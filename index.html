@@ -2,9 +2,48 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MIXOMESH</title>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/layout.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "jszip": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm"
+    }
+  }
+  </script>
+  <script defer src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script defer src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.js"></script>
 </head>
 <body>
-  <!-- Claude Code will populate this in Phase 1 -->
+  <div id="app">
+    <header id="header">
+      <span id="project-name">Untitled</span>
+      <span id="dirty-indicator"></span>
+    </header>
+
+    <aside id="outliner">
+      <span>Outliner — Phase 2</span>
+    </aside>
+
+    <div id="viewport">
+      <canvas id="renderCanvas" tabindex="0"></canvas>
+    </div>
+
+    <aside id="right-panel">
+      <span>Properties — Phase 3</span>
+    </aside>
+
+    <div id="asset-panel">
+      <span>Asset Panel — Phase 2</span>
+    </div>
+
+    <div id="status-bar"></div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script type="module" src="main.js"></script>
 </body>
 </html>

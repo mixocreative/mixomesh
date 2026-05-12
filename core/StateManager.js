@@ -1,0 +1,96 @@
+import { EVENTS } from './events.js';
+
+const DEV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+const INITIAL_STATE = {
+  project: { name: 'Untitled', isDirty: false, lastSavedAt: null, version: '3.1' },
+  scene: {
+    objects: {},
+    groups: {},
+    assetLibrary: {},
+    shaders: {},
+    uvOverrides: {},
+    userSwatches: [],
+    camera: {
+      preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 10,
+      target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
+    },
+    overlays: { grid: true, axes: true, wireframe: false, bedPreview: false },
+    cursor3d: { x: 0, y: 0, z: 0 },
+  },
+  selection: { selectedIds: [], activeId: null, pivotMode: 'median' },
+  print: {
+    workingScale: '1:1', targetRatio: null,
+    bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
+    minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
+  },
+  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220 },
+  gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
+};
+
+let _state = JSON.parse(JSON.stringify(INITIAL_STATE));
+const _listeners = new Map();
+let _suppressDirty = false;
+
+function _deepFreeze(obj) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  Object.getOwnPropertyNames(obj).forEach(k => _deepFreeze(obj[k]));
+  return Object.freeze(obj);
+}
+
+/**
+ * Subscribe to a named event.
+ * @param {string} eventName
+ * @param {function} fn
+ * @returns {function} unsubscribe
+ */
+export function subscribe(eventName, fn) {
+  if (!_listeners.has(eventName)) _listeners.set(eventName, new Set());
+  _listeners.get(eventName).add(fn);
+  return () => _listeners.get(eventName)?.delete(fn);
+}
+
+/**
+ * Dispatch a named event to all subscribers synchronously.
+ * @param {string} eventName
+ * @param {*} [payload]
+ */
+export function dispatch(eventName, payload) {
+  const fns = _listeners.get(eventName);
+  if (!fns) return;
+  for (const fn of fns) {
+    try { fn(payload); } catch (err) { console.error(err); }
+  }
+}
+
+/**
+ * Return current application state. Deep-frozen in dev mode.
+ * @returns {object}
+ */
+export function getState() {
+  if (DEV) return _deepFreeze(JSON.parse(JSON.stringify(_state)));
+  return _state;
+}
+
+/**
+ * Update state via an updater function.
+ * @param {function} updaterFn  Receives current state, must return new state.
+ * @param {{ silent?: boolean }} [opts]  Pass silent:true to suppress PROJECT_DIRTY.
+ */
+export function setState(updaterFn, opts = {}) {
+  _state = updaterFn(_state);
+  if (!opts.silent && !_suppressDirty) {
+    dispatch(EVENTS.PROJECT_DIRTY, null);
+  }
+}
+
+/**
+ * Run fn() with PROJECT_DIRTY dispatch suppressed (for load/undo operations).
+ * @param {function} fn
+ */
+export function withoutDirty(fn) {
+  _suppressDirty = true;
+  try { fn(); } finally { _suppressDirty = false; }
+}
+
+export const StateManager = { subscribe, dispatch, getState, setState, withoutDirty };

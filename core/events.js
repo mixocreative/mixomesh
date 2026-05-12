@@ -1,0 +1,58 @@
+export const EVENTS = {
+  // Asset lifecycle
+  ASSET_REGISTERED:        'asset:registered',
+  ASSET_INSTANTIATED:      'asset:instantiated',
+  ASSET_MISSING:           'asset:missing',
+  ASSET_RELINKED:          'asset:relinked',
+
+  // Validation
+  VALIDATION_STARTED:      'validation:started',
+  VALIDATION_COMPLETE:     'validation:complete',
+
+  // Selection
+  SELECTION_CHANGED:       'selection:changed',
+  ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
+
+  // Transform
+  TRANSFORM_COMMITTED:     'transform:committed',
+
+  // Shaders
+  SHADER_CREATED:          'shader:created',
+  SHADER_UPDATED:          'shader:updated',
+  SHADER_DUPLICATED:       'shader:duplicated',
+  SHADER_ASSIGNED:         'shader:assigned',
+  UV_OVERRIDE_CHANGED:     'shader:uvOverrideChanged',
+  COLOR_APPLIED:           'shader:colorApplied',
+
+  // Hierarchy
+  GROUP_CREATED:           'hierarchy:groupCreated',
+  GROUP_DISSOLVED:         'hierarchy:groupDissolved',
+  PARENT_CHANGED:          'hierarchy:parentChanged',
+  OBJECT_RENAMED:          'hierarchy:renamed',
+  VISIBILITY_CHANGED:      'hierarchy:visibilityChanged',
+  LOCK_CHANGED:            'hierarchy:lockChanged',
+
+  // History
+  HISTORY_PUSHED:          'history:pushed',
+  HISTORY_UNDONE:          'history:undone',
+  HISTORY_REDONE:          'history:redone',
+
+  // Print
+  EXPORT_STARTED:          'print:exportStarted',
+  EXPORT_COMPLETE:         'print:exportComplete',
+
+  // Project
+  PROJECT_NEW:             'project:new',
+  PROJECT_LOADED:          'project:loaded',
+  PROJECT_SAVED:           'project:saved',
+  PROJECT_DIRTY:           'project:dirty',
+  AUTOSAVE_WRITTEN:        'project:autosaved',
+
+  // Camera
+  CAMERA_PRESET_CHANGED:   'camera:presetChanged',
+
+  // UI
+  TOAST:                   'ui:toast',
+  MODAL_OPEN:              'ui:modalOpen',
+  MODAL_CLOSE:             'ui:modalClose',
+};

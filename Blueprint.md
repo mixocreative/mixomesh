@@ -20,20 +20,38 @@
 - **Validation runs at import time, non-blocking.** Re-runs blocking before export.
 
 ### 0.2 CDN Imports (`index.html`)
+
+Babylon ships UMD globals from `cdn.babylonjs.com`. The `babylon.module.js`
+ESM file the older v3.0 of this blueprint specified does **not** exist on
+the CDN, and the npm `babylonjs` package only ships UMD too. Use script
+tags; defer scripts execute in document order before module scripts, so
+`window.BABYLON` is populated before any of our ES modules run.
+
 ```html
+<!-- UMD: populates window.BABYLON, then extends it -->
+<script defer src="https://cdn.babylonjs.com/babylon.js"></script>
+<script defer src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.js"></script>
+<!-- Add these when Phase 2 / Phase 5 needs them -->
+<!-- <script defer src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script> -->
+<!-- <script defer src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.js"></script> -->
+
 <script type="importmap">
 {
   "imports": {
-    "babylonjs":             "https://cdn.babylonjs.com/babylon.module.js",
-    "babylonjs-loaders":     "https://cdn.babylonjs.com/loaders/babylonjs.loaders.module.js",
-    "babylonjs-serializers": "https://cdn.babylonjs.com/serializers/babylonjs.serializers.module.js",
-    "babylonjs-materials":   "https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.module.js",
-    "jszip":                 "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm",
-    "lucide":                "https://cdn.jsdelivr.net/npm/lucide@latest/+esm"
+    "jszip": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm"
   }
 }
 </script>
 ```
+
+In any module that needs Babylon, read it from the global:
+```js
+const BABYLON = window.BABYLON;
+if (!BABYLON) throw new Error('Babylon.js failed to load');
+```
+Pin a version (`https://cdn.babylonjs.com/v9.6.2/babylon.js`) before shipping
+if you need reproducible builds. Un-versioned URL is fine for development.
+
 No other CDN libs. Everything else is vanilla JS.
 
 ### 0.3 File Layout
@@ -222,32 +240,48 @@ Use CSS Grid for the outer layout. Resizable splitters between Outliner / Viewpo
 
 **File: `core/Icons.js`**
 
-Thin wrapper over Lucide. Returns SVG strings; no DOM dependencies inside this module.
+Inline SVG registry. Returns SVG strings; no DOM dependencies, no CDN dependency.
+
+The original blueprint intended to import the `lucide` npm package, but
+that package was abandoned at v1.14.0 with an incompatible data format —
+the modern Lucide is published under framework-specific names (`lucide-react`,
+`lucide-vue-next`, etc.) which don't suit a no-build vanilla JS project.
+Inline paths are simpler, version-stable, and tiny.
 
 ```js
-import { icons } from 'lucide';
-
 const DEFAULT_ATTRS = { width: 16, height: 16, 'stroke-width': 1.75 };
 
+const ICON_PATHS = {
+  // Phase 1 — status bar + toast
+  Circle:        '<circle cx="12" cy="12" r="10"/>',
+  Check:         '<path d="M20 6 9 17l-5-5"/>',
+  Info:          '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  CheckCircle:   '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
+  AlertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  XCircle:       '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+  Loader2:       '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  // Add new icons as later phases need them. Copy paths from lucide.dev/icons.
+};
+
 /**
- * @param {string} name  Lucide icon name in PascalCase, e.g. 'Eye', 'Lock', 'AlertTriangle'
- * @param {object} [attrs]  Optional SVG attributes (size, stroke-width, class)
- * @returns {string} SVG markup
+ * @param {string} name  PascalCase icon name (must exist in ICON_PATHS)
+ * @param {object} [attrs]  Optional SVG attribute overrides
+ * @returns {string} SVG markup, or '' if unknown
  */
 export function icon(name, attrs = {}) {
-  const data = icons[name];
-  if (!data) return '';
-  const [, , children] = data;
+  const body = ICON_PATHS[name];
+  if (!body) return '';
   const finalAttrs = { ...DEFAULT_ATTRS, ...attrs };
-  const attrStr = Object.entries(finalAttrs).map(([k,v]) => `${k}="${v}"`).join(' ');
-  const childStr = children.map(([tag, props]) =>
-    `<${tag} ${Object.entries(props).map(([k,v]) => `${k}="${v}"`).join(' ')}/>`
-  ).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" ${attrStr}>${childStr}</svg>`;
+  const attrStr = Object.entries(finalAttrs).map(([k, v]) => `${k}="${v}"`).join(' ');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" ${attrStr}>${body}</svg>`;
 }
 ```
 
-**Used icon names** (Lucide PascalCase):
+When a later phase needs a new icon, grab its `d` / child markup from
+[lucide.dev/icons](https://lucide.dev/icons) (view source on the icon's
+SVG) and add an entry to `ICON_PATHS`. Names below are the ones the rest
+of this blueprint references — add them in the phase that first uses
+each one:
 - Outliner: `Eye` / `EyeOff` (visibility), `Lock` / `Unlock`, `AlertTriangle`, `CircleAlert`, `Printer`, `CheckCircle2`, `XCircle`, `Folder`, `FolderOpen`, `Box`
 - Header: `Save`, `FolderOpen`, `FilePlus`, `Undo2`, `Redo2`
 - Status bar: `Move3D`, `RotateCcw`, `Maximize`, `Circle` (dirty), `Check` (saved)

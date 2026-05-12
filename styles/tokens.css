@@ -1,0 +1,71 @@
+:root {
+  /* Surfaces */
+  --bg-0: #0a0a0b;
+  --bg-1: #131316;
+  --bg-2: #1a1a1f;
+  --bg-3: #232329;
+  --bg-4: #2d2d35;
+
+  --border:        #2a2a30;
+  --border-strong: #3a3a44;
+  --border-focus:  #06b6d4;
+
+  /* Text */
+  --text-0: #ededf0;
+  --text-1: #a1a1ab;
+  --text-2: #6b6b75;
+  --text-disabled: #4a4a52;
+
+  /* Accent */
+  --accent:    #06b6d4;
+  --accent-hi: #22d3ee;
+  --accent-fg: #ecfeff;
+
+  /* Status */
+  --danger:  #ef4444;
+  --warning: #f59e0b;
+  --success: #22c55e;
+  --info:    #3b82f6;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+
+  /* Spacing */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 24px;
+
+  /* Radii */
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-med:  200ms;
+
+  /* Shadows */
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.45);
+}
+
+html, body {
+  background: var(--bg-0);
+  color: var(--text-0);
+  font: var(--fs-md)/1.5 var(--font-sans);
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
