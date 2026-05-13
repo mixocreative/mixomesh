@@ -5,6 +5,10 @@ export const EVENTS = {
   ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',
 
+  // Scene object lifecycle (structural changes to state.scene.objects)
+  OBJECT_REMOVED:          'object:removed',
+  OBJECT_RESTORED:         'object:restored',
+
   // Validation
   VALIDATION_STARTED:      'validation:started',
   VALIDATION_COMPLETE:     'validation:complete',
@@ -55,4 +59,6 @@ export const EVENTS = {
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
   MODAL_CLOSE:             'ui:modalClose',
+  UI_PANEL_CHANGED:        'ui:panelChanged',
+  UI_CONTEXT_MENU:         'ui:contextMenu',
 };

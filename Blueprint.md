@@ -387,13 +387,15 @@ const initialState = {
     shaders: {},        // Record<shaderId, ShaderEntry>
     uvOverrides: {},    // Record<meshId, UVOverride>
     userSwatches: [],
-    camera: { preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 10, target: {x:0,y:0,z:0}, isOrthographic: false },
+    camera: { preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 0.4, target: {x:0,y:0,z:0}, isOrthographic: false },
     overlays: { grid: true, axes: true, wireframe: false, bedPreview: false },
+    gridSize: 0.3,         // BU — default 300 mm build area; user-editable in Properties → Scene
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: 'median' /* median|active|individual|cursor */ },
   print: {
-    workingScale: '1:1', targetRatio: null,
+    workingRatio: 1,            // denominator of the scene display ratio (1 = 1:1)
+    targetRatio:  1,            // denominator of the final print export ratio
     bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
@@ -438,21 +440,15 @@ HistoryManager.endBatch()           → void  // finish and push the batch as on
 ```
 
 ### Standard Commands (one file, all classes)
-```
-TransformCommand
-ShaderAssignCommand
-ShaderUpdateCommand
-ShaderDuplicateCommand
-ShaderDeleteCommand
-UVOverrideCommand
-ColorApplyCommand
-GroupCommand / UngroupCommand
-VisibilityCommand / LockCommand / RenameCommand
-DeleteCommand
-DuplicateCommand
-SmartReplaceCommand
-TransformSwabCommand
-```
+Implemented in Phase 3:
+- `TransformCommand` — `{ prev, next, alreadyApplied? }` keyed by meshId. Sets absolute transforms via `setParent(null)` cycle so the world position survives the change. Used by both gizmo drag-end and Properties Panel input commits.
+- `VisibilityCommand`, `LockCommand`, `RenameCommand`
+- `DeleteCommand` — soft-deletes (`setEnabled(false)` + remove from state) so undo restores instantly without re-instantiating from the asset container.
+- `DuplicateCommand` — clones via `AssetLoader.cloneMeshAsNewObject`, offsets +10 mm in X so the clone is visible, auto-selects new meshes. Sharing geometry on redo: clones are kept disabled in memory and re-enabled on redo (same pattern as DeleteCommand).
+- `GroupCommand` / `UngroupCommand` — creates/disposes a `TransformNode` pivot; reparents members preserving world transform. All three commands wrap their parent-touching work in a `_withDetachedPivot` helper that temporarily detaches the selection-visual pivot so meshes are in their canonical parents during the mutation.
+
+Stubs (real bodies in later phases):
+`ShaderAssignCommand`, `ShaderUpdateCommand`, `ShaderDuplicateCommand`, `ShaderDeleteCommand`, `UVOverrideCommand`, `ColorApplyCommand`, `SmartReplaceCommand`, `TransformSwabCommand`.
 
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
@@ -555,6 +551,7 @@ Shift+RMB      → place 3D cursor at hit point
 ### Public API
 ```js
 SceneManager.init(canvas)
+SceneManager.setTransformCommitHandler(fn)    // injected by main.js to push TransformCommand on gizmo drag-end
 SceneManager.getScene()                       → BABYLON.Scene
 SceneManager.getEngine()                      → BABYLON.Engine
 
@@ -567,30 +564,35 @@ SceneManager.restoreCameraState(state)
 // Gizmos
 SceneManager.setGizmoMode(mode)               // 'translate'|'rotate'|'scale'|'none'
 SceneManager.setGizmoSpace(space)             // 'world'|'local'
-SceneManager.attachToSelection(meshes, pivot)
+SceneManager.attachToSelection(meshes, pivotMode, activeMesh)
 
-// Selection visuals
-SceneManager.setActive(mesh)                  // strong HighlightLayer outline
-SceneManager.setSelected(meshes)              // subtle HighlightLayer outline
+// Selection visuals (custom mask + post-process — see "Selection silhouette" below)
+SceneManager.setActive(mesh)                  // full-intensity cyan ring
+SceneManager.setSelected(meshes)              // dim cyan ring (kind='selected')
 
 // Overlays
 SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'bedPreview'
+SceneManager.setGridSize(extentBU)            // rebuilds the ground mesh at the new extent
 SceneManager.updateBedPreview(dims)
 
 // 3D Cursor
 SceneManager.getCursor()                      → Vector3
 SceneManager.setCursor(v3)
+SceneManager.setCursorVisible(on)             // hidden by default; shown only for pivotMode='cursor'
+
+// Picking
+SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gizmo arrows / overlays)
 ```
 
 ### Implementation Notes
-- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Compute ortho bounds from `camera.radius` and aspect on every preset change.
+- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Defaults tuned for a 300 mm working area: `radius=0.4`, `lowerRadiusLimit=0.02`, `upperRadiusLimit=5`, `wheelPrecision=500`, `panningSensibility=5000`. Compute ortho bounds from `camera.radius` and aspect on every preset change.
 - Numpad presets set `alpha` and `beta` then call `camera.rebuildAnglesAndRadius()`.
-- **Selection highlight:** one `BABYLON.HighlightLayer('hl', scene)`. Add active mesh with full-intensity color `var(--accent)`. Add selected (non-active) with reduced intensity (alpha 0.4). Remove all on selection change.
-- **Gizmo:** `BABYLON.GizmoManager(scene)`. Subscribe to `gizmo.{position|rotation|scale}Gizmo.onDragStartObservable` → snapshot transforms. `onDragEndObservable` → push `BatchCommand`.
-- **Axes overlay:** `new BABYLON.AxesViewer(scene, 0.5)`. Toggle visibility via dispose/recreate or by setting `viewer.scaleLines = 0`.
-- **Grid:** ground plane (`MeshBuilder.CreateGround` 20×20m) with `BABYLON.GridMaterial` from `babylonjs-materials`. Minor lines 10mm, major lines 100mm.
+- **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX` (~3), `OUTLINE_INTENSITY` (~1.8), `MASK_BRIGHTNESS_ACTIVE` / `MASK_BRIGHTNESS_SELECTED`.
+- **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `main.js` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
+- **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
+- **Grid:** ground plane sized to `state.scene.gridSize` (default `0.3` BU = 300 mm) with `BABYLON.GridMaterial`. Minor lines 10 mm, major lines 100 mm. Rebuild via `SceneManager.setGridSize(extentBU)`.
 - **Bed preview:** `MeshBuilder.CreateBox` sized to bed dims, semi-transparent material, wireframe outline overlay.
-- **3D cursor:** custom small mesh (cross + sphere) created once, repositioned on demand.
+- **3D cursor:** 3 mm sphere, hidden by default. Made visible only when `state.selection.pivotMode === 'cursor'` via `setCursorVisible`.
 
 ### Lighting
 1 × `HemisphericLight` (top-down, intensity 0.4)
@@ -616,8 +618,12 @@ AssetLoader.getContainer(assetId)                     → BABYLON.AssetContainer
 ```js
 {
   id, name, filename, originalPath, extension,
-  sourceUnit,                  // 'meters'|'centimeters'|'millimeters'|'inches'|'feet'
-  unitConfirmed,               // boolean
+  sourceUnit,                  // 'meters'|'centimeters'|'millimeters'|'inches'|'feet' — default 'millimeters'
+  unitConfirmed,               // boolean — true by default; false only when the
+                               //   user has flagged an asset for review.
+  modelRatio,                  // denominator of the ratio the asset was authored
+                               //   at (1 = full real-world size, 72 = 1:72).
+                               //   Default 1 unless a glTF "ratio" extra overrides.
   directoryHandleKey,          // IndexedDB key for FileSystemDirectoryHandle
   blobUrl,                     // module-local Map, not in state
   thumbnailDataUrl,
@@ -631,26 +637,68 @@ AssetLoader.getContainer(assetId)                     → BABYLON.AssetContainer
 3. BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, null, extension).
 4. Register all materials → ShaderLibrary.registerFromContainer (merge strategy).
 5. Store AssetContainer in module-local Map<assetId, container>.
-6. Register AssetEntry in state.
-7. addAllToScene() for the container.
-8. Create SceneObject entries for each visible mesh.
-9. Detect source unit (heuristic — see below). Set unitConfirmed=false if guessed.
-10. Generate thumbnail via Tools.CreateScreenshotUsingRenderTarget (async).
-11. If vertexCount <= 100_000 → queue MeshValidator.validateMesh; else skip auto-validate with toast.
-12. Dispatch EVENTS.ASSET_INSTANTIATED for each mesh.
+6. addAllToScene() for the container.
+7. Resolve modelRatio: read glTF "ratio" extra (Blender custom property);
+   parse '1/N', '1:N', or bare 'N' as denominator N. Default 1 when absent.
+8. Apply import scaling — see "Import Scale Model" below. Drop offset on top.
+9. Register AssetEntry (sourceUnit='millimeters', unitConfirmed=true, modelRatio).
+10. Create SceneObject entries for each visible mesh.
+11. Generate thumbnail via Tools.CreateScreenshotUsingRenderTargetAsync (async).
+12. If vertexCount <= 100_000 → queue MeshValidator.validateMesh; else skip
+    auto-validate with toast.
+13. Dispatch EVENTS.ASSET_INSTANTIATED for each mesh.
 ```
 
-### Source Unit Heuristic
+### Import Scale Model
+We assume the **Blender default export workflow**: `Metric / unit-scale 0.001 / length mm`. Raw values in the file are interpreted as **millimetres of whatever-size the model was authored at**. STL and OBJ have no unit metadata; the same assumption applies.
+
+Four numbers drive the math:
+
+| Symbol | Where | Default |
+|---|---|---|
+| `sourceUnit` | per-asset (AssetEntry) | `'millimeters'` |
+| `modelRatio` | per-asset (AssetEntry), read from glTF `extras.ratio` | `1` |
+| `workingRatio` | scene (`state.print.workingRatio`) | `1` |
+| `targetRatio`  | scene (`state.print.targetRatio`)  | `1` |
+
+**On import**, the loader scales every parent-less node (and its position) by:
+
 ```js
-function detectSourceUnit(container) {
-  const bbox = computeContainerBoundingBox(container);
-  const maxDim = Math.max(bbox.sizeX, bbox.sizeY, bbox.sizeZ);
-  // HEURISTIC — flag unitConfirmed=false; user confirms in Properties Panel
-  if (maxDim > 100)  return { unit: 'millimeters', confirmed: false };
-  if (maxDim > 10)   return { unit: 'centimeters', confirmed: false };
-  return { unit: 'meters', confirmed: false };
+importFactor = SOURCE_UNIT_FACTORS[sourceUnit] * (modelRatio / workingRatio);
+// SOURCE_UNIT_FACTORS: meters=1, centimeters=0.01, millimeters=0.001, inches=0.0254, feet=0.3048
+```
+
+After scaling, **1 BU in the scene == 1 m at the working ratio's print size**. The drop offset is added on top of the scaled position so the world-space anchor lands where the user dropped it.
+
+> ### Implementation note — vertex baking
+> `importFactor` is **baked into the vertex data** with `mesh.bakeTransformIntoVertices(Matrix.Scaling(importFactor))`, *not* stored in `mesh.scaling`. Every node ends with `scaling = (1, 1, 1)` so the Properties panel reads scale `1` after import (matching the user's mental model: "1 mm in Blender is scale 1 here").
+>
+> **This is a Babylon-software-compatibility concern, not part of the workingRatio / targetRatio / modelRatio scale math.** The ratio math (above) decides *how big* the model is in BU. The bake decides *where that size lives* — on the vertices or on the transform. We chose vertices because:
+> 1. Reads naturally in the UI (scale = 1, not 0.001).
+> 2. Babylon's HighlightLayer stencil + gizmo passes lose precision when world transforms operate at sub-mm scale, manifesting as halo bleed onto mesh faces. Normalising scale to 1 fixes it.
+>
+> Source-unit changes (Properties Panel) re-bake the **delta** (`newFactor / oldFactor`) into vertices; non-root local positions are scaled by the same delta so within-asset spacing follows. The world drop anchor (root node position) is left alone so the asset doesn't jump when the user corrects a unit.
+
+```js
+function applyImportScaling(container, factor, dropPos) {
+  const scaleMat = BABYLON.Matrix.Scaling(factor, factor, factor);
+  for (const m of container.meshes) {
+    if (m.geometry) m.bakeTransformIntoVertices(scaleMat);
+  }
+  for (const n of [...container.meshes, ...container.transformNodes]) {
+    n.position.scaleInPlace(factor);
+  }
+  const roots = [...container.meshes, ...container.transformNodes].filter(n => !n.parent);
+  if (dropPos) for (const r of roots) r.position.addInPlace(dropPos);
+  for (const m of container.meshes) m.refreshBoundingInfo?.();
 }
 ```
+
+**Blender custom property convention.** In Blender, add a custom property on the object or the scene named `ratio`, type String, value `"1/72"` (or `"1:72"`, or `"72"`). The glTF exporter emits this to the node `extras` bag, which Babylon's loader exposes at `mesh.metadata.gltf.extras`. Without the property, `modelRatio` defaults to `1` (i.e. authored at 1:1, full real-world size).
+
+**External (non-Blender) glTF files** that follow the spec's meters convention will import 1000× too small at the mm default. The user can then override `sourceUnit` to `'meters'` in the Properties Panel (Phase 3), and the loader re-applies the scaling.
+
+Export-time rescaling from `workingRatio` to `targetRatio` happens in `PrintManager` — see §12.
 
 ### Thumbnail Generation
 ```js
@@ -854,7 +902,7 @@ Every field persisted. Restored exactly.
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
   "print": {
-    "workingScale": "1:1", "targetRatio": 35,
+    "workingRatio": 12, "targetRatio": 35,
     "bedPreset": "Bambu P1S", "bedDimensions": {"x":256,"y":256,"z":256},
     "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05
   },
@@ -911,26 +959,40 @@ Every field persisted. Restored exactly.
 
 ### Public API
 ```js
-PrintManager.setWorkingScale(str)             // '1:1', etc.
-PrintManager.setTargetRatio(num)              // 35, 48, ...
-PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm
+PrintManager.setWorkingRatio(num)             // 1, 12, 72 — denominator
+PrintManager.setTargetRatio(num)              // 1, 35, 48, 72 — denominator
+PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
 ```
 
 ### Scale Math
+
+The asset loader has already baked unit conversion and the working ratio into the mesh's in-scene transform (see §8 *Import Scale Model*). The Print Manager only has to rescale from the **working ratio** to the **target ratio** and convert metres → millimetres:
+
 ```js
-function exportedPositionMM(v3, sourceUnit, targetRatio) {
-  const unitFactor = SOURCE_UNIT_FACTORS[sourceUnit]; // m=1, cm=0.01, mm=0.001, in=0.0254, ft=0.3048
-  const exportScale = 1 / targetRatio;
-  // result in millimeters
-  return {
-    x: v3.x * unitFactor * exportScale * 1000,
-    y: v3.y * unitFactor * exportScale * 1000,
-    z: v3.z * unitFactor * exportScale * 1000,
-  };
+function exportFactor() {
+  const wr = state.print.workingRatio;
+  const tr = state.print.targetRatio;
+  return (wr / tr) * 1000;          // BU (m at workingRatio) → mm at targetRatio
+}
+
+function exportedPositionMM(v3) {
+  const f = exportFactor();
+  return { x: v3.x * f, y: v3.y * f, z: v3.z * f };
 }
 ```
+
+Worked examples (all assuming `1 BU == 1 m` at the working ratio):
+
+| working | target | factor | a 0.1 BU mesh → |
+|---|---|---|---|
+| 1   | 1   | 1000 | 100 mm at 1:1 (full size) |
+| 72  | 72  | 1000 | 100 mm at 1:72 |
+| 12  | 2   | 6000 | 600 mm at 1:2  (6× larger output) |
+| 35  | 72  | 486… |  48.6 mm at 1:72 (shrunk) |
+
+`sourceUnit` and `modelRatio` are **not** referenced at export time — they were already consumed at import to position the mesh in scene-metres.
 
 ### Presets
 ```js
@@ -960,13 +1022,11 @@ async function exportOBJ({ partsOnly = true }) {
   // 1. Collect meshes
   const meshes = collectExportMeshes(partsOnly);
 
-  // 2. Apply export scale: scale by source unit × (1/targetRatio) × 1000 (to mm)
+  // 2. Apply export scale: (workingRatio / targetRatio) × 1000 (m at working → mm at target).
   // OBJExport bakes mesh.scaling into output, so set scaling per mesh temporarily.
   const prevScales = meshes.map(m => m.scaling.clone());
-  meshes.forEach(m => {
-    const f = SOURCE_UNIT_FACTORS[m.metadata.sourceUnit] * (1/state.print.targetRatio) * 1000;
-    m.scaling.scaleInPlace(f);
-  });
+  const f = (state.print.workingRatio / state.print.targetRatio) * 1000;
+  meshes.forEach(m => m.scaling.scaleInPlace(f));
 
   // 3. Generate OBJ + MTL via Babylon
   const matlibName = `${state.project.name}.mtl`;
@@ -1024,12 +1084,23 @@ function exportSTL() {
 ### Properties Panel (`ui/PropertiesPanel.js`)
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 1. **Object** — name, visible, locked
-2. **Transform** — Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand`. On multi-select, fields show `—` when values differ; editing applies delta.
+2. **Transform** — Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand`. On multi-select, fields show `—` when values differ; editing applies delta. Read-only **Size (mm)** row at top derived from world AABB (so a wrong-unit import is visible).
 3. **Source Unit** — dropdown + `AlertTriangle` if unconfirmed + "Confirm" button.
 4. **Shader** — dropdown of scene shaders, Duplicate / Edit buttons.
 5. **UV Override** — offset/scale/rotation inputs; "Reset to Default" button.
 6. **Print Part** — toggle + label + tolerance.
 7. **Validation** — collapsed list of issues with per-issue Auto-Fix button.
+
+**Scene** section (only when no object is active):
+- Grid size (mm) input → `SceneManager.setGridSize`.
+
+### Future: Copy active-to-selected (Phase 4 / 5 nice-to-have)
+A "Copy from active" affordance on each Transform sub-section (Position, Rotation, Scale, Source Unit, Shader, UV Override) that applies the active object's value to all other selected objects in one batched `TransformCommand` / `ShaderAssignCommand` / etc. UI: small "↧ to all" button beside each section header, enabled only when `selectedIds.length > 1`. Three flavours per section:
+- **Each axis** — per-component button (e.g. only copy Position.X).
+- **Whole section** — copy all three components of Position.
+- **All transforms** — single button at the Transform header that snaps Position+Rotation+Scale of every selected to match the active.
+
+Not part of Phase 3's milestone. Defer until Phase 4 because the same pattern needs to apply to Shader/UV sections which don't exist yet.
 
 ### Shader Panel (`ui/ShaderPanel.js`)
 - Scene Shaders list: row per shader with color/texture preview, name, mesh count badge, action menu.
@@ -1136,6 +1207,14 @@ Full `ShaderLibrary` · `ShaderPanel` · Properties Panel shader + UV override s
 Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore
 **Milestone:** Save → close → reopen identically. Move asset file → reopen → ghost → relink → resolved.
 
+### Phase handoff (every time a phase closes)
+1. Flip the phase's checkbox in `CLAUDE.md` to `[x]`.
+2. Rewrite `PHASE_HANDOFF.md` at the repo root as a self-contained pickup prompt for the next clear session (1-paragraph summary of what just landed, deferred items, design decisions locked, the next phase's BLUEPRINT §15 deliverables + milestone, and a STEP 0 / STEP 1 instruction block).
+3. Add or update memory notes for anything durable (design decisions, deferred features, technical gotchas).
+4. Commit only when the user asks.
+
+`PHASE_HANDOFF.md` is rolling — overwrite each phase. Old phase history lives in this file (above) and in memory notes.
+
 ---
 
 ## PART 16 — ACCEPTED CONSTRAINTS
@@ -1143,7 +1222,7 @@ Full `PersistenceManager` with autosave + recent projects · ghost/relink in Out
 | Constraint | Mitigation |
 |---|---|
 | Chrome / Edge only | Single startup check; blocking dialog otherwise |
-| Source unit detection is heuristic | `unitConfirmed: false` → warning icon → user confirms |
+| Source unit assumed mm (Blender default) | Per-asset override in Properties Panel; flips `unitConfirmed: false` until reviewed |
 | Validation v1 = 3 checks only | Future Pro version adds thin-wall, self-intersect, overhang |
 | Numpad shortcuts assume numpad | `Alt+1/3/7` registered as alternates |
 | OBJ+MTL slicer support varies | Informational tooltip — not a blocking warning |

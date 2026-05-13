@@ -6,6 +6,7 @@
   <title>MIXOMESH</title>
   <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/layout.css">
+  <link rel="stylesheet" href="styles/components.css">
   <script type="importmap">
   {
     "imports": {
@@ -15,6 +16,7 @@
   </script>
   <script defer src="https://cdn.babylonjs.com/babylon.js"></script>
   <script defer src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.js"></script>
+  <script defer src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
 </head>
 <body>
   <div id="app">
@@ -23,21 +25,16 @@
       <span id="dirty-indicator"></span>
     </header>
 
-    <aside id="outliner">
-      <span>Outliner — Phase 2</span>
-    </aside>
+    <aside id="outliner"></aside>
 
     <div id="viewport">
       <canvas id="renderCanvas" tabindex="0"></canvas>
+      <div id="viewport-drop-overlay"></div>
     </div>
 
-    <aside id="right-panel">
-      <span>Properties — Phase 3</span>
-    </aside>
+    <aside id="right-panel"></aside>
 
-    <div id="asset-panel">
-      <span>Asset Panel — Phase 2</span>
-    </div>
+    <div id="asset-panel"></div>
 
     <div id="status-bar"></div>
   </div>

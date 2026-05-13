@@ -2,6 +2,12 @@ import { Toast } from './ui/Toast.js';
 import { StatusBar } from './ui/StatusBar.js';
 import { SceneManager } from './core/SceneManager.js';
 import { InputManager } from './core/InputManager.js';
+import { AssetPanel } from './ui/AssetPanel.js';
+import { ViewportDrop } from './ui/ViewportDrop.js';
+import { Outliner } from './ui/Outliner.js';
+import { PropertiesPanel } from './ui/PropertiesPanel.js';
+import { ContextMenu } from './ui/ContextMenu.js';
+import { push, TransformCommand } from './core/HistoryManager.js';
 
 // ── Browser gate ─────────────────────────────────────────
 if (!('showDirectoryPicker' in window)) {
@@ -27,6 +33,22 @@ async function bootstrap() {
   const canvas = document.getElementById('renderCanvas');
   SceneManager.init(canvas);
   InputManager.init(SceneManager.getScene());
+
+  // After-gizmo-drag → push TransformCommand. Injected here to avoid a
+  // SceneManager → HistoryManager dependency cycle.
+  SceneManager.setTransformCommitHandler(({ prev, next, alreadyApplied }) => {
+    push(new TransformCommand(prev, next, { alreadyApplied }));
+  });
+
+  Outliner.init();
+  PropertiesPanel.init();
+  ContextMenu.init();
+  AssetPanel.init();
+  ViewportDrop.attach(document.getElementById('viewport'), SceneManager.getScene());
+
+  // Both viewport RMB and outliner RMB route to the same context menu.
+  InputManager.setContextMenuHandler((info) => ContextMenu.open(info));
+  Outliner.setContextMenuHandler((info)     => ContextMenu.open(info));
 
   canvas.focus();
 }

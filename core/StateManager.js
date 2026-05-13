@@ -12,15 +12,16 @@ const INITIAL_STATE = {
     uvOverrides: {},
     userSwatches: [],
     camera: {
-      preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 10,
+      preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 0.4,
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
     },
     overlays: { grid: true, axes: true, wireframe: false, bedPreview: false },
+    gridSize: 0.3,                       // BU — default 300 mm build area
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: 'median' },
   print: {
-    workingScale: '1:1', targetRatio: null,
+    workingRatio: 1, targetRatio: 1,
     bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
@@ -93,4 +94,14 @@ export function withoutDirty(fn) {
   try { fn(); } finally { _suppressDirty = false; }
 }
 
-export const StateManager = { subscribe, dispatch, getState, setState, withoutDirty };
+/**
+ * Mark the project dirty without mutating state. Use from commands that
+ * change Babylon objects directly (e.g. transforms) rather than state.
+ * Respects the suppression flag set by withoutDirty().
+ */
+export function markDirty() {
+  if (_suppressDirty) return;
+  dispatch(EVENTS.PROJECT_DIRTY, null);
+}
+
+export const StateManager = { subscribe, dispatch, getState, setState, withoutDirty, markDirty };

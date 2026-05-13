@@ -39,8 +39,8 @@ writing or modifying any module. Do not deviate from the contracts there.
 
 ## Build phases
 - [x] Phase 1: Foundation (events, State, History, Input, Scene, Icons, Toast, StatusBar, layout)
-- [ ] Phase 2: Asset Pipeline (AssetLoader, ShaderLibrary stub, MeshValidator, AssetPanel)
-- [ ] Phase 3: Selection & Interaction (gizmos, Outliner, ContextMenu, Properties transform)
+- [x] Phase 2: Asset Pipeline (AssetLoader, ShaderLibrary stub, MeshValidator, AssetPanel)
+- [x] Phase 3: Selection & Interaction (gizmos, Outliner, ContextMenu, Properties transform)
 - [ ] Phase 4: Shader System (full ShaderLibrary, ShaderPanel, UV overrides, swatches)
 - [ ] Phase 5: Print Pipeline (PrintManager, PrintPanel, OBJ+MTL export, bed preview)
 - [ ] Phase 6: Persistence & Polish (full save/load, autosave, ghost/relink, smart replace)
@@ -66,3 +66,22 @@ writing or modifying any module. Do not deviate from the contracts there.
 ## Definition of done per phase
 Each phase has a Milestone in BLUEPRINT §15. The phase is not done until
 that milestone is demonstrably working in Chrome. Show me how to verify it.
+
+## Phase handoff (do this every time a phase closes)
+When the user has confirmed a phase milestone works, before you stop:
+1. Flip the phase's checkbox in this file to `[x]`.
+2. Rewrite `PHASE_HANDOFF.md` at the repo root. It is the ONLY pickup prompt
+   for the next clear session — make it self-contained:
+   - Which phase just closed + a 1-paragraph summary of what works.
+   - Concrete deferred items / known scope cuts the user accepted.
+   - Design decisions locked in this phase (link to memory notes).
+   - Which phase is next, its BLUEPRINT §15 deliverables + milestone verbatim.
+   - A STEP 0 / STEP 1 instruction block in the same style the user gave
+     when starting Phase 3 (verify previous phase first, then build).
+3. Update / add memory notes for anything durable that doesn't already have
+   one (design decisions, deferred features).
+4. Commit only when the user asks you to.
+
+`PHASE_HANDOFF.md` is a rolling document — overwrite it each phase. Old
+phase docs live in `BLUEPRINT.md §15` (build phase history) and in memory
+notes, not in stale handoff files.

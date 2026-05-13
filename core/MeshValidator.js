@@ -1,0 +1,241 @@
+import { EVENTS } from './events.js';
+import { dispatch, getState } from './StateManager.js';
+
+const BABYLON = window.BABYLON;
+if (!BABYLON) throw new Error('Babylon.js failed to load');
+
+// ── Tunables ─────────────────────────────────────────────
+const MERGE_DISTANCE   = 1e-4;      // 0.1 mm (Babylon units = meters)
+const NORMAL_SAMPLE    = 64;        // faces sampled for inverted-normal vote
+const RAY_OFFSET       = 1e-3;      // 1 mm — push ray start outside surface
+const RAY_LENGTH       = 100;       // generous; we only need a hit flag
+const TRI_BUDGET_AUTO  = 100_000;   // BLUEPRINT §14.3 — vertex budget
+
+// ── Geometry helpers ─────────────────────────────────────
+
+function _getPositions(mesh) {
+  return mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+}
+function _getIndices(mesh) {
+  return mesh.getIndices();
+}
+
+/**
+ * Build edge → faceCount map. An edge belongs to exactly 2 faces in a
+ * well-formed closed manifold; anything else flags non-manifold.
+ */
+function _checkNonManifold(positions, indices) {
+  const edges = new Map(); // 'a:b' → count
+  const key = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+    [[a, b], [b, c], [c, a]].forEach(([u, v]) => {
+      const k = key(u, v);
+      edges.set(k, (edges.get(k) ?? 0) + 1);
+    });
+  }
+  let badEdges = 0;
+  for (const count of edges.values()) {
+    if (count !== 2) badEdges++;
+  }
+  return badEdges;
+}
+
+/**
+ * Cast a ray from each sampled face's centroid along its normal. If the ray
+ * re-enters the mesh, the normal is pointing inward. Majority vote decides
+ * the entire mesh's winding (a low-fi but cheap heuristic).
+ */
+function _checkInvertedNormals(mesh, positions, indices) {
+  const triCount = indices.length / 3;
+  if (triCount === 0) return false;
+
+  const step = Math.max(1, Math.floor(triCount / NORMAL_SAMPLE));
+  let inwardVotes = 0;
+  let sampled     = 0;
+
+  const a = new BABYLON.Vector3();
+  const b = new BABYLON.Vector3();
+  const c = new BABYLON.Vector3();
+
+  const worldMatrix = mesh.getWorldMatrix();
+
+  for (let t = 0; t < triCount; t += step) {
+    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
+    a.set(positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]);
+    b.set(positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]);
+    c.set(positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]);
+
+    const aw = BABYLON.Vector3.TransformCoordinates(a, worldMatrix);
+    const bw = BABYLON.Vector3.TransformCoordinates(b, worldMatrix);
+    const cw = BABYLON.Vector3.TransformCoordinates(c, worldMatrix);
+
+    const centroid = aw.add(bw).add(cw).scaleInPlace(1 / 3);
+    const edge1    = bw.subtract(aw);
+    const edge2    = cw.subtract(aw);
+    const normal   = BABYLON.Vector3.Cross(edge1, edge2);
+    if (normal.lengthSquared() < 1e-12) continue;
+    normal.normalize();
+
+    const origin = centroid.add(normal.scale(RAY_OFFSET));
+    const ray    = new BABYLON.Ray(origin, normal, RAY_LENGTH);
+    const hit    = mesh.intersects(ray, true);
+    if (hit.hit) inwardVotes++;
+    sampled++;
+  }
+
+  return sampled > 0 && (inwardVotes / sampled) > 0.5;
+}
+
+/**
+ * Compare the mesh's *exported* AABB against the configured bed dimensions.
+ *
+ * In-scene size is in metres at the scene's working ratio (1 BU = 1 m). The
+ * bed constraint applies to the physical print, so we rescale by
+ * (workingRatio / targetRatio) before converting to mm.
+ */
+function _checkExceedsBed(mesh) {
+  const bb     = mesh.getBoundingInfo().boundingBox;
+  const size   = bb.maximumWorld.subtract(bb.minimumWorld);   // metres at workingRatio
+  const print  = getState().print;
+  const wr     = print.workingRatio > 0 ? print.workingRatio : 1;
+  const tr     = print.targetRatio  > 0 ? print.targetRatio  : 1;
+  const k      = 1000 * (wr / tr);                            // BU → mm at targetRatio
+  const sizeMM = { x: size.x * k, y: size.y * k, z: size.z * k };
+  const bed    = print.bedDimensions;
+  return sizeMM.x > bed.x || sizeMM.y > bed.y || sizeMM.z > bed.z
+    ? { sizeMM, bedMM: bed }
+    : null;
+}
+
+// ── Public API ───────────────────────────────────────────
+
+/**
+ * Run validation checks against a mesh.
+ * @param {BABYLON.AbstractMesh} mesh
+ * @returns {Promise<ValidationResult[]>}
+ */
+export async function validateMesh(mesh) {
+  dispatch(EVENTS.VALIDATION_STARTED, { meshName: mesh.name });
+
+  const positions = _getPositions(mesh);
+  const indices   = _getIndices(mesh);
+  const results = [];
+
+  if (!positions || !indices || indices.length === 0) {
+    dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, results });
+    return results;
+  }
+
+  const badEdgeCount = _checkNonManifold(positions, indices);
+  if (badEdgeCount > 0) {
+    results.push({
+      type: 'nonManifold',
+      severity: 'error',
+      count: badEdgeCount,
+      autoFixAvailable: true,
+      fixed: false,
+      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'}`,
+    });
+  }
+
+  const inverted = _checkInvertedNormals(mesh, positions, indices);
+  if (inverted) {
+    results.push({
+      type: 'invertedNormals',
+      severity: 'error',
+      count: 1,
+      autoFixAvailable: true,
+      fixed: false,
+      message: 'Normals appear inverted',
+    });
+  }
+
+  const overBed = _checkExceedsBed(mesh);
+  if (overBed) {
+    const { sizeMM, bedMM } = overBed;
+    results.push({
+      type: 'exceedsBed',
+      severity: 'warning',
+      count: 1,
+      autoFixAvailable: false,
+      fixed: false,
+      message: `Exceeds bed: ${sizeMM.x.toFixed(0)}×${sizeMM.y.toFixed(0)}×${sizeMM.z.toFixed(0)} mm vs ${bedMM.x}×${bedMM.y}×${bedMM.z} mm`,
+    });
+  }
+
+  dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, results });
+  return results;
+}
+
+/**
+ * Apply available auto-fixes for a result list.
+ * @param {BABYLON.Mesh} mesh
+ * @param {ValidationResult[]} results
+ * @returns {Promise<ValidationResult[]>} mutated results with fixed flags set
+ */
+export async function autoFix(mesh, results) {
+  for (const r of results) {
+    if (!r.autoFixAvailable || r.fixed) continue;
+    if (r.type === 'nonManifold') {
+      if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
+        const vd = BABYLON.VertexData.ExtractFromMesh(mesh);
+        BABYLON.VertexData.MergeByDistance(vd, MERGE_DISTANCE);
+        vd.applyToMesh(mesh);
+      } else if (typeof mesh.mergeVerticesByDistance === 'function') {
+        mesh.mergeVerticesByDistance(MERGE_DISTANCE);
+      } else {
+        continue;
+      }
+      r.fixed = true;
+    } else if (r.type === 'invertedNormals') {
+      const indices = mesh.getIndices();
+      if (!indices) continue;
+      const flipped = new Uint32Array(indices.length);
+      for (let i = 0; i < indices.length; i += 3) {
+        flipped[i]     = indices[i];
+        flipped[i + 1] = indices[i + 2];
+        flipped[i + 2] = indices[i + 1];
+      }
+      mesh.setIndices(flipped);
+      r.fixed = true;
+    }
+  }
+  return results;
+}
+
+/** @param {ValidationResult[]} results */
+export function hasErrors(results) {
+  return results.some(r => r.severity === 'error');
+}
+
+/** @param {ValidationResult[]} results */
+export function hasWarnings(results) {
+  return results.some(r => r.severity === 'warning');
+}
+
+/**
+ * Re-validate every mesh currently flagged as a Print Part.
+ * @returns {Promise<Map<string, ValidationResult[]>>}
+ */
+export async function validateAllPrintParts() {
+  const out = new Map();
+  const objects = getState().scene.objects;
+  for (const [meshId, obj] of Object.entries(objects)) {
+    if (!obj.isPrintPart || obj.isGhost) continue;
+    const babylonMesh = obj._babylonMesh;
+    if (!babylonMesh) continue;
+    out.set(meshId, await validateMesh(babylonMesh));
+  }
+  return out;
+}
+
+/** Soft-threshold check used by AssetLoader to skip auto-validation on huge meshes. */
+export function shouldAutoValidate(mesh) {
+  return (mesh.getTotalVertices?.() ?? 0) <= TRI_BUDGET_AUTO;
+}
+
+export const MeshValidator = {
+  validateMesh, autoFix, hasErrors, hasWarnings,
+  validateAllPrintParts, shouldAutoValidate,
+};
