@@ -42,7 +42,7 @@ writing or modifying any module. Do not deviate from the contracts there.
 - [x] Phase 2: Asset Pipeline (AssetLoader, ShaderLibrary stub, MeshValidator, AssetPanel)
 - [x] Phase 3: Selection & Interaction (gizmos, Outliner, ContextMenu, Properties transform)
 - [x] Phase 4: Shader System (full ShaderLibrary, ShaderPanel, UV overrides, swatches)
-- [ ] Phase 5: Print Pipeline (PrintManager, PrintPanel, OBJ+MTL export, bed preview)
+- [x] Phase 5: Print Pipeline (PrintManager, PrintPanel, OBJ+MTL export, bed preview)
 - [ ] Phase 6: Persistence & Polish (full save/load, autosave, ghost/relink, smart replace)
 
 ## Coding conventions

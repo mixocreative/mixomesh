@@ -1,113 +1,102 @@
 # PHASE HANDOFF — pickup prompt for the next clear session
 
-## What just closed: Phase 4 + cross-phase UX/polish batch
+## What just closed: Phase 5 — Print Pipeline ✓ (2026-05-15)
 
-Phase 4 (Shader System) is done and was previously verified. On top of it
-this batch closed and is **demonstrably working in Chrome** (verified live
-via DevTools against the running app):
+Milestone **verified live in Chrome**: set Target Ratio 1:35, live exported
+dimensions update, Export OBJ+MTL → ZIP downloads, opens in Bambu Studio with
+colors intact.
 
-- **Import dedupe** — identical shader/texture (content + settings + size)
-  is silently shared on import, no merge prompt. `ShaderLibrary._findContentDuplicate`,
-  `AssetLoader._findImportedTextureBySignature`.
-- **Working-ratio rescale** — changing working ratio rescales every scene
-  object about the origin and re-normalizes scale to 1 (`RescaleWorldCommand`,
-  undoable). Working/Target ratio accept M:N (larger *or* smaller), not just 1:N.
-- **Apply Rotation / Apply Scale** in Properties — bakes into vertices and
-  normalizes transform to 0,0,0 / 1,1,1 (`BakeTransformCommand`, vertex
-  snapshot undo). Scale-lock toggle (default ON) = proportional XYZ;
-  viewport scale gizmo is uniform by default.
-- **Collections** — every imported file mints one display-only outliner
-  bucket (`state.scene.collections`, `SceneObject.collectionId`). Real
-  groups are unaffected; a group mixing collections renders at the outliner
-  root with a `[Mixed]` badge. RMB → Select Members / Rename / Delete.
-- **Floating viewport toolbar** (Fusion-360 style) — Group A move/rotate/scale,
-  Group B pivot (active/median/cursor/world), orientation local/world,
-  Group C camera free/follow-active/world-origin. `ui/ViewportToolbar.js`.
-- **Nav Cube** (`ui/NavCube.js`) — top-left orientation widget. Click face →
-  ortho preset (fit to scene bbox); drag → orbit; Home → perspective.
-  Camera sync (locked, see memory note): `rotateX(β − π/2) rotateY(π/2 − α)`.
-  Face→preset map in `SceneManager.setCameraPreset` uses the same
-  front-relative convention (LEFT = camera +X / α=0, RIGHT = camera −X / α=π).
-- **Bed FRONT tag** — single flat tag hugging the +Z bed edge, grid-line
-  colour, readable from the default camera (`rotation = (π/2, π, 0)`).
-  Replaces the old four billboarded amber tags.
-- Camera defaults: front-3/4 elevated (α=π/3, β=π/4, r≈0.4243 ≈ 30 cm high);
-  first dropped asset auto-frames the scene.
-
-All of the above is reflected in `BLUEPRINT.md` (§0.3/0.5, Part 4 state,
-Part 5 commands, Part 7 SceneManager + camera convention, Part 8 SceneObject/
-Collection schema, Part 10 dedupe, Part 12 PrintManager, Part 13 Outliner /
-Properties / ViewportToolbar / NavCube, Part 15 adjustments batch).
+Phase 5 surface (all working):
+- **PrintManager** (`core/PrintManager.js`) — `SCALE_PRESETS`, `getExportedDimensions`,
+  `exportOBJ` (OBJ+MTL+textures in a JSZip via `BABYLON.OBJExport`), `exportSTL`
+  (`BABYLON.STLExport`). Export factor = `(workingRatio/targetRatio)*1000`.
+- **PrintPanel** (`ui/PrintPanel.js`) — tabs Scale / Validation / **Bed** / Preview /
+  Export. Ratio inputs accept any positive `M:N` (stored `N/M`). Pre-export
+  validation gate: errors block (modal), warnings confirm.
+- **Bed tab + presets** — default **Elegoo Saturn 4 Ultra** (218.88×122.88×220 mm);
+  Bambu P1S/X1C/A1/mini, Prusa, Ender, Generic, Custom. X/Y/Z inputs +
+  "Show bed volume" overlay (`overlays.bedPreview`, `SceneManager.setOverlay`).
+- **Scene floor = printer bed XY** — `state.scene.gridSize` REMOVED. Floor
+  footprint tracks `state.print.bedDimensions` (rectangular). New
+  `state.scene.grid {cellMM,subdivisions}` = grid-line styling only.
+  `SceneManager.rebuildBed()` (Print▸Bed) / `setGrid()` (Properties▸Scene)
+  replace `setGridSize()`.
+- **Camera mouse remap (CAD, all modes)** — Babylon pointer orbit/pan
+  disabled (`buttons:[]`); custom `_onCameraPointer`: **RMB=orbit, MMB=pan,
+  Shift+MMB=orbit, wheel=zoom, LMB=select/gizmo**. (Babylon hard-forces RMB
+  as its pan button, so RMB-orbit had to be hand-rolled.)
+- `PrintPartCommand`, `BakeTransformCommand`, `RescaleWorldCommand` in
+  `core/HistoryManager.js`. Properties Print-Part section + Outliner printer
+  toggle column.
 
 ## Deferred / accepted scope cuts
 
-- Full **Phase 5** milestone (export → Bambu Studio) is **not** verified yet —
-  `core/PrintManager.js` + `ui/PrintPanel.js` exist as scaffolding only.
-- Nav cube does **not** snap to corner/edge isometric views — face clicks only.
-- Camera follow-active / world-origin modes wired but lightly tested.
+- Nav cube: face clicks only, no corner/edge isometric snaps.
+- Camera follow modes (followActive/worldOrigin) lightly tested.
+- **Old v3.1 saves**: scalar `scene.gridSize` is ignored on load — footprint
+  still correct (from bed), grid styling falls back to 10 mm / 10 subdiv.
+  **Phase 6 PersistenceManager must not re-emit `gridSize`; persist
+  `scene.grid` + `print.bedDimensions/bedPreset` instead, and migrate old files.**
 
 ## Locked design decisions (memory notes)
 
-- `[[navcube_camera_convention]]` — NavCube CSS sync formula + front-relative
-  LEFT/RIGHT convention, derived empirically via Chrome DevTools.
-- `[[phase4_design_decisions]]`, `[[phase3_design_decisions]]`,
-  `[[scale_ratio_model]]`, `[[ui_accent_palette]]`, `[[scene_default_scale]]`,
+- `[[scene-grid-bed-camera]]` — floor = printer bed XY; `scene.grid` is
+  styling only; Saturn 4 Ultra default; RMB/MMB/Shift+MMB camera map.
+- `[[scale_ratio_model]]`, `[[navcube_camera_convention]]`,
+  `[[phase4_design_decisions]]`, `[[phase3_design_decisions]]`,
+  `[[ui_accent_palette]]`, `[[scene_default_scale]]`,
   `[[backlog_copy_from_active]]`.
 
+All reflected in `BLUEPRINT.md` (§4 state, §7 SceneManager grid/camera,
+§12 PrintManager, §13 PrintPanel/Properties, §15 Phase 5 close-out).
+
 ---
 
-## NEXT: Phase 5 — Print Pipeline
+## NEXT: Phase 6 — Persistence & Polish
 
 **BLUEPRINT §15 deliverables:**
-`PrintManager` · `PrintPanel` · pre-export validation gate · bed preview
-overlay · OBJ+MTL via `BABYLON.OBJExport`.
+Full `PersistenceManager` with autosave + recent projects · ghost/relink in
+Outliner · Smart Replace · Transform Swab · camera state save/restore.
 
 **Milestone (verbatim):**
-> Set 1:35, see live dimensions, export ZIP, open in Bambu Studio with
-> colors intact.
+> Save → close → reopen identically. Move asset file → reopen → ghost →
+> relink → resolved.
 
-Key API surface (BLUEPRINT §12):
-```
-PrintManager.setWorkingRatio(num) / setTargetRatio(num)
-PrintManager.getExportedDimensions(meshId) → {x,y,z} mm at targetRatio
-PrintManager.exportOBJ(options) → Promise<void>   // triggers ZIP download
-PrintManager.exportSTL(options) → Promise<void>
-```
-`PrintPartCommand` (Part 5) toggles `isPrintPart`/`partLabel`/`partTolerance`.
-OBJ+MTL is the primary colored-print format (CLAUDE.md rule 6). Add the
-Babylon loaders/serializers `<script defer>` only when this phase needs it
-(BLUEPRINT line 34).
+Key spec: BLUEPRINT **§10 (PersistenceManager — full project schema v3.1,
+load sequence, autosave, recent projects)** and §11 (asset relink / ghost).
+`SmartReplaceCommand` / `TransformSwabCommand` are stubs in
+`core/HistoryManager.js` — real bodies land this phase. Camera
+save/restore: `SceneManager.saveCameraState`/`restoreCameraState` exist.
 
 ---
 
-### STEP 0 — verify the previous work still runs (do this first)
+### STEP 0 — verify previous work still runs (do this first)
 
 1. `npx http-server -p 5500 -c-1`, open Chrome at http://localhost:5500.
-2. DevTools console must be clean (no errors — CLAUDE.md dev rule).
-3. Drop a multi-mesh GLB: outliner shows a collection bucket; scene
-   auto-frames; nav cube tracks orbit and every face label is upright;
-   click each nav-cube face → camera snaps to the matching side
-   (LEFT click → you view from +X). Bed shows a flat readable `FRONT`
-   tag at the front edge.
-4. Change Working Ratio → all objects rescale in place, scale stays 1.
-   Properties → Apply Rotation/Scale bakes and zeroes the transform.
-   Undo (`Ctrl+Z`) reverses each.
-5. If anything above fails, fix it before starting Phase 5.
+2. DevTools console clean (no errors — CLAUDE.md dev rule).
+3. Drop a multi-mesh GLB: collection bucket in outliner; scene auto-frames;
+   nav-cube tracks orbit, faces upright, face click snaps camera; floor is
+   the rectangular Saturn bed with a flat readable `FRONT` tag.
+4. Camera: **RMB drag = orbit, MMB drag = pan, Shift+MMB = orbit, wheel =
+   zoom, LMB = select/gizmo**. No middle-click autoscroll.
+5. Properties ▸ Scene: Grid cell + Subdivisions re-skin grid (footprint
+   fixed). Print ▸ Bed: switch preset → floor resizes; Show bed volume box
+   matches footprint. Export tab: 1:35 → ZIP exports.
+6. Working Ratio change rescales in place (scale stays 1); Apply
+   Rotation/Scale bakes & zeroes; `Ctrl+Z` reverses each.
+7. If anything fails, fix before starting Phase 6.
 
-### STEP 1 — build Phase 5
+### STEP 1 — build Phase 6
 
-Re-read **BLUEPRINT §12 (PrintManager)** and **§13 (PrintPanel)** before
-writing code. Then implement, in order:
-1. `core/PrintManager.js` — ratio math, `getExportedDimensions`,
-   `exportOBJ` (OBJ+MTL in a JSZip), `exportSTL`. Babylon-first:
-   use `BABYLON.OBJExport` / serializers, not hand-rolled writers.
-2. Pre-export validation gate (reuse `MeshValidator`; block on hard errors,
-   warn on soft).
-3. `ui/PrintPanel.js` — wire Scale/Validation/Preview/Export tabs to
-   PrintManager; live exported-dimension readout at `targetRatio`.
-4. Bed preview overlay (bed volume box at `state.print.bedDimensions`,
-   toggled by `overlays.printPreview`).
-5. `PrintPartCommand` + Properties "print part" section.
+Re-read **BLUEPRINT §10 + §11** before writing code. Implement in order:
+1. `core/PersistenceManager.js` — full v3.1 save/load (whole project state,
+   shaders, UV overrides, collections, print, **scene.grid +
+   print.bedDimensions**; do NOT emit `scene.gridSize`; migrate old files).
+   Load sequence order per §10.
+2. Autosave + recent-projects list.
+3. Outliner ghost rows + Relink (file picker) — §11 / §13.
+4. `SmartReplaceCommand` + `TransformSwabCommand` real bodies.
+5. Camera state save/restore wired into project save/load.
 
 Demonstrate the milestone in Chrome, then run the CLAUDE.md
-"Phase handoff" procedure (flip Phase 5 → `[x]`, rewrite this file).
+"Phase handoff" procedure (flip Phase 6 → `[x]`, rewrite this file).

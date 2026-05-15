@@ -1153,6 +1153,35 @@ body.modal-scale     #renderCanvas { cursor: nwse-resize; }
   border-color: var(--accent);
 }
 
+.pp-xyz-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+.pp-xyz {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1;
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+}
+.pp-xyz input {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: right;
+}
+.pp-xyz input:focus {
+  border-color: var(--accent);
+}
+
 .pp-info {
   font-size: var(--fs-xs);
   color: var(--text-1);

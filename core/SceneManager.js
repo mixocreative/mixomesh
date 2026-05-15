@@ -11,8 +11,11 @@ const GridMaterial = BABYLON.GridMaterial ?? null;
 // Selection ring colour — matches --accent in styles/tokens.css.
 const ACCENT_COLOR    = BABYLON.Color3.FromHexString('#f59e0b');
 const ACCENT_DIM      = BABYLON.Color3.FromHexString('#f59e0b').scale(0.55);
-const GRID_CELL_SIZE  = 0.01;  // 10 mm minor
-const GRID_MAJOR_FREQ = 10;    // major every 10 cells (= 100 mm)
+// Grid line styling defaults (used when state.scene.grid is missing). The
+// ground footprint itself comes from the printer bed XY, not from these.
+const DEFAULT_GRID_CELL_MM = 10;   // minor cell size, mm
+const DEFAULT_GRID_SUBDIV  = 10;   // major line every N minor cells
+const MM_PER_BU            = 1000; // 1 BU = 1 m of print at the working ratio
 const AXES_SIZE       = 0.05;  // 50 mm
 const CAM_RADIUS_MIN  = 0.02;  // 20 mm — close zoom for fine print parts
 const CAM_RADIUS_MAX  = 5;     // 5 m  — far zoom limit
@@ -156,12 +159,12 @@ function _setupCamera() {
 
   const ptrs = _camera.inputs.attached.pointers;
   if (ptrs) {
-    // MMB orbits (button 1); RMB pans (button 2 — matches default
-    // panningMouseButton). LMB stays excluded so selection/body-drag own it.
-    ptrs.buttons            = [1, 2];
-    // Lower sensibility = faster pan. Babylon already auto-scales pan delta by
-    // camera.radius, so this stays consistent across zoom levels.
-    ptrs.panningSensibility = 1000;
+    // Babylon classifies RMB(2) as its pan button, so RMB can only ever pan
+    // (and pan is disabled here) — it will not orbit no matter what. So drive
+    // all mouse orbit/pan ourselves in _onCameraPointer and let Babylon handle
+    // only the wheel. buttons=[] disables Babylon's pointer orbit/pan.
+    ptrs.buttons            = [];
+    ptrs.panningSensibility = 0;
   }
 
   // Multiplicative wheel zoom feels right at any scale. wheelDeltaPercentage
@@ -180,6 +183,75 @@ function _setupCamera() {
   // become 1:1 with cursor, which CAD tools expect.
   _camera.panningInertia = 0;
   _camera.inertia        = 0;
+
+  // MMB: the browser's middle-click autoscroll would otherwise hijack the
+  // drag, so suppress it on mousedown and run our own handler.
+  _canvas.addEventListener('mousedown', _preventMmbDefault);
+  _canvas.addEventListener('auxclick',  _preventMmbDefault);
+  _scene.onPointerObservable.add(_onCameraPointer);
+}
+
+function _preventMmbDefault(e) {
+  if (e.button === 1) e.preventDefault();
+}
+
+// Pixel→radian factor for orbit (RMB drag / Shift+MMB drag).
+const ORBIT_SENS = 0.006;
+let _camDrag = null;  // { x, y, btn } active camera drag, or null when idle
+
+function _orbit(dx, dy) {
+  _camera.alpha -= dx * ORBIT_SENS;
+  _camera.beta  -= dy * ORBIT_SENS;
+  const eps = 0.01;
+  _camera.beta = Math.min(Math.PI - eps, Math.max(eps, _camera.beta));
+}
+
+function _pan(dx, dy) {
+  // Grab-pan: content follows the cursor. Speed scales with distance so it
+  // feels constant at any zoom (Babylon does the same for its own pan).
+  const scale = Math.max(_camera.radius, 0.05) / 700;
+  const right = _camera.getDirection(BABYLON.Axis.X);
+  const up    = _camera.getDirection(BABYLON.Axis.Y);
+  _camera.target.addInPlace(right.scale(-dx * scale));
+  _camera.target.addInPlace(up.scale(dy * scale));
+}
+
+/**
+ * Custom mouse navigation (CAD convention, all modes) — Babylon's pointer
+ * orbit/pan is disabled because it forces RMB to be the pan button:
+ *   RMB drag         → orbit
+ *   MMB drag         → pan (grab-pan the target in its view plane)
+ *   Shift + MMB drag → orbit
+ * LMB(0) is ignored here so selection / gizmo / body-drag keep it. In follow
+ * modes _applyFollowTarget re-locks the target each frame, so a pan only
+ * persists in free mode (intended) while orbit circles the locked point.
+ */
+function _onCameraPointer(info) {
+  const ev = info?.event;
+  if (!ev) return;
+  const T = BABYLON.PointerEventTypes;
+
+  if (info.type === T.POINTERDOWN && (ev.button === 1 || ev.button === 2)) {
+    _camDrag = { x: ev.clientX, y: ev.clientY, btn: ev.button };
+    if (ev.button === 1) ev.preventDefault?.();
+    return;
+  }
+  if (info.type === T.POINTERUP && _camDrag && ev.button === _camDrag.btn) {
+    _camDrag = null;
+    return;
+  }
+  if (info.type !== T.POINTERMOVE || !_camDrag) return;
+  // buttons bitmask: 2 = RMB held, 4 = MMB held. Released off-canvas → stop.
+  const mask = _camDrag.btn === 2 ? 2 : 4;
+  if ((ev.buttons & mask) === 0) { _camDrag = null; return; }
+
+  const dx = ev.clientX - _camDrag.x;
+  const dy = ev.clientY - _camDrag.y;
+  _camDrag.x = ev.clientX;
+  _camDrag.y = ev.clientY;
+
+  if (_camDrag.btn === 2 || ev.shiftKey) _orbit(dx, dy);
+  else _pan(dx, dy);
 }
 
 function _syncOrtho() {
@@ -399,19 +471,34 @@ function _setupLighting() {
 // ── Grid ─────────────────────────────────────────────────
 
 function _setupGrid() {
-  _rebuildGroundMesh(getState().scene.gridSize);
+  _rebuildGroundMesh();
 }
 
-function _rebuildGroundMesh(extent) {
+/**
+ * Rebuild the floor. Its footprint equals the printer bed XY
+ * (state.print.bedDimensions, mm → BU); the grid lines drawn on it are styled
+ * from state.scene.grid (minor cell size + subdivisions). Takes no arguments —
+ * always reads current state so bed-size and grid edits both flow through here.
+ */
+function _rebuildGroundMesh() {
+  const bed  = getState().print.bedDimensions;
+  const grid = getState().scene.grid ?? {};
+  const cellMM = grid.cellMM > 0 ? grid.cellMM : DEFAULT_GRID_CELL_MM;
+  const subdiv = grid.subdivisions > 0 ? grid.subdivisions : DEFAULT_GRID_SUBDIV;
+
+  const wBU    = bed.x / MM_PER_BU;          // bed X → ground width
+  const dBU    = bed.y / MM_PER_BU;          // bed Y → ground depth (Babylon Z)
+  const cellBU = cellMM / MM_PER_BU;
+
   if (_ground) { _ground.dispose(); _ground = null; }
-  _ground = BABYLON.MeshBuilder.CreateGround('grid', { width: extent, height: extent }, _scene);
-  _ground.isPickable     = false;
-  _ground.receiveShadows = true;
 
   if (GridMaterial) {
+    _ground = BABYLON.MeshBuilder.CreateGround('grid', { width: wBU, height: dBU }, _scene);
+    _ground.isPickable     = false;
+    _ground.receiveShadows = true;
     const mat = new GridMaterial('gridMat', _scene);
-    mat.gridRatio           = GRID_CELL_SIZE;
-    mat.majorUnitFrequency  = GRID_MAJOR_FREQ;
+    mat.gridRatio           = cellBU;
+    mat.majorUnitFrequency  = subdiv;
     mat.minorUnitVisibility = 0.45;
     mat.mainColor           = new BABYLON.Color3(0.08, 0.08, 0.10);
     mat.lineColor           = new BABYLON.Color3(0.38, 0.38, 0.46);
@@ -419,9 +506,10 @@ function _rebuildGroundMesh(extent) {
     mat.backFaceCulling     = false;
     _ground.material = mat;
   } else {
-    _ground.dispose();
+    const longest = Math.max(wBU, dBU);
     _ground = BABYLON.MeshBuilder.CreateGround('grid', {
-      width: extent, height: extent, subdivisions: Math.max(10, Math.floor(extent / GRID_CELL_SIZE)),
+      width: wBU, height: dBU,
+      subdivisions: Math.max(10, Math.floor(longest / cellBU)),
     }, _scene);
     _ground.isPickable     = false;
     _ground.receiveShadows = true;
@@ -432,7 +520,7 @@ function _rebuildGroundMesh(extent) {
     _ground.material = mat;
   }
 
-  _rebuildBedLabels(extent);
+  _rebuildBedLabels(wBU, dBU);
 }
 
 /**
@@ -442,14 +530,14 @@ function _rebuildGroundMesh(extent) {
  * shown — once the user knows the front edge the rest is implied, and four
  * upright tags were visual noise.
  */
-function _rebuildBedLabels(extent) {
+function _rebuildBedLabels(widthBU, depthBU) {
   for (const lbl of _bedLabels) lbl.dispose();
   _bedLabels = [];
-  const half   = extent / 2;
-  const labelW = Math.max(0.05, extent * 0.16);      // scales with bed
+  const frontZ = depthBU / 2;                          // +Z edge = bed front
+  const labelW = Math.max(0.05, Math.min(widthBU, depthBU) * 0.16);
   const labelH = labelW * 0.30;
-  const inset  = labelH * 0.55;                       // hug the front bed edge
-  const pos    = new BABYLON.Vector3(0, 0.004, half - inset);  // 4 mm above bed
+  const inset  = labelH * 0.55;                         // hug the front bed edge
+  const pos    = new BABYLON.Vector3(0, 0.004, frontZ - inset);  // 4 mm above bed
   _bedLabels.push(_createBedLabelMesh('FRONT', pos, labelW, labelH));
 }
 
@@ -491,14 +579,28 @@ function _createBedLabelMesh(text, position, width, height) {
 }
 
 /**
- * Resize the build-area grid. `extentBU` is the side length in Babylon Units
- * (1 BU = 1 m of print at the scene's working ratio).
- * @param {number} extentBU
+ * Re-skin the grid lines. The floor footprint is unchanged (it tracks the
+ * printer bed); only the minor cell size and major-line spacing change.
+ * @param {{ cellMM?: number, subdivisions?: number }} grid
  */
-export function setGridSize(extentBU) {
-  if (!Number.isFinite(extentBU) || extentBU <= 0) return;
-  setState(s => ({ ...s, scene: { ...s.scene, gridSize: extentBU } }), { silent: true });
-  _rebuildGroundMesh(extentBU);
+export function setGrid(grid) {
+  const prev = getState().scene.grid ?? {};
+  const cellMM = Number.isFinite(grid.cellMM) && grid.cellMM > 0
+    ? grid.cellMM : prev.cellMM ?? DEFAULT_GRID_CELL_MM;
+  const subdivisions = Number.isFinite(grid.subdivisions) && grid.subdivisions > 0
+    ? Math.round(grid.subdivisions) : prev.subdivisions ?? DEFAULT_GRID_SUBDIV;
+  setState(s => ({
+    ...s, scene: { ...s.scene, grid: { cellMM, subdivisions } },
+  }), { silent: true });
+  _rebuildGroundMesh();
+}
+
+/**
+ * Rebuild the floor to match the current printer bed XY
+ * (state.print.bedDimensions). Call after bed dimensions change.
+ */
+export function rebuildBed() {
+  _rebuildGroundMesh();
 }
 
 // ── Axes overlay (1-pixel lines, no arrowheads) ─────────
@@ -1006,7 +1108,7 @@ export function cancelBodyDrag() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'printPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'printPreview'|'bedPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -1030,6 +1132,13 @@ export function setOverlay(name, on) {
       break;
     case 'wireframeEdges':
       _setWireframeEdgesMode(on);
+      break;
+    case 'bedPreview':
+      if (on) updateBedPreview(getState().print.bedDimensions);
+      else {
+        const bed = _scene.getMeshByName('bedPreview');
+        if (bed) bed.dispose();
+      }
       break;
   }
 }
@@ -1187,7 +1296,7 @@ export const SceneManager = {
   setCameraPreset, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
-  setOverlay, setWireframeEdgeColor, setGridSize, updateBedPreview,
+  setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

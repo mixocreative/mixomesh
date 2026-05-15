@@ -122,14 +122,21 @@ function _applyAndWireSectionCollapse() {
 // ── Scene section (shown when no object is active) ───────
 
 function _renderSceneSection() {
-  const gridBU = getState().scene.gridSize ?? 0.3;
-  const gridMM = gridBU * 1000;
+  const grid = getState().scene.grid ?? { cellMM: 10, subdivisions: 10 };
+  const bed  = getState().print.bedDimensions;
   return `
     <section class="pp-section" data-section="scene">
       <header class="pp-section-header">Scene</header>
       <div class="pp-row">
-        <label>Bed size (mm)</label>
-        <input type="number" step="10" min="10" id="pp-grid-size" value="${_fmt(gridMM, 0)}">
+        <label>Grid cell (mm)</label>
+        <input type="number" step="1" min="0.1" id="pp-grid-cell" value="${_fmt(grid.cellMM, 2)}">
+      </div>
+      <div class="pp-row">
+        <label>Subdivisions</label>
+        <input type="number" step="1" min="1" id="pp-grid-subdiv" value="${_fmt(grid.subdivisions, 0)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Bed ${_fmt(bed.x, 2)} × ${_fmt(bed.y, 2)} mm — set in Print ▸ Bed.</span>
       </div>
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">Click a mesh to edit its properties.</span>
@@ -139,18 +146,26 @@ function _renderSceneSection() {
 }
 
 function _wireSceneSection() {
-  const input = _bodyEl.querySelector('#pp-grid-size');
-  if (!input) return;
+  const cellInput   = _bodyEl.querySelector('#pp-grid-cell');
+  const subdivInput = _bodyEl.querySelector('#pp-grid-subdiv');
+  if (!cellInput || !subdivInput) return;
   const commit = () => {
-    const mm = parseFloat(input.value);
-    if (!Number.isFinite(mm) || mm <= 0) { _render(); return; }
-    SceneManager.setGridSize(mm / 1000);
+    const cellMM = parseFloat(cellInput.value);
+    const subdivisions = parseInt(subdivInput.value, 10);
+    if (!Number.isFinite(cellMM) || cellMM <= 0 ||
+        !Number.isFinite(subdivisions) || subdivisions < 1) {
+      _render();
+      return;
+    }
+    SceneManager.setGrid({ cellMM, subdivisions });
   };
-  input.addEventListener('change', commit);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') { _render(); }
-  });
+  for (const input of [cellInput, subdivInput]) {
+    input.addEventListener('change', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { _render(); }
+    });
+  }
 }
 
 // ── Object section ───────────────────────────────────────

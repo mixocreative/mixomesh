@@ -411,14 +411,14 @@ const initialState = {
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
     overlays: { grid: true, axes: true, wireframe: false, bedPreview: false, wireframeEdges: false, wireframeEdgeColor: '#f59e0b' },
-    gridSize: 0.3,         // BU — default 300 mm build area; user-editable in Properties → Scene
+    grid: { cellMM: 10, subdivisions: 10 },  // line styling only; floor footprint = print.bedDimensions XY
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: 'median' /* world|median|active|individual|cursor */ },
   print: {
     workingRatio: 1,            // denominator of the scene display ratio (1 = 1:1)
     targetRatio:  1,            // denominator of the final print export ratio
-    bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
+    bedPreset: 'Elegoo Saturn 4 Ultra', bedDimensions: { x: 218.88, y: 122.88, z: 220 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
   ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
@@ -624,7 +624,8 @@ SceneManager.cancelBodyDrag()                // restores pivot to pre-drag posit
 // Overlays
 SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'bedPreview'|'wireframeEdges'
 SceneManager.setWireframeEdgeColor(hexColor)  // live-update edge color while wireframeEdges is on
-SceneManager.setGridSize(extentBU)            // rebuilds the ground mesh at the new extent
+SceneManager.setGrid({cellMM,subdivisions})   // re-skins grid lines (footprint unchanged)
+SceneManager.rebuildBed()                     // rebuilds ground to current print.bedDimensions XY
 SceneManager.updateBedPreview(dims)
 
 // 3D Cursor
@@ -643,7 +644,7 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 - **Wireframe edges:** `SceneManager.setOverlay('wireframeEdges', on)` calls `mesh.enableEdgesRendering(0.9, true)` / `mesh.disableEdgesRendering()` on every mesh with `.geometry`. Edge color and width stored in module-local `_wireframeEdgeState`. `setWireframeEdgeColor(hex)` parses hex to `BABYLON.Color4` and updates all live edge renderers.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `main.js` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
-- **Bed (grid):** ground plane sized to `state.scene.gridSize` (default `0.3` BU = 300 mm) with `BABYLON.GridMaterial`. Minor lines 10 mm, major lines 100 mm. Rebuild via `SceneManager.setGridSize(extentBU)`. State key stays `gridSize` for backward compatibility with the v3.1 save schema, but the user-facing label in Properties reads **Bed size** since "grid" is just the visual representation.
+- **Bed (grid):** ground plane footprint = the printer bed XY (`state.print.bedDimensions.x` × `.y`, mm → BU; default Elegoo Saturn 4 Ultra 218.88 × 122.88 mm), rectangular. Lines drawn with `BABYLON.GridMaterial`, styled from `state.scene.grid` (`cellMM` minor cell size, `subdivisions` minor cells per major line; default 10 mm / 10). `SceneManager.rebuildBed()` resizes the floor when bed dimensions change (called from Print ▸ Bed); `SceneManager.setGrid({cellMM,subdivisions})` re-skins the lines (called from Properties ▸ Scene). The single flat `FRONT` tag sits at the `+Z` bed edge and scales with `min(width,depth)`. Old v3.1 saves with a scalar `scene.gridSize` are ignored; `scene.grid` falls back to the 10/10 default.
 - **Bed FRONT tag:** a single `MeshBuilder.CreatePlane` mesh with `DynamicTexture` text `FRONT`, laid **flat on the bed** (`rotation = (π/2, π, 0)`, no billboard) hugging the +Z edge, 4 mm above the bed, textured face up with glyphs readable from the front-elevated camera (verified live; `rotation.x = -π/2` mirrors the text, `+π/2` alone is upside-down). Drawn in the muted grid-line colour (`rgba(97,97,117,0.55)` ≈ grid `Color3 0.38,0.38,0.46`) so it reads as part of the bed, not a UI accent. Only FRONT is shown — once the front edge is known the rest is implied; the old four upright billboarded tags (FRONT/BACK/LEFT/RIGHT) were dropped as visual noise. Size scales with bed extent (`max(0.03, extent * 0.10)` × 0.32 ratio). Rebuilt by `_rebuildGroundMesh` whenever bed extent changes. Visibility tracks `state.scene.overlays.grid` (toggled together with ground plane).
 - **Bed preview:** `MeshBuilder.CreateBox` sized to bed dims, semi-transparent material, wireframe outline overlay.
 - **3D cursor:** 3 mm sphere, hidden by default. Made visible only when `state.selection.pivotMode === 'cursor'` via `setCursorVisible`.
@@ -660,7 +661,7 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
   | top     | (any)       | 0        | +Y |
   | bottom  | (any)       | π        | -Y |
   | perspective | π/3 | π/4 | front-right-3/4-elevated (matches initial load) |
-- **Camera Presets — animate + fit + auto-revert:** `setCameraPreset(name)` animates `alpha`, `beta`, `target`, `radius` simultaneously (320 ms, quadratic ease-in-out) toward the named view. Before animation it computes the scene's hierarchy bbox over every `metadata.meshId`-tagged mesh and sets the target to that centre plus a radius of `diag × 1.2` so all content fits. For an ortho preset (top/bottom/front/back/left/right) the camera switches to `ORTHOGRAPHIC_CAMERA` only *after* the animation finishes — interpolating through ortho mid-flight looks broken. For `'perspective'` the mode goes back to `PERSPECTIVE_CAMERA` post-anim. The settled `target` is snapshotted in `_lastAppliedTarget`. **Auto-revert:** inside `_applyFollowTarget`, when the camera is in ortho mode and the preset is not perspective, any divergence of `_camera.target` from `_lastAppliedTarget` (squared distance > `1e-6`, i.e. ~1 mm pan) flips the preset back to `'perspective'` and dispatches `CAMERA_PRESET_CHANGED`. The `_animating` flag suppresses revert during the preset animation itself. Camera input panning: `ArcRotateCameraPointersInput.buttons = [1, 2]` so RMB drag triggers Babylon's native pan (the panningMouseButton). The context-menu RMB stays usable because `InputManager` defers `_onContextMenuRMB` to RMB-UP and cancels it if movement exceeds 4 px.
+- **Camera Presets — animate + fit + auto-revert:** `setCameraPreset(name)` animates `alpha`, `beta`, `target`, `radius` simultaneously (320 ms, quadratic ease-in-out) toward the named view. Before animation it computes the scene's hierarchy bbox over every `metadata.meshId`-tagged mesh and sets the target to that centre plus a radius of `diag × 1.2` so all content fits. For an ortho preset (top/bottom/front/back/left/right) the camera switches to `ORTHOGRAPHIC_CAMERA` only *after* the animation finishes — interpolating through ortho mid-flight looks broken. For `'perspective'` the mode goes back to `PERSPECTIVE_CAMERA` post-anim. The settled `target` is snapshotted in `_lastAppliedTarget`. **Auto-revert:** inside `_applyFollowTarget`, when the camera is in ortho mode and the preset is not perspective, any divergence of `_camera.target` from `_lastAppliedTarget` (squared distance > `1e-6`, i.e. ~1 mm pan) flips the preset back to `'perspective'` and dispatches `CAMERA_PRESET_CHANGED`. The `_animating` flag suppresses revert during the preset animation itself. Camera input: Babylon's pointer orbit/pan is fully disabled (`ArcRotateCameraPointersInput.buttons = []`, `panningSensibility = 0`) because Babylon hard-classifies RMB(2) as its pan button — RMB could never orbit through Babylon. All mouse orbit/pan is custom in `_onCameraPointer` (scene `onPointerObservable`); Babylon keeps only the wheel-zoom input. CAD convention, all modes: **RMB drag = orbit**, **MMB drag = grab-pan** target in view plane (speed ∝ radius), **Shift+MMB drag = orbit**. LMB(0) is ignored by the camera so selection/gizmo/body-drag own it. The context-menu RMB stays usable because `InputManager` defers `_onContextMenuRMB` to RMB-UP and cancels it if movement exceeds 4 px (an RMB drag both orbits and suppresses the menu). In follow modes `_applyFollowTarget` re-locks the target each frame so a pan only persists in `free` (intended). Middle-click autoscroll suppressed via `mousedown`/`auxclick` `preventDefault` on the canvas. Net: **RMB = orbit, MMB = pan, Shift+MMB = orbit, wheel = zoom, LMB = select/gizmo**.
 
 ### Lighting
 1 × `HemisphericLight` (top-down, intensity 0.4)
@@ -1268,7 +1269,7 @@ Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 7. **Validation** — collapsed list of issues with per-issue Auto-Fix button.
 
 **Scene** section (only when no object is active):
-- **Bed size (mm)** input → `SceneManager.setGridSize` (internal state key still `gridSize`).
+- **Grid cell (mm)** + **Subdivisions** inputs → `SceneManager.setGrid({cellMM,subdivisions})` (state `scene.grid`). Read-only hint shows the current bed size; bed size itself is set in Print ▸ Bed.
 
 ### Future: Copy active-to-selected (Phase 4 / 5 nice-to-have)
 A "Copy from active" affordance on each Transform sub-section (Position, Rotation, Scale, Source Unit, Shader, UV Override) that applies the active object's value to all other selected objects in one batched `TransformCommand` / `ShaderAssignCommand` / etc. UI: small "↧ to all" button beside each section header, enabled only when `selectedIds.length > 1`. Three flavours per section:
@@ -1408,9 +1409,9 @@ Full `ShaderLibrary` · `ShaderPanel` (Shader Library) · Properties Panel shade
 **What shipped:** Shader Library displays scene shaders with texture thumbnails. Inline editor for type / color / texture / UV base. Per-row Duplicate, per-mesh UV overrides clone texture to prevent leaks. Properties Shader section binding-only (slots with combined dropdown + auto-focus). Shader merge modal on import collisions. Right panel splitter + individually collapsible sub-sections. LMB drag on mesh translates on horizontal plane (Bambu Studio style). All undoable. Import readback pattern for glTF-embedded textures.
 **Deferred (user accepted):** Copy-from-active, user-swatch persistence, multi-material-per-mesh, sub-section collapse persistence.
 
-### Phase 5 — Print Pipeline
+### Phase 5 — Print Pipeline ✓ CLOSED 2026-05-15
 `PrintManager` · `PrintPanel` · pre-export validation gate · bed preview overlay · OBJ+MTL via `BABYLON.OBJExport`
-**Milestone:** Set 1:35, see live dimensions, export ZIP, open in Bambu Studio with colors intact.
+**Milestone:** Set 1:35, see live dimensions, export ZIP, open in Bambu Studio with colors intact. — **verified in Chrome 2026-05-15.**
 **What shipped:** PrintManager with SCALE_PRESETS (Default 1:1 added), exportOBJ/exportSTL with JSZip bundling, pre-export validation gate (errors block, warnings confirm). PrintPanel with Scale / Validation / Bed / Export tabs; ratio inputs accept any positive `M:N` format (parser stores `N/M`, so values < 1 = upscaled prints, > 1 = downscaled models). Bed preview overlay toggle. Print Part toggle in Outliner (6th column, Printer icon, `PrintPartCommand`). Wireframe edges overlay with color picker (`setOverlay('wireframeEdges')` + `setWireframeEdgeColor()`). Panel collapse/resize system in `main.js` (all three panels — Outliner, right panel, Asset Panel — collapsible + drag-resizable). Remove asset button in Asset Panel (session assets only). Session asset re-drag fixed via `instantiateAsset()` + blob URL cache.
 
 **Adjustments batch (closed alongside Phase 5):**
@@ -1424,7 +1425,12 @@ Full `ShaderLibrary` · `ShaderPanel` (Shader Library) · Properties Panel shade
 - **Camera Follow Modes** — `state.scene.camera.followMode` (`free|followActive|worldOrigin`) drives a per-frame override of `_camera.target`. `followActive` tracks the active object's hierarchy bbox centre; `worldOrigin` pins to `(0,0,0)`. See §7 *Camera Follow Modes*.
 - **Focus action** — RMB Outliner object → "Focus" (was "Frame Selection"). `frameSelected()` now uses hierarchy bounds + animated camera transition (280 ms ease-in-out on `target` and `radius`).
 
-**Deferred (user accepted):** Full Phase 5 milestone verification in Bambu Studio pending. Nav cube currently does not snap-to-corner / -edge isometric views (only face clicks).
+**Close-out batch (2026-05-15, verified live):**
+- **Bed tab + presets** — `PrintPanel` Bed tab: printer presets (default **Elegoo Saturn 4 Ultra** 218.88×122.88×220 mm; Bambu P1S/X1C/A1/mini, Prusa, Ender, Generic, Custom), X/Y/Z mm inputs, "Show bed volume" overlay. `state.scene.overlays.bedPreview` + `SceneManager.setOverlay('bedPreview')` (the `updateBedPreview` box was previously dead code).
+- **Scene floor = printer bed XY** — `state.scene.gridSize` removed; floor footprint now tracks `print.bedDimensions` (rectangular). New `state.scene.grid {cellMM,subdivisions}` is line-styling only. `SceneManager.setGrid()` (Properties ▸ Scene: Grid cell + Subdivisions) / `rebuildBed()` (Print ▸ Bed) replace `setGridSize()`. Old saves' scalar `gridSize` ignored (10/10 fallback).
+- **Camera mouse remap (CAD)** — Babylon pointer orbit/pan disabled (`buttons:[]`); custom `_onCameraPointer`: RMB = orbit, MMB = pan, Shift+MMB = orbit, wheel = zoom, LMB = select/gizmo. Babylon hard-forces RMB as its pan button so RMB-orbit had to be custom. See §7.
+
+**Deferred (user accepted):** Nav cube does not snap-to-corner / -edge isometric views (only face clicks). Camera follow modes lightly tested. Old v3.1 saves with scalar `scene.gridSize` lose grid styling (footprint still correct from bed).
 
 ### Phase 6 — Persistence & Polish
 Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore

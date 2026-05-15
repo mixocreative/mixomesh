@@ -21,14 +21,17 @@ const INITIAL_STATE = {
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
       followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: false },
-    gridSize: 0.3,                       // BU — default 300 mm build area
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: false, bedPreview: false },
+    // The scene floor footprint equals the printer bed XY (print.bedDimensions).
+    // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,
+    // subdivisions = how many minor cells between major lines.
+    grid: { cellMM: 10, subdivisions: 10 },
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: 'active' },
   print: {
     workingRatio: 1, targetRatio: 1,
-    bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
+    bedPreset: 'Elegoo Saturn 4 Ultra', bedDimensions: { x: 218.88, y: 122.88, z: 220 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
   ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },

@@ -43,8 +43,20 @@ function _fmtRatio(n) {
   return Math.abs(m - r) < 1e-6 ? `${r}:1` : `${(+m.toFixed(3)).toString()}:1`;
 }
 
+// Print-bed presets (interior build volume, mm). 'Custom' keeps current dims.
+const BED_PRESETS = [
+  { label: 'Elegoo Saturn 4 Ultra', x: 218.88, y: 122.88, z: 220 },
+  { label: 'Bambu Lab P1S / X1C', x: 256, y: 256, z: 256 },
+  { label: 'Bambu Lab A1',        x: 256, y: 256, z: 256 },
+  { label: 'Bambu Lab A1 mini',   x: 180, y: 180, z: 180 },
+  { label: 'Prusa MK4 / MK3S+',   x: 250, y: 210, z: 220 },
+  { label: 'Creality Ender 3',    x: 220, y: 220, z: 250 },
+  { label: 'Generic Large',       x: 300, y: 300, z: 400 },
+  { label: 'Custom',              x: null, y: null, z: null },
+];
+
 let _bodyEl = null;
-let _activeTab = 'scale'; // Current tab: 'scale' | 'validation' | 'export'
+let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'preview' | 'export'
 
 export function init() {
   _bodyEl = document.getElementById('rp-print-body');
@@ -69,10 +81,11 @@ export function init() {
 // ── Tabs ──────────────────────────────────────────────────
 
 function _renderTabs() {
-  const tabs = ['scale', 'validation', 'preview', 'export'];
+  const tabs = ['scale', 'validation', 'bed', 'preview', 'export'];
   const labels = {
     scale: 'Scale',
     validation: 'Validation',
+    bed: 'Bed',
     preview: 'Preview',
     export: 'Export',
   };
@@ -391,6 +404,105 @@ function _renderExportTab() {
   return el;
 }
 
+// ── Bed Tab ──────────────────────────────────────────────
+
+function _matchBedPreset(dims) {
+  const p = BED_PRESETS.find(
+    b => b.x === dims.x && b.y === dims.y && b.z === dims.z
+  );
+  return p ? p.label : 'Custom';
+}
+
+function _renderBedTab() {
+  const state = getState();
+  const dims = state.print.bedDimensions;
+  const presetLabel = state.print.bedPreset || _matchBedPreset(dims);
+  const showVolume = state.scene.overlays.bedPreview ?? false;
+
+  let html = '<div class="pp-tab-content">';
+
+  html += '<div class="pp-field-group">';
+  html += '<label>Printer Bed</label>';
+  html += '<select id="pp-bed-preset" class="pp-preset-select">';
+  for (const b of BED_PRESETS) {
+    const sel = b.label === presetLabel ? ' selected' : '';
+    html += `<option value="${b.label}"${sel}>${b.label}</option>`;
+  }
+  html += '</select>';
+  html += '</div>';
+
+  html += '<div class="pp-field-group">';
+  html += '<label>Build Volume (mm)</label>';
+  html += '<div class="pp-xyz-row">';
+  for (const axis of ['x', 'y', 'z']) {
+    html += `<label class="pp-xyz">${axis.toUpperCase()}`;
+    html += `<input type="number" min="1" step="1" data-bed-axis="${axis}" value="${dims[axis]}"></label>`;
+  }
+  html += '</div>';
+  html += '</div>';
+
+  html += '<div class="pp-field-group">';
+  html += '<div class="pp-checkbox">';
+  html += `<input type="checkbox" id="pp-bed-show" ${showVolume ? 'checked' : ''}>`;
+  html += '<label for="pp-bed-show">Show bed volume in viewport</label>';
+  html += '</div>';
+  html += '<div class="pp-info">Models exceeding the bed are flagged in Validation.</div>';
+  html += '</div>';
+
+  html += '</div>';
+
+  const el = document.createElement('div');
+  el.innerHTML = html;
+
+  // Commit bed dims + preset to state (non-undoable metadata, like targetRatio).
+  // Re-draw the volume box live when it is currently shown.
+  const commit = (next) => {
+    setState(s => ({
+      ...s,
+      print: { ...s.print, bedPreset: next.preset, bedDimensions: next.dims },
+    }), { silent: true });
+    // Scene floor footprint tracks the printer bed XY.
+    SceneManager.rebuildBed();
+    if (getState().scene.overlays.bedPreview) {
+      SceneManager.updateBedPreview(next.dims);
+    }
+  };
+
+  el.querySelector('#pp-bed-preset').addEventListener('change', (e) => {
+    const b = BED_PRESETS.find(p => p.label === e.target.value);
+    if (!b) return;
+    if (b.x === null) {
+      // Custom: keep current dims, just relabel.
+      commit({ preset: 'Custom', dims: getState().print.bedDimensions });
+    } else {
+      commit({ preset: b.label, dims: { x: b.x, y: b.y, z: b.z } });
+    }
+    _render();
+  });
+
+  el.querySelectorAll('[data-bed-axis]').forEach(inp => {
+    inp.addEventListener('change', (e) => {
+      const axis = e.target.dataset.bedAxis;
+      const v = parseFloat(e.target.value);
+      if (!(v > 0)) { e.target.value = getState().print.bedDimensions[axis]; return; }
+      const dims = { ...getState().print.bedDimensions, [axis]: v };
+      commit({ preset: _matchBedPreset(dims), dims });
+      _render();
+    });
+  });
+
+  el.querySelector('#pp-bed-show').addEventListener('change', (e) => {
+    const on = e.target.checked;
+    setState(s => ({
+      ...s,
+      scene: { ...s.scene, overlays: { ...s.scene.overlays, bedPreview: on } },
+    }), { silent: true });
+    SceneManager.setOverlay('bedPreview', on);
+  });
+
+  return el;
+}
+
 // ── Preview Tab ──────────────────────────────────────────
 
 function _renderPreviewTab() {
@@ -476,6 +588,8 @@ async function _render() {
   } else if (_activeTab === 'validation') {
     const el = await _renderValidationTab();
     _bodyEl.appendChild(el);
+  } else if (_activeTab === 'bed') {
+    _bodyEl.appendChild(_renderBedTab());
   } else if (_activeTab === 'preview') {
     _bodyEl.appendChild(_renderPreviewTab());
   } else if (_activeTab === 'export') {
