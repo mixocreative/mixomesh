@@ -17,6 +17,7 @@
   <script defer src="https://cdn.babylonjs.com/babylon.js"></script>
   <script defer src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.js"></script>
   <script defer src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+  <script defer src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.js"></script>
 </head>
 <body>
   <div id="app">
@@ -30,9 +31,34 @@
     <div id="viewport">
       <canvas id="renderCanvas" tabindex="0"></canvas>
       <div id="viewport-drop-overlay"></div>
+      <div id="nav-cube" class="nav-cube"></div>
+      <div id="viewport-toolbar" class="viewport-toolbar"></div>
     </div>
 
-    <aside id="right-panel"></aside>
+    <aside id="right-panel">
+      <section class="rp-section" id="rp-properties">
+        <header class="rp-section-header" data-toggle="rp-properties">
+          <span class="rp-chev"></span>
+          <span class="rp-title">Properties</span>
+        </header>
+        <div class="rp-body" id="rp-properties-body"></div>
+      </section>
+      <div class="rp-splitter" data-rp-splitter aria-hidden="true"></div>
+      <section class="rp-section" id="rp-shaders">
+        <header class="rp-section-header" data-toggle="rp-shaders">
+          <span class="rp-chev"></span>
+          <span class="rp-title">Shader Library</span>
+        </header>
+        <div class="rp-body" id="rp-shaders-body"></div>
+      </section>
+      <section class="rp-section" id="rp-print">
+        <header class="rp-section-header" data-toggle="rp-print">
+          <span class="rp-chev"></span>
+          <span class="rp-title">Print</span>
+        </header>
+        <div class="rp-body" id="rp-print-body"></div>
+      </section>
+    </aside>
 
     <div id="asset-panel"></div>
 

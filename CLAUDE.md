@@ -41,7 +41,7 @@ writing or modifying any module. Do not deviate from the contracts there.
 - [x] Phase 1: Foundation (events, State, History, Input, Scene, Icons, Toast, StatusBar, layout)
 - [x] Phase 2: Asset Pipeline (AssetLoader, ShaderLibrary stub, MeshValidator, AssetPanel)
 - [x] Phase 3: Selection & Interaction (gizmos, Outliner, ContextMenu, Properties transform)
-- [ ] Phase 4: Shader System (full ShaderLibrary, ShaderPanel, UV overrides, swatches)
+- [x] Phase 4: Shader System (full ShaderLibrary, ShaderPanel, UV overrides, swatches)
 - [ ] Phase 5: Print Pipeline (PrintManager, PrintPanel, OBJ+MTL export, bed preview)
 - [ ] Phase 6: Persistence & Polish (full save/load, autosave, ghost/relink, smart replace)
 
@@ -77,7 +77,7 @@ When the user has confirmed a phase milestone works, before you stop:
    - Design decisions locked in this phase (link to memory notes).
    - Which phase is next, its BLUEPRINT §15 deliverables + milestone verbatim.
    - A STEP 0 / STEP 1 instruction block in the same style the user gave
-     when starting Phase 3 (verify previous phase first, then build).
+     when starting Phase 3 (verify previous phase firstgi, then build).
 3. Update / add memory notes for anything durable that doesn't already have
    one (design decisions, deferred features).
 4. Commit only when the user asks you to.

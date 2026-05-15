@@ -119,6 +119,14 @@
 .sb-label { color: var(--text-2); }
 .sb-label span { color: var(--text-1); }
 
+/* ── Panel collapse states ────────────────────────────── */
+
+#outliner.ol-outer-collapsed .ol-header,
+#outliner.ol-outer-collapsed .ol-list { display: none; }
+
+#right-panel.rp-outer-collapsed .rp-section,
+#right-panel.rp-outer-collapsed .rp-splitter { display: none; }
+
 /* ── Toast container ──────────────────────────────────── */
 #toast-container {
   position: fixed;

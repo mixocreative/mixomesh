@@ -1,13 +1,15 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState } from '../core/StateManager.js';
-import { AssetLoader } from '../core/AssetLoader.js';
+import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 
 const BABYLON = window.BABYLON;
 
-const SUPPORTED = new Set(['.glb', '.gltf', '.obj', '.stl']);
-const DRAG_MIME = 'application/x-mixomesh-asset';
+const MESH_EXT    = new Set(['.glb', '.gltf', '.obj', '.stl']);
+const TEXTURE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const SUPPORTED   = new Set([...MESH_EXT, ...TEXTURE_EXT]);
+const DRAG_MIME   = 'application/x-mixomesh-asset';
 
 const SESSION_KEY = '__session__';
 
@@ -77,7 +79,8 @@ async function _scanDirectory(dirHandle, prefix) {
       const dot = name.lastIndexOf('.');
       const ext = dot === -1 ? '' : name.slice(dot).toLowerCase();
       if (SUPPORTED.has(ext)) {
-        node.files.push({ name, path: relPath, ext, handle: entry });
+        const kind = TEXTURE_EXT.has(ext) ? 'texture' : 'mesh';
+        node.files.push({ name, path: relPath, ext, kind, handle: entry });
       }
     }
   }
@@ -218,13 +221,21 @@ function _renderGrid() {
   const cards = files.map(f => _renderCard(f)).join('');
   _gridEl.innerHTML = `<div class="ap-cards">${cards}</div>`;
 
+  _gridEl.querySelectorAll('.ac-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeAsset(btn.dataset.assetId);
+    });
+  });
+
   _gridEl.querySelectorAll('.asset-card').forEach(card => {
     const mountKey = card.dataset.mountKey;
     const path     = card.dataset.path;
     const filename = card.dataset.filename;
+    const kind     = card.dataset.kind ?? 'mesh';
 
     card.addEventListener('dragstart', e => {
-      const payload = JSON.stringify({ mountKey, path, filename });
+      const payload = JSON.stringify({ mountKey, path, filename, kind });
       e.dataTransfer.setData(DRAG_MIME, payload);
       e.dataTransfer.effectAllowed = 'copy';
     });
@@ -234,11 +245,19 @@ function _renderGrid() {
         if (mountKey === SESSION_KEY) return;
         const handle = getFileHandle(mountKey, path);
         if (!handle) throw new Error('File handle not available');
-        await AssetLoader.loadFromHandle(
-          handle,
-          new BABYLON.Vector3(0, 0, 0),
-          { directoryHandleKey: mountKey, originalPath: path },
-        );
+        if (kind === 'texture') {
+          // Double-clicking a texture loads it into the asset library so it
+          // can be assigned to a shader from the ShaderPanel. No scene drop.
+          await AssetLoader.loadTextureFromHandle(handle, {
+            directoryHandleKey: mountKey, originalPath: path,
+          });
+        } else {
+          await AssetLoader.loadFromHandle(
+            handle,
+            new BABYLON.Vector3(0, 0, 0),
+            { directoryHandleKey: mountKey, originalPath: path },
+          );
+        }
       });
     });
   });
@@ -259,12 +278,16 @@ function _sessionFiles() {
 
 function _renderCard(file) {
   const asset = file._asset ?? _findAssetForFile(file);
+  const kind  = file.kind ?? asset?.kind ?? 'mesh';
+  const isSession = file.mountKey === SESSION_KEY;
+
+  const placeholderIcon = kind === 'texture' ? 'Image' : 'Box';
   const thumbHtml = asset?.thumbnailDataUrl
     ? `<img class="ac-thumb" src="${asset.thumbnailDataUrl}" alt="" draggable="false">`
-    : `<div class="ac-thumb ac-thumb-empty">${icon('Box', { width: 32, height: 32 })}</div>`;
+    : `<div class="ac-thumb ac-thumb-empty">${icon(placeholderIcon, { width: 32, height: 32 })}</div>`;
 
   let badges = `<span class="ac-ext">${file.ext.slice(1).toUpperCase()}</span>`;
-  if (asset) {
+  if (kind === 'mesh' && asset) {
     const ratio = asset.modelRatio ?? 1;
     badges += `<span class="ac-ratio">1:${ratio}</span>`;
     if (asset.unitConfirmed === false) {
@@ -272,13 +295,19 @@ function _renderCard(file) {
     }
   }
 
+  const deleteBtn = isSession && asset
+    ? `<button class="ac-delete" data-asset-id="${asset.id}" title="Remove asset">×</button>`
+    : '';
+
   return `
     <div class="asset-card"
          draggable="true"
          data-mount-key="${file.mountKey}"
          data-path="${_escape(file.path)}"
          data-filename="${_escape(file.name)}"
+         data-kind="${kind}"
          title="${_escape(file.path)}">
+      ${deleteBtn}
       ${thumbHtml}
       <div class="ac-meta">
         <span class="ac-name">${_escape(file.name)}</span>

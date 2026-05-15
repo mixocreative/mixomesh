@@ -1,11 +1,13 @@
 import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
-import { getState } from '../core/StateManager.js';
+import { getState, setState, dispatch } from '../core/StateManager.js';
+import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
 
 let _root = null;
 let _isOpen = false;
+let _ignoreNextClose = false;
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -15,13 +17,22 @@ export function init() {
   _root.className = 'context-menu hidden';
   document.body.appendChild(_root);
 
-  document.addEventListener('mousedown', (e) => {
-    if (_isOpen && !_root.contains(e.target)) close();
-  });
+  // Capture-phase pointerdown so we close before any downstream canvas
+  // selection / drag handler runs. The _ignoreNextClose flag swallows the very
+  // pointerdown that opens the menu so it doesn't immediately self-close.
+  document.addEventListener('pointerdown', (e) => {
+    if (!_isOpen) return;
+    if (_root.contains(e.target)) return;
+    if (_ignoreNextClose) return;
+    close();
+  }, true);
   document.addEventListener('keydown', (e) => {
     if (_isOpen && e.key === 'Escape') { e.preventDefault(); close(); }
   });
   window.addEventListener('blur', close);
+  // Scroll / resize should dismiss the menu so it doesn't float orphaned.
+  window.addEventListener('wheel',  () => { if (_isOpen) close(); }, { passive: true });
+  window.addEventListener('resize', () => { if (_isOpen) close(); });
 }
 
 /**
@@ -38,10 +49,15 @@ export function open(info) {
   _root.style.left = `${info.x}px`;
   _root.style.top  = `${info.y}px`;
   _root.classList.remove('hidden');
-  // Defer the "open" flag to the next frame so the same mousedown that opened
-  // the menu doesn't trigger the outside-click close handler.
+  // Mark open synchronously so subsequent pointerdown closes deterministically.
+  // The pointerdown that opened us is suppressed via _ignoreNextClose, which
+  // unlatches on the next macrotask — covers RMB's pointerdown + contextmenu
+  // sequence without blocking the next user click.
+  _isOpen = true;
+  _ignoreNextClose = true;
+  setTimeout(() => { _ignoreNextClose = false; }, 0);
+  // Edge clamp after the browser lays it out.
   requestAnimationFrame(() => {
-    _isOpen = true;
     const r = _root.getBoundingClientRect();
     const vpW = window.innerWidth, vpH = window.innerHeight;
     if (r.right > vpW)  _root.style.left = `${Math.max(0, vpW - r.width - 4)}px`;
@@ -67,12 +83,21 @@ export function close() {
 // ── Item rendering ───────────────────────────────────────
 
 function _buildItems(info) {
+  if (info.targetKind === 'collection' && info.targetId) {
+    return [
+      { label: 'Select Members',     shortcut: '',  action: 'col-select', iconName: 'Box',      cls: '' },
+      { label: 'Rename Collection…', shortcut: '',  action: 'col-rename', iconName: 'Edit3',    cls: '' },
+      'sep',
+      { label: 'Delete Collection',  shortcut: '',  action: 'col-delete', iconName: 'Trash2',   cls: 'cm-danger' },
+    ];
+  }
+
   const hasSelection = Selection.getSelectedIds().length > 0;
   const someGrouped = Selection.getSelectedIds().some(id => !!getState().scene.objects[id]?.parentId);
   const enabled = (cond) => cond ? '' : 'cm-disabled';
 
   return [
-    { label: 'Frame Selection', shortcut: 'F',           action: 'frame',   iconName: 'Maximize',   cls: enabled(hasSelection) },
+    { label: 'Focus',           shortcut: 'F',           action: 'frame',   iconName: 'Maximize',   cls: enabled(hasSelection) },
     'sep',
     { label: 'Toggle Hidden',   shortcut: 'H',           action: 'hide',    iconName: 'EyeOff',     cls: enabled(hasSelection) },
     { label: 'Toggle Lock',     shortcut: '',            action: 'lock',    iconName: 'Lock',       cls: enabled(hasSelection) },
@@ -99,14 +124,17 @@ function _renderItem(item) {
 // ── Actions ──────────────────────────────────────────────
 
 function _runAction(action, info) {
-  if (action === 'frame')     _frame();
-  if (action === 'hide')      _toggleHide();
-  if (action === 'lock')      _toggleLock();
-  if (action === 'rename')    _renameActive();
-  if (action === 'duplicate') _duplicate();
-  if (action === 'group')     _group();
-  if (action === 'ungroup')   _ungroup();
-  if (action === 'delete')    _delete();
+  if (action === 'frame')      _frame();
+  if (action === 'hide')       _toggleHide();
+  if (action === 'lock')       _toggleLock();
+  if (action === 'rename')     _renameActive();
+  if (action === 'duplicate')  _duplicate();
+  if (action === 'group')      _group();
+  if (action === 'ungroup')    _ungroup();
+  if (action === 'delete')     _delete();
+  if (action === 'col-select') _selectCollectionMembers(info.targetId);
+  if (action === 'col-rename') _renameCollection(info.targetId);
+  if (action === 'col-delete') _deleteCollection(info.targetId);
 }
 
 function _frame() {
@@ -174,6 +202,48 @@ function _delete() {
   const ids = Selection.getSelectedIds();
   if (!ids.length) return;
   push(new DeleteCommand(ids));
+}
+
+function _selectCollectionMembers(collectionId) {
+  const ids = Object.values(getState().scene.objects)
+    .filter(o => o.collectionId === collectionId)
+    .map(o => o.id);
+  if (ids.length) Selection.set(ids, ids[ids.length - 1]);
+}
+
+function _renameCollection(collectionId) {
+  const col = getState().scene.collections?.[collectionId];
+  if (!col) return;
+  const next = window.prompt('Rename collection to:', col.name);
+  if (next == null) return;
+  const trimmed = next.trim();
+  if (!trimmed || trimmed === col.name) return;
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      collections: { ...s.scene.collections, [collectionId]: { ...col, name: trimmed } },
+    },
+  }));
+  dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name: trimmed });
+}
+
+function _deleteCollection(collectionId) {
+  const col = getState().scene.collections?.[collectionId];
+  if (!col) return;
+  const memberCount = Object.values(getState().scene.objects).filter(o => o.collectionId === collectionId).length;
+  if (memberCount > 0 && !window.confirm(`Delete collection "${col.name}"? Its ${memberCount} member${memberCount === 1 ? '' : 's'} will become uncollected.`)) return;
+
+  setState(s => {
+    const nextObjects = { ...s.scene.objects };
+    for (const [id, obj] of Object.entries(nextObjects)) {
+      if (obj.collectionId === collectionId) nextObjects[id] = { ...obj, collectionId: null };
+    }
+    const nextCols = { ...s.scene.collections };
+    delete nextCols[collectionId];
+    return { ...s, scene: { ...s.scene, objects: nextObjects, collections: nextCols } };
+  });
+  dispatch(EVENTS.COLLECTION_REMOVED, { collectionId });
 }
 
 export const ContextMenu = { init, open, close };

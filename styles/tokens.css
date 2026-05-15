@@ -8,7 +8,7 @@
 
   --border:        #2a2a30;
   --border-strong: #3a3a44;
-  --border-focus:  #06b6d4;
+  --border-focus:  #f59e0b;
 
   /* Text */
   --text-0: #ededf0;
@@ -16,14 +16,15 @@
   --text-2: #6b6b75;
   --text-disabled: #4a4a52;
 
-  /* Accent */
-  --accent:    #06b6d4;
-  --accent-hi: #22d3ee;
-  --accent-fg: #ecfeff;
+  /* Accent — yellow-orange (amber) */
+  --accent:    #f59e0b;
+  --accent-hi: #fbbf24;
+  --accent-fg: #1a1108;
 
-  /* Status */
+  /* Status — warning shifted to a clean yellow so it stays visually
+     distinct from the amber accent. */
   --danger:  #ef4444;
-  --warning: #f59e0b;
+  --warning: #facc15;
   --success: #22c55e;
   --info:    #3b82f6;
 

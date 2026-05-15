@@ -20,7 +20,14 @@ let _scene  = null;
 let _canvas = null;
 
 let _modal = null;   // active modal G/R/S op (see _enterModal)
+let _bodyDrag = null; // pending / active LMB-on-mesh-body drag (see _onSelectionPointerDown)
 let _onContextMenu = null;
+let _rmbPending = null;   // pending context-menu request — committed on RMB-UP if not dragged
+const RMB_DRAG_THRESHOLD_PX = 4;
+
+// A press has to move farther than this before we promote it to a drag. Below
+// the threshold the LMB-down behaves as a plain click (selection only).
+const BODY_DRAG_THRESHOLD_PX = 4;
 
 // ── Key string builder ───────────────────────────────────
 
@@ -123,7 +130,15 @@ function _onPointer(info) {
   const ev = info.event;
 
   if (info.type === PointerEventTypes.POINTERMOVE) {
-    if (_modal) _onModalMouseMove(ev);
+    if (_rmbPending) {
+      const dx = ev.clientX - _rmbPending.x;
+      const dy = ev.clientY - _rmbPending.y;
+      if (Math.abs(dx) > RMB_DRAG_THRESHOLD_PX || Math.abs(dy) > RMB_DRAG_THRESHOLD_PX) {
+        _rmbPending = null;  // promoted to drag → Babylon pans, no menu
+      }
+    }
+    if (_modal)        _onModalMouseMove(ev);
+    else if (_bodyDrag) _onBodyDragMove();
     return;
   }
 
@@ -133,12 +148,27 @@ function _onPointer(info) {
       else if (ev.button === 2) _cancelModal();
       return;
     }
-    if (ev.button === 0) _onSelectionClick(info);
-    else if (ev.button === 2) _onContextMenuRMB(info);
+    if (ev.button === 0) _onSelectionPointerDown(info);
+    else if (ev.button === 2) {
+      if (_bodyDrag) { _onBodyDragCancel(); return; }
+      if (ev.shiftKey) { _placeCursorAtPick(); return; }
+      // Defer the context menu until RMB-UP so RMB-drag can pan the camera
+      // (Babylon ArcRotateCamera's panningMouseButton=2). If the pointer moved
+      // past RMB_DRAG_THRESHOLD_PX before release, the menu is suppressed.
+      _rmbPending = { x: ev.clientX, y: ev.clientY, info };
+    }
+  }
+
+  if (info.type === PointerEventTypes.POINTERUP) {
+    if (_bodyDrag && ev.button === 0) _onBodyDragUp();
+    if (ev.button === 2 && _rmbPending) {
+      _onContextMenuRMB(_rmbPending.info);
+      _rmbPending = null;
+    }
   }
 }
 
-function _onSelectionClick(info) {
+function _onSelectionPointerDown(info) {
   const ev = info.event;
 
   // Probe the raw pick first. If we hit a non-meshId pickable (a gizmo arrow,
@@ -149,14 +179,86 @@ function _onSelectionClick(info) {
   }
 
   const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
-  if (!id) {
-    if (!ev.shiftKey) Selection.clear();
+
+  // Shift-click is a multi-select gesture — toggle and skip drag.
+  if (ev.shiftKey) {
+    if (id) Selection.toggle(id);
+    else    /* clicking empty space with shift is a no-op */;
     return;
   }
-  if (ev.shiftKey) Selection.toggle(id);
-  else             Selection.set([id], id);
+
+  // Empty pick → clear selection. Nothing to drag.
+  if (!id) {
+    Selection.clear();
+    return;
+  }
+
+  // Promote the picked mesh to active without disturbing an existing multi-
+  // selection. If the click landed outside the current selection, single-select.
+  if (!Selection.getSelectedIds().includes(id)) {
+    Selection.set([id], id);
+  } else if (Selection.getActiveId() !== id) {
+    Selection.setActive(id);
+  }
+
+  // Stage a body drag. We don't engage the pivot until the pointer crosses
+  // BODY_DRAG_THRESHOLD_PX so a plain click still reads as just-a-click.
+  const planeY = SceneManager.getBodyDragPlaneY();
+  const startWorld = _pickHorizontalPlaneAtPointer(planeY);
+  if (startWorld) {
+    _bodyDrag = {
+      planeY,
+      startWorld,
+      startX: _scene.pointerX,
+      startY: _scene.pointerY,
+      engaged: false,
+    };
+  }
 
   _canvas?.focus();
+}
+
+function _onBodyDragMove() {
+  if (!_bodyDrag) return;
+  const dx = _scene.pointerX - _bodyDrag.startX;
+  const dy = _scene.pointerY - _bodyDrag.startY;
+
+  if (!_bodyDrag.engaged) {
+    if (Math.hypot(dx, dy) < BODY_DRAG_THRESHOLD_PX) return;
+    _bodyDrag.engaged = SceneManager.beginBodyDrag();
+    if (!_bodyDrag.engaged) { _bodyDrag = null; return; }
+  }
+
+  const now = _pickHorizontalPlaneAtPointer(_bodyDrag.planeY);
+  if (!now) return;
+  const delta = now.subtract(_bodyDrag.startWorld);
+  delta.y = 0;  // pin to the horizontal plane the drag started on
+  SceneManager.setBodyDragOffset(delta);
+}
+
+function _onBodyDragUp() {
+  const drag = _bodyDrag;
+  _bodyDrag = null;
+  if (drag?.engaged) SceneManager.endBodyDrag();
+}
+
+function _onBodyDragCancel() {
+  if (_bodyDrag?.engaged) SceneManager.cancelBodyDrag();
+  _bodyDrag = null;
+}
+
+/**
+ * Cast a ray from the pointer onto a horizontal plane at world Y = `y`.
+ * Returns `null` when the ray is parallel to the plane or points away from it.
+ */
+function _pickHorizontalPlaneAtPointer(y) {
+  const cam = _scene.activeCamera;
+  if (!cam) return null;
+  const ray = _scene.createPickingRay(_scene.pointerX, _scene.pointerY, BABYLON.Matrix.Identity(), cam);
+  if (Math.abs(ray.direction.y) < 1e-6) return null;
+  const t = (y - ray.origin.y) / ray.direction.y;
+  if (t < 0) return null;
+  return ray.origin.add(ray.direction.scale(t));
 }
 
 function _onContextMenuRMB(info) {
@@ -168,6 +270,24 @@ function _onContextMenuRMB(info) {
   if (_onContextMenu) {
     _onContextMenu({ x: ev.clientX, y: ev.clientY, source: 'viewport' });
   }
+}
+
+function _placeCursorAtPick() {
+  // Prefer a real surface pick (mesh or ground) so cursor lands on geometry.
+  // Falls back to the analytic ground-plane intersection so empty-space drops
+  // still place the cursor on Y=0 instead of failing silently.
+  const pick = _scene.pick(_scene.pointerX, _scene.pointerY, m => !!m && m.isPickable !== false);
+  let point = (pick?.hit && pick.pickedPoint) ? pick.pickedPoint : null;
+  if (!point) {
+    const ray = _scene.createPickingRay(_scene.pointerX, _scene.pointerY, BABYLON.Matrix.Identity(), _scene.activeCamera);
+    if (Math.abs(ray.direction.y) > 1e-6) {
+      const t = -ray.origin.y / ray.direction.y;
+      if (t >= 0) point = ray.origin.add(ray.direction.scale(t));
+    }
+  }
+  if (!point) return;
+  SceneManager.setCursor(point);
+  SceneManager.setCursorVisible(true);
 }
 
 // ── Modal G / R / S ──────────────────────────────────────

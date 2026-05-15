@@ -8,6 +8,7 @@ export const EVENTS = {
   // Scene object lifecycle (structural changes to state.scene.objects)
   OBJECT_REMOVED:          'object:removed',
   OBJECT_RESTORED:         'object:restored',
+  OBJECT_UPDATED:          'object:updated',
 
   // Validation
   VALIDATION_STARTED:      'validation:started',
@@ -35,6 +36,12 @@ export const EVENTS = {
   OBJECT_RENAMED:          'hierarchy:renamed',
   VISIBILITY_CHANGED:      'hierarchy:visibilityChanged',
   LOCK_CHANGED:            'hierarchy:lockChanged',
+
+  // Collections (file-import display buckets in the outliner)
+  COLLECTION_CREATED:      'collection:created',
+  COLLECTION_REMOVED:      'collection:removed',
+  COLLECTION_RENAMED:      'collection:renamed',
+  COLLECTION_MEMBERSHIP:   'collection:membership',
 
   // History
   HISTORY_PUSHED:          'history:pushed',

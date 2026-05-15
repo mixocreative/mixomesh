@@ -3,7 +3,13 @@ import { subscribe, setState, getState } from '../core/StateManager.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
-import { push, TransformCommand, VisibilityCommand, LockCommand, RenameCommand } from '../core/HistoryManager.js';
+import {
+  push, beginBatch, endBatch,
+  TransformCommand, VisibilityCommand, LockCommand, RenameCommand,
+  ShaderAssignCommand, ShaderDuplicateCommand, UVOverrideCommand,
+  PrintPartCommand, BakeTransformCommand,
+} from '../core/HistoryManager.js';
+import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { icon } from '../core/Icons.js';
 
 const BABYLON = window.BABYLON;
@@ -27,17 +33,20 @@ const SOURCE_UNIT_LABELS = {
 
 let _root = null;
 let _bodyEl = null;
+// Section keys that the user has collapsed. Preserved across re-renders, lost
+// on page reload (intentional for Phase 4 — persistence lands in Phase 6).
+const _collapsedSections = new Set();
 
 // ── Init ─────────────────────────────────────────────────
 
 /** Initialise the Properties panel. Must be called once after DOM is ready. */
 export function init() {
-  _root = document.getElementById('right-panel');
-  _root.innerHTML = `
-    <div class="pp-header"><span class="pp-title">Properties</span></div>
-    <div class="pp-body" id="pp-body"></div>
-  `;
-  _bodyEl = _root.querySelector('#pp-body');
+  // The right column is now a stack of collapsible sections; we render into
+  // our pre-mounted body container (see index.html). No private header — the
+  // section shell owns it.
+  _root = document.getElementById('rp-properties');
+  _bodyEl = document.getElementById('rp-properties-body');
+  _bodyEl.classList.add('pp-body');
 
   const events = [
     EVENTS.SELECTION_CHANGED,
@@ -48,6 +57,12 @@ export function init() {
     EVENTS.OBJECT_RENAMED,
     EVENTS.ASSET_REGISTERED,
     EVENTS.ASSET_INSTANTIATED,
+    EVENTS.SHADER_CREATED,
+    EVENTS.SHADER_UPDATED,
+    EVENTS.SHADER_ASSIGNED,
+    EVENTS.SHADER_DUPLICATED,
+    EVENTS.COLOR_APPLIED,
+    EVENTS.UV_OVERRIDE_CHANGED,
   ];
   for (const ev of events) subscribe(ev, _render);
   _render();
@@ -76,11 +91,32 @@ function _render() {
     ${_renderObjectSection(obj, multi, sel.length)}
     ${_renderTransformSection(mesh, multi)}
     ${asset ? _renderSourceUnitSection(asset) : ''}
+    ${_renderShaderSection(obj)}
+    ${_renderUVOverrideSection(obj)}
+    ${_renderPrintPartSection(obj)}
   `;
 
   _wireObjectSection(obj);
   _wireTransformSection(activeId);
   if (asset) _wireSourceUnitSection(asset);
+  _wireShaderSection();
+  _wireUVOverrideSection(obj);
+  _wirePrintPartSection(obj);
+  _applyAndWireSectionCollapse();
+}
+
+function _applyAndWireSectionCollapse() {
+  _bodyEl.querySelectorAll('.pp-section[data-section]').forEach(sec => {
+    const key = sec.dataset.section;
+    if (_collapsedSections.has(key)) sec.classList.add('pp-collapsed');
+    const header = sec.querySelector(':scope > .pp-section-header');
+    if (!header) return;
+    header.addEventListener('click', () => {
+      sec.classList.toggle('pp-collapsed');
+      if (sec.classList.contains('pp-collapsed')) _collapsedSections.add(key);
+      else _collapsedSections.delete(key);
+    });
+  });
 }
 
 // ── Scene section (shown when no object is active) ───────
@@ -89,10 +125,10 @@ function _renderSceneSection() {
   const gridBU = getState().scene.gridSize ?? 0.3;
   const gridMM = gridBU * 1000;
   return `
-    <section class="pp-section">
+    <section class="pp-section" data-section="scene">
       <header class="pp-section-header">Scene</header>
       <div class="pp-row">
-        <label>Grid size (mm)</label>
+        <label>Bed size (mm)</label>
         <input type="number" step="10" min="10" id="pp-grid-size" value="${_fmt(gridMM, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
@@ -125,7 +161,7 @@ function _renderObjectSection(obj, multi, total) {
   const nameVal = multi ? '—' : obj.name;
   const nameDisabled = multi ? 'disabled' : '';
   return `
-    <section class="pp-section">
+    <section class="pp-section" data-section="object">
       <header class="pp-section-header">Object${multi ? ` <span class="pp-multi">(${total} selected)</span>` : ''}</header>
       <div class="pp-row">
         <label>Name</label>
@@ -181,8 +217,13 @@ function _renderTransformSection(mesh, multi) {
                        : _hierarchyWorldSize(mesh);
   const sizeMM = sizeBU ? { x: sizeBU.x * 1000, y: sizeBU.y * 1000, z: sizeBU.z * 1000 } : null;
 
+  const scaleLocked = getState().ui?.scaleLocked !== false;
+  const lockedCls = scaleLocked ? 'pp-locked' : '';
+  const lockIcon = scaleLocked ? 'Lock' : 'Unlock';
+  const applyDis = multi ? 'disabled' : '';
+
   return `
-    <section class="pp-section">
+    <section class="pp-section" data-section="transform">
       <header class="pp-section-header">Transform</header>
       <div class="pp-grid3 pp-readonly">
         <label>Size (mm)</label>
@@ -197,16 +238,26 @@ function _renderTransformSection(mesh, multi) {
         <input type="number" step="0.1" data-xform="position" data-axis="z" value="${_fmt(posMM.z)}" ${dis}>
       </div>
       <div class="pp-grid3">
-        <label>Rot (°)</label>
+        <label>
+          Rot (°)
+          <button class="pp-apply-btn" data-apply="rotation" ${applyDis} title="Bake current rotation into vertices; reset to 0,0,0">Apply</button>
+        </label>
         <input type="number" step="0.1" data-xform="rotation" data-axis="x" value="${_fmt(rotDeg.x)}" ${dis}>
         <input type="number" step="0.1" data-xform="rotation" data-axis="y" value="${_fmt(rotDeg.y)}" ${dis}>
         <input type="number" step="0.1" data-xform="rotation" data-axis="z" value="${_fmt(rotDeg.z)}" ${dis}>
       </div>
-      <div class="pp-grid3">
-        <label>Scale</label>
+      <div class="pp-grid3 pp-scale-row ${lockedCls}">
+        <label>
+          Scale
+          <button class="pp-apply-btn" data-apply="scale" ${applyDis} title="Bake current scale into vertices; reset to 1,1,1">Apply</button>
+        </label>
         <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <button class="pp-icon-btn pp-scale-lock" data-action="scaleLock" title="${scaleLocked ? 'Unlock per-axis scale' : 'Lock proportional scale'}">${icon(lockIcon, { width: 13, height: 13 })}</button>
+        <span class="pp-hint">${scaleLocked ? 'Scale locked — edits mirror across XYZ' : 'Scale unlocked — per-axis edits'}</span>
       </div>
     </section>
   `;
@@ -258,6 +309,23 @@ function _wireTransformSection(meshId) {
       if (e.key === 'Escape') { _render(); }
     });
   });
+
+  _bodyEl.querySelectorAll('[data-apply]').forEach(btn => {
+    if (btn.disabled) return;
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.apply;            // 'rotation' | 'scale'
+      push(new BakeTransformCommand(meshId, kind));
+      _render();
+    });
+  });
+
+  const lockBtn = _bodyEl.querySelector('[data-action="scaleLock"]');
+  lockBtn?.addEventListener('click', () => {
+    const cur = getState().ui?.scaleLocked !== false;
+    setState(s => ({ ...s, ui: { ...s.ui, scaleLocked: !cur } }), { silent: true });
+    SceneManager.setScaleLock(!cur);
+    _render();
+  });
 }
 
 function _commitTransformInput(meshId, input) {
@@ -282,7 +350,20 @@ function _commitTransformInput(meshId, input) {
     );
     next.rotation = { x: q.x, y: q.y, z: q.z, w: q.w };
   } else if (which === 'scaling') {
-    next.scaling[axis] = value;
+    // Scale lock: edits on any axis mirror proportionally to the other two.
+    // The mirror is RATIO-based (newAxis / oldAxis), so the part keeps its
+    // current aspect ratio if the user has already biased it.
+    const locked = getState().ui?.scaleLocked !== false;
+    if (locked) {
+      const prevVal = prev.scaling[axis];
+      const ratio = (Number.isFinite(prevVal) && Math.abs(prevVal) > 1e-9) ? (value / prevVal) : 1;
+      next.scaling.x = prev.scaling.x * ratio;
+      next.scaling.y = prev.scaling.y * ratio;
+      next.scaling.z = prev.scaling.z * ratio;
+      next.scaling[axis] = value;             // exact match on edited axis
+    } else {
+      next.scaling[axis] = value;
+    }
   }
   if (_eq(prev, next)) return;
 
@@ -299,7 +380,7 @@ function _renderSourceUnitSection(asset) {
     ? `<span class="pp-warn" title="Source unit unconfirmed — review the imported size">${icon('AlertTriangle', { width: 12, height: 12 })}</span>`
     : '';
   return `
-    <section class="pp-section">
+    <section class="pp-section" data-section="source-unit">
       <header class="pp-section-header">Source Unit ${warn}</header>
       <div class="pp-row">
         <label>Unit</label>
@@ -371,6 +452,320 @@ function _changeSourceUnit(asset, newUnit) {
   });
   Selection.refresh();
   _render();
+}
+
+// ── Shader section (binding-only slot list) ──────────────
+
+/**
+ * Slot list. Each slot represents one distinct shader currently bound to the
+ * selected meshes (active mesh's bucket first). The slot exposes:
+ *   • a click target that focuses the shader in the Shader Library
+ *   • a combined dropdown to either replace the binding with another shader
+ *     or duplicate it in place (clone + reassign in one undo entry)
+ *
+ * Shader *appearance* (color / texture / sliders / UV base) is edited only in
+ * the Library — auto-focus brings the active mesh's shader into the editor
+ * when the active object changes.
+ */
+function _renderShaderSection(obj) {
+  const libShaders = Object.values(getState().scene.shaders);
+  if (!libShaders.length) {
+    return `
+      <section class="pp-section" data-section="shader">
+        <header class="pp-section-header">Shader</header>
+        <div class="pp-row pp-row-inline">
+          <span class="pp-hint">No shaders in scene yet. Drop an asset, or create one in the Shader Library.</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const activeId = Selection.getActiveId();
+  const selIds   = Selection.getSelectedIds();
+  const meshIds  = selIds.length ? selIds : [obj.id];
+
+  // Buckets by shader, then re-ordered so the active mesh's bucket is first.
+  const buckets = _collectShaderBuckets(meshIds);
+  const activeBucketIdx = buckets.findIndex(b => b.meshIds.includes(activeId));
+  if (activeBucketIdx > 0) {
+    const [active] = buckets.splice(activeBucketIdx, 1);
+    buckets.unshift(active);
+  }
+
+  const slotsHtml = buckets.map(b => _renderShaderSlot(b, libShaders)).join('');
+
+  return `
+    <section class="pp-section">
+      <header class="pp-section-header">
+        Shader
+        <span class="pp-multi">${meshIds.length === 1 ? '' : `(${meshIds.length} meshes)`}</span>
+      </header>
+      <div class="pp-shader-list">${slotsHtml}</div>
+    </section>
+  `;
+}
+
+function _collectShaderBuckets(meshIds) {
+  const objects = getState().scene.objects;
+  const byShader = new Map();   // shaderId (or '' for none) → meshIds[]
+  for (const id of meshIds) {
+    const o = objects[id];
+    if (!o) continue;
+    const key = o.shaderId ?? '';
+    if (!byShader.has(key)) byShader.set(key, []);
+    byShader.get(key).push(id);
+  }
+  return Array.from(byShader.entries()).map(([shaderId, ids]) => ({
+    shaderId: shaderId || null,
+    meshIds:  ids,
+  }));
+}
+
+function _renderShaderSlot(bucket, libShaders) {
+  // Empty bucket — meshes with no shader bound. Compact assign-only dropdown,
+  // no duplicate option (nothing to clone from).
+  if (!bucket.shaderId) {
+    const opts = libShaders.map(s => `<option value="shader:${s.id}">${_escape(s.name)}</option>`).join('');
+    return `
+      <div class="pp-shader-slot pp-shader-slot-empty"
+           data-bucket-shader=""
+           data-bucket-meshes="${bucket.meshIds.join(',')}">
+        <span class="pp-shader-chip pp-shader-chip-empty">${icon('AlertTriangle', { width: 12, height: 12 })}</span>
+        <span class="pp-shader-name">No shader</span>
+        <span class="pp-shader-meshcount">${bucket.meshIds.length}</span>
+        <select class="pp-slot-dropdown" aria-label="Assign shader">
+          <option value="" selected hidden>Assign…</option>
+          <optgroup label="Assign with">${opts}</optgroup>
+        </select>
+      </div>
+    `;
+  }
+
+  const sh = getState().scene.shaders[bucket.shaderId];
+  if (!sh) return '';
+
+  const replaceOpts = libShaders
+    .filter(s => s.id !== sh.id)
+    .map(s => `<option value="shader:${s.id}">${_escape(s.name)}</option>`)
+    .join('');
+
+  return `
+    <div class="pp-shader-slot"
+         data-bucket-shader="${sh.id}"
+         data-bucket-meshes="${bucket.meshIds.join(',')}">
+      <button class="pp-slot-info" type="button" data-slot-focus="${sh.id}"
+              title="Open ${_escape(sh.name)} in the Shader Library">
+        ${renderShaderPreview(sh, 18)}
+        <span class="pp-shader-name">${_escape(sh.name)}</span>
+        <span class="pp-shader-meshcount" title="${bucket.meshIds.length} mesh${bucket.meshIds.length === 1 ? '' : 'es'} in selection">${bucket.meshIds.length}</span>
+      </button>
+      <select class="pp-slot-dropdown" aria-label="Change shader on this slot">
+        <option value="" selected hidden>${_escape(sh.name)}</option>
+        ${replaceOpts ? `<optgroup label="Replace with">${replaceOpts}</optgroup>` : ''}
+        <optgroup label="Actions">
+          <option value="duplicate">Duplicate in place</option>
+        </optgroup>
+      </select>
+    </div>
+  `;
+}
+
+function _wireShaderSection() {
+  // Slot click → focus the shader in the Library (replaces the old Edit button).
+  _bodyEl.querySelectorAll('[data-slot-focus]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.slotFocus;
+      if (id) ShaderPanel.focus(id);
+    });
+  });
+
+  // Combined dropdown: shader id → replace; "duplicate" → duplicate in place.
+  _bodyEl.querySelectorAll('.pp-slot-dropdown').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const v = sel.value;
+      // Always reset back to the placeholder so the dropdown reads as "current
+      // shader" between actions, regardless of which option was just chosen.
+      sel.value = '';
+
+      const slot = sel.closest('.pp-shader-slot');
+      const sourceId = slot?.dataset.bucketShader || null;
+      const targets = (slot?.dataset.bucketMeshes ?? '').split(',').filter(Boolean);
+      if (!targets.length) return;
+
+      if (v.startsWith('shader:')) {
+        const nextId = v.slice('shader:'.length);
+        if (!nextId || nextId === sourceId) return;
+        push(new ShaderAssignCommand(targets, nextId));
+        return;
+      }
+
+      if (v === 'duplicate' && sourceId) {
+        beginBatch('Duplicate Shader in Place');
+        const dup = new ShaderDuplicateCommand(sourceId);
+        push(dup);
+        const newId = dup.getNewId();
+        if (newId) push(new ShaderAssignCommand(targets, newId));
+        endBatch();
+        if (newId) ShaderPanel.focus(newId);
+      }
+    });
+  });
+}
+
+// ── UV Override section ──────────────────────────────────
+
+function _renderUVOverrideSection(obj) {
+  if (!obj.shaderId) return '';
+  const override = getState().scene.uvOverrides[obj.id] ?? null;
+  const active = !!override;
+  const uv = override ?? { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+  return `
+    <section class="pp-section" data-section="uv-override">
+      <header class="pp-section-header">
+        UV Override
+        ${active ? '<span class="pp-multi">(active)</span>' : ''}
+      </header>
+      <div class="pp-grid3">
+        <label>Offset</label>
+        <input type="number" step="0.01" id="pp-uv-ox" value="${_fmt(uv.offsetX, 3)}">
+        <input type="number" step="0.01" id="pp-uv-oy" value="${_fmt(uv.offsetY, 3)}">
+        <span class="pp-readout-thin">U / V</span>
+      </div>
+      <div class="pp-grid3">
+        <label>Scale</label>
+        <input type="number" step="0.05" id="pp-uv-sx" value="${_fmt(uv.scaleX, 3)}">
+        <input type="number" step="0.05" id="pp-uv-sy" value="${_fmt(uv.scaleY, 3)}">
+        <span class="pp-readout-thin">U / V</span>
+      </div>
+      <div class="pp-row">
+        <label>Rotation</label>
+        <input type="number" step="0.05" id="pp-uv-rot" value="${_fmt(uv.rotation, 3)}">
+      </div>
+      <div class="pp-row-inline">
+        <span class="pp-hint">${active ? 'Per-mesh override of the shader\'s UV base.' : 'No override — using shader UV base.'}</span>
+        <button class="pp-btn" id="pp-uv-reset" ${active ? '' : 'disabled'}>Reset to Default</button>
+      </div>
+    </section>
+  `;
+}
+
+function _wireUVOverrideSection(obj) {
+  if (!obj.shaderId) return;
+  const fields = [
+    ['pp-uv-ox',  'offsetX'],
+    ['pp-uv-oy',  'offsetY'],
+    ['pp-uv-sx',  'scaleX'],
+    ['pp-uv-sy',  'scaleY'],
+    ['pp-uv-rot', 'rotation'],
+  ];
+
+  for (const [elId, key] of fields) {
+    const el = _bodyEl.querySelector(`#${elId}`);
+    if (!el) continue;
+    el.addEventListener('change', () => {
+      const n = parseFloat(el.value);
+      if (!Number.isFinite(n)) { _render(); return; }
+      const prev = getState().scene.uvOverrides[obj.id] ?? null;
+      const base = prev ?? { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+      if (Math.abs(base[key] - n) < 1e-9) return;
+      const next = { ...base, [key]: n };
+      push(new UVOverrideCommand(obj.id, prev, next));
+    });
+  }
+
+  _bodyEl.querySelector('#pp-uv-reset')?.addEventListener('click', () => {
+    const prev = getState().scene.uvOverrides[obj.id] ?? null;
+    if (!prev) return;
+    push(new UVOverrideCommand(obj.id, prev, null));
+  });
+}
+
+// ── Print Part section ───────────────────────────────────
+
+function _renderPrintPartSection(obj) {
+  const isPrintPart = obj.isPrintPart ?? false;
+  const partLabel = obj.partLabel ?? '';
+  const partTolerance = obj.partTolerance ?? 0;
+
+  return `
+    <section class="pp-section" data-section="print-part">
+      <header class="pp-section-header">Print Part</header>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" id="pp-is-print-part" ${isPrintPart ? 'checked' : ''}> Export as print part</label>
+      </div>
+      ${isPrintPart ? `
+      <div class="pp-row">
+        <label>Part Label</label>
+        <input type="text" id="pp-part-label" value="${_escape(partLabel)}">
+      </div>
+      <div class="pp-row">
+        <label>Tolerance (mm)</label>
+        <input type="number" step="0.1" id="pp-part-tolerance" value="${_fmt(partTolerance, 1)}">
+      </div>
+      ` : '<div class="pp-row-inline"><span class="pp-hint">Not marked for export.</span></div>'}
+    </section>
+  `;
+}
+
+function _wirePrintPartSection(obj) {
+  const isPrintPartCb = _bodyEl.querySelector('#pp-is-print-part');
+  if (!isPrintPartCb) return;
+
+  isPrintPartCb.addEventListener('change', () => {
+    const prev = {
+      isPrintPart: !!obj.isPrintPart,
+      partLabel: obj.partLabel ?? '',
+      partTolerance: obj.partTolerance ?? 0,
+    };
+    const next = {
+      isPrintPart: isPrintPartCb.checked,
+      partLabel: isPrintPartCb.checked ? (obj.partLabel ?? '') : '',
+      partTolerance: isPrintPartCb.checked ? (obj.partTolerance ?? 0) : 0,
+    };
+    push(new PrintPartCommand(obj.id, prev, next));
+  });
+
+  // Wire label and tolerance inputs if print part is checked
+  const labelEl = _bodyEl.querySelector('#pp-part-label');
+  const toleranceEl = _bodyEl.querySelector('#pp-part-tolerance');
+
+  if (labelEl) {
+    labelEl.addEventListener('change', () => {
+      const prev = {
+        isPrintPart: true,
+        partLabel: obj.partLabel ?? '',
+        partTolerance: obj.partTolerance ?? 0,
+      };
+      const next = {
+        isPrintPart: true,
+        partLabel: labelEl.value.trim(),
+        partTolerance: obj.partTolerance ?? 0,
+      };
+      if (next.partLabel !== prev.partLabel) {
+        push(new PrintPartCommand(obj.id, prev, next));
+      }
+    });
+  }
+
+  if (toleranceEl) {
+    toleranceEl.addEventListener('change', () => {
+      const n = parseFloat(toleranceEl.value);
+      if (!Number.isFinite(n) || n < 0) { _render(); return; }
+      const prev = {
+        isPrintPart: true,
+        partLabel: obj.partLabel ?? '',
+        partTolerance: obj.partTolerance ?? 0,
+      };
+      const next = {
+        isPrintPart: true,
+        partLabel: obj.partLabel ?? '',
+        partTolerance: n,
+      };
+      if (Math.abs(next.partTolerance - prev.partTolerance) > 1e-9) {
+        push(new PrintPartCommand(obj.id, prev, next));
+      }
+    });
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { dispatch, setState, getState, withoutDirty, markDirty } from './StateMa
 import { SceneManager } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { AssetLoader } from './AssetLoader.js';
+import { ShaderLibrary } from './ShaderLibrary.js';
 
 const BABYLON = window.BABYLON;
 const STACK_LIMIT = 200;
@@ -525,13 +526,356 @@ export class DuplicateCommand {
   }
 }
 
-// ── Stubs for later phases (Phase 4 / Phase 6) ──────────
+// ── Shader / UV commands (Phase 4) ───────────────────────
 
-export class ShaderAssignCommand   { constructor(){ this.label='Assign Shader';   } execute(){} undo(){} }
-export class ShaderUpdateCommand   { constructor(){ this.label='Update Shader';   } execute(){} undo(){} }
-export class ShaderDuplicateCommand{ constructor(){ this.label='Duplicate Shader';} execute(){} undo(){} }
-export class ShaderDeleteCommand   { constructor(){ this.label='Delete Shader';   } execute(){} undo(){} }
-export class UVOverrideCommand     { constructor(){ this.label='UV Override';     } execute(){} undo(){} }
-export class ColorApplyCommand     { constructor(){ this.label='Apply Color';     } execute(){} undo(){} }
+/**
+ * Create a fresh shader. On undo the shader is deleted; on redo it is
+ * recreated from the captured entry (id may change but no outstanding
+ * reference should survive an undo).
+ */
+export class ShaderCreateCommand {
+  constructor(partial = {}) {
+    this._partial = partial;
+    this._newId   = null;
+    this._entry   = null;
+    this.label = 'New Shader';
+  }
+  execute() {
+    const seed = (this._newId && this._entry) ? this._entry : this._partial;
+    this._newId = ShaderLibrary.createShader(seed);
+    this._entry = this._newId ? { ...getState().scene.shaders[this._newId] } : null;
+    markDirty();
+  }
+  undo() {
+    if (this._newId) ShaderLibrary.deleteShader(this._newId);
+  }
+  /** Last-created shader id; useful for UI callers that want to focus it. */
+  getNewId() { return this._newId; }
+}
+
+/**
+ * Assign a shader to one or more meshes. `prev` is captured per-mesh so
+ * undo restores each mesh to whatever it had before — possibly null.
+ */
+export class ShaderAssignCommand {
+  constructor(meshIds, shaderId) {
+    this._meshIds  = meshIds.slice();
+    this._shaderId = shaderId;
+    const objects  = getState().scene.objects;
+    this._prev = {};
+    for (const id of this._meshIds) this._prev[id] = objects[id]?.shaderId ?? null;
+    this.label = this._meshIds.length === 1 ? 'Assign Shader' : `Assign Shader (${this._meshIds.length})`;
+  }
+  execute() {
+    for (const id of this._meshIds) ShaderLibrary.assignToMesh(this._shaderId, id);
+    markDirty();
+  }
+  undo() {
+    for (const id of this._meshIds) {
+      const prev = this._prev[id];
+      if (prev) ShaderLibrary.assignToMesh(prev, id);
+    }
+  }
+}
+
+/**
+ * Mutate one field of a shader (name / diffuseColor / opacity / etc.).
+ * The caller passes both prev and next values; we don't read prev from state
+ * inside execute() to keep the BLUEPRINT contract ("capture prev before execute").
+ */
+export class ShaderUpdateCommand {
+  constructor(shaderId, field, prevValue, nextValue) {
+    this._shaderId = shaderId;
+    this._field    = field;
+    this._prev     = prevValue;
+    this._next     = nextValue;
+    this.label = `Update Shader (${field})`;
+  }
+  execute() {
+    ShaderLibrary.updateShader(this._shaderId, this._field, this._next);
+    markDirty();
+  }
+  undo() {
+    ShaderLibrary.updateShader(this._shaderId, this._field, this._prev);
+  }
+}
+
+/**
+ * Duplicate an existing shader. The first execute() forwards to
+ * `ShaderLibrary.duplicateShader`; redo recreates from the captured entry —
+ * the redone shader is a fresh id, which is fine because nothing should
+ * reference the original-dup's id after undo.
+ */
+export class ShaderDuplicateCommand {
+  constructor(sourceId) {
+    this._sourceId = sourceId;
+    this._newId    = null;
+    this._entry    = null;
+    this.label = 'Duplicate Shader';
+  }
+  execute() {
+    if (this._newId && this._entry) {
+      // Redo path. Material was disposed on undo; rebuild from snapshot.
+      this._newId = ShaderLibrary.createShader(this._entry);
+    } else {
+      this._newId = ShaderLibrary.duplicateShader(this._sourceId);
+      if (this._newId) this._entry = { ...getState().scene.shaders[this._newId] };
+    }
+    markDirty();
+  }
+  undo() {
+    if (this._newId) ShaderLibrary.deleteShader(this._newId);
+  }
+  /** Last-created shader id; useful for UI callers that want to focus it. */
+  getNewId() { return this._newId; }
+}
+
+/**
+ * Delete a shader (only valid when no meshes are linked — the UI button must
+ * gate on that). Undo recreates the shader from its captured fields.
+ */
+export class ShaderDeleteCommand {
+  constructor(shaderId) {
+    this._shaderId = shaderId;
+    const sh = getState().scene.shaders[shaderId];
+    this._snapshot = sh ? { ...sh } : null;
+    this.label = 'Delete Shader';
+  }
+  execute() {
+    if (!this._snapshot) return;
+    if (ShaderLibrary.deleteShader(this._shaderId)) markDirty();
+  }
+  undo() {
+    if (!this._snapshot) return;
+    // Loses the original id (createShader mints a new one), but no
+    // outstanding references should survive a successful delete.
+    this._shaderId = ShaderLibrary.createShader(this._snapshot);
+  }
+}
+
+/**
+ * Set or clear a per-mesh UV override. Pass `nextUV = null` to clear.
+ * `prevUV` is whatever was in state.scene.uvOverrides at command-construction
+ * time, or null when the mesh had no prior override.
+ */
+export class UVOverrideCommand {
+  constructor(meshId, prevUV, nextUV) {
+    this._meshId = meshId;
+    this._prev = prevUV ? { ...prevUV } : null;
+    this._next = nextUV ? { ...nextUV } : null;
+    this.label = 'UV Override';
+  }
+  execute() {
+    if (this._next) ShaderLibrary.setUVOverride(this._meshId, this._next);
+    else            ShaderLibrary.clearUVOverride(this._meshId);
+    markDirty();
+  }
+  undo() {
+    if (this._prev) ShaderLibrary.setUVOverride(this._meshId, this._prev);
+    else            ShaderLibrary.clearUVOverride(this._meshId);
+  }
+}
+
+/**
+ * Apply a swatch's hex color to a shader's diffuse. Effectively a specialised
+ * ShaderUpdateCommand for 'diffuseColor', kept separate so the COLOR_APPLIED
+ * event fires for swatch-drag tracking.
+ */
+export class ColorApplyCommand {
+  constructor(shaderId, prevHex, nextHex) {
+    this._shaderId = shaderId;
+    this._prev = prevHex;
+    this._next = nextHex;
+    this.label = 'Apply Color';
+  }
+  execute() {
+    ShaderLibrary.applySwatchColor(this._shaderId, this._next);
+    markDirty();
+  }
+  undo() {
+    if (this._prev) ShaderLibrary.applySwatchColor(this._shaderId, this._prev);
+  }
+}
+
+/** Set isPrintPart, partLabel, partTolerance on a mesh for export. */
+export class PrintPartCommand {
+  constructor(meshId, prevPrintPart, nextPrintPart) {
+    this._meshId = meshId;
+    this._prev = prevPrintPart ? { ...prevPrintPart } : { isPrintPart: false, partLabel: '', partTolerance: 0 };
+    this._next = nextPrintPart ? { ...nextPrintPart } : { isPrintPart: false, partLabel: '', partTolerance: 0 };
+    this.label = this._next.isPrintPart ? 'Mark as Print Part' : 'Unmark as Print Part';
+  }
+  execute() {
+    _setPrintPart(this._meshId, this._next);
+    markDirty();
+  }
+  undo() {
+    _setPrintPart(this._meshId, this._prev);
+  }
+}
+
+function _setPrintPart(meshId, printPart) {
+  setState(state => {
+    const o = state.scene.objects[meshId];
+    if (!o) return state;
+    return {
+      ...state,
+      scene: {
+        ...state.scene,
+        objects: {
+          ...state.scene.objects,
+          [meshId]: { ...o, ...printPart },
+        },
+      },
+    };
+  }, SILENT);
+  dispatch(EVENTS.OBJECT_UPDATED, { meshId });
+}
+
+// ── Apply rotation / scale to vertices ─────────────────────
+
+/**
+ * Bake the current rotation or scaling of a mesh into its vertex data, then
+ * reset the corresponding transform component to identity. Position is left
+ * untouched. Mirrors Blender's "Apply Rotation / Apply Scale" command.
+ *
+ * Undo restores the pre-bake vertex positions and normals from a snapshot,
+ * so floating-point error doesn't accumulate over many cycles.
+ */
+export class BakeTransformCommand {
+  constructor(meshId, kind /* 'rotation' | 'scale' */) {
+    this._meshId = meshId;
+    this._kind = kind;
+    this._snapPositions = null;
+    this._snapNormals   = null;
+    this._snapRotation  = null;
+    this._snapQuaternion = null;
+    this._snapScaling   = null;
+    this.label = kind === 'rotation' ? 'Apply Rotation' : 'Apply Scale';
+  }
+  execute() {
+    const mesh = AssetLoader.getBabylonMesh(this._meshId);
+    if (!mesh || !mesh.geometry) return;
+    if (this._snapPositions === null) {
+      const pos = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+      this._snapPositions = pos ? new Float32Array(pos) : null;
+      const norm = mesh.getVerticesData(BABYLON.VertexBuffer.NormalKind);
+      this._snapNormals = norm ? new Float32Array(norm) : null;
+      this._snapRotation = mesh.rotation.clone();
+      this._snapQuaternion = mesh.rotationQuaternion ? mesh.rotationQuaternion.clone() : null;
+      this._snapScaling = mesh.scaling.clone();
+    }
+
+    let mat;
+    if (this._kind === 'rotation') {
+      if (mesh.rotationQuaternion) {
+        mat = new BABYLON.Matrix();
+        mesh.rotationQuaternion.toRotationMatrix(mat);
+      } else {
+        mat = BABYLON.Matrix.RotationYawPitchRoll(mesh.rotation.y, mesh.rotation.x, mesh.rotation.z);
+      }
+      mesh.bakeTransformIntoVertices(mat);
+      mesh.rotation.set(0, 0, 0);
+      if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+    } else {
+      mat = BABYLON.Matrix.Scaling(mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
+      mesh.bakeTransformIntoVertices(mat);
+      mesh.scaling.set(1, 1, 1);
+    }
+    mesh.refreshBoundingInfo?.();
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId: this._meshId });
+    markDirty();
+  }
+  undo() {
+    const mesh = AssetLoader.getBabylonMesh(this._meshId);
+    if (!mesh) return;
+    if (this._snapPositions) mesh.setVerticesData(BABYLON.VertexBuffer.PositionKind, this._snapPositions, /*updatable*/ false);
+    if (this._snapNormals)   mesh.setVerticesData(BABYLON.VertexBuffer.NormalKind,   this._snapNormals,   /*updatable*/ false);
+    if (this._snapRotation)  mesh.rotation.copyFrom(this._snapRotation);
+    if (this._snapQuaternion) mesh.rotationQuaternion = this._snapQuaternion.clone();
+    if (this._snapScaling)   mesh.scaling.copyFrom(this._snapScaling);
+    mesh.refreshBoundingInfo?.();
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId: this._meshId });
+  }
+}
+
+// ── Rescale world (working ratio change) ───────────────────
+
+/**
+ * Rebake the entire scene to a new working ratio.
+ *
+ * Every registered mesh's vertex data is scaled by `prev / next`; every
+ * Babylon node on the ancestor chain has its local position scaled by the
+ * same factor exactly once. Result: world transforms scale relative to the
+ * world origin, mesh.scaling stays (1,1,1), and a mesh's Properties scale
+ * still reads "1" after the change.
+ *
+ * Cursor3d position scales too. Overlays (grid, axes, gizmos, selection RTT)
+ * are unaffected — they aren't on any registered mesh's ancestor chain.
+ */
+export class RescaleWorldCommand {
+  constructor(prevRatio, nextRatio) {
+    this._prev = prevRatio;
+    this._next = nextRatio;
+    this.label = `Set working scale ${_fmtRatioLabel(nextRatio)}`;
+  }
+  execute() { _applyWorldRescale(this._prev, this._next); markDirty(); }
+  undo()    { _applyWorldRescale(this._next, this._prev); }
+}
+
+// Format a ratio number as a display string for command labels. Mirrors the
+// PrintPanel formatter so an undo-stack entry reads "Set working scale 2:1"
+// when the user typed "2:1", not "1:0.5".
+function _fmtRatioLabel(n) {
+  if (!Number.isFinite(n) || n <= 0) return '1:1';
+  if (Math.abs(n - 1) < 1e-9) return '1:1';
+  if (n > 1) {
+    const r = Math.round(n);
+    return Math.abs(n - r) < 1e-6 ? `1:${r}` : `1:${(+n.toFixed(3)).toString()}`;
+  }
+  const m = 1 / n;
+  const r = Math.round(m);
+  return Math.abs(m - r) < 1e-6 ? `${r}:1` : `${(+m.toFixed(3)).toString()}:1`;
+}
+
+function _applyWorldRescale(fromRatio, toRatio) {
+  if (!Number.isFinite(fromRatio) || !Number.isFinite(toRatio) || fromRatio <= 0 || toRatio <= 0) return;
+  if (fromRatio === toRatio) return;
+  const factor = fromRatio / toRatio;
+  const scaleMat = BABYLON.Matrix.Scaling(factor, factor, factor);
+  const visited = new WeakSet();
+  const objects = getState().scene.objects;
+
+  for (const meshId of Object.keys(objects)) {
+    const mesh = AssetLoader.getBabylonMesh(meshId);
+    if (!mesh) continue;
+    if (mesh.geometry && typeof mesh.bakeTransformIntoVertices === 'function') {
+      mesh.bakeTransformIntoVertices(scaleMat);
+    }
+    let n = mesh;
+    while (n) {
+      if (visited.has(n)) break;
+      visited.add(n);
+      if (n.position && typeof n.position.scaleInPlace === 'function') {
+        n.position.scaleInPlace(factor);
+      }
+      n = n.parent ?? null;
+    }
+    mesh.refreshBoundingInfo?.();
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId });
+  }
+
+  setState(s => {
+    const c = s.scene.cursor3d ?? { x: 0, y: 0, z: 0 };
+    return {
+      ...s,
+      print: { ...s.print, workingRatio: toRatio },
+      scene: { ...s.scene, cursor3d: { x: c.x * factor, y: c.y * factor, z: c.z * factor } },
+    };
+  }, SILENT);
+}
+
+// ── Stubs for later phases (Phase 6) ────────────────────
+
 export class SmartReplaceCommand   { constructor(){ this.label='Smart Replace';   } execute(){} undo(){} }
 export class TransformSwabCommand  { constructor(){ this.label='Transform Swab';  } execute(){} undo(){} }

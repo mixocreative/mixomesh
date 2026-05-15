@@ -57,7 +57,7 @@ No other CDN libs. Everything else is vanilla JS.
 ### 0.3 File Layout
 ```
 index.html
-main.js                    ← bootstrap, dependency wiring only
+main.js                    ← bootstrap, dependency wiring, panel collapse/resize
 styles/
   tokens.css               ← CSS variables (colors, spacing, type)
   layout.css               ← panel grid, splitters
@@ -84,6 +84,9 @@ ui/
   StatusBar.js
   Toast.js
   Modal.js                 ← generic modal helper
+  ViewportDrop.js          ← drag-and-drop onto viewport (asset panel + OS files)
+  ViewportToolbar.js       ← floating bottom toolbar (Fusion 360-style)
+  NavCube.js               ← top-left orientation widget
 ```
 
 ### 0.4 Babylon-First Rule
@@ -122,7 +125,7 @@ If you find yourself writing > 30 lines of geometry / scene management code, sto
 | `PersistenceManager.js` | < 400 |
 | `PrintManager.js` | < 350 |
 | Each `ui/*.js` | < 400 |
-| `main.js` | < 150 |
+| `main.js` | < 300 (bootstrap + panel collapse/resize wiring) |
 
 If a file grows past 1.5× target, split by responsibility. Smaller files → faster AI review.
 
@@ -162,14 +165,16 @@ Single dark theme. Pro-tool aesthetic. No theme switcher in v1.
   --text-2: #6b6b75;        /* tertiary, hints */
   --text-disabled: #4a4a52;
 
-  /* Accent */
-  --accent:     #06b6d4;    /* cyan — interactive, active */
-  --accent-hi:  #22d3ee;
-  --accent-fg:  #ecfeff;
+  /* Accent — yellow-orange (amber); locked Phase 3, user confirmed */
+  --accent:    #f59e0b;
+  --accent-hi: #fbbf24;
+  --accent-fg: #1a1108;
 
-  /* Status */
+  --border-focus: #f59e0b;
+
+  /* Status — warning uses yellow-400 to stay distinct from amber accent */
   --danger:  #ef4444;
-  --warning: #f59e0b;
+  --warning: #facc15;
   --success: #22c55e;
   --info:    #3b82f6;
 
@@ -309,6 +314,11 @@ export const EVENTS = {
   ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',
 
+  // Scene object lifecycle
+  OBJECT_REMOVED:          'object:removed',
+  OBJECT_RESTORED:         'object:restored',
+  OBJECT_UPDATED:          'object:updated',
+
   // Validation
   VALIDATION_STARTED:      'validation:started',
   VALIDATION_COMPLETE:     'validation:complete',
@@ -336,6 +346,12 @@ export const EVENTS = {
   VISIBILITY_CHANGED:      'hierarchy:visibilityChanged',
   LOCK_CHANGED:            'hierarchy:lockChanged',
 
+  // Collections (file-import display buckets in the outliner; see §13 Outliner)
+  COLLECTION_CREATED:      'collection:created',
+  COLLECTION_REMOVED:      'collection:removed',
+  COLLECTION_RENAMED:      'collection:renamed',
+  COLLECTION_MEMBERSHIP:   'collection:membership',
+
   // History
   HISTORY_PUSHED:          'history:pushed',
   HISTORY_UNDONE:          'history:undone',
@@ -359,6 +375,8 @@ export const EVENTS = {
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
   MODAL_CLOSE:             'ui:modalClose',
+  UI_PANEL_CHANGED:        'ui:panelChanged',
+  UI_CONTEXT_MENU:         'ui:contextMenu',
 };
 ```
 
@@ -381,25 +399,29 @@ StateManager.setState(updaterFn)         → void
 const initialState = {
   project: { name: 'Untitled', isDirty: false, lastSavedAt: null, version: '3.1' },
   scene: {
-    objects: {},        // Record<meshId, SceneObject>
+    objects: {},        // Record<meshId, SceneObject> — each has collectionId tag
     groups: {},         // Record<groupId, GroupNode>
+    collections: {},    // Record<collectionId, CollectionEntry> — outliner-only buckets
     assetLibrary: {},   // Record<assetId, AssetEntry>
     shaders: {},        // Record<shaderId, ShaderEntry>
     uvOverrides: {},    // Record<meshId, UVOverride>
     userSwatches: [],
-    camera: { preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 0.4, target: {x:0,y:0,z:0}, isOrthographic: false },
-    overlays: { grid: true, axes: true, wireframe: false, bedPreview: false },
+    // Default pose: 30 cm above origin, 45° downward, front-right-3/4. Babylon
+    // ArcRotateCamera positions camera at target + R·(sinβ cosα, cosβ, sinβ sinα).
+    // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
+    camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
+    overlays: { grid: true, axes: true, wireframe: false, bedPreview: false, wireframeEdges: false, wireframeEdgeColor: '#f59e0b' },
     gridSize: 0.3,         // BU — default 300 mm build area; user-editable in Properties → Scene
     cursor3d: { x: 0, y: 0, z: 0 },
   },
-  selection: { selectedIds: [], activeId: null, pivotMode: 'median' /* median|active|individual|cursor */ },
+  selection: { selectedIds: [], activeId: null, pivotMode: 'median' /* world|median|active|individual|cursor */ },
   print: {
     workingRatio: 1,            // denominator of the scene display ratio (1 = 1:1)
     targetRatio:  1,            // denominator of the final print export ratio
     bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
-  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220 },
+  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
 ```
@@ -447,8 +469,22 @@ Implemented in Phase 3:
 - `DuplicateCommand` — clones via `AssetLoader.cloneMeshAsNewObject`, offsets +10 mm in X so the clone is visible, auto-selects new meshes. Sharing geometry on redo: clones are kept disabled in memory and re-enabled on redo (same pattern as DeleteCommand).
 - `GroupCommand` / `UngroupCommand` — creates/disposes a `TransformNode` pivot; reparents members preserving world transform. All three commands wrap their parent-touching work in a `_withDetachedPivot` helper that temporarily detaches the selection-visual pivot so meshes are in their canonical parents during the mutation.
 
+Phase 4 implementations (Shader System):
+- `ShaderCreateCommand` — `{ shaderId }` — creates new Babylon material, entry in state, pushes with `getNewId()`.
+- `ShaderAssignCommand` — `{ shaderId, meshIds[] }` — reassigns material to multiple meshes, dispatches `SHADER_ASSIGNED` per mesh.
+- `ShaderUpdateCommand` — `{ shaderId, field, prevValue, newValue }` — mutates Babylon material + state entry (color, opacity, UV base, etc.). Texture swaps go through `diffuseTextureAssetId`.
+- `ShaderDuplicateCommand` — `{ shaderId, newShaderId }` — clones entry + Babylon material, linked meshes remain with original, pushes with `getNewId()`.
+- `ShaderDeleteCommand` — `{ shaderId }` — checks `linkedMeshIds === []` before delete, disposes Babylon material.
+- `UVOverrideCommand` — `{ meshId, isClearing, ...uvFields }` — applies or clears per-mesh UV offset/scale/rotation, clones material + texture on apply.
+- `ColorApplyCommand` — `{ shaderId, hex }` — applies swatch color to a shader's diffuse, dispatches `COLOR_APPLIED`.
+
+Phase 5 implementations:
+- `PrintPartCommand` — `{ meshId, prevPrintPart, nextPrintPart }` — toggles `isPrintPart` / `partLabel` / `partTolerance` on a scene object, dispatches `OBJECT_UPDATED`.
+- `RescaleWorldCommand` — `{ prevRatio, nextRatio }` — re-bakes every registered mesh's vertex data by `prev/next`, scales every ancestor `TransformNode.position` (via WeakSet dedup), scales `state.scene.cursor3d`, updates `state.print.workingRatio`. Undo runs the inverse factor.
+- `BakeTransformCommand` — `{ meshId, kind: 'rotation' | 'scale' }` — bakes either the current rotation OR scaling into vertices and resets that component to identity. Position is left untouched. Snapshots pre-bake position + normal vertex buffers so undo restores exact bytes (no FP drift on repeated cycles).
+
 Stubs (real bodies in later phases):
-`ShaderAssignCommand`, `ShaderUpdateCommand`, `ShaderDuplicateCommand`, `ShaderDeleteCommand`, `UVOverrideCommand`, `ColorApplyCommand`, `SmartReplaceCommand`, `TransformSwabCommand`.
+`SmartReplaceCommand`, `TransformSwabCommand`.
 
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
@@ -516,7 +552,7 @@ Shift+D        → duplicate
 Delete / X     → delete (confirm)
 Tab            → cycle active panel
 ~              → toggle gizmo space (world/local)
-. (period)     → cycle pivot mode (median → active → individual → cursor)
+. (period)     → cycle pivot mode (world → median → active → individual → cursor)
 ```
 
 **Laptop fallback:** If keyboard has no numpad, the user can use `Alt+1/3/7` etc. as alternates. Register both.
@@ -532,14 +568,19 @@ Tab            → cycle active panel
 
 ### Mouse
 ```
-LMB click      → pick + select
-Shift+LMB      → add to selection
-LMB drag empty → box select
-RMB            → context menu
-MMB drag       → orbit
-Shift+MMB drag → pan
-Wheel          → dolly zoom
-Shift+RMB      → place 3D cursor at hit point
+LMB click           → pick + select
+LMB drag on mesh    → translate selection on the horizontal plane
+                      (locked to the active mesh's current Y; Bambu-Studio /
+                      Tinkercad style). A drag has to clear ~4 px to engage —
+                      shorter LMB presses are still a plain click.
+Shift+LMB           → add / remove from selection (no drag)
+LMB drag empty      → box select
+RMB during body drag → cancel (pivot snaps back, no history push)
+RMB click            → context menu (deferred to UP; suppressed if drag > 4 px)
+RMB drag             → pan camera target
+MMB drag             → orbit
+Wheel                → dolly zoom
+Shift+RMB            → place 3D cursor at hit point
 ```
 
 ---
@@ -556,22 +597,33 @@ SceneManager.getScene()                       → BABYLON.Scene
 SceneManager.getEngine()                      → BABYLON.Engine
 
 // Camera
-SceneManager.setCameraPreset(preset)          // 'perspective'|'top'|'bottom'|'front'|'back'|'left'|'right'
+SceneManager.setCameraPreset(preset)          // 'perspective'|'top'|'bottom'|'front'|'back'|'left'|'right' — animates + frames all + auto-reverts to perspective on pan
 SceneManager.frameSelected(meshes)            // animate to fit bounding box of meshes
+SceneManager.frameAll()                       // frame every registered mesh — used by NavCube Home button
 SceneManager.saveCameraState()                → CameraState
 SceneManager.restoreCameraState(state)
 
 // Gizmos
 SceneManager.setGizmoMode(mode)               // 'translate'|'rotate'|'scale'|'none'
 SceneManager.setGizmoSpace(space)             // 'world'|'local'
+SceneManager.setScaleLock(locked)             // hide per-axis scale arrows when true; only uniform handle remains
+SceneManager.setFollowMode(mode)              // 'free'|'followActive'|'worldOrigin' — camera target tracking
 SceneManager.attachToSelection(meshes, pivotMode, activeMesh)
 
 // Selection visuals (custom mask + post-process — see "Selection silhouette" below)
-SceneManager.setActive(mesh)                  // full-intensity cyan ring
-SceneManager.setSelected(meshes)              // dim cyan ring (kind='selected')
+SceneManager.setActive(mesh)                  // full-intensity amber ring
+SceneManager.setSelected(meshes)              // dim amber ring (kind='selected')
+
+// Body drag (LMB drag on mesh to translate on horizontal plane)
+SceneManager.getBodyDragPlaneY()              → number  (active mesh's current Y, locked during drag)
+SceneManager.beginBodyDrag(meshes, startWorldPos)
+SceneManager.setBodyDragOffset(worldPos)     // updates pivot position
+SceneManager.endBodyDrag()
+SceneManager.cancelBodyDrag()                // restores pivot to pre-drag position
 
 // Overlays
-SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'bedPreview'
+SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'bedPreview'|'wireframeEdges'
+SceneManager.setWireframeEdgeColor(hexColor)  // live-update edge color while wireframeEdges is on
 SceneManager.setGridSize(extentBU)            // rebuilds the ground mesh at the new extent
 SceneManager.updateBedPreview(dims)
 
@@ -587,12 +639,28 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 ### Implementation Notes
 - Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Defaults tuned for a 300 mm working area: `radius=0.4`, `lowerRadiusLimit=0.02`, `upperRadiusLimit=5`, `wheelPrecision=500`, `panningSensibility=5000`. Compute ortho bounds from `camera.radius` and aspect on every preset change.
 - Numpad presets set `alpha` and `beta` then call `camera.rebuildAnglesAndRadius()`.
-- **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX` (~3), `OUTLINE_INTENSITY` (~1.8), `MASK_BRIGHTNESS_ACTIVE` / `MASK_BRIGHTNESS_SELECTED`.
+- **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_COLOR = '#f59e0b'` (amber — matches `--accent`).
+- **Wireframe edges:** `SceneManager.setOverlay('wireframeEdges', on)` calls `mesh.enableEdgesRendering(0.9, true)` / `mesh.disableEdgesRendering()` on every mesh with `.geometry`. Edge color and width stored in module-local `_wireframeEdgeState`. `setWireframeEdgeColor(hex)` parses hex to `BABYLON.Color4` and updates all live edge renderers.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `main.js` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
-- **Grid:** ground plane sized to `state.scene.gridSize` (default `0.3` BU = 300 mm) with `BABYLON.GridMaterial`. Minor lines 10 mm, major lines 100 mm. Rebuild via `SceneManager.setGridSize(extentBU)`.
+- **Bed (grid):** ground plane sized to `state.scene.gridSize` (default `0.3` BU = 300 mm) with `BABYLON.GridMaterial`. Minor lines 10 mm, major lines 100 mm. Rebuild via `SceneManager.setGridSize(extentBU)`. State key stays `gridSize` for backward compatibility with the v3.1 save schema, but the user-facing label in Properties reads **Bed size** since "grid" is just the visual representation.
+- **Bed FRONT tag:** a single `MeshBuilder.CreatePlane` mesh with `DynamicTexture` text `FRONT`, laid **flat on the bed** (`rotation = (π/2, π, 0)`, no billboard) hugging the +Z edge, 4 mm above the bed, textured face up with glyphs readable from the front-elevated camera (verified live; `rotation.x = -π/2` mirrors the text, `+π/2` alone is upside-down). Drawn in the muted grid-line colour (`rgba(97,97,117,0.55)` ≈ grid `Color3 0.38,0.38,0.46`) so it reads as part of the bed, not a UI accent. Only FRONT is shown — once the front edge is known the rest is implied; the old four upright billboarded tags (FRONT/BACK/LEFT/RIGHT) were dropped as visual noise. Size scales with bed extent (`max(0.03, extent * 0.10)` × 0.32 ratio). Rebuilt by `_rebuildGroundMesh` whenever bed extent changes. Visibility tracks `state.scene.overlays.grid` (toggled together with ground plane).
 - **Bed preview:** `MeshBuilder.CreateBox` sized to bed dims, semi-transparent material, wireframe outline overlay.
 - **3D cursor:** 3 mm sphere, hidden by default. Made visible only when `state.selection.pivotMode === 'cursor'` via `setCursorVisible`.
+- **Camera Follow Modes:** `state.scene.camera.followMode` ∈ `{'free','followActive','worldOrigin'}`. A `scene.onBeforeRenderObservable` hook (`_applyFollowTarget`) overrides `_camera.target` every frame in non-free modes — `worldOrigin` pins it to `(0,0,0)`; `followActive` reads the active object id via `state.selection.activeId`, finds the Babylon mesh through `_scene.meshes.find(m => m.metadata?.meshId === activeId)`, and pins target to its hierarchy bbox centre. Pan input is effectively disabled in non-free modes — to regain pan, switch back to `'free'`.
+- **Default pose + first-asset auto-frame:** Initial `state.scene.camera` puts the camera ~30 cm above origin looking down 45° from the front-right quadrant. With an empty scene this is the user's "neutral tabletop" pose. On the **first** `ASSET_INSTANTIATED` event of a session (or after `PROJECT_NEW`), SceneManager debounces 50 ms and calls `frameAll()` so all submeshes of a multi-mesh import (e.g. 5-node glTF) frame as a union, not one-by-one. A `_initiallyFramed` latch is then set to `true` so subsequent drops do not re-frame — the user is past initial orientation. `PROJECT_LOADED` also sets the latch (saved camera state wins). `PROJECT_NEW` resets it.
+- **Preset face → α/β convention:** Babylon ArcRotateCamera position = `target + R·(sinβ cosα, cosβ, sinβ sinα)`. The NavCube / preset map below uses this so each clicked face shows that face of the scene:
+
+  | Preset  | α           | β        | Camera sits at |
+  |---------|-------------|----------|----------------|
+  | front   | π/2         | π/2      | +Z |
+  | back    | -π/2        | π/2      | -Z |
+  | right   | 0           | π/2      | +X |
+  | left    | π           | π/2      | -X |
+  | top     | (any)       | 0        | +Y |
+  | bottom  | (any)       | π        | -Y |
+  | perspective | π/3 | π/4 | front-right-3/4-elevated (matches initial load) |
+- **Camera Presets — animate + fit + auto-revert:** `setCameraPreset(name)` animates `alpha`, `beta`, `target`, `radius` simultaneously (320 ms, quadratic ease-in-out) toward the named view. Before animation it computes the scene's hierarchy bbox over every `metadata.meshId`-tagged mesh and sets the target to that centre plus a radius of `diag × 1.2` so all content fits. For an ortho preset (top/bottom/front/back/left/right) the camera switches to `ORTHOGRAPHIC_CAMERA` only *after* the animation finishes — interpolating through ortho mid-flight looks broken. For `'perspective'` the mode goes back to `PERSPECTIVE_CAMERA` post-anim. The settled `target` is snapshotted in `_lastAppliedTarget`. **Auto-revert:** inside `_applyFollowTarget`, when the camera is in ortho mode and the preset is not perspective, any divergence of `_camera.target` from `_lastAppliedTarget` (squared distance > `1e-6`, i.e. ~1 mm pan) flips the preset back to `'perspective'` and dispatches `CAMERA_PRESET_CHANGED`. The `_animating` flag suppresses revert during the preset animation itself. Camera input panning: `ArcRotateCameraPointersInput.buttons = [1, 2]` so RMB drag triggers Babylon's native pan (the panningMouseButton). The context-menu RMB stays usable because `InputManager` defers `_onContextMenuRMB` to RMB-UP and cancels it if movement exceeds 4 px.
 
 ### Lighting
 1 × `HemisphericLight` (top-down, intensity 0.4)
@@ -609,26 +677,59 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 AssetLoader.mountDirectory()                          → Promise<DirectoryEntry>
 AssetLoader.loadFromHandle(fileHandle, position)      → Promise<MeshId[]>
 AssetLoader.loadFromBlob(blob, filename, position)    → Promise<MeshId[]>
+AssetLoader.loadTextureFromHandle(fileHandle)         → Promise<void>  // async thumbnail gen
+AssetLoader.loadTextureFromBlob(blob, filename)       → Promise<void>
+AssetLoader.registerImportedTexture(babylonTexture)   → Promise<assetId>  // glTF-embedded texture → asset entry + data URL thumbnail
 AssetLoader.loadAssetsForProject(assetEntries)        → Promise<void>  // uses AssetsManager
 AssetLoader.releaseAsset(assetId)                     → void
+AssetLoader.removeAsset(assetId)                      → void  // removes from state + dispatches ASSET_REGISTERED{type:'removed'}
+AssetLoader.instantiateAsset(assetId, position)       → Promise<MeshId[]>  // re-loads from cached blob URL; each call = independent scene objects
 AssetLoader.getContainer(assetId)                     → BABYLON.AssetContainer | null
+AssetLoader.getBabylonTexture(assetId)                → BABYLON.Texture | null
 ```
 
 ### AssetEntry
 ```js
 {
   id, name, filename, originalPath, extension,
-  sourceUnit,                  // 'meters'|'centimeters'|'millimeters'|'inches'|'feet' — default 'millimeters'
-  unitConfirmed,               // boolean — true by default; false only when the
-                               //   user has flagged an asset for review.
-  modelRatio,                  // denominator of the ratio the asset was authored
-                               //   at (1 = full real-world size, 72 = 1:72).
-                               //   Default 1 unless a glTF "ratio" extra overrides.
+  kind,                        // 'mesh' | 'texture' — new in Phase 4
+  isImported,                  // boolean — true if texture from glTF, false if user-loaded
+  sourceUnit,                  // 'meters'|'centimeters'|'millimeters'|'inches'|'feet' — default 'millimeters' (mesh only)
+  unitConfirmed,               // boolean — true by default; false only when the user flagged for review (mesh only)
+  modelRatio,                  // denominator of the ratio the asset was authored at (1 = full real-world size, 72 = 1:72).
+                               //   Default 1 unless a glTF "ratio" extra overrides (mesh only).
   directoryHandleKey,          // IndexedDB key for FileSystemDirectoryHandle
   blobUrl,                     // module-local Map, not in state
   thumbnailDataUrl,
 }
 ```
+
+### SceneObject (per visible mesh, in `state.scene.objects[meshId]`)
+```js
+{
+  id,                          // meshId
+  name,                        // mesh name from import or rename
+  assetId,                     // back-reference to AssetEntry
+  collectionId,                // outliner display bucket (null = uncollected)
+  parentId,                    // groupId if this mesh is inside a group, else null
+  shaderId,                    // shader currently assigned (null = scene default)
+  visible, locked, isGhost,    // booleans
+  isPrintPart,                 // include in OBJ/STL export
+  partLabel, partTolerance,    // print-time annotations (Phase 5)
+}
+```
+
+### CollectionEntry (per imported file, in `state.scene.collections[id]`)
+```js
+{
+  id,                          // 'col_<timestamp>_<counter>'
+  name,                        // filename + .NNN if collision (display-mutable)
+  sourceFile,                  // original filename (immutable)
+  sourceAssetId,               // assetId this collection was minted for
+  createdAt,                   // ISO8601
+}
+```
+Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one CollectionEntry. Mesh-to-collection link lives on `SceneObject.collectionId`, never on the collection side, so groups can freely span collections (see §13 Outliner render rules).
 
 ### Load Flow
 ```
@@ -729,8 +830,31 @@ async function mountDirectory() {
 ```
 On project load, retrieve handle via `idbGet(key)`, call `handle.requestPermission({ mode: 'read' })`. If denied, show non-blocking banner with re-grant button. Ghost objects render until resolved.
 
+### Imported vs User-Loaded Textures (Phase 4)
+glTF-embedded textures register via `registerImportedTexture(babylonTexture)`. Babylon's glTF loader does not populate `texture.url` with a usable path for embedded images — it sets bookkeeping names like `"data:tex_1"`. Thumbnails must be generated asynchronously via GPU readback:
+
+```js
+async function readTextureToDataUrl(texture, targetSize = 128) {
+  // 1. Wait for texture.isReady()
+  // 2. texture.readPixels() → Uint8Array
+  // 3. Normalize to RGBA if needed (handle RGB, Float32, etc.)
+  // 4. Put to canvas, downscale to 128×128
+  // 5. Y-flip (glTF uses invertY=false; readback is GL bottom-up)
+  // 6. Return canvas.toDataURL('image/png')
+}
+```
+
+Asset entries tagged with `kind: 'texture'` and `isImported: true` prevent `releaseAsset` from disposing the texture — lifetime is owned by the source `AssetContainer` or session.
+
+User-loaded textures (via drag/drop or load-from-file) use blob URLs directly; no readback needed.
+
+### Session Re-instantiation
+`instantiateAsset(assetId, position)` re-loads the asset from the cached blob URL (stored in a module-local `Map<assetId, objectURL>` set on first load). Each call goes through the full load path — fresh `AssetContainer`, new mesh registration, independent SceneObject entries — so re-dragged copies appear as separate items in the Outliner and are independently selectable.
+
+Session assets dragged from the Asset Panel carry `mountKey === '__session__'`; `ViewportDrop` detects this and calls `instantiateAsset(path, position)` rather than attempting to retrieve a `FileSystemFileHandle` (which session assets don't have).
+
 ### Memory Rules
-- `releaseAsset(assetId)`: only dispose container if `linkedMeshIds.length === 0`.
+- `releaseAsset(assetId)`: only dispose container if `linkedMeshIds.length === 0`. Skip disposal if `isImported: true`.
 - Track blob URLs in `Map<assetId, blobUrl>` for explicit revocation.
 - On `PROJECT_NEW` / `PROJECT_LOADED`: revoke all blob URLs, dispose all containers, clear map.
 
@@ -797,14 +921,14 @@ MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, Valid
 ```js
 ShaderLibrary.createShader(partial)                    → shaderId
 ShaderLibrary.updateShader(shaderId, field, value)
-ShaderLibrary.duplicateShader(shaderId)                → newShaderId
+ShaderLibrary.duplicateShader(shaderId)                → newShaderId  (returns id via getNewId())
 ShaderLibrary.deleteShader(shaderId)                   // only if linkedMeshIds is empty
 ShaderLibrary.assignToMesh(shaderId, meshId)
-ShaderLibrary.setUVOverride(meshId, uv)
+ShaderLibrary.setUVOverride(meshId, uv)               // clones material AND texture
 ShaderLibrary.clearUVOverride(meshId)
 ShaderLibrary.applySwatchColor(shaderId, hex)
 ShaderLibrary.getBabylonMaterial(meshId)               → BABYLON.Material
-ShaderLibrary.registerFromContainer(container)         → shaderId[]
+ShaderLibrary.registerFromContainer(container)         → Promise<shaderId[]>  // async; handles merge modal on collisions
 ShaderLibrary.rebuildLinkedIndex()                     // on project load
 ```
 
@@ -828,8 +952,8 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 ### Material Management
 - Maintain private `Map<shaderId, BABYLON.StandardMaterial>` (or PBRMaterial).
 - On `updateShader`, mutate the Babylon material directly → all linked meshes update.
-- On `setUVOverride`, clone the shared material once, apply UV offset, store in `Map<meshId, BABYLON.Material>`. Assign clone to that mesh only.
-- On `clearUVOverride`, dispose clone, re-assign shared material.
+- On `setUVOverride`, **clone both the material and its texture** (via `material.clone()` + `texture.clone()` on each of `diffuseTexture`, `albedoTexture`, `baseTexture`). Apply UV offset to the cloned material, store in `Map<meshId, BABYLON.Material>`. Assign clone to that mesh only. **Rationale:** Babylon's `material.clone()` copies texture *pointers*, so UV offsets would leak across meshes. Cloning the texture ensures per-mesh overrides are truly independent.
+- On `clearUVOverride`, dispose clone + its cloned textures, re-assign shared material.
 - Do **not** clone-per-frame. Clone once on override creation.
 
 ### Shader Duplication
@@ -838,10 +962,11 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 
 ### Import Merge Strategy
 On material-name collision during `registerFromContainer`:
-1. Dispatch `EVENTS.MODAL_OPEN` with id `shaderMerge`, payload `{ conflicts }`.
-2. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**.
-3. Default: Rename. Checkbox "Apply to all conflicts in this import."
-4. On confirm: apply choices, continue load.
+1. **Auto-dedupe first.** `_findContentDuplicate(mat)` builds a signature from the imported material — `type | diffuseColor | opacity | roughness | metallic | uvBase | diffuseTextureAssetId` — and compares to every existing scene shader's signature. An exact match silently reuses the existing shaderId, redirects the imported mesh's `material` pointer, disposes the duplicate material, and skips the merge modal entirely. This catches the most common case (the user dropped the same file twice).
+2. **Texture dedupe** runs as part of step 1's signature. Imported (glTF-embedded) textures are deduped by `${name}|${width}|${height}|${className}` in `AssetLoader.registerImportedTexture` so two imports of the same file end up sharing one `diffuseTextureAssetId` — without this, shader content-dedupe would fail because the texture ids would differ.
+3. **Only remaining conflicts hit the modal.** If a name still collides AND content differs, dispatch `EVENTS.MODAL_OPEN` with id `shaderMerge`, payload `{ conflicts }`.
+4. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**. Default: Rename. Checkbox "Apply to all conflicts in this import."
+5. On confirm: apply choices, continue load.
 
 ### Hardcoded Swatches
 ```js
@@ -897,24 +1022,28 @@ Every field persisted. Restored exactly.
   "project": { "name": "..." },
   "sceneSettings": {
     "camera": { "preset": "perspective", "alpha": 1.57, "beta": 1.1, "radius": 10,
-                "target": {"x":0,"y":0,"z":0}, "isOrthographic": false },
-    "overlays": { "grid": true, "axes": true, "wireframe": false, "bedPreview": false },
+                "target": {"x":0,"y":0,"z":0}, "isOrthographic": false,
+                "followMode": "free" /* 'free' | 'followActive' | 'worldOrigin' */ },
+    "overlays": { "grid": true, "axes": true, "wireframe": false, "bedPreview": false,
+                  "wireframeEdges": false, "wireframeEdgeColor": "#f59e0b" },
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
   "print": {
-    "workingRatio": 12, "targetRatio": 35,
+    "workingRatio": 12, "targetRatio": 35,         // any positive float (e.g. 0.5 for 2:1 upscale)
     "bedPreset": "Bambu P1S", "bedDimensions": {"x":256,"y":256,"z":256},
     "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05
   },
-  "assetLibrary": [ /* AssetEntry without container or blobUrl */ ],
-  "shaders": [ /* ShaderEntry without linkedMeshIds */ ],
-  "uvOverrides": { /* Record<meshId, UVOverride> */ },
-  "userSwatches": [ /* SwatchEntry[] */ ],
-  "sceneObjects": [ /* SceneObject[] */ ],
-  "groups": [ /* GroupNode[] */ ],
-  "selection": { "selectedIds": [], "activeId": null, "pivotMode": "median" },
-  "gizmo": { "mode": "translate", "space": "world", "snap": {...} },
-  "ui": { "activePanel": "properties", "outlinerCollapsed": {}, "assetPanelHeight": 220 }
+  "assetLibrary":  [ /* AssetEntry without container or blobUrl */ ],
+  "collections":   [ /* CollectionEntry[] — outliner display buckets */ ],
+  "shaders":       [ /* ShaderEntry without linkedMeshIds */ ],
+  "uvOverrides":   { /* Record<meshId, UVOverride> */ },
+  "userSwatches":  [ /* SwatchEntry[] */ ],
+  "sceneObjects":  [ /* SceneObject[] — each carries collectionId tag */ ],
+  "groups":        [ /* GroupNode[] */ ],
+  "selection":     { "selectedIds": [], "activeId": null, "pivotMode": "median" },
+  "gizmo":         { "mode": "translate", "space": "world", "snap": {...} },
+  "ui":            { "activePanel": "properties", "outlinerCollapsed": {},
+                     "assetPanelHeight": 220, "scaleLocked": true }
 }
 ```
 
@@ -927,15 +1056,18 @@ Every field persisted. Restored exactly.
 5. Restore shaders into state + create Babylon materials in ShaderLibrary.
 6. Restore uvOverrides into state.
 7. Restore userSwatches.
+7b. Restore collections into state.scene.collections (outliner display only — no Babylon work).
 8. Use BABYLON.AssetsManager to batch-load all assetLibrary entries:
    - For each: attempt to resolve via directoryHandleKey from IndexedDB.
    - Unresolved → create ghost (state.scene.objects entry with isGhost: true).
 9. For each sceneObject:
    - If asset loaded → instantiate at transform, assign shader, apply UV override if exists.
    - If ghost → create wireframe bounding box at transform.
+   - Preserve `collectionId` on the restored object so Outliner re-routes correctly.
 10. Restore groups (TransformNodes), re-parent children in order.
 11. SceneManager.restoreCameraState() from saved camera.
-12. Apply overlay states.
+12. Apply overlay states (including `wireframeEdges` + `wireframeEdgeColor`).
+12b. Apply `SceneManager.setScaleLock(state.ui.scaleLocked)` so the viewport scale gizmo matches the saved lock preference on first activation.
 13. ShaderLibrary.rebuildLinkedIndex().
 14. Queue validation for all non-ghost meshes (async, non-blocking).
 15. Dispatch PROJECT_LOADED. Set isDirty=false.
@@ -970,6 +1102,20 @@ PrintManager.exportSTL(options)               → Promise<void>
 
 The asset loader has already baked unit conversion and the working ratio into the mesh's in-scene transform (see §8 *Import Scale Model*). The Print Manager only has to rescale from the **working ratio** to the **target ratio** and convert metres → millimetres:
 
+#### Working-ratio re-bake (live)
+
+Changing `state.print.workingRatio` after objects are already in the scene re-bakes **every** registered mesh so the scene's BU ↔ metres mapping stays consistent. PrintPanel routes the workingRatio input through `push(new RescaleWorldCommand(prev, next))` (defined in `core/HistoryManager.js`). The command:
+
+1. `factor = prev / next`.
+2. For every meshId in `state.scene.objects`: `mesh.bakeTransformIntoVertices(Matrix.Scaling(factor))`.
+3. Walks each registered mesh up the parent chain (group TransformNodes, glTF `__root__`, etc.) and scales every ancestor's local `position` by `factor` — exactly once per node (deduped via a `WeakSet`). Result: world transforms scale relative to the world origin, every mesh keeps `scaling = (1,1,1)`, Properties Panel scale field still reads `1`.
+4. Scales `state.scene.cursor3d` by `factor`.
+5. Sets `state.print.workingRatio = next`.
+
+`targetRatio` is **export-only metadata** and is not part of the rescale — it changes via plain `setState`.
+
+Undo restores by running the inverse factor; overlays (grid, axes, gizmos, selection RTT) are unaffected because they're not on any registered mesh's ancestor chain.
+
 ```js
 function exportFactor() {
   const wr = state.print.workingRatio;
@@ -991,12 +1137,15 @@ Worked examples (all assuming `1 BU == 1 m` at the working ratio):
 | 72  | 72  | 1000 | 100 mm at 1:72 |
 | 12  | 2   | 6000 | 600 mm at 1:2  (6× larger output) |
 | 35  | 72  | 486… |  48.6 mm at 1:72 (shrunk) |
+| 0.5 | 1   | 500  |  50 mm at 1:1   (scene was authored 2:1; exported back to real) |
+| 1   | 0.5 | 2000 | 200 mm at 2:1   (export an oversized 2× fit-test copy) |
 
 `sourceUnit` and `modelRatio` are **not** referenced at export time — they were already consumed at import to position the mesh in scene-metres.
 
 ### Presets
 ```js
 export const SCALE_PRESETS = [
+  { category:'Default',    label:'1:1 Full Scale',  ratio:1   },
   { category:'Military',   label:'1:35 Armor',      ratio:35  },
   { category:'Military',   label:'1:48 Aircraft',   ratio:48  },
   { category:'Military',   label:'1:72 Small',      ratio:72  },
@@ -1008,6 +1157,13 @@ export const SCALE_PRESETS = [
   { category:'Custom',     label:'Custom',          ratio:null},
 ];
 ```
+
+Ratio inputs in PrintPanel accept any positive `M:N` (or `M/N`) — both numerator and denominator parsed as floats. A bare `N` is shorthand for `1:N`. The stored value is `N / M`, so `1:72 → 72`, `2:1 → 0.5`, `3:5 → 5/3 ≈ 1.667`. Display:
+- value `> 1` → `1:N` (N rounded, decimal if non-integer)
+- value `< 1` → `M:1` (M = 1/value, decimal if non-integer)
+- value `≈ 1` → `1:1`
+
+This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as well as **down** (1:72 model). Both `RescaleWorldCommand` and `exportFactor()` already operate on plain positive numbers, so no math changes are needed downstream.
 
 ### OBJ + MTL Export (Primary)
 
@@ -1073,26 +1229,46 @@ function exportSTL() {
 ## PART 13 — UI MODULES
 
 ### Outliner (`ui/Outliner.js`)
-- Renders unified tree from `state.scene.objects` + `state.scene.groups`.
+- Renders unified tree from `state.scene.objects` + `state.scene.groups` + `state.scene.collections`.
 - Row icons via `Icons.icon(name, attrs)` — see Part 2.
 - Drag-to-reparent: `dragstart` on row, `dragover` on group, `drop` → `PARENT_CHANGED`.
 - Multi-select: `Shift+click` range, `Ctrl+click` toggle. Dispatch `SELECTION_CHANGED`.
 - Double-click row name → inline rename (text input, blur/Enter commits via `RenameCommand`).
 - Search bar: filters by name / shader / part-label / validation status.
 - Ghost rows: red `CircleAlert` icon, right-click → Relink (file picker).
+- **Row layout** uses a 6-column grid: `[indent] [type-icon] [name] [visibility] [lock] [print-part]`. The print-part column shows a `Printer` icon button on object rows (highlighted amber when `isPrintPart: true`); group rows get a blank placeholder span to keep alignment. Clicking the icon toggles `isPrintPart` via `PrintPartCommand`.
+
+#### Collections (Blender-style import buckets)
+
+A **collection** is a display-only outliner container per imported file. It carries no scene-graph weight — it's purely metadata used to route rendering. Each `AssetLoader.loadFromBlob` / `instantiateAsset` call mints one new collection named after the source filename (with `.NNN` suffix when the name is already taken). Members are tagged via `state.scene.objects[meshId].collectionId`.
+
+`CollectionEntry` schema: `{ id, name, sourceFile, sourceAssetId, createdAt }` (state.scene.collections[id]).
+
+**Render rules** — these resolve the group ↔ collection conflict cleanly:
+1. Compute each group's "collection signature" by walking its leaf meshes' `collectionId` tags. Either `null` (no leaves tagged), a single collectionId (homogeneous), or `'mixed'` (multiple).
+2. **Collection-homogeneous groups** nest inside the collection's expander.
+3. **Mixed-collection groups** render at the outliner root (not inside any collection) with a `Mixed` badge next to the group name. Their members keep their original `collectionId` tags — the group is just routing display.
+4. **Standalone (no group) objects** render inside their `collectionId` container, or at root if untagged.
+5. Empty collections auto-hide (no row when 0 visible children).
+
+Collection row interactions:
+- Click name → select every mesh with that `collectionId` (descends across groups).
+- Click chevron → toggle collapsed state in `ui.outlinerCollapsed[colId]`.
+- Double-click name → inline rename (dispatches `COLLECTION_RENAMED`, not undoable for now).
+- RMB → context menu: **Select Members**, **Rename Collection…**, **Delete Collection** (the last untags every member, leaving them visible as "uncollected" at outliner root; the collection entry is then removed from state).
 
 ### Properties Panel (`ui/PropertiesPanel.js`)
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 1. **Object** — name, visible, locked
-2. **Transform** — Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand`. On multi-select, fields show `—` when values differ; editing applies delta. Read-only **Size (mm)** row at top derived from world AABB (so a wrong-unit import is visible).
+2. **Transform** — Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand`. On multi-select, fields show `—` when values differ; editing applies delta. Read-only **Size (mm)** row at top derived from world AABB (so a wrong-unit import is visible). **Apply Rotation** and **Apply Scale** buttons next to their section labels bake the current rotation/scale into vertex data and reset that component to identity (`BakeTransformCommand`, undoable via vertex snapshot). **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`).
 3. **Source Unit** — dropdown + `AlertTriangle` if unconfirmed + "Confirm" button.
-4. **Shader** — dropdown of scene shaders, Duplicate / Edit buttons.
-5. **UV Override** — offset/scale/rotation inputs; "Reset to Default" button.
+4. **Shader** (Phase 4, binding-only) — Lists distinct shaders bound to current selection as **slots**. Active mesh's shader appears first. Multi-selection across meshes with different shaders → one slot per shader. Per-slot UI: texture thumbnail chip or color preview, shader name, linked mesh-count badge, combined `<select>` with optgroup "Replace with → [list of all scene shaders]" + synthetic action "Duplicate in place". Click chip/name area → Library `focus(shaderId)`. **No color picker, sliders, or UV inputs here** — those live only in the Shader Library. Properties Shader is binding-only.
+5. **UV Override** — offset/scale/rotation inputs per-mesh; "Reset to Default" button. Mesh-specific UI.
 6. **Print Part** — toggle + label + tolerance.
 7. **Validation** — collapsed list of issues with per-issue Auto-Fix button.
 
 **Scene** section (only when no object is active):
-- Grid size (mm) input → `SceneManager.setGridSize`.
+- **Bed size (mm)** input → `SceneManager.setGridSize` (internal state key still `gridSize`).
 
 ### Future: Copy active-to-selected (Phase 4 / 5 nice-to-have)
 A "Copy from active" affordance on each Transform sub-section (Position, Rotation, Scale, Source Unit, Shader, UV Override) that applies the active object's value to all other selected objects in one batched `TransformCommand` / `ShaderAssignCommand` / etc. UI: small "↧ to all" button beside each section header, enabled only when `selectedIds.length > 1`. Three flavours per section:
@@ -1102,12 +1278,17 @@ A "Copy from active" affordance on each Transform sub-section (Position, Rotatio
 
 Not part of Phase 3's milestone. Defer until Phase 4 because the same pattern needs to apply to Shader/UV sections which don't exist yet.
 
-### Shader Panel (`ui/ShaderPanel.js`)
-- Scene Shaders list: row per shader with color/texture preview, name, mesh count badge, action menu.
-- Per-shader actions: Edit / Duplicate / Assign to Selection / Select Linked / Rename / Delete.
-- Inline editor: type toggle, diffuse color picker, texture drop-target, UV base, opacity, PBR sliders.
-- Swatch palette: hardcoded library grouped by category + user swatches with `Plus` button.
-- Click swatch → applies `diffuseColor` to currently edited shader. Drag swatch → mesh: see Part 10.
+### Shader Library (`ui/ShaderPanel.js`)
+Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
+
+- **Scene Shaders list:** row per shader with texture thumbnail (if `diffuseTextureAssetId`) or color chip, name, linked mesh-count badge. Hover → small Duplicate button.
+- **Create new:** `+` button in header creates a Standard material shader.
+- **Inline editor:** Click any row to open editor below the list. Fields: type toggle (`Standard` / `PBR` / `Unlit`), diffuse color picker + hex field, texture slot with drop-target + Pick… button (opens texture modal grid), opacity / roughness / metallic sliders, UV-base inputs (offsetX/Y, scaleX/Y, rotation), action row (Duplicate / Assign / Select Linked / Delete). All edits update viewport live and are undoable.
+- **Texture pick modal:** Click Pick… → grid of every loaded texture (including imported glTF-embedded ones). Click texture → assigns, modal closes. Also shows "Swap…" and clear button on loaded state.
+- **Swatch palette:** Hardcoded DEFAULT_SWATCHES (Primer / Military / Metals / Miniatures, 20 entries) + User section with `+` button to capture current editor's color. Click swatch → `ColorApplyCommand` pushed.
+- **Merge modal:** When `registerFromContainer` encounters material-name collisions → modal with per-conflict radios (Use existing / Rename import / Replace scene shader) + "Apply to all" checkbox.
+- **Auto-focus:** Subscribes to `ACTIVE_OBJECT_CHANGED`. When active object changes, `ShaderPanel.focus(shaderId)` is called UNLESS an `<input>` / `<select>` / `<textarea>` inside the Library has DOM focus (prevents focus theft mid-edit).
+- **Sub-sections:** All collapsible via chevron headers (Scene Shaders, Editor, Swatches). Collapse state is module-local, lost on reload.
 
 ### Asset Panel (`ui/AssetPanel.js`)
 - Bottom-docked, resizable.
@@ -1121,6 +1302,32 @@ Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Repla
 
 ### Print Panel (`ui/PrintPanel.js`)
 Tabs: Scale / Validation / Bed / Thickness (future) / Orientation (future) / Export.
+
+### Viewport Toolbar (`ui/ViewportToolbar.js`)
+
+Fusion 360-style floating pill anchored bottom-centre of the `#viewport` element. Always visible, always above the canvas. Four groups, divider between each:
+
+- **Group A — Gizmo mode.** Move / Rotate / Scale. Click → `SceneManager.setGizmoMode('translate'|'rotate'|'scale')`.
+- **Group B — Pivot mode.** Active / Median / Cursor / World (in display order). Default = `'active'` so transforms pivot around the selected object out of the box. Click → `Selection.setPivotMode(...)`. `'world'` pivots at `(0,0,0)`; `'cursor'` pivots at `state.scene.cursor3d`.
+- **Group ~ — Orientation.** Single toggle button. Click flips `state.gizmo.space` between `'world'` and `'local'` via `SceneManager.setGizmoSpace`. Label reads the current state.
+- **Group C — Camera mode.** Free / Follow Active / World Origin. Click → `SceneManager.setFollowMode(...)`. See §7 *Camera Follow Modes*.
+
+Active button highlighted with `--accent`. Subscribes to `SELECTION_CHANGED`, `ACTIVE_OBJECT_CHANGED`, `CAMERA_PRESET_CHANGED`, `PROJECT_LOADED` so the active highlight stays in sync.
+
+### Nav Cube (`ui/NavCube.js`)
+
+Fusion 360-style orientation widget anchored top-left of the viewport. Pure DOM/CSS 3D — no Babylon meshes. A `scene.onBeforeRenderObservable` writes the cube's CSS transform each frame straight from the `ArcRotateCamera` spherical angles:
+
+```
+transform: rotateX(β − π/2) rotateY(π/2 − α)
+```
+
+At the front preset (α = β = π/2) this is the identity → the bare `nc-front` face. Yaw is `π/2 − α`: viewed from FRONT in Babylon's left-handed space world +X is on the viewer's LEFT, so a camera on +X (α = 0) shows the LEFT face. Verified live (Chrome DevTools) against the scene: front = identity/FRONT; camera +X → LEFT; camera −X → RIGHT; above → TOP; below → BOTTOM; every face label stays upright and readable. Earlier view-matrix reconstructions kept introducing mirror / 180° flips (Babylon LH ↔ CSS handedness), so the camera's own angles are used directly. The six CSS faces are the **canonical static cube layout** (`nc-front` +Z, `nc-back` −Z, `nc-right` +X, `nc-left` −X, `nc-top` +Y, `nc-bottom` −Y); all orientation lives in the per-frame rotateX/rotateY.
+
+Interactions:
+- **Click face** (FRONT/BACK/LEFT/RIGHT/TOP/BOTTOM) → `SceneManager.setCameraPreset(name)`. That call: (a) computes the scene bbox over all registered meshes, (b) animates camera `alpha/beta/target/radius` toward the orthogonal view + bbox fit (320 ms ease-in-out), (c) switches to `ORTHOGRAPHIC_CAMERA` after the animation finishes. The ortho view persists until the user pans (RMB drag) — auto-revert in `_applyFollowTarget` flips the preset back to `'perspective'`.
+- **Drag any part of the cube** → orbit main camera (`alpha -= dx*0.01`, `beta -= dy*0.01`, clamped to `[0.01, π−0.01]`). A 4-px movement threshold suppresses the face-click when the gesture is actually a drag.
+- **Home button** (small circular `⌂` below the cube) → `SceneManager.setCameraPreset('perspective')` — same code path, animates back to a 3/4 perspective view fit to the full scene bbox.
 
 ### Status Bar (`ui/StatusBar.js`)
 Single bar at bottom. Segments:
@@ -1195,13 +1402,29 @@ Wrap every async UI entry point.
 Selection model in StateManager · gizmo wiring in SceneManager · `Outliner` · `ContextMenu` · `PropertiesPanel` (transform + source unit) · remaining viewport shortcuts
 **Milestone:** Click-select, G+X move with snap, Ctrl+G group, F frame, undo all.
 
-### Phase 4 — Shader System
-Full `ShaderLibrary` · `ShaderPanel` · Properties Panel shader + UV override sections · merge-strategy modal
+### Phase 4 — Shader System ✓ CLOSED 2026-05-14
+Full `ShaderLibrary` · `ShaderPanel` (Shader Library) · Properties Panel shader + UV override sections · merge-strategy modal · imported texture readback · right-panel layout (splitter + sub-collapse) · body-drag translate on LMB
 **Milestone:** Create / duplicate / assign shaders, edit UV per mesh, apply swatches, all undoable.
+**What shipped:** Shader Library displays scene shaders with texture thumbnails. Inline editor for type / color / texture / UV base. Per-row Duplicate, per-mesh UV overrides clone texture to prevent leaks. Properties Shader section binding-only (slots with combined dropdown + auto-focus). Shader merge modal on import collisions. Right panel splitter + individually collapsible sub-sections. LMB drag on mesh translates on horizontal plane (Bambu Studio style). All undoable. Import readback pattern for glTF-embedded textures.
+**Deferred (user accepted):** Copy-from-active, user-swatch persistence, multi-material-per-mesh, sub-section collapse persistence.
 
 ### Phase 5 — Print Pipeline
 `PrintManager` · `PrintPanel` · pre-export validation gate · bed preview overlay · OBJ+MTL via `BABYLON.OBJExport`
 **Milestone:** Set 1:35, see live dimensions, export ZIP, open in Bambu Studio with colors intact.
+**What shipped:** PrintManager with SCALE_PRESETS (Default 1:1 added), exportOBJ/exportSTL with JSZip bundling, pre-export validation gate (errors block, warnings confirm). PrintPanel with Scale / Validation / Bed / Export tabs; ratio inputs accept any positive `M:N` format (parser stores `N/M`, so values < 1 = upscaled prints, > 1 = downscaled models). Bed preview overlay toggle. Print Part toggle in Outliner (6th column, Printer icon, `PrintPartCommand`). Wireframe edges overlay with color picker (`setOverlay('wireframeEdges')` + `setWireframeEdgeColor()`). Panel collapse/resize system in `main.js` (all three panels — Outliner, right panel, Asset Panel — collapsible + drag-resizable). Remove asset button in Asset Panel (session assets only). Session asset re-drag fixed via `instantiateAsset()` + blob URL cache.
+
+**Adjustments batch (closed alongside Phase 5):**
+- **Collections** — every import mints one display-only outliner bucket (`state.scene.collections`). Mixed-collection groups render at outliner root with a `Mixed` badge. RMB → Select Members / Rename / Delete. See §13 Outliner.
+- **Working-ratio re-bake** — `RescaleWorldCommand` (Part 5) re-bakes every registered mesh's vertices and scales every ancestor `TransformNode.position` exactly once when `state.print.workingRatio` changes. Mesh.scaling stays `(1,1,1)`. Undo restores by running the inverse factor. PrintPanel's workingRatio input routes through this command; targetRatio remains plain `setState`.
+- **Auto-dedupe on import** — `ShaderLibrary._findContentDuplicate` compares numeric fields + textureAssetId; exact match silently reuses the existing shader instead of opening the merge modal. `AssetLoader.registerImportedTexture` dedupes glTF-embedded textures by `${name}|${width}|${height}|${className}` so re-imports share textureAssetIds, which lets shader-content dedupe collapse the materials.
+- **Apply Rotation / Apply Scale** — `BakeTransformCommand` (Part 5) bakes the current rotation OR scale into vertices and resets that component to identity. Position untouched. Undo uses a vertex-buffer snapshot so float error doesn't drift on repeated cycles.
+- **Scale lock** — `state.ui.scaleLocked: true` (default). Properties Panel mirrors per-axis scale edits proportionally when locked. `SceneManager.setScaleLock(locked)` hides the scale gizmo's per-axis arrows so only the central uniform handle remains; re-applied each time `setGizmoMode('scale')` materialises the gizmo.
+- **Viewport Toolbar (Fusion 360-style)** — floating bottom-centre pill with 4 groups: gizmo mode (Move/Rotate/Scale), pivot mode (World/Median/Active/Cursor), orientation toggle (World ↔ Local), camera mode (Free/Follow/World-Origin). Active button highlighted amber. See §13 *ViewportToolbar*.
+- **Nav Cube** — DOM/CSS 3D widget anchored top-left of the viewport. Click face → orthogonal preset; drag → orbit; Home button → perspective reset. Sync via `scene.onBeforeRenderObservable`. See §13 *Nav Cube*.
+- **Camera Follow Modes** — `state.scene.camera.followMode` (`free|followActive|worldOrigin`) drives a per-frame override of `_camera.target`. `followActive` tracks the active object's hierarchy bbox centre; `worldOrigin` pins to `(0,0,0)`. See §7 *Camera Follow Modes*.
+- **Focus action** — RMB Outliner object → "Focus" (was "Frame Selection"). `frameSelected()` now uses hierarchy bounds + animated camera transition (280 ms ease-in-out on `target` and `radius`).
+
+**Deferred (user accepted):** Full Phase 5 milestone verification in Bambu Studio pending. Nav cube currently does not snap-to-corner / -edge isometric views (only face clicks).
 
 ### Phase 6 — Persistence & Polish
 Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore

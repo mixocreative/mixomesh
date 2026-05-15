@@ -1,5 +1,5 @@
 import { EVENTS } from './events.js';
-import { subscribe, getState, setState } from './StateManager.js';
+import { subscribe, dispatch, getState, setState } from './StateManager.js';
 
 if (!window.BABYLON) {
   throw new Error('Babylon.js failed to load — check that the CDN <script> tag is present in index.html');
@@ -8,8 +8,9 @@ if (!window.BABYLON) {
 const BABYLON = window.BABYLON;
 const GridMaterial = BABYLON.GridMaterial ?? null;
 
-const ACCENT_COLOR    = BABYLON.Color3.FromHexString('#06b6d4');
-const ACCENT_DIM      = BABYLON.Color3.FromHexString('#06b6d4').scale(0.55);
+// Selection ring colour — matches --accent in styles/tokens.css.
+const ACCENT_COLOR    = BABYLON.Color3.FromHexString('#f59e0b');
+const ACCENT_DIM      = BABYLON.Color3.FromHexString('#f59e0b').scale(0.55);
 const GRID_CELL_SIZE  = 0.01;  // 10 mm minor
 const GRID_MAJOR_FREQ = 10;    // major every 10 cells (= 100 mm)
 const AXES_SIZE       = 0.05;  // 50 mm
@@ -26,7 +27,24 @@ let _gizmos    = null;
 let _axes      = null;   // { x, y, z } line meshes
 let _cursor    = null;
 let _ground    = null;
+let _bedLabels = [];   // single flat FRONT tag laid on the bed
 let _shadowGen = null;
+
+// Camera-preset animation state. _lastApplied* captures camera pose after a
+// preset animation finished — used by the auto-revert hook in ortho mode to
+// detect when the user pans (target moves), orbits (alpha/beta moves), or
+// otherwise diverges from the snapped face view.
+let _lastAppliedTarget = null;
+let _lastAppliedAlpha  = 0;
+let _lastAppliedBeta   = 0;
+let _animating         = false;
+const REVERT_DELTA_SQ      = 1e-6;     // > ~1 mm target pan triggers revert
+const REVERT_ANGLE_DELTA   = 0.005;    // ≈ 0.3° orbit triggers revert
+
+// First-asset auto-frame state. Set true once we frame the first import of a
+// session, or when a saved project loads (saved view wins). PROJECT_NEW resets.
+let _initiallyFramed   = false;
+let _initialFrameTimer = null;
 
 // Custom selection outline (replaces HighlightLayer because HL's stencil mask
 // leaks on PBR materials that report any alpha mode).
@@ -35,8 +53,8 @@ let _selMaskMatActive    = null;   // override for active mesh — full intensit
 let _selMaskMatSelected  = null;   // override for selected non-active — dim
 let _outlinePass         = null;
 const _maskMeshes  = new Set();
-const OUTLINE_RADIUS_PX = 3.0; // ring width in screen pixels
-const OUTLINE_INTENSITY = 1.8; // multiplier for the cyan tint
+const OUTLINE_RADIUS_PX = 4.5; // ring width in screen pixels
+const OUTLINE_INTENSITY = 2.0; // multiplier for the accent tint
 // Mask emissive brightness — the ring's per-pixel value comes from this, so
 // "active" reaches full intensity and "selected" stays muted.
 const MASK_BRIGHTNESS_ACTIVE   = 1.0;
@@ -49,7 +67,14 @@ let _selectedMeshes     = [];
 let _activeMesh         = null;
 let _currentPivotMode   = 'median';
 let _dragSnapshot       = null;
+let _bodyDragOriginPivot = null; // pivot world position at body-drag start
 let _onTransformCommit  = null; // injected by main.js to avoid circular imports
+
+// Print preview material tracking
+const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
+
+// Wireframe edge rendering tracking
+const _wireframeEdgeState = { enabled: false, color: new BABYLON.Color4(1, 0.8, 0, 1) };
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -83,12 +108,30 @@ export function init(canvas) {
   setGizmoMode(gz.mode);
   setGizmoSpace(gz.space);
 
+  _lastAppliedTarget = _camera.target.clone();
+  _scene.onBeforeRenderObservable.add(_applyFollowTarget);
   _engine.runRenderLoop(() => _scene.render());
   window.addEventListener('resize', () => _engine.resize());
 
   subscribe(EVENTS.PROJECT_LOADED, () => {
     restoreCameraState(getState().scene.camera);
+    _initiallyFramed = true;   // saved view honours user's last camera
   });
+
+  // Auto-frame on the very first scene content of a session/project. Subsequent
+  // drops do not retrigger — the user is past initial orientation by then.
+  // 50 ms debounce batches multi-mesh imports (a single GLB usually fires
+  // ASSET_INSTANTIATED N times in quick succession) so we frame the union.
+  subscribe(EVENTS.ASSET_INSTANTIATED, () => {
+    if (_initiallyFramed) return;
+    if (_initialFrameTimer) clearTimeout(_initialFrameTimer);
+    _initialFrameTimer = setTimeout(() => {
+      frameAll();
+      _initiallyFramed = true;
+      _initialFrameTimer = null;
+    }, 50);
+  });
+  subscribe(EVENTS.PROJECT_NEW, () => { _initiallyFramed = false; });
 }
 
 /**
@@ -107,20 +150,36 @@ function _setupCamera() {
   _camera = new BABYLON.ArcRotateCamera('cam', c.alpha, c.beta, c.radius, BABYLON.Vector3.Zero(), _scene);
   _camera.lowerRadiusLimit = CAM_RADIUS_MIN;
   _camera.upperRadiusLimit = CAM_RADIUS_MAX;
-  // Wheel precision is "ticks per BU" — higher = slower zoom. At BU = 1 m the
-  // default 50 means each wheel notch is ~20 mm. For a 300 mm build area we
-  // want finer control: 500 → ~2 mm per notch.
-  _camera.wheelPrecision   = 500;
   _camera.minZ = 0.001;        // 1 mm near plane
   _camera.maxZ = 100;
   _camera.attachControl(_canvas, true);
 
   const ptrs = _camera.inputs.attached.pointers;
   if (ptrs) {
-    ptrs.buttons            = [1];  // MMB → orbit only
-    // Panning at this scale needs lower sensibility (smaller = faster pan).
-    ptrs.panningSensibility = 5000;
+    // MMB orbits (button 1); RMB pans (button 2 — matches default
+    // panningMouseButton). LMB stays excluded so selection/body-drag own it.
+    ptrs.buttons            = [1, 2];
+    // Lower sensibility = faster pan. Babylon already auto-scales pan delta by
+    // camera.radius, so this stays consistent across zoom levels.
+    ptrs.panningSensibility = 1000;
   }
+
+  // Multiplicative wheel zoom feels right at any scale. wheelDeltaPercentage
+  // > 0 switches Babylon from linear (wheel/precision) to percentage-based:
+  // each notch scales radius by ~(1 ± wheelDeltaPercentage). Matches Blender
+  // and Fusion-360's smooth zoom. wheelPrecision becomes irrelevant in this
+  // mode, but we leave a sane fallback.
+  const wheel = _camera.inputs.attached.mousewheel;
+  if (wheel) {
+    wheel.wheelDeltaPercentage = 0.08;  // 8% per notch
+    wheel.wheelPrecisionY      = 60;
+  }
+  _camera.wheelPrecision = 50;
+
+  // Zero panning + orbit inertia kills "ice-skating" coast-after-release — both
+  // become 1:1 with cursor, which CAD tools expect.
+  _camera.panningInertia = 0;
+  _camera.inertia        = 0;
 }
 
 function _syncOrtho() {
@@ -137,23 +196,119 @@ function _syncOrtho() {
  * @param {'perspective'|'top'|'bottom'|'front'|'back'|'left'|'right'} preset
  */
 export function setCameraPreset(preset) {
+  // Babylon LH, Y-up. Camera position = target + R·(sinβ cosα, cosβ, sinβ sinα).
+  // "Front" semantically means the camera sits on +Z looking back toward the
+  // origin, so user sees the +Z face of geometry — α = π/2, β = π/2.
   const ORTHO = {
-    top:    { alpha: -Math.PI / 2, beta: 0           },
-    bottom: { alpha: -Math.PI / 2, beta: Math.PI     },
-    front:  { alpha: -Math.PI / 2, beta: Math.PI / 2 },
-    back:   { alpha:  Math.PI / 2, beta: Math.PI / 2 },
-    left:   { alpha:  Math.PI,     beta: Math.PI / 2 },
-    right:  { alpha:  0,           beta: Math.PI / 2 },
+    top:    { alpha:  Math.PI / 2, beta: 0           },   // camera +Y
+    bottom: { alpha:  Math.PI / 2, beta: Math.PI     },   // camera -Y
+    front:  { alpha:  Math.PI / 2, beta: Math.PI / 2 },   // camera +Z
+    back:   { alpha: -Math.PI / 2, beta: Math.PI / 2 },   // camera -Z
+    // Front-relative convention: from FRONT (Babylon LH) world +X is the
+    // viewer's LEFT. So the LEFT face is seen with the camera on +X (α=0)
+    // and the RIGHT face with the camera on -X (α=π). Matches NavCube yaw.
+    left:   { alpha:  0,           beta: Math.PI / 2 },   // camera +X
+    right:  { alpha:  Math.PI,     beta: Math.PI / 2 },   // camera -X
   };
 
+  let alpha, beta;
+  let isOrtho = false;
   if (preset === 'perspective') {
-    _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+    // Front-right-elevated home pose — same shape as initial-load default so
+    // Home button returns the user to the same neutral view they started in.
+    alpha = Math.PI / 3;
+    beta  = Math.PI / 4;
+    isOrtho = false;
   } else if (ORTHO[preset]) {
-    _camera.alpha = ORTHO[preset].alpha;
-    _camera.beta  = ORTHO[preset].beta;
-    _camera.mode  = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    _syncOrtho();
+    alpha = ORTHO[preset].alpha;
+    beta  = ORTHO[preset].beta;
+    isOrtho = true;
+  } else {
+    return;
   }
+
+  // Frame all registered meshes so the requested view always shows content.
+  const bbox = _sceneBoundingBox();
+  const target = bbox ? BABYLON.Vector3.Center(bbox.min, bbox.max) : new BABYLON.Vector3(0, 0, 0);
+  const radius = bbox
+    ? Math.max(bbox.max.subtract(bbox.min).length() * 1.2, 0.05)
+    : _camera.radius;
+
+  // Drop out of ortho up front so the interim animation frames render in
+  // perspective — orthographic interpolation looks broken mid-transition.
+  if (_camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA && !isOrtho) {
+    _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+  }
+
+  _animating = true;
+  _animateMulti({ alpha, beta, target, radius }, 320, () => {
+    _animating = false;
+    _lastAppliedTarget.copyFrom(_camera.target);
+    _lastAppliedAlpha = _camera.alpha;
+    _lastAppliedBeta  = _camera.beta;
+    if (isOrtho) {
+      _camera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+      _syncOrtho();
+    } else {
+      _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+    }
+  });
+
+  setState(s => ({ ...s, scene: { ...s.scene, camera: { ...s.scene.camera, preset } } }), { silent: true });
+  dispatch(EVENTS.CAMERA_PRESET_CHANGED, { preset });
+}
+
+/** Frame every registered scene mesh — used by Home button. */
+export function frameAll() {
+  const meshes = _scene.meshes.filter(m => m.metadata?.meshId);
+  if (!meshes.length) {
+    _animateCameraTo(new BABYLON.Vector3(0, 0, 0), 0.4, 280);
+    return;
+  }
+  frameSelected(meshes);
+}
+
+function _sceneBoundingBox() {
+  let min = new BABYLON.Vector3( Infinity,  Infinity,  Infinity);
+  let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
+  let any = false;
+  for (const m of _scene.meshes) {
+    if (!m.metadata?.meshId) continue;
+    try {
+      const r = m.getHierarchyBoundingVectors(true);
+      min = BABYLON.Vector3.Minimize(min, r.min);
+      max = BABYLON.Vector3.Maximize(max, r.max);
+      any = true;
+    } catch { /* skip degenerate */ }
+  }
+  return any ? { min, max } : null;
+}
+
+function _animateMulti({ alpha, beta, target, radius }, durationMs, onDone) {
+  const ease = new BABYLON.QuadraticEase();
+  ease.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEINOUT);
+  const frames = Math.max(1, Math.round(60 * (durationMs / 1000)));
+  let remaining = 0;
+  const oneEnd = () => { if (--remaining <= 0) onDone?.(); };
+
+  for (const [name, to] of [['alpha', alpha], ['beta', beta], ['radius', radius]]) {
+    if (to == null) continue;
+    remaining++;
+    BABYLON.Animation.CreateAndStartAnimation(
+      `cam_${name}`, _camera, name,
+      60, frames, _camera[name], to,
+      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT, ease, oneEnd
+    );
+  }
+  if (target) {
+    remaining++;
+    BABYLON.Animation.CreateAndStartAnimation(
+      'cam_target', _camera, 'target',
+      60, frames, _camera.target.clone(), target.clone(),
+      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT, ease, oneEnd
+    );
+  }
+  if (remaining === 0) onDone?.();
 }
 
 /**
@@ -164,13 +319,43 @@ export function frameSelected(meshes) {
   if (!meshes.length) return;
   let min = new BABYLON.Vector3( Infinity,  Infinity,  Infinity);
   let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
-  meshes.forEach(m => {
-    const bi = m.getBoundingInfo();
-    min = BABYLON.Vector3.Minimize(min, bi.boundingBox.minimumWorld);
-    max = BABYLON.Vector3.Maximize(max, bi.boundingBox.maximumWorld);
-  });
-  _camera.target = BABYLON.Vector3.Center(min, max);
-  _camera.radius = Math.max(max.subtract(min).length() * 1.5, 0.5);
+  for (const m of meshes) {
+    if (!m) continue;
+    try {
+      // Hierarchy bounds include any child meshes (glTF parents wrap several
+      // submeshes under one node) — using getBoundingInfo alone would frame
+      // only the picked parent's bbox, often shrunk to a point.
+      const r = m.getHierarchyBoundingVectors(true);
+      min = BABYLON.Vector3.Minimize(min, r.min);
+      max = BABYLON.Vector3.Maximize(max, r.max);
+    } catch {
+      const bi = m.getBoundingInfo?.();
+      if (!bi) continue;
+      min = BABYLON.Vector3.Minimize(min, bi.boundingBox.minimumWorld);
+      max = BABYLON.Vector3.Maximize(max, bi.boundingBox.maximumWorld);
+    }
+  }
+  if (!Number.isFinite(min.x)) return;
+  const center = BABYLON.Vector3.Center(min, max);
+  const diag   = max.subtract(min).length();
+  const radius = Math.max(diag * 1.2, 0.05);
+  _animateCameraTo(center, radius, 280);
+}
+
+function _animateCameraTo(targetVec, radiusVal, durationMs) {
+  const ease = new BABYLON.QuadraticEase();
+  ease.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEINOUT);
+  const frames = Math.max(1, Math.round(60 * (durationMs / 1000)));
+  BABYLON.Animation.CreateAndStartAnimation(
+    'frame_target', _camera, 'target',
+    60, frames, _camera.target.clone(), targetVec.clone(),
+    BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT, ease
+  );
+  BABYLON.Animation.CreateAndStartAnimation(
+    'frame_radius', _camera, 'radius',
+    60, frames, _camera.radius, radiusVal,
+    BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT, ease
+  );
 }
 
 /** @returns {{ alpha, beta, radius, target, isOrthographic }} */
@@ -246,6 +431,63 @@ function _rebuildGroundMesh(extent) {
     mat.backFaceCulling = false;
     _ground.material = mat;
   }
+
+  _rebuildBedLabels(extent);
+}
+
+/**
+ * Rebuild the single FRONT bed-edge tag. It lies flat on the ground plane as
+ * part of the bed (not a billboard) and is drawn in the muted grid-line colour
+ * so it reads as a quiet bed marking rather than a UI accent. Only FRONT is
+ * shown — once the user knows the front edge the rest is implied, and four
+ * upright tags were visual noise.
+ */
+function _rebuildBedLabels(extent) {
+  for (const lbl of _bedLabels) lbl.dispose();
+  _bedLabels = [];
+  const half   = extent / 2;
+  const labelW = Math.max(0.05, extent * 0.16);      // scales with bed
+  const labelH = labelW * 0.30;
+  const inset  = labelH * 0.55;                       // hug the front bed edge
+  const pos    = new BABYLON.Vector3(0, 0.004, half - inset);  // 4 mm above bed
+  _bedLabels.push(_createBedLabelMesh('FRONT', pos, labelW, labelH));
+}
+
+function _createBedLabelMesh(text, position, width, height) {
+  const tex = new BABYLON.DynamicTexture(`bedLabelTex_${text}`, { width: 256, height: 80 }, _scene, false);
+  tex.hasAlpha = true;
+  const ctx = tex.getContext();
+  ctx.clearRect(0, 0, 256, 80);
+  // Grid-line colour (Color3 ≈ 0.38,0.38,0.46) so it belongs to the bed, but
+  // opaque enough to be seen at a shallow angle. Orientation handled by the
+  // mesh (rotation.x = +π/2 → normal up, glyphs read toward the front edge).
+  ctx.fillStyle = 'rgba(120, 120, 140, 0.9)';
+  ctx.font = 'bold 48px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 42);
+  tex.update();
+
+  const mat = new BABYLON.StandardMaterial(`bedLabelMat_${text}`, _scene);
+  mat.diffuseTexture = tex;
+  mat.emissiveTexture = tex;
+  mat.disableLighting = true;
+  mat.opacityTexture  = tex;       // alpha via texture
+  mat.backFaceCulling = false;
+  mat.zOffset         = -2;        // pull toward camera so the grid never hides it
+
+  const plane = BABYLON.MeshBuilder.CreatePlane(`bedLabel_${text}`, { width, height }, _scene);
+  plane.material = mat;
+  plane.position = position;
+  // Lay flat on the bed, textured face UP, text readable from the front-
+  // elevated camera. Verified live: rotateX(+90°) puts the non-mirrored
+  // face up but the glyphs run away from the viewer, so rotateY(180°)
+  // spins them back. (rotateX(-90°) mirrors the text; +90° alone is
+  // upside-down.) No billboard — it is part of the bed.
+  plane.rotation.set(Math.PI / 2, Math.PI, 0);
+  plane.isPickable = false;
+  plane.renderingGroupId = 0;
+  return plane;
 }
 
 /**
@@ -463,8 +705,117 @@ export function setGizmoMode(mode) {
   _gizmos.rotationGizmoEnabled = mode === 'rotate';
   _gizmos.scaleGizmoEnabled    = mode === 'scale';
   _enabledGizmoChanged();
+  // Babylon recreates the scale sub-gizmos when scaleGizmoEnabled flips on.
+  // Re-apply the user's scale-lock preference so the per-axis arrows match
+  // the Properties panel state.
+  if (mode === 'scale') setScaleLock(getState().ui?.scaleLocked !== false);
   if (getState().gizmo.mode !== mode) {
     setState(s => ({ ...s, gizmo: { ...s.gizmo, mode } }), { silent: true });
+  }
+}
+
+/**
+ * Set the camera follow mode. Affects where `_camera.target` lives every frame:
+ *   - 'free'         → user-controlled (default). Pan + Focus work normally.
+ *   - 'followActive' → target tracked to active object's hierarchy bbox centre.
+ *   - 'worldOrigin'  → target locked to (0,0,0).
+ *
+ * In follow modes, manual pan is effectively overridden every frame. To regain
+ * pan control, switch back to 'free'.
+ *
+ * @param {'free'|'followActive'|'worldOrigin'} mode
+ */
+export function setFollowMode(mode) {
+  if (!['free', 'followActive', 'worldOrigin'].includes(mode)) return;
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, camera: { ...s.scene.camera, followMode: mode } },
+  }), { silent: true });
+}
+
+function _applyFollowTarget() {
+  if (!_camera) return;
+
+  // Radius-scaled orbit sensitivity. Babylon's default angularSensibility is
+  // a fixed value, which feels too sluggish when zoomed out (sweeping
+  // rotations need many drags) and too twitchy when zoomed in. Mild inverse
+  // scaling gives Blender/Fusion-style "more degrees per pixel the further
+  // out the camera is", without becoming uncontrollable at small radii.
+  const r = Math.max(0.15, _camera.radius);
+  const orbitSens = Math.max(80, 220 / Math.sqrt(r));
+  _camera.angularSensibilityX = orbitSens;
+  _camera.angularSensibilityY = orbitSens;
+
+  // Auto-revert: in ortho mode, ANY user-initiated camera change — pan
+  // (target diverges), orbit (alpha/beta diverge), or zoom-then-orbit — flips
+  // the preset back to 'perspective'. Captures both halves of the NavCube
+  // face-click UX: "until user pans OR rotates".
+  if (!_animating && _lastAppliedTarget && _camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) {
+    const preset = getState().scene?.camera?.preset;
+    if (preset && preset !== 'perspective') {
+      const dx = _camera.target.x - _lastAppliedTarget.x;
+      const dy = _camera.target.y - _lastAppliedTarget.y;
+      const dz = _camera.target.z - _lastAppliedTarget.z;
+      const panDivergence   = dx*dx + dy*dy + dz*dz > REVERT_DELTA_SQ;
+      const orbitDivergence =
+        Math.abs(_camera.alpha - _lastAppliedAlpha) > REVERT_ANGLE_DELTA ||
+        Math.abs(_camera.beta  - _lastAppliedBeta)  > REVERT_ANGLE_DELTA;
+      if (panDivergence || orbitDivergence) {
+        _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+        setState(s => ({ ...s, scene: { ...s.scene, camera: { ...s.scene.camera, preset: 'perspective' } } }), { silent: true });
+        dispatch(EVENTS.CAMERA_PRESET_CHANGED, { preset: 'perspective' });
+      }
+    }
+  }
+
+  // Keep ortho frustum in sync with radius — wheel zoom changes radius but
+  // doesn't trigger _syncOrtho otherwise, so the view would feel "frozen".
+  if (_camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) _syncOrtho();
+
+  const mode = getState().scene?.camera?.followMode ?? 'free';
+  if (mode === 'free') return;
+  if (mode === 'worldOrigin') {
+    _camera.target.set(0, 0, 0);
+    return;
+  }
+  // followActive: track active object hierarchy bbox centre.
+  const activeId = getState().selection?.activeId;
+  if (!activeId) return;
+  const mesh = _meshOf(activeId);
+  if (!mesh) return;
+  let center;
+  try {
+    const r = mesh.getHierarchyBoundingVectors(true);
+    center = BABYLON.Vector3.Center(r.min, r.max);
+  } catch {
+    center = mesh.getAbsolutePosition?.().clone() ?? new BABYLON.Vector3(0, 0, 0);
+  }
+  _camera.target.copyFrom(center);
+}
+
+function _meshOf(meshId) {
+  // SceneManager owns no mesh registry — delegate to AssetLoader if available
+  // via the scene's metadata-tagged meshes (set in AssetLoader registration).
+  return _scene?.meshes?.find(m => m.metadata?.meshId === meshId) ?? null;
+}
+
+/**
+ * Toggle proportional / per-axis scaling on the viewport scale gizmo.
+ *
+ * When `locked` is true, only the central uniform handle is shown — dragging
+ * it scales every axis equally. When false, the per-axis arrows are restored
+ * so the user can scale a single axis. Mirrors the Properties Panel lock UX.
+ *
+ * @param {boolean} locked
+ */
+export function setScaleLock(locked) {
+  const sg = _gizmos?.gizmos?.scaleGizmo;
+  if (!sg) return;
+  const show = !locked;
+  for (const key of ['xGizmo', 'yGizmo', 'zGizmo']) {
+    const sub = sg[key];
+    if (!sub) continue;
+    sub.isEnabled = show;
   }
 }
 
@@ -488,6 +839,9 @@ export function setGizmoSpace(space) {
  * given pivot mode. Falls back to the median for unsupported modes.
  */
 function _computePivotPosition(meshes, mode, activeMesh) {
+  if (mode === 'world') {
+    return BABYLON.Vector3.Zero();
+  }
   if (mode === 'active' && activeMesh) {
     return activeMesh.getAbsolutePosition().clone();
   }
@@ -587,17 +941,79 @@ function _onGizmoDragEnd() {
   attachToSelection(_selectedMeshes, _currentPivotMode, _activeMesh);
 }
 
+// ── Body drag (LMB on mesh body → ground-plane translate) ───────
+
+/**
+ * The Y coordinate the body-drag plane should be locked to — taken from the
+ * active mesh's world position (or the first selected mesh as a fallback).
+ * @returns {number} world Y in BU, or 0 when nothing is selected.
+ */
+export function getBodyDragPlaneY() {
+  const m = _activeMesh ?? _selectedMeshes[0] ?? null;
+  if (!m) return 0;
+  return m.getAbsolutePosition().y;
+}
+
+/**
+ * Begin a horizontal pivot drag. Returns false if there's no live pivot
+ * (no selection) or another drag is already in progress.
+ * @returns {boolean}
+ */
+export function beginBodyDrag() {
+  if (!_pivotNode || !_selectedMeshes.length) return false;
+  if (_dragSnapshot) return false;
+  _dragSnapshot = _snapshotAbsolute(_selectedMeshes);
+  _bodyDragOriginPivot = _pivotNode.position.clone();
+  return true;
+}
+
+/**
+ * Move the selection pivot by `delta` from its position at beginBodyDrag().
+ * Caller is responsible for zero-ing the Y component if the drag should stay
+ * on the horizontal plane.
+ * @param {BABYLON.Vector3} delta
+ */
+export function setBodyDragOffset(delta) {
+  if (!_pivotNode || !_bodyDragOriginPivot || !delta) return;
+  _pivotNode.position.copyFrom(_bodyDragOriginPivot).addInPlace(delta);
+}
+
+/**
+ * Finish a body drag — snapshot the new transforms, push the same
+ * TransformCommand pipeline gizmo drags use, and re-anchor the pivot.
+ */
+export function endBodyDrag() {
+  if (!_dragSnapshot) return;
+  const prev = _dragSnapshot;
+  const next = _snapshotAbsolute(_selectedMeshes);
+  _dragSnapshot = null;
+  _bodyDragOriginPivot = null;
+  if (_onTransformCommit) _onTransformCommit({ prev, next, alreadyApplied: true });
+  attachToSelection(_selectedMeshes, _currentPivotMode, _activeMesh);
+}
+
+/** Abort a body drag — revert the pivot to its origin and drop snapshots. */
+export function cancelBodyDrag() {
+  if (!_dragSnapshot) return;
+  if (_pivotNode && _bodyDragOriginPivot) {
+    _pivotNode.position.copyFrom(_bodyDragOriginPivot);
+  }
+  _dragSnapshot = null;
+  _bodyDragOriginPivot = null;
+}
+
 // ── Overlays ─────────────────────────────────────────────
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'printPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
   switch (name) {
     case 'grid':
       if (_ground) _ground.isVisible = on;
+      for (const lbl of _bedLabels) lbl.isVisible = on;
       break;
     case 'axes':
       if (_axes) {
@@ -609,6 +1025,85 @@ export function setOverlay(name, on) {
     case 'wireframe':
       _scene.forceWireframe = on;
       break;
+    case 'printPreview':
+      _setPrintPreviewMode(on);
+      break;
+    case 'wireframeEdges':
+      _setWireframeEdgesMode(on);
+      break;
+  }
+}
+
+/**
+ * Update the wireframe edge color and re-apply if edges are currently enabled.
+ * @param {string} hexColor  e.g. '#ffcc00'
+ */
+export function setWireframeEdgeColor(hexColor) {
+  try {
+    const c = BABYLON.Color3.FromHexString(hexColor);
+    _wireframeEdgeState.color = new BABYLON.Color4(c.r, c.g, c.b, 1);
+  } catch {
+    return;
+  }
+  if (!_wireframeEdgeState.enabled) return;
+  for (const mesh of _scene.meshes) {
+    if (mesh._edgesRenderer) mesh.edgesColor = _wireframeEdgeState.color;
+  }
+}
+
+function _setWireframeEdgesMode(enabled) {
+  _wireframeEdgeState.enabled = enabled;
+  for (const mesh of _scene.meshes) {
+    if (!mesh.geometry) continue;
+    if (enabled) {
+      mesh.enableEdgesRendering(0.9, true);
+      mesh.edgesColor = _wireframeEdgeState.color;
+      mesh.edgesWidth = 1.5;
+    } else {
+      mesh.disableEdgesRendering();
+    }
+  }
+}
+
+/**
+ * Apply print preview mode: remove metallic from all materials for a matte appearance.
+ * When disabled, restore original metallic values.
+ */
+function _setPrintPreviewMode(enabled) {
+  const meshes = _scene.meshes;
+
+  if (enabled) {
+    // Store original metallic values and set all to 0
+    for (const mesh of meshes) {
+      if (!mesh.material) continue;
+
+      const mat = mesh.material;
+      const matId = mat.uniqueId.toString();
+
+      if (!_printPreviewMaterialMap.has(matId)) {
+        // Store original value
+        const originalMetallic = mat.metallic ?? 0;
+        _printPreviewMaterialMap.set(matId, { originalMetallic });
+      }
+
+      // Apply matte appearance (remove metallic)
+      if (mat.metallic !== undefined) {
+        mat.metallic = 0;
+      }
+    }
+  } else {
+    // Restore original metallic values
+    for (const mesh of meshes) {
+      if (!mesh.material) continue;
+
+      const mat = mesh.material;
+      const matId = mat.uniqueId.toString();
+      const stored = _printPreviewMaterialMap.get(matId);
+
+      if (stored && mat.metallic !== undefined) {
+        mat.metallic = stored.originalMetallic;
+      }
+    }
   }
 }
 
@@ -689,10 +1184,11 @@ export function pickMeshIdAt(x, y) {
 export const SceneManager = {
   init, setTransformCommitHandler,
   getScene, getEngine, getShadowGenerator,
-  setCameraPreset, frameSelected, saveCameraState, restoreCameraState,
-  setGizmoMode, setGizmoSpace, attachToSelection,
+  setCameraPreset, frameSelected, frameAll, saveCameraState, restoreCameraState,
+  setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
-  setOverlay, setGridSize, updateBedPreview,
+  setOverlay, setWireframeEdgeColor, setGridSize, updateBedPreview,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
+  getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 };

@@ -7,25 +7,31 @@ const INITIAL_STATE = {
   scene: {
     objects: {},
     groups: {},
+    collections: {},
     assetLibrary: {},
     shaders: {},
     uvOverrides: {},
     userSwatches: [],
     camera: {
-      preset: 'perspective', alpha: 1.57, beta: 1.1, radius: 0.4,
+      // Front-3/4 elevated default. Babylon ArcRotateCamera positions camera at
+      //   target + R·(sinβ cosα, cosβ, sinβ sinα).
+      // β = π/4 (45° downward); α = π/3 puts camera in the front-right quadrant
+      // (+X, +Z). radius 0.4243 ≈ 0.3 / cos(π/4) → camera.y ≈ 30 cm above origin.
+      preset: 'perspective', alpha: Math.PI / 3, beta: Math.PI / 4, radius: 0.4243,
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
+      followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
-    overlays: { grid: true, axes: true, wireframe: false, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: false },
     gridSize: 0.3,                       // BU — default 300 mm build area
     cursor3d: { x: 0, y: 0, z: 0 },
   },
-  selection: { selectedIds: [], activeId: null, pivotMode: 'median' },
+  selection: { selectedIds: [], activeId: null, pivotMode: 'active' },
   print: {
     workingRatio: 1, targetRatio: 1,
     bedPreset: 'Bambu P1S', bedDimensions: { x: 256, y: 256, z: 256 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
-  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220 },
+  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
 

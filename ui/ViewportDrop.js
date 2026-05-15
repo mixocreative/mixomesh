@@ -5,6 +5,7 @@ import { Toast, safeAsync } from './Toast.js';
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
 const SUPPORTED_EXT  = new Set(['.glb', '.gltf', '.obj', '.stl']);
+const SESSION_KEY    = '__session__';
 
 /**
  * Wire drag-and-drop on the viewport. Drops can come from:
@@ -69,6 +70,11 @@ function _handleDrop(e, position) {
   if (panelPayload) {
     safeAsync(async () => {
       const { mountKey, path, filename } = JSON.parse(panelPayload);
+      if (mountKey === SESSION_KEY) {
+        // path IS the assetId; re-instantiate from existing container
+        await AssetLoader.instantiateAsset(path, position);
+        return;
+      }
       const handle = AssetPanel.getFileHandle(mountKey, path);
       if (!handle) throw new Error(`No file handle for ${filename}`);
       await AssetLoader.loadFromHandle(handle, position, {

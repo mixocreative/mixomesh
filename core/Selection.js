@@ -8,7 +8,7 @@ import { AssetLoader } from './AssetLoader.js';
 // includes selection, it just isn't a dirty trigger.
 const SILENT = { silent: true };
 
-const VALID_PIVOTS = new Set(['median', 'active', 'individual', 'cursor']);
+const VALID_PIVOTS = new Set(['world', 'median', 'active', 'individual', 'cursor']);
 
 /**
  * Resolve a list of meshIds to live Babylon meshes, dropping unknowns / ghosts.
@@ -132,7 +132,7 @@ export function setPivotMode(mode) {
 
 /** Cycle through pivot modes in order: median → active → individual → cursor. */
 export function cyclePivotMode() {
-  const order = ['median', 'active', 'individual', 'cursor'];
+  const order = ['world', 'median', 'active', 'individual', 'cursor'];
   const cur = getState().selection.pivotMode;
   const next = order[(order.indexOf(cur) + 1) % order.length];
   setPivotMode(next);
