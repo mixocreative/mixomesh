@@ -45,6 +45,15 @@ export function register(id, renderFn) {
   _renderers.set(id, renderFn);
 }
 
+/**
+ * Convenience opener — dispatches MODAL_OPEN for a registered id.
+ * @param {string} id
+ * @param {object} [payload]  merged into the modal data (may include onClose)
+ */
+export function open(id, payload = {}) {
+  dispatch(EVENTS.MODAL_OPEN, { id, ...payload });
+}
+
 /** Programmatically close the active modal (same effect as ESC). */
 export function close(result) {
   _close(result);
@@ -131,4 +140,4 @@ function _close(result) {
   catch (err) { console.error('Modal onClose handler threw:', err); }
 }
 
-export const Modal = { init, register, close };
+export const Modal = { init, register, open, close };

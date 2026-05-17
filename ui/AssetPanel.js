@@ -1,6 +1,8 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, getState } from '../core/StateManager.js';
+import { subscribe, getState, dispatch } from '../core/StateManager.js';
 import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
+import { kvSet, kvGet, getHandle } from '../core/idb.js';
+import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 
@@ -37,23 +39,83 @@ export function init() {
   subscribe(EVENTS.ASSET_REGISTERED,   () => _renderGrid());
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
 
+  Modal.register('remountFolder', ({ data, close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `
+      <h2 class="pm-modal-title">Re-mount asset folder?</h2>
+      <p class="pm-modal-body">Last session's asset folder
+        <strong>${_esc(data?.name || '')}</strong> is available. Re-mount it so
+        saved projects relink to live files?</p>
+      <div class="pm-modal-actions">
+        <button class="btn" data-r="skip">Skip</button>
+        <button class="btn btn-primary" data-r="mount">Mount</button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b =>
+      b.addEventListener('click', () => close(b.dataset.r)));
+    return el;
+  });
+
   _renderTree();
   _renderGrid();
+}
+
+const LAST_MOUNT_KEY = 'last_mount_dir';
+
+/** Scan a granted directory handle into the panel + cache its file handles. */
+async function _mountHandle(key, handle, announce) {
+  const tree = await _scanDirectory(handle, '');
+  _mounts.set(key, { handle, tree });
+  _cacheHandles(key, tree);
+  _selectedKey  = key;
+  _selectedPath = '';
+  _renderTree();
+  _renderGrid();
+  if (announce) Toast.show(`Mounted: ${handle.name}`, 'success', 3000);
 }
 
 /** Programmatically trigger the directory-mount picker (also bound to header button). */
 export async function promptMount() {
   await safeAsync(async () => {
     const { key, handle } = await AssetLoader.mountDirectory();
-    const tree = await _scanDirectory(handle, '');
-    _mounts.set(key, { handle, tree });
-    _cacheHandles(key, tree);
-    _selectedKey  = key;
-    _selectedPath = '';
-    _renderTree();
-    _renderGrid();
-    Toast.show(`Mounted: ${handle.name}`, 'success', 3000);
+    await _mountHandle(key, handle, true);
+    await kvSet(LAST_MOUNT_KEY, { key, name: handle.name });
   });
+}
+
+/**
+ * Boot flow: if the last-mounted folder handle is still in IndexedDB, ask the
+ * user whether to re-mount it (permission re-grant needs the modal-button
+ * gesture). Replaces autosave recovery on startup.
+ */
+export async function promptRemount() {
+  let rec;
+  try { rec = await kvGet(LAST_MOUNT_KEY); } catch { return; }
+  if (!rec?.key) return;
+  const handle = await getHandle(rec.key);
+  if (!handle) return;
+
+  const choice = await new Promise(resolve => {
+    dispatch(EVENTS.MODAL_OPEN, {
+      id: 'remountFolder',
+      name: rec.name,
+      onClose: (r) => resolve(r || 'skip'),
+    });
+  });
+  if (choice !== 'mount') return;
+
+  await safeAsync(async () => {
+    if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') {
+      Toast.show('Folder permission denied', 'warning', 4000);
+      return;
+    }
+    await _mountHandle(rec.key, handle, true);
+  });
+}
+
+function _esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /**
@@ -333,4 +395,4 @@ function _escape(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
-export const AssetPanel = { init, promptMount, getFileHandle };
+export const AssetPanel = { init, promptMount, promptRemount, getFileHandle };

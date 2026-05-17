@@ -497,6 +497,69 @@ export function createShader(partial = {}) {
 }
 
 /**
+ * Recreate a shader from a persisted entry, keeping its original id so
+ * restored SceneObjects' `shaderId` references stay valid (BLUEPRINT §10 load
+ * step 5). linkedMeshIds start empty — rebuilt later by rebuildLinkedIndex().
+ *
+ * Texture handling: a user-loaded texture (restored by AssetLoader under the
+ * same assetId) is rebound. glTF-embedded ("imported") textures are not
+ * restored this phase — the shader falls back to its persisted diffuse colour.
+ *
+ * @param {object} entry  persisted ShaderEntry
+ * @returns {string} shaderId (same as entry.id)
+ */
+export function restoreShader(entry) {
+  const id   = entry.id;
+  const name = entry.name ?? 'Material';
+  const type = entry.type ?? 'standard';
+  const scene = SceneManager.getScene();
+  const mat = _createBabylonMaterial(type, name, scene);
+  _materials.set(id, mat);
+
+  const restored = {
+    id, name, type,
+    diffuseColor:          entry.diffuseColor ?? FALLBACK_DIFFUSE,
+    diffuseTextureAssetId: entry.diffuseTextureAssetId ?? null,
+    uvBase: {
+      offsetX:  entry.uvBase?.offsetX  ?? 0,
+      offsetY:  entry.uvBase?.offsetY  ?? 0,
+      scaleX:   entry.uvBase?.scaleX   ?? 1,
+      scaleY:   entry.uvBase?.scaleY   ?? 1,
+      rotation: entry.uvBase?.rotation ?? 0,
+    },
+    opacity:   entry.opacity   ?? 1,
+    roughness: entry.roughness ?? 0.5,
+    metallic:  entry.metallic  ?? 0,
+    linkedMeshIds: [],
+  };
+  _applyEntryToMaterial(mat, restored);
+
+  const tex = restored.diffuseTextureAssetId
+    ? AssetLoader.getBabylonTexture(restored.diffuseTextureAssetId)
+    : null;
+  if (tex) _setMaterialField(mat, 'diffuseTextureAssetId', restored.diffuseTextureAssetId, type);
+  else restored.diffuseTextureAssetId = null;   // imported texture not restored → colour only
+
+  setState(state => ({
+    ...state,
+    scene: { ...state.scene, shaders: { ...state.scene.shaders, [id]: restored } },
+  }), SILENT);
+  dispatch(EVENTS.SHADER_CREATED, { shaderId: id });
+  return id;
+}
+
+/**
+ * Dispose every Babylon material + UV-override clone. BLUEPRINT §14.2
+ * "on new/load project".
+ */
+export function resetAll() {
+  for (const m of _materials.values()) { try { m.dispose(); } catch { /* */ } }
+  for (const c of _uvClones.values()) { try { c.material?.dispose(); } catch { /* */ } }
+  _materials.clear();
+  _uvClones.clear();
+}
+
+/**
  * Mutate one field of a shader. Live-updates the Babylon material so every
  * linked mesh re-renders without per-mesh clones (per BLUEPRINT §10).
  *
@@ -836,6 +899,7 @@ export const ShaderLibrary = {
   createShader, updateShader, duplicateShader, deleteShader,
   assignToMesh, setUVOverride, clearUVOverride, applySwatchColor,
   setDiffuseTexture, rebuildLinkedIndex,
+  restoreShader, resetAll,
   linkMesh, unlinkMesh,
   getBabylonMaterial, getMaterialById,
 };

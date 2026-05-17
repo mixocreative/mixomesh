@@ -69,6 +69,7 @@ core/
   InputManager.js
   SceneManager.js
   AssetLoader.js
+  ImportNormalizer.js      ← import-normalization seam (units/ratio/RH→LH bake)
   ShaderLibrary.js
   MeshValidator.js
   PersistenceManager.js
@@ -120,6 +121,7 @@ If you find yourself writing > 30 lines of geometry / scene management code, sto
 | `InputManager.js` | < 300 |
 | `SceneManager.js` | < 400 |
 | `AssetLoader.js` | < 350 |
+| `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 400 |
 | `MeshValidator.js` | < 300 |
 | `PersistenceManager.js` | < 400 |
@@ -870,9 +872,17 @@ Three critical checks only. Pure JS — no WASM. Each handles 50k+ triangle mesh
 
 | Check | Severity | Method | Auto-Fix |
 |---|---|---|---|
-| Non-manifold edges | error | Edge-face count map; flag edges with count ≠ 2 | Merge by distance |
-| Inverted normals | error | Cast ray from face centroid along normal; if it exits the mesh it's correct, else inverted (majority vote) | Flip winding |
+| Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | Merge by distance |
+| Inverted normals | **warning** (Phase 6) | Cast ray from face centroid along normal; if it exits the mesh it's correct, else inverted (majority vote) | Flip winding |
 | Exceeds bed volume | warning | Compare mesh world AABB to bed dims | None |
+
+> **Phase 6 severity change.** Non-manifold + inverted-normals were `error`
+> (hard-blocked export). A colour-print *assembly* tool works with downloaded
+> display models that are routinely non-watertight, and slicers
+> (Bambu / Lychee / Cura) auto-repair these — so they are now non-blocking
+> warnings, still surfaced. The non-manifold check also welds by position
+> first; without that, unwelded glTF/STL imports (per-triangle vertex copies)
+> report nearly every edge as non-manifold even when perfectly closed.
 
 Deferred to future versions: thin-wall heatmap, self-intersection, overhang analysis.
 
@@ -1097,7 +1107,19 @@ PrintManager.setTargetRatio(num)              // 1, 35, 48, 72 — denominator
 PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
+PrintManager.exportThreeMF(options)           → Promise<void>  // colour, mm-native
 ```
+> **Phase 6 — structured export pipeline.** All three entry points are thin
+> wrappers over one orchestrator `_runExport(format, options)` driven by a
+> declarative `FORMATS` / `PREP_STEPS` registry: collect → clone (+
+> `makeGeometryUnique` so the shared-geometry clone can't corrupt the scene)
+> → ordered prep (`fallbackMaterial` / `flattenWorld` (world-matrix + mm scale
+> bake) / weld / optimizeIndices / createNormals / CSG2) → re-validate the
+> fixed clones → serialize → package. The live scene is never mutated.
+> Validation runs *after* prep; export only blocks on errors that survive the
+> auto-fix (`err.validationErrors`). `options.onProgress(frac,msg)` feeds the
+> blocking `ui/ProgressOverlay`. See §15 *Phase 6* for the full surface
+> (CSG2-needs-watertight, 3MF Z-up + baked viewer-invariant placement, etc.).
 
 ### Scale Math
 
@@ -1432,9 +1454,78 @@ Full `ShaderLibrary` · `ShaderPanel` (Shader Library) · Properties Panel shade
 
 **Deferred (user accepted):** Nav cube does not snap-to-corner / -edge isometric views (only face clicks). Camera follow modes lightly tested. Old v3.1 saves with scalar `scene.gridSize` lose grid styling (footprint still correct from bed).
 
-### Phase 6 — Persistence & Polish
-Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore
+### Phase 6 — Persistence & Export Hardening — IN PROGRESS (awaiting live Chrome verification)
+Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore · import-transform normalization · structured export pipeline (OBJ / STL / **3MF**) · progress overlay
 **Milestone:** Save → close → reopen identically. Move asset file → reopen → ghost → relink → resolved.
+
+**What shipped this session (code complete, headless-tested, not yet Chrome-verified):**
+
+- **`core/PersistenceManager.js`** — `save / saveAs / open / newProject / getRecentProjects / openRecent / relinkAsset / startAutosave / stopAutosave / recoverAutosave`. Project file is a JSON `.mixo` written via `showSaveFilePicker` (handle cached + persisted for re-save / recent). v3.1 schema embeds every asset's bytes (base64) **plus** `sha256` + `originalPath` + `directoryHandleKey`, per-object world transform + `containerMeshIndex`, group transforms, camera (+followMode), print, ui, gizmo, selection, shaders (sans `linkedMeshIds`), uvOverrides, collections, swatches. Load sequence per §10/§11.
+  - **Asset resolution priority on load:** live file at `originalPath` in a re-granted directory handle → live file found by content-hash scan of that dir (moved/renamed) → embedded base64 copy (`isUnlinked`, "static") → ghost (`isGhost`). Unmatched-but-embedded surfaces a non-blocking modal listing them with per-item Relink.
+  - **Boot behaviour (user decision):** does NOT auto-recover/prompt a discarded autosave. Instead remembers the last mounted asset folder (`idb` kv `last_mount_dir`) and offers a "Re-mount asset folder '<name>'? [Skip][Mount]" modal so saved projects relink to live files. Autosave still *writes* to `idb` every 60 s while dirty (not surfaced on boot).
+  - **State support:** `StateManager.replaceState` / `freshState`. `AssetLoader.restoreContainer / bindRestoredMesh / restoreTexture / registerAssetEntry / getAssetBytes / getContainerGeomMeshes / resetAll`. `ShaderLibrary.restoreShader` (rebuilds material with the *persisted* shaderId so SceneObject refs stay valid) / `resetAll`. `idb.kvKeys` + file-handle re-exports.
+  - **Accepted scope cut:** glTF-embedded ("imported") textures are not re-bound on load — affected shaders fall back to their persisted diffuse colour. Mesh geometry, user-loaded textures, shader colour/opacity/rough/metal/UV, transforms, groups, collections, camera all restore. Fits the solid-colour-per-part print use case.
+
+- **Import-transform normalization (`AssetLoader.bakeImportTransform`)** — the single seam for everything an import arrives with. Bakes unit×ratio scale, the Babylon glTF **right-handed→left-handed `__root__` reflection**, and the drop offset into vertex data; every mesh ends `parent=null, rotation=0, scaling=(1,1,1)`, `position`=world placement. Kills the `Properties → rotZ 180 / scaleY -1` artefact (a reflection has no clean rotation+positive-scale decomposition). Negative-determinant bakes get `flipFaces` so winding stays outward. `__root__`/empty nodes disposed → flat hierarchy. (Supersedes the §8 "scale only" bake note.)
+
+- **Commands (`HistoryManager`)** — real `TransformSwabCommand` (snap selected objects' world transform to the active) and `SmartReplaceCommand` (swap selected objects' geometry for a clone of the active, keeping each target's transform/shader/collection; soft-delete reversible). Wired in `ContextMenu` (multi-select); plus a **Relink** context item for ghost/unlinked objects.
+
+- **MeshValidator correctness + severity** — `_checkNonManifold` now **welds by position first** (imported glTF/STL is unwelded → per-triangle vertex copies → an index-keyed edge check false-flagged ~every edge; e.g. "134508 non-manifold edges" on a closed mesh). Non-manifold + inverted-normals reclassified **`error` → `warning`** (slicer-repairable; a colour-print assembly tool must not hard-block downloaded display models). `validateAllPrintParts` resolves meshes via `AssetLoader.getBabylonMesh` (the `obj._babylonMesh` it read never existed — state is JSON-cloned). Same fix in `PrintManager._collectPrintMeshes / getExportedDimensions` and `PrintPanel` auto-fix.
+
+- **Structured export pipeline (`PrintManager`)** — one orchestrator `_runExport(formatKey, options)` for every format:
+  `collect → clone (+ unique geometry) → ordered PREP steps → re-validate the fixed clones → serialize → package/download`.
+  - **Non-destructive guarantee (critical nuance).** Babylon `Mesh.clone()`
+    shares the source *geometry* by reference; every PREP step rewrites vertex
+    data in place. The orchestrator therefore calls
+    `clone.makeGeometryUnique()` **immediately after clone, before any prep**,
+    for *all* formats. Without it `flattenWorld`/`weld`/`optimizeIndices`/
+    `createNormals`/CSG would corrupt the live scene mesh. The clone keeps its
+    parent (so its world matrix includes ancestors) and is disposed in
+    `finally`. Net: the live scene — geometry, transforms, materials,
+    hierarchy — is never mutated by an export; re-export is idempotent.
+  - **`FORMATS` registry** is the single definition point: `{ prep:[stepKeys], needsCSG, serialize(ctx) }`.
+  - **`PREP_STEPS`** map: `fallbackMaterial` (neutral material so `OBJExport.MTL`'s `specularPower` deref can't crash on untextured imports), `flattenWorld` (see below), `weld` (`mergeVerticesByDistance` / `VertexData.MergeByDistance`, 0.1 mm), `optimizeIndices`, `createNormals(true)`, `csg` / `csgSolidOnly`. (`makeUnique`/`bakeTransform` steps were removed — superseded by the up-front unique-geometry call + `flattenWorld`.)
+  - **CSG2 nuance.** CSG2/Manifold *requires watertight input* — it cannot heal a non-watertight mesh, it rejects it (`"Not manifold"`). That is the normal case for downloaded display models and is **not an error**: the re-bake is skipped for that part (silent, no per-mesh console noise), the part keeps its welded/optimised geometry, the count is surfaced as **one** info toast ("N parts not watertight — slicer will auto-repair"). `csg` = unconditional (STL); `csgSolidOnly` = solid-colour meshes only (3MF colour is per-object, so colour-safe; textured meshes keep UVs). CSG2 init is lazy + degrades to a warning if the build lacks it.
+  - **Validation runs on the fixed clones, after prep.** Export only blocks when an error *survives* the auto-fix; the surviving list rides on `err.validationErrors` and `PrintPanel` shows the `validationErrors` modal only then. (Removed the pre-validate gate and the `exportConfirm` modal.)
+  - **Serializers:** OBJ → zip(.obj/.mtl[/textures]); STL → `BABYLON.STLExport.CreateSTL` (direct); 3MF → hand-written OPC (below).
+  - **Progress + blocking overlay:** `_runExport` reports `options.onProgress(frac,msg)` across collect/prep/validate/serialize/package/download. `ui/ProgressOverlay.js` is a full-screen darkened, pointer-locked overlay with a % bar; `PrintPanel.runExport` shows it for the duration and hides it in `finally`.
+
+- **Import/export transform seams are now separate, single-purpose modules.**
+  *Import side:* `core/ImportNormalizer.js` owns `importScaleFactor` (sourceUnit
+  × modelRatio / workingRatio — one place, both the fresh-load and
+  project-restore paths call it, no drift) and `bakeImportTransform` (THE
+  import-normalization seam: units/ratio + glTF RH→LH `__root__` reflection +
+  drop anchor baked into vertices; every mesh ends `parent=null, rot=0,
+  scale=1`). `SOURCE_UNIT_FACTORS`/`DEFAULT_SOURCE_UNIT` live here too and are
+  re-exported by `AssetLoader` and consumed directly by `PropertiesPanel`
+  (the old hand-synced duplicate constant is gone). **It is one unified path,
+  not branched by file extension:** the glTF RH→LH reflection is
+  auto-detected (negative-determinant world matrix) and a no-op for STL/OBJ
+  which never carry it; unit varies per *asset* (`sourceUnit`), not per
+  format. Per-extension import rules, if ever needed, branch here. *Export
+  side:*
+  `PrintManager`'s `flattenWorld` PREP step is the symmetric world-bake. Future
+  per-import settings go in `ImportNormalizer` and nowhere else; the dead
+  `bakeTransform` PREP step was removed (superseded by `flattenWorld`).
+- **`flattenWorld` prep (all formats)** — bakes the full world matrix
+  (ancestors/groups included) + the mm export scale into each clone's
+  *unique* vertices, then flattens the node to identity. The clone keeps its
+  parent so the world matrix is real. Fixes grouped parts exporting at their
+  group-local transform (the "scales/locations messed up" bug). Hierarchy-
+  independent afterwards — OBJ/STL/3MF all read correct world geometry.
+- **3MF axis convention** — Babylon is Y-up (left-handed after the import
+  bake); 3MF/slicers are Z-up right-handed. The writer rotates every vertex
+  `Y_UP_TO_Z_UP` (`Matrix.RotationX(-90°)`) and flips triangle winding
+  (`THREEMF_REVERSE_WINDING`) for the RH consumer; origin-centering is
+  computed in 3MF space. Both are single switches at the top of the pipeline —
+  verify orientation in a slicer, not on paper (LH↔RH reasoning is
+  unreliable; same lesson as `[[navcube_camera_convention]]`).
+- **3MF export (`exportThreeMF`, "Export 3MF (color)" button)** — Babylon has no 3MF serializer (`SceneSerializer` only emits `.babylon` JSON), so the writer is hand-rolled: a spec-compliant OPC zip (`[Content_Types].xml`, `_rels/.rels`, `3D/3dmodel.model`, `model/3mf` mime). One `<object>` per mesh (multi-shell hierarchy preserved, unlike STL's single blob); solid colour via the Materials-extension `<m:colorgroup>` + per-object `pid/pindex` (uppercase `#RRGGBBFF`). Vertices arrive world-space mm (from `flattenWorld`), get rotated Y-up→Z-up, winding-flipped, then a single shared offset centres the whole build on the origin (`unit="millimeter"` literal). **Placement is fully baked + viewer-invariant:** all geometry is absolute in the vertices and every `<build><item>` carries an **explicit identity transform** (`THREEMF_IDENTITY` = `1 0 0 0 1 0 0 0 1 0 0 0`), so no slicer/viewer can reposition a part by guessing a transform — Bambu / Lychee / Prusa / 3D-Viewer all show identical placement. No null-UV trap (BaseMaterial path never declares texture mapping). Texture2D / true textured-3MF deferred — use OBJ for image-textured parts.
+
+- **Headless test harness (`tests/`, no build step)** — run:
+  - `node --import ./tests/register-hooks.mjs tests/export.test.mjs` (30 cases)
+  - `node --import ./tests/register-hooks.mjs tests/validator.test.mjs` (4 cases)
+  Stubs Babylon / JSZip (bare-specifier loader hook) / DOM, drives the **real** `PrintManager` + `MeshValidator`. Covers: collection gating; per-format prep; **non-destructive** (clone unique + world-baked while the live scene mesh stays untouched); post-fix validation (error-survives vs error-resolved); selectedOnly / individually; OBJ fallback material; STL CSG present/absent + non-watertight CSG2 rejection → quiet skip + one info toast; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item + textured-skips-CSG; progress monotonic→1 and not advanced past the empty-collect guard; position-welded manifold (no false positive) + warning severity. **34/34 green.**
 
 ### Phase handoff (every time a phase closes)
 1. Flip the phase's checkbox in `CLAUDE.md` to `[x]`.

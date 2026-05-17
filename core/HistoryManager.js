@@ -875,7 +875,158 @@ function _applyWorldRescale(fromRatio, toRatio) {
   }, SILENT);
 }
 
-// ── Stubs for later phases (Phase 6) ────────────────────
+// ── Transform Swab / Smart Replace (Phase 6) ─────────────
 
-export class SmartReplaceCommand   { constructor(){ this.label='Smart Replace';   } execute(){} undo(){} }
-export class TransformSwabCommand  { constructor(){ this.label='Transform Swab';  } execute(){} undo(){} }
+/** Snapshot a mesh's world transform in the {position,rotation:quat,scaling} shape. */
+function _captureWorld(mesh) {
+  mesh.computeWorldMatrix(true);
+  const q = mesh.absoluteRotationQuaternion
+    ?? BABYLON.Quaternion.FromEulerVector(mesh.rotation ?? BABYLON.Vector3.Zero());
+  const p = mesh.getAbsolutePosition();
+  const s = mesh.absoluteScaling ?? mesh.scaling;
+  return {
+    position: { x: p.x, y: p.y, z: p.z },
+    rotation: { x: q.x, y: q.y, z: q.z, w: q.w },
+    scaling:  { x: s.x, y: s.y, z: s.z },
+  };
+}
+
+/**
+ * Snap every other selected object's transform to match the active object.
+ * Position + rotation + scale. Undo restores each target's prior transform.
+ */
+export class TransformSwabCommand {
+  constructor(meshIds, activeId) {
+    this._activeId = activeId;
+    this._targets = (meshIds ?? []).filter(id => id !== activeId);
+    this._prev = {};
+    this._next = {};
+    const active = AssetLoader.getBabylonMesh(activeId);
+    const src = active ? _captureWorld(active) : null;
+    for (const id of this._targets) {
+      const m = AssetLoader.getBabylonMesh(id);
+      if (!m || !src) continue;
+      this._prev[id] = _captureWorld(m);
+      this._next[id] = { position: { ...src.position }, rotation: { ...src.rotation }, scaling: { ...src.scaling } };
+    }
+    this.label = this._targets.length === 1 ? 'Transform Swab' : `Transform Swab (${this._targets.length})`;
+  }
+  execute() { _applyTransforms(this._next); markDirty(); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) }); }
+  undo()    { _applyTransforms(this._prev); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) }); }
+}
+
+/**
+ * Replace every other selected object's geometry with a clone of the active
+ * object's mesh, keeping each target's own world transform, shader,
+ * collection, parent and print-part flags (BLUEPRINT context-menu "Smart
+ * Replace"). Soft-deletes the originals so undo restores them instantly.
+ */
+export class SmartReplaceCommand {
+  constructor(meshIds, activeId) {
+    this._activeId = activeId;
+    this._targets  = (meshIds ?? []).filter(id => id !== activeId);
+    this._executed = false;
+    this._pairs    = [];   // [{ oldId, oldObj, oldMesh, oldParent, newId, newMesh }]
+    this.label = this._targets.length === 1 ? 'Smart Replace' : `Smart Replace (${this._targets.length})`;
+  }
+  execute() {
+    if (this._executed) {                       // redo
+      _withDetachedPivot(() => {
+        for (const p of this._pairs) {
+          p.oldMesh.setParent(null); p.oldMesh.setEnabled(false);
+          p.newMesh.setEnabled(true);
+          AssetLoader.restoreCloneToScene(p.newId, p.newObj, p.newMesh);
+          setState(state => {
+            const next = { ...state.scene.objects };
+            delete next[p.oldId];
+            return { ...state, scene: { ...state.scene, objects: next } };
+          }, SILENT);
+          dispatch(EVENTS.OBJECT_REMOVED,  { id: p.oldId });
+          dispatch(EVENTS.OBJECT_RESTORED, { id: p.newId });
+        }
+        const ids = this._pairs.map(p => p.newId);
+        if (ids.length) Selection.set(ids, ids[ids.length - 1]);
+      });
+      markDirty();
+      return;
+    }
+    const active = AssetLoader.getBabylonMesh(this._activeId);
+    if (!active) return;
+    _withDetachedPivot(() => {
+      for (const oldId of this._targets) {
+        const oldObj  = getState().scene.objects[oldId];
+        const oldMesh = AssetLoader.getBabylonMesh(oldId);
+        if (!oldObj || !oldMesh) continue;
+        const world = _captureWorld(oldMesh);
+
+        const newId = AssetLoader.cloneMeshAsNewObject(this._activeId, null);
+        if (!newId) continue;
+        const newMesh = AssetLoader.getBabylonMesh(newId);
+        if (!newMesh) continue;
+
+        _applyAbsoluteTransform(newMesh, world);
+
+        // Adopt the target's identity + settings; geometry comes from active.
+        setState(state => {
+          const cur = state.scene.objects[newId];
+          if (!cur) return state;
+          return {
+            ...state,
+            scene: { ...state.scene, objects: { ...state.scene.objects, [newId]: {
+              ...cur,
+              name: oldObj.name,
+              collectionId: oldObj.collectionId ?? null,
+              parentId: oldObj.parentId ?? null,
+              isPrintPart: !!oldObj.isPrintPart,
+              partLabel: oldObj.partLabel ?? '',
+              partTolerance: oldObj.partTolerance ?? 0,
+            } } },
+          };
+        }, SILENT);
+        if (oldObj.shaderId) ShaderLibrary.assignToMesh(oldObj.shaderId, newId);
+
+        oldMesh.setParent(null);
+        oldMesh.setEnabled(false);
+        const oldParent = oldMesh.parent ?? null;
+        setState(state => {
+          const next = { ...state.scene.objects };
+          delete next[oldId];
+          return { ...state, scene: { ...state.scene, objects: next } };
+        }, SILENT);
+        dispatch(EVENTS.OBJECT_REMOVED, { id: oldId });
+
+        this._pairs.push({
+          oldId, oldObj: { ...oldObj }, oldMesh, oldParent,
+          newId, newObj: { ...getState().scene.objects[newId] }, newMesh,
+        });
+      }
+      const ids = this._pairs.map(p => p.newId);
+      if (ids.length) Selection.set(ids, ids[ids.length - 1]);
+    });
+    this._executed = true;
+    markDirty();
+  }
+  undo() {
+    _withDetachedPivot(() => {
+      for (const p of this._pairs) {
+        p.newMesh.setParent(null); p.newMesh.setEnabled(false);
+        setState(state => {
+          const next = { ...state.scene.objects };
+          delete next[p.newId];
+          return { ...state, scene: { ...state.scene, objects: next } };
+        }, SILENT);
+        dispatch(EVENTS.OBJECT_REMOVED, { id: p.newId });
+
+        p.oldMesh.setEnabled(true);
+        p.oldMesh.setParent(p.oldParent);
+        setState(state => ({
+          ...state,
+          scene: { ...state.scene, objects: { ...state.scene.objects, [p.oldId]: p.oldObj } },
+        }), SILENT);
+        dispatch(EVENTS.OBJECT_RESTORED, { id: p.oldId });
+      }
+      const ids = this._pairs.map(p => p.oldId);
+      if (ids.length) Selection.set(ids, ids[ids.length - 1]);
+    });
+  }
+}

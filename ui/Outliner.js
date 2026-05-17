@@ -192,17 +192,18 @@ function _renderObjectRow(obj, depth) {
     depth,
     hasChildren: false,
     isCollapsed: false,
-    iconName: obj.isGhost ? 'CircleAlert' : 'Box',
+    iconName: obj.isGhost ? 'CircleAlert' : (obj.isUnlinked ? 'Link' : 'Box'),
     isGhost: obj.isGhost,
+    isUnlinked: obj.isUnlinked,
   });
 }
 
-function _renderRow({ id, kind, name, visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, isGhost, nameIsHtml }) {
+function _renderRow({ id, kind, name, visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, isGhost, isUnlinked, nameIsHtml }) {
   const indent  = depth * 14;
   const twirl   = hasChildren
     ? `<span class="ol-twirl">${icon(isCollapsed ? 'ChevronRight' : 'ChevronDown', { width: 12, height: 12 })}</span>`
     : `<span class="ol-twirl ol-twirl-empty"></span>`;
-  const ghostCls = isGhost ? 'ol-ghost' : '';
+  const ghostCls = isGhost ? 'ol-ghost' : (isUnlinked ? 'ol-unlinked' : '');
   const lockedCls = locked ? 'ol-locked' : '';
   const hiddenCls = !visible ? 'ol-hidden' : '';
   const printBtn = kind === 'object'

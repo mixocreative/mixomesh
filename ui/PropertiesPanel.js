@@ -2,6 +2,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, setState, getState } from '../core/StateManager.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
+import { SOURCE_UNIT_FACTORS } from '../core/ImportNormalizer.js';
 import { SceneManager } from '../core/SceneManager.js';
 import {
   push, beginBatch, endBatch,
@@ -14,15 +15,8 @@ import { icon } from '../core/Icons.js';
 
 const BABYLON = window.BABYLON;
 
-// Must mirror AssetLoader.SOURCE_UNIT_FACTORS — duplicated to avoid a public
-// export from AssetLoader. Keep them in sync if either changes.
-const SOURCE_UNIT_FACTORS = {
-  meters:      1,
-  centimeters: 0.01,
-  millimeters: 0.001,
-  inches:      0.0254,
-  feet:        0.3048,
-};
+// SOURCE_UNIT_FACTORS imported from ImportNormalizer.js — single source of
+// truth for the import-normalization seam (no more hand-synced duplicate).
 const SOURCE_UNIT_LABELS = {
   meters:      'Metres (m)',
   centimeters: 'Centimetres (cm)',

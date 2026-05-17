@@ -72,3 +72,13 @@ export async function kvDelete(key) {
   const store = await _tx(STORE_KV, 'readwrite');
   return _wrap(store.delete(key));
 }
+
+/** List all keys in the generic key/value store (autosave-recovery scan). */
+export async function kvKeys() {
+  const store = await _tx(STORE_KV, 'readonly');
+  return _wrap(store.getAllKeys());
+}
+
+// FileSystemFileHandle objects (e.g. the saved .mixo file) share the handle
+// store — putHandle/getHandle already persist any structured-clonable handle.
+export { putHandle as putFileHandle, getHandle as getFileHandle, deleteHandle as deleteFileHandle };

@@ -5,6 +5,9 @@ import { ShaderLibrary } from './ShaderLibrary.js';
 import { MeshValidator } from './MeshValidator.js';
 import { Toast } from '../ui/Toast.js';
 import { putHandle, getHandle } from './idb.js';
+import {
+  bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
+} from './ImportNormalizer.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -14,17 +17,8 @@ const SUPPORTED_TEXTURE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 const THUMB_SIZE  = 128;
 const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isolation
 
-// File-unit → metres. We assume Blender default export (metric / 0.001 / mm) so
-// raw values in glTF / STL / OBJ are interpreted as millimetres unless the user
-// overrides per-asset in Phase 3.
-const SOURCE_UNIT_FACTORS = {
-  millimeters: 0.001,
-  centimeters: 0.01,
-  meters:      1,
-  inches:      0.0254,
-  feet:        0.3048,
-};
-const DEFAULT_SOURCE_UNIT = 'millimeters';
+// Source-unit factors + DEFAULT_SOURCE_UNIT now live in ImportNormalizer.js
+// (the import-normalization seam); imported above.
 
 // Module-local — never persisted in state.
 const _containers   = new Map();    // assetId → BABYLON.AssetContainer
@@ -112,11 +106,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // custom property if present (Blender custom prop), else 1:1. The result is
     // that 1 BU in the scene == 1 m at the scene's working ratio (its print size).
     // Export-time rescaling from working → target ratio happens in PrintManager.
-    const sourceUnit    = DEFAULT_SOURCE_UNIT;
-    const modelRatio    = _extractModelRatio(container) ?? 1;
-    const workingRatio  = _currentWorkingRatio();
-    const scaleFactor   = SOURCE_UNIT_FACTORS[sourceUnit] * (modelRatio / workingRatio);
-    _applyImportScaling(container, scaleFactor, position);
+    const sourceUnit  = DEFAULT_SOURCE_UNIT;
+    const modelRatio  = _extractModelRatio(container) ?? 1;
+    bakeImportTransform(container, importScaleFactor(sourceUnit, modelRatio), position);
 
     const entry = {
       id: assetId,
@@ -180,8 +172,7 @@ export async function instantiateAsset(assetId, position) {
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
-    const scaleFactor = SOURCE_UNIT_FACTORS[sourceUnit] * ((asset.modelRatio ?? 1) / _currentWorkingRatio());
-    _applyImportScaling(container, scaleFactor, position);
+    bakeImportTransform(container, importScaleFactor(sourceUnit, asset.modelRatio), position);
 
     const collectionId = _createCollectionFromFilename(asset.filename, assetId);
     const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
@@ -594,11 +585,6 @@ function _scheduleIdle(fn) {
   else setTimeout(fn, 50);
 }
 
-function _currentWorkingRatio() {
-  const r = getState().print?.workingRatio;
-  return typeof r === 'number' && r > 0 ? r : 1;
-}
-
 /**
  * Look for a Blender custom property called "ratio" inside the glTF "extras"
  * bag on any node in the container. Accepts '1/72', '1:72', or '72'. Returns
@@ -636,36 +622,8 @@ function _parseRatio(raw) {
   return null;
 }
 
-/**
- * Apply the unit+ratio scale to the asset by BAKING it into vertex data
- * (rather than setting mesh.scaling). Every node ends with scaling=(1,1,1),
- * which matches user intuition ("1 mm in Blender should read as scale 1")
- * AND avoids the depth/stencil precision issues that HighlightLayer + gizmos
- * exhibit when world transforms operate at 0.001-scale.
- *
- * Local positions are scaled by the same factor so hierarchy offsets convert
- * to BU too. The drop offset is added to root nodes' positions on top.
- */
-function _applyImportScaling(container, factor, position) {
-  const scaleMat = BABYLON.Matrix.Scaling(factor, factor, factor);
-  for (const m of container.meshes) {
-    if (m.geometry && typeof m.bakeTransformIntoVertices === 'function') {
-      m.bakeTransformIntoVertices(scaleMat);
-    }
-  }
-
-  // Convert every local position into BU — child offsets within an asset
-  // hierarchy were authored in the source unit too, not just the root.
-  for (const n of [...container.meshes, ...container.transformNodes]) {
-    n.position.scaleInPlace(factor);
-  }
-
-  // Drop anchor applies only to roots (typically Babylon's glTF __root__).
-  const roots = [...container.meshes, ...container.transformNodes].filter(n => !n.parent);
-  if (position) for (const r of roots) r.position.addInPlace(position);
-
-  for (const m of container.meshes) m.refreshBoundingInfo?.();
-}
+// importScaleFactor + bakeImportTransform — THE import-normalization seam —
+// now live in ImportNormalizer.js (imported above and re-exported below).
 
 function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId) {
   const meshIds = [];
@@ -848,6 +806,127 @@ function _queueValidation(meshId) {
   });
 }
 
+// ── Project restore (Phase 6) ────────────────────────────
+
+/**
+ * Geometry-bearing meshes of a container, in stable load order. The same
+ * filter `_registerInstantiatedMeshes` uses, so a saved `containerMeshIndex`
+ * resolves back to the same mesh on reload.
+ * @param {string} assetId
+ * @returns {BABYLON.AbstractMesh[]}
+ */
+export function getContainerGeomMeshes(assetId) {
+  const container = _containers.get(assetId);
+  if (!container) return [];
+  return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
+}
+
+/**
+ * Raw bytes of a loaded asset, read back from its cached blob URL. Used by
+ * PersistenceManager to embed the asset in the project file.
+ * @param {string} assetId
+ * @returns {Promise<ArrayBuffer|null>}
+ */
+export async function getAssetBytes(assetId) {
+  const url = _blobUrls.get(assetId);
+  if (!url) return null;
+  const res = await fetch(url);
+  return res.arrayBuffer();
+}
+
+/**
+ * Load an AssetContainer from a blob for project restore. Unlike loadFromBlob
+ * this does NOT mutate state, mint collections/objects, or apply import
+ * scaling — the saved per-object world transforms are restored verbatim by
+ * PersistenceManager. Registers the container + blob URL under `assetId` so
+ * later release / re-instantiate work normally.
+ *
+ * @param {string} assetId   the persisted asset id (reused, not minted)
+ * @param {Blob}   blob
+ * @param {string} extension e.g. '.glb'
+ * @returns {Promise<BABYLON.AbstractMesh[]>} ordered geometry meshes
+ */
+export async function restoreContainer(assetId, blob, extension) {
+  const scene = SceneManager.getScene();
+  const blobUrl = URL.createObjectURL(blob);
+  _blobUrls.set(assetId, blobUrl);
+  const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
+    blobUrl, '', scene, null, extension
+  );
+  _containers.set(assetId, container);
+  container.addAllToScene();
+  return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
+}
+
+/**
+ * Bind a restored container mesh to its persisted meshId so the rest of the
+ * app (Selection, ShaderLibrary, HistoryManager) finds it by the same id it
+ * had when saved.
+ */
+export function bindRestoredMesh(meshId, mesh, assetId, sourceUnit = DEFAULT_SOURCE_UNIT) {
+  mesh.metadata = { ...(mesh.metadata ?? {}), meshId, assetId, sourceUnit };
+  _meshRegistry.set(meshId, mesh);
+}
+
+/**
+ * Recreate a user-loaded texture asset from embedded bytes, keeping its
+ * persisted assetId so shader.diffuseTextureAssetId stays valid.
+ * @param {object} entry  persisted AssetEntry (kind 'texture', !isImported)
+ * @param {Blob}   blob
+ * @returns {Promise<string>} assetId
+ */
+export async function restoreTexture(entry, blob) {
+  const scene = SceneManager.getScene();
+  const blobUrl = URL.createObjectURL(blob);
+  _blobUrls.set(entry.id, blobUrl);
+  const texture = await new Promise((resolve, reject) => {
+    const t = new BABYLON.Texture(
+      blobUrl, scene, false, false,
+      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+      () => resolve(t),
+      (msg, err) => reject(err ?? new Error(String(msg))),
+    );
+  });
+  _textures.set(entry.id, texture);
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: { ...entry, thumbnailDataUrl: blobUrl } } },
+  }), { silent: true });
+  return entry.id;
+}
+
+/**
+ * Register a persisted asset-library entry without loading geometry. Used for
+ * ghost / static assets so the Outliner + relink flow have an entry to point
+ * at.
+ */
+export function registerAssetEntry(entry) {
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: entry } },
+  }), { silent: true });
+  dispatch(EVENTS.ASSET_REGISTERED, { assetId: entry.id, entry });
+}
+
+/**
+ * Tear down every loaded asset/texture/mesh. BLUEPRINT §14.2 "on new/load
+ * project". Mounted directory handles are session-scoped and kept.
+ */
+export function resetAll() {
+  for (const c of _containers.values()) {
+    try { c.removeAllFromScene(); c.dispose(); } catch { /* */ }
+  }
+  for (const [id, t] of _textures.entries()) {
+    const e = getState().scene.assetLibrary[id];
+    if (t && !e?.isImported) { try { t.dispose(); } catch { /* */ } }
+  }
+  for (const url of _blobUrls.values()) URL.revokeObjectURL(url);
+  _containers.clear();
+  _textures.clear();
+  _blobUrls.clear();
+  _meshRegistry.clear();
+}
+
 export function removeAsset(assetId) {
   if (!getState().scene.assetLibrary[assetId]) return;
   setState(s => {
@@ -866,4 +945,7 @@ export const AssetLoader = {
   isMeshExt, isTextureExt,
   releaseAsset, removeAsset, instantiateAsset, getContainer, getBabylonMesh, getDirectoryHandle,
   cloneMeshAsNewObject, restoreCloneToScene,
+  getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh,
+  restoreTexture, registerAssetEntry, resetAll,
+  bakeImportTransform, importScaleFactor,
 };

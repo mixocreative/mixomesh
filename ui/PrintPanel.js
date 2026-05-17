@@ -2,11 +2,13 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
+import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { push, RescaleWorldCommand } from '../core/HistoryManager.js';
-import { Toast, safeAsync } from './Toast.js';
+import { Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
+import { ProgressOverlay } from './ProgressOverlay.js';
 
 // Parse a print-scale ratio of the form M:N or M/N (both > 0). A bare number
 // "N" is treated as "1:N". Returns the value N/M — i.e. how many real-world
@@ -73,7 +75,6 @@ export function init() {
 
   // Register validation modals
   Modal.register('validationErrors', _renderValidationErrorsModal);
-  Modal.register('exportConfirm', _renderExportConfirmModal);
 
   _render();
 }
@@ -262,10 +263,11 @@ async function _renderValidationTab() {
     btn.addEventListener('click', async () => {
       const meshId = btn.dataset.meshId;
       const obj = getState().scene.objects[meshId];
-      if (!obj?._babylonMesh) return;
+      if (!obj) return;
+      const mesh = AssetLoader.getBabylonMesh(meshId);
+      if (!mesh) return;
 
       try {
-        const mesh = obj._babylonMesh;
         const results = await MeshValidator.validateMesh(mesh);
         await MeshValidator.autoFix(mesh, results);
         Toast.show(`✓ Fixed ${obj.name}`, 'success', 2000);
@@ -307,6 +309,10 @@ function _renderExportTab() {
   html += `${icon('Download', 'inline')} Export OBJ + MTL`;
   html += `</button>`;
 
+  html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf">`;
+  html += `${icon('Download', 'inline')} Export 3MF (color)`;
+  html += `</button>`;
+
   html += `<button class="pp-export-btn pp-export-stl" data-format="stl">`;
   html += `${icon('Download', 'inline')} Export STL`;
   html += `</button>`;
@@ -325,81 +331,33 @@ function _renderExportTab() {
     return { selectedOnly, individually };
   };
 
-  // Wire export buttons
-  el.querySelector('.pp-export-obj').addEventListener('click', async () => {
-    const opts = getOptions();
-    await safeAsync(async () => {
-      const validationMap = await MeshValidator.validateAllPrintParts();
-      const hasErrors = Array.from(validationMap.values()).some(results =>
-        results.some(r => r.severity === 'error')
-      );
-      const hasWarnings = Array.from(validationMap.values()).some(results =>
-        results.some(r => r.severity === 'warning')
-      );
-
-      if (hasErrors) {
-        // Show error modal
-        const errors = [];
-        for (const [meshId, results] of validationMap) {
-          const obj = getState().scene.objects[meshId];
-          for (const r of results) {
-            if (r.severity === 'error') {
-              errors.push({ meshName: obj?.name || meshId, message: r.message });
-            }
-          }
-        }
-        Modal.open('validationErrors', { errors });
-        return;
+  // Wire export buttons. Validation now happens INSIDE the export (after the
+  // file-type auto-fix), so the panel just runs the export and only surfaces
+  // the error list for problems the auto-fix couldn't resolve.
+  const runExport = async (fn, opts) => {
+    ProgressOverlay.show('Exporting…');
+    try {
+      await fn({ ...opts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
+    } catch (err) {
+      if (err?.validationErrors?.length) {
+        Modal.open('validationErrors', { errors: err.validationErrors });
+      } else {
+        console.error(err);
+        Toast.show(`Error: ${err.message}`, 'error', 0);
       }
+    } finally {
+      ProgressOverlay.hide();
+    }
+  };
 
-      if (hasWarnings) {
-        // Show confirm modal
-        Modal.open('exportConfirm', {
-          onConfirm: () => PrintManager.exportOBJ(opts),
-        });
-        return;
-      }
+  el.querySelector('.pp-export-obj').addEventListener('click', () =>
+    runExport(PrintManager.exportOBJ, getOptions()));
 
-      // No warnings/errors: export directly
-      await PrintManager.exportOBJ(opts);
-    });
-  });
+  el.querySelector('.pp-export-3mf').addEventListener('click', () =>
+    runExport(PrintManager.exportThreeMF, getOptions()));
 
-  el.querySelector('.pp-export-stl').addEventListener('click', async () => {
-    const opts = getOptions();
-    await safeAsync(async () => {
-      const validationMap = await MeshValidator.validateAllPrintParts();
-      const hasErrors = Array.from(validationMap.values()).some(results =>
-        results.some(r => r.severity === 'error')
-      );
-      const hasWarnings = Array.from(validationMap.values()).some(results =>
-        results.some(r => r.severity === 'warning')
-      );
-
-      if (hasErrors) {
-        const errors = [];
-        for (const [meshId, results] of validationMap) {
-          const obj = getState().scene.objects[meshId];
-          for (const r of results) {
-            if (r.severity === 'error') {
-              errors.push({ meshName: obj?.name || meshId, message: r.message });
-            }
-          }
-        }
-        Modal.open('validationErrors', { errors });
-        return;
-      }
-
-      if (hasWarnings) {
-        Modal.open('exportConfirm', {
-          onConfirm: () => PrintManager.exportSTL(opts),
-        });
-        return;
-      }
-
-      await PrintManager.exportSTL(opts);
-    });
-  });
+  el.querySelector('.pp-export-stl').addEventListener('click', () =>
+    runExport(PrintManager.exportSTL, getOptions()));
 
   return el;
 }
@@ -599,8 +557,8 @@ async function _render() {
 
 // ── Modals ────────────────────────────────────────────────
 
-function _renderValidationErrorsModal(payload) {
-  const { errors } = payload;
+function _renderValidationErrorsModal({ data, close }) {
+  const errors = data?.errors ?? [];
 
   let html = '<div class="modal-content">';
   html += '<h3>Validation Errors</h3>';
@@ -617,35 +575,7 @@ function _renderValidationErrorsModal(payload) {
 
   const el = document.createElement('div');
   el.innerHTML = html;
-  el.querySelector('[data-action="close"]').addEventListener('click', () => {
-    Modal.close();
-  });
-  return el;
-}
-
-function _renderExportConfirmModal(payload) {
-  const { onConfirm } = payload;
-
-  let html = '<div class="modal-content">';
-  html += '<h3>Export Anyway?</h3>';
-  html += '<p>Warnings detected. Export anyway?</p>';
-  html += '<div class="modal-actions">';
-  html += '<button class="btn btn-secondary" data-action="cancel">Cancel</button>';
-  html += '<button class="btn btn-primary" data-action="confirm">Export</button>';
-  html += '</div>';
-  html += '</div>';
-
-  const el = document.createElement('div');
-  el.innerHTML = html;
-  el.querySelector('[data-action="cancel"]').addEventListener('click', () => {
-    Modal.close();
-  });
-  el.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
-    Modal.close();
-    if (onConfirm) {
-      await safeAsync(onConfirm);
-    }
-  });
+  el.querySelector('[data-action="close"]').addEventListener('click', () => close());
   return el;
 }
 

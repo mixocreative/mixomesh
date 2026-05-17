@@ -2,7 +2,9 @@ import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand } from '../core/HistoryManager.js';
+import { PersistenceManager } from '../core/PersistenceManager.js';
+import { safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 
 let _root = null;
@@ -92,11 +94,23 @@ function _buildItems(info) {
     ];
   }
 
-  const hasSelection = Selection.getSelectedIds().length > 0;
-  const someGrouped = Selection.getSelectedIds().some(id => !!getState().scene.objects[id]?.parentId);
+  const selIds = Selection.getSelectedIds();
+  const hasSelection = selIds.length > 0;
+  const multi = selIds.length > 1;
+  const someGrouped = selIds.some(id => !!getState().scene.objects[id]?.parentId);
   const enabled = (cond) => cond ? '' : 'cm-disabled';
 
+  const objs = getState().scene.objects;
+  const ghostId = info.targetKind === 'object' && info.targetId
+    && (objs[info.targetId]?.isGhost || objs[info.targetId]?.isUnlinked)
+    ? info.targetId : null;
+
   return [
+    ...(ghostId ? [
+      { label: objs[ghostId].isGhost ? 'Relink Asset…' : 'Relink to live file…',
+        shortcut: '', action: 'relink', iconName: 'Link', cls: '' },
+      'sep',
+    ] : []),
     { label: 'Focus',           shortcut: 'F',           action: 'frame',   iconName: 'Maximize',   cls: enabled(hasSelection) },
     'sep',
     { label: 'Toggle Hidden',   shortcut: 'H',           action: 'hide',    iconName: 'EyeOff',     cls: enabled(hasSelection) },
@@ -106,6 +120,9 @@ function _buildItems(info) {
     'sep',
     { label: 'Group',           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
     { label: 'Ungroup',         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
+    'sep',
+    { label: 'Smart Replace',   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
+    { label: 'Transform Swab',  shortcut: '',            action: 'swab',    iconName: 'Move3D',     cls: enabled(multi) },
     'sep',
     { label: 'Delete',          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
@@ -132,9 +149,32 @@ function _runAction(action, info) {
   if (action === 'group')      _group();
   if (action === 'ungroup')    _ungroup();
   if (action === 'delete')     _delete();
+  if (action === 'replace')    _smartReplace();
+  if (action === 'swab')       _transformSwab();
+  if (action === 'relink')     _relink(info.targetId);
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
   if (action === 'col-rename') _renameCollection(info.targetId);
   if (action === 'col-delete') _deleteCollection(info.targetId);
+}
+
+function _smartReplace() {
+  const ids = Selection.getSelectedIds();
+  const activeId = Selection.getActiveId();
+  if (ids.length < 2 || !activeId) return;
+  push(new SmartReplaceCommand(ids, activeId));
+}
+
+function _transformSwab() {
+  const ids = Selection.getSelectedIds();
+  const activeId = Selection.getActiveId();
+  if (ids.length < 2 || !activeId) return;
+  push(new TransformSwabCommand(ids, activeId));
+}
+
+function _relink(meshId) {
+  const obj = getState().scene.objects[meshId];
+  if (!obj?.assetId) return;
+  safeAsync(() => PersistenceManager.relinkAsset(obj.assetId));
 }
 
 function _frame() {

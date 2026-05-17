@@ -113,4 +113,21 @@ export function markDirty() {
   dispatch(EVENTS.PROJECT_DIRTY, null);
 }
 
-export const StateManager = { subscribe, dispatch, getState, setState, withoutDirty, markDirty };
+/**
+ * Replace the entire state tree (project new / load). Silent against
+ * PROJECT_DIRTY — the caller owns dirty/saved signalling.
+ * @param {object} next  full state object (used verbatim, not cloned)
+ */
+export function replaceState(next) {
+  _state = next;
+}
+
+/** A deep clone of the pristine initial state (for New Project). */
+export function freshState() {
+  return JSON.parse(JSON.stringify(INITIAL_STATE));
+}
+
+export const StateManager = {
+  subscribe, dispatch, getState, setState, withoutDirty, markDirty,
+  replaceState, freshState,
+};

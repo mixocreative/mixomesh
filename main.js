@@ -13,6 +13,9 @@ import { Modal } from './ui/Modal.js';
 import { ViewportToolbar } from './ui/ViewportToolbar.js';
 import { NavCube } from './ui/NavCube.js';
 import { push, TransformCommand } from './core/HistoryManager.js';
+import { PersistenceManager } from './core/PersistenceManager.js';
+import { ProjectMenu } from './ui/ProjectMenu.js';
+import { safeAsync } from './ui/Toast.js';
 import { icon } from './core/Icons.js';
 
 // ── Browser gate ─────────────────────────────────────────
@@ -55,6 +58,8 @@ async function bootstrap() {
   AssetPanel.init();
   ViewportToolbar.init();
   NavCube.init();
+  PersistenceManager.init();
+  ProjectMenu.init();
   _wireRightPanelCollapse();
   _initPanels();
   ViewportDrop.attach(document.getElementById('viewport'), SceneManager.getScene());
@@ -63,7 +68,20 @@ async function bootstrap() {
   InputManager.setContextMenuHandler((info) => ContextMenu.open(info));
   Outliner.setContextMenuHandler((info)     => ContextMenu.open(info));
 
+  // Project shortcuts — override the InputManager no-op placeholders. The
+  // dispatcher preventDefaults handled keys, so the browser's own Ctrl+S /
+  // Ctrl+O dialogs stay suppressed.
+  InputManager.register('Ctrl+S',       'global', () => safeAsync(() => PersistenceManager.save()));
+  InputManager.register('Ctrl+Shift+S', 'global', () => safeAsync(() => PersistenceManager.saveAs()));
+  InputManager.register('Ctrl+O',       'global', () => safeAsync(() => PersistenceManager.open()));
+  InputManager.register('Ctrl+N',       'global', () => safeAsync(() => PersistenceManager.newProject()));
+
+  PersistenceManager.startAutosave();
   canvas.focus();
+
+  // Boot: don't auto-recover a discarded session. Instead offer to re-mount
+  // the last-used asset folder so saved projects relink to live files.
+  safeAsync(() => AssetPanel.promptRemount());
 }
 
 function _wireRightPanelCollapse() {

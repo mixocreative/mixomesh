@@ -1,5 +1,6 @@
 import { EVENTS } from './events.js';
 import { dispatch, getState } from './StateManager.js';
+import { AssetLoader } from './AssetLoader.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -21,14 +22,40 @@ function _getIndices(mesh) {
 }
 
 /**
- * Build edge → faceCount map. An edge belongs to exactly 2 faces in a
- * well-formed closed manifold; anything else flags non-manifold.
+ * Map every vertex index to a canonical index shared by all vertices at the
+ * same position (within MERGE_DISTANCE). Imported glTF/STL geometry is almost
+ * always unwelded — each triangle carries its own vertex copies split for
+ * normals/UVs — so a raw index-keyed topology check reports nearly every edge
+ * as non-manifold even on a perfectly closed mesh. Welding by position first
+ * makes the count reflect *real* topology.
+ */
+function _weldedIndexMap(positions) {
+  const eps = MERGE_DISTANCE;
+  const canonical = new Map();                 // 'x|y|z' → canonical index
+  const remap = new Int32Array(positions.length / 3);
+  for (let i = 0; i < remap.length; i++) {
+    const k = `${Math.round(positions[i * 3] / eps)}|`
+            + `${Math.round(positions[i * 3 + 1] / eps)}|`
+            + `${Math.round(positions[i * 3 + 2] / eps)}`;
+    let c = canonical.get(k);
+    if (c === undefined) { c = i; canonical.set(k, c); }
+    remap[i] = c;
+  }
+  return remap;
+}
+
+/**
+ * Build edge → faceCount map over position-welded indices. An edge belongs to
+ * exactly 2 faces in a closed manifold; anything else is a real boundary /
+ * non-manifold edge (an actual hole or T-junction, not just unwelded data).
  */
 function _checkNonManifold(positions, indices) {
+  const w = _weldedIndexMap(positions);
   const edges = new Map(); // 'a:b' → count
   const key = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
   for (let i = 0; i < indices.length; i += 3) {
-    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+    const a = w[indices[i]], b = w[indices[i + 1]], c = w[indices[i + 2]];
+    if (a === b || b === c || c === a) continue;   // degenerate after weld
     [[a, b], [b, c], [c, a]].forEach(([u, v]) => {
       const k = key(u, v);
       edges.set(k, (edges.get(k) ?? 0) + 1);
@@ -129,13 +156,16 @@ export async function validateMesh(mesh) {
 
   const badEdgeCount = _checkNonManifold(positions, indices);
   if (badEdgeCount > 0) {
+    // Warning, not error: a colored-print assembly tool works with downloaded
+    // display models that are frequently non-watertight, and slicers
+    // (Bambu / Lychee / Cura) auto-repair these. Surfaced, never blocking.
     results.push({
       type: 'nonManifold',
-      severity: 'error',
+      severity: 'warning',
       count: badEdgeCount,
       autoFixAvailable: true,
       fixed: false,
-      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'}`,
+      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
     });
   }
 
@@ -143,11 +173,11 @@ export async function validateMesh(mesh) {
   if (inverted) {
     results.push({
       type: 'invertedNormals',
-      severity: 'error',
+      severity: 'warning',
       count: 1,
       autoFixAvailable: true,
       fixed: false,
-      message: 'Normals appear inverted',
+      message: 'Normals appear inverted (auto-fixed on export)',
     });
   }
 
@@ -223,7 +253,7 @@ export async function validateAllPrintParts() {
   const objects = getState().scene.objects;
   for (const [meshId, obj] of Object.entries(objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
-    const babylonMesh = obj._babylonMesh;
+    const babylonMesh = AssetLoader.getBabylonMesh(meshId);
     if (!babylonMesh) continue;
     out.set(meshId, await validateMesh(babylonMesh));
   }

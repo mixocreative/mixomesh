@@ -1,0 +1,3 @@
+# Agent / editor local config — not project source
+.claude/
+.vscode/
