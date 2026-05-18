@@ -1,10 +1,26 @@
-# MIXOMESH — Implementation Blueprint v3.1
+# MIXOMESH — Implementation Blueprint v3.2
 ### Babylon.js · Vanilla JS · No Build Step · Chrome/Edge Only
 
 > **For Claude Code:** Sections are in build order. Each module section is a contract:
 > *Purpose · Data Structure · Public API · Implementation Rules · Pitfalls.*
 > Use Babylon.js APIs whenever available — see §0.4 "Babylon-First Rule."
 > Module size targets in §0.5 are enforced to keep files reviewable.
+
+## What this tool exists for
+
+**Primary target: Mimaki UV-inkjet full-color 3D printers** (3DUJ-553
+default, 3DUJ-2207 + variants). They consume textured 3MF via the Materials
+Extension OR OBJ+MTL+PNG. Continuous-tone textures are preserved end-to-end
+— Mimaki paints ~10 M colors per surface, **not** one solid color per part.
+
+**Secondary target: filament multi-color printers** (Bambu X1C, Prusa XL,
+OrcaSlicer/PrusaSlicer ecosystem). They consume 3MF with `<colorgroup>` +
+per-object `pindex` for filament-zone assignment, one solid color per part.
+
+Per-printer behavior is **data-driven** via `config/printers.json` (single
+source of truth: format, color mode, texture limits, bed dimensions,
+axis/winding/unit, prep pipeline). Adding a printer = adding a JSON row,
+not editing code.
 
 ---
 
@@ -16,8 +32,19 @@
 - **All state mutations go through `StateManager.dispatch()`.**
 - **All reversible actions push a Command to `HistoryManager`.**
 - **All inter-module communication uses typed events from `events.js`.**
-- **OBJ + MTL is the primary export format** (colored 3D printing).
-- **Validation runs at import time, non-blocking.** Re-runs blocking before export.
+- **Export is printer-driven, not format-driven.** Target printer (from
+  `config/printers.json`) declares format + color mode + prep steps.
+  Mimaki target preserves textures; filament target collapses to solid
+  per-part color. Never collapse textures for a Mimaki target.
+- **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
+  `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
+  stamping `sourceGroupId` on each SceneObject so validator + exporter can
+  re-union the part.
+- **Validation runs at import time, non-blocking.** Re-runs blocking before
+  export. Topology checks are **group-aware**: meshes with a `sourceGroupId`
+  are validated as the welded union of all siblings (positions only, no
+  data copy), not as individual shells. Integrity checks (zero verts,
+  missing registry) stay per-mesh.
 
 ### 0.2 CDN Imports (`index.html`)
 
@@ -58,6 +85,10 @@ No other CDN libs. Everything else is vanilla JS.
 ```
 index.html
 main.js                    ← bootstrap, dependency wiring, panel collapse/resize
+config/                    ← editable data, no code change (JSON import attrs)
+  swatches.json            ← DEFAULT_SWATCHES (ShaderLibrary)
+  scale-presets.json       ← SCALE_PRESETS (PrintManager)
+  bed-presets.json         ← BED_PRESETS (PrintPanel)
 styles/
   tokens.css               ← CSS variables (colors, spacing, type)
   layout.css               ← panel grid, splitters
@@ -68,12 +99,15 @@ core/
   HistoryManager.js
   InputManager.js
   SceneManager.js
+  Selection.js             ← selection set + active id + pivot mode (§4b)
   AssetLoader.js
   ImportNormalizer.js      ← import-normalization seam (units/ratio/RH→LH bake)
   ShaderLibrary.js
   MeshValidator.js
   PersistenceManager.js
-  PrintManager.js
+  PrintManager.js          ← export seam (OBJ/STL/3MF), non-destructive
+  ThreeMFLoader.js         ← `.3mf` SceneLoader plugin = inverse of 3MF export
+  idb.js                   ← IndexedDB layer for FileSystemHandles + kv store (§11b)
   Icons.js                 ← Lucide wrapper: returns SVG strings by name
 ui/
   Outliner.js
@@ -85,9 +119,20 @@ ui/
   StatusBar.js
   Toast.js
   Modal.js                 ← generic modal helper
+  ProjectMenu.js           ← header toolbar (new/open/save/recent) + persistence modals (§13b)
+  ProgressOverlay.js       ← full-screen blocking overlay during exports (§13b)
   ViewportDrop.js          ← drag-and-drop onto viewport (asset panel + OS files)
   ViewportToolbar.js       ← floating bottom toolbar (Fusion 360-style)
   NavCube.js               ← top-left orientation widget
+tests/                     ← headless harness — Node-native, no build (§14b)
+  register-hooks.mjs       ← `node:module.register` entry; runner uses --import
+  hooks.mjs                ← resolver hook: 'jszip' → stub, './idb.js' → stub
+  jszip-stub.mjs           ← minimal JSZip for export tests
+  idb-stub.mjs             ← in-memory mirror of core/idb.js
+  env.mjs                  ← installEnv(): Babylon shim, atob/btoa, DOMParser
+  export.test.mjs          ← PrintManager export pipeline
+  validator.test.mjs       ← MeshValidator severity + position-welded manifold
+  persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
 ```
 
 ### 0.4 Babylon-First Rule
@@ -126,6 +171,7 @@ If you find yourself writing > 30 lines of geometry / scene management code, sto
 | `MeshValidator.js` | < 300 |
 | `PersistenceManager.js` | < 400 |
 | `PrintManager.js` | < 350 |
+| `ThreeMFLoader.js` | < 250 (3MF import = inverse of 3MF export) |
 | Each `ui/*.js` | < 400 |
 | `main.js` | < 300 (bootstrap + panel collapse/resize wiring) |
 
@@ -160,12 +206,16 @@ Single dark theme. Pro-tool aesthetic. No theme switcher in v1.
   --border:        #2a2a30;
   --border-strong: #3a3a44;
   --border-focus:  #06b6d4;
+  --ring-focus:    rgba(245, 158, 11, 0.35);  /* 2px box-shadow ring on input :focus — keyboard a11y */
 
-  /* Text */
+  /* Text — tertiary lightened 2026-05-18 (UI audit) so labels +
+     section headers reach ≥ 5:1 WCAG AA on --bg-1 / --bg-2 panels.
+     Disabled also lightened so disabled inputs/buttons remain legible
+     without needing a compounding opacity multiplier. */
   --text-0: #ededf0;        /* primary */
   --text-1: #a1a1ab;        /* secondary */
-  --text-2: #6b6b75;        /* tertiary, hints */
-  --text-disabled: #4a4a52;
+  --text-2: #8a8a96;        /* tertiary, hints */
+  --text-disabled: #5a5a64;
 
   /* Accent — yellow-orange (amber); locked Phase 3, user confirmed */
   --accent:    #f59e0b;
@@ -390,11 +440,16 @@ export const EVENTS = {
 
 ### Public API
 ```js
-StateManager.subscribe(eventName, fn)    → unsubscribeFn
-StateManager.dispatch(eventName, payload) → void
-StateManager.getState()                  → ReadonlyState
-StateManager.setState(updaterFn)         → void
+StateManager.subscribe(eventName, fn)             → unsubscribeFn
+StateManager.dispatch(eventName, payload)         → void
+StateManager.getState()                           → ReadonlyState (deep-frozen in DEV)
+StateManager.setState(updaterFn, {silent}?)       → void  // silent:true suppresses PROJECT_DIRTY
+StateManager.withoutDirty(fn)                     → void  // block-scope silent for direct-Babylon ops
+StateManager.markDirty()                          → void  // dispatch PROJECT_DIRTY without state mutation
+StateManager.replaceState(next)                   → void  // atomic swap (project load / undo); used verbatim, not cloned
+StateManager.freshState()                         → State // deep clone of INITIAL_STATE (New Project)
 ```
+Module-local `_suppressDirty` flag drives `withoutDirty` and gates both `setState({silent})` and `markDirty()`. Persistence load wraps its restore phase in `withoutDirty` so dispatching individual restores doesn't repeatedly flag the project dirty.
 
 ### State Shape (full schema — see Part 10 for persisted form)
 ```js
@@ -412,11 +467,13 @@ const initialState = {
     // ArcRotateCamera positions camera at target + R·(sinβ cosα, cosβ, sinβ sinα).
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
-    overlays: { grid: true, axes: true, wireframe: false, bedPreview: false, wireframeEdges: false, wireframeEdgeColor: '#f59e0b' },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: false, bedPreview: false },
+    // wireframeEdges + wireframeEdgeColor are written on first PrintPanel toggle
+    // (not in INITIAL_STATE); persistence restores them when present.
     grid: { cellMM: 10, subdivisions: 10 },  // line styling only; floor footprint = print.bedDimensions XY
     cursor3d: { x: 0, y: 0, z: 0 },
   },
-  selection: { selectedIds: [], activeId: null, pivotMode: 'median' /* world|median|active|individual|cursor */ },
+  selection: { selectedIds: [], activeId: null, pivotMode: 'active' /* world|median|active|individual|cursor */ },
   print: {
     workingRatio: 1,            // denominator of the scene display ratio (1 = 1:1)
     targetRatio:  1,            // denominator of the final print export ratio
@@ -439,6 +496,37 @@ const initialState = {
   ```
 - Never store Babylon objects in state. State is JSON-serializable.
 - Subscribers are called synchronously in registration order. If a subscriber throws, log and continue.
+
+---
+
+## PART 4b — SELECTION
+
+**File: `core/Selection.js`**
+
+Owns `state.selection`. All selection writes are **silent against `PROJECT_DIRTY`** (clicking around must not mark the project dirty) but are still persisted in §11 schema.
+
+### Public API
+```js
+Selection.set(ids, activeId?)        → void   // replace; active defaults to last id (or null)
+Selection.add(id)                    → void   // idempotent; added id becomes active
+Selection.remove(id)                 → void
+Selection.toggle(id)                 → void
+Selection.setActive(id)              → void   // must already be in selectedIds
+Selection.clear()                    → void
+Selection.selectAll()                → void   // visible non-ghost; Blender-A toggle (all → clear)
+Selection.setPivotMode(mode)         → void   // 'world'|'median'|'active'|'individual'|'cursor'
+Selection.cyclePivotMode()           → void   // in the order above
+Selection.refresh()                  → void   // re-sync visuals after scene gain/loss
+Selection.getSelectedIds()           → string[]
+Selection.getActiveId()              → string|null
+Selection.getSelectedResolved()      → { id, mesh }[]   // ghost/missing dropped
+```
+
+### Behaviour rules
+- Resolution drops `obj.isGhost === true` and meshes `AssetLoader.getBabylonMesh` cannot find. Ghosts are *selectable in the outliner* but never receive gizmo / silhouette attention.
+- Every selection-write call emits `EVENTS.SELECTION_CHANGED` (with `{selectedIds, activeId}`); an active-id change additionally emits `EVENTS.ACTIVE_OBJECT_CHANGED`.
+- `_applyVisuals` (private) calls `SceneManager.setActive(activeMesh)`, `SceneManager.setSelected(others)`, `SceneManager.attachToSelection(allMeshes, pivotMode, activeMesh)`. The gizmo's pivot follows `state.selection.pivotMode`.
+- `setPivotMode('cursor')` also flips `SceneManager.setCursorVisible(true)`; switching away hides it.
 
 ---
 
@@ -481,7 +569,7 @@ Phase 4 implementations (Shader System):
 - `ColorApplyCommand` — `{ shaderId, hex }` — applies swatch color to a shader's diffuse, dispatches `COLOR_APPLIED`.
 
 Phase 5 implementations:
-- `PrintPartCommand` — `{ meshId, prevPrintPart, nextPrintPart }` — toggles `isPrintPart` / `partLabel` / `partTolerance` on a scene object, dispatches `OBJECT_UPDATED`.
+- `PrintPartCommand` — `{ meshId, prev, next }` — toggles `isPrintPart` boolean on a scene object, dispatches `OBJECT_UPDATED`.
 - `RescaleWorldCommand` — `{ prevRatio, nextRatio }` — re-bakes every registered mesh's vertex data by `prev/next`, scales every ancestor `TransformNode.position` (via WeakSet dedup), scales `state.scene.cursor3d`, updates `state.print.workingRatio`. Undo runs the inverse factor.
 - `BakeTransformCommand` — `{ meshId, kind: 'rotation' | 'scale' }` — bakes either the current rotation OR scaling into vertices and resets that component to identity. Position is left untouched. Snapshots pre-bake position + normal vertex buffers so undo restores exact bytes (no FP drift on repeated cycles).
 
@@ -665,9 +753,28 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
   | perspective | π/3 | π/4 | front-right-3/4-elevated (matches initial load) |
 - **Camera Presets — animate + fit + auto-revert:** `setCameraPreset(name)` animates `alpha`, `beta`, `target`, `radius` simultaneously (320 ms, quadratic ease-in-out) toward the named view. Before animation it computes the scene's hierarchy bbox over every `metadata.meshId`-tagged mesh and sets the target to that centre plus a radius of `diag × 1.2` so all content fits. For an ortho preset (top/bottom/front/back/left/right) the camera switches to `ORTHOGRAPHIC_CAMERA` only *after* the animation finishes — interpolating through ortho mid-flight looks broken. For `'perspective'` the mode goes back to `PERSPECTIVE_CAMERA` post-anim. The settled `target` is snapshotted in `_lastAppliedTarget`. **Auto-revert:** inside `_applyFollowTarget`, when the camera is in ortho mode and the preset is not perspective, any divergence of `_camera.target` from `_lastAppliedTarget` (squared distance > `1e-6`, i.e. ~1 mm pan) flips the preset back to `'perspective'` and dispatches `CAMERA_PRESET_CHANGED`. The `_animating` flag suppresses revert during the preset animation itself. Camera input: Babylon's pointer orbit/pan is fully disabled (`ArcRotateCameraPointersInput.buttons = []`, `panningSensibility = 0`) because Babylon hard-classifies RMB(2) as its pan button — RMB could never orbit through Babylon. All mouse orbit/pan is custom in `_onCameraPointer` (scene `onPointerObservable`); Babylon keeps only the wheel-zoom input. CAD convention, all modes: **RMB drag = orbit**, **MMB drag = grab-pan** target in view plane (speed ∝ radius), **Shift+MMB drag = orbit**. LMB(0) is ignored by the camera so selection/gizmo/body-drag own it. The context-menu RMB stays usable because `InputManager` defers `_onContextMenuRMB` to RMB-UP and cancels it if movement exceeds 4 px (an RMB drag both orbits and suppresses the menu). In follow modes `_applyFollowTarget` re-locks the target each frame so a pan only persists in `free` (intended). Middle-click autoscroll suppressed via `mousedown`/`auxclick` `preventDefault` on the canvas. Net: **RMB = orbit, MMB = pan, Shift+MMB = orbit, wheel = zoom, LMB = select/gizmo**.
 
-### Lighting
-1 × `HemisphericLight` (top-down, intensity 0.4)
-1 × `DirectionalLight` (intensity 0.8, casts shadows on a `ShadowGenerator` 1024×1024)
+### Lighting & viewport look (Fusion 360-style)
+Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
+- **Backdrop:** soft vertical gradient (`BG_GRADIENT_TOP` light cool grey →
+  `BG_GRADIENT_BOTTOM` steel) painted into a 4×512 `DynamicTexture` on a
+  fullscreen background `BABYLON.Layer` (`isBackground=true`). Screenshot-safe,
+  no engine alpha. `scene.clearColor` = the gradient base so no black flash.
+- **Tone mapping:** `scene.imageProcessingConfiguration` ACES, `contrast`
+  `TONE_CONTRAST` (1.10), `exposure` `TONE_EXPOSURE` (1.05). Applied at
+  material shading so it bakes into the frame the selection-silhouette
+  post-process samples — no post-chain conflict.
+- **3-light studio:** `HemisphericLight` (`HEMI_INTENSITY` 0.85, white sky,
+  `HEMI_GROUND_COLOR` soft floor bounce so undersides never go black) +
+  `DirectionalLight` "key" (`KEY_INTENSITY` 0.70) + opposite low
+  `DirectionalLight` "fill" (`FILL_INTENSITY` 0.25, **zero specular** so no
+  second highlight). The key drives a `ShadowGenerator` 2048², kernel-blurred
+  (`SHADOW_BLUR_KERNEL` 32), `darkness` `SHADOW_DARKNESS` 0.62 (soft contact,
+  not inky). `getShadowGenerator()` returns this — shadow casters unchanged.
+- All tunables are UPPER_SNAKE constants at the top of `SceneManager.js`.
+- **Deliberately not used:** `DefaultRenderingPipeline` / `SSAO2` — they
+  reorder the camera post-process chain and would risk the custom selection
+  silhouette pass. Revisit only with live verification (would add Fusion's
+  subtle ambient-occlusion contact darkening).
 
 ---
 
@@ -701,7 +808,10 @@ AssetLoader.getBabylonTexture(assetId)                → BABYLON.Texture | null
   unitConfirmed,               // boolean — true by default; false only when the user flagged for review (mesh only)
   modelRatio,                  // denominator of the ratio the asset was authored at (1 = full real-world size, 72 = 1:72).
                                //   Default 1 unless a glTF "ratio" extra overrides (mesh only).
-  directoryHandleKey,          // IndexedDB key for FileSystemDirectoryHandle
+  directoryHandleKey,          // IndexedDB key for FileSystemDirectoryHandle (folder-mounted assets)
+  fileHandleKey,               // IndexedDB key for a single FileSystemFileHandle (loose drag-drop, Chrome only).
+                               //   Mutually optional with directoryHandleKey — an asset has at most one of either.
+                               //   Either field present ⇒ "Linked"; neither ⇒ "Snapshot" (frozen embedded copy only).
   blobUrl,                     // module-local Map, not in state
   thumbnailDataUrl,
 }
@@ -711,16 +821,42 @@ AssetLoader.getBabylonTexture(assetId)                → BABYLON.Texture | null
 ```js
 {
   id,                          // meshId
-  name,                        // mesh name from import or rename
+  name,                        // mesh name from import or rename — unique across
+                               //   state.scene.objects + state.scene.groups
+                               //   (see "Name uniqueness invariant" below)
   assetId,                     // back-reference to AssetEntry
   collectionId,                // outliner display bucket (null = uncollected)
   parentId,                    // groupId if this mesh is inside a group, else null
   shaderId,                    // shader currently assigned (null = scene default)
   visible, locked, isGhost,    // booleans
   isPrintPart,                 // include in OBJ/STL export
-  partLabel, partTolerance,    // print-time annotations (Phase 5)
+  sourceGroupId,               // (Phase 7 prep) uuid shared by siblings split
+                               //   from one MultiMaterial source mesh.
+                               //   Null if the mesh came in single-material.
+                               //   Group-aware validator + exporter use this
+                               //   to re-union part topology. See §0.1 +
+                               //   §9 group-aware validation.
 }
 ```
+
+**Name uniqueness invariant.** `name` must be unique across the union of
+`state.scene.objects` and `state.scene.groups`. Two sites enforce it:
+
+- **`AssetLoader._uniqueObjectName(baseName)`** — called when a new
+  SceneObject is registered (import, duplicate, instantiate). If `baseName`
+  is already taken, the helper appends `.NNN` (zero-padded, scanned
+  upward) until it finds a free slot. The first `.NNN` collision is
+  parsed off the stem so collisions of collisions stay readable.
+- **`HistoryManager._setName(id, prev, next)`** — rename collisions are
+  resolved by the same `.NNN` scheme, excluding `self` from the taken
+  set so renaming to the current name is a no-op. The command dispatches
+  the *final* (post-uniquify) name so Outliner / Properties never display
+  the raw input.
+
+Why: per-mesh export filenames are `${projectName}_${name}${ratioSuffix}.${ext}`
+(see §12 *Export filenames*). Two SceneObjects with the same name would
+silently overwrite each other inside the outer zip. The invariant turns a
+quiet data-loss footgun into a guaranteed visible suffix.
 
 ### CollectionEntry (per imported file, in `state.scene.collections[id]`)
 ```js
@@ -739,6 +875,20 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
 1. Receive FileHandle or Blob.
 2. Create Blob URL via URL.createObjectURL.
 3. BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, null, extension).
+   Supported: `.glb .gltf .obj .stl` (Babylon loaders CDN) + `.3mf`
+   (`core/ThreeMFLoader.js`, a self-registered SceneLoader plugin — Babylon
+   ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`:
+   unzip OPC → `3D/3dmodel.model` → per `<object>`/`<mesh>` build a Babylon
+   mesh, rotate `RotationX(+90°)` (3MF Z-up → Babylon Y-up, undoing the export
+   `Y_UP_TO_Z_UP`), restore winding (export wrote `v1,v3,v2`), map
+   `m:colorgroup`+`pid/pindex` → `StandardMaterial.diffuseColor`, apply any
+   `<build><item>` transform. Returns an AssetContainer so every downstream
+   path (shaders, re-instantiate, project restore) is identical to other
+   formats. Vertices are raw mm → handled by the normal import-scale model
+   exactly like STL (so scale is NOT bit-identical across a working≠target
+   ratio — same inherent behaviour as re-importing an exported OBJ/STL).
+   Component-only assemblies (no `<mesh>`) are unsupported — we never export
+   those (one `<object>`+`<mesh>` per part).
 4. Register all materials → ShaderLibrary.registerFromContainer (merge strategy).
 5. Store AssetContainer in module-local Map<assetId, container>.
 6. addAllToScene() for the container.
@@ -856,6 +1006,28 @@ User-loaded textures (via drag/drop or load-from-file) use blob URLs directly; n
 
 Session assets dragged from the Asset Panel carry `mountKey === '__session__'`; `ViewportDrop` detects this and calls `instantiateAsset(path, position)` rather than attempting to retrieve a `FileSystemFileHandle` (which session assets don't have).
 
+### Loose OS Drag-Drop: File-Handle Capture
+When the user drops a file from the OS file explorer (not from the Asset
+Panel), `ViewportDrop` must capture the file handle **synchronously inside the
+drop event** — `DataTransferItem.getAsFileSystemHandle()` is only valid in
+that frame. The handler:
+1. Walks `dt.items`, snapshots `{ file, handleP }` where `handleP =
+   it.getAsFileSystemHandle().catch(() => null)`.
+2. Falls back to `dt.files` (and `handleP = Promise.resolve(null)`) when
+   `items` is unavailable.
+3. Inside `safeAsync`, awaits `handleP`; if it resolved to a `kind === 'file'`
+   handle, passes `{ fileHandle: h }` into `AssetLoader.loadFromBlob`.
+
+`AssetLoader.loadFromBlob` then persists the handle into IndexedDB under
+`fh_<assetId>` and writes that key to the AssetEntry as `fileHandleKey` — the
+key is only set when `fileHandle` was passed AND `directoryHandleKey` was not
+(an under-mount drop already has dir-level relink, so the per-file handle would
+be redundant). This makes loose-dropped files **Linked, not Snapshot**, and
+they relink across reloads via resolution tier 3 (see §11 Asset Resolution
+Priority). Browsers without `getAsFileSystemHandle` (none of our supported
+ones, but the API is recent) fall through to the embedded snapshot path —
+no regression.
+
 ### Memory Rules
 - `releaseAsset(assetId)`: only dispose container if `linkedMeshIds.length === 0`. Skip disposal if `isImported: true`.
 - Track blob URLs in `Map<assetId, blobUrl>` for explicit revocation.
@@ -893,7 +1065,38 @@ MeshValidator.autoFix(babylonMesh, results)        → Promise<ValidationResult[
 MeshValidator.hasErrors(results)                   → boolean
 MeshValidator.hasWarnings(results)                 → boolean
 MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, ValidationResult[]>>
+MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // welded-union path
 ```
+
+### Group-aware topology checks (Phase 7 prep)
+
+Split-on-import (§8 *Load Flow*) makes individual shells non-watertight by
+construction — a 6-face cube with 3 shaders becomes 3 meshes of 2 faces
+each, each with 6 boundary edges by definition. Per-shell topology checks
+lose all signal in this case.
+
+**Rule:** when validating a mesh whose `SceneObject.sourceGroupId` is set,
+topology checks (`nonManifold`, `invertedNormals`) run on the **welded
+union of all siblings**, not on the individual mesh:
+
+1. Collect every SceneObject sharing this `sourceGroupId`.
+2. Concatenate their position arrays. Index buffers shift by the running
+   vertex offset so concatenated indices remain valid.
+3. Weld concatenated positions by distance (existing weld used by §1022
+   non-manifold check) — siblings share coplanar seams, so welding
+   stitches them back into one logical part. **No data copied back into
+   Babylon meshes**; the welded buffers exist only inside the validator.
+4. Run topology checks on the welded union. Result is attached to **every**
+   sibling's `ValidationResult[]` so the Outliner shows the warning on any
+   row of the group.
+
+**Integrity checks** (zero-vertex mesh, missing registry entry, exceeds bed
+volume) stay per-mesh — they answer about the individual shell, not the
+part topology.
+
+**Pre-export gate** (§9 *Pre-Export Gate*) iterates print parts, but
+deduplicates by `sourceGroupId` so each part runs once even if it has 12
+siblings. Block / confirm-anyway semantics unchanged.
 
 ### ValidationResult
 ```js
@@ -979,31 +1182,17 @@ On material-name collision during `registerFromContainer`:
 4. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**. Default: Rename. Checkbox "Apply to all conflicts in this import."
 5. On confirm: apply choices, continue load.
 
-### Hardcoded Swatches
+### Default Swatches
+Maintained in **`config/swatches.json`** (single source of truth — edit the
+JSON, no code change). `ShaderLibrary.js` re-exports it unchanged:
 ```js
-export const DEFAULT_SWATCHES = [
-  { id:'sw_primer_grey',   name:'Primer Grey',     hex:'#808080', category:'Primer' },
-  { id:'sw_black_primer',  name:'Black Primer',    hex:'#1C1C1C', category:'Primer' },
-  { id:'sw_white_primer',  name:'White Primer',    hex:'#F0F0F0', category:'Primer' },
-  { id:'sw_olive_drab',    name:'Olive Drab',      hex:'#6B6B2B', category:'Military' },
-  { id:'sw_nato_black',    name:'NATO Black',      hex:'#1A1A1A', category:'Military' },
-  { id:'sw_desert_sand',   name:'Desert Sand',     hex:'#C2B280', category:'Military' },
-  { id:'sw_panzer_grey',   name:'Panzer Grey',     hex:'#4A4A4A', category:'Military' },
-  { id:'sw_russian_green', name:'Russian Green',   hex:'#4A5E3A', category:'Military' },
-  { id:'sw_us_dark_green', name:'US Dark Green',   hex:'#354535', category:'Military' },
-  { id:'sw_interior_buff', name:'Interior Buff',   hex:'#C8A87A', category:'Military' },
-  { id:'sw_silver',        name:'Metallic Silver', hex:'#C0C0C0', category:'Metals' },
-  { id:'sw_gunmetal',      name:'Gunmetal',        hex:'#2C3539', category:'Metals' },
-  { id:'sw_brass',         name:'Brass',           hex:'#B5A642', category:'Metals' },
-  { id:'sw_copper',        name:'Copper',          hex:'#B87333', category:'Metals' },
-  { id:'sw_rust',          name:'Rust',            hex:'#8B4513', category:'Metals' },
-  { id:'sw_bone_white',    name:'Bone White',      hex:'#E8E4C9', category:'Miniatures' },
-  { id:'sw_flesh',         name:'Flesh',           hex:'#FFCBA4', category:'Miniatures' },
-  { id:'sw_blood_red',     name:'Blood Red',       hex:'#8B0000', category:'Miniatures' },
-  { id:'sw_royal_blue',    name:'Royal Blue',      hex:'#2B4590', category:'Miniatures' },
-  { id:'sw_leather',       name:'Leather Brown',   hex:'#8B5E3C', category:'Miniatures' },
-];
+import swatchData from '../config/swatches.json' with { type: 'json' };
+export const DEFAULT_SWATCHES = swatchData;
 ```
+Each entry: `{ id, name, hex:'#RRGGBB', category }`. Categories render as
+headed sections (`Primer` / `Military` / `Metals` / `Miniatures`, 20 entries
+at time of writing). User swatches live in `state.scene.userSwatches` and are
+appended after these.
 
 ---
 
@@ -1013,15 +1202,25 @@ export const DEFAULT_SWATCHES = [
 
 ### Public API
 ```js
+PersistenceManager.init()                  → void   // call from main.js: registers project modals on Modal
 PersistenceManager.save()                  → Promise<void>
 PersistenceManager.saveAs()                → Promise<void>
 PersistenceManager.open()                  → Promise<void>
 PersistenceManager.newProject()            → Promise<void>
 PersistenceManager.getRecentProjects()     → RecentProject[]
+PersistenceManager.openRecent(rec)         → Promise<void>
+PersistenceManager.relinkAsset(assetId)    → Promise<void>   // user-driven re-pick of a single file
 PersistenceManager.startAutosave(ms=60000) → void
 PersistenceManager.stopAutosave()          → void
 PersistenceManager.recoverAutosave()       → Promise<boolean>
+// Test surface — pure helpers exported for headless tests; do NOT import from app code.
+PersistenceManager.__test = {
+  _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
+  _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
+  _arrToMap, _migrate,
+}
 ```
+Constants: `SCHEMA_VERSION = '3.1'`, `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`, `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally `AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
 
 ### Full Project Schema (v3.1)
 Every field persisted. Restored exactly.
@@ -1035,8 +1234,9 @@ Every field persisted. Restored exactly.
     "camera": { "preset": "perspective", "alpha": 1.57, "beta": 1.1, "radius": 10,
                 "target": {"x":0,"y":0,"z":0}, "isOrthographic": false,
                 "followMode": "free" /* 'free' | 'followActive' | 'worldOrigin' */ },
-    "overlays": { "grid": true, "axes": true, "wireframe": false, "bedPreview": false,
-                  "wireframeEdges": false, "wireframeEdgeColor": "#f59e0b" },
+    "overlays": { "grid": true, "axes": true, "wireframe": false, "printPreview": false,
+                  "bedPreview": false, "wireframeEdges": false, "wireframeEdgeColor": "#f59e0b" },
+    "grid": { "cellMM": 10, "subdivisions": 10 },  /* line styling only; footprint = print.bedDimensions XY */
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
   "print": {
@@ -1058,6 +1258,19 @@ Every field persisted. Restored exactly.
 }
 ```
 
+### Asset Resolution Priority (locked — `_resolveAssetBlob`)
+Every asset has one resolution attempt on load. Walk top-down; first hit wins.
+
+| # | Tier | Condition | Live? | Source |
+|---|---|---|---|---|
+| 1 | Live exact path | `directoryHandleKey` granted **and** file exists at `originalPath` | yes | file on disk |
+| 2 | Hash relink | `directoryHandleKey` granted **and** no exact path, but a sibling/descendant file with matching `sha256` (+ ext filter) is found within `SCAN_FILE_LIMIT` (4000) | yes | file on disk |
+| 3 | Single-file handle | `fileHandleKey` resolves and permission is granted (loose drag-drop relink — Chrome only, only set when caller passed `fileHandle:` without a `directoryHandleKey`) | yes | file on disk |
+| 4 | Embedded snapshot | `fileData` (base64) present | no (Snapshot) | embedded in `.mixo` |
+| 5 | None | nothing left | — | → ghost wireframe |
+
+Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge: **Snapshot**); tier 5 ⇒ ghost. Tier 3 sits below the directory because a dir also gives the hash-relink rescue (tier 2) — folder-mounted assets have a richer recovery path than loose drops. **Unmatched modal** (post-load) lists only assets where a live source was *expected but failed*: `status==='static' && (directoryHandleKey || fileHandleKey)`. Assets that were always frozen (no link at all) never surface — they're not lost, they're snapshots by design.
+
 ### Load Sequence (order critical)
 ```
 1. Parse JSON, check version compatibility.
@@ -1069,7 +1282,7 @@ Every field persisted. Restored exactly.
 7. Restore userSwatches.
 7b. Restore collections into state.scene.collections (outliner display only — no Babylon work).
 8. Use BABYLON.AssetsManager to batch-load all assetLibrary entries:
-   - For each: attempt to resolve via directoryHandleKey from IndexedDB.
+   - For each: run `_resolveAssetBlob` (see priority table above).
    - Unresolved → create ghost (state.scene.objects entry with isGhost: true).
 9. For each sceneObject:
    - If asset loaded → instantiate at transform, assign shader, apply UV override if exists.
@@ -1096,6 +1309,35 @@ Every field persisted. Restored exactly.
 
 ---
 
+## PART 11b — IDB (IndexedDB Layer)
+
+**File: `core/idb.js`**
+
+Thin wrapper over IndexedDB. Single DB `'mixomesh'` v1 with two object stores:
+- `handles` — structured-clonable `FileSystemDirectoryHandle` / `FileSystemFileHandle`. Survives reloads (Chrome only). Keys: `last_mount_dir` (rec `{key, name}`), `fh_<assetId>` (loose-drop file handles, see §11 tier 3), `<mountKey>` (per-mount dir handles minted by `AssetLoader.mountDirectory`).
+- `kv` — generic JSON-serialisable values. Keys: `recent_projects` (max 10, see above), `autosave_<projectName>` (full project JSON, 60 s while dirty).
+
+### Public API
+```js
+// Handle store
+putHandle(key, handle)        → Promise<void>
+getHandle(key)                → Promise<Handle|undefined>
+deleteHandle(key)             → Promise<void>
+listHandleKeys()              → Promise<string[]>
+// Re-exports — file handles share the store
+putFileHandle, getFileHandle, deleteFileHandle  // === putHandle, getHandle, deleteHandle
+
+// kv store
+kvSet(key, value)             → Promise<void>
+kvGet(key)                    → Promise<any>
+kvDelete(key)                 → Promise<void>
+kvKeys()                      → Promise<string[]>   // autosave-recovery scan
+```
+
+The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create missing stores. The headless test harness swaps the whole module via the `./idb.js` resolve hook to `tests/idb-stub.mjs` (same export surface, Map-backed).
+
+---
+
 ## PART 12 — PRINT MANAGER
 
 **File: `core/PrintManager.js`**
@@ -1108,7 +1350,97 @@ PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
 PrintManager.exportThreeMF(options)           → Promise<void>  // colour, mm-native
+
+// options = { selectedOnly?:bool, individually?:bool, onProgress?:fn }
+//   selectedOnly  — restrict to current selection (default: all isPrintPart meshes)
+//   individually  — one file per mesh on disk (see "Export filenames" below)
+//                   (default: one combined file per format)
 ```
+
+### Export filenames
+
+Every export filename follows one recipe so two exports at different scales
+never collide on disk and the user can read the scale from the filename
+without opening the file. **The ratio suffix is always present, even at
+1:1** — consistency beats brevity here:
+
+```
+suffix         = `_r${workingRatio}to${targetRatio}`     // e.g. `_r1to144`, `_r1to1`
+combined       = `${projectName}${suffix}.${ext}`        // e.g. `Saturn_r1to1.3mf`
+individually:
+  outer zip    = `${projectName}${suffix}.zip`           // e.g. `Saturn_r1to1.zip`
+  inner entry  = `${projectName}_${meshName}${suffix}.${ext}`
+                                                          // e.g. `Saturn_hull_r1to1.3mf`
+```
+
+For OBJ, the OBJ payload's `mtllib` reference points at the **matching**
+`.mtl` filename (per-mesh in individually mode, combined otherwise) — never
+a project-scoped name, so a per-mesh OBJ is independently usable.
+
+`projectName` comes from `state.project.name`, set by `PersistenceManager.saveAs`
+(File System Access save picker) and by `_loadProject` on opening a `.mixo`.
+Defaults to `'Untitled'`.
+
+**Save dialog.** `_triggerDownload(blob, suggestedName, hint)` is the single
+disk-write seam. On Chrome/Edge it uses `window.showSaveFilePicker({ suggestedName, types })`
+so the user sees a Save-As dialog with the computed name pre-filled and can
+accept with one click. `AbortError` (user cancel) is silent — not an error,
+no toast. If the API is missing (headless tests only — Chrome always has it),
+the function falls back to the classic anchor `download` attribute. Both
+paths receive the same `suggestedName`, so the filename contract is identical
+regardless of save mode.
+
+### OBJ solid-colour PNG synthesis
+
+Mimaki UV-inkjet slicers are texture-first: a shader with a flat diffuse
+colour and no map gets ignored or interpreted as plain white. To keep
+OBJ+MTL exports usable on the primary printer target, **OBJ export
+synthesises a 4×4 RGBA PNG per unique solid-colour material** and injects a
+`map_Kd` line into the MTL pointing at it. Tiled sampling makes 4×4
+sufficient — every texel is the same colour, so any UV (or none) resolves
+to the same pixel. Concept-only fallback: this is OBJ-specific; 3MF
+Materials Extension already preserves real textures and falls back to
+`<m:colorgroup>` for solid materials.
+
+Filenames + dedup:
+- Per-material hex key `RRGGBBAA` where `A = round(material.alpha × 255)`.
+- File path inside the export zip: `textures/solid_${HEX_RRGGBBAA}.png`.
+- One PNG per unique key — N materials of the same (rgb, α) → one PNG.
+- MTL line appended per matching `newmtl` block: `map_Kd textures/solid_${HEX_RRGGBBAA}.png`.
+
+Transparency:
+- The α byte lives **in the PNG** (modern slicers, Mimaki especially, read
+  this).
+- MTL `d` (dissolve) is left at whatever Babylon's `OBJExport.MTL` emits
+  — i.e. it carries `material.alpha` already — so legacy slicers that
+  only read MTL opacity still get the right value. The two channels match
+  by construction; multiplying both is a slicer edge case rare enough to
+  accept.
+
+Toggle:
+- `state.print.objBakeSolidTextures` (default **true**). Persisted in
+  `state.print` like every other print option; survives save/load via
+  `PersistenceManager`'s shallow-merge — old saves without the key auto-
+  default to `true` on load.
+- Surfaced as the **"Bake solid colors to texture (OBJ, Mimaki-friendly)"**
+  checkbox on the Export tab. Toggling dispatches a silent `setState` (no
+  history entry — it's an export option, not a scene mutation).
+- Disabling skips synthesis entirely: no PNG entries, no `map_Kd`
+  injection. OBJ ships as classic vertex-coloured material — chosen
+  explicitly when an FDM workflow or a downstream tool prefers it.
+
+Code seams:
+- `PrintManager._synthesizeSolidShaderTextures(meshList)` — returns
+  `{ blobByName, filenameByMaterialName }`. Skips materials with a real
+  diffuse/albedo/base texture (the existing `_collectTextureBlobs` path
+  owns those).
+- `PrintManager._solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas.
+- `PrintManager._injectMapKd(mtlString, filenameByMaterialName)` —
+  post-processes the MTL string emitted by `BABYLON.OBJExport.MTL`,
+  splitting on `^newmtl\s+` to locate each block and appending the
+  `map_Kd` line. No-op when the map is empty.
+- All three are called from `_serializeOBJ` only; STL and 3MF are
+  unaffected.
 > **Phase 6 — structured export pipeline.** All three entry points are thin
 > wrappers over one orchestrator `_runExport(format, options)` driven by a
 > declarative `FORMATS` / `PREP_STEPS` registry: collect → clone (+
@@ -1166,20 +1498,63 @@ Worked examples (all assuming `1 BU == 1 m` at the working ratio):
 `sourceUnit` and `modelRatio` are **not** referenced at export time — they were already consumed at import to position the mesh in scene-metres.
 
 ### Presets
+Maintained in **`config/scale-presets.json`** (edit the JSON, no code change).
+`PrintManager.js` re-exports it unchanged:
 ```js
-export const SCALE_PRESETS = [
-  { category:'Default',    label:'1:1 Full Scale',  ratio:1   },
-  { category:'Military',   label:'1:35 Armor',      ratio:35  },
-  { category:'Military',   label:'1:48 Aircraft',   ratio:48  },
-  { category:'Military',   label:'1:72 Small',      ratio:72  },
-  { category:'Military',   label:'1:100 Micro',     ratio:100 },
-  { category:'Miniatures', label:'28mm Heroic',     ratio:56  },
-  { category:'Miniatures', label:'32mm Standard',   ratio:48  },
-  { category:'Miniatures', label:'54mm Large',      ratio:32  },
-  { category:'Tabletop',   label:'6mm Epic',        ratio:300 },
-  { category:'Custom',     label:'Custom',          ratio:null},
-];
+import scalePresetData from '../config/scale-presets.json' with { type: 'json' };
+export const SCALE_PRESETS = scalePresetData;
 ```
+Each entry: `{ category, label, ratio }`. `ratio: null` marks the free-form
+**Custom** row (user types any `M:N`).
+
+### Printer Profiles (`config/printers.json`) — single source of truth
+
+Per-printer behavior (format, color mode, texture limits, bed dimensions,
+axis/winding, prep pipeline) is data-driven. `config/printers.json` is the
+**only** place to add/edit a printer. Replaces the earlier
+`config/bed-presets.json` (deleted) — bed dims live inline per row.
+
+Schema (one entry per printer, keyed by id):
+```js
+{
+  "<id>": {
+    displayName, vendor,                          // shown in UI dropdowns
+    format,                                       // 'obj+mtl' | '3mf-core' |
+                                                  // '3mf-materials-ext' |
+                                                  // '3mf-colorgroup' | 'stl'
+    color: { mode, colorSpace? },                 // mode: 'none' |
+                                                  //   'solid-per-part' (filament) |
+                                                  //   'texture-uv' (Mimaki) |
+                                                  //   'vertex-color'
+                                                  // colorSpace: 'sRGB' | 'linear'
+    texture: null | { maxSize, encoding },        // null for solid/none modes
+    bed: { x, y, z } | null,                      // mm; null = Custom
+    axis: { up, winding },                        // up: 'Y' | 'Z'; winding: 'ccw'|'cw'
+    unit: 'millimeter' | 'meter',
+    prep: [string, ...]                           // ordered PrintManager.PREP_STEPS keys
+  }
+}
+```
+
+`prep` keys reference entries in `PrintManager.PREP_STEPS`. Existing
+keys: `fallbackMaterial`, `flattenWorld`. Phase 7 prep adds:
+`preserveUVs`, `preserveTextures`, `collapseToSolidColor`,
+`synthesizeSolidColorPNG`, `splitGroupHints`.
+
+Consumers:
+- `PrintPanel.js` reads `state.print.targetPrinterId` → looks up row → drives
+  format/color UX, bed-size readout, and the export call.
+- `SceneManager.js` reads the same row's `bed` for the floor/bed preview
+  geometry (replaces the old `bedPresets` lookup).
+- `PrintManager._runExport` reads `prep` to dispatch the right ordered
+  pipeline; format-specific serializers (`_buildOBJ`, `_build3MFModel`)
+  branch on `color.mode` for texture vs. solid behavior.
+
+Default seeded entry: `mimaki-3duj-553`. State default
+`state.print.targetPrinterId === 'mimaki-3duj-553'`. Each printer's `bed`
+also seeds `state.print.bedDimensions` at project create / printer-switch
+time (still a state field; printers.json is the *source*, state is the
+*current value*, mirrors how `scale-presets.json` seeds `workingRatio`).
 
 Ratio inputs in PrintPanel accept any positive `M:N` (or `M/N`) — both numerator and denominator parsed as floats. A bare `N` is shorthand for `1:N`. The stored value is `N / M`, so `1:72 → 72`, `2:1 → 0.5`, `3:5 → 5/3 ≈ 1.667`. Display:
 - value `> 1` → `1:N` (N rounded, decimal if non-integer)
@@ -1293,13 +1668,35 @@ Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 **Scene** section (only when no object is active):
 - **Grid cell (mm)** + **Subdivisions** inputs → `SceneManager.setGrid({cellMM,subdivisions})` (state `scene.grid`). Read-only hint shows the current bed size; bed size itself is set in Print ▸ Bed.
 
-### Future: Copy active-to-selected (Phase 4 / 5 nice-to-have)
-A "Copy from active" affordance on each Transform sub-section (Position, Rotation, Scale, Source Unit, Shader, UV Override) that applies the active object's value to all other selected objects in one batched `TransformCommand` / `ShaderAssignCommand` / etc. UI: small "↧ to all" button beside each section header, enabled only when `selectedIds.length > 1`. Three flavours per section:
-- **Each axis** — per-component button (e.g. only copy Position.X).
-- **Whole section** — copy all three components of Position.
-- **All transforms** — single button at the Transform header that snaps Position+Rotation+Scale of every selected to match the active.
+### Copy active-to-selected — ↧ buttons (shipped post-Phase-7, 2026-05-18)
+Single header-level `↧` button on the **Transform**, **Shader**, and **UV
+Override** sections. Visible only when `Selection.getSelectedIds().length > 1`
+(and, for Shader, only when the active mesh has a binding to propagate).
+Clicking the button copies the active mesh's value(s) to every OTHER selected
+mesh in **one undo step**:
 
-Not part of Phase 3's milestone. Defer until Phase 4 because the same pattern needs to apply to Shader/UV sections which don't exist yet.
+- **Transform** — single `TransformCommand(prev, next)` keyed by meshId; prev
+  is each target's absolute pos/rot/scale before the copy, next is the active
+  mesh's `_readTransform(...)` snapshot. Whole-section copy only — there is
+  no per-axis variant (the original spec's per-axis flavour was dropped as
+  premature for the actual use case, which is "make these match").
+- **Shader** — `ShaderAssignCommand(targetIds, activeShaderId)`. The command
+  is already multi-mesh-native; targets already bound to the same shader are
+  filtered out so the diff is the change set, not the selection.
+- **UV Override** — `UVOverrideCommand` is single-mesh, so N pushes are
+  wrapped in `beginBatch('Copy UV Override') / endBatch()`. If the active
+  mesh has no override, the copy *clears* each target's override (symmetric
+  with "Reset to Default" applied across the selection). Equal-value
+  targets are skipped.
+
+The ↧ button lives inside `<header class="pp-section-header">`. The header
+also owns the section collapse-toggle, so each copy click handler calls
+`e.stopPropagation()` to keep the section open. CSS: `.pp-copy-btn` in
+`styles/components.css` (transparent, border, accent on hover).
+
+The earlier "Source Unit" copy variant was dropped — Source Unit edits
+bake into vertex data per-asset, not per-mesh, so a copy-from-active makes
+no sense at the Properties level.
 
 ### Shader Library (`ui/ShaderPanel.js`)
 Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
@@ -1308,17 +1705,43 @@ Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
 - **Create new:** `+` button in header creates a Standard material shader.
 - **Inline editor:** Click any row to open editor below the list. Fields: type toggle (`Standard` / `PBR` / `Unlit`), diffuse color picker + hex field, texture slot with drop-target + Pick… button (opens texture modal grid), opacity / roughness / metallic sliders, UV-base inputs (offsetX/Y, scaleX/Y, rotation), action row (Duplicate / Assign / Select Linked / Delete). All edits update viewport live and are undoable.
 - **Texture pick modal:** Click Pick… → grid of every loaded texture (including imported glTF-embedded ones). Click texture → assigns, modal closes. Also shows "Swap…" and clear button on loaded state.
-- **Swatch palette:** Hardcoded DEFAULT_SWATCHES (Primer / Military / Metals / Miniatures, 20 entries) + User section with `+` button to capture current editor's color. Click swatch → `ColorApplyCommand` pushed.
+- **Swatch palette:** DEFAULT_SWATCHES from `config/swatches.json` (Primer / Military / Metals / Miniatures) + User section with `+` button to capture current editor's color. Click swatch → `ColorApplyCommand` pushed.
 - **Merge modal:** When `registerFromContainer` encounters material-name collisions → modal with per-conflict radios (Use existing / Rename import / Replace scene shader) + "Apply to all" checkbox.
 - **Auto-focus:** Subscribes to `ACTIVE_OBJECT_CHANGED`. When active object changes, `ShaderPanel.focus(shaderId)` is called UNLESS an `<input>` / `<select>` / `<textarea>` inside the Library has DOM focus (prevents focus theft mid-edit).
 - **Sub-sections:** All collapsible via chevron headers (Scene Shaders, Editor, Swatches). Collapse state is module-local, lost on reload.
 
 ### Asset Panel (`ui/AssetPanel.js`)
 - Bottom-docked, resizable.
-- Left: folder tree from mounted directory.
-- Right: thumbnail grid. Hover preview tooltip.
-- Card: name, extension badge, source-unit badge (with warning icon if unconfirmed).
-- Double-click → add at origin. Drag → add at cursor ray-pick.
+- Left column: a two-tab switcher (built ONCE in `init` — `main.js` appends the
+  panel-collapse button into `.ap-tree-header`, so the header element must
+  survive re-renders; only `#ap-tree-list` and `#ap-grid` re-render).
+  - **Session** tab — all assets registered to *this project's* `assetLibrary`
+    (loose drops + folder loads, regardless of source). Per-card **Linked /
+    Snapshot** badge derived from `!!(asset.directoryHandleKey || asset.fileHandleKey)`.
+    No tree (CSS: `#ap-tree[data-tab="session"] .ap-tree-list { display: none }`).
+    Mount button is also hidden on this tab — mounting belongs to Library.
+    Drag from a Session card uses `mountKey: SESSION_KEY`; ViewportDrop
+    re-instantiates the existing AssetContainer (no reload, identical to a
+    "Duplicate" via drag).
+  - **Asset Library** tab — the *mounted folder browser*. Same lifecycle as a
+    cross-project folder (re-mounted via `last_mount_dir` on boot, see §11
+    Boot behaviour). Tree of mount roots + subdirectories. Mount button visible.
+    Drag from a Library card carries the directoryHandleKey + relPath; the drop
+    handler loads through `AssetLoader.loadFromHandle` so it registers as a
+    Linked asset in this project's Session.
+- Right column: thumbnail grid. Hover preview tooltip.
+- Card: name, extension badge, source-unit badge (with warning icon if
+  unconfirmed), and on Session — Linked/Snapshot link-status badge.
+- Double-click → Session: `instantiateAsset(assetId)` at origin; Library:
+  `loadFromHandle(...)` at origin (or `loadTextureFromHandle` for textures).
+- Mounting a folder auto-switches to the Library tab.
+- **Rationale for the split:** Session and Library answer different questions.
+  Session = "what is this project made of?" — the working set, mixed
+  provenance. Library = "what is in my reusable folder?" — content-addressable,
+  cross-project, exists independently of whether this project uses any of it.
+  Conflating them (the original single-tree design) made the empty state
+  ("Session is empty / mount a folder") imply that mounting is required to
+  drop files, which is false — loose drag-drop is fully supported.
 
 ### Context Menu (`ui/ContextMenu.js`)
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
@@ -1368,6 +1791,25 @@ Collapses non-essential segments below 1280px.
 ### Modal (`ui/Modal.js`)
 Generic. Listens for `MODAL_OPEN`. Renders by id (`shaderMerge`, `dirtyConfirm`, `validationErrors`, etc.).
 
+### Project Menu (`ui/ProjectMenu.js`)
+Header toolbar: **New / Open / Save / Save As** buttons + Recent-projects flyout (thumbnails + timestamps; max 10 from `PersistenceManager.getRecentProjects`). The header also exposes the **`#project-name` inline editor** — clicking (or pressing Enter/Space while focused) swaps the label for a text input pre-selected to the current name; Enter or blur commits via `HistoryManager.push(new RenameProjectCommand(prev, next))` (so the rename is undoable and marks the project dirty), Escape cancels, empty / whitespace cancels. Subscribes to `PROJECT_LOADED / PROJECT_SAVED / PROJECT_NEW / PROJECT_RENAMED` to refresh the label — the refresh skips the element while `data-editing="1"` so it can't clobber an open editor. Why editable in-place: the project name is the prefix for every export filename (see §12 *Export filenames*), so changing it must be a one-second action — not a hidden side-effect of Save As. Owns four `Modal.register` IDs the persistence flow dispatches into:
+- `dirtyConfirm` — "Unsaved changes" → returns `'save' | 'discard' | 'cancel'`.
+- `recoverAutosave` — surface a found autosave → `'recover' | 'discard'`.
+- `unmatchedAssets` — Linked assets that fell back to Snapshot (only those with a link expectation: `directoryHandleKey || fileHandleKey`). Per-item **Relink…** button calls `PersistenceManager.relinkAsset(id)` and drops the row when it resolves.
+
+`ProjectMenu.init()` is called from `main.js` after `PersistenceManager.init()`; the persistence module dispatches `MODAL_OPEN` events but the renderers themselves live here so the UI layer owns markup.
+
+### Progress Overlay (`ui/ProgressOverlay.js`)
+Full-screen blocking overlay shown during exports. Single instance, lazily appended to `body`. Captures and swallows `pointerdown / pointerup / click / wheel / keydown / contextmenu` so the user can't mutate the scene mid-pipeline.
+
+```js
+ProgressOverlay.show(title = 'Working…')   → void
+ProgressOverlay.update(frac, message?)      → void   // frac 0..1; clamps to 0..100%
+ProgressOverlay.hide()                      → void
+```
+
+`PrintManager._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
+
 ---
 
 ## PART 14 — STABILITY PATTERNS
@@ -1408,6 +1850,51 @@ Wrap every async UI entry point.
 ### 14.4 Render Loop Hygiene
 - Never call `StateManager.getState()` inside `scene.registerBeforeRender`. Cache via event subscription.
 - Gizmo drag updates Babylon transforms directly; state is updated only on `onDragEndObservable`.
+
+---
+
+## PART 14b — HEADLESS TEST HARNESS
+
+**Directory: `tests/`** — Node-native, no build, no framework. Drives the *real* `PrintManager / MeshValidator / PersistenceManager` modules with stubs for browser-only deps (Babylon shim, JSZip, IndexedDB, DOMParser).
+
+### Run command (single)
+```
+node --import ./tests/register-hooks.mjs --test tests/*.test.mjs
+```
+**`--import` runs the register-shim, NOT the hooks file directly.** `tests/register-hooks.mjs` is a one-liner that calls `module.register('./hooks.mjs', import.meta.url)` — the Node module-customisation API. Pointing `--import` at `tests/hooks.mjs` is silently wrong: it'll run the file's top-level code (the `resolve` export), but Node won't register it as a loader, so resolutions fall through to the real `idb.js` / `jszip` and tests hang on `indexedDB is not defined`.
+
+### Resolver hook (`tests/hooks.mjs`)
+```js
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'jszip')      → tests/jszip-stub.mjs    // app imports `await import('jszip')`
+  if (specifier === './idb.js')   → tests/idb-stub.mjs      // path-suffix match
+  return nextResolve(specifier, context);
+}
+```
+
+### Stubs
+- **`tests/idb-stub.mjs`** — Map-backed mirror of `core/idb.js`. Same export surface (`putHandle / getHandle / kvSet / kvGet / putFileHandle / getFileHandle / __reset`). `__reset()` wipes both Maps between tests.
+- **`tests/jszip-stub.mjs`** — minimal JSZip for export tests.
+- **`tests/env.mjs`** — `installEnv()`: shims `window.BABYLON` minimally, polyfills `atob / btoa`, registers `DOMParser`, etc. Every test file calls `installEnv()` before importing the modules under test.
+
+### Test files
+| File | Count | Covers |
+|---|---:|---|
+| `tests/export.test.mjs` | 47 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
+| `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
+| `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
+| `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
+| `tests/state-shape.test.mjs` | 10 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = true`, persistence migration shallow-merge handles missing keys |
+| `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: layout per printer profile, texture dedup, UV round-trip via pseudo-loader regex, Bambu fallback to colorgroup |
+| `tests/validator-group.test.mjs` | 5 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam |
+
+**Total: 95 tests.** Drives the *real* modules — passing tests guarantee the load-path math, byte fidelity, and export pipeline. **Out of scope (deferred human Chrome pass):** live Babylon scene round-trip, `showSaveFilePicker` save flow (the picker prompts the user — verified live in Chrome; the test harness exercises the anchor-fallback branch of `_triggerDownload` only), autosave timer firing, Outliner ghost row UI, 3MF rendered in a slicer.
+
+### Adding a new test file
+1. Create `tests/<name>.test.mjs`, start with `import { installEnv } from './env.mjs'; installEnv(); console.error = () => {};`.
+2. Drive *real* modules via dynamic `await import('../core/Whatever.js')` so the resolver hook fires.
+3. Tests should call `resetIdb()` between cases for isolation (see `persistence.test.mjs` pattern).
+4. New browser-only deps need a stub + a `hooks.mjs` redirect line.
 
 ---
 
@@ -1454,14 +1941,21 @@ Full `ShaderLibrary` · `ShaderPanel` (Shader Library) · Properties Panel shade
 
 **Deferred (user accepted):** Nav cube does not snap-to-corner / -edge isometric views (only face clicks). Camera follow modes lightly tested. Old v3.1 saves with scalar `scene.gridSize` lose grid styling (footprint still correct from bed).
 
-### Phase 6 — Persistence & Export Hardening — IN PROGRESS (awaiting live Chrome verification)
+### Phase 6 — Persistence & Export Hardening ✓ CLOSED 2026-05-17 — ⚠ LIVE-CHROME-UNVERIFIED
+> Closed on user instruction (human tester unavailable). Code complete +
+> **49/49 headless** green. The §15 milestone ("Save → reopen identically;
+> move asset → ghost → relink") was **NOT demonstrated in a browser** — it is
+> the deferred first task of the next session (see `PHASE_HANDOFF.md` STEP 0/1).
+> The 3MF axis switches (`Y_UP_TO_Z_UP`, `THREEMF_REVERSE_WINDING`) are still
+> paper-only — confirm in a real slicer. Treat anything below as "intended
+> behaviour", not "verified behaviour", until that pass runs.
 Full `PersistenceManager` with autosave + recent projects · ghost/relink in Outliner · Smart Replace · Transform Swab · camera state save/restore · import-transform normalization · structured export pipeline (OBJ / STL / **3MF**) · progress overlay
 **Milestone:** Save → close → reopen identically. Move asset file → reopen → ghost → relink → resolved.
 
 **What shipped this session (code complete, headless-tested, not yet Chrome-verified):**
 
 - **`core/PersistenceManager.js`** — `save / saveAs / open / newProject / getRecentProjects / openRecent / relinkAsset / startAutosave / stopAutosave / recoverAutosave`. Project file is a JSON `.mixo` written via `showSaveFilePicker` (handle cached + persisted for re-save / recent). v3.1 schema embeds every asset's bytes (base64) **plus** `sha256` + `originalPath` + `directoryHandleKey`, per-object world transform + `containerMeshIndex`, group transforms, camera (+followMode), print, ui, gizmo, selection, shaders (sans `linkedMeshIds`), uvOverrides, collections, swatches. Load sequence per §10/§11.
-  - **Asset resolution priority on load:** live file at `originalPath` in a re-granted directory handle → live file found by content-hash scan of that dir (moved/renamed) → embedded base64 copy (`isUnlinked`, "static") → ghost (`isGhost`). Unmatched-but-embedded surfaces a non-blocking modal listing them with per-item Relink.
+  - **Asset resolution priority on load (5 tiers, see §11):** live file at `originalPath` in a re-granted directory handle → live file via content-hash scan of that dir (moved/renamed) → re-granted single `fileHandleKey` (loose drag-drop relink, added post-Phase-6) → embedded base64 copy (`isUnlinked`, "Snapshot") → ghost. Unmatched modal lists *only* assets that had a link expectation (`directoryHandleKey || fileHandleKey`) but fell back to the snapshot — pure Snapshot assets never surface (they're complete by design).
   - **Boot behaviour (user decision):** does NOT auto-recover/prompt a discarded autosave. Instead remembers the last mounted asset folder (`idb` kv `last_mount_dir`) and offers a "Re-mount asset folder '<name>'? [Skip][Mount]" modal so saved projects relink to live files. Autosave still *writes* to `idb` every 60 s while dirty (not surfaced on boot).
   - **State support:** `StateManager.replaceState` / `freshState`. `AssetLoader.restoreContainer / bindRestoredMesh / restoreTexture / registerAssetEntry / getAssetBytes / getContainerGeomMeshes / resetAll`. `ShaderLibrary.restoreShader` (rebuilds material with the *persisted* shaderId so SceneObject refs stay valid) / `resetAll`. `idb.kvKeys` + file-handle re-exports.
   - **Accepted scope cut:** glTF-embedded ("imported") textures are not re-bound on load — affected shaders fall back to their persisted diffuse colour. Mesh geometry, user-loaded textures, shader colour/opacity/rough/metal/UV, transforms, groups, collections, camera all restore. Fits the solid-colour-per-part print use case.
@@ -1520,12 +2014,120 @@ Full `PersistenceManager` with autosave + recent projects · ghost/relink in Out
   computed in 3MF space. Both are single switches at the top of the pipeline —
   verify orientation in a slicer, not on paper (LH↔RH reasoning is
   unreliable; same lesson as `[[navcube_camera_convention]]`).
-- **3MF export (`exportThreeMF`, "Export 3MF (color)" button)** — Babylon has no 3MF serializer (`SceneSerializer` only emits `.babylon` JSON), so the writer is hand-rolled: a spec-compliant OPC zip (`[Content_Types].xml`, `_rels/.rels`, `3D/3dmodel.model`, `model/3mf` mime). One `<object>` per mesh (multi-shell hierarchy preserved, unlike STL's single blob); solid colour via the Materials-extension `<m:colorgroup>` + per-object `pid/pindex` (uppercase `#RRGGBBFF`). Vertices arrive world-space mm (from `flattenWorld`), get rotated Y-up→Z-up, winding-flipped, then a single shared offset centres the whole build on the origin (`unit="millimeter"` literal). **Placement is fully baked + viewer-invariant:** all geometry is absolute in the vertices and every `<build><item>` carries an **explicit identity transform** (`THREEMF_IDENTITY` = `1 0 0 0 1 0 0 0 1 0 0 0`), so no slicer/viewer can reposition a part by guessing a transform — Bambu / Lychee / Prusa / 3D-Viewer all show identical placement. No null-UV trap (BaseMaterial path never declares texture mapping). Texture2D / true textured-3MF deferred — use OBJ for image-textured parts.
+- **3MF export (`exportThreeMF`, "Export 3MF (color)" button)** — Babylon has no 3MF serializer (`SceneSerializer` only emits `.babylon` JSON), so the writer is hand-rolled: a spec-compliant OPC zip (`[Content_Types].xml`, `_rels/.rels`, `3D/3dmodel.model`, `model/3mf` mime). One `<object>` per mesh (multi-shell hierarchy preserved, unlike STL's single blob); solid colour via the Materials-extension `<m:colorgroup>` + per-object `pid/pindex` (uppercase `#RRGGBBFF`). Vertices arrive world-space mm (from `flattenWorld`), get rotated Y-up→Z-up, winding-flipped, then a single shared offset centres the whole build on the origin (`unit="millimeter"` literal). **Placement is fully baked + viewer-invariant:** all geometry is absolute in the vertices and every `<build><item>` carries an **explicit identity transform** (`THREEMF_IDENTITY` = `1 0 0 0 1 0 0 0 1 0 0 0`), so no slicer/viewer can reposition a part by guessing a transform — Bambu / Lychee / Prusa / 3D-Viewer all show identical placement. No null-UV trap (BaseMaterial path never declares texture mapping). **Texture-uv 3MF (`3mf-materials-ext`) for Mimaki landed in Phase 7** — see §15 Phase 7 for the writer/loader contract and the `_serialize3MF` profile-driven dispatch.
+  - **`individually` mode for 3MF** (added 2026-05-18) produces N standalone `.3mf` zips — one per mesh, each with its own `[Content_Types].xml` / `_rels/.rels` / `3D/3dmodel.model` (and per-mesh texture parts + `3D/_rels/3dmodel.model.rels` for the Mimaki path) — bundled inside an outer `application/zip` named `${projectName}.zip`. The outer wrapper is a plain zip, **not** a 3MF; each inner entry is a complete slicer-importable 3MF on its own. The same `individually` toggle now applies uniformly to all three formats — see the options doc above. Implemented via `_wrapIndividual3MF(ctx, entriesForMesh)` which calls the shared `_build3MFColorGroupEntries` / `_build3MFMaterialsExtEntries` helpers per mesh, generates each inner zip, and embeds it in the outer.
 
-- **Headless test harness (`tests/`, no build step)** — run:
-  - `node --import ./tests/register-hooks.mjs tests/export.test.mjs` (30 cases)
-  - `node --import ./tests/register-hooks.mjs tests/validator.test.mjs` (4 cases)
-  Stubs Babylon / JSZip (bare-specifier loader hook) / DOM, drives the **real** `PrintManager` + `MeshValidator`. Covers: collection gating; per-format prep; **non-destructive** (clone unique + world-baked while the live scene mesh stays untouched); post-fix validation (error-survives vs error-resolved); selectedOnly / individually; OBJ fallback material; STL CSG present/absent + non-watertight CSG2 rejection → quiet skip + one info toast; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item + textured-skips-CSG; progress monotonic→1 and not advanced past the empty-collect guard; position-welded manifold (no false positive) + warning severity. **34/34 green.**
+- **Headless test harness (`tests/`, no build step)** — run all three:
+  `node --import ./tests/register-hooks.mjs --test tests/export.test.mjs tests/validator.test.mjs tests/persistence.test.mjs`
+  - `tests/export.test.mjs` (40) — collection gating; per-format prep; **non-destructive** (clone unique + world-baked while the live scene mesh stays untouched); post-fix validation (error-survives vs error-resolved); selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; STL CSG present/absent + non-watertight CSG2 rejection → quiet skip + one info toast; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item + textured-skips-CSG; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern covers all four format×mode combinations including OBJ `mtllib` reference and ratio suffix at 1:1, 1:144, 12:35; progress monotonic→1 and not advanced past the empty-collect guard.
+  - `tests/validator.test.mjs` (4) — position-welded manifold (no false positive) + warning severity.
+  - `tests/persistence.test.mjs` (18, **Phase 6 + 6b**) — drives the real `PersistenceManager.__test` helpers with an in-memory idb stub (`tests/idb-stub.mjs`, swapped in via the `./idb.js` resolve hook) + Node-native crypto/Blob/base64. Covers: base64 byte-fidelity incl. the 0x8000 chunk boundary + full 0–255 range (guards "reopen identically"); sha256 vectors; `_resolveAssetBlob` 5-tier priority (live exact path > content-hash scan > `fileHandleKey` > embedded > null/ghost) including the new fileHandleKey tier (granted resolves live, denied falls through, dir handle beats loose handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough.
+  Stubs Babylon / JSZip / DOM / idb (loader hooks), drives the **real** `PrintManager` / `MeshValidator` / `PersistenceManager`. **52/52 green.** Does **not** cover the live Babylon scene round-trip, File System Access pickers, autosave timer, Outliner ghost UI, or 3MF-in-slicer — those are the deferred human Chrome pass.
+
+**Phase 6b polish (post-close, code-only, no new milestone):**
+- **Session / Library tab split** in `AssetPanel` — see §13 *Asset Panel* for full rationale. Session = this project's working set; Library = mounted folder browser. Header built once in `init` so `main.js`'s appended collapse button survives re-renders.
+- **Linked / Snapshot liveness badge** on Session cards. Derived: `!!(asset.directoryHandleKey || asset.fileHandleKey)`. Tells the user at a glance whether saves will track a disk source or are frozen copies.
+- **`fileHandleKey` resolution tier** in `_resolveAssetBlob` (priority 3, between hash-scan and embedded). Set by `AssetLoader.loadFromBlob` when the caller passes `fileHandle:` without a `directoryHandleKey` (loose OS drag-drop). Persisted in `idb` under `fh_<assetId>`. Makes loose-dropped files **Linked** instead of frozen snapshots across reloads.
+- **`ViewportDrop` synchronous `getAsFileSystemHandle` capture** — see §8 *Loose OS Drag-Drop: File-Handle Capture*. The API is only valid inside the drop frame; the handler snapshots `{ file, handleP }` then awaits `handleP` later in `safeAsync`.
+- **Unmatched-modal semantics fixed** — the modal in `ProjectMenu` now lists *only* assets where a link was expected but failed (`directoryHandleKey || fileHandleKey`), with wording rewritten ("Linked assets fell back to snapshot"). Pure Snapshot assets were never lost — they were just being reported as if they were.
+
+### Phase 7 — Mimaki Textured 3MF (Materials Extension) ✓ CODE COMPLETE 2026-05-18 — ⚠ LIVE-CHROME-UNVERIFIED
+`PrintManager._serialize3MF` printer-driven dispatch · new `_build3MFModelMaterialsExt` writer · matching loader path in `core/ThreeMFLoader.js` · per-vertex UV emission · OPC texture parts (`3D/Textures/*.png` + per-part rels) · new `weldSolidOnly` PREP step.
+
+**Milestone:** Drop a textured GLB → set target = Mimaki 3DUJ-553 → export 3MF → re-import the exported 3MF → texture survives the round-trip (continuous-tone preserved, not a solid colour). **Defer the live Chrome+Mimaki-slicer pass; the next session opens with STEP 0/1 verification of both Phase 6 AND this round-trip.**
+
+**What shipped (code complete, headless-tested, not Chrome-verified):**
+
+- **Printer-driven 3MF dispatch (`PrintManager`)** — one entrypoint
+  `exportThreeMF` → `_serialize3MF(ctx)` resolves the target printer via
+  `_getPrinterProfile()` (reads `state.print.targetPrinterId` → looks up
+  `config/printers.json`, falls back to `mimaki-3duj-553`) and branches on
+  the profile's `format` field:
+  - `3mf-materials-ext` (Mimaki) → `_serialize3MFMaterialsExt(ctx)`
+  - `3mf-colorgroup` (Bambu / Prusa / Orca, default fallback) →
+    `_serialize3MFColorGroup(ctx)` (the existing writer, unchanged).
+  Dispatch is **single seam** — UI calls one function, content-types and
+  rels diverge inside the serializer. Never collapse textures for a Mimaki
+  target; never emit texture parts for a filament target.
+
+- **Mimaki textured writer (`_build3MFModelMaterialsExt(list, pathByMesh)`)** —
+  per the 3MF Materials Extension. Resource layout (single shared id
+  namespace, allocated in this order):
+  ```
+  <m:texture2d id="1" path="/3D/Textures/<name>.png" contenttype="image/png"/>
+  …one per unique texture asset…
+  <m:texture2dgroup id="N" texid="1"> <m:tex2coord u=".." v=".."/>×verts </m:texture2dgroup>
+  …one per textured mesh; one tex2coord per vertex in vertex order…
+  <m:colorgroup id="K"> <m:color color="#RRGGBBFF"/>×distinct </m:colorgroup>
+  …only emitted when at least one solid (non-textured) mesh is in the scene…
+  <object id="…" type="model" pid="N">          textured path: pid = texture2dgroup id
+  <object id="…" type="model" pid="K" pindex="P"> solid path: pid+pindex = colorgroup
+  ```
+  Triangles on textured objects carry `p1/p2/p3` mirroring `v1/v2/v3`
+  (because we emit one tex2coord per vertex in vertex order — round-trip is
+  trivial). Triangles on solid objects carry only `v1/v2/v3`. Geometry
+  transforms (Y-up→Z-up, winding flip, origin-centring, baked identity
+  build item) are identical to the colorgroup writer — the inverse loader
+  re-uses the same logic.
+
+- **Texture packaging (`_collectMimakiTextures(meshList)`)** — walks export
+  clones, deduplicates by `_getAssetIdForTexture(texture)` so two meshes
+  sharing the same source texture write one PNG part with one
+  `<m:texture2d>` resource and two `<m:texture2dgroup>` entries bound to it
+  (`texid` shared). Filenames sanitised + collision-resolved. Returns
+  `{ blobByPath, pathByMesh }` consumed by the serializer.
+
+- **Per-part rels + content types** — Mimaki package additionally emits:
+  - `3D/_rels/3dmodel.model.rels` — one `<Relationship>` per unique
+    texture path, `Type = "…/2013/01/3dtexture"`.
+  - `[Content_Types].xml` — Mimaki variant adds `<Default Extension="png" ContentType="image/png"/>`.
+    Filament packages keep the lean colorgroup-only version (no PNGs in
+    the package).
+
+- **`weldSolidOnly` PREP step** — the 3MF FORMATS entry's `prep` list was
+  switched from `weld` to `weldSolidOnly`. Welding-by-position averages
+  UVs at seams, which would shred Mimaki's continuous-tone mapping; solid-
+  colour meshes still get the full weld (no UVs to protect). The
+  `csgSolidOnly` step (existing) already keeps CSG2 off textured meshes.
+
+- **3MF loader inverse (`core/ThreeMFLoader.js`)** — `_buildContainer` now
+  receives the OPC `zip` (threaded through from the SceneLoader plugin's
+  `parse` hook) so it can resolve `<m:texture2d path="…">` to a real
+  in-package PNG byte stream via `_texturePartToUrl(zip, partPath)` → blob
+  URL → `new BABYLON.Texture(url, scene, false, false)` → `mat.diffuseTexture`.
+  Per-object material assignment branches on the object's `pid`:
+  - `pid` resolves to a `texture2dgroup` → textured: rebuild per-vertex
+    UVs by walking triangles and writing `coords[p_i]` into `uvs[v_i*2]`
+    (1:1 inverse of the writer); `diffuseTexture` from the resolved blob.
+  - `pid` resolves to a `colorgroup` → solid: `diffuseColor` from
+    `group[pindex]` (existing colorgroup path, unchanged).
+  - Neither resolves → grey fallback. No load-path branching by file
+    extension — both Bambu and Mimaki 3MF go through the same plugin.
+
+- **Headless round-trip test (`tests/threemf-materials-ext.test.mjs`, 6
+  green)** — drives the **real** PrintManager + JSZip stub through six
+  scenarios: Mimaki-default + textured mesh emits the Materials Extension
+  layout (texture2d + texture2dgroup + p1/p2/p3 + PNG part + per-part
+  rels + textured Content_Types); Bambu target emits colorgroup only
+  (no textures, lean Content_Types); Mimaki + a solid mesh degrades to
+  colorgroup without breaking; Mimaki + mixed textured/solid emits both
+  resource types with distinct pids; UVs round-trip in vertex order with
+  per-triangle `p_i == v_i`; texture dedup folds two siblings sharing one
+  texture into one `<m:texture2d>` + two `<m:texture2dgroup>`. The
+  env-stub canvas was hardened to use a real `Uint8ClampedArray` for
+  `createImageData(w,h).data` so `_textureToBlob` works end-to-end in Node.
+
+**Accepted scope cuts (Phase 7):**
+- The loader is XML-correct but DOM-dependent (`DOMParser`) — round-trip
+  is verified in headless on the *writer* side via pseudo-loader regex.
+  The full DOM round-trip (zip → DOMParser → Babylon mesh) is the
+  deferred Chrome verification.
+- The 3MF `<m:texture2d>` defaults `contentbox`/`tilestyleu/v`/`filter`
+  attributes are not emitted (spec defaults apply). Add later if a Mimaki
+  slicer complains.
+- Vertex-colour mode and `vertex-color` printers are scaffolded in
+  `printers.json` but not yet wired into a writer pipeline — no current
+  Mimaki target needs it.
 
 ### Phase handoff (every time a phase closes)
 1. Flip the phase's checkbox in `CLAUDE.md` to `[x]`.

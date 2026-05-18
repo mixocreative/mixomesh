@@ -8,11 +8,14 @@ import { putHandle, getHandle } from './idb.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from './ImportNormalizer.js';
+// Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
+// paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
+import './ThreeMFLoader.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
-const SUPPORTED_EXTENSIONS = ['.glb', '.gltf', '.obj', '.stl'];
+const SUPPORTED_EXTENSIONS = ['.glb', '.gltf', '.obj', '.stl', '.3mf'];
 const SUPPORTED_TEXTURE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 const THUMB_SIZE  = 128;
 const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isolation
@@ -29,6 +32,9 @@ const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (se
 
 let _idCounter = 0;
 const _newId = (prefix) => `${prefix}_${Date.now().toString(36)}_${++_idCounter}`;
+
+let _groupCounter = 0;
+const _newGroupId = () => `grp_${Date.now().toString(36)}_${++_groupCounter}`;
 
 // ── Public API ───────────────────────────────────────────
 
@@ -76,7 +82,11 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
  * @param {Blob} blob
  * @param {string} filename
  * @param {BABYLON.Vector3} [position]
- * @param {{ originalPath?: string, directoryHandleKey?: string }} [opts]
+ * @param {{ originalPath?: string, directoryHandleKey?: string,
+ *           fileHandle?: FileSystemFileHandle, fileHandleKey?: string }} [opts]
+ *   `fileHandle` = a single-file handle (OS drag-drop via
+ *   getAsFileSystemHandle) persisted to idb so the loose asset can relink;
+ *   `fileHandleKey` = an already-persisted key (project restore path).
  * @returns {Promise<string[]>} created meshIds
  */
 export async function loadFromBlob(blob, filename, position, opts = {}) {
@@ -98,6 +108,12 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     );
     _containers.set(assetId, container);
 
+    // One-mesh-one-shader invariant: any MultiMaterial mesh splits into
+    // N single-material siblings, each stamped with a shared sourceGroupId.
+    // Runs BEFORE registerFromContainer so MultiMaterial wrappers are gone
+    // before ShaderLibrary walks container.materials.
+    splitMultiMaterialMeshesInContainer(container);
+
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container);
 
     container.addAllToScene();
@@ -110,6 +126,19 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const modelRatio  = _extractModelRatio(container) ?? 1;
     bakeImportTransform(container, importScaleFactor(sourceUnit, modelRatio), position);
 
+    // OS drag-drop has no directory handle, but Chrome's
+    // DataTransferItem.getAsFileSystemHandle() yields a single FILE handle.
+    // Persisting it gives a loose drop a relink path of its own (resolved in
+    // PersistenceManager between dir-scan and the embedded snapshot). Without
+    // this a dragged file is a permanent frozen snapshot. Best-effort: idb may
+    // refuse the structured clone — the embedded copy still guarantees reopen.
+    let fileHandleKey = opts.fileHandleKey ?? null;
+    if (!fileHandleKey && opts.fileHandle && !opts.directoryHandleKey) {
+      fileHandleKey = `fh_${assetId}`;
+      try { await putHandle(fileHandleKey, opts.fileHandle); }
+      catch { fileHandleKey = null; }
+    }
+
     const entry = {
       id: assetId,
       name: filename.replace(/\.[^.]+$/, ''),
@@ -121,6 +150,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       unitConfirmed: true,
       modelRatio,
       directoryHandleKey: opts.directoryHandleKey ?? null,
+      fileHandleKey,
       thumbnailDataUrl: null,
     };
     setState(s => ({
@@ -168,6 +198,7 @@ export async function instantiateAsset(assetId, position) {
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
       blobUrl, '', scene, null, asset.extension
     );
+    splitMultiMaterialMeshesInContainer(container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container);
     container.addAllToScene();
 
@@ -286,10 +317,33 @@ export function restoreCloneToScene(meshId, savedObj, mesh) {
   }), { silent: true });
 }
 
-function _nextDupName(baseName) {
+/**
+ * Pick a name that no existing SceneObject already owns. If `baseName` is
+ * free, it's returned unchanged; otherwise we append `.NNN` (and increment
+ * if it already ends in `.NNN`). Used at every entry point that adds a new
+ * SceneObject — import, duplicate, primitive — so the uniqueness invariant
+ * `name → at most one object` holds across the whole scene. Per-object
+ * export filenames (`${project}_${name}_r{w}to{t}.${ext}`) depend on this.
+ */
+function _uniqueObjectName(baseName) {
   const objects = getState().scene.objects;
   const taken = new Set(Object.values(objects).map(o => o.name));
-  // If name ends with .NNN, increment; else add .001
+  if (!taken.has(baseName)) return baseName;
+  const m = baseName.match(/^(.*)\.(\d{3,})$/);
+  const stem = m ? m[1] : baseName;
+  for (let i = 1; i < 999; i++) {
+    const candidate = `${stem}.${String(i).padStart(3, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${baseName}.dup`;
+}
+
+/** @deprecated — kept as a thin alias so older imports still resolve. */
+function _nextDupName(baseName) {
+  // Duplicates always increment even when the base is free, so the source
+  // and the copy don't share a stem; force a collision then resolve.
+  const objects = getState().scene.objects;
+  const taken = new Set(Object.values(objects).map(o => o.name));
   const m = baseName.match(/^(.*)\.(\d{3,})$/);
   const stem = m ? m[1] : baseName;
   for (let i = 1; i < 999; i++) {
@@ -625,6 +679,148 @@ function _parseRatio(raw) {
 // importScaleFactor + bakeImportTransform — THE import-normalization seam —
 // now live in ImportNormalizer.js (imported above and re-exported below).
 
+// ── Split-on-import: one-mesh-one-shader invariant ──────────
+//
+// Any mesh with a `MultiMaterial` (duck-typed via `mat.subMaterials[]` + >1
+// subMeshes) is split into N single-material siblings, one per subMesh.
+// Each sibling carries:
+//   - its own VertexData clone (positions/normals/uvs + the subMesh's slice
+//     of the index buffer — verts are over-copied for simplicity, dead
+//     verts cost bytes only, no correctness impact)
+//   - the corresponding sub-material as `mesh.material`
+//   - `mesh.metadata.sourceGroupId` shared across all siblings of one split
+//
+// MultiMaterial wrappers are filtered out of `container.materials` so
+// ShaderLibrary never mints orphan shader entries for them. The original
+// source mesh is disposed.
+//
+// Pure split spec is in `splitMultiMaterialMeshes` (testable; no Babylon
+// constructors). The wrapper that calls Babylon to build real children is
+// `splitMultiMaterialMeshesInContainer`.
+
+/**
+ * Pure split planner — walks a list of mesh-like objects and decides which
+ * to keep vs. split. Calls `makeChild(spec)` for each new sibling. Caller
+ * supplies the factory + group-id generator so this function is testable
+ * without a Babylon scene.
+ *
+ * @param {Array} meshes      live `container.meshes`
+ * @param {(spec:{name:string, scene:any, sourceMesh:any, subMaterial:any,
+ *                indexStart:number, indexCount:number,
+ *                verticesStart:number, verticesCount:number,
+ *                groupId:string, partIndex:number})=>any} makeChild
+ * @param {()=>string} genGroupId
+ * @returns {{meshes:Array, disposed:Array, orphanMultiMaterials:Array}}
+ */
+export function splitMultiMaterialMeshes(meshes, makeChild, genGroupId) {
+  const out = [];
+  const disposed = [];
+  const orphanMultiMaterials = [];
+  for (const mesh of meshes) {
+    const mat = mesh.material;
+    const isMulti = !!mat && Array.isArray(mat.subMaterials) && mat.subMaterials.length > 0;
+    const subs = mesh.subMeshes;
+    if (!isMulti) { out.push(mesh); continue; }
+
+    if (!subs || subs.length === 0) {
+      // MultiMaterial with no subMeshes — unwrap to first sub-material.
+      mesh.material = mat.subMaterials[0] ?? null;
+      orphanMultiMaterials.push(mat);
+      out.push(mesh);
+      continue;
+    }
+    if (subs.length === 1) {
+      // Single subMesh — unwrap to its sub-material, no split needed.
+      const sm = subs[0];
+      mesh.material = mat.subMaterials[sm.materialIndex] ?? mat.subMaterials[0] ?? null;
+      orphanMultiMaterials.push(mat);
+      out.push(mesh);
+      continue;
+    }
+
+    const groupId = genGroupId();
+    for (let i = 0; i < subs.length; i++) {
+      const sm = subs[i];
+      const child = makeChild({
+        name: `${mesh.name || 'mesh'}__part${i}`,
+        scene: mesh.getScene?.() ?? null,
+        sourceMesh: mesh,
+        subMaterial: mat.subMaterials[sm.materialIndex] ?? null,
+        indexStart:  sm.indexStart,
+        indexCount:  sm.indexCount,
+        verticesStart: sm.verticesStart ?? 0,
+        verticesCount: sm.verticesCount ?? 0,
+        groupId,
+        partIndex: i,
+      });
+      out.push(child);
+    }
+    disposed.push(mesh);
+    orphanMultiMaterials.push(mat);
+  }
+  return { meshes: out, disposed, orphanMultiMaterials };
+}
+
+/** Real-Babylon child factory used by the in-container split. */
+function _makeBabylonChildMesh(spec) {
+  const { name, scene, sourceMesh, subMaterial,
+          indexStart, indexCount, groupId } = spec;
+
+  const positions = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.PositionKind);
+  const normals   = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.NormalKind);
+  const uvs       = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
+  const indices   = sourceMesh.getIndices?.();
+  const subIdx    = indices ? Array.from(indices.slice(indexStart, indexStart + indexCount)) : [];
+
+  const child = new BABYLON.Mesh(name, scene);
+  const vd    = new BABYLON.VertexData();
+  if (positions) vd.positions = Array.from(positions);
+  if (normals)   vd.normals   = Array.from(normals);
+  if (uvs)       vd.uvs       = Array.from(uvs);
+  vd.indices = subIdx;
+  vd.applyToMesh(child);
+
+  child.material = subMaterial ?? null;
+  child.parent   = sourceMesh.parent ?? null;
+  if (sourceMesh.position?.clone) child.position = sourceMesh.position.clone();
+  if (sourceMesh.scaling?.clone)  child.scaling  = sourceMesh.scaling.clone();
+  if (sourceMesh.rotationQuaternion?.clone) {
+    child.rotationQuaternion = sourceMesh.rotationQuaternion.clone();
+  } else if (sourceMesh.rotation?.clone) {
+    child.rotation = sourceMesh.rotation.clone();
+  }
+  child.metadata = { ...(sourceMesh.metadata ?? {}), sourceGroupId: groupId };
+  return child;
+}
+
+/**
+ * Wrapper: split every MultiMaterial mesh in `container.meshes`, prune the
+ * MultiMaterial wrappers from `container.materials`, dispose source meshes.
+ * Called from every import / restore entry point so the rest of the pipeline
+ * only ever sees single-material meshes.
+ */
+export function splitMultiMaterialMeshesInContainer(container) {
+  const result = splitMultiMaterialMeshes(
+    container.meshes ?? [],
+    _makeBabylonChildMesh,
+    _newGroupId
+  );
+  container.meshes = result.meshes;
+  for (const m of result.disposed) {
+    try { m.dispose?.(); } catch { /* fall through */ }
+  }
+  if (Array.isArray(container.materials) && result.orphanMultiMaterials.length) {
+    const orphans = new Set(result.orphanMultiMaterials);
+    container.materials = container.materials.filter(mat => {
+      if (orphans.has(mat)) {
+        try { mat.dispose?.(); } catch { /* fall through */ }
+        return false;
+      }
+      return true;
+    });
+  }
+}
+
 function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId) {
   const meshIds = [];
   for (const mesh of container.meshes) {
@@ -637,7 +833,7 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
 
     const sceneObject = {
       id: meshId,
-      name: mesh.name || 'mesh',
+      name: _uniqueObjectName(mesh.name || 'mesh'),
       assetId,
       collectionId: collectionId ?? null,
       parentId: null,
@@ -646,8 +842,7 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
       locked: false,
       isGhost: false,
       isPrintPart: true,
-      partLabel: '',
-      partTolerance: 0,
+      sourceGroupId: mesh.metadata?.sourceGroupId ?? null,
     };
     setState(s => ({
       ...s,
@@ -853,6 +1048,10 @@ export async function restoreContainer(assetId, blob, extension) {
   const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
     blobUrl, '', scene, null, extension
   );
+  // Same split as the live import path — restored containers must match the
+  // mesh-per-material shape the saved sceneObjects were minted under, so
+  // containerMeshIndex lookups line up. Split is deterministic in subMesh order.
+  splitMultiMaterialMeshesInContainer(container);
   _containers.set(assetId, container);
   container.addAllToScene();
   return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);

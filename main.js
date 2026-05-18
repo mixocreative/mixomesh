@@ -1,6 +1,7 @@
 import { Toast } from './ui/Toast.js';
 import { StatusBar } from './ui/StatusBar.js';
 import { SceneManager } from './core/SceneManager.js';
+import { getState } from './core/StateManager.js';
 import { InputManager } from './core/InputManager.js';
 import { AssetPanel } from './ui/AssetPanel.js';
 import { ViewportDrop } from './ui/ViewportDrop.js';
@@ -75,6 +76,13 @@ async function bootstrap() {
   InputManager.register('Ctrl+Shift+S', 'global', () => safeAsync(() => PersistenceManager.saveAs()));
   InputManager.register('Ctrl+O',       'global', () => safeAsync(() => PersistenceManager.open()));
   InputManager.register('Ctrl+N',       'global', () => safeAsync(() => PersistenceManager.newProject()));
+
+  // Apply boot overlays from initial state. printPreview defaults to ON
+  // (Mimaki matte preview); wireframe edges + bedPreview default OFF.
+  const overlays = getState().scene.overlays;
+  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'bedPreview']) {
+    if (overlays?.[key]) SceneManager.setOverlay(key, true);
+  }
 
   PersistenceManager.startAutosave();
   canvas.focus();

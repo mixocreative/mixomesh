@@ -289,9 +289,7 @@ function _toggleLock(meshId) {
 function _togglePrintPart(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
-  const prev = { isPrintPart: !!obj.isPrintPart, partLabel: obj.partLabel ?? '', partTolerance: obj.partTolerance ?? 0 };
-  const next = { isPrintPart: !obj.isPrintPart, partLabel: prev.partLabel, partTolerance: prev.partTolerance };
-  push(new PrintPartCommand(meshId, prev, next));
+  push(new PrintPartCommand(meshId, !!obj.isPrintPart, !obj.isPrintPart));
 }
 
 function _toggleCollapsed(id) {

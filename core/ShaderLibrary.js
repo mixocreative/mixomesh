@@ -2,6 +2,7 @@ import { EVENTS } from './events.js';
 import { dispatch, setState, getState } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { SceneManager } from './SceneManager.js';
+import swatchData from '../config/swatches.json' with { type: 'json' };
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -10,32 +11,12 @@ const FALLBACK_DIFFUSE = '#cccccc';
 const SILENT = { silent: true };
 
 /**
- * Hardcoded swatch library (BLUEPRINT §10). Grouped by `category` so the
- * ShaderPanel can render headed sections; user swatches live in
- * `state.scene.userSwatches` and are appended.
+ * Default swatch library (BLUEPRINT §10), maintained in
+ * `config/swatches.json`. Grouped by `category` so the ShaderPanel can render
+ * headed sections; user swatches live in `state.scene.userSwatches` and are
+ * appended. Edit the JSON to add/retune palette entries — no code change.
  */
-export const DEFAULT_SWATCHES = [
-  { id: 'sw_primer_grey',   name: 'Primer Grey',     hex: '#808080', category: 'Primer' },
-  { id: 'sw_black_primer',  name: 'Black Primer',    hex: '#1C1C1C', category: 'Primer' },
-  { id: 'sw_white_primer',  name: 'White Primer',    hex: '#F0F0F0', category: 'Primer' },
-  { id: 'sw_olive_drab',    name: 'Olive Drab',      hex: '#6B6B2B', category: 'Military' },
-  { id: 'sw_nato_black',    name: 'NATO Black',      hex: '#1A1A1A', category: 'Military' },
-  { id: 'sw_desert_sand',   name: 'Desert Sand',     hex: '#C2B280', category: 'Military' },
-  { id: 'sw_panzer_grey',   name: 'Panzer Grey',     hex: '#4A4A4A', category: 'Military' },
-  { id: 'sw_russian_green', name: 'Russian Green',   hex: '#4A5E3A', category: 'Military' },
-  { id: 'sw_us_dark_green', name: 'US Dark Green',   hex: '#354535', category: 'Military' },
-  { id: 'sw_interior_buff', name: 'Interior Buff',   hex: '#C8A87A', category: 'Military' },
-  { id: 'sw_silver',        name: 'Metallic Silver', hex: '#C0C0C0', category: 'Metals' },
-  { id: 'sw_gunmetal',      name: 'Gunmetal',        hex: '#2C3539', category: 'Metals' },
-  { id: 'sw_brass',         name: 'Brass',           hex: '#B5A642', category: 'Metals' },
-  { id: 'sw_copper',        name: 'Copper',          hex: '#B87333', category: 'Metals' },
-  { id: 'sw_rust',          name: 'Rust',            hex: '#8B4513', category: 'Metals' },
-  { id: 'sw_bone_white',    name: 'Bone White',      hex: '#E8E4C9', category: 'Miniatures' },
-  { id: 'sw_flesh',         name: 'Flesh',           hex: '#FFCBA4', category: 'Miniatures' },
-  { id: 'sw_blood_red',     name: 'Blood Red',       hex: '#8B0000', category: 'Miniatures' },
-  { id: 'sw_royal_blue',    name: 'Royal Blue',      hex: '#2B4590', category: 'Miniatures' },
-  { id: 'sw_leather',       name: 'Leather Brown',   hex: '#8B5E3C', category: 'Miniatures' },
-];
+export const DEFAULT_SWATCHES = swatchData;
 
 // Module-local: Babylon material objects keyed by shaderId. Not persisted in
 // state — state holds only the JSON-serializable ShaderEntry.

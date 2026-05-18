@@ -1,6 +1,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState } from '../core/StateManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { HistoryManager, RenameProjectCommand } from '../core/HistoryManager.js';
 import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
@@ -48,17 +49,76 @@ export function init() {
   }, true);
 
   _registerModals();
+  _wireProjectNameEditor();
 
   const refresh = () => _refreshName();
-  subscribe(EVENTS.PROJECT_LOADED, refresh);
-  subscribe(EVENTS.PROJECT_SAVED,  refresh);
-  subscribe(EVENTS.PROJECT_NEW,    refresh);
+  subscribe(EVENTS.PROJECT_LOADED,  refresh);
+  subscribe(EVENTS.PROJECT_SAVED,   refresh);
+  subscribe(EVENTS.PROJECT_NEW,     refresh);
+  subscribe(EVENTS.PROJECT_RENAMED, refresh);
   _refreshName();
 }
 
 function _refreshName() {
   const el = document.getElementById('project-name');
-  if (el) el.textContent = getState().project.name || 'Untitled';
+  if (!el || el.dataset.editing === '1') return;   // don't clobber an open editor
+  el.textContent = getState().project.name || 'Untitled';
+}
+
+/**
+ * Inline-edit the project name on click. Commit on Enter or blur, cancel
+ * on Escape. Empty / whitespace-only input cancels. The commit goes through
+ * `RenameProjectCommand` so it's undoable and marks the project dirty —
+ * exports will then default to the new name (see §12 *Export filenames*).
+ */
+function _wireProjectNameEditor() {
+  const el = document.getElementById('project-name');
+  if (!el) return;
+  el.title = 'Click to rename project';
+  el.tabIndex = 0;
+
+  const open = () => {
+    if (el.dataset.editing === '1') return;
+    const current = getState().project.name || 'Untitled';
+    el.dataset.editing = '1';
+    el.textContent = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'pm-name-input';
+    input.value = current;
+    input.maxLength = 80;
+    el.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = () => {
+      if (done) return; done = true;
+      const next = input.value.trim();
+      el.dataset.editing = '';
+      el.textContent = getState().project.name || 'Untitled';
+      if (next && next !== current) {
+        HistoryManager.push(new RenameProjectCommand(current, next));
+      }
+    };
+    const cancel = () => {
+      if (done) return; done = true;
+      el.dataset.editing = '';
+      el.textContent = getState().project.name || 'Untitled';
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')      { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape'){ e.preventDefault(); cancel(); }
+      e.stopPropagation();        // don't leak hotkeys to viewport (undo etc.)
+    });
+    input.addEventListener('blur', commit);
+  };
+
+  el.addEventListener('click',   open);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  });
 }
 
 async function _toggleRecent() {
@@ -132,10 +192,11 @@ function _registerModals() {
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">Assets loaded from saved copy</h2>
-      <p class="pm-modal-body">${assets.length} asset${assets.length === 1 ? '' : 's'}
-        could not be matched to a file on disk and were restored from the embedded
-        copy. They are static to this project. Relink to reconnect to a live file.</p>
+      <h2 class="pm-modal-title">Linked assets fell back to snapshot</h2>
+      <p class="pm-modal-body">${assets.length} linked asset${assets.length === 1 ? '' : 's'}
+        couldn't be found on disk and ${assets.length === 1 ? 'was' : 'were'} restored
+        from the saved snapshot. The project is still complete — relink below to
+        reconnect to a live file.</p>
       <div class="pm-asset-list">
         ${assets.map(a => `
           <div class="pm-asset-row" data-id="${a.id}">

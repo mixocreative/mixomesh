@@ -1,0 +1,12 @@
+[
+  { "category": "Default",    "label": "1:1 Full Scale", "ratio": 1 },
+  { "category": "Military",   "label": "1:35 Armor",     "ratio": 35 },
+  { "category": "Military",   "label": "1:48 Aircraft",  "ratio": 48 },
+  { "category": "Military",   "label": "1:72 Small",     "ratio": 72 },
+  { "category": "Military",   "label": "1:100 Micro",    "ratio": 100 },
+  { "category": "Miniatures", "label": "28mm Heroic",    "ratio": 56 },
+  { "category": "Miniatures", "label": "32mm Standard",  "ratio": 48 },
+  { "category": "Miniatures", "label": "54mm Large",     "ratio": 32 },
+  { "category": "Tabletop",   "label": "6mm Epic",       "ratio": 300 },
+  { "category": "Custom",     "label": "Custom",         "ratio": null }
+]

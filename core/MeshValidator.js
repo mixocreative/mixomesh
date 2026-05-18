@@ -135,50 +135,149 @@ function _checkExceedsBed(mesh) {
     : null;
 }
 
+// ── Group-aware helpers (Phase 7: split-on-import) ───────
+
+/**
+ * Collect live Babylon meshes that share a sourceGroupId. Split shells of an
+ * original MultiMaterial mesh stamp the same id at import time — without
+ * concatenating them, every shell looks non-watertight by construction.
+ */
+function _collectGroupSiblings(sourceGroupId) {
+  const objects = getState().scene.objects;
+  const siblings = [];
+  for (const [meshId, obj] of Object.entries(objects)) {
+    if (obj.sourceGroupId !== sourceGroupId) continue;
+    if (obj.isGhost) continue;
+    const babylonMesh = AssetLoader.getBabylonMesh?.(meshId);
+    if (!babylonMesh) continue;
+    siblings.push({ meshId, babylonMesh });
+  }
+  return siblings;
+}
+
+/**
+ * Concatenate sibling positions in world space and shift indices to match.
+ * Welding in _checkNonManifold then re-joins shared seams regardless of
+ * which sub-material side each triangle originated on.
+ */
+function _buildGroupUnion(siblings) {
+  let totalVerts = 0;
+  let totalIndices = 0;
+  for (const { babylonMesh } of siblings) {
+    const pos = _getPositions(babylonMesh);
+    const idx = _getIndices(babylonMesh);
+    if (!pos || !idx) continue;
+    totalVerts   += pos.length / 3;
+    totalIndices += idx.length;
+  }
+  const positions = new Float32Array(totalVerts * 3);
+  const indices   = new Uint32Array(totalIndices);
+  let pOff = 0, iOff = 0, vOff = 0;
+  const tmp = new BABYLON.Vector3();
+  for (const { babylonMesh } of siblings) {
+    const pos = _getPositions(babylonMesh);
+    const idx = _getIndices(babylonMesh);
+    if (!pos || !idx) continue;
+    const wm = babylonMesh.getWorldMatrix?.() ?? null;
+    const vCount = pos.length / 3;
+    for (let i = 0; i < vCount; i++) {
+      tmp.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+      const w = wm ? BABYLON.Vector3.TransformCoordinates(tmp, wm) : tmp;
+      positions[(vOff + i) * 3]     = w.x;
+      positions[(vOff + i) * 3 + 1] = w.y;
+      positions[(vOff + i) * 3 + 2] = w.z;
+    }
+    for (let i = 0; i < idx.length; i++) {
+      indices[iOff + i] = idx[i] + vOff;
+    }
+    vOff += vCount;
+    iOff += idx.length;
+    pOff += vCount * 3;
+  }
+  return { positions, indices };
+}
+
+/**
+ * Run topology checks on the welded union of all siblings sharing a
+ * sourceGroupId. Inverted-normals is skipped on group scope — raycasting
+ * against a synthetic union mesh adds complexity for a heuristic the slicer
+ * also corrects, and split shells frequently mislead the per-mesh check.
+ */
+export async function validateGroup(sourceGroupId) {
+  const siblings = _collectGroupSiblings(sourceGroupId);
+  const results = [];
+  if (siblings.length === 0) return results;
+  const { positions, indices } = _buildGroupUnion(siblings);
+  if (!positions.length || !indices.length) return results;
+
+  const badEdgeCount = _checkNonManifold(positions, indices);
+  if (badEdgeCount > 0) {
+    results.push({
+      type: 'nonManifold',
+      severity: 'warning',
+      count: badEdgeCount,
+      autoFixAvailable: false,
+      fixed: false,
+      scope: 'group',
+      sourceGroupId,
+      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} across group (slicer-repairable)`,
+    });
+  }
+  return results;
+}
+
 // ── Public API ───────────────────────────────────────────
 
 /**
- * Run validation checks against a mesh.
+ * Run validation checks against a mesh. If the SceneObject carries a
+ * sourceGroupId (split-on-import shell), topology checks dispatch to the
+ * welded-union path — a single shell is non-watertight by construction.
+ * Integrity checks (bed bounds) stay per-mesh.
  * @param {BABYLON.AbstractMesh} mesh
  * @returns {Promise<ValidationResult[]>}
  */
 export async function validateMesh(mesh) {
   dispatch(EVENTS.VALIDATION_STARTED, { meshName: mesh.name });
 
+  const results = [];
+  const sceneObj = getState().scene.objects?.[mesh.name];
+  const groupId  = sceneObj?.sourceGroupId ?? null;
+
   const positions = _getPositions(mesh);
   const indices   = _getIndices(mesh);
-  const results = [];
 
-  if (!positions || !indices || indices.length === 0) {
-    dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, results });
-    return results;
-  }
-
-  const badEdgeCount = _checkNonManifold(positions, indices);
-  if (badEdgeCount > 0) {
-    // Warning, not error: a colored-print assembly tool works with downloaded
-    // display models that are frequently non-watertight, and slicers
-    // (Bambu / Lychee / Cura) auto-repair these. Surfaced, never blocking.
-    results.push({
-      type: 'nonManifold',
-      severity: 'warning',
-      count: badEdgeCount,
-      autoFixAvailable: true,
-      fixed: false,
-      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
-    });
-  }
-
-  const inverted = _checkInvertedNormals(mesh, positions, indices);
-  if (inverted) {
-    results.push({
-      type: 'invertedNormals',
-      severity: 'warning',
-      count: 1,
-      autoFixAvailable: true,
-      fixed: false,
-      message: 'Normals appear inverted (auto-fixed on export)',
-    });
+  if (positions && indices && indices.length > 0) {
+    if (groupId) {
+      // Topology on the welded union; inverted-normals skipped on group scope.
+      const groupResults = await validateGroup(groupId);
+      results.push(...groupResults);
+    } else {
+      const badEdgeCount = _checkNonManifold(positions, indices);
+      if (badEdgeCount > 0) {
+        // Warning, not error: a colored-print assembly tool works with downloaded
+        // display models that are frequently non-watertight, and slicers
+        // (Bambu / Lychee / Cura) auto-repair these. Surfaced, never blocking.
+        results.push({
+          type: 'nonManifold',
+          severity: 'warning',
+          count: badEdgeCount,
+          autoFixAvailable: true,
+          fixed: false,
+          message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
+        });
+      }
+      const inverted = _checkInvertedNormals(mesh, positions, indices);
+      if (inverted) {
+        results.push({
+          type: 'invertedNormals',
+          severity: 'warning',
+          count: 1,
+          autoFixAvailable: true,
+          fixed: false,
+          message: 'Normals appear inverted (auto-fixed on export)',
+        });
+      }
+    }
   }
 
   const overBed = _checkExceedsBed(mesh);
@@ -245,14 +344,21 @@ export function hasWarnings(results) {
 }
 
 /**
- * Re-validate every mesh currently flagged as a Print Part.
+ * Re-validate every mesh currently flagged as a Print Part. Grouped shells
+ * (sourceGroupId set) collapse to one entry per group — the union check ran
+ * against the same geometry for every sibling otherwise.
  * @returns {Promise<Map<string, ValidationResult[]>>}
  */
 export async function validateAllPrintParts() {
   const out = new Map();
   const objects = getState().scene.objects;
+  const seenGroups = new Set();
   for (const [meshId, obj] of Object.entries(objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
+    if (obj.sourceGroupId) {
+      if (seenGroups.has(obj.sourceGroupId)) continue;
+      seenGroups.add(obj.sourceGroupId);
+    }
     const babylonMesh = AssetLoader.getBabylonMesh(meshId);
     if (!babylonMesh) continue;
     out.set(meshId, await validateMesh(babylonMesh));
@@ -266,6 +372,6 @@ export function shouldAutoValidate(mesh) {
 }
 
 export const MeshValidator = {
-  validateMesh, autoFix, hasErrors, hasWarnings,
+  validateMesh, validateGroup, autoFix, hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

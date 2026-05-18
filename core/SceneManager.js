@@ -22,6 +22,20 @@ const CAM_RADIUS_MAX  = 5;     // 5 m  — far zoom limit
 // 3D cursor diameter in BU. Tiny by default — only shown when pivotMode='cursor'.
 const CURSOR_DIAMETER = 0.003;     // 3 mm
 
+// ── Fusion 360-style viewport ────────────────────────────
+// Soft vertical backdrop gradient (cool light grey → steel), neutral studio
+// lighting and gentle ACES tone mapping. Tune these to retune the look.
+const BG_GRADIENT_TOP    = '#e7ebef';   // top  — light cool grey
+const BG_GRADIENT_BOTTOM = '#9aa4af';   // base — steel grey
+const HEMI_INTENSITY     = 0.85;        // broad even sky fill
+const HEMI_GROUND_COLOR  = '#c6cbd2';   // soft floor bounce (kills black undersides)
+const KEY_INTENSITY      = 0.70;        // single soft key for form
+const FILL_INTENSITY     = 0.25;        // opposite low fill, no extra highlight
+const SHADOW_DARKNESS    = 0.62;        // 0=black … 1=none — soft contact, not inky
+const SHADOW_BLUR_KERNEL = 32;          // wider = softer shadow edge
+const TONE_CONTRAST      = 1.10;
+const TONE_EXPOSURE      = 1.05;
+
 let _engine    = null;
 let _scene     = null;
 let _camera    = null;
@@ -95,9 +109,21 @@ export function init(canvas) {
   _engine.adaptToDeviceRatio = true;
 
   _scene = new BABYLON.Scene(_engine);
-  _scene.clearColor   = new BABYLON.Color4(0x0a / 255, 0x0a / 255, 0x0b / 255, 1);
+  // Fallback solid = gradient base, so any frame before the backdrop layer
+  // draws (and screenshot edges) matches instead of flashing black.
+  _scene.clearColor   = BABYLON.Color4.FromHexString(BG_GRADIENT_BOTTOM + 'ff');
   _scene.ambientColor = new BABYLON.Color3(1, 1, 1);
 
+  // Gentle ACES tone mapping — Fusion's clean, slightly punchy look. Applied
+  // at material shading, so it bakes into the scene the selection-silhouette
+  // post-process samples (no post-chain conflict).
+  const ip = _scene.imageProcessingConfiguration;
+  ip.toneMappingEnabled = true;
+  ip.toneMappingType    = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+  ip.contrast           = TONE_CONTRAST;
+  ip.exposure           = TONE_EXPOSURE;
+
+  _setupBackground();
   _setupCamera();
   _setupLighting();
   _setupGrid();
@@ -454,18 +480,54 @@ export function restoreCameraState(state) {
   if (state.isOrthographic) _syncOrtho();
 }
 
+// ── Background ───────────────────────────────────────────
+
+// Fusion-style soft vertical gradient as a fullscreen background Layer (a
+// built-in, screenshot-safe, no engine-alpha needed). A 4×512 dynamic
+// texture is enough — it stretches across the viewport; clamp wrap stops
+// edge bleed.
+function _setupBackground() {
+  const tex = new BABYLON.DynamicTexture('mx-bg-gradient', { width: 4, height: 512 }, _scene, false);
+  tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+  tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+  const ctx = tex.getContext();
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, BG_GRADIENT_TOP);
+  g.addColorStop(1, BG_GRADIENT_BOTTOM);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 512);
+  tex.update();
+
+  const layer = new BABYLON.Layer('mx-bg', null, _scene, /* isBackground */ true);
+  layer.texture = tex;
+}
+
 // ── Lighting ─────────────────────────────────────────────
 
+// Neutral 3-light studio: broad hemispheric fill (sky white, soft floor
+// bounce so undersides never go black), one soft key for form + a single
+// gentle contact shadow, and a low opposite fill with no specular so it
+// adds no second highlight. Reads flat-and-even like Fusion's default env.
 function _setupLighting() {
   const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), _scene);
-  hemi.intensity = 0.4;
+  hemi.intensity   = HEMI_INTENSITY;
+  hemi.diffuse     = new BABYLON.Color3(1, 1, 1);
+  hemi.groundColor = BABYLON.Color3.FromHexString(HEMI_GROUND_COLOR);
+  hemi.specular    = new BABYLON.Color3(0.15, 0.15, 0.15);
 
-  const dir = new BABYLON.DirectionalLight('dir', new BABYLON.Vector3(-1, -2, -1), _scene);
-  dir.intensity = 0.8;
-  dir.position  = new BABYLON.Vector3(5, 10, 5);
+  const key = new BABYLON.DirectionalLight('key', new BABYLON.Vector3(-1, -2, -1), _scene);
+  key.intensity = KEY_INTENSITY;
+  key.position  = new BABYLON.Vector3(6, 12, 6);
 
-  _shadowGen = new BABYLON.ShadowGenerator(1024, dir);
+  const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(1, -1, 1), _scene);
+  fill.intensity = FILL_INTENSITY;
+  fill.specular  = new BABYLON.Color3(0, 0, 0);
+
+  _shadowGen = new BABYLON.ShadowGenerator(2048, key);
   _shadowGen.useBlurExponentialShadowMap = true;
+  _shadowGen.useKernelBlur = true;
+  _shadowGen.blurKernel    = SHADOW_BLUR_KERNEL;
+  _shadowGen.darkness      = SHADOW_DARKNESS;
 }
 
 // ── Grid ─────────────────────────────────────────────────
@@ -1164,10 +1226,13 @@ function _setWireframeEdgesMode(enabled) {
   _wireframeEdgeState.enabled = enabled;
   for (const mesh of _scene.meshes) {
     if (!mesh.geometry) continue;
+    // Edge outlines apply to imported content only — skip grid / axes /
+    // bedPreview / nav-cube helpers (no metadata.meshId stamp).
+    if (!mesh.metadata?.meshId) continue;
     if (enabled) {
       mesh.enableEdgesRendering(0.9, true);
       mesh.edgesColor = _wireframeEdgeState.color;
-      mesh.edgesWidth = 1.5;
+      mesh.edgesWidth = 1.0;
     } else {
       mesh.disableEdgesRendering();
     }

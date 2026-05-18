@@ -9,12 +9,13 @@
   --border:        #2a2a30;
   --border-strong: #3a3a44;
   --border-focus:  #f59e0b;
+  --ring-focus:    rgba(245, 158, 11, 0.35);
 
   /* Text */
   --text-0: #ededf0;
   --text-1: #a1a1ab;
-  --text-2: #6b6b75;
-  --text-disabled: #4a4a52;
+  --text-2: #8a8a96;
+  --text-disabled: #5a5a64;
 
   /* Accent — yellow-orange (amber) */
   --accent:    #f59e0b;

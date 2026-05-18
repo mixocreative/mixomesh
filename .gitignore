@@ -1,3 +1,9 @@
 # Agent / editor local config — not project source
 .claude/
 .vscode/
+
+# Node — tests run with stock Node, no install needed. package.json /
+# package-lock.json + node_modules are stray local artefacts.
+node_modules/
+package.json
+package-lock.json

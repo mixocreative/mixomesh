@@ -11,6 +11,7 @@ import {
   PrintPartCommand, BakeTransformCommand,
 } from '../core/HistoryManager.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
+import { Modal } from './Modal.js';
 import { icon } from '../core/Icons.js';
 
 const BABYLON = window.BABYLON;
@@ -59,6 +60,7 @@ export function init() {
     EVENTS.UV_OVERRIDE_CHANGED,
   ];
   for (const ev of events) subscribe(ev, _render);
+  Modal.register('shader-picker', _shaderPickerRenderer);
   _render();
 }
 
@@ -231,9 +233,15 @@ function _renderTransformSection(mesh, multi) {
   const lockIcon = scaleLocked ? 'Lock' : 'Unlock';
   const applyDis = multi ? 'disabled' : '';
 
+  // ↧ Copy-from-active: only meaningful when the selection has >1 mesh and a
+  // single active mesh exists. Hidden otherwise.
+  const copyBtn = multi
+    ? `<button class="pp-copy-btn" data-copy="transform" title="Copy active's position / rotation / scale to other selected meshes">↧</button>`
+    : '';
+
   return `
     <section class="pp-section" data-section="transform">
-      <header class="pp-section-header">Transform</header>
+      <header class="pp-section-header">Transform${copyBtn}</header>
       <div class="pp-grid3 pp-readonly">
         <label>Size (mm)</label>
         <span class="pp-readout">${sizeMM ? _fmt(sizeMM.x) : '—'}</span>
@@ -335,6 +343,43 @@ function _wireTransformSection(meshId) {
     SceneManager.setScaleLock(!cur);
     _render();
   });
+
+  _bodyEl.querySelector('[data-copy="transform"]')?.addEventListener('click', (e) => {
+    e.stopPropagation();   // header click toggles section collapse; copy must not
+    _copyTransformFromActive();
+  });
+}
+
+/**
+ * Propagate the active mesh's absolute position / rotation / scale to every
+ * OTHER selected mesh. Blender's `Ctrl+L Link Transforms` analogue. Pushed as
+ * a single `TransformCommand` so undo reverses every affected mesh in one
+ * step. No-op when fewer than two meshes are selected or the active mesh
+ * cannot be resolved.
+ */
+function _copyTransformFromActive() {
+  const activeId = Selection.getActiveId();
+  const selIds = Selection.getSelectedIds();
+  if (!activeId || selIds.length < 2) return;
+  const activeMesh = AssetLoader.getBabylonMesh(activeId);
+  if (!activeMesh) return;
+  const source = _readTransform(activeMesh);
+
+  const prev = {};
+  const next = {};
+  for (const id of selIds) {
+    if (id === activeId) continue;
+    const m = AssetLoader.getBabylonMesh(id);
+    if (!m) continue;
+    prev[id] = _readTransform(m);
+    next[id] = {
+      position: { ...source.position },
+      rotation: { ...source.rotation },
+      scaling:  { ...source.scaling },
+    };
+  }
+  if (!Object.keys(next).length) return;
+  push(new TransformCommand(prev, next));
 }
 
 function _commitTransformInput(meshId, input) {
@@ -503,10 +548,19 @@ function _renderShaderSection(obj) {
 
   const slotsHtml = buckets.map(b => _renderShaderSlot(b, libShaders)).join('');
 
+  // ↧ Copy-from-active: visible when multi-select AND the active mesh has a
+  // shader to propagate. Reassigns every other selected mesh's binding to the
+  // active's shader in one undo step.
+  const activeObj = activeId ? getState().scene.objects[activeId] : null;
+  const canCopy = meshIds.length > 1 && activeObj?.shaderId;
+  const copyBtn = canCopy
+    ? `<button class="pp-copy-btn" data-copy="shader" title="Copy active's shader binding to other selected meshes">↧</button>`
+    : '';
+
   return `
     <section class="pp-section">
       <header class="pp-section-header">
-        Shader
+        Shader${copyBtn}
         <span class="pp-multi">${meshIds.length === 1 ? '' : `(${meshIds.length} meshes)`}</span>
       </header>
       <div class="pp-shader-list">${slotsHtml}</div>
@@ -530,11 +584,10 @@ function _collectShaderBuckets(meshIds) {
   }));
 }
 
-function _renderShaderSlot(bucket, libShaders) {
-  // Empty bucket — meshes with no shader bound. Compact assign-only dropdown,
-  // no duplicate option (nothing to clone from).
+function _renderShaderSlot(bucket /*, libShaders */) {
+  // Empty bucket — meshes with no shader bound. One [Assign…] button opens
+  // the picker modal (no Duplicate — nothing to clone from).
   if (!bucket.shaderId) {
-    const opts = libShaders.map(s => `<option value="shader:${s.id}">${_escape(s.name)}</option>`).join('');
     return `
       <div class="pp-shader-slot pp-shader-slot-empty"
            data-bucket-shader=""
@@ -542,21 +595,13 @@ function _renderShaderSlot(bucket, libShaders) {
         <span class="pp-shader-chip pp-shader-chip-empty">${icon('AlertTriangle', { width: 12, height: 12 })}</span>
         <span class="pp-shader-name">No shader</span>
         <span class="pp-shader-meshcount">${bucket.meshIds.length}</span>
-        <select class="pp-slot-dropdown" aria-label="Assign shader">
-          <option value="" selected hidden>Assign…</option>
-          <optgroup label="Assign with">${opts}</optgroup>
-        </select>
+        <button class="pp-slot-action" data-slot-assign type="button" title="Assign a shader from the library">Assign…</button>
       </div>
     `;
   }
 
   const sh = getState().scene.shaders[bucket.shaderId];
   if (!sh) return '';
-
-  const replaceOpts = libShaders
-    .filter(s => s.id !== sh.id)
-    .map(s => `<option value="shader:${s.id}">${_escape(s.name)}</option>`)
-    .join('');
 
   return `
     <div class="pp-shader-slot"
@@ -568,13 +613,8 @@ function _renderShaderSlot(bucket, libShaders) {
         <span class="pp-shader-name">${_escape(sh.name)}</span>
         <span class="pp-shader-meshcount" title="${bucket.meshIds.length} mesh${bucket.meshIds.length === 1 ? '' : 'es'} in selection">${bucket.meshIds.length}</span>
       </button>
-      <select class="pp-slot-dropdown" aria-label="Change shader on this slot">
-        <option value="" selected hidden>${_escape(sh.name)}</option>
-        ${replaceOpts ? `<optgroup label="Replace with">${replaceOpts}</optgroup>` : ''}
-        <optgroup label="Actions">
-          <option value="duplicate">Duplicate in place</option>
-        </optgroup>
-      </select>
+      <button class="pp-slot-action pp-slot-icon" data-slot-dup="${sh.id}" type="button" title="Duplicate in place">${icon('Copy', { width: 13, height: 13 })}</button>
+      <button class="pp-slot-action" data-slot-replace="${sh.id}" type="button" title="Replace with another shader (opens picker)">Replace…</button>
     </div>
   `;
 }
@@ -588,37 +628,137 @@ function _wireShaderSection() {
     });
   });
 
-  // Combined dropdown: shader id → replace; "duplicate" → duplicate in place.
-  _bodyEl.querySelectorAll('.pp-slot-dropdown').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const v = sel.value;
-      // Always reset back to the placeholder so the dropdown reads as "current
-      // shader" between actions, regardless of which option was just chosen.
-      sel.value = '';
-
-      const slot = sel.closest('.pp-shader-slot');
-      const sourceId = slot?.dataset.bucketShader || null;
+  // Duplicate-in-place: clone source shader + reassign to bucket's meshes.
+  _bodyEl.querySelectorAll('[data-slot-dup]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sourceId = btn.dataset.slotDup;
+      const slot = btn.closest('.pp-shader-slot');
       const targets = (slot?.dataset.bucketMeshes ?? '').split(',').filter(Boolean);
-      if (!targets.length) return;
-
-      if (v.startsWith('shader:')) {
-        const nextId = v.slice('shader:'.length);
-        if (!nextId || nextId === sourceId) return;
-        push(new ShaderAssignCommand(targets, nextId));
-        return;
-      }
-
-      if (v === 'duplicate' && sourceId) {
-        beginBatch('Duplicate Shader in Place');
-        const dup = new ShaderDuplicateCommand(sourceId);
-        push(dup);
-        const newId = dup.getNewId();
-        if (newId) push(new ShaderAssignCommand(targets, newId));
-        endBatch();
-        if (newId) ShaderPanel.focus(newId);
-      }
+      if (!sourceId || !targets.length) return;
+      beginBatch('Duplicate Shader in Place');
+      const dup = new ShaderDuplicateCommand(sourceId);
+      push(dup);
+      const newId = dup.getNewId();
+      if (newId) push(new ShaderAssignCommand(targets, newId));
+      endBatch();
+      if (newId) ShaderPanel.focus(newId);
     });
   });
+
+  // Replace…: open shader picker modal with the bucket's current shader excluded.
+  _bodyEl.querySelectorAll('[data-slot-replace]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sourceId = btn.dataset.slotReplace;
+      const slot = btn.closest('.pp-shader-slot');
+      const targets = (slot?.dataset.bucketMeshes ?? '').split(',').filter(Boolean);
+      if (!targets.length) return;
+      Modal.open('shader-picker', {
+        excludeShaderId: sourceId,
+        title: 'Replace shader',
+        onClose: (nextId) => {
+          if (!nextId || nextId === sourceId) return;
+          push(new ShaderAssignCommand(targets, nextId));
+        },
+      });
+    });
+  });
+
+  // Assign…: empty-bucket variant, same picker, no exclusion.
+  _bodyEl.querySelectorAll('[data-slot-assign]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const slot = btn.closest('.pp-shader-slot');
+      const targets = (slot?.dataset.bucketMeshes ?? '').split(',').filter(Boolean);
+      if (!targets.length) return;
+      Modal.open('shader-picker', {
+        excludeShaderId: null,
+        title: 'Assign shader',
+        onClose: (nextId) => {
+          if (!nextId) return;
+          push(new ShaderAssignCommand(targets, nextId));
+        },
+      });
+    });
+  });
+
+  _bodyEl.querySelector('[data-copy="shader"]')?.addEventListener('click', (e) => {
+    e.stopPropagation();   // header click toggles section collapse; copy must not
+    _copyShaderFromActive();
+  });
+}
+
+/**
+ * Propagate the active mesh's shader binding to every OTHER selected mesh.
+ * `ShaderAssignCommand` is natively multi-mesh, so one push = one undo step.
+ * Skips meshes already bound to the active shader (no-op edges).
+ */
+function _copyShaderFromActive() {
+  const activeId = Selection.getActiveId();
+  const selIds = Selection.getSelectedIds();
+  if (!activeId || selIds.length < 2) return;
+  const objects = getState().scene.objects;
+  const activeObj = objects[activeId];
+  if (!activeObj?.shaderId) return;
+  const targets = selIds.filter(id => {
+    if (id === activeId) return false;
+    const o = objects[id];
+    return o && o.shaderId !== activeObj.shaderId;
+  });
+  if (!targets.length) return;
+  push(new ShaderAssignCommand(targets, activeObj.shaderId));
+}
+
+// Shader picker modal renderer: searchable thumbnail grid driven by
+// state.scene.shaders. Closes with the picked shader id (or null on cancel).
+function _shaderPickerRenderer({ data, close }) {
+  const excludeId = data?.excludeShaderId ?? null;
+  const title = data?.title ?? 'Pick shader';
+  const root = document.createElement('div');
+  root.className = 'modal-shader-picker';
+  let query = '';
+
+  const render = () => {
+    const all = Object.values(getState().scene.shaders);
+    const q = query.trim().toLowerCase();
+    const filtered = all
+      .filter(s => s.id !== excludeId)
+      .filter(s => !q || s.name.toLowerCase().includes(q));
+
+    root.innerHTML = `
+      <header class="modal-header">
+        <h3>${_escape(title)}</h3>
+        <button class="modal-close" data-action="cancel" type="button" aria-label="Close">×</button>
+      </header>
+      <div class="modal-shader-picker-search">
+        <input type="search" placeholder="Search shaders…" value="${_escape(query)}" autocomplete="off">
+      </div>
+      <div class="modal-shader-picker-grid">
+        ${filtered.length ? filtered.map(s => `
+          <button class="modal-shader-tile" data-shader-id="${s.id}" type="button" title="${_escape(s.name)}">
+            ${renderShaderPreview(s, 72)}
+            <span class="modal-shader-tile-name">${_escape(s.name)}</span>
+          </button>
+        `).join('') : '<div class="modal-empty">No shaders match.</div>'}
+      </div>
+      <footer class="modal-footer">
+        <button class="modal-btn" data-action="cancel" type="button">Cancel</button>
+      </footer>
+    `;
+
+    const search = root.querySelector('input[type="search"]');
+    search?.addEventListener('input', (e) => {
+      query = e.target.value;
+      render();
+    });
+    root.querySelectorAll('[data-shader-id]').forEach(tile => {
+      tile.addEventListener('click', () => close(tile.dataset.shaderId));
+    });
+    root.querySelectorAll('[data-action="cancel"]').forEach(b => {
+      b.addEventListener('click', () => close(null));
+    });
+    search?.focus();
+  };
+  render();
+  return root;
 }
 
 // ── UV Override section ──────────────────────────────────
@@ -628,10 +768,16 @@ function _renderUVOverrideSection(obj) {
   const override = getState().scene.uvOverrides[obj.id] ?? null;
   const active = !!override;
   const uv = override ?? { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+  // ↧ Copy-from-active: visible when multi-select. Active's override (or
+  // "clear" if it has none) propagates to every other selected mesh.
+  const multi = Selection.getSelectedIds().length > 1;
+  const copyBtn = multi
+    ? `<button class="pp-copy-btn" data-copy="uv-override" title="Copy active's UV override to other selected meshes (or clear them if active has none)">↧</button>`
+    : '';
   return `
     <section class="pp-section" data-section="uv-override">
       <header class="pp-section-header">
-        UV Override
+        UV Override${copyBtn}
         ${active ? '<span class="pp-multi">(active)</span>' : ''}
       </header>
       <div class="pp-grid3">
@@ -687,94 +833,69 @@ function _wireUVOverrideSection(obj) {
     if (!prev) return;
     push(new UVOverrideCommand(obj.id, prev, null));
   });
+
+  _bodyEl.querySelector('[data-copy="uv-override"]')?.addEventListener('click', (e) => {
+    e.stopPropagation();   // header click toggles section collapse; copy must not
+    _copyUVOverrideFromActive();
+  });
+}
+
+/**
+ * Propagate the active mesh's UV override to every OTHER selected mesh.
+ * `UVOverrideCommand` is single-mesh, so N pushes are wrapped in a batch for
+ * a single undo entry. If the active has no override, targets are cleared
+ * (symmetric with "Reset to Default" applied across the selection).
+ */
+function _copyUVOverrideFromActive() {
+  const activeId = Selection.getActiveId();
+  const selIds = Selection.getSelectedIds();
+  if (!activeId || selIds.length < 2) return;
+  const overrides = getState().scene.uvOverrides;
+  const source = overrides[activeId] ?? null;
+
+  const work = [];
+  for (const id of selIds) {
+    if (id === activeId) continue;
+    const prev = overrides[id] ?? null;
+    const next = source ? { ...source } : null;
+    if (_uvEq(prev, next)) continue;
+    work.push({ id, prev, next });
+  }
+  if (!work.length) return;
+  beginBatch('Copy UV Override');
+  for (const { id, prev, next } of work) push(new UVOverrideCommand(id, prev, next));
+  endBatch();
+}
+
+function _uvEq(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  for (const k of ['offsetX', 'offsetY', 'scaleX', 'scaleY', 'rotation']) {
+    if (Math.abs((a[k] ?? 0) - (b[k] ?? 0)) > 1e-9) return false;
+  }
+  return true;
 }
 
 // ── Print Part section ───────────────────────────────────
 
 function _renderPrintPartSection(obj) {
   const isPrintPart = obj.isPrintPart ?? false;
-  const partLabel = obj.partLabel ?? '';
-  const partTolerance = obj.partTolerance ?? 0;
-
   return `
     <section class="pp-section" data-section="print-part">
       <header class="pp-section-header">Print Part</header>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" id="pp-is-print-part" ${isPrintPart ? 'checked' : ''}> Export as print part</label>
       </div>
-      ${isPrintPart ? `
-      <div class="pp-row">
-        <label>Part Label</label>
-        <input type="text" id="pp-part-label" value="${_escape(partLabel)}">
-      </div>
-      <div class="pp-row">
-        <label>Tolerance (mm)</label>
-        <input type="number" step="0.1" id="pp-part-tolerance" value="${_fmt(partTolerance, 1)}">
-      </div>
-      ` : '<div class="pp-row-inline"><span class="pp-hint">Not marked for export.</span></div>'}
     </section>
   `;
 }
 
 function _wirePrintPartSection(obj) {
-  const isPrintPartCb = _bodyEl.querySelector('#pp-is-print-part');
-  if (!isPrintPartCb) return;
-
-  isPrintPartCb.addEventListener('change', () => {
-    const prev = {
-      isPrintPart: !!obj.isPrintPart,
-      partLabel: obj.partLabel ?? '',
-      partTolerance: obj.partTolerance ?? 0,
-    };
-    const next = {
-      isPrintPart: isPrintPartCb.checked,
-      partLabel: isPrintPartCb.checked ? (obj.partLabel ?? '') : '',
-      partTolerance: isPrintPartCb.checked ? (obj.partTolerance ?? 0) : 0,
-    };
-    push(new PrintPartCommand(obj.id, prev, next));
+  const cb = _bodyEl.querySelector('#pp-is-print-part');
+  if (!cb) return;
+  cb.addEventListener('change', () => {
+    push(new PrintPartCommand(obj.id, !!obj.isPrintPart, cb.checked));
   });
-
-  // Wire label and tolerance inputs if print part is checked
-  const labelEl = _bodyEl.querySelector('#pp-part-label');
-  const toleranceEl = _bodyEl.querySelector('#pp-part-tolerance');
-
-  if (labelEl) {
-    labelEl.addEventListener('change', () => {
-      const prev = {
-        isPrintPart: true,
-        partLabel: obj.partLabel ?? '',
-        partTolerance: obj.partTolerance ?? 0,
-      };
-      const next = {
-        isPrintPart: true,
-        partLabel: labelEl.value.trim(),
-        partTolerance: obj.partTolerance ?? 0,
-      };
-      if (next.partLabel !== prev.partLabel) {
-        push(new PrintPartCommand(obj.id, prev, next));
-      }
-    });
-  }
-
-  if (toleranceEl) {
-    toleranceEl.addEventListener('change', () => {
-      const n = parseFloat(toleranceEl.value);
-      if (!Number.isFinite(n) || n < 0) { _render(); return; }
-      const prev = {
-        isPrintPart: true,
-        partLabel: obj.partLabel ?? '',
-        partTolerance: obj.partTolerance ?? 0,
-      };
-      const next = {
-        isPrintPart: true,
-        partLabel: obj.partLabel ?? '',
-        partTolerance: n,
-      };
-      if (Math.abs(next.partTolerance - prev.partTolerance) > 1e-9) {
-        push(new PrintPartCommand(obj.id, prev, next));
-      }
-    });
-  }
 }
 
 // ── Helpers ──────────────────────────────────────────────

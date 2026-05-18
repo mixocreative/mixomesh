@@ -26,6 +26,25 @@
   font-size: var(--fs-md);
   color: var(--text-0);
   font-weight: 500;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  cursor: text;
+  transition: background var(--dur-fast) var(--ease);
+}
+#project-name:hover  { background: var(--bg-2); }
+#project-name:focus  { outline: none; background: var(--bg-2); }
+#project-name[data-editing="1"] { padding: 0; background: transparent; }
+
+.pm-name-input {
+  font: inherit;
+  color: var(--text-0);
+  background: var(--bg-0);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--r-sm);
+  padding: 2px var(--sp-2);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-focus);
+  min-width: 12ch;
 }
 
 #dirty-indicator {

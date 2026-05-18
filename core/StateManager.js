@@ -21,7 +21,7 @@ const INITIAL_STATE = {
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
       followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: false, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
     // The scene floor footprint equals the printer bed XY (print.bedDimensions).
     // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,
     // subdivisions = how many minor cells between major lines.
@@ -31,8 +31,10 @@ const INITIAL_STATE = {
   selection: { selectedIds: [], activeId: null, pivotMode: 'active' },
   print: {
     workingRatio: 1, targetRatio: 1,
-    bedPreset: 'Elegoo Saturn 4 Ultra', bedDimensions: { x: 218.88, y: 122.88, z: 220 },
+    targetPrinterId: 'mimaki-3duj-553',
+    bedDimensions: { x: 508, y: 508, z: 305 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
+    objBakeSolidTextures: true,
   },
   ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },

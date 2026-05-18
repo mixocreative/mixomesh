@@ -9,6 +9,7 @@ import { Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
+import printersData from '../config/printers.json' with { type: 'json' };
 
 // Parse a print-scale ratio of the form M:N or M/N (both > 0). A bare number
 // "N" is treated as "1:N". Returns the value N/M — i.e. how many real-world
@@ -45,17 +46,10 @@ function _fmtRatio(n) {
   return Math.abs(m - r) < 1e-6 ? `${r}:1` : `${(+m.toFixed(3)).toString()}:1`;
 }
 
-// Print-bed presets (interior build volume, mm). 'Custom' keeps current dims.
-const BED_PRESETS = [
-  { label: 'Elegoo Saturn 4 Ultra', x: 218.88, y: 122.88, z: 220 },
-  { label: 'Bambu Lab P1S / X1C', x: 256, y: 256, z: 256 },
-  { label: 'Bambu Lab A1',        x: 256, y: 256, z: 256 },
-  { label: 'Bambu Lab A1 mini',   x: 180, y: 180, z: 180 },
-  { label: 'Prusa MK4 / MK3S+',   x: 250, y: 210, z: 220 },
-  { label: 'Creality Ender 3',    x: 220, y: 220, z: 250 },
-  { label: 'Generic Large',       x: 300, y: 300, z: 400 },
-  { label: 'Custom',              x: null, y: null, z: null },
-];
+// Printer profiles maintained in `config/printers.json` (single source of
+// truth — also drives export pipeline + color mode + texture handling).
+// `custom` entry has all-null bed dims; user types XYZ manually.
+export const PRINTERS = printersData;
 
 let _bodyEl = null;
 let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'preview' | 'export'
@@ -285,6 +279,8 @@ async function _renderValidationTab() {
 // ── Export Tab ────────────────────────────────────────────
 
 function _renderExportTab() {
+  const bakeSolids = getState().print?.objBakeSolidTextures ?? true;
+
   let html = '<div class="pp-tab-content">';
 
   html += '<div class="pp-field-group">';
@@ -298,6 +294,11 @@ function _renderExportTab() {
   html += '<div class="pp-checkbox">';
   html += '<input type="checkbox" id="pp-individually" data-option="individually">';
   html += '<label for="pp-individually">Each individually (separate files)</label>';
+  html += '</div>';
+
+  html += '<div class="pp-checkbox">';
+  html += `<input type="checkbox" id="pp-bake-solid" ${bakeSolids ? 'checked' : ''}>`;
+  html += '<label for="pp-bake-solid">Bake solid colors to texture (OBJ, Mimaki-friendly)</label>';
   html += '</div>';
 
   html += '</div>';
@@ -350,6 +351,11 @@ function _renderExportTab() {
     }
   };
 
+  el.querySelector('#pp-bake-solid').addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
+  });
+
   el.querySelector('.pp-export-obj').addEventListener('click', () =>
     runExport(PrintManager.exportOBJ, getOptions()));
 
@@ -364,29 +370,37 @@ function _renderExportTab() {
 
 // ── Bed Tab ──────────────────────────────────────────────
 
-function _matchBedPreset(dims) {
-  const p = BED_PRESETS.find(
-    b => b.x === dims.x && b.y === dims.y && b.z === dims.z
-  );
-  return p ? p.label : 'Custom';
+function _matchPrinterByBed(dims) {
+  for (const [id, p] of Object.entries(PRINTERS)) {
+    if (id === 'custom') continue;
+    const b = p.bed;
+    if (b && b.x === dims.x && b.y === dims.y && b.z === dims.z) return id;
+  }
+  return 'custom';
 }
 
 function _renderBedTab() {
   const state = getState();
   const dims = state.print.bedDimensions;
-  const presetLabel = state.print.bedPreset || _matchBedPreset(dims);
+  const printerId = state.print.targetPrinterId || _matchPrinterByBed(dims);
   const showVolume = state.scene.overlays.bedPreview ?? false;
 
   let html = '<div class="pp-tab-content">';
 
   html += '<div class="pp-field-group">';
-  html += '<label>Printer Bed</label>';
-  html += '<select id="pp-bed-preset" class="pp-preset-select">';
-  for (const b of BED_PRESETS) {
-    const sel = b.label === presetLabel ? ' selected' : '';
-    html += `<option value="${b.label}"${sel}>${b.label}</option>`;
+  html += '<label>Target Printer</label>';
+  html += '<select id="pp-printer-select" class="pp-preset-select">';
+  for (const [id, p] of Object.entries(PRINTERS)) {
+    const sel = id === printerId ? ' selected' : '';
+    html += `<option value="${id}"${sel}>${p.displayName}</option>`;
   }
   html += '</select>';
+  const cur = PRINTERS[printerId];
+  if (cur) {
+    const fmt = cur.format;
+    const colorMode = cur.color?.mode;
+    html += `<div class="pp-info">${cur.vendor} · ${fmt} · ${colorMode}</div>`;
+  }
   html += '</div>';
 
   html += '<div class="pp-field-group">';
@@ -412,28 +426,28 @@ function _renderBedTab() {
   const el = document.createElement('div');
   el.innerHTML = html;
 
-  // Commit bed dims + preset to state (non-undoable metadata, like targetRatio).
-  // Re-draw the volume box live when it is currently shown.
+  // Commit target printer + bed dims to state (non-undoable metadata, like
+  // targetRatio). Re-draw the volume box live when currently shown.
   const commit = (next) => {
     setState(s => ({
       ...s,
-      print: { ...s.print, bedPreset: next.preset, bedDimensions: next.dims },
+      print: { ...s.print, targetPrinterId: next.printerId, bedDimensions: next.dims },
     }), { silent: true });
-    // Scene floor footprint tracks the printer bed XY.
     SceneManager.rebuildBed();
     if (getState().scene.overlays.bedPreview) {
       SceneManager.updateBedPreview(next.dims);
     }
   };
 
-  el.querySelector('#pp-bed-preset').addEventListener('change', (e) => {
-    const b = BED_PRESETS.find(p => p.label === e.target.value);
-    if (!b) return;
-    if (b.x === null) {
-      // Custom: keep current dims, just relabel.
-      commit({ preset: 'Custom', dims: getState().print.bedDimensions });
+  el.querySelector('#pp-printer-select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    const p = PRINTERS[id];
+    if (!p) return;
+    if (!p.bed || p.bed.x === null) {
+      // Custom: keep current dims, just retarget.
+      commit({ printerId: id, dims: getState().print.bedDimensions });
     } else {
-      commit({ preset: b.label, dims: { x: b.x, y: b.y, z: b.z } });
+      commit({ printerId: id, dims: { x: p.bed.x, y: p.bed.y, z: p.bed.z } });
     }
     _render();
   });
@@ -444,7 +458,7 @@ function _renderBedTab() {
       const v = parseFloat(e.target.value);
       if (!(v > 0)) { e.target.value = getState().print.bedDimensions[axis]; return; }
       const dims = { ...getState().print.bedDimensions, [axis]: v };
-      commit({ preset: _matchBedPreset(dims), dims });
+      commit({ printerId: _matchPrinterByBed(dims), dims });
       _render();
     });
   });

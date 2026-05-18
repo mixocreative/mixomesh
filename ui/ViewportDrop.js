@@ -4,8 +4,9 @@ import { Toast, safeAsync } from './Toast.js';
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
-const SUPPORTED_EXT  = new Set(['.glb', '.gltf', '.obj', '.stl']);
 const SESSION_KEY    = '__session__';
+// Mesh-extension support is owned by AssetLoader (single source of truth —
+// `.3mf` etc. extend there, not here).
 
 /**
  * Wire drag-and-drop on the viewport. Drops can come from:
@@ -84,15 +85,39 @@ function _handleDrop(e, position) {
     return;
   }
 
-  const files = dt.files ? Array.from(dt.files) : [];
-  if (!files.length) return;
-  for (const file of files) {
+  // DataTransferItem and getAsFileSystemHandle() are only valid synchronously
+  // inside the drop event — snapshot the File + handle-promise NOW, before any
+  // await. The handle (Chrome-only) lets a loose OS drop relink later instead
+  // of being a frozen snapshot. Fall back to dt.files when items is absent.
+  const entries = [];
+  const items = dt.items ? Array.from(dt.items) : [];
+  for (const it of items) {
+    if (it.kind !== 'file') continue;
+    const file = it.getAsFile();
+    if (!file) continue;
+    const handleP = it.getAsFileSystemHandle
+      ? it.getAsFileSystemHandle().catch(() => null)
+      : Promise.resolve(null);
+    entries.push({ file, handleP });
+  }
+  if (!entries.length) {
+    for (const f of (dt.files ? Array.from(dt.files) : [])) {
+      entries.push({ file: f, handleP: Promise.resolve(null) });
+    }
+  }
+  if (!entries.length) return;
+
+  for (const { file, handleP } of entries) {
     const ext = _extOf(file.name);
-    if (!SUPPORTED_EXT.has(ext)) {
+    if (!AssetLoader.isMeshExt(ext)) {
       Toast.show(`Skipped ${file.name}: unsupported (${ext || 'no ext'})`, 'warning', 4000);
       continue;
     }
-    safeAsync(() => AssetLoader.loadFromBlob(file, file.name, position));
+    safeAsync(async () => {
+      const h = await handleP;
+      const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
+      await AssetLoader.loadFromBlob(file, file.name, position, fileHandle ? { fileHandle } : {});
+    });
   }
 }
 

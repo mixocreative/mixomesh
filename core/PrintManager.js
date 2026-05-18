@@ -2,30 +2,46 @@ import { getState } from './StateManager.js';
 import { Toast } from '../ui/Toast.js';
 import { MeshValidator } from './MeshValidator.js';
 import { AssetLoader } from './AssetLoader.js';
+import scalePresetData from '../config/scale-presets.json' with { type: 'json' };
+import printersData from '../config/printers.json' with { type: 'json' };
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 // ── Scale ────────────────────────────────────────────────
 
-export const SCALE_PRESETS = [
-  { category: 'Default',  label: '1:1 Full Scale', ratio: 1 },
-  { category: 'Military', label: '1:35 Armor', ratio: 35 },
-  { category: 'Military', label: '1:48 Aircraft', ratio: 48 },
-  { category: 'Military', label: '1:72 Small', ratio: 72 },
-  { category: 'Military', label: '1:100 Micro', ratio: 100 },
-  { category: 'Miniatures', label: '28mm Heroic', ratio: 56 },
-  { category: 'Miniatures', label: '32mm Standard', ratio: 48 },
-  { category: 'Miniatures', label: '54mm Large', ratio: 32 },
-  { category: 'Tabletop', label: '6mm Epic', ratio: 300 },
-  { category: 'Custom', label: 'Custom', ratio: null },
-];
+// Working/target-ratio presets, maintained in `config/scale-presets.json`
+// (`ratio: null` = the free-form Custom row). Edit the JSON to add scales.
+export const SCALE_PRESETS = scalePresetData;
 
 function _exportFactor() {
   const state = getState();
   const wr = state.print.workingRatio > 0 ? state.print.workingRatio : 1;
   const tr = state.print.targetRatio > 0 ? state.print.targetRatio : 1;
   return (wr / tr) * 1000; // BU (m at workingRatio) → mm at targetRatio
+}
+
+/**
+ * Ratio suffix appended to every export filename, so two exports at
+ * different scales never overwrite each other on disk and the user can
+ * see at a glance which scale a file is at: `1:144` → `_r1to144`,
+ * `1:1` → `_r1to1`, etc. Always present — even at 1:1 — for consistency.
+ */
+function _ratioSuffix() {
+  const s = getState().print;
+  const wr = s.workingRatio > 0 ? s.workingRatio : 1;
+  const tr = s.targetRatio > 0 ? s.targetRatio : 1;
+  return `_r${wr}to${tr}`;
+}
+
+/** Combined-export base name: `${projectName}_r{w}to{t}` (no extension). */
+function _exportBaseName(ctx) {
+  return `${ctx.projectName}${_ratioSuffix()}`;
+}
+
+/** Per-mesh base name (individually mode): `${projectName}_${meshName}_r{w}to{t}`. */
+function _perMeshBaseName(ctx, meshName) {
+  return `${ctx.projectName}_${meshName}${_ratioSuffix()}`;
 }
 
 export function getExportedDimensions(meshId) {
@@ -149,6 +165,97 @@ function _getAssetIdForTexture(texture) {
 }
 
 /**
+ * Synthesise a 4×4 RGBA PNG per solid-colour material — OBJ-only fallback so
+ * slicers that key off textures (Mimaki especially) still receive an image
+ * even when the artist set a plain diffuse colour with no map. Tiled sampling
+ * makes a 4×4 acceptable: every texel is the same colour, so any UV — or
+ * none — resolves to the same pixel. Alpha = `material.alpha × 255` lives in
+ * the PNG channel; the writer-side MTL keeps `d` at the same value so legacy
+ * slicers (which read MTL opacity, ignore PNG α) still get the right value.
+ *
+ * Dedup key is `${HEX_RRGGBBAA}` — one blob per unique (rgb, α) tuple shared
+ * across every material that maps to it.
+ *
+ * Returns:
+ *   blobByName              – Map<'solid_RRGGBBAA.png', Blob>   (zip entries)
+ *   filenameByMaterialName  – Map<materialName, 'solid_RRGGBBAA.png'>
+ *                             (drives the MTL post-process)
+ *
+ * Toggle: `state.print.objBakeSolidTextures` (default ON). Disabling skips
+ * this synthesis entirely — the OBJ ships as classic vertex-coloured
+ * material with no texture references.
+ */
+async function _synthesizeSolidShaderTextures(meshList) {
+  const blobByName = new Map();
+  const filenameByMaterialName = new Map();
+  const seenMaterials = new Set();
+  for (const { mesh } of meshList) {
+    const mat = mesh.material;
+    if (!mat) continue;
+    if (seenMaterials.has(mat)) continue;
+    seenMaterials.add(mat);
+    if (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture) continue;
+    const c = mat.diffuseColor || mat.albedoColor || mat.baseColor || { r: 0.8, g: 0.8, b: 0.8 };
+    const r = _clamp255(c.r), g = _clamp255(c.g), b = _clamp255(c.b);
+    const a = _clamp255(mat.alpha ?? 1);
+    const hex = `${_hex2(r)}${_hex2(g)}${_hex2(b)}${_hex2(a)}`;
+    const filename = `solid_${hex}.png`;
+    const matName = mat.name || mat.id || mesh.name;
+    if (matName) filenameByMaterialName.set(matName, filename);
+    if (!blobByName.has(filename)) {
+      try { blobByName.set(filename, await _solidColorBlob(r, g, b, a)); }
+      catch (err) { console.error(`Solid PNG synthesis failed for ${hex}:`, err); }
+    }
+  }
+  return { blobByName, filenameByMaterialName };
+}
+
+/** 4×4 RGBA PNG of one flat colour. Tiled sampling = uniform anywhere. */
+async function _solidColorBlob(r, g, b, a) {
+  return new Promise((resolve, reject) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4; canvas.height = 4;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get canvas context');
+      const imageData = ctx.createImageData(4, 4);
+      const px = imageData.data;
+      for (let i = 0; i < 16; i++) {
+        px[i * 4]     = r;
+        px[i * 4 + 1] = g;
+        px[i * 4 + 2] = b;
+        px[i * 4 + 3] = a;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error('toBlob produced no blob')); return; }
+        resolve(blob);
+      }, 'image/png');
+    } catch (err) { reject(err); }
+  });
+}
+
+/**
+ * Post-process the MTL string emitted by Babylon's OBJExport: for every
+ * `newmtl <name>` block whose material is in `filenameByMaterialName`, append
+ * `map_Kd textures/<filename>`. Block boundaries are detected by a regex
+ * split on the `newmtl` keyword so we don't depend on Babylon's internal MTL
+ * shape. Untouched if the map is empty (synthesis off, or every material has
+ * a real texture).
+ */
+function _injectMapKd(mtlString, filenameByMaterialName) {
+  if (!filenameByMaterialName.size) return mtlString;
+  const blocks = String(mtlString).split(/(?=^newmtl\s+)/m);
+  return blocks.map(block => {
+    const m = block.match(/^newmtl\s+(\S+)/);
+    if (!m) return block;
+    const filename = filenameByMaterialName.get(m[1]);
+    if (!filename) return block;
+    return block.replace(/\s*$/, '') + `\nmap_Kd textures/${filename}\n`;
+  }).join('');
+}
+
+/**
  * Convert a Babylon texture to a PNG blob using readPixels and canvas.
  */
 async function _textureToBlob(texture) {
@@ -181,11 +288,44 @@ async function _textureToBlob(texture) {
 
 // ── Export ───────────────────────────────────────────────
 
-async function _triggerDownload(blob, filename) {
+/**
+ * Save bytes to disk. The default filename is `suggestedName` (caller-built:
+ * `${projectName}${_ratioSuffix()}.${ext}` or per-mesh equivalent). On
+ * Chrome/Edge — our only supported browsers — `showSaveFilePicker` is always
+ * present, so the user sees a Save dialog with that name pre-filled and can
+ * accept with one click. If the user cancels (`AbortError`) it is a silent
+ * no-op, not an error. The anchor fallback exists only for environments
+ * where the API is missing (e.g. headless tests) — never used in production.
+ *
+ * @param {Blob} blob
+ * @param {string} suggestedName
+ * @param {{ description?:string, mime?:string, ext?:string }=} hint
+ *        ext WITHOUT the dot. Used to populate `types[].accept` so the
+ *        picker filters correctly.
+ */
+async function _triggerDownload(blob, suggestedName, hint = {}) {
+  if (typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function') {
+    try {
+      const mime = hint.mime || blob.type || 'application/octet-stream';
+      const ext = hint.ext || (suggestedName.split('.').pop() || '');
+      const accept = ext ? { [mime]: [`.${ext}`] } : { [mime]: [] };
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: hint.description || `${ext.toUpperCase()} file`, accept }],
+      });
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;   // user cancelled — silent
+      console.error('Save dialog failed, falling back to anchor download:', err);
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = suggestedName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -326,6 +466,11 @@ const PREP_STEPS = {
     mesh.refreshBoundingInfo?.();
   },
   weld(mesh)            { _weld(mesh); },
+  // 3MF Materials Extension: textured meshes carry UV seams whose vertex
+  // tuples MUST stay split. Welding by position alone would average UVs at
+  // seams and shred the texture mapping. Solid-color meshes have no UVs to
+  // protect, so weld them as usual.
+  weldSolidOnly(mesh)   { if (_isSolidColor(mesh)) _weld(mesh); },
   optimizeIndices(mesh) { mesh.optimizeIndices?.(); },
   createNormals(mesh)   { mesh.createNormals?.(true); },
   // Watertight re-bake. `csg` = unconditional (STL). `csgSolidOnly` skips
@@ -435,17 +580,25 @@ async function _runExport(formatKey, options = {}) {
     progress(0.82, `Writing ${fmt.label}…`);
     const out = await fmt.serialize(ctx);
 
-    if (out.kind === 'direct') {
-      out.run();
-    } else {
+    // Every format funnels through `_triggerDownload`, which shows the
+    // Save-As dialog with `filename` pre-filled. `kind` only varies how the
+    // payload is built — zip-of-entries vs. single blob.
+    let blob;
+    if (out.kind === 'zip') {
       progress(0.9, 'Packaging…');
       const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       for (const e of out.entries) zip.file(e.path, e.data);
-      const blob = await zip.generateAsync({ type: 'blob', mimeType: out.mime });
-      progress(0.98, 'Downloading…');
-      await _triggerDownload(blob, out.filename);
+      blob = await zip.generateAsync({ type: 'blob', mimeType: out.mime });
+    } else {
+      // kind: 'blob' — caller supplied raw bytes (STL combined).
+      blob = out.data instanceof Blob
+        ? out.data
+        : new Blob([out.data], { type: out.mime || 'application/octet-stream' });
     }
+    progress(0.98, 'Downloading…');
+    const ext = (out.filename.split('.').pop() || '').toLowerCase();
+    await _triggerDownload(blob, out.filename, { mime: out.mime, ext, description: `${fmt.label} file` });
     progress(1, 'Done');
     Toast.show(`✓ Exported ${out.filename ?? fmt.label}`, 'success', 3000);
     if (ctx.csgSkipped.length) {
@@ -465,37 +618,130 @@ async function _runExport(formatKey, options = {}) {
 async function _serializeOBJ(ctx) {
   const meshes = ctx.meshes.map(e => e.mesh);
   const textureBlobs = await _collectTextureBlobs(meshes);
+  // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
+  // so Mimaki UV-inkjet (texture-first) slicers receive an image even when
+  // the artist set a flat diffuse colour with no map. Toggle is on by default,
+  // off via the Export-tab checkbox.
+  const bakeSolids = !!getState().print?.objBakeSolidTextures;
+  const synth = bakeSolids
+    ? await _synthesizeSolidShaderTextures(ctx.meshes)
+    : { blobByName: new Map(), filenameByMaterialName: new Map() };
+
   const entries = [];
   if (ctx.individually) {
     for (const { mesh, name } of ctx.meshes) {
-      entries.push({ path: `${name}.obj`, data: BABYLON.OBJExport.OBJ([mesh], true, `${ctx.projectName}.mtl`, true) });
-      entries.push({ path: `${name}.mtl`, data: BABYLON.OBJExport.MTL([mesh]) });
+      const base = _perMeshBaseName(ctx, name);
+      const mtl = BABYLON.OBJExport.MTL([mesh]);
+      entries.push({ path: `${base}.obj`, data: BABYLON.OBJExport.OBJ([mesh], true, `${base}.mtl`, true) });
+      entries.push({ path: `${base}.mtl`, data: _injectMapKd(mtl, synth.filenameByMaterialName) });
     }
   } else {
-    entries.push({ path: `${ctx.projectName}.obj`, data: BABYLON.OBJExport.OBJ(meshes, true, `${ctx.projectName}.mtl`, true) });
-    entries.push({ path: `${ctx.projectName}.mtl`, data: BABYLON.OBJExport.MTL(meshes) });
+    const base = _exportBaseName(ctx);
+    const mtl = BABYLON.OBJExport.MTL(meshes);
+    entries.push({ path: `${base}.obj`, data: BABYLON.OBJExport.OBJ(meshes, true, `${base}.mtl`, true) });
+    entries.push({ path: `${base}.mtl`, data: _injectMapKd(mtl, synth.filenameByMaterialName) });
   }
   for (const [filename, blob] of textureBlobs) entries.push({ path: `textures/${filename}`, data: blob });
-  return { kind: 'zip', mime: 'application/zip', filename: `${ctx.projectName}.zip`, entries };
+  for (const [filename, blob] of synth.blobByName) entries.push({ path: `textures/${filename}`, data: blob });
+  return { kind: 'zip', mime: 'application/zip', filename: `${_exportBaseName(ctx)}.zip`, entries };
 }
 
 function _serializeSTL(ctx) {
   const meshes = ctx.meshes.map(e => e.mesh);
+  if (ctx.individually) {
+    const entries = [];
+    for (const { mesh, name } of ctx.meshes) {
+      const base = _perMeshBaseName(ctx, name);
+      const data = BABYLON.STLExport.CreateSTL([mesh], false, base, true, false, false, false);
+      entries.push({ path: `${base}.stl`, data });
+    }
+    return { kind: 'zip', mime: 'application/zip', filename: `${_exportBaseName(ctx)}.zip`, entries };
+  }
+  // Combined STL: ask the exporter for raw bytes (download=false) and route
+  // through `_triggerDownload` like every other format so the user sees the
+  // same Save-As dialog with the project+ratio default name.
+  const base = _exportBaseName(ctx);
+  const data = BABYLON.STLExport.CreateSTL(meshes, false, base, true, false, false, false);
+  return { kind: 'blob', mime: 'model/stl', filename: `${base}.stl`, data };
+}
+
+/**
+ * The 3MF entry serializer is printer-profile driven. The printer's
+ * `format` field in `config/printers.json` picks the sub-pipeline:
+ *
+ *   3mf-materials-ext → Mimaki UV-inkjet: per-vertex UVs + embedded PNG
+ *                       textures via the Materials Extension. Continuous-
+ *                       tone colour preserved.
+ *   3mf-colorgroup    → Filament multi-colour (Bambu/Prusa/Orca): solid
+ *                       diffuse colour per object via <m:colorgroup>.
+ *
+ * Default is Mimaki (project goal). Unknown formats fall back to colorgroup
+ * — never silently change the file shape.
+ */
+async function _serialize3MF(ctx) {
+  const profile = _getPrinterProfile();
+  if (profile?.format === '3mf-materials-ext') return _serialize3MFMaterialsExt(ctx);
+  return _serialize3MFColorGroup(ctx);
+}
+
+function _build3MFColorGroupEntries(meshList) {
+  return [
+    { path: '[Content_Types].xml', data: _3MF_CONTENT_TYPES },
+    { path: '_rels/.rels',         data: _3MF_RELS },
+    { path: '3D/3dmodel.model',    data: _build3MFModel(meshList) },
+  ];
+}
+
+async function _build3MFMaterialsExtEntries(meshList) {
+  const { blobByPath, pathByMesh } = await _collectMimakiTextures(meshList);
+  const modelXml = _build3MFModelMaterialsExt(meshList, pathByMesh);
+  const entries = [
+    { path: '[Content_Types].xml', data: _3MF_CONTENT_TYPES_TEXTURED },
+    { path: '_rels/.rels',         data: _3MF_RELS },
+    { path: '3D/3dmodel.model',    data: modelXml },
+  ];
+  if (blobByPath.size) {
+    entries.push({ path: '3D/_rels/3dmodel.model.rels', data: _buildTextureRels(blobByPath) });
+    for (const [path, blob] of blobByPath) entries.push({ path, data: blob });
+  }
+  return entries;
+}
+
+/**
+ * Per-mesh 3MF wrapper: builds N standalone `.3mf` zips and bundles them
+ * inside an outer `.zip` so the user gets one file per part on disk.
+ * The outer archive is a plain `application/zip` — each inner entry is a
+ * complete, slicer-importable 3MF in its own right.
+ */
+async function _wrapIndividual3MF(ctx, entriesForMesh) {
+  const { default: JSZip } = await import('jszip');
+  const entries = [];
+  for (const e of ctx.meshes) {
+    const inner = await entriesForMesh([e]);
+    const innerZip = new JSZip();
+    for (const x of inner) innerZip.file(x.path, x.data);
+    const data = await innerZip.generateAsync({ type: 'uint8array', mimeType: 'model/3mf' });
+    entries.push({ path: `${_perMeshBaseName(ctx, e.name)}.3mf`, data });
+  }
+  return { kind: 'zip', mime: 'application/zip', filename: `${_exportBaseName(ctx)}.zip`, entries };
+}
+
+async function _serialize3MFColorGroup(ctx) {
+  if (ctx.individually) {
+    return _wrapIndividual3MF(ctx, list => _build3MFColorGroupEntries(list));
+  }
   return {
-    kind: 'direct', filename: `${ctx.projectName}.stl`,
-    run: () => BABYLON.STLExport.CreateSTL(meshes, true, ctx.projectName, true, false, false, false),
+    kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`,
+    entries: _build3MFColorGroupEntries(ctx.meshes),
   };
 }
 
-function _serialize3MF(ctx) {
-  return {
-    kind: 'zip', mime: 'model/3mf', filename: `${ctx.projectName}.3mf`,
-    entries: [
-      { path: '[Content_Types].xml', data: _3MF_CONTENT_TYPES },
-      { path: '_rels/.rels',         data: _3MF_RELS },
-      { path: '3D/3dmodel.model',    data: _build3MFModel(ctx.meshes) },
-    ],
-  };
+async function _serialize3MFMaterialsExt(ctx) {
+  if (ctx.individually) {
+    return _wrapIndividual3MF(ctx, list => _build3MFMaterialsExtEntries(list));
+  }
+  const entries = await _build3MFMaterialsExtEntries(ctx.meshes);
+  return { kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`, entries };
 }
 
 /**
@@ -517,7 +763,9 @@ const FORMATS = {
   },
   '3mf': {
     label: '3MF', needsCSG: true,
-    prep: ['fallbackMaterial', 'flattenWorld', 'weld', 'optimizeIndices',
+    // `weldSolidOnly` (not `weld`) so textured Mimaki meshes keep their UV
+    // seams intact — solid-colour filament meshes are still welded.
+    prep: ['fallbackMaterial', 'flattenWorld', 'weldSolidOnly', 'optimizeIndices',
            'csgSolidOnly', 'createNormals'],
     serialize: _serialize3MF,
   },
@@ -527,6 +775,18 @@ const FORMATS = {
 export const exportOBJ     = (options = {}) => _runExport('obj', options);
 export const exportSTL     = (options = {}) => _runExport('stl', options);
 export const exportThreeMF = (options = {}) => _runExport('3mf', options);
+
+// ── Printer profile dispatch ─────────────────────────────
+
+/**
+ * Resolve the current target printer's profile from `config/printers.json`.
+ * Falls back to the project default (mimaki-3duj-553) if the id is missing
+ * or unknown — the export pipeline must never crash on a bad id.
+ */
+function _getPrinterProfile() {
+  const id = getState().print?.targetPrinterId || 'mimaki-3duj-553';
+  return printersData[id] || printersData['mimaki-3duj-553'];
+}
 
 // ── 3MF (color, mm-native, multi-shell) ──────────────────
 
@@ -625,8 +885,226 @@ function _build3MFModel(list) {
 const _3MF_CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`;
 
+// Adds the PNG default content type for the Mimaki textured pipeline.
+// Plain colorgroup packages don't carry binaries, so we keep the lean
+// version for filament exports and only emit this one when textures are
+// in the package.
+const _3MF_CONTENT_TYPES_TEXTURED = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="png" ContentType="image/png"/></Types>`;
+
 const _3MF_RELS = `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
+
+const _3MF_TEXTURE_REL_TYPE = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture';
+
+// ── 3MF Materials Extension (Mimaki textured) ────────────
+//
+// The texture writer is the exact inverse of the loader's parse path. To
+// keep round-trip trivial we emit ONE <m:tex2coord> per vertex in
+// vertex-order, and every triangle's `p1/p2/p3` index simply re-states its
+// `v1/v2/v3` — vertex i ↔ UV i. Welding is skipped on textured meshes (see
+// PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
+//
+// File package additions (vs. colorgroup):
+//   3D/_rels/3dmodel.model.rels — one Relationship per unique texture
+//   3D/Textures/<n>.png         — the texture bytes themselves
+//   [Content_Types].xml         — adds Default Extension="png"
+
+function _sanitizeTextureName(name) {
+  return String(name || 'texture').replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+/**
+ * Walk export clones, extract every unique diffuse/albedo/base texture as a
+ * PNG blob, and assign each a stable package path. Returns:
+ *   blobByPath  – Map<packagePath, Blob>   (zip entries)
+ *   pathByMesh  – Map<mesh, packagePath>   (XML attrs)
+ * Meshes without a texture (or with no UVs) are absent from pathByMesh and
+ * the writer falls them through to the colorgroup path.
+ */
+async function _collectMimakiTextures(meshList) {
+  const blobByPath = new Map();
+  const pathByMesh = new Map();
+  const pathByAssetId = new Map();
+  const usedNames = new Set();
+
+  for (const { mesh } of meshList) {
+    const mat = mesh.material;
+    if (!mat) continue;
+    const tex = mat.diffuseTexture || mat.albedoTexture || mat.baseTexture;
+    if (!tex) continue;
+    // Need UVs to map this texture to geometry. Without them, fall through
+    // to colorgroup with the material's diffuse colour.
+    const uvs = mesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
+    if (!uvs || uvs.length === 0) continue;
+
+    const assetId = _getAssetIdForTexture(tex);
+    let path = pathByAssetId.get(assetId);
+    if (!path) {
+      const base = _sanitizeTextureName(tex.name || assetId);
+      let filename = `${base}.png`;
+      let counter = 0;
+      while (usedNames.has(filename)) { counter++; filename = `${base}_${counter}.png`; }
+      usedNames.add(filename);
+      path = `3D/Textures/${filename}`;
+      try {
+        const blob = await _textureToBlob(tex);
+        blobByPath.set(path, blob);
+        pathByAssetId.set(assetId, path);
+      } catch (err) {
+        console.error(`Texture encode failed for ${tex.name}:`, err);
+        continue;
+      }
+    }
+    pathByMesh.set(mesh, path);
+  }
+  return { blobByPath, pathByMesh };
+}
+
+/**
+ * Build the model XML for the Materials Extension pipeline. Layout:
+ *
+ *   <resources>
+ *     <m:texture2d id="1" path="/3D/Textures/a.png" contenttype="image/png"/>
+ *     ...                                                — one per unique texture
+ *     <m:texture2dgroup id="N" texid="1">                — one per textured mesh
+ *       <m:tex2coord u=".." v=".."/> × verts
+ *     </m:texture2dgroup>
+ *     <m:colorgroup id="K">                              — only if any solid mesh
+ *       <m:color color="#RRGGBBFF"/> × distinct
+ *     </m:colorgroup>
+ *     <object id="..." type="model" pid="K" pindex="P">  — solid path
+ *     <object id="..." type="model" pid="N">             — textured path
+ *       <triangle v1=".." v2=".." v3=".." p1=".." p2=".." p3=".."/>
+ *   </resources>
+ *
+ * Geometry transforms (Y-up→Z-up, winding flip, origin-center) mirror the
+ * colorgroup builder one-for-one so the loader's inverse remains shared.
+ */
+function _build3MFModelMaterialsExt(list, pathByMesh) {
+  // Pass 1: assign resource ids, gather distinct solid colours.
+  let nextId = 1;
+  const tex2dIdByPath = new Map();
+  for (const p of new Set([...pathByMesh.values()])) tex2dIdByPath.set(p, nextId++);
+
+  const tex2dGroupIdByMesh = new Map();
+  for (const { mesh } of list) if (pathByMesh.has(mesh)) tex2dGroupIdByMesh.set(mesh, nextId++);
+
+  const colors = [];
+  const colorIndex = new Map();
+  for (const { mesh } of list) {
+    if (pathByMesh.has(mesh)) continue;
+    const hex = _materialHex(mesh);
+    if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
+  }
+  const colorGroupId = colors.length ? nextId++ : null;
+
+  // Pass 2: rotate vertices into 3MF space and find union bounds.
+  const converted = new Map();
+  let mnx = Infinity, mny = Infinity, mnz = Infinity;
+  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (const { mesh } of list) {
+    const p = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+    if (!p) continue;
+    const out = new Float32Array(p.length);
+    for (let i = 0; i < p.length; i += 3) {
+      const w = BABYLON.Vector3.TransformCoordinates(
+        new BABYLON.Vector3(p[i], p[i + 1], p[i + 2]), Y_UP_TO_Z_UP);
+      out[i] = w.x; out[i + 1] = w.y; out[i + 2] = w.z;
+      if (w.x < mnx) mnx = w.x; if (w.x > mxx) mxx = w.x;
+      if (w.y < mny) mny = w.y; if (w.y > mxy) mxy = w.y;
+      if (w.z < mnz) mnz = w.z; if (w.z > mxz) mxz = w.z;
+    }
+    converted.set(mesh, out);
+  }
+  const cx = Number.isFinite(mnx) ? (mnx + mxx) / 2 : 0;
+  const cy = Number.isFinite(mny) ? (mny + mxy) / 2 : 0;
+  const cz = Number.isFinite(mnz) ? (mnz + mxz) / 2 : 0;
+
+  // Resources — texture2d.
+  const tex2dXml = [...tex2dIdByPath.entries()]
+    .map(([path, id]) => `<m:texture2d id="${id}" path="/${path}" contenttype="image/png"/>`)
+    .join('');
+
+  // Resources — texture2dgroup (one per textured mesh, coord per vertex).
+  const tex2dGroupXmls = [];
+  for (const { mesh } of list) {
+    const groupId = tex2dGroupIdByMesh.get(mesh);
+    if (!groupId) continue;
+    const texPath = pathByMesh.get(mesh);
+    const texId = tex2dIdByPath.get(texPath);
+    const uvs = mesh.getVerticesData(BABYLON.VertexBuffer.UVKind) || [];
+    let coords = '';
+    for (let i = 0; i < uvs.length; i += 2) {
+      coords += `<m:tex2coord u="${+uvs[i].toFixed(6)}" v="${+uvs[i + 1].toFixed(6)}"/>`;
+    }
+    tex2dGroupXmls.push(`<m:texture2dgroup id="${groupId}" texid="${texId}">${coords}</m:texture2dgroup>`);
+  }
+
+  // Resources — colorgroup (only when any solid meshes exist).
+  const colorXml = colorGroupId
+    ? `<m:colorgroup id="${colorGroupId}">${colors.map(c => `<m:color color="${c}"/>`).join('')}</m:colorgroup>`
+    : '';
+
+  // Objects + build items.
+  const objs = [];
+  const items = [];
+  let objId = nextId;
+  for (const { mesh } of list) {
+    const pos = converted.get(mesh);
+    const idx = mesh.getIndices();
+    if (!pos || !idx || idx.length === 0) { objId++; continue; }
+
+    let v = '';
+    for (let i = 0; i < pos.length; i += 3) {
+      v += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
+    }
+    let t = '';
+    const isTextured = tex2dGroupIdByMesh.has(mesh);
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i];
+      const [b, c] = THREEMF_REVERSE_WINDING ? [idx[i + 2], idx[i + 1]] : [idx[i + 1], idx[i + 2]];
+      // Textured: per-triangle p1/p2/p3 mirror v1/v2/v3 because we emit one
+      // tex2coord per vertex in vertex order. The loader inverts this 1:1.
+      t += isTextured
+        ? `<triangle v1="${a}" v2="${b}" v3="${c}" p1="${a}" p2="${b}" p3="${c}"/>`
+        : `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
+    }
+    let pidAttrs;
+    if (isTextured) {
+      pidAttrs = ` pid="${tex2dGroupIdByMesh.get(mesh)}"`;
+    } else if (colorGroupId != null) {
+      const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+      pidAttrs = ` pid="${colorGroupId}" pindex="${pidx}"`;
+    } else {
+      pidAttrs = '';
+    }
+    objs.push(
+      `<object id="${objId}" type="model"${pidAttrs}>` +
+      `<mesh><vertices>${v}</vertices><triangles>${t}</triangles></mesh></object>`
+    );
+    items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
+    objId++;
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
+<build>${items.join('')}</build>
+</model>`;
+}
+
+/** Per-part rels file. One Relationship per unique texture path. */
+function _buildTextureRels(blobByPath) {
+  const rels = [];
+  let n = 0;
+  for (const path of blobByPath.keys()) {
+    rels.push(`<Relationship Id="texRel${n}" Target="/${path}" Type="${_3MF_TEXTURE_REL_TYPE}"/>`);
+    n++;
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join('')}</Relationships>`;
+}
 
 export const PrintManager = {
   exportOBJ,

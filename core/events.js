@@ -57,6 +57,7 @@ export const EVENTS = {
   PROJECT_LOADED:          'project:loaded',
   PROJECT_SAVED:           'project:saved',
   PROJECT_DIRTY:           'project:dirty',
+  PROJECT_RENAMED:         'project:renamed',
   AUTOSAVE_WRITTEN:        'project:autosaved',
 
   // Camera

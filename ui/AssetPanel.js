@@ -8,7 +8,7 @@ import { icon } from '../core/Icons.js';
 
 const BABYLON = window.BABYLON;
 
-const MESH_EXT    = new Set(['.glb', '.gltf', '.obj', '.stl']);
+const MESH_EXT    = new Set(['.glb', '.gltf', '.obj', '.stl', '.3mf']);
 const TEXTURE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const SUPPORTED   = new Set([...MESH_EXT, ...TEXTURE_EXT]);
 const DRAG_MIME   = 'application/x-mixomesh-asset';
@@ -16,8 +16,10 @@ const DRAG_MIME   = 'application/x-mixomesh-asset';
 const SESSION_KEY = '__session__';
 
 let _root          = null;
-let _treeEl        = null;
+let _listEl        = null;          // #ap-tree-list (mount branches; library tab)
+let _treeWrapEl    = null;          // #ap-tree (carries data-tab for CSS)
 let _gridEl        = null;
+let _activeTab     = 'session';     // 'session' | 'library' — top-level switch
 let _selectedKey   = SESSION_KEY;   // mountKey or SESSION_KEY
 let _selectedPath  = '';            // relative path within selected mount; '' = root
 const _mounts      = new Map();     // mountKey → { handle, tree }
@@ -28,13 +30,36 @@ const _fileHandles = new Map();     // `${mountKey}:${relPath}` → FileSystemFi
 /** Initialise the Asset Panel. Must be called once after DOM is ready. */
 export function init() {
   _root = document.getElementById('asset-panel');
+  // Header is built ONCE here (never re-rendered) so the panel-collapse
+  // button main.js appends into `.ap-tree-header` survives. Only the mount
+  // list (#ap-tree-list) and the grid re-render. Session vs Asset Library is
+  // a top-level tab, not a tree row — they have different lifecycles
+  // (Session = this project's working set; Library = a reusable mounted
+  // folder, re-mounted across projects).
   _root.innerHTML = `
-    <div class="ap-tree" id="ap-tree"></div>
+    <div class="ap-tree" id="ap-tree" data-tab="session">
+      <div class="ap-tree-header">
+        <div class="ap-tabs">
+          <button class="ap-tab active" data-tab="session" title="Assets used in this project">Session</button>
+          <button class="ap-tab" data-tab="library" title="A mounted folder you can pull assets from across projects">Asset Library</button>
+        </div>
+        <button class="ap-btn" id="ap-mount-btn" title="Mount a directory">
+          ${icon('Upload', { width: 14, height: 14 })}
+          <span>Mount</span>
+        </button>
+      </div>
+      <ul class="ap-tree-list" id="ap-tree-list"></ul>
+    </div>
     <div class="ap-divider"></div>
     <div class="ap-grid" id="ap-grid"></div>
   `;
-  _treeEl = document.getElementById('ap-tree');
-  _gridEl = document.getElementById('ap-grid');
+  _treeWrapEl = document.getElementById('ap-tree');
+  _listEl     = document.getElementById('ap-tree-list');
+  _gridEl     = document.getElementById('ap-grid');
+
+  _treeWrapEl.querySelector('#ap-mount-btn').addEventListener('click', promptMount);
+  _treeWrapEl.querySelectorAll('.ap-tab').forEach(btn =>
+    btn.addEventListener('click', () => _setTab(btn.dataset.tab)));
 
   subscribe(EVENTS.ASSET_REGISTERED,   () => _renderGrid());
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
@@ -56,7 +81,7 @@ export function init() {
     return el;
   });
 
-  _renderTree();
+  _renderTreeList();
   _renderGrid();
 }
 
@@ -69,9 +94,28 @@ async function _mountHandle(key, handle, announce) {
   _cacheHandles(key, tree);
   _selectedKey  = key;
   _selectedPath = '';
-  _renderTree();
-  _renderGrid();
+  _setTab('library');
   if (announce) Toast.show(`Mounted: ${handle.name}`, 'success', 3000);
+}
+
+/** Switch between Session and Library tabs. Drives `data-tab` on #ap-tree. */
+function _setTab(tab) {
+  _activeTab = tab;
+  _treeWrapEl.dataset.tab = tab;
+  _treeWrapEl.querySelectorAll('.ap-tab').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.tab === tab));
+  if (tab === 'session') {
+    _selectedKey  = SESSION_KEY;
+    _selectedPath = '';
+  } else if (_selectedKey === SESSION_KEY) {
+    const first = _mounts.keys().next();
+    if (!first.done) {
+      _selectedKey  = first.value;
+      _selectedPath = '';
+    }
+  }
+  _renderTreeList();
+  _renderGrid();
 }
 
 /** Programmatically trigger the directory-mount picker (also bound to header button). */
@@ -170,35 +214,21 @@ function _findNode(node, relPath) {
 
 // ── Tree rendering ───────────────────────────────────────
 
-function _renderTree() {
+// Session tab has no tree (one logical bucket); Library tab lists mount roots
+// and their subdirectories. The list element is empty on Session — CSS hides
+// it via `#ap-tree[data-tab="session"] .ap-tree-list { display: none }`.
+function _renderTreeList() {
+  if (_activeTab === 'session' || _mounts.size === 0) {
+    _listEl.innerHTML = '';
+    return;
+  }
   const parts = [];
-  parts.push(`
-    <div class="ap-tree-header">
-      <button class="ap-btn" id="ap-mount-btn" title="Mount a directory">
-        ${icon('Upload', { width: 14, height: 14 })}
-        <span>Mount</span>
-      </button>
-    </div>
-    <ul class="ap-tree-list">
-      ${_renderTreeRow({
-        label: 'Session',
-        iconName: 'Box',
-        key: SESSION_KEY,
-        relPath: '',
-        depth: 0,
-        hasChildren: false,
-      })}
-  `);
-
   for (const [mountKey, m] of _mounts) {
     parts.push(_renderTreeBranch(mountKey, m.tree, 0));
   }
-  parts.push('</ul>');
+  _listEl.innerHTML = parts.join('');
 
-  _treeEl.innerHTML = parts.join('');
-
-  _treeEl.querySelector('#ap-mount-btn')?.addEventListener('click', promptMount);
-  _treeEl.querySelectorAll('[data-tree-row]').forEach(el => {
+  _listEl.querySelectorAll('[data-tree-row]').forEach(el => {
     el.addEventListener('click', e => {
       e.stopPropagation();
       const key  = el.dataset.mountKey;
@@ -210,7 +240,7 @@ function _renderTree() {
       }
       _selectedKey  = key;
       _selectedPath = path;
-      _treeEl.querySelectorAll('[data-tree-row]').forEach(r => r.classList.remove('selected'));
+      _listEl.querySelectorAll('[data-tree-row]').forEach(r => r.classList.remove('selected'));
       el.classList.add('selected');
       _renderGrid();
     });
@@ -260,8 +290,15 @@ function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren }) {
 
 function _renderGrid() {
   let files = [];
-  if (_selectedKey === SESSION_KEY) {
+  if (_activeTab === 'session') {
     files = _sessionFiles();
+  } else if (_mounts.size === 0) {
+    _gridEl.innerHTML = `
+      <div class="ap-empty">
+        No folder mounted. Click <strong>Mount</strong> to pick one — its files
+        become draggable across projects.
+      </div>`;
+    return;
   } else {
     const mount = _mounts.get(_selectedKey);
     if (mount) {
@@ -273,8 +310,8 @@ function _renderGrid() {
   if (!files.length) {
     _gridEl.innerHTML = `
       <div class="ap-empty">
-        ${_selectedKey === SESSION_KEY
-          ? 'Drop a 3D file (.glb / .gltf / .obj / .stl) onto the viewport, or mount a directory.'
+        ${_activeTab === 'session'
+          ? 'Drop a 3D file (.glb / .gltf / .obj / .stl / .3mf) onto the viewport, or mount a directory.'
           : 'No supported files in this folder.'}
       </div>`;
     return;
@@ -304,7 +341,14 @@ function _renderGrid() {
 
     card.addEventListener('dblclick', () => {
       safeAsync(async () => {
-        if (mountKey === SESSION_KEY) return;
+        if (mountKey === SESSION_KEY) {
+          // path IS the assetId on session cards; re-instantiate the loaded
+          // container at origin. Same code path as a SESSION_KEY viewport drop.
+          if (kind === 'mesh') {
+            await AssetLoader.instantiateAsset(path, new BABYLON.Vector3(0, 0, 0));
+          }
+          return;
+        }
         const handle = getFileHandle(mountKey, path);
         if (!handle) throw new Error('File handle not available');
         if (kind === 'texture') {
@@ -325,17 +369,19 @@ function _renderGrid() {
   });
 }
 
+// Session = every asset registered to this project (loose drops + folder
+// loads), regardless of source. Liveness is shown per-card via the
+// Linked/Snapshot badge — not by filtering.
 function _sessionFiles() {
   const library = getState().scene.assetLibrary;
-  return Object.values(library)
-    .filter(a => !a.directoryHandleKey)
-    .map(a => ({
-      name: a.filename,
-      path: a.id,
-      ext: a.extension,
-      mountKey: SESSION_KEY,
-      _asset: a,
-    }));
+  return Object.values(library).map(a => ({
+    name: a.filename,
+    path: a.id,
+    ext: a.extension,
+    kind: a.kind ?? 'mesh',
+    mountKey: SESSION_KEY,
+    _asset: a,
+  }));
 }
 
 function _renderCard(file) {
@@ -355,6 +401,14 @@ function _renderCard(file) {
     if (asset.unitConfirmed === false) {
       badges += `<span class="ac-unit-badge" title="Source unit unconfirmed: ${asset.sourceUnit}">${icon('AlertTriangle', { width: 11, height: 11 })}${_unitShort(asset.sourceUnit)}</span>`;
     }
+  }
+  // Liveness badge — only meaningful on the Session tab (Library cards are
+  // always live by definition since they're the mounted folder browser).
+  if (isSession && asset) {
+    const linked = !!(asset.directoryHandleKey || asset.fileHandleKey);
+    badges += linked
+      ? `<span class="ac-link is-linked" title="Linked to a file on disk — saves stay in sync if the source changes">Linked</span>`
+      : `<span class="ac-link is-snapshot" title="Saved as a frozen snapshot — no on-disk source to track">Snapshot</span>`;
   }
 
   const deleteBtn = isSession && asset

@@ -99,6 +99,7 @@ async function _serialiseAssetLibrary() {
       kind: a.kind ?? 'mesh', sourceUnit: a.sourceUnit ?? 'millimeters',
       unitConfirmed: a.unitConfirmed !== false, modelRatio: a.modelRatio ?? 1,
       directoryHandleKey: a.directoryHandleKey ?? null,
+      fileHandleKey: a.fileHandleKey ?? null,
       isImported: !!a.isImported,
       thumbnailDataUrl: typeof a.thumbnailDataUrl === 'string'
         && a.thumbnailDataUrl.startsWith('data:') ? a.thumbnailDataUrl : null,
@@ -139,7 +140,7 @@ function _serialiseSceneObjects() {
       visible: o.visible !== false, locked: !!o.locked,
       isGhost: !!o.isGhost, isUnlinked: !!o.isUnlinked,
       isPrintPart: o.isPrintPart !== false,
-      partLabel: o.partLabel ?? '', partTolerance: o.partTolerance ?? 0,
+      sourceGroupId: o.sourceGroupId ?? null,
       containerMeshIndex,
       transform: mesh ? _decompose(mesh) : (o._savedTransform ?? null),
     };
@@ -239,6 +240,20 @@ async function _resolveAssetBlob(entry) {
       }
     } catch (err) {
       console.error(`Live resolve failed for ${entry.filename}:`, err);
+    }
+  }
+  // Loose drag-drop: no directory, but a persisted single-file handle. Lower
+  // priority than a mounted directory (a dir also gives the hash-rescan
+  // relink) but above the frozen embedded snapshot — a dragged file can stay
+  // live across reloads in the same browser profile.
+  if (entry.fileHandleKey) {
+    try {
+      const fh = await getFileHandle(entry.fileHandleKey);
+      if (fh && (await fh.requestPermission({ mode: 'read' })) === 'granted') {
+        return { blob: await fh.getFile(), live: true };
+      }
+    } catch (err) {
+      console.error(`File-handle resolve failed for ${entry.filename}:`, err);
     }
   }
   if (entry.fileData) {
@@ -374,7 +389,13 @@ async function _loadProject(doc) {
       const geom = await AssetLoader.restoreContainer(a.id, r.blob, a.extension);
       const status = r.live ? 'live' : 'static';
       assetRes.set(a.id, { status, geom });
-      if (status === 'static') unmatched.push(a);
+      // Only nag for assets that were SUPPOSED to track a live file (had a
+      // dir or file handle) but fell back to the embedded snapshot. A loose
+      // drag-drop with no handle is an expected snapshot — never flag it,
+      // otherwise the modal cries wolf on every reopen.
+      if (status === 'static' && (a.directoryHandleKey || a.fileHandleKey)) {
+        unmatched.push(a);
+      }
     } catch (err) {
       console.error(`Container restore failed for ${a.filename}:`, err);
       assetRes.set(a.id, { status: 'ghost' });
@@ -408,7 +429,7 @@ async function _loadProject(doc) {
       visible: o.visible !== false, locked: !!o.locked,
       isGhost: ghost, isUnlinked: unlinked && !ghost,
       isPrintPart: o.isPrintPart !== false,
-      partLabel: o.partLabel ?? '', partTolerance: o.partTolerance ?? 0,
+      sourceGroupId: o.sourceGroupId ?? null,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       _savedTransform: o.transform ?? null,
     };
@@ -698,4 +719,13 @@ export const PersistenceManager = {
   save, saveAs, open, newProject,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,
+};
+
+// Headless-test surface only. These are pure, browser-API-light helpers that
+// carry the milestone-critical invariants (byte-exact embed, asset-resolution
+// priority, migration). Not part of the public API — do not call from app code.
+export const __test = {
+  _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
+  _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
+  _arrToMap, _migrate,
 };

@@ -36,7 +36,7 @@ const real = {
     TransformCoordinates: (v) => vec(v.x, v.y, v.z),
     Cross: (a, b) => vec(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x),
   }),
-  VertexBuffer: { PositionKind: 'position' },
+  VertexBuffer: { PositionKind: 'position', UVKind: 'uv' },
   Ray: function (origin, dir, len) { this.origin = origin; this.dir = dir; this.len = len; },
   // Matrices are opaque in tests (Vector3.TransformCoordinates is identity);
   // only the call plumbing matters.
@@ -59,10 +59,27 @@ const real = {
   }),
   OBJExport: {
     OBJ: (meshes, ...rest) => { calls.objExportOBJ.push({ count: meshes.length, rest }); return 'OBJ-DATA'; },
-    MTL: (meshes) => { calls.objExportMTL.push({ count: meshes.length }); return 'MTL-DATA'; },
+    // Realistic per-material block so PrintManager._injectMapKd (which splits
+    // the MTL string on `newmtl <name>`) can locate each material and decorate
+    // it with `map_Kd textures/solid_*.png`. Production Babylon emits one
+    // block per unique material; the stub matches that shape using whichever
+    // identifier (.name / .id / mesh.name) the synthesis function also reads.
+    MTL: (meshes) => {
+      calls.objExportMTL.push({ count: meshes.length });
+      return meshes.map(m => {
+        const matName = m.material?.name || m.material?.id || m.name;
+        return `newmtl ${matName}\nKd 1 1 1\n`;
+      }).join('');
+    },
   },
   STLExport: {
-    CreateSTL: (meshes, ...rest) => { calls.stlCreate.push({ count: meshes.length, rest }); },
+    CreateSTL: (meshes, ...rest) => {
+      calls.stlCreate.push({ count: meshes.length, rest });
+      // download=true (rest[0]) is the auto-download path; the caller doesn't
+      // use the return value. download=false (individually mode) needs bytes
+      // back so the outer zip wrapper has something to embed.
+      return rest[0] ? undefined : 'STL-BYTES';
+    },
   },
   // CSG2 present by default so the STL re-bake path is exercised. Tests that
   // need the "CSG2 unavailable" branch null these out + restore.
@@ -87,6 +104,10 @@ const BABYLON = new Proxy(real, {
 
 export function installEnv() {
   globalThis.location = { hostname: 'localhost' };
+  // window.showSaveFilePicker is left undefined so PrintManager._triggerDownload
+  // falls back to its anchor-tag path. The anchor's `download` attribute then
+  // captures the suggested filename, which is what every export test asserts
+  // against. The picker path itself is verified live in Chrome — not in tests.
   globalThis.window = { BABYLON, addEventListener() {} };
   globalThis.requestIdleCallback = (fn) => setTimeout(fn, 0);
 
@@ -95,13 +116,28 @@ export function installEnv() {
   globalThis.URL.createObjectURL = () => 'blob:stub';
   globalThis.URL.revokeObjectURL = () => {};
 
-  const el = () => ({
-    style: {}, set href(_) {}, set download(_) {},
-    click() { calls.downloads.push(true); },
-    appendChild() {}, removeChild() {},
-    getContext() { return { createImageData: () => ({ data: [] }), putImageData() {} }; },
-    toBlob(cb) { cb(new Blob([])); },
-  });
+  const el = () => {
+    let cw = 1, ch = 1;
+    let pendingFilename = null;   // captured from `a.download = ...`
+    return {
+      style: {}, set href(_) {},
+      set download(v) { pendingFilename = v; },
+      get download() { return pendingFilename; },
+      get width() { return cw; }, set width(v) { cw = v; },
+      get height() { return ch; }, set height(v) { ch = v; },
+      click() { calls.downloads.push(pendingFilename); },
+      appendChild() {}, removeChild() {},
+      // `data` is a Uint8ClampedArray so `imageData.data.set(pixels)` —
+      // the real DOM signature used by _textureToBlob — actually works.
+      getContext() {
+        return {
+          createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+          putImageData() {},
+        };
+      },
+      toBlob(cb) { cb(new Blob([])); },
+    };
+  };
   globalThis.document = {
     createElement: el,
     body: { appendChild() {}, removeChild() {} },

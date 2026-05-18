@@ -242,6 +242,27 @@ function _setLocked(meshId, locked) {
   dispatch(EVENTS.LOCK_CHANGED, { meshId, locked });
 }
 
+/**
+ * Rename the project. The project name is shown in the header (editable in
+ * place) and is the prefix for every export filename — see §12 *Export
+ * filenames*. Empty / whitespace-only input is rejected up-stream; the
+ * command itself trusts its input.
+ */
+export class RenameProjectCommand {
+  constructor(prevName, nextName) {
+    this.label = 'Rename project';
+    this._prev = prevName;
+    this._next = nextName;
+  }
+  execute() { _setProjectName(this._next); markDirty(); }
+  undo()    { _setProjectName(this._prev); }
+}
+
+function _setProjectName(name) {
+  setState(state => ({ ...state, project: { ...state.project, name } }), SILENT);
+  dispatch(EVENTS.PROJECT_RENAMED, { name });
+}
+
 /** Rename an object or group. */
 export class RenameCommand {
   constructor(id, prevName, nextName) {
@@ -254,21 +275,37 @@ export class RenameCommand {
   undo()    { _setName(this._id, this._prev); }
 }
 
-function _setName(id, name) {
+function _setName(id, requestedName) {
+  // Enforce scene-wide name uniqueness across both objects and groups —
+  // export filenames embed `${project}_${object.name}` and would collide
+  // inside the zip if two parts shared a name. Self is excluded so renames
+  // to the same string are a no-op.
+  let finalName = requestedName;
   setState(state => {
+    const taken = new Set();
+    for (const [k, o] of Object.entries(state.scene.objects)) if (k !== id) taken.add(o.name);
+    for (const [k, g] of Object.entries(state.scene.groups))  if (k !== id) taken.add(g.name);
+    if (taken.has(finalName)) {
+      const m = finalName.match(/^(.*)\.(\d{3,})$/);
+      const stem = m ? m[1] : finalName;
+      for (let i = 1; i < 999; i++) {
+        const c = `${stem}.${String(i).padStart(3, '0')}`;
+        if (!taken.has(c)) { finalName = c; break; }
+      }
+    }
     if (state.scene.objects[id]) {
       const o = state.scene.objects[id];
-      return { ...state, scene: { ...state.scene, objects: { ...state.scene.objects, [id]: { ...o, name } } } };
+      return { ...state, scene: { ...state.scene, objects: { ...state.scene.objects, [id]: { ...o, name: finalName } } } };
     }
     if (state.scene.groups[id]) {
       const g = state.scene.groups[id];
-      return { ...state, scene: { ...state.scene, groups: { ...state.scene.groups, [id]: { ...g, name } } } };
+      return { ...state, scene: { ...state.scene, groups: { ...state.scene.groups, [id]: { ...g, name: finalName } } } };
     }
     return state;
   }, SILENT);
   const node = _findNodeForId(id);
-  if (node) node.name = name;
-  dispatch(EVENTS.OBJECT_RENAMED, { id, name });
+  if (node) node.name = finalName;
+  dispatch(EVENTS.OBJECT_RENAMED, { id, name: finalName });
 }
 
 /**
@@ -697,13 +734,13 @@ export class ColorApplyCommand {
   }
 }
 
-/** Set isPrintPart, partLabel, partTolerance on a mesh for export. */
+/** Toggle isPrintPart on a mesh for export. */
 export class PrintPartCommand {
-  constructor(meshId, prevPrintPart, nextPrintPart) {
+  constructor(meshId, prev, next) {
     this._meshId = meshId;
-    this._prev = prevPrintPart ? { ...prevPrintPart } : { isPrintPart: false, partLabel: '', partTolerance: 0 };
-    this._next = nextPrintPart ? { ...nextPrintPart } : { isPrintPart: false, partLabel: '', partTolerance: 0 };
-    this.label = this._next.isPrintPart ? 'Mark as Print Part' : 'Unmark as Print Part';
+    this._prev = !!prev;
+    this._next = !!next;
+    this.label = this._next ? 'Mark as Print Part' : 'Unmark as Print Part';
   }
   execute() {
     _setPrintPart(this._meshId, this._next);
@@ -714,7 +751,7 @@ export class PrintPartCommand {
   }
 }
 
-function _setPrintPart(meshId, printPart) {
+function _setPrintPart(meshId, isPrintPart) {
   setState(state => {
     const o = state.scene.objects[meshId];
     if (!o) return state;
@@ -724,7 +761,7 @@ function _setPrintPart(meshId, printPart) {
         ...state.scene,
         objects: {
           ...state.scene.objects,
-          [meshId]: { ...o, ...printPart },
+          [meshId]: { ...o, isPrintPart: !!isPrintPart },
         },
       },
     };
@@ -978,8 +1015,6 @@ export class SmartReplaceCommand {
               collectionId: oldObj.collectionId ?? null,
               parentId: oldObj.parentId ?? null,
               isPrintPart: !!oldObj.isPrintPart,
-              partLabel: oldObj.partLabel ?? '',
-              partTolerance: oldObj.partTolerance ?? 0,
             } } },
           };
         }, SILENT);
