@@ -196,17 +196,27 @@ Single dark theme. Pro-tool aesthetic. No theme switcher in v1.
 
 ```css
 :root {
-  /* Surfaces */
-  --bg-0: #0a0a0b;          /* deepest — viewport background */
-  --bg-1: #131316;          /* panel background */
-  --bg-2: #1a1a1f;          /* elevated rows, hover */
-  --bg-3: #232329;          /* selected rows, inputs */
-  --bg-4: #2d2d35;          /* borders subtle */
+  /* Surfaces — FIXED-ASSIGNMENT elevation ladder. The ladder isn't a free
+     palette; each rung has a documented role so the parent-child panel
+     hierarchy reads at a glance (PART 13b). Don't reuse a rung at the
+     wrong level — that's what blends the hierarchy. */
+  --bg-0: #0a0a0b;          /* viewport / app background */
+  --bg-1: #131316;          /* top-level panel surface (Outliner, Properties, Shader, Asset, Print) */
+  --bg-2: #1a1a1f;          /* section surface inside a panel (.pp-section, .sp-section, .ap-card) */
+  --bg-3: #232329;          /* control surface — inputs, default buttons, selected rows */
+  --bg-4: #2d2d35;          /* hover / pressed elevation on top of --bg-3 */
 
   --border:        #2a2a30;
   --border-strong: #3a3a44;
   --border-focus:  #06b6d4;
   --ring-focus:    rgba(245, 158, 11, 0.35);  /* 2px box-shadow ring on input :focus — keyboard a11y */
+
+  /* Semantic border roles — DERIVED from --border / --border-strong but
+     used by panel-vs-section hierarchy (see PART 13b "Workspaces & Panel
+     Hierarchy"). Touch these to re-tune the visual depth of the panel
+     tree without re-grepping every selector. */
+  --border-panel:   var(--border-strong);   /* between top-level panels */
+  --border-section: var(--border);          /* between sections inside a panel */
 
   /* Text — tertiary lightened 2026-05-18 (UI audit) so labels +
      section headers reach ≥ 5:1 WCAG AA on --bg-1 / --bg-2 panels.
@@ -480,7 +490,11 @@ const initialState = {
     bedPreset: 'Elegoo Saturn 4 Ultra', bedDimensions: { x: 218.88, y: 122.88, z: 220 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
   },
-  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
+  ui: {
+    activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
+    workspace: 'layout',                                          // 'layout' | 'shade' | 'print' — see PART 13b
+    panelCollapsed: { right: false, bottom: false, left: false }, // user-toggled overrides on top of the workspace defaults
+  },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
 ```
@@ -610,6 +624,17 @@ Ctrl+S          → save
 Ctrl+Shift+S    → save as
 Ctrl+N          → new project (confirm if dirty)
 Ctrl+O          → open
+
+Ctrl+1          → workspace: Layout     (see PART 13b)
+Ctrl+2          → workspace: Shade
+Ctrl+3          → workspace: Print
+```
+
+**Panel toggles** (single keys; suppressed when an `<input>/<textarea>/<select>` has focus):
+```
+N              → toggle right column (Properties + Shader + Print stack)
+T              → toggle bottom region (Asset Panel)
+\              → max viewport — collapse right + bottom together
 ```
 
 **Viewport:**
@@ -1809,6 +1834,144 @@ ProgressOverlay.hide()                      → void
 ```
 
 `PrintManager._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
+
+---
+
+## PART 13b — WORKSPACES & PANEL HIERARCHY
+
+**Design intent.** The user's workflow is linear — *Import → Arrange → Shade → Print* — not the swiss-army-knife DCC pattern. Tabbed panels with manual resize don't scale once the Print pipeline grows (Bed / Scale / Validation / Export, plus deferred Thickness / Orientation). Industry-standard fix is **workspace presets** (Blender top-bar pattern, also Substance Painter, Maya, Cinema 4D, Houdini): a tiny set of named panel layouts, one click to switch. The user stops resizing because the layout is *per task*, not freeform.
+
+This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region` model). Overkill for a focused tool. The contract here is:
+
+1. Three fixed workspaces (`Layout` / `Shade` / `Print`).
+2. A semantic elevation token assignment so parent-child panel hierarchy reads at a glance.
+3. Three single-key panel-collapse hotkeys for the "give me the viewport now" panic case.
+
+### The three workspaces
+
+| Workspace | Outliner | Properties | Shader Library | Asset Panel | Print Panel |
+|---|---|---|---|---|---|
+| **Layout** (default — import & arrange) | visible 260px | visible (Object + Transform expanded; Shader / UV header-collapsed) | header-collapsed | visible at default 220px (drop target focus) | hidden |
+| **Shade** (texture / shader / UV) | visible 220px (narrow) | visible (Shader + UV Override expanded; Transform header-collapsed) | visible, expanded — primary edit surface | collapsed to header bar (textures still drop OK; thumbnail browse via picker modal) | hidden |
+| **Print** (validate + export) | visible 220px (narrow) | collapsed except **Print Part** section | hidden | collapsed to header bar | visible at full height (Bed → Scale → Export, validation embedded as a checklist at the top of the Export tab per the option-A fold-in) |
+
+Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.
+
+**Top-bar UI.** Workspace switcher is a three-button pill in the header, between the Project menu and the right-side controls. Active button highlighted with `--accent`. Tooltip on each button shows the hotkey (`Ctrl+1` / `Ctrl+2` / `Ctrl+3`). Module: `ui/WorkspaceSwitcher.js`.
+
+### Elevation token assignment (the hierarchy contract)
+
+The existing `--bg-0..--bg-4` ladder gets a **fixed-assignment rule** (PART 1 tokens table). Each rung has a documented role; don't reuse a rung at the wrong level. The rule:
+
+| Token | Used for |
+|---|---|
+| `--bg-0` | viewport / app background |
+| `--bg-1` | **top-level panel surface** — Outliner, Properties, Shader Library, Asset Panel, Print Panel |
+| `--bg-2` | **section surface inside a panel** — `.pp-section`, `.sp-section`, `.ap-card` body |
+| `--bg-3` | **control surface** — inputs, default buttons, selected rows |
+| `--bg-4` | hover / pressed elevation on top of `--bg-3` |
+
+Plus two **semantic border roles** (also in PART 1 tokens):
+
+- `--border-panel` (= `--border-strong`) — 1px, between top-level panels.
+- `--border-section` (= `--border`) — 1px, between sections inside a panel.
+
+Each top-level panel gains a 1px **top stripe** in `--accent` when it owns keyboard focus, `--border-panel` otherwise. Reads as a parent-child tree without relying on whitespace alone (which was the audit issue — sections and panels visually blended).
+
+**Implementation contract:** every CSS rule that sets `background-color` on a panel must use the right token. The Phase 7 audit checklist is:
+- `.pp-body`, `.sp-body`, `#asset-panel`, `#print-panel` root → `--bg-1`
+- `.pp-section`, `.sp-section`, `.ap-card` → `--bg-2`
+- `input`, `select`, `textarea`, `.pp-btn` (default) → `--bg-3`
+- `:hover` on the above → `--bg-4`
+
+### Panel-collapse hotkeys (the panic-button pattern)
+
+Three single keys, gated by `InputManager` when an `<input> / <textarea> / <select>` has focus (same gate the `G/R/S` modal ops use):
+
+```
+N              → toggle right column (Properties + Shader + Print stack)
+T              → toggle bottom region (Asset Panel)
+\              → max viewport — collapse right + bottom together
+Ctrl+1/2/3     → switch workspace
+```
+
+`N` and `T` are Blender-canonical (Properties / Toolbar). `\` is the "I need the viewport NOW" key — collapses everything except the pinned Outliner. The Outliner has no toggle hotkey because hiding the scene list mid-work is rarely what the user actually wants; they can still hide it via the splitter handle.
+
+### State shape
+
+```js
+state.ui = {
+  ...existing,
+  workspace: 'layout',                                  // 'layout' | 'shade' | 'print'
+  panelCollapsed: { right: false, bottom: false, left: false },  // manual overrides on top of workspace defaults
+};
+```
+
+**Resolution rule** for "is panel P visible?":
+1. If `state.ui.panelCollapsed[side]` is `true`, hide.
+2. Otherwise, look up the workspace's default visibility for P.
+3. Workspace-defaults that say "hidden" still respect `panelCollapsed[side] === false` (user can pop a panel back up explicitly).
+
+Switching workspace **resets** `panelCollapsed` to all-`false` so the new workspace starts from its declared defaults. Mid-workspace `N/T/\` toggles only flip `panelCollapsed`, never `workspace`.
+
+### Persistence (per-user, not per-project)
+
+Workspace + `panelCollapsed` + per-workspace panel widths persist to `localStorage.mixomesh_ui_workspace` (JSON object). NOT stored in `.mixo` — workspace is a *user preference*, not a project artefact. A teammate opening the same `.mixo` on a different monitor shouldn't inherit the saver's layout.
+
+Boot sequence: `PersistenceManager.init` (or a small `ui/Workspace.js` module) reads `localStorage` → seeds `state.ui.workspace + panelCollapsed` before the first render. Missing key → workspace defaults to `'layout'`. Schema version field in the localStorage blob so future shape changes can migrate.
+
+### Module sketch
+
+`ui/Workspace.js` (~120 lines target):
+- `init()` — subscribes to `EVENTS.WORKSPACE_CHANGED`; renders the header pill switcher; binds the four hotkeys via `InputManager`.
+- `setWorkspace(name)` — dispatches state change + resets `panelCollapsed`.
+- `togglePanel(side)` — flips `panelCollapsed[side]`.
+- `maxViewport()` — sets `panelCollapsed = { right: true, bottom: true, left: false }`.
+- Applies a `data-workspace="…"` attribute on `<body>` so CSS can hide/size panels per workspace without per-panel JS.
+
+CSS hook points (one selector per panel, three workspaces × hidden|narrow|wide):
+```css
+body[data-workspace="layout"]   .panel-shader  { display: none; }
+body[data-workspace="shade"]    .panel-print   { display: none; }
+body[data-workspace="print"]    .panel-shader  { display: none; }
+body[data-panel-collapsed-right="true"]  .panel-right-column { display: none; }
+/* …etc */
+```
+
+This keeps the layout logic declarative — flip an attribute, the grid recomputes. No per-panel show/hide imperative code in twenty places.
+
+### Events
+
+```js
+EVENTS.WORKSPACE_CHANGED       // payload: { from, to }
+EVENTS.PANEL_COLLAPSED_CHANGED // payload: { side, collapsed }
+```
+
+Subscribers: `ui/Workspace.js` for re-render; `SceneManager` (engine.resize() on the next animation frame so the canvas fills the new viewport size).
+
+### Why not full dockable panels
+
+Considered. Rejected for v1.
+
+Pros of full docking (Blender/Maya/Houdini): infinite flexibility, power users love it.
+
+Cons: heavy implementation (drag-to-detach, drop-zone detection, floating windows with their own resize/close), serialisation of arbitrary trees, and a UX cost — users have to *learn* where they put things. The MIXOMESH workflow is linear and small. Three workspaces cover 95% of the value at ~5% of the implementation cost.
+
+If a future user requests it, the layered design above supports it: workspace presets become *named saves* of an arbitrary layout tree. v1 ships fixed presets.
+
+### Rollout plan (not yet a phase — backlog item)
+
+This is a **post-Phase-7 polish** addition, gated behind the deferred live-Chrome verifications. Order when it lands:
+
+1. Update tokens.css (semantic borders + the elevation comment block).
+2. Add `state.ui.workspace + panelCollapsed` + localStorage persistence.
+3. Write `ui/Workspace.js` + header pill + hotkey bindings.
+4. Add `data-workspace` driven CSS rules in `layout.css`.
+5. Audit each panel root's CSS to confirm it sits on `--bg-1`, sections on `--bg-2`, controls on `--bg-3`.
+6. Headless tests: state-shape test for the new `ui.workspace + panelCollapsed` defaults; one round-trip test for the localStorage seeding.
+7. Live Chrome pass: workspace switch + hotkeys + visible hierarchy + maximised viewport on `\`.
+
+Do not start this work until Phases 6 + 7 + the existing polish wave have all passed their live Chrome verification (PHASE_HANDOFF.md). Layout churn while those are unverified would conflate "is the workspace switcher broken?" with "did Phase 7 ever work?".
 
 ---
 
