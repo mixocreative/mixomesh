@@ -1,0 +1,212 @@
+/* ── Context menu ─────────────────────────────────────── */
+.context-menu {
+  position: fixed;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--sp-2);
+  min-width: 200px;
+  z-index: 2000;
+  font-size: var(--fs-sm);
+  color: var(--text-0);
+  user-select: none;
+}
+.context-menu.hidden { display: none; }
+.cm-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.cm-item:hover { background: var(--bg-3); }
+.cm-item.cm-disabled { color: var(--text-disabled); pointer-events: none; }
+.cm-item.cm-danger { color: var(--danger); }
+.cm-item.cm-danger:hover { background: rgba(239, 68, 68, 0.08); }
+.cm-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text-1); }
+.cm-shortcut { font-size: var(--fs-xs); color: var(--text-2); font-family: var(--font-mono); }
+.cm-sep { height: 1px; background: var(--border); margin: var(--sp-2) var(--sp-2); }
+
+/* ── Modal-transform cursor cue ───────────────────────── */
+body.modal-translate #renderCanvas { cursor: move; }
+body.modal-rotate    #renderCanvas { cursor: ew-resize; }
+body.modal-scale     #renderCanvas { cursor: nwse-resize; }
+
+/* ── Modal dialog (generic, see ui/Modal.js) ──────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  backdrop-filter: blur(2px);
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-shell {
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  min-width: 360px;
+  max-width: min(720px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text-0);
+}
+.modal-header {
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.modal-header .modal-icon { color: var(--accent); display: inline-flex; align-items: center; }
+.modal-body {
+  padding: var(--sp-5) var(--sp-6);
+  overflow-y: auto;
+  font-size: var(--fs-md);
+  color: var(--text-1);
+  line-height: 1.55;
+}
+.modal-footer {
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  background: var(--bg-0);
+}
+.modal-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-0);
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.modal-btn:hover { background: var(--bg-4); border-color: var(--border-focus); }
+.modal-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.modal-btn-primary:hover {
+  background: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+.modal-btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.modal-btn-danger:hover { background: rgba(239, 68, 68, 0.12); }
+
+.modal-header h3 { margin: 0; font-size: var(--fs-lg); font-weight: 500; flex: 1; }
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--sp-2);
+}
+.modal-close:hover { color: var(--text-0); }
+
+/* ── Shader picker modal ───────────────────────────── */
+.modal-shader-picker { display: flex; flex-direction: column; min-width: 480px; }
+.modal-shader-picker-search { padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--border); }
+.modal-shader-picker-search input {
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-3) var(--sp-3);
+  border-radius: var(--r-sm);
+}
+.modal-shader-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
+  overflow-y: auto;
+  max-height: 60vh;
+}
+.modal-shader-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.modal-shader-tile:hover { background: var(--bg-3); border-color: var(--accent); }
+.modal-shader-tile .sp-swatch-chip { width: 72px; height: 72px; }
+.modal-shader-tile-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-empty {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ── Shader merge modal ─────────────────────────────── */
+.mm-apply-all {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.mm-apply-all select {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+  padding: 3px var(--sp-3);
+  border-radius: var(--r-sm);
+  margin-left: var(--sp-3);
+}
+.mm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.mm-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--bg-2);
+  border-radius: var(--r-sm);
+}
+.mm-row-name {
+  font-family: var(--font-mono);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+}
+.mm-row-opts { display: flex; gap: var(--sp-5); font-size: var(--fs-xs); color: var(--text-1); }
+.mm-row-opts label { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+.mm-row-opts input[type="radio"] { accent-color: var(--accent); }
+

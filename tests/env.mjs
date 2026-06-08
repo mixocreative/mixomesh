@@ -1,5 +1,5 @@
 // Headless browser/Babylon environment for export tests. Must be called
-// BEFORE importing any core/* module (they read window.BABYLON / location at
+// BEFORE importing any src/core/* module (they read window.BABYLON / location at
 // module-eval time).
 
 export const calls = {

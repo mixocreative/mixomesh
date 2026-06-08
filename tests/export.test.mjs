@@ -11,11 +11,11 @@ import { instances as zipInstances } from './jszip-stub.mjs';
 
 installEnv();
 
-const { StateManager } = await import('../core/StateManager.js');
-const { AssetLoader }  = await import('../core/AssetLoader.js');
-const { MeshValidator } = await import('../core/MeshValidator.js');
-const { PrintManager } = await import('../core/PrintManager.js');
-const { Toast } = await import('../ui/Toast.js');
+const { StateManager } = await import('../src/core/StateManager.js');
+const { AssetLoader }  = await import('../src/core/AssetLoader.js');
+const { MeshValidator } = await import('../src/core/MeshValidator.js');
+const { PrintManager } = await import('../src/core/PrintManager.js');
+const { Toast } = await import('../src/ui/Toast.js');
 const toasts = [];
 Toast.show = (msg, type) => { toasts.push({ msg, type }); };
 Toast.dismiss = () => {};

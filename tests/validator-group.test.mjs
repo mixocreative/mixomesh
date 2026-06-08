@@ -1,7 +1,7 @@
 // Group-aware validator tests. Run:
 //   node --import ./tests/register-hooks.mjs tests/validator-group.test.mjs
 //
-// Phase 7: import splits MultiMaterial meshes into N siblings stamped with
+// Import splits MultiMaterial meshes into N siblings stamped with
 // the same sourceGroupId. Each shell is non-watertight by construction, so
 // the per-mesh topology check would always scream. validateGroup welds the
 // siblings' world-space positions back into one body and runs the manifold
@@ -11,9 +11,9 @@ import assert from 'node:assert/strict';
 import { installEnv } from './env.mjs';
 
 installEnv();
-const { MeshValidator } = await import('../core/MeshValidator.js');
-const { AssetLoader }   = await import('../core/AssetLoader.js');
-const { setState }      = await import('../core/StateManager.js');
+const { MeshValidator } = await import('../src/core/MeshValidator.js');
+const { AssetLoader }   = await import('../src/core/AssetLoader.js');
+const { setState }      = await import('../src/core/StateManager.js');
 
 // ── Closed unit cube split into two material groups ─────────────────────
 // Same 8 vertex positions across both halves. Each half holds a subset of

@@ -1,0 +1,251 @@
+/* ── Outer grid ───────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 40px 1fr var(--asset-panel-height, 220px) 28px;
+  grid-template-columns: var(--outliner-width, 260px) 1fr var(--right-panel-width, 300px);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────── */
+#header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-5);
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  user-select: none;
+}
+
+#project-name {
+  font-size: var(--fs-md);
+  color: var(--text-0);
+  font-weight: 500;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  cursor: text;
+  transition: background var(--dur-fast) var(--ease);
+}
+#project-name:hover  { background: var(--bg-2); }
+#project-name:focus  { outline: none; background: var(--bg-2); }
+#project-name[data-editing="1"] { padding: 0; background: transparent; }
+
+.pm-name-input {
+  font: inherit;
+  color: var(--text-0);
+  background: var(--bg-0);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--r-sm);
+  padding: 2px var(--sp-2);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-focus);
+  min-width: 12ch;
+}
+
+#dirty-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+#dirty-indicator.dirty { background: var(--warning); }
+
+/* ── Outliner ─────────────────────────────────────────── */
+#outliner {
+  grid-column: 1;
+  grid-row: 2;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+/* ── Viewport ─────────────────────────────────────────── */
+#viewport {
+  grid-column: 2;
+  grid-row: 2;
+  background: var(--bg-0);
+  position: relative;
+  overflow: hidden;
+}
+
+#renderCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+
+.boot-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background: rgba(10, 10, 11, 0.88);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  text-align: center;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.boot-status-error { color: var(--danger); }
+
+.boot-status-fullscreen {
+  position: fixed;
+  flex-direction: column;
+  gap: var(--sp-2);
+  height: 100vh;
+  background: var(--bg-0);
+  pointer-events: auto;
+}
+
+.boot-status-title {
+  margin: 0;
+  color: var(--text-0);
+  font-size: var(--fs-lg);
+}
+
+.boot-status-overlay {
+  z-index: 50;
+  pointer-events: auto;
+}
+
+/* ── Right panel ──────────────────────────────────────── */
+#right-panel {
+  grid-column: 3;
+  grid-row: 2;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+/* ── Asset panel ──────────────────────────────────────── */
+/* Outer placement only — internal split layout lives in components.css. */
+#asset-panel {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+/* ── Status bar ───────────────────────────────────────── */
+#status-bar {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-5);
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  user-select: none;
+}
+
+.sb-left   { flex: 1; display: flex; align-items: center; gap: var(--sp-4); }
+.sb-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--sp-4); }
+.sb-right  { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-5); }
+
+.sb-sep { color: var(--text-2); }
+
+.sb-save-icon { display: flex; align-items: center; color: var(--text-2); }
+.sb-save-icon.dirty  { color: var(--warning); }
+.sb-save-icon.saved  { color: var(--success); }
+
+.sb-label { color: var(--text-2); }
+.sb-label span { color: var(--text-1); }
+
+/* ── Panel collapse states ────────────────────────────── */
+
+#outliner.ol-outer-collapsed .ol-header,
+#outliner.ol-outer-collapsed .ol-list { display: none; }
+
+#right-panel.rp-outer-collapsed .rp-section,
+#right-panel.rp-outer-collapsed .rp-splitter { display: none; }
+
+/* ── Toast container ──────────────────────────────────── */
+#toast-container {
+  position: fixed;
+  bottom: calc(28px + var(--sp-5));
+  right: var(--sp-6);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--sp-3);
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 240px;
+  max-width: 360px;
+  pointer-events: all;
+  box-shadow: var(--shadow-md);
+  animation: toast-in var(--dur-med) var(--ease) both;
+}
+
+.toast.toast-out {
+  animation: toast-out var(--dur-med) var(--ease) both;
+}
+
+@keyframes toast-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes toast-out {
+  from { transform: translateX(0);    opacity: 1; max-height: 80px; margin-bottom: 0; }
+  to   { transform: translateX(16px); opacity: 0; max-height: 0;    margin-bottom: calc(-1 * var(--sp-3)); }
+}
+
+.toast-icon { display: flex; align-items: center; flex-shrink: 0; }
+.toast-msg  { flex: 1; line-height: 1.4; }
+
+.toast.info    .toast-icon { color: var(--info); }
+.toast.success .toast-icon { color: var(--success); }
+.toast.warning .toast-icon { color: var(--warning); }
+.toast.error   .toast-icon { color: var(--danger); }
+.toast.loading .toast-icon { color: var(--accent); }
+
+.toast.loading .toast-icon svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Scrollbar ────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: var(--bg-1); }
+::-webkit-scrollbar-thumb  { background: var(--bg-4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }

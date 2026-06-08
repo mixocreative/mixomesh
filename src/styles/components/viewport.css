@@ -1,0 +1,121 @@
+/* ── Viewport toolbar (Fusion 360 style) ─────────────────── */
+.viewport-toolbar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: rgba(19, 19, 22, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  pointer-events: auto;
+}
+.vt-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.vt-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
+  margin: 0 var(--sp-2);
+}
+.vt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: 28px;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.vt-btn:hover { background: var(--bg-2); color: var(--text-0); }
+.vt-btn.vt-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.vt-label { font-size: var(--fs-xs); font-weight: 500; }
+
+/* ── Nav cube (Fusion 360 style) ─────────────────────────── */
+.nav-cube {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 90px;
+  height: 110px;
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  perspective: 600px;
+}
+.nc-cube {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  margin: 8px auto 0;
+  transform-style: preserve-3d;
+  pointer-events: auto;
+  cursor: grab;
+}
+.nc-cube:active { cursor: grabbing; }
+.nc-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  background: rgba(35, 35, 41, 0.92);
+  color: var(--text-1);
+  border: 1px solid var(--border-strong);
+  backface-visibility: hidden;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.nc-face:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.nc-front  { transform: translateZ(30px); }
+.nc-back   { transform: rotateY(180deg) translateZ(30px); }
+/* Canonical cube. Orientation is driven entirely by the view-matrix
+   matrix3d() in NavCube.js — these are just the static face positions. */
+.nc-left   { transform: rotateY(-90deg) translateZ(30px); }
+.nc-right  { transform: rotateY( 90deg) translateZ(30px); }
+.nc-top    { transform: rotateX( 90deg) translateZ(30px); }
+.nc-bottom { transform: rotateX(-90deg) translateZ(30px); }
+.nc-home {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  background: rgba(19, 19, 22, 0.85);
+  color: var(--text-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.nc-home:hover { color: var(--accent); border-color: var(--accent); }
+.pp-hidden { display: none !important; }
+

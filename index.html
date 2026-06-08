@@ -4,69 +4,91 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MIXOMESH</title>
-  <link rel="stylesheet" href="styles/tokens.css">
-  <link rel="stylesheet" href="styles/layout.css">
-  <link rel="stylesheet" href="styles/components.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "jszip": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm"
-    }
-  }
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/src/styles/tokens.css">
+  <link rel="stylesheet" href="/src/styles/layout.css">
+  <link rel="stylesheet" href="/src/styles/components.css">
+  <link rel="stylesheet" href="/src/styles/components/asset.css">
+  <link rel="stylesheet" href="/src/styles/components/outliner.css">
+  <link rel="stylesheet" href="/src/styles/components/shell.css">
+  <link rel="stylesheet" href="/src/styles/components/properties.css">
+  <link rel="stylesheet" href="/src/styles/components/shader.css">
+  <link rel="stylesheet" href="/src/styles/components/context-modal.css">
+  <link rel="stylesheet" href="/src/styles/components/print.css">
+  <link rel="stylesheet" href="/src/styles/components/viewport.css">
+  <link rel="stylesheet" href="/src/styles/components/project.css">
+  <link rel="stylesheet" href="/src/styles/components/progress.css">
+  <script>
+    window.addEventListener('error', function () {
+      var boot = document.getElementById('boot-status');
+      if (!boot) return;
+      boot.textContent = 'Failed to initialise MIXOMESH. Check DevTools for details.';
+      boot.classList.add('boot-status-error');
+      boot.hidden = false;
+    });
   </script>
-  <script defer src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script defer src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.js"></script>
-  <script defer src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
-  <script defer src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.js"></script>
 </head>
 <body>
+  <noscript>
+    <div class="boot-status boot-status-error">
+      MIXOMESH requires JavaScript in Chrome or Edge.
+    </div>
+  </noscript>
+
   <div id="app">
-    <header id="header">
+    <header id="header" aria-label="Project toolbar">
       <span id="project-name">Untitled</span>
-      <span id="dirty-indicator"></span>
+      <span id="dirty-indicator" aria-hidden="true"></span>
     </header>
 
-    <aside id="outliner"></aside>
+    <aside id="outliner" aria-label="Scene outliner"></aside>
 
-    <div id="viewport">
-      <canvas id="renderCanvas" tabindex="0"></canvas>
+    <main id="viewport" aria-label="3D viewport">
+      <canvas id="renderCanvas" tabindex="0" aria-label="Interactive 3D scene viewport">
+        MIXOMESH 3D viewport.
+      </canvas>
       <div id="viewport-drop-overlay"></div>
       <div id="nav-cube" class="nav-cube"></div>
       <div id="viewport-toolbar" class="viewport-toolbar"></div>
-    </div>
+      <div id="boot-status" class="boot-status" role="status" aria-live="polite">
+        Loading MIXOMESH...
+      </div>
+    </main>
 
-    <aside id="right-panel">
+    <aside id="right-panel" aria-label="Inspector panels">
       <section class="rp-section" id="rp-properties">
-        <header class="rp-section-header" data-toggle="rp-properties">
+        <button type="button" class="rp-section-header" data-toggle="rp-properties" aria-controls="rp-properties-body" aria-expanded="true">
           <span class="rp-chev"></span>
           <span class="rp-title">Properties</span>
-        </header>
+        </button>
         <div class="rp-body" id="rp-properties-body"></div>
       </section>
-      <div class="rp-splitter" data-rp-splitter aria-hidden="true"></div>
+      <div class="rp-splitter" data-rp-splitter role="separator" aria-label="Resize Properties and Shader Library panels" aria-orientation="horizontal" tabindex="0"></div>
       <section class="rp-section" id="rp-shaders">
-        <header class="rp-section-header" data-toggle="rp-shaders">
+        <button type="button" class="rp-section-header" data-toggle="rp-shaders" aria-controls="rp-shaders-body" aria-expanded="true">
           <span class="rp-chev"></span>
           <span class="rp-title">Shader Library</span>
-        </header>
+        </button>
         <div class="rp-body" id="rp-shaders-body"></div>
       </section>
       <section class="rp-section" id="rp-print">
-        <header class="rp-section-header" data-toggle="rp-print">
+        <button type="button" class="rp-section-header" data-toggle="rp-print" aria-controls="rp-print-body" aria-expanded="true">
           <span class="rp-chev"></span>
           <span class="rp-title">Print</span>
-        </header>
+        </button>
         <div class="rp-body" id="rp-print-body"></div>
       </section>
     </aside>
 
-    <div id="asset-panel"></div>
+    <section id="asset-panel" aria-label="Asset library"></section>
 
-    <div id="status-bar"></div>
+    <div id="status-bar" role="status" aria-label="Application status"></div>
   </div>
 
-  <div id="toast-container"></div>
+  <div id="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
+  <div id="modal-root" class="modal-overlay hidden"></div>
+  <div id="progress-root" class="progress-overlay hidden" aria-live="polite"></div>
 
-  <script type="module" src="main.js"></script>
+  <script type="module" src="/src/app/boot.ts"></script>
 </body>
 </html>

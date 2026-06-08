@@ -1,0 +1,47 @@
+/* ── Phase 6: project menu / persistence ──────────────── */
+.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn-danger:hover { filter: brightness(1.1); }
+.btn-sm { padding: 2px var(--sp-3); font-size: var(--fs-xs); }
+
+.pm-bar { margin-left: auto; display: flex; align-items: center; gap: var(--sp-1); }
+.pm-btn {
+  background: transparent; border: 1px solid transparent; color: var(--text-1);
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); cursor: pointer;
+}
+.pm-btn:hover { background: var(--bg-3); color: var(--text-0); border-color: var(--border-strong); }
+
+.pm-recent { position: relative; }
+.pm-recent-list {
+  position: absolute; top: 100%; right: 0; margin-top: var(--sp-2); z-index: 200;
+  width: 280px; max-height: 360px; overflow-y: auto;
+  background: var(--bg-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: var(--sp-2);
+}
+.pm-recent-list.hidden { display: none; }
+.pm-recent-empty { padding: var(--sp-4); color: var(--text-2); font-size: var(--fs-sm); text-align: center; }
+.pm-recent-item {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%;
+  background: transparent; border: none; color: var(--text-0);
+  padding: var(--sp-3); border-radius: var(--r-sm); cursor: pointer; text-align: left;
+}
+.pm-recent-item:hover { background: var(--bg-3); }
+.pm-recent-thumb { width: 48px; height: 32px; object-fit: cover; border-radius: var(--r-sm); background: var(--bg-4); flex-shrink: 0; }
+.pm-recent-thumb-blank { display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.pm-recent-meta { display: flex; flex-direction: column; min-width: 0; }
+.pm-recent-name { font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-recent-date { font-size: var(--fs-xs); color: var(--text-2); }
+
+.pm-modal { padding: var(--sp-5); min-width: 360px; max-width: 520px; }
+.pm-modal-title { font-size: var(--fs-lg); margin: 0 0 var(--sp-4); color: var(--text-0); }
+.pm-modal-body { font-size: var(--fs-sm); color: var(--text-1); margin: 0 0 var(--sp-5); line-height: 1.5; }
+.pm-modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+.pm-asset-list { max-height: 240px; overflow-y: auto; margin-bottom: var(--sp-5); }
+.pm-asset-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); padding: var(--sp-3); border-bottom: 1px solid var(--border);
+}
+.pm-asset-name { font-size: var(--fs-sm); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ol-row.ol-unlinked .ol-icon { color: var(--accent); }
+

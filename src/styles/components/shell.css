@@ -1,0 +1,142 @@
+/* ── Right panel: stacked collapsible sections ───────── */
+.rp-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 32px;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.rp-section.collapsed { flex: 0 0 auto; }
+.rp-section.collapsed .rp-body { display: none; }
+
+/* Drag handle between the two stacked sections. */
+.rp-splitter {
+  height: 5px;
+  background: var(--border);
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease);
+}
+.rp-splitter:hover,
+.rp-splitter.dragging,
+.rp-splitter:focus-visible { background: var(--accent); outline: none; }
+
+.rp-section-header {
+  appearance: none;
+  width: 100%;
+  flex-shrink: 0;
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--bg-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  cursor: pointer;
+  user-select: none;
+}
+.rp-section-header:hover { color: var(--text-0); }
+.rp-section-header:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+  color: var(--text-0);
+}
+.rp-section.collapsed .rp-section-header { border-bottom: none; }
+
+.rp-chev {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.rp-section.collapsed .rp-chev { transform: rotate(-90deg); }
+
+.rp-title { font-weight: 500; }
+
+.rp-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+
+/* ── Panel resize handles ─────────────────────────────── */
+.panel-resize {
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+.panel-resize:hover { background: var(--accent); opacity: 0.5; }
+.panel-resize.dragging { background: var(--accent); opacity: 0.7; }
+
+.panel-resize-ew-right { top: 0; right: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+.panel-resize-ew-left  { top: 0; left: 0;  bottom: 0; width: 5px; cursor: ew-resize; }
+.panel-resize-ns-top   { top: 0; left: 0;  right: 0;  height: 5px; cursor: ns-resize; }
+
+/* ── Panel collapse buttons ───────────────────────────── */
+.panel-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.panel-collapse-btn:hover,
+.panel-collapse-btn:focus-visible { color: var(--text-0); background: var(--bg-3); outline: none; }
+
+#right-panel > .rp-panel-collapse {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 2;
+}
+
+
+/* ── Right panel: collapsed expand strip ──────────────── */
+.rp-expand-strip {
+  background: transparent;
+  border: none;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.rp-expand-strip:hover,
+.rp-expand-strip:focus-visible { color: var(--text-0); outline: none; }
+#right-panel.rp-outer-collapsed .rp-expand-strip { display: flex; }
+
+/* ── Asset panel: collapsed expand strip ──────────────── */
+.ap-expand-strip {
+  background: transparent;
+  border: none;
+  display: none;
+  position: absolute;
+  right: var(--sp-4);
+  top: 0;
+  height: 32px;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: var(--sp-2);
+}
+.ap-expand-strip:hover,
+.ap-expand-strip:focus-visible { color: var(--text-0); outline: none; }
+#asset-panel.ap-outer-collapsed .ap-expand-strip { display: flex; }
+
+

@@ -1,4 +1,4 @@
-// In-memory stand-in for core/idb.js (no IndexedDB under Node). Mirrors the
+// In-memory stand-in for src/core/idb.js (no IndexedDB under Node). Mirrors the
 // exact export surface PersistenceManager / AssetPanel import. Each test that
 // needs isolation calls __reset().
 

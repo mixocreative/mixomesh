@@ -1,0 +1,33 @@
+/* ── Phase 6: export progress overlay ─────────────────── */
+.progress-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 8, 10, 0.74);
+  backdrop-filter: blur(2px);
+  cursor: progress;
+}
+.progress-overlay.hidden { display: none; }
+.po-panel {
+  width: min(420px, 80vw);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md, 8px);
+  padding: var(--sp-5);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+}
+.po-title { font-size: var(--fs-lg); color: var(--text-0); margin-bottom: var(--sp-4); }
+.po-track {
+  height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--bg-4); border: 1px solid var(--border);
+}
+.po-bar {
+  height: 100%; width: 0%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+.po-row {
+  display: flex; justify-content: space-between; gap: var(--sp-3);
+  margin-top: var(--sp-3); font-size: var(--fs-sm);
+}
+.po-pct { color: var(--text-0); font-variant-numeric: tabular-nums; }
+.po-msg { color: var(--text-2); }

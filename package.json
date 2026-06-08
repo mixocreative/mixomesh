@@ -1,0 +1,30 @@
+{
+  "name": "mixomesh",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:deps": "node scripts/install-deps.mjs",
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
+    "test:headless": "node --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
+    "test:browser": "node tests/browser-smoke.mjs"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.6.2",
+    "@babylonjs/loaders": "9.6.2",
+    "@babylonjs/materials": "9.6.2",
+    "@babylonjs/serializers": "9.6.2",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0",
+    "vite": "8.0.16"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

@@ -20,7 +20,7 @@ import { putFileHandle as seedHandle, __reset as resetIdb } from './idb-stub.mjs
 installEnv();
 console.error = () => {};
 
-const { __test } = await import('../core/PersistenceManager.js');
+const { __test } = await import('../src/core/PersistenceManager.js');
 const {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,

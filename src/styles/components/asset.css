@@ -1,0 +1,296 @@
+/* ── Asset panel ──────────────────────────────────────── */
+#asset-panel {
+  display: grid;
+  grid-template-columns: 220px 1px 1fr;
+  padding: 0;
+  align-items: stretch;
+}
+
+.ap-tree {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ap-tree-header {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ap-tabs {
+  display: inline-flex;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.ap-tab {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 3px var(--sp-2);
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ap-tab:hover { color: var(--text-0); }
+.ap-tab.active { background: var(--bg-3); color: var(--accent); }
+.ap-tab:focus-visible,
+.ap-btn:focus-visible,
+.ap-tree-row:focus-visible,
+.asset-card:focus-visible,
+.ac-delete:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Session tab has no tree branches and no mount action — hide both. */
+#ap-tree[data-tab="session"] .ap-tree-list { display: none; }
+#ap-tree[data-tab="session"] #ap-mount-btn { display: none; }
+
+.ap-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-0);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.ap-btn:hover { background: var(--bg-4); border-color: var(--border-focus); }
+.ap-btn:active { transform: translateY(1px); }
+
+.ap-divider {
+  background: var(--border);
+  width: 1px;
+}
+
+.ap-tree-list, .ap-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ap-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 3px var(--sp-3) 3px var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-tree-row:hover { background: var(--bg-2); color: var(--text-0); }
+.ap-tree-row.selected { background: var(--bg-3); color: var(--text-0); }
+.ap-tree-row.selected .ap-tree-icon { color: var(--accent); }
+
+.ap-tree-toggle { display: inline-flex; align-items: center; color: var(--text-2); width: 12px; }
+.ap-tree-toggle-empty { visibility: hidden; }
+.ap-tree-row.collapsed .ap-tree-toggle { transform: rotate(-90deg); }
+.ap-tree-row.collapsed + .ap-tree-children { display: none; }
+
+.ap-tree-icon { display: inline-flex; align-items: center; color: var(--text-1); flex-shrink: 0; }
+.ap-tree-label { font-size: var(--fs-sm); }
+
+/* ── Asset grid ───────────────────────────────────────── */
+.ap-grid {
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.ap-grid-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(100px, 128px);
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.ap-search,
+.ap-kind-filter {
+  min-width: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.ap-search:focus,
+.ap-kind-filter:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--ring-focus);
+  outline: none;
+}
+
+.ap-grid-summary {
+  min-height: 16px;
+  margin-bottom: var(--sp-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.ap-empty {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  padding: var(--sp-5);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.ap-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--sp-4);
+}
+
+.asset-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  cursor: grab;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.asset-card:hover { border-color: var(--border-focus); background: var(--bg-3); }
+.asset-card:active { cursor: grabbing; }
+.asset-card:focus-visible { border-color: var(--border-focus); background: var(--bg-3); }
+
+.ac-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--bg-0);
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  display: block;
+  image-rendering: auto;
+}
+.ac-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+.ac-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.ac-name {
+  font-size: var(--fs-xs);
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ac-badges {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.ac-ext {
+  background: var(--bg-4);
+  color: var(--text-1);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 1px var(--sp-2);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+}
+.ac-ratio {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 1px var(--sp-2);
+  border-radius: 2px;
+  background: var(--bg-3);
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+.ac-unit-badge {
+  font-size: 9px;
+  color: var(--warning);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.ac-unit-badge.ac-unit-ok { color: var(--text-2); }
+
+.ac-link {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 1px var(--sp-2);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+.ac-link.is-linked   { background: rgba(245, 158, 11, 0.14); color: var(--accent); }
+.ac-link.is-snapshot { background: var(--bg-4); color: var(--text-2); }
+
+/* ── Viewport drag-over highlight ─────────────────────── */
+#viewport-drop-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px dashed transparent;
+  border-radius: var(--r-md);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+#viewport.drag-over #viewport-drop-overlay {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+/* ── Asset card: delete button ────────────────────────── */
+.asset-card { position: relative; }
+.ac-delete {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  background: var(--bg-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.asset-card:hover .ac-delete,
+.asset-card:focus-within .ac-delete { display: flex; }
+.ac-delete:hover { color: var(--danger); border-color: var(--danger); background: var(--bg-3); }
+

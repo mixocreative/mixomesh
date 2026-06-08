@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { installEnv } from './env.mjs';
 
 installEnv();
-const { MeshValidator } = await import('../core/MeshValidator.js');
+const { MeshValidator } = await import('../src/core/MeshValidator.js');
 
 // Unit cube scaled to 0.1 m (under the default bed → no exceedsBed noise).
 const S = 0.1;

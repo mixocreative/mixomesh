@@ -1,7 +1,7 @@
 // State-shape tests. Run:
 //   node --import ./tests/register-hooks.mjs tests/state-shape.test.mjs
 //
-// Phase 7 (Mimaki pivot) locks three defaults:
+// Mimaki printer profile support locks three defaults:
 //   • targetPrinterId  = 'mimaki-3duj-553'  (most popular UV-inkjet installed base)
 //   • bedDimensions    = 508 × 508 × 305 mm (3DUJ-553 spec)
 //   • overlays.printPreview = true          (matte preview ON by default)
@@ -16,8 +16,8 @@ import { installEnv } from './env.mjs';
 installEnv();
 console.error = () => {};
 
-const { freshState, getState, setState } = await import('../core/StateManager.js');
-const { __test } = await import('../core/PersistenceManager.js');
+const { freshState, getState, setState } = await import('../src/core/StateManager.js');
+const { __test } = await import('../src/core/PersistenceManager.js');
 const { _migrate } = __test;
 
 let passed = 0, failed = 0;

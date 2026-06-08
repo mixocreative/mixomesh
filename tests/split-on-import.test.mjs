@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { installEnv } from './env.mjs';
 
 installEnv();
-const { splitMultiMaterialMeshes } = await import('../core/AssetLoader.js');
+const { splitMultiMaterialMeshes } = await import('../src/core/AssetLoader.js');
 
 // Test fixtures ────────────────────────────────────────────────────────────
 const makeMat   = (id) => ({ __mat: id, subMaterials: undefined });

@@ -1,9 +1,14 @@
 # Agent / editor local config — not project source
 .claude/
+.codex/
+.remember/
 .vscode/
+.tmp/
+.npm-cache/
 
 # Node — tests run with stock Node, no install needed. package.json /
-# package-lock.json + node_modules are stray local artefacts.
+# package-lock.json used to be a stray local artefact. package.json is now
+# project source because the Vite migration owns scripts and dependencies.
 node_modules/
-package.json
 package-lock.json
+dist/
