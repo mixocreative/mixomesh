@@ -299,5 +299,3 @@
 .pp-scale-lock:hover { color: var(--accent); border-color: var(--accent); }
 .pp-locked + .pp-row .pp-scale-lock,
 .pp-scale-row.pp-locked ~ .pp-row-inline .pp-scale-lock { color: var(--accent); border-color: var(--accent); }
-
-

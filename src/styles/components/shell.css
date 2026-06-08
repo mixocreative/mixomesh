@@ -138,5 +138,3 @@
 .ap-expand-strip:hover,
 .ap-expand-strip:focus-visible { color: var(--text-0); outline: none; }
 #asset-panel.ap-outer-collapsed .ap-expand-strip { display: flex; }
-
-

@@ -293,4 +293,3 @@
 .asset-card:hover .ac-delete,
 .asset-card:focus-within .ac-delete { display: flex; }
 .ac-delete:hover { color: var(--danger); border-color: var(--danger); background: var(--bg-3); }
-

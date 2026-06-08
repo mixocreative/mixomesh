@@ -209,4 +209,3 @@ body.modal-scale     #renderCanvas { cursor: nwse-resize; }
 .mm-row-opts { display: flex; gap: var(--sp-5); font-size: var(--fs-xs); color: var(--text-1); }
 .mm-row-opts label { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .mm-row-opts input[type="radio"] { accent-color: var(--accent); }
-

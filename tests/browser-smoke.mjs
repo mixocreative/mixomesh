@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
-import { spawn } from 'node:child_process';
+import { join, resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -201,19 +201,30 @@ function findBrowser() {
   const local = process.env.LOCALAPPDATA;
   const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
   const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
-  const candidates = [
+  const absoluteCandidates = [
     join(programFiles, 'Google/Chrome/Application/chrome.exe'),
     join(programFilesX86, 'Google/Chrome/Application/chrome.exe'),
     local ? join(local, 'Google/Chrome/Application/chrome.exe') : '',
     join(programFiles, 'Microsoft/Edge/Application/msedge.exe'),
     join(programFilesX86, 'Microsoft/Edge/Application/msedge.exe'),
     local ? join(local, 'Microsoft/Edge/Application/msedge.exe') : '',
-    'google-chrome',
-    'chrome',
-    'chromium',
-    'msedge',
   ];
-  return candidates.find(p => p && (p.includes(sep) ? existsSync(p) : true)) ?? null;
+  const absoluteMatch = absoluteCandidates.find(p => p && existsSync(p));
+  if (absoluteMatch) return absoluteMatch;
+
+  for (const command of ['google-chrome', 'chrome', 'chromium', 'msedge']) {
+    const resolved = resolveCommand(command);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveCommand(command) {
+  const resolver = process.platform === 'win32' ? 'where.exe' : 'sh';
+  const args = process.platform === 'win32' ? [command] : ['-c', `command -v ${command}`];
+  const result = spawnSync(resolver, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (result.status !== 0) return null;
+  return result.stdout.split(/\r?\n/).map(line => line.trim()).find(Boolean) ?? null;
 }
 
 async function waitForBrowserWs(port, stderr) {
