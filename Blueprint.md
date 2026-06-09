@@ -55,7 +55,10 @@ not editing code.
 ### 0.2 Runtime
 
 `index.html` is the single supported app shell. It is served by Vite and loads
-`/src/app/boot.ts`.
+`/src/app/boot.ts` through an inline dynamic `import()` wrapper. The wrapper
+does not make static file servers supported; it exists so VS Code/Live Server
+style hosts that serve `.ts` as `video/mp2t` fail visibly in `#boot-status`
+with the Vite command instead of hanging forever on "Loading MIXOMESH...".
 
 `src/app/boot.ts` imports the pinned Babylon npm packages, assembles the legacy
 `window.BABYLON` namespace expected by the existing JS modules, registers

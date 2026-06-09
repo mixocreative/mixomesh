@@ -89,6 +89,15 @@
   <div id="modal-root" class="modal-overlay hidden"></div>
   <div id="progress-root" class="progress-overlay hidden" aria-live="polite"></div>
 
-  <script type="module" src="/src/app/boot.ts"></script>
+  <script type="module">
+    import('/src/app/boot.ts').catch(function (err) {
+      var boot = document.getElementById('boot-status');
+      if (!boot) return;
+      console.error('MIXOMESH boot module failed:', err);
+      boot.textContent = 'MIXOMESH must be served by Vite. Run npm run dev and open http://127.0.0.1:5173/index.html.';
+      boot.classList.add('boot-status-error');
+      boot.hidden = false;
+    });
+  </script>
 </body>
 </html>
