@@ -1,7 +1,7 @@
 # MIXOMESH
 
 Browser-based 3D model assembly tool for full-color 3D printing. MIXOMESH is
-Mimaki-first: textured 3MF Materials Extension and OBJ+MTL+PNG exports preserve
+ UV inkjet color 3D print-first: textured 3MF Materials Extension and OBJ+MTL+PNG exports preserve
 continuous-tone color for UV-inkjet printers, while filament targets use solid
 per-part 3MF color groups.
 
