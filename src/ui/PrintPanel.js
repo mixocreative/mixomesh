@@ -193,7 +193,7 @@ async function _renderValidationTab() {
 
       html += `<div class="pp-mesh-validation ${icon_class}">`;
       html += `<div class="pp-mesh-header">`;
-      html += `${icon(icon_name, 'inline')}`;
+      html += `${icon(icon_name, { class: 'inline' })}`;
       html += `<span class="pp-mesh-name">${escapeHtml(obj.name)}</span>`;
       html += `</div>`;
 
@@ -275,15 +275,15 @@ function _renderExportTab() {
   html += '<label>Format</label>';
 
   html += `<button class="pp-export-btn pp-export-obj" data-format="obj">`;
-  html += `${icon('Download', 'inline')} Export OBJ + MTL`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export OBJ + MTL`;
   html += `</button>`;
 
   html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf">`;
-  html += `${icon('Download', 'inline')} Export 3MF (color)`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export 3MF (color)`;
   html += `</button>`;
 
   html += `<button class="pp-export-btn pp-export-stl" data-format="stl">`;
-  html += `${icon('Download', 'inline')} Export STL`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export STL`;
   html += `</button>`;
 
   html += '</div>';

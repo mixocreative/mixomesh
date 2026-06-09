@@ -22,7 +22,7 @@ export function init() {
     <button class="pm-btn" data-act="new"    title="New project (Ctrl+N)">${icon('FilePlus',   { width: 15, height: 15 })}</button>
     <button class="pm-btn" data-act="open"   title="Open project (Ctrl+O)">${icon('FolderOpen', { width: 15, height: 15 })}</button>
     <button class="pm-btn" data-act="save"   title="Save (Ctrl+S)">${icon('Save',         { width: 15, height: 15 })}</button>
-    <button class="pm-btn" data-act="saveas" title="Save As (Ctrl+Shift+S)">${icon('Copy',   { width: 15, height: 15 })}</button>
+    <button class="pm-btn" data-act="saveas" title="Save As (Ctrl+Shift+S)">${icon('FilePenLine', { width: 15, height: 15 })}</button>
     <div class="pm-recent">
       <button class="pm-btn" data-act="recent" title="Recent projects">${icon('Clock', { width: 15, height: 15 })}</button>
       <div class="pm-recent-list hidden"></div>

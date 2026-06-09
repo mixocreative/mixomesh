@@ -400,12 +400,14 @@ SVG) and add an entry to `ICON_PATHS`. Names below are the ones the rest
 of this blueprint references — add them in the phase that first uses
 each one:
 - Outliner: `Eye` / `EyeOff` (visibility), `Lock` / `Unlock`, `AlertTriangle`, `CircleAlert`, `Printer`, `CheckCircle2`, `XCircle`, `Folder`, `FolderOpen`, `Box`
-- Header: `Save`, `FolderOpen`, `FilePlus`, `Undo2`, `Redo2`
-- Status bar: `Move3D`, `RotateCcw`, `Maximize`, `Circle` (dirty), `Check` (saved)
+- Header: `Save`, `FolderOpen`, `FilePlus`, `FilePenLine` (Save As), `Undo2`, `Redo2`
+- Status bar: `Circle` (dirty), `Check` (saved)
+- Viewport toolbar: `Move3D`, `RotateCcw`, `Scale3D`, `CircleDot`, `Box`, `Crosshair`, `Circle`, `RotateCw`, `Orbit`, `Eye`, `LocateFixed`
 - Asset panel: `Upload`, `Image`, `RefreshCw`
 - Print panel: `Printer`, `Ruler`, `Layers`, `RotateCw`, `Download`, `AlertOctagon`
 - Toast: `Info`, `CheckCircle`, `AlertTriangle`, `XCircle`, `Loader2` (spinner — animate via CSS)
-- Shader panel: `Palette`, `Copy`, `Trash2`, `Plus`, `Edit3`
+- Shader panel: `Palette`, `Copy`, `Trash2`, `Plus`, `Edit3`, `Focus`
+- Context menu icon audit: focus/select-linked use `Focus`; transform sampling uses `Pipette`; duplicate/save-as stay visually distinct (`Copy` vs `FilePenLine`). Rationale: toolbar and menu icons must distinguish action semantics at a glance, so one glyph must not represent unrelated operations such as scale, frame/focus, free camera, and world-origin follow.
 
 Render in DOM:
 ```js

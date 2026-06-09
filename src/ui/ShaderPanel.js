@@ -444,7 +444,7 @@ function _renderEditor(sh) {
       <div class="sp-actions">
         <button class="sp-btn" id="sp-act-duplicate">${icon('Copy',  { width: 12, height: 12 })}<span>Duplicate</span></button>
         <button class="sp-btn" id="sp-act-assign" ${selCount ? '' : 'disabled'}>${icon('Link', { width: 12, height: 12 })}<span>Assign (${selCount})</span></button>
-        <button class="sp-btn" id="sp-act-select" ${linked ? '' : 'disabled'}>${icon('Maximize', { width: 12, height: 12 })}<span>Select linked</span></button>
+        <button class="sp-btn" id="sp-act-select" ${linked ? '' : 'disabled'}>${icon('Focus', { width: 12, height: 12 })}<span>Select linked</span></button>
         <button class="sp-btn sp-btn-danger" id="sp-act-delete" ${linked ? 'disabled' : ''} title="${escapeAttr(linked ? `Refuses while ${linked} mesh${linked === 1 ? '' : 'es'} use this shader` : 'Delete shader')}">${icon('Trash2', { width: 12, height: 12 })}<span>Delete</span></button>
       </div>
     </section>

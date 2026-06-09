@@ -119,7 +119,7 @@ function _buildItems(info) {
         shortcut: '', action: 'relink', iconName: 'Link', cls: '' },
       'sep',
     ] : []),
-    { label: 'Focus',           shortcut: 'F',           action: 'frame',   iconName: 'Maximize',   cls: enabled(hasSelection) },
+    { label: 'Focus',           shortcut: 'F',           action: 'frame',   iconName: 'Focus',      cls: enabled(hasSelection) },
     'sep',
     { label: 'Toggle Hidden',   shortcut: 'H',           action: 'hide',    iconName: 'EyeOff',     cls: enabled(hasSelection) },
     { label: 'Toggle Lock',     shortcut: '',            action: 'lock',    iconName: 'Lock',       cls: enabled(hasSelection) },
@@ -130,7 +130,7 @@ function _buildItems(info) {
     { label: 'Ungroup',         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
     'sep',
     { label: 'Smart Replace',   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
-    { label: 'Transform Swab',  shortcut: '',            action: 'swab',    iconName: 'Move3D',     cls: enabled(multi) },
+    { label: 'Transform Swab',  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
     'sep',
     { label: 'Delete',          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];

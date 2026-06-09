@@ -20,20 +20,20 @@ let _root = null;
 const GIZMO_MODES = [
   { id: 'translate', label: 'Move',   iconName: 'Move3D' },
   { id: 'rotate',    label: 'Rotate', iconName: 'RotateCcw' },
-  { id: 'scale',     label: 'Scale',  iconName: 'Maximize' },
+  { id: 'scale',     label: 'Scale',  iconName: 'Scale3D' },
 ];
 
 const PIVOT_MODES = [
-  { id: 'active', label: 'Active',       iconName: 'CheckCircle' },
+  { id: 'active', label: 'Active',       iconName: 'CircleDot' },
   { id: 'median', label: 'Median',       iconName: 'Box' },
-  { id: 'cursor', label: 'Cursor',       iconName: 'Plus' },
+  { id: 'cursor', label: 'Cursor',       iconName: 'Crosshair' },
   { id: 'world',  label: 'World Origin', iconName: 'Circle' },
 ];
 
 const FOLLOW_MODES = [
-  { id: 'free',         label: 'Free Camera',          iconName: 'Move3D' },
+  { id: 'free',         label: 'Free Camera',          iconName: 'Orbit' },
   { id: 'followActive', label: 'Follow Active',        iconName: 'Eye' },
-  { id: 'worldOrigin',  label: 'Look At World Origin', iconName: 'Maximize' },
+  { id: 'worldOrigin',  label: 'Look At World Origin', iconName: 'LocateFixed' },
 ];
 
 export function init() {
