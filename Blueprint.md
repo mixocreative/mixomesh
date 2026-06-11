@@ -779,10 +779,24 @@ Stubs (real bodies in later phases):
 
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
-- Undo/redo do **not** mark project dirty.
 - New push clears redo stack.
-- Commands capture `prev` state **before** `execute()`, never inside.
+- Snapshot domains differ (2026-06-11 review C3): **logical JSON state** is
+  captured at construction, before `execute()`. **Babylon scene-graph facts**
+  (parents, world transforms) are captured *inside* `execute()`, after
+  `_withDetachedPivot` normalizes the graph — at construction time a live
+  selection parents meshes under the temporary pivot, which is disposed
+  during detach.
 - `undo()` must perfectly reverse `execute()`.
+- **Dirty is position-based** (review A5). `HistoryManager.getPosition()`
+  returns the serial of the current undo-stack top (0 when empty); push
+  assigns a monotonic serial per command. PersistenceManager records the
+  position at save/load/new; the project is dirty iff
+  `position !== savedPosition` OR a non-history mutation fired
+  `PROJECT_DIRTY` since the last save (sticky flag —
+  `HistoryManager.isApplying()` distinguishes command-driven dirty events,
+  which the position diff already covers). Undoing back to the saved
+  position therefore reads clean; editing after save then undoing past the
+  save reads dirty.
 
 ---
 
@@ -1042,6 +1056,10 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                //   Either field present ⇒ "Linked"; neither ⇒ "Snapshot" (frozen embedded copy only).
   blobUrl,                     // module-local Map, not in state
   thumbnailDataUrl,
+  contentHash,                 // sha256 of source file bytes (set at import; reused at save)
+  sourceFileHash,              // texture identity scope — §10b (texture entries)
+  sourceAssetId,               // owning mesh asset for imported textures — §10b
+  babylonTextureName,          // loader-minted texture.name for reload rebind — §10b
 }
 ```
 
@@ -1434,6 +1452,41 @@ appended after these.
 
 ---
 
+## PART 10b — TEXTURE IDENTITY
+
+What uniquely names a texture across import → session → `.mixo` → reload →
+export. Without this contract, dedupe aliases unrelated textures and reload
+drops them (2026-06-11 review C2/H6).
+
+**Identity fields** (on every `kind: 'texture'` AssetEntry):
+- `sourceFileHash` — sha256 of the *source file bytes* the texture arrived in
+  (the glTF/3MF container for imported textures; the image file itself for
+  user-loaded ones). Computed once at import in `AssetLoader.loadFromBlob`;
+  reused by `instantiateAsset` from the AssetEntry.
+- `sourceAssetId` — the mesh AssetEntry whose container owns an imported
+  texture's lifetime (null for user-loaded textures).
+- `babylonTextureName` — `texture.name` as the loader minted it. Deterministic
+  for identical source bytes, so it re-identifies the texture inside a
+  restored container.
+
+**Dedupe rule** (`AssetLoader.registerImportedTexture`): signature is
+`sourceFileHash | babylonTextureName | width | height | class`. Same file
+re-imported → dedupes to one assetId. Different files NEVER silently merge,
+even when loaders mint generic names like `Image_0` at equal dimensions.
+Cross-file pixel-level dedupe is intentionally out of scope — correctness
+over compactness.
+
+**Reload rebind rule** (PersistenceManager load): after `restoreContainer`
+succeeds for mesh asset `A`, every persisted imported-texture entry with
+`sourceAssetId === A.id` is rebound by looking up `babylonTextureName` in the
+restored container's textures and registering the instance under its
+persisted assetId (`AssetLoader.bindRestoredTexture`). Shaders are restored
+AFTER assets (see §11 Load Sequence) so `restoreShader` finds both user and
+imported textures live and keeps `diffuseTextureAssetId`; the colour-only
+fallback now triggers only when the texture is genuinely gone.
+
+---
+
 ## PART 11 — PERSISTENCE MANAGER
 
 **File: `src/core/PersistenceManager.js`**
@@ -1458,7 +1511,10 @@ PersistenceManager.__test = {
   _arrToMap, _migrate,
 }
 ```
-Constants: `SCHEMA_VERSION = '3.1'`, `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`, `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally `AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
+Constants: `SCHEMA_VERSION = '3.2'` (3.2 adds the §10b texture-identity
+fields `sourceFileHash` / `sourceAssetId` / `babylonTextureName` on texture
+AssetEntries — 3.1 docs load unchanged, missing fields just skip the rebind
+and fall back to colour), `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`, `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally `AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
 
 ### Full Project Schema (v3.1)
 Every field persisted. Restored exactly.
@@ -1516,14 +1572,20 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 1. Parse JSON, check version compatibility.
 2. HistoryManager.clear()
 3. Dispose all current Babylon meshes/materials/containers, revoke blob URLs.
-4. Restore print, sceneSettings, ui, gizmo into state.
-5. Restore shaders into state + create Babylon materials in ShaderLibrary.
-6. Restore uvOverrides into state.
-7. Restore userSwatches.
-7b. Restore collections into state.scene.collections (outliner display only — no Babylon work).
-8. Use BABYLON.AssetsManager to batch-load all assetLibrary entries:
+4. Restore print, sceneSettings, ui, gizmo, uvOverrides, userSwatches,
+   collections into state (no Babylon work).
+8. Resolve + restore every assetLibrary entry sequentially:
    - For each: run `_resolveAssetBlob` (see priority table above).
+   - Mesh assets: restoreContainer, then REBIND imported textures owned by
+     this container (§10b reload rebind rule: match persisted
+     babylonTextureName, register under the persisted texture assetId).
+   - User-loaded texture assets: restoreTexture under the persisted id.
    - Unresolved → create ghost (state.scene.objects entry with isGhost: true).
+5. Restore shaders into state + create Babylon materials in ShaderLibrary.
+   MUST run AFTER step 8 — restoreShader rebinds diffuseTextureAssetId via
+   AssetLoader.getBabylonTexture, which only resolves once textures are
+   restored. (Pre-3.2 builds ran shaders first, which silently dropped every
+   texture binding on reload.)
 9. For each sceneObject:
    - If asset loaded → instantiate at transform, assign shader, apply UV override if exists.
    - If ghost → create wireframe bounding box at transform.
