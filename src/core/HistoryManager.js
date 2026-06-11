@@ -320,13 +320,17 @@ export class DeleteCommand {
       const obj  = objects[id];
       const mesh = AssetLoader.getBabylonMesh(id);
       if (!obj || !mesh) continue;
-      this._snapshots.push({ id, obj: { ...obj }, mesh, prevParent: mesh.parent ?? null });
+      this._snapshots.push({ id, obj: { ...obj }, mesh, prevParent: null });
     }
     this.label = this._snapshots.length === 1 ? 'Delete' : `Delete (${this._snapshots.length})`;
   }
   execute() {
     _withDetachedPivot(() => {
       for (const s of this._snapshots) {
+        // Captured HERE (post-detach) so it is the canonical parent — at
+        // construction time the mesh may sit under the temporary selection
+        // pivot, which is disposed during detach (review C3).
+        s.prevParent = s.mesh.parent ?? null;
         s.mesh.setParent(null);
         s.mesh.setEnabled(false);
         setState(state => {
