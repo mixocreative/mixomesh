@@ -156,6 +156,7 @@ src/
     scale/                 ← Authored/Scene/Print scale contracts
     assets/
       AssetTypes.js        ← supported extensions + extension parser
+      TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export

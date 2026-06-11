@@ -13,6 +13,7 @@ import { getPrinterProfile as _getPrinterProfile } from './print/PrinterProfiles
 import { createPrepSteps } from './print/PrintPrep.js';
 import { createFormats } from './print/PrintFormats.js';
 import { packageAndDownload } from './print/PrintPackaging.js';
+import { textureToPngBlob } from './assets/TextureReadback.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -212,35 +213,11 @@ function _injectMapKd(mtlString, filenameByMaterialName) {
   }).join('');
 }
 
-/**
- * Convert a Babylon texture to a PNG blob using readPixels and canvas.
- */
+/** Convert a Babylon texture to a PNG blob via the shared readback seam. */
 async function _textureToBlob(texture) {
-  return new Promise((resolve, reject) => {
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = texture.getBaseSize().width;
-      canvas.height = texture.getBaseSize().height;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Failed to get canvas context');
-
-      // Use Babylon's readPixels to extract texture data
-      const pixels = texture.readPixels();
-      if (!pixels) throw new Error('readPixels returned null');
-
-      const imageData = ctx.createImageData(canvas.width, canvas.height);
-      imageData.data.set(pixels);
-      ctx.putImageData(imageData, 0, 0);
-
-      canvas.toBlob(blob => {
-        if (!blob) throw new Error('toBlob produced no blob');
-        resolve(blob);
-      }, 'image/png');
-    } catch (err) {
-      reject(err);
-    }
-  });
+  const blob = await textureToPngBlob(texture);
+  if (!blob) throw new Error(`Texture readback failed for ${texture?.name ?? 'texture'}`);
+  return blob;
 }
 
 // ── Export ───────────────────────────────────────────────

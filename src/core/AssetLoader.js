@@ -16,6 +16,7 @@ import {
   isTextureExt,
 } from './assets/AssetTypes.js';
 import { parseScaleRatioText } from './scale/ScaleMath.js';
+import { textureToDataUrl } from './assets/TextureReadback.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import './ThreeMFLoader.js';
@@ -535,7 +536,7 @@ const TEX_THUMB_SIZE = 128;
 async function _generateImportedTextureThumbnail(assetId, texture) {
   try {
     await _awaitTextureReady(texture);
-    const dataUrl = await _readTextureToDataUrl(texture, TEX_THUMB_SIZE);
+    const dataUrl = await textureToDataUrl(texture, TEX_THUMB_SIZE);
     if (!dataUrl) return;
     setState(s => {
       const a = s.scene.assetLibrary[assetId];
@@ -567,71 +568,9 @@ function _awaitTextureReady(texture) {
   });
 }
 
-/**
- * Read a Babylon texture back into a canvas and return a data URL. Handles
- * Uint8 and Float32 pixel buffers, RGB and RGBA, and Y-flips the result so
- * the thumbnail reads right-side up (glTF textures upload with invertY=false,
- * so readPixels returns GL bottom-up data).
- */
-async function _readTextureToDataUrl(texture, targetSize) {
-  const size = texture.getSize?.();
-  const w = size?.width  | 0;
-  const h = size?.height | 0;
-  if (!w || !h) return null;
-
-  const pixels = await texture.readPixels();
-  if (!pixels) return null;
-
-  // Normalise to a single Uint8ClampedArray of RGBA bytes.
-  let rgba;
-  if (pixels instanceof Uint8Array || pixels instanceof Uint8ClampedArray) {
-    const u8 = pixels instanceof Uint8ClampedArray
-      ? pixels
-      : new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength);
-    if (u8.length === w * h * 4) {
-      rgba = u8;
-    } else if (u8.length === w * h * 3) {
-      rgba = new Uint8ClampedArray(w * h * 4);
-      for (let i = 0, j = 0; i < u8.length; i += 3, j += 4) {
-        rgba[j]   = u8[i];
-        rgba[j+1] = u8[i+1];
-        rgba[j+2] = u8[i+2];
-        rgba[j+3] = 255;
-      }
-    } else {
-      return null;
-    }
-  } else if (pixels instanceof Float32Array) {
-    const stride = pixels.length === w * h * 4 ? 4 : pixels.length === w * h * 3 ? 3 : 0;
-    if (!stride) return null;
-    rgba = new Uint8ClampedArray(w * h * 4);
-    for (let i = 0, j = 0; i < pixels.length; i += stride, j += 4) {
-      rgba[j]   = Math.max(0, Math.min(255, pixels[i]   * 255));
-      rgba[j+1] = Math.max(0, Math.min(255, pixels[i+1] * 255));
-      rgba[j+2] = Math.max(0, Math.min(255, pixels[i+2] * 255));
-      rgba[j+3] = stride === 4 ? Math.max(0, Math.min(255, pixels[i+3] * 255)) : 255;
-    }
-  } else {
-    return null;
-  }
-
-  const source = document.createElement('canvas');
-  source.width  = w;
-  source.height = h;
-  source.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
-
-  const thumb = document.createElement('canvas');
-  thumb.width  = targetSize;
-  thumb.height = targetSize;
-  const ctx = thumb.getContext('2d');
-  ctx.save();
-  ctx.translate(0, targetSize);
-  ctx.scale(1, -1);
-  ctx.drawImage(source, 0, 0, targetSize, targetSize);
-  ctx.restore();
-
-  return thumb.toDataURL('image/png');
-}
+// Texture readback (Promise readPixels, float/RGB normalisation, Y-flip)
+// lives in ./assets/TextureReadback.js — the shared seam used by both this
+// thumbnail path and PrintManager's export PNG encoding.
 
 // ── Helpers ──────────────────────────────────────────────
 
