@@ -38,7 +38,7 @@ const HI_TRIS = [
   [1, 5, 6], [1, 6, 2],   // x+
 ];
 
-function buildHalfMesh(name, tris) {
+function buildHalfMesh(name, tris, meshId = name) {
   // Unwelded — each triangle gets its own 3 vertex copies. Position-welding
   // in _checkNonManifold rejoins the seam across siblings.
   const positions = [];
@@ -52,6 +52,7 @@ function buildHalfMesh(name, tris) {
   }
   return {
     name,
+    metadata: { meshId },
     getVerticesData: () => new Float32Array(positions),
     getIndices: () => indices,
     getWorldMatrix: () => ({}),
@@ -155,6 +156,20 @@ await test('validateAllPrintParts dedupes by sourceGroupId', async () => {
   const map = await MeshValidator.validateAllPrintParts();
   // Only one of the two siblings produces an entry — the other is collapsed.
   assert.equal(map.size, 1, `dedup should yield 1 entry, got ${map.size}`);
+});
+
+await test('validateMesh routes by metadata.meshId, not Babylon mesh name', async () => {
+  // Real imports produce mesh.name like "Cube__part0" while the SceneObject
+  // key is the minted meshId — they NEVER match. Regression for review C4.
+  const lo = buildHalfMesh('Cube__part0', LO_TRIS, 'mesh_aaa_1');
+  const hi = buildHalfMesh('Cube__part1', HI_TRIS, 'mesh_aaa_2');
+  seedState([
+    { id: 'mesh_aaa_1', sourceGroupId: 'grp_meta', mesh: lo },
+    { id: 'mesh_aaa_2', sourceGroupId: 'grp_meta', mesh: hi },
+  ]);
+  const results = await MeshValidator.validateMesh(lo);
+  assert.equal(nm(results), undefined,
+    `divergent-name sibling must still route through the group union, got ${JSON.stringify(results)}`);
 });
 
 console.log('\n' + out.join('\n'));

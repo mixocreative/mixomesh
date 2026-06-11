@@ -240,7 +240,9 @@ export async function validateMesh(mesh) {
   dispatch(EVENTS.VALIDATION_STARTED, { meshName: mesh.name });
 
   const results = [];
-  const sceneObj = getState().scene.objects?.[mesh.name];
+  // SceneObjects are keyed by minted meshId (stamped on mesh.metadata at
+  // registration) — Babylon mesh.name is unrelated and collides across imports.
+  const sceneObj = getState().scene.objects?.[mesh.metadata?.meshId];
   const groupId  = sceneObj?.sourceGroupId ?? null;
 
   const positions = _getPositions(mesh);
