@@ -224,6 +224,17 @@ await test('OBJ: all-meshes mode → single OBJ call with every mesh', async () 
   assert.equal(calls.objExportOBJ[0].count, 3);
 });
 
+await test('export aborts when a mesh cannot be cloned — live mesh untouched (M10)', async () => {
+  const m = mesh('m1');
+  m.clone = () => null;                       // simulate Babylon clone failure
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  MeshValidator.validateMesh = valOK;
+  await rejects(PrintManager.exportOBJ(), /clone/i);
+  assert.notEqual(m.__worldBaked, true, 'live mesh must not be flattened to mm');
+  assert.notEqual(m.__disposed, true, 'live mesh must not be disposed by cleanup');
+  assert.equal(calls.downloads.length, 0, 'nothing downloads');
+});
+
 await test('OBJ: never runs CSG2 (colour-safe — STL-only)', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
   MeshValidator.validateMesh = valOK;

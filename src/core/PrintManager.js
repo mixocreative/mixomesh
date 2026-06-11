@@ -405,12 +405,17 @@ async function _runExport(formatKey, options = {}) {
       // Keep the parent so the clone's world matrix includes group/ancestor
       // transforms; `flattenWorld` then bakes that full world (+ mm scale)
       // into the vertices.
-      const clone = (mesh.clone?.(`${mesh.name}__export`, mesh.parent ?? null, true)) || mesh;
+      const clone = mesh.clone?.(`${mesh.name}__export`, mesh.parent ?? null, true);
+      if (!clone || clone === mesh) {
+        // Never fall back to the live mesh: prep steps bake mm-scale into
+        // vertices and the finally-block disposes clones (review M10).
+        throw new Error(`Could not clone "${mesh.name}" for export.`);
+      }
       // CRITICAL: Babylon's clone shares the source geometry by reference.
       // Every prep step rewrites vertex data in place — without a unique
       // geometry copy here they would corrupt the live scene mesh. This makes
       // the whole export pipeline non-destructive for ALL formats.
-      if (clone !== mesh) clone.makeGeometryUnique?.();
+      clone.makeGeometryUnique?.();
       for (const stepKey of fmt.prep) {
         const step = PREP_STEPS[stepKey];
         if (!step) continue;
