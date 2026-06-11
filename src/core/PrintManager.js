@@ -13,7 +13,8 @@ import { getPrinterProfile as _getPrinterProfile } from './print/PrinterProfiles
 import { createPrepSteps } from './print/PrintPrep.js';
 import { createFormats } from './print/PrintFormats.js';
 import { packageAndDownload } from './print/PrintPackaging.js';
-import { textureToPngBlob } from './assets/TextureReadback.js';
+import { collectTextureBlobs, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
+import { buildColorGroupEntries, buildMaterialsExtEntries } from './print/ThreeMFWriter.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -50,77 +51,9 @@ function _collectPrintMeshes(selectedOnly) {
 }
 
 // ── Texture Export ───────────────────────────────────────
-
-/**
- * Extract all unique textures from a list of meshes and convert to PNG blobs.
- * Returns Map<filename, blob>.
- */
-async function _collectTextureBlobs(meshes) {
-  const textureMap = new Map(); // assetId → { name, blob }
-  const state = getState();
-
-  for (const mesh of meshes) {
-    const mat = mesh.material;
-    if (!mat) continue;
-
-    // Check diffuse/albedo/base textures
-    const textures = [];
-    if (mat.diffuseTexture) textures.push(mat.diffuseTexture);
-    else if (mat.albedoTexture) textures.push(mat.albedoTexture);
-    else if (mat.baseTexture) textures.push(mat.baseTexture);
-
-    for (const tex of textures) {
-      if (!tex) continue;
-
-      // Generate unique asset ID-based filename
-      const assetId = _getAssetIdForTexture(tex);
-      if (!assetId || textureMap.has(assetId)) continue;
-
-      // Re-encode texture to PNG blob
-      try {
-        const blob = await _textureToBlob(tex);
-        textureMap.set(assetId, {
-          name: tex.name || assetId,
-          blob,
-        });
-      } catch (err) {
-        console.error(`Failed to export texture ${tex.name}:`, err);
-      }
-    }
-  }
-
-  // Build result map with deduped filenames
-  const result = new Map();
-  const usedNames = new Set();
-
-  for (const [assetId, { name, blob }] of textureMap) {
-    let filename = `${name}.png`;
-    let counter = 0;
-    while (usedNames.has(filename)) {
-      counter++;
-      filename = `${name}_${counter}.png`;
-    }
-    usedNames.add(filename);
-    result.set(filename, blob);
-  }
-
-  return result;
-}
-
-/**
- * Find the asset ID for a texture by checking the asset library.
- */
-function _getAssetIdForTexture(texture) {
-  const state = getState();
-  // Textures from imports are stored in assetLibrary
-  for (const [assetId, asset] of Object.entries(state.scene.assetLibrary)) {
-    if (asset.textures?.[texture.name]) {
-      return assetId;
-    }
-  }
-  // Fallback: use texture name
-  return texture.name || texture.uniqueId?.toString();
-}
+// Texture collection lives in print/ExportTextures.js (shared with the 3MF
+// Materials Extension writer). OBJ solid-colour synthesis stays here — it is
+// an OBJ-specific fallback.
 
 /**
  * Synthesise a 4×4 RGBA PNG per solid-colour material — OBJ-only fallback so
@@ -211,13 +144,6 @@ function _injectMapKd(mtlString, filenameByMaterialName) {
     if (!filename) return block;
     return block.replace(/\s*$/, '') + `\nmap_Kd textures/${filename}\n`;
   }).join('');
-}
-
-/** Convert a Babylon texture to a PNG blob via the shared readback seam. */
-async function _textureToBlob(texture) {
-  const blob = await textureToPngBlob(texture);
-  if (!blob) throw new Error(`Texture readback failed for ${texture?.name ?? 'texture'}`);
-  return blob;
 }
 
 // ── Export ───────────────────────────────────────────────
@@ -314,18 +240,6 @@ function _isSolidColor(mesh) {
 //   fixed clones → serialize → package/download.
 // A format is just a declarative entry in FORMATS: which PREP steps to run
 // (in order) and how to serialize. Add/adjust a format here, nowhere else.
-
-// Babylon is Y-up (and, after the import bake, left-handed). 3MF / slicers
-// are Z-up right-handed. This rotation maps Babylon (x,y,z) → 3MF; the
-// winding flip restores outward normals for the RH consumer. Both are single
-// switches: if a live test shows the model lying down / mirrored, this is the
-// one place to adjust (LH↔RH reasoning is unreliable on paper — verify in a
-// slicer, same lesson as the nav-cube convention).
-const Y_UP_TO_Z_UP = BABYLON.Matrix.RotationX(-Math.PI / 2);
-const THREEMF_REVERSE_WINDING = true;
-// 3MF 3×4 row-major identity — emitted on every build item so placement is
-// driven solely by the baked vertices, never a viewer-guessed transform.
-const THREEMF_IDENTITY = '1 0 0 0 1 0 0 0 1 0 0 0';
 
 const PREP_STEPS = createPrepSteps({
   BABYLON,
@@ -453,7 +367,7 @@ async function _runExport(formatKey, options = {}) {
 
 async function _serializeOBJ(ctx) {
   const meshes = ctx.meshes.map(e => e.mesh);
-  const textureBlobs = await _collectTextureBlobs(meshes);
+  const textureBlobs = await collectTextureBlobs(meshes);
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
   // so Mimaki UV-inkjet (texture-first) slicers receive an image even when
   // the artist set a flat diffuse colour with no map. Toggle is on by default,
@@ -520,29 +434,6 @@ async function _serialize3MF(ctx) {
   return _serialize3MFColorGroup(ctx);
 }
 
-function _build3MFColorGroupEntries(meshList) {
-  return [
-    { path: '[Content_Types].xml', data: _3MF_CONTENT_TYPES },
-    { path: '_rels/.rels',         data: _3MF_RELS },
-    { path: '3D/3dmodel.model',    data: _build3MFModel(meshList) },
-  ];
-}
-
-async function _build3MFMaterialsExtEntries(meshList) {
-  const { blobByPath, pathByMesh } = await _collectMimakiTextures(meshList);
-  const modelXml = _build3MFModelMaterialsExt(meshList, pathByMesh);
-  const entries = [
-    { path: '[Content_Types].xml', data: _3MF_CONTENT_TYPES_TEXTURED },
-    { path: '_rels/.rels',         data: _3MF_RELS },
-    { path: '3D/3dmodel.model',    data: modelXml },
-  ];
-  if (blobByPath.size) {
-    entries.push({ path: '3D/_rels/3dmodel.model.rels', data: _buildTextureRels(blobByPath) });
-    for (const [path, blob] of blobByPath) entries.push({ path, data: blob });
-  }
-  return entries;
-}
-
 /**
  * Per-mesh 3MF wrapper: builds N standalone `.3mf` zips and bundles them
  * inside an outer `.zip` so the user gets one file per part on disk.
@@ -564,19 +455,19 @@ async function _wrapIndividual3MF(ctx, entriesForMesh) {
 
 async function _serialize3MFColorGroup(ctx) {
   if (ctx.individually) {
-    return _wrapIndividual3MF(ctx, list => _build3MFColorGroupEntries(list));
+    return _wrapIndividual3MF(ctx, list => buildColorGroupEntries(list));
   }
   return {
     kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`,
-    entries: _build3MFColorGroupEntries(ctx.meshes),
+    entries: buildColorGroupEntries(ctx.meshes),
   };
 }
 
 async function _serialize3MFMaterialsExt(ctx) {
   if (ctx.individually) {
-    return _wrapIndividual3MF(ctx, list => _build3MFMaterialsExtEntries(list));
+    return _wrapIndividual3MF(ctx, list => buildMaterialsExtEntries(list));
   }
-  const entries = await _build3MFMaterialsExtEntries(ctx.meshes);
+  const entries = await buildMaterialsExtEntries(ctx.meshes);
   return { kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`, entries };
 }
 
@@ -591,323 +482,7 @@ export const exportOBJ     = (options = {}) => _runExport('obj', options);
 export const exportSTL     = (options = {}) => _runExport('stl', options);
 export const exportThreeMF = (options = {}) => _runExport('3mf', options);
 
-// ── 3MF (color, mm-native, multi-shell) ──────────────────
-
-function _clamp255(c) { return Math.max(0, Math.min(255, Math.round((c ?? 0) * 255))); }
-function _hex2(n) { return n.toString(16).padStart(2, '0').toUpperCase(); }
-
-/** Solid diffuse colour of a mesh's material as 3MF #RRGGBBFF. */
-function _materialHex(mesh) {
-  const m = mesh.material || {};
-  const c = m.diffuseColor || m.albedoColor || m.baseColor;
-  if (!c) return '#CCCCCCFF';
-  return `#${_hex2(_clamp255(c.r))}${_hex2(_clamp255(c.g))}${_hex2(_clamp255(c.b))}FF`;
-}
-
-/**
- * Build the 3MF `3D/3dmodel.model` XML. Each export mesh becomes its own
- * <object> (multi-shell hierarchy preserved, unlike STL's single blob) with a
- * solid colour via the Materials extension colorgroup — exactly the
- * one-colour-per-part model this tool produces.
- *
- * Vertices arrive world-space millimetre (from `flattenWorld`) in Babylon
- * Y-up; here they're rotated into 3MF Z-up (`Y_UP_TO_Z_UP`), winding flipped
- * for the right-handed consumer, then the whole build is centred on the
- * origin so it lands on the slicer bed. `unit="millimeter"` is literal.
- */
-function _build3MFModel(list) {
-  const colors = [];
-  const colorIndex = new Map();
-  for (const { mesh } of list) {
-    const hex = _materialHex(mesh);
-    if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
-  }
-
-  // Pass 1: rotate every mesh's vertices into 3MF space and find the union
-  // bounds (for origin-centering) over the *converted* coordinates.
-  const converted = new Map();   // mesh → Float32Array (3MF-space xyz)
-  let mnx = Infinity, mny = Infinity, mnz = Infinity;
-  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
-  for (const { mesh } of list) {
-    const p = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
-    if (!p) continue;
-    const out = new Float32Array(p.length);
-    for (let i = 0; i < p.length; i += 3) {
-      const w = BABYLON.Vector3.TransformCoordinates(
-        new BABYLON.Vector3(p[i], p[i + 1], p[i + 2]), Y_UP_TO_Z_UP);
-      out[i] = w.x; out[i + 1] = w.y; out[i + 2] = w.z;
-      if (w.x < mnx) mnx = w.x; if (w.x > mxx) mxx = w.x;
-      if (w.y < mny) mny = w.y; if (w.y > mxy) mxy = w.y;
-      if (w.z < mnz) mnz = w.z; if (w.z > mxz) mxz = w.z;
-    }
-    converted.set(mesh, out);
-  }
-  const cx = Number.isFinite(mnx) ? (mnx + mxx) / 2 : 0;
-  const cy = Number.isFinite(mny) ? (mny + mxy) / 2 : 0;
-  const cz = Number.isFinite(mnz) ? (mnz + mxz) / 2 : 0;
-
-  const objs = [];
-  const items = [];
-  let objId = 2;                                  // id 1 = colorgroup
-  for (const { mesh } of list) {
-    const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) { objId++; continue; }
-
-    let v = '';
-    for (let i = 0; i < pos.length; i += 3) {
-      v += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
-    let t = '';
-    for (let i = 0; i < idx.length; i += 3) {
-      const [b, c] = THREEMF_REVERSE_WINDING ? [idx[i + 2], idx[i + 1]] : [idx[i + 1], idx[i + 2]];
-      t += `<triangle v1="${idx[i]}" v2="${b}" v3="${c}"/>`;
-    }
-    const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
-    objs.push(
-      `<object id="${objId}" type="model" pid="1" pindex="${pidx}">` +
-      `<mesh><vertices>${v}</vertices><triangles>${t}</triangles></mesh></object>`
-    );
-    // Geometry is fully baked into the vertices (flattenWorld → absolute,
-    // origin-centred). The build item therefore carries an EXPLICIT identity
-    // matrix (3MF 3×4 row-major) — no viewer/slicer can place the object
-    // anywhere but exactly where its vertices say. Placement is consistent
-    // across every 3MF consumer.
-    items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
-    objId++;
-  }
-
-  const colorXml = colors.map(c => `<m:color color="${c}"/>`).join('');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-<resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${objs.join('')}</resources>
-<build>${items.join('')}</build>
-</model>`;
-}
-
-const _3MF_CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`;
-
-// Adds the PNG default content type for the Mimaki textured pipeline.
-// Plain colorgroup packages don't carry binaries, so we keep the lean
-// version for filament exports and only emit this one when textures are
-// in the package.
-const _3MF_CONTENT_TYPES_TEXTURED = `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="png" ContentType="image/png"/></Types>`;
-
-const _3MF_RELS = `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
-
-const _3MF_TEXTURE_REL_TYPE = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture';
-
-// ── 3MF Materials Extension (Mimaki textured) ────────────
-//
-// The texture writer is the exact inverse of the loader's parse path. To
-// keep round-trip trivial we emit ONE <m:tex2coord> per vertex in
-// vertex-order, and every triangle's `p1/p2/p3` index simply re-states its
-// `v1/v2/v3` — vertex i ↔ UV i. Welding is skipped on textured meshes (see
-// PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
-//
-// File package additions (vs. colorgroup):
-//   3D/_rels/3dmodel.model.rels — one Relationship per unique texture
-//   3D/Textures/<n>.png         — the texture bytes themselves
-//   [Content_Types].xml         — adds Default Extension="png"
-
-function _sanitizeTextureName(name) {
-  return String(name || 'texture').replace(/[^A-Za-z0-9_-]/g, '_');
-}
-
-/**
- * Walk export clones, extract every unique diffuse/albedo/base texture as a
- * PNG blob, and assign each a stable package path. Returns:
- *   blobByPath  – Map<packagePath, Blob>   (zip entries)
- *   pathByMesh  – Map<mesh, packagePath>   (XML attrs)
- * Meshes without a texture (or with no UVs) are absent from pathByMesh and
- * the writer falls them through to the colorgroup path.
- */
-async function _collectMimakiTextures(meshList) {
-  const blobByPath = new Map();
-  const pathByMesh = new Map();
-  const pathByAssetId = new Map();
-  const usedNames = new Set();
-
-  for (const { mesh } of meshList) {
-    const mat = mesh.material;
-    if (!mat) continue;
-    const tex = mat.diffuseTexture || mat.albedoTexture || mat.baseTexture;
-    if (!tex) continue;
-    // Need UVs to map this texture to geometry. Without them, fall through
-    // to colorgroup with the material's diffuse colour.
-    const uvs = mesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
-    if (!uvs || uvs.length === 0) continue;
-
-    const assetId = _getAssetIdForTexture(tex);
-    let path = pathByAssetId.get(assetId);
-    if (!path) {
-      const base = _sanitizeTextureName(tex.name || assetId);
-      let filename = `${base}.png`;
-      let counter = 0;
-      while (usedNames.has(filename)) { counter++; filename = `${base}_${counter}.png`; }
-      usedNames.add(filename);
-      path = `3D/Textures/${filename}`;
-      try {
-        const blob = await _textureToBlob(tex);
-        blobByPath.set(path, blob);
-        pathByAssetId.set(assetId, path);
-      } catch (err) {
-        console.error(`Texture encode failed for ${tex.name}:`, err);
-        continue;
-      }
-    }
-    pathByMesh.set(mesh, path);
-  }
-  return { blobByPath, pathByMesh };
-}
-
-/**
- * Build the model XML for the Materials Extension pipeline. Layout:
- *
- *   <resources>
- *     <m:texture2d id="1" path="/3D/Textures/a.png" contenttype="image/png"/>
- *     ...                                                — one per unique texture
- *     <m:texture2dgroup id="N" texid="1">                — one per textured mesh
- *       <m:tex2coord u=".." v=".."/> × verts
- *     </m:texture2dgroup>
- *     <m:colorgroup id="K">                              — only if any solid mesh
- *       <m:color color="#RRGGBBFF"/> × distinct
- *     </m:colorgroup>
- *     <object id="..." type="model" pid="K" pindex="P">  — solid path
- *     <object id="..." type="model" pid="N">             — textured path
- *       <triangle v1=".." v2=".." v3=".." p1=".." p2=".." p3=".."/>
- *   </resources>
- *
- * Geometry transforms (Y-up→Z-up, winding flip, origin-center) mirror the
- * colorgroup builder one-for-one so the loader's inverse remains shared.
- */
-function _build3MFModelMaterialsExt(list, pathByMesh) {
-  // Pass 1: assign resource ids, gather distinct solid colours.
-  let nextId = 1;
-  const tex2dIdByPath = new Map();
-  for (const p of new Set([...pathByMesh.values()])) tex2dIdByPath.set(p, nextId++);
-
-  const tex2dGroupIdByMesh = new Map();
-  for (const { mesh } of list) if (pathByMesh.has(mesh)) tex2dGroupIdByMesh.set(mesh, nextId++);
-
-  const colors = [];
-  const colorIndex = new Map();
-  for (const { mesh } of list) {
-    if (pathByMesh.has(mesh)) continue;
-    const hex = _materialHex(mesh);
-    if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
-  }
-  const colorGroupId = colors.length ? nextId++ : null;
-
-  // Pass 2: rotate vertices into 3MF space and find union bounds.
-  const converted = new Map();
-  let mnx = Infinity, mny = Infinity, mnz = Infinity;
-  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
-  for (const { mesh } of list) {
-    const p = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
-    if (!p) continue;
-    const out = new Float32Array(p.length);
-    for (let i = 0; i < p.length; i += 3) {
-      const w = BABYLON.Vector3.TransformCoordinates(
-        new BABYLON.Vector3(p[i], p[i + 1], p[i + 2]), Y_UP_TO_Z_UP);
-      out[i] = w.x; out[i + 1] = w.y; out[i + 2] = w.z;
-      if (w.x < mnx) mnx = w.x; if (w.x > mxx) mxx = w.x;
-      if (w.y < mny) mny = w.y; if (w.y > mxy) mxy = w.y;
-      if (w.z < mnz) mnz = w.z; if (w.z > mxz) mxz = w.z;
-    }
-    converted.set(mesh, out);
-  }
-  const cx = Number.isFinite(mnx) ? (mnx + mxx) / 2 : 0;
-  const cy = Number.isFinite(mny) ? (mny + mxy) / 2 : 0;
-  const cz = Number.isFinite(mnz) ? (mnz + mxz) / 2 : 0;
-
-  // Resources — texture2d.
-  const tex2dXml = [...tex2dIdByPath.entries()]
-    .map(([path, id]) => `<m:texture2d id="${id}" path="/${path}" contenttype="image/png"/>`)
-    .join('');
-
-  // Resources — texture2dgroup (one per textured mesh, coord per vertex).
-  const tex2dGroupXmls = [];
-  for (const { mesh } of list) {
-    const groupId = tex2dGroupIdByMesh.get(mesh);
-    if (!groupId) continue;
-    const texPath = pathByMesh.get(mesh);
-    const texId = tex2dIdByPath.get(texPath);
-    const uvs = mesh.getVerticesData(BABYLON.VertexBuffer.UVKind) || [];
-    let coords = '';
-    for (let i = 0; i < uvs.length; i += 2) {
-      coords += `<m:tex2coord u="${+uvs[i].toFixed(6)}" v="${+uvs[i + 1].toFixed(6)}"/>`;
-    }
-    tex2dGroupXmls.push(`<m:texture2dgroup id="${groupId}" texid="${texId}">${coords}</m:texture2dgroup>`);
-  }
-
-  // Resources — colorgroup (only when any solid meshes exist).
-  const colorXml = colorGroupId
-    ? `<m:colorgroup id="${colorGroupId}">${colors.map(c => `<m:color color="${c}"/>`).join('')}</m:colorgroup>`
-    : '';
-
-  // Objects + build items.
-  const objs = [];
-  const items = [];
-  let objId = nextId;
-  for (const { mesh } of list) {
-    const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) { objId++; continue; }
-
-    let v = '';
-    for (let i = 0; i < pos.length; i += 3) {
-      v += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
-    let t = '';
-    const isTextured = tex2dGroupIdByMesh.has(mesh);
-    for (let i = 0; i < idx.length; i += 3) {
-      const a = idx[i];
-      const [b, c] = THREEMF_REVERSE_WINDING ? [idx[i + 2], idx[i + 1]] : [idx[i + 1], idx[i + 2]];
-      // Textured: per-triangle p1/p2/p3 mirror v1/v2/v3 because we emit one
-      // tex2coord per vertex in vertex order. The loader inverts this 1:1.
-      t += isTextured
-        ? `<triangle v1="${a}" v2="${b}" v3="${c}" p1="${a}" p2="${b}" p3="${c}"/>`
-        : `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
-    }
-    let pidAttrs;
-    if (isTextured) {
-      pidAttrs = ` pid="${tex2dGroupIdByMesh.get(mesh)}"`;
-    } else if (colorGroupId != null) {
-      const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
-      pidAttrs = ` pid="${colorGroupId}" pindex="${pidx}"`;
-    } else {
-      pidAttrs = '';
-    }
-    objs.push(
-      `<object id="${objId}" type="model"${pidAttrs}>` +
-      `<mesh><vertices>${v}</vertices><triangles>${t}</triangles></mesh></object>`
-    );
-    items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
-    objId++;
-  }
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
-<build>${items.join('')}</build>
-</model>`;
-}
-
-/** Per-part rels file. One Relationship per unique texture path. */
-function _buildTextureRels(blobByPath) {
-  const rels = [];
-  let n = 0;
-  for (const path of blobByPath.keys()) {
-    rels.push(`<Relationship Id="texRel${n}" Target="/${path}" Type="${_3MF_TEXTURE_REL_TYPE}"/>`);
-    n++;
-  }
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join('')}</Relationships>`;
-}
+// 3MF package writers live in print/ThreeMFWriter.js (split, review L29).
 
 export const PrintManager = {
   exportOBJ,
