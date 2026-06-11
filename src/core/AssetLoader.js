@@ -1,3 +1,9 @@
+// Mesh-asset loading, registration, instancing, and project restore.
+// Texture assets live in ./assets/TextureAssets.js, the split-on-import
+// invariant in ./assets/MeshSplit.js, and the shared blob-URL registry in
+// ./assets/BlobUrls.js (review L29 split) — all re-exported below so the
+// AssetLoader public surface is unchanged.
+
 import { EVENTS } from './events.js';
 import { dispatch, setState, getState } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
@@ -10,13 +16,20 @@ import {
 } from './ImportNormalizer.js';
 import {
   SUPPORTED_EXTENSIONS,
-  SUPPORTED_TEXTURE_EXTENSIONS,
   extOf as _extOf,
   isMeshExt,
   isTextureExt,
 } from './assets/AssetTypes.js';
 import { parseScaleRatioText } from './scale/ScaleMath.js';
-import { textureToDataUrl } from './assets/TextureReadback.js';
+import { setBlobUrl, getBlobUrl, revokeBlobUrl, revokeAllBlobUrls } from './assets/BlobUrls.js';
+import {
+  splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer,
+} from './assets/MeshSplit.js';
+import {
+  loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
+  registerImportedTexture, bindRestoredTexture, restoreTexture,
+  releaseTextureAsset, resetTextures,
+} from './assets/TextureAssets.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import './ThreeMFLoader.js';
@@ -27,21 +40,13 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 const THUMB_SIZE  = 128;
 const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isolation
 
-// Source-unit factors + DEFAULT_SOURCE_UNIT now live in ImportNormalizer.js
-// (the import-normalization seam); imported above.
-
 // Module-local — never persisted in state.
 const _containers   = new Map();    // assetId → BABYLON.AssetContainer
-const _textures     = new Map();    // assetId → BABYLON.Texture (texture-kind assets)
-const _blobUrls     = new Map();    // assetId → object URL
 const _meshRegistry = new Map();    // meshId  → BABYLON.AbstractMesh
 const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (session)
 
 let _idCounter = 0;
 const _newId = (prefix) => `${prefix}_${Date.now().toString(36)}_${++_idCounter}`;
-
-let _groupCounter = 0;
-const _newGroupId = () => `grp_${Date.now().toString(36)}_${++_groupCounter}`;
 
 /** sha256 hex of an ArrayBuffer — texture-identity scope (§10b). */
 async function _sha256Hex(buf) {
@@ -111,7 +116,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   const scene = SceneManager.getScene();
   const assetId = _newId('asset');
   const blobUrl = URL.createObjectURL(blob);
-  _blobUrls.set(assetId, blobUrl);
+  setBlobUrl(assetId, blobUrl);
 
   // §10b texture-identity scope: hash the source bytes once. Reused as the
   // AssetEntry contentHash so persistence doesn't re-hash at save time.
@@ -192,8 +197,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     return meshIds;
   } catch (err) {
     Toast.dismiss(loadToastId);
-    URL.revokeObjectURL(blobUrl);
-    _blobUrls.delete(assetId);
+    revokeBlobUrl(assetId);
     _containers.delete(assetId);
     throw err;
   }
@@ -211,7 +215,7 @@ export async function instantiateAsset(assetId, position) {
   const asset = getState().scene.assetLibrary[assetId];
   if (!asset) throw new Error(`Asset ${assetId} not in library`);
 
-  const blobUrl = _blobUrls.get(assetId);
+  const blobUrl = getBlobUrl(assetId);
   if (!blobUrl) throw new Error(`No cached data for ${asset.filename} — cannot re-instantiate`);
 
   const scene = SceneManager.getScene();
@@ -250,13 +254,8 @@ export function releaseAsset(assetId) {
   if (!entry) return;
 
   if (entry.kind === 'texture') {
-    // Refuse while any shader still points at this texture.
-    const shaders = getState().scene.shaders;
-    const refd = Object.values(shaders).some(s => s.diffuseTextureAssetId === assetId);
-    if (refd) return;
-    const tex = _textures.get(assetId);
-    if (tex && !entry.isImported) tex.dispose();
-    _textures.delete(assetId);
+    // Refuses while any shader still points at this texture.
+    if (!releaseTextureAsset(assetId, entry)) return;
   } else {
     const stillLinked = Object.values(getState().scene.objects).some(o => o.assetId === assetId && !o.isGhost);
     if (stillLinked) return;
@@ -266,10 +265,8 @@ export function releaseAsset(assetId) {
       container.dispose();
       _containers.delete(assetId);
     }
+    revokeBlobUrl(assetId);
   }
-
-  const url = _blobUrls.get(assetId);
-  if (url) { URL.revokeObjectURL(url); _blobUrls.delete(assetId); }
 
   setState(s => {
     const next = { ...s.scene.assetLibrary };
@@ -362,7 +359,6 @@ function _uniqueObjectName(baseName) {
   return `${baseName}.dup`;
 }
 
-/** @deprecated — kept as a thin alias so older imports still resolve. */
 function _nextDupName(baseName) {
   // Duplicates always increment even when the base is free, so the source
   // and the copy don't share a stem; force a collision then resolve.
@@ -388,213 +384,15 @@ export { isMeshExt };
 /** True if the extension is a recognised image we can load as a Babylon texture. */
 export { isTextureExt };
 
-/**
- * Load a texture from a FileSystemFileHandle and register it as a texture
- * asset. If a texture with the same `originalPath` + `directoryHandleKey` is
- * already loaded, returns the existing assetId (dedup).
- * @param {FileSystemFileHandle} fileHandle
- * @param {{ originalPath?: string, directoryHandleKey?: string }} [opts]
- * @returns {Promise<string>} assetId
- */
-export async function loadTextureFromHandle(fileHandle, opts = {}) {
-  const file = await fileHandle.getFile();
-  return loadTextureFromBlob(file, file.name, opts);
-}
+// Texture-asset API — owned by ./assets/TextureAssets.js, re-exported so the
+// AssetLoader surface (and its callers/tests) stay unchanged.
+export {
+  loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
+  registerImportedTexture, bindRestoredTexture, restoreTexture,
+};
 
-/**
- * Load a texture from a Blob/File and register it as a texture asset.
- * @param {Blob} blob
- * @param {string} filename
- * @param {{ originalPath?: string, directoryHandleKey?: string }} [opts]
- * @returns {Promise<string>} assetId
- */
-export async function loadTextureFromBlob(blob, filename, opts = {}) {
-  const ext = _extOf(filename);
-  if (!isTextureExt(ext)) throw new Error(`Unsupported texture type: ${ext}`);
-
-  // Dedup by mounted path so dragging the same image twice doesn't double-load.
-  if (opts.originalPath && opts.directoryHandleKey) {
-    const lib = getState().scene.assetLibrary;
-    for (const a of Object.values(lib)) {
-      if (a.kind === 'texture'
-          && a.originalPath === opts.originalPath
-          && a.directoryHandleKey === opts.directoryHandleKey) {
-        return a.id;
-      }
-    }
-  }
-
-  const scene = SceneManager.getScene();
-  const assetId = _newId('tex');
-  const blobUrl = URL.createObjectURL(blob);
-  _blobUrls.set(assetId, blobUrl);
-
-  const texture = await new Promise((resolve, reject) => {
-    const t = new BABYLON.Texture(
-      blobUrl, scene, /*noMipmap*/ false, /*invertY*/ false,
-      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-      () => resolve(t),
-      (msg, err) => reject(err ?? new Error(String(msg))),
-    );
-  });
-  _textures.set(assetId, texture);
-
-  const entry = {
-    id: assetId,
-    name: filename.replace(/\.[^.]+$/, ''),
-    filename,
-    originalPath: opts.originalPath ?? filename,
-    extension: ext,
-    kind: 'texture',
-    directoryHandleKey: opts.directoryHandleKey ?? null,
-    thumbnailDataUrl: blobUrl,   // the image itself doubles as the panel thumbnail
-  };
-  setState(s => ({
-    ...s,
-    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: entry } },
-  }), { silent: true });
-  dispatch(EVENTS.ASSET_REGISTERED, { assetId, entry });
-
-  return assetId;
-}
-
-/** @param {string} assetId */
-export function getBabylonTexture(assetId) {
-  return _textures.get(assetId) ?? null;
-}
-
-/**
- * Register a BABYLON.BaseTexture that came from an imported AssetContainer
- * (e.g. the diffuse/albedo texture on a glTF material). The texture's lifetime
- * stays owned by its container — we just expose it as a texture asset so the
- * UI can swap, preview, and refer to it.
- *
- * Returns the existing asset id if the same texture instance was already
- * registered, otherwise mints a new one.
- *
- * @param {BABYLON.BaseTexture} texture
- * @param {{ sourceFileHash?: string|null, sourceAssetId?: string|null }} [ctx]
- *   §10b identity scope — sourceFileHash is the sha256 of the source file the
- *   texture arrived in; sourceAssetId is the owning mesh AssetEntry.
- * @returns {string|null}
- */
-export function registerImportedTexture(texture, ctx = {}) {
-  if (!texture) return null;
-  for (const [id, t] of _textures.entries()) {
-    if (t === texture) return id;
-  }
-  // Content-dedupe scoped by source file (§10b): same bytes re-imported reuse
-  // the canonical assetId; two DIFFERENT files never merge, even when loaders
-  // mint identical generic names ("Image_0") at equal dimensions (review H6).
-  const dupId = _findImportedTextureBySignature(texture, ctx);
-  if (dupId) return dupId;
-
-  const assetId = _newId('tex');
-  _textures.set(assetId, texture);
-
-  // texture.url is unreliable for glTF-embedded images — the loader sets it to
-  // a bookkeeping name like "data:tex_1", not a real URL, and the actual bytes
-  // live only on the GPU after upload. Schedule a real thumbnail via
-  // readPixels → canvas → data: URL once the texture is ready.
-  const fallbackName = (typeof texture.name === 'string' && texture.name)
-    ? texture.name
-    : `Texture ${assetId.slice(-4)}`;
-  const filename = _filenameFromUrl(texture.url) || fallbackName;
-  const baseName = filename.replace(/\.[^.]+$/, '') || 'Texture';
-
-  const entry = {
-    id: assetId,
-    name: baseName,
-    filename,
-    originalPath: null,
-    extension: _extOf(filename) || '.imported',
-    kind: 'texture',
-    directoryHandleKey: null,
-    isImported: true,
-    sourceFileHash: ctx.sourceFileHash ?? null,
-    sourceAssetId: ctx.sourceAssetId ?? null,
-    babylonTextureName: typeof texture.name === 'string' ? texture.name : null,
-    thumbnailDataUrl: null,   // populated async below
-  };
-  setState(s => ({
-    ...s,
-    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: entry } },
-  }), { silent: true });
-  dispatch(EVENTS.ASSET_REGISTERED, { assetId, entry });
-
-  _scheduleIdle(() => _generateImportedTextureThumbnail(assetId, texture));
-  return assetId;
-}
-
-function _importedTextureSignature(texture, sourceFileHash) {
-  const size = typeof texture.getSize === 'function' ? texture.getSize() : null;
-  const w = size?.width ?? 0;
-  const h = size?.height ?? 0;
-  const cls = texture.constructor?.name ?? 'Texture';
-  return `${sourceFileHash ?? ''}|${texture.name ?? ''}|${w}|${h}|${cls}`;
-}
-
-function _findImportedTextureBySignature(texture, ctx = {}) {
-  // No file-hash scope → no content dedupe. Unscoped matching is exactly the
-  // cross-file aliasing bug (H6); instance identity was already checked.
-  if (!ctx.sourceFileHash) return null;
-  const target = _importedTextureSignature(texture, ctx.sourceFileHash);
-  for (const [id, t] of _textures.entries()) {
-    const entry = getState().scene.assetLibrary[id];
-    if (!entry?.isImported) continue;
-    if (_importedTextureSignature(t, entry.sourceFileHash) === target) return id;
-  }
-  return null;
-}
-
-function _filenameFromUrl(url) {
-  if (typeof url !== 'string' || !url) return null;
-  if (url.startsWith('data:')) return null;
-  const last = url.split(/[\\/]/).pop();
-  if (!last || last.startsWith('blob:')) return null;
-  return last;
-}
-
-const TEX_THUMB_SIZE = 128;
-
-async function _generateImportedTextureThumbnail(assetId, texture) {
-  try {
-    await _awaitTextureReady(texture);
-    const dataUrl = await textureToDataUrl(texture, TEX_THUMB_SIZE);
-    if (!dataUrl) return;
-    setState(s => {
-      const a = s.scene.assetLibrary[assetId];
-      if (!a) return s;
-      return {
-        ...s,
-        scene: {
-          ...s.scene,
-          assetLibrary: { ...s.scene.assetLibrary, [assetId]: { ...a, thumbnailDataUrl: dataUrl } },
-        },
-      };
-    }, { silent: true });
-    dispatch(EVENTS.ASSET_REGISTERED, { assetId, entry: getState().scene.assetLibrary[assetId] });
-  } catch (err) {
-    console.error(`Imported texture thumbnail failed for ${assetId}:`, err);
-  }
-}
-
-function _awaitTextureReady(texture) {
-  if (typeof texture.isReady !== 'function' || texture.isReady()) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const start = performance.now();
-    const tick = () => {
-      if (texture.isReady()) return resolve();
-      if (performance.now() - start > 5000) return reject(new Error('texture not ready (timeout)'));
-      setTimeout(tick, 30);
-    };
-    tick();
-  });
-}
-
-// Texture readback (Promise readPixels, float/RGB normalisation, Y-flip)
-// lives in ./assets/TextureReadback.js — the shared seam used by both this
-// thumbnail path and PrintManager's export PNG encoding.
+// Split-on-import — owned by ./assets/MeshSplit.js.
+export { splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer };
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -615,163 +413,10 @@ function _extractModelRatio(container) {
     if (!extras) continue;
     const raw = extras.ratio ?? extras.Ratio;
     if (raw == null) continue;
-    const parsed = _parseAuthoredRatio(raw);
+    const parsed = parseScaleRatioText(raw);
     if (parsed) return parsed;
   }
   return null;
-}
-
-function _parseAuthoredRatio(raw) {
-  return parseScaleRatioText(raw);
-}
-
-// importScaleFactor + bakeImportTransform — THE import-normalization seam —
-// now live in ImportNormalizer.js (imported above and re-exported below).
-
-// ── Split-on-import: one-mesh-one-shader invariant ──────────
-//
-// Any mesh with a `MultiMaterial` (duck-typed via `mat.subMaterials[]` + >1
-// subMeshes) is split into N single-material siblings, one per subMesh.
-// Each sibling carries:
-//   - its own VertexData clone (positions/normals/uvs + the subMesh's slice
-//     of the index buffer — verts are over-copied for simplicity, dead
-//     verts cost bytes only, no correctness impact)
-//   - the corresponding sub-material as `mesh.material`
-//   - `mesh.metadata.sourceGroupId` shared across all siblings of one split
-//
-// MultiMaterial wrappers are filtered out of `container.materials` so
-// ShaderLibrary never mints orphan shader entries for them. The original
-// source mesh is disposed.
-//
-// Pure split spec is in `splitMultiMaterialMeshes` (testable; no Babylon
-// constructors). The wrapper that calls Babylon to build real children is
-// `splitMultiMaterialMeshesInContainer`.
-
-/**
- * Pure split planner — walks a list of mesh-like objects and decides which
- * to keep vs. split. Calls `makeChild(spec)` for each new sibling. Caller
- * supplies the factory + group-id generator so this function is testable
- * without a Babylon scene.
- *
- * @param {Array} meshes      live `container.meshes`
- * @param {(spec:{name:string, scene:any, sourceMesh:any, subMaterial:any,
- *                indexStart:number, indexCount:number,
- *                verticesStart:number, verticesCount:number,
- *                groupId:string, partIndex:number})=>any} makeChild
- * @param {()=>string} genGroupId
- * @returns {{meshes:Array, disposed:Array, orphanMultiMaterials:Array}}
- */
-export function splitMultiMaterialMeshes(meshes, makeChild, genGroupId) {
-  const out = [];
-  const disposed = [];
-  const orphanMultiMaterials = [];
-  for (const mesh of meshes) {
-    const mat = mesh.material;
-    const isMulti = !!mat && Array.isArray(mat.subMaterials) && mat.subMaterials.length > 0;
-    const subs = mesh.subMeshes;
-    if (!isMulti) { out.push(mesh); continue; }
-
-    if (!subs || subs.length === 0) {
-      // MultiMaterial with no subMeshes — unwrap to first sub-material.
-      mesh.material = mat.subMaterials[0] ?? null;
-      orphanMultiMaterials.push(mat);
-      out.push(mesh);
-      continue;
-    }
-    if (subs.length === 1) {
-      // Single subMesh — unwrap to its sub-material, no split needed.
-      const sm = subs[0];
-      mesh.material = mat.subMaterials[sm.materialIndex] ?? mat.subMaterials[0] ?? null;
-      orphanMultiMaterials.push(mat);
-      out.push(mesh);
-      continue;
-    }
-
-    const groupId = genGroupId();
-    for (let i = 0; i < subs.length; i++) {
-      const sm = subs[i];
-      const child = makeChild({
-        name: `${mesh.name || 'mesh'}__part${i}`,
-        scene: mesh.getScene?.() ?? null,
-        sourceMesh: mesh,
-        subMaterial: mat.subMaterials[sm.materialIndex] ?? null,
-        indexStart:  sm.indexStart,
-        indexCount:  sm.indexCount,
-        verticesStart: sm.verticesStart ?? 0,
-        verticesCount: sm.verticesCount ?? 0,
-        groupId,
-        partIndex: i,
-      });
-      out.push(child);
-    }
-    disposed.push(mesh);
-    orphanMultiMaterials.push(mat);
-  }
-  return { meshes: out, disposed, orphanMultiMaterials };
-}
-
-/** Real-Babylon child factory used by the in-container split. */
-function _makeBabylonChildMesh(spec) {
-  const { name, scene, sourceMesh, subMaterial,
-          indexStart, indexCount, groupId } = spec;
-
-  const positions = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.PositionKind);
-  const normals   = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.NormalKind);
-  const uvs       = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
-  const indices   = sourceMesh.getIndices?.();
-  const subIdx    = indices ? indices.slice(indexStart, indexStart + indexCount) : [];
-
-  const child = new BABYLON.Mesh(name, scene);
-  const vd    = new BABYLON.VertexData();
-  // Per-child TYPED copies (review M18). Copies are load-bearing — children
-  // sharing one buffer would corrupt each other when a later bake mutates
-  // vertex data in place. Typed copies cost ~4 bytes/float vs the old
-  // Array.from plain-number arrays (~8+ with boxing) on dense meshes.
-  if (positions) vd.positions = new Float32Array(positions);
-  if (normals)   vd.normals   = new Float32Array(normals);
-  if (uvs)       vd.uvs       = new Float32Array(uvs);
-  vd.indices = subIdx;
-  vd.applyToMesh(child);
-
-  child.material = subMaterial ?? null;
-  child.parent   = sourceMesh.parent ?? null;
-  if (sourceMesh.position?.clone) child.position = sourceMesh.position.clone();
-  if (sourceMesh.scaling?.clone)  child.scaling  = sourceMesh.scaling.clone();
-  if (sourceMesh.rotationQuaternion?.clone) {
-    child.rotationQuaternion = sourceMesh.rotationQuaternion.clone();
-  } else if (sourceMesh.rotation?.clone) {
-    child.rotation = sourceMesh.rotation.clone();
-  }
-  child.metadata = { ...(sourceMesh.metadata ?? {}), sourceGroupId: groupId };
-  return child;
-}
-
-/**
- * Wrapper: split every MultiMaterial mesh in `container.meshes`, prune the
- * MultiMaterial wrappers from `container.materials`, dispose source meshes.
- * Called from every import / restore entry point so the rest of the pipeline
- * only ever sees single-material meshes.
- */
-export function splitMultiMaterialMeshesInContainer(container) {
-  const result = splitMultiMaterialMeshes(
-    container.meshes ?? [],
-    _makeBabylonChildMesh,
-    _newGroupId
-  );
-  container.meshes = result.meshes;
-  for (const m of result.disposed) {
-    try { m.dispose?.(); } catch { /* fall through */ }
-  }
-  if (Array.isArray(container.materials) && result.orphanMultiMaterials.length) {
-    const orphans = new Set(result.orphanMultiMaterials);
-    container.materials = container.materials.filter(mat => {
-      if (orphans.has(mat)) {
-        try { mat.dispose?.(); } catch { /* fall through */ }
-        return false;
-      }
-      return true;
-    });
-  }
 }
 
 function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId) {
@@ -976,7 +621,7 @@ export function getContainerGeomMeshes(assetId) {
  * @returns {Promise<ArrayBuffer|null>}
  */
 export async function getAssetBytes(assetId) {
-  const url = _blobUrls.get(assetId);
+  const url = getBlobUrl(assetId);
   if (!url) return null;
   const res = await fetch(url);
   return res.arrayBuffer();
@@ -997,7 +642,7 @@ export async function getAssetBytes(assetId) {
 export async function restoreContainer(assetId, blob, extension) {
   const scene = SceneManager.getScene();
   const blobUrl = URL.createObjectURL(blob);
-  _blobUrls.set(assetId, blobUrl);
+  setBlobUrl(assetId, blobUrl);
   const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
     blobUrl, '', scene, null, extension
   );
@@ -1021,46 +666,6 @@ export function bindRestoredMesh(meshId, mesh, assetId, sourceUnit = DEFAULT_SOU
 }
 
 /**
- * Bind a restored container-owned texture instance under its persisted
- * assetId (§10b reload rebind). PersistenceManager matches the instance by
- * `babylonTextureName` inside the freshly restored container; this just
- * registers it so `getBabylonTexture` / shader restore resolve it live.
- * @param {string} assetId   persisted imported-texture asset id
- * @param {BABYLON.BaseTexture} texture
- */
-export function bindRestoredTexture(assetId, texture) {
-  if (!assetId || !texture) return;
-  _textures.set(assetId, texture);
-}
-
-/**
- * Recreate a user-loaded texture asset from embedded bytes, keeping its
- * persisted assetId so shader.diffuseTextureAssetId stays valid.
- * @param {object} entry  persisted AssetEntry (kind 'texture', !isImported)
- * @param {Blob}   blob
- * @returns {Promise<string>} assetId
- */
-export async function restoreTexture(entry, blob) {
-  const scene = SceneManager.getScene();
-  const blobUrl = URL.createObjectURL(blob);
-  _blobUrls.set(entry.id, blobUrl);
-  const texture = await new Promise((resolve, reject) => {
-    const t = new BABYLON.Texture(
-      blobUrl, scene, false, false,
-      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-      () => resolve(t),
-      (msg, err) => reject(err ?? new Error(String(msg))),
-    );
-  });
-  _textures.set(entry.id, texture);
-  setState(s => ({
-    ...s,
-    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: { ...entry, thumbnailDataUrl: blobUrl } } },
-  }), { silent: true });
-  return entry.id;
-}
-
-/**
  * Register a persisted asset-library entry without loading geometry. Used for
  * ghost / static assets so the Outliner + relink flow have an entry to point
  * at.
@@ -1081,14 +686,9 @@ export function resetAll() {
   for (const c of _containers.values()) {
     try { c.removeAllFromScene(); c.dispose(); } catch { /* */ }
   }
-  for (const [id, t] of _textures.entries()) {
-    const e = getState().scene.assetLibrary[id];
-    if (t && !e?.isImported) { try { t.dispose(); } catch { /* */ } }
-  }
-  for (const url of _blobUrls.values()) URL.revokeObjectURL(url);
+  resetTextures();
+  revokeAllBlobUrls();
   _containers.clear();
-  _textures.clear();
-  _blobUrls.clear();
   _meshRegistry.clear();
 }
 
