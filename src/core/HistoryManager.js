@@ -1025,9 +1025,9 @@ export class SmartReplaceCommand {
         }, SILENT);
         if (oldObj.shaderId) ShaderLibrary.assignToMesh(oldObj.shaderId, newId);
 
+        const oldParent = oldMesh.parent ?? null;   // BEFORE unparenting (review H5)
         oldMesh.setParent(null);
         oldMesh.setEnabled(false);
-        const oldParent = oldMesh.parent ?? null;
         setState(state => {
           const next = { ...state.scene.objects };
           delete next[oldId];
