@@ -532,7 +532,13 @@ async function _pushRecent(name, handle) {
 
 // ── Public API ───────────────────────────────────────────
 
-/** Write to the currently-open file, or prompt if none. */
+/**
+ * Write to the currently-open file, or prompt if none.
+ * @returns {Promise<boolean>} true when bytes hit disk; false when the user
+ *   cancelled the save picker. Callers in "save then continue" flows MUST
+ *   abort on false — proceeding discards the project the user asked to keep
+ *   (review H9).
+ */
 export async function save() {
   if (!_fileHandle) return saveAs();
   const text = JSON.stringify(await _buildDocument());
@@ -545,22 +551,26 @@ export async function save() {
   await _pushRecent(getState().project.name, _fileHandle);
   await kvDelete(`${AUTOSAVE_PREFIX}${getState().project.name}`);
   Toast.show('Project saved', 'success', 2000);
+  return true;
 }
 
-/** Prompt for a file location and save there. */
+/**
+ * Prompt for a file location and save there.
+ * @returns {Promise<boolean>} true on save, false on picker cancel.
+ */
 export async function saveAs() {
   const suggested = `${getState().project.name || 'Untitled'}${FILE_EXT}`;
   let handle;
   try {
     handle = await window.showSaveFilePicker({ suggestedName: suggested, types: FILE_TYPES });
   } catch (err) {
-    if (err?.name === 'AbortError') return;
+    if (err?.name === 'AbortError') return false;
     throw err;
   }
   _fileHandle = handle;
   const name = handle.name.replace(/\.mixo$/i, '');
   setState(s => ({ ...s, project: { ...s.project, name } }), SILENT);
-  await save();
+  return save();
 }
 
 /** Prompt for a .mixo file and load it. */
@@ -568,7 +578,7 @@ export async function open() {
   if (_dirty) {
     const choice = await _confirmDirty();
     if (choice === 'cancel') return;
-    if (choice === 'save')   await save();
+    if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
   let handle;
   try {
@@ -588,7 +598,7 @@ export async function newProject() {
   if (_dirty) {
     const choice = await _confirmDirty();
     if (choice === 'cancel') return;
-    if (choice === 'save')   await save();
+    if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
   historyClear();
   _resetWorld();
@@ -614,7 +624,7 @@ export async function openRecent(rec) {
   if (_dirty) {
     const choice = await _confirmDirty();
     if (choice === 'cancel') return;
-    if (choice === 'save')   await save();
+    if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
   const handle = await getFileHandle(rec.handleKey);
   if (!handle) { Toast.show('Recent project handle lost', 'error', 4000); return; }
