@@ -445,7 +445,10 @@ function _doRegister(container, choices, importCtx = {}) {
  * @returns {string} shaderId
  */
 export function createShader(partial = {}) {
-  const id   = _nextShaderId();
+  // Honour a requested id when free — undo/redo of delete/duplicate recreate
+  // shaders from snapshots and must keep their original ids so older stack
+  // entries (assigns) stay valid (review M14).
+  const id   = (partial.id && !getState().scene.shaders[partial.id]) ? partial.id : _nextShaderId();
   const name = _nextAvailableName(partial.name ?? 'Material');
   const type = partial.type ?? 'standard';
 

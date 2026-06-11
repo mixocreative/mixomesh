@@ -8,7 +8,7 @@ import {
   push, beginBatch, endBatch,
   TransformCommand, VisibilityCommand, LockCommand, RenameCommand,
   ShaderAssignCommand, ShaderDuplicateCommand, UVOverrideCommand,
-  PrintPartCommand, BakeTransformCommand,
+  PrintPartCommand, BakeTransformCommand, SourceUnitCommand,
 } from '../core/HistoryManager.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
@@ -475,38 +475,11 @@ function _changeSourceUnit(asset, newUnit) {
   const oldF = SOURCE_UNIT_FACTORS[oldUnit] ?? 0.001;
   const newF = SOURCE_UNIT_FACTORS[newUnit] ?? 0.001;
   if (oldF <= 0 || newF <= 0) return;
-  const delta = newF / oldF;
-  if (Math.abs(delta - 1) < 1e-12) return;
+  if (Math.abs(newF / oldF - 1) < 1e-12) return;
 
-  // Detach the selection pivot so meshes are back in their canonical parents
-  // while we rebake — matches the pattern used by hierarchy commands.
-  SceneManager.attachToSelection([], 'median', null);
-
-  // Re-bake the scale DELTA into vertex data, keeping mesh.scaling at the
-  // user's current value (typically 1). Non-root local positions scale too,
-  // so within-asset spacing follows. The world drop anchor (root position)
-  // is left alone so the asset stays where the user placed it.
-  const objects = getState().scene.objects;
-  const meshIds = Object.keys(objects).filter(id => objects[id].assetId === asset.id);
-  const scaleMat = BABYLON.Matrix.Scaling(delta, delta, delta);
-  for (const id of meshIds) {
-    const m = AssetLoader.getBabylonMesh(id);
-    if (!m) continue;
-    if (m.geometry && typeof m.bakeTransformIntoVertices === 'function') {
-      m.bakeTransformIntoVertices(scaleMat);
-    }
-    if (m.parent) m.position.scaleInPlace(delta);
-    m.refreshBoundingInfo?.();
-  }
-
-  setState(s => {
-    const a = s.scene.assetLibrary[asset.id];
-    if (!a) return s;
-    return {
-      ...s,
-      scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [asset.id]: { ...a, sourceUnit: newUnit, unitConfirmed: false } } },
-    };
-  });
+  // Destructive vertex re-bake → must be a command (Blueprint §0.1; review
+  // M12). SourceUnitCommand owns pivot detach, delta bake, and state update.
+  push(new SourceUnitCommand(asset.id, oldUnit, newUnit));
   Selection.refresh();
   _render();
 }

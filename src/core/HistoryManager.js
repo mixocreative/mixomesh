@@ -4,6 +4,7 @@ import { SceneManager } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
+import { SOURCE_UNIT_FACTORS } from './scale/ScaleMath.js';
 
 const BABYLON = window.BABYLON;
 const STACK_LIMIT = 200;
@@ -728,8 +729,9 @@ export class ShaderDeleteCommand {
   }
   undo() {
     if (!this._snapshot) return;
-    // Loses the original id (createShader mints a new one), but no
-    // outstanding references should survive a successful delete.
+    // createShader honours the snapshot's id (free after a delete), so the
+    // shader returns under its ORIGINAL id and older stack entries
+    // referencing it stay valid (review M14).
     this._shaderId = ShaderLibrary.createShader(this._snapshot);
   }
 }
@@ -878,6 +880,74 @@ export class BakeTransformCommand {
     mesh.refreshBoundingInfo?.();
     dispatch(EVENTS.OBJECT_UPDATED, { meshId: this._meshId });
   }
+}
+
+// ── Source-unit change (per-asset re-bake) ─────────────────
+
+/**
+ * Change an asset's source unit, re-baking the unit DELTA into every mesh
+ * instantiated from it (review M12 — this is destructive vertex math and must
+ * be undoable). Mirrors the RescaleWorld approach: inverse-factor undo, no
+ * vertex snapshots — unit factors are exact constants, so round-trip drift is
+ * at float epsilon. Parented (non-root) positions scale so within-asset
+ * spacing follows; the world drop anchor (root position) stays put.
+ */
+export class SourceUnitCommand {
+  constructor(assetId, prevUnit, nextUnit) {
+    this._assetId = assetId;
+    this._prev = prevUnit;
+    this._next = nextUnit;
+    const a = getState().scene.assetLibrary[assetId];
+    this._prevConfirmed = a ? a.unitConfirmed !== false : true;
+    this.label = `Source Unit (${nextUnit})`;
+  }
+  execute() {
+    _applySourceUnit(this._assetId, this._prev, this._next, /*confirmed*/ false);
+    markDirty();
+  }
+  undo() {
+    _applySourceUnit(this._assetId, this._next, this._prev, this._prevConfirmed);
+  }
+}
+
+function _applySourceUnit(assetId, fromUnit, toUnit, confirmed) {
+  const oldF = SOURCE_UNIT_FACTORS[fromUnit] ?? 0.001;
+  const newF = SOURCE_UNIT_FACTORS[toUnit] ?? 0.001;
+  if (!(oldF > 0) || !(newF > 0)) return;
+  const delta = newF / oldF;
+
+  _withDetachedPivot(() => {
+    const objects = getState().scene.objects;
+    const scaleMat = BABYLON.Matrix.Scaling(delta, delta, delta);
+    for (const id of Object.keys(objects)) {
+      if (objects[id].assetId !== assetId) continue;
+      const m = AssetLoader.getBabylonMesh(id);
+      if (!m) continue;
+      if (Math.abs(delta - 1) > 1e-12) {
+        if (m.geometry && typeof m.bakeTransformIntoVertices === 'function') {
+          m.bakeTransformIntoVertices(scaleMat);
+        }
+        if (m.parent) m.position.scaleInPlace(delta);
+      }
+      m.refreshBoundingInfo?.();
+      dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
+    }
+  });
+
+  setState(s => {
+    const a = s.scene.assetLibrary[assetId];
+    if (!a) return s;
+    return {
+      ...s,
+      scene: {
+        ...s.scene,
+        assetLibrary: {
+          ...s.scene.assetLibrary,
+          [assetId]: { ...a, sourceUnit: toUnit, unitConfirmed: confirmed },
+        },
+      },
+    };
+  }, SILENT);
 }
 
 // ── Rescale world (working ratio change) ───────────────────
