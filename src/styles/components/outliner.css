@@ -190,3 +190,9 @@
   font-weight: 500;
   letter-spacing: 0.02em;
 }
+
+/* Validation status badge (A6 cache) */
+.ol-validation { display: inline-flex; align-items: center; margin-left: 4px; vertical-align: middle; }
+.ol-validation-warning { color: var(--warning); }
+.ol-validation-error   { color: var(--danger); }
+.ol-validation-stale   { opacity: 0.45; }

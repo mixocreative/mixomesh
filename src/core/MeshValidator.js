@@ -1,5 +1,5 @@
 import { EVENTS } from './events.js';
-import { dispatch, getState } from './StateManager.js';
+import { dispatch, getState, setState, subscribe } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 
 const BABYLON = window.BABYLON;
@@ -226,6 +226,62 @@ export async function validateGroup(sourceGroupId) {
   return results;
 }
 
+// ── Validation result cache (arch A6) ────────────────────
+// state.scene.validation: Record<meshId, { results, validatedAt, stale }>.
+// Stale entries keep their last results so the UI can grey them out instead
+// of blanking. Export clones never write here — they carry the source
+// meshId in metadata but are not the live registered mesh.
+
+const SILENT = { silent: true };
+
+function _cacheResults(meshIds, results) {
+  const ids = [].concat(meshIds).filter(Boolean);
+  if (!ids.length) return;
+  setState(s => {
+    const v = { ...s.scene.validation };
+    const validatedAt = Date.now();
+    for (const id of ids) v[id] = { results, validatedAt, stale: false };
+    return { ...s, scene: { ...s.scene, validation: v } };
+  }, SILENT);
+}
+
+function _markStale(meshIds) {
+  const ids = [].concat(meshIds).filter(id => getState().scene.validation[id]);
+  if (!ids.length) return;
+  setState(s => {
+    const v = { ...s.scene.validation };
+    for (const id of ids) if (v[id]) v[id] = { ...v[id], stale: true };
+    return { ...s, scene: { ...s.scene, validation: v } };
+  }, SILENT);
+}
+
+function _dropEntry(meshId) {
+  if (!getState().scene.validation[meshId]) return;
+  setState(s => {
+    const v = { ...s.scene.validation };
+    delete v[meshId];
+    return { ...s, scene: { ...s.scene, validation: v } };
+  }, SILENT);
+}
+
+function _clearCache() {
+  setState(s => ({ ...s, scene: { ...s.scene, validation: {} } }), SILENT);
+}
+
+/** Mark every cached entry stale (e.g. bed dimensions changed). */
+export function invalidateAll() {
+  _markStale(Object.keys(getState().scene.validation));
+}
+
+/** Wire cache invalidation. Call once at boot (and in headless tests). */
+export function init() {
+  subscribe(EVENTS.TRANSFORM_COMMITTED, (p) => _markStale(p?.meshIds ?? []));
+  subscribe(EVENTS.OBJECT_UPDATED, (p) => _markStale(p?.meshId ? [p.meshId] : []));
+  subscribe(EVENTS.OBJECT_REMOVED, (p) => { if (p?.id) _dropEntry(p.id); });
+  subscribe(EVENTS.PROJECT_NEW, _clearCache);
+  subscribe(EVENTS.PROJECT_LOADED, _clearCache);
+}
+
 // ── Public API ───────────────────────────────────────────
 
 /**
@@ -295,7 +351,23 @@ export async function validateMesh(mesh) {
     });
   }
 
-  dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, results });
+  // Cache (A6): only for the LIVE registered mesh — export clones carry the
+  // source meshId in metadata but must not overwrite live results.
+  const meshId = mesh.metadata?.meshId;
+  const isLive = !!meshId && AssetLoader.getBabylonMesh(meshId) === mesh;
+  if (isLive) {
+    if (groupId) {
+      // Group-scoped topology results attach to every sibling (Blueprint §9);
+      // per-mesh integrity results (bed bounds) stay on this mesh only.
+      const siblingIds = _collectGroupSiblings(groupId)
+        .map(s => s.meshId)
+        .filter(id => id !== meshId);
+      if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'));
+    }
+    _cacheResults([meshId], results);
+  }
+
+  dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, meshId: isLive ? meshId : null, results });
   return results;
 }
 
@@ -374,6 +446,7 @@ export function shouldAutoValidate(mesh) {
 }
 
 export const MeshValidator = {
+  init, invalidateAll,
   validateMesh, validateGroup, autoFix, hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

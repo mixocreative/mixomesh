@@ -34,11 +34,13 @@ export function init() {
     EVENTS.ASSET_INSTANTIATED,
     EVENTS.OBJECT_REMOVED,
     EVENTS.OBJECT_RESTORED,
+    EVENTS.VALIDATION_COMPLETE,   // cache updates from import auto-validate (A6)
   ];
   for (const ev of events) subscribe(ev, _render);
 
   // Register validation modals
   Modal.register('validationErrors', _renderValidationErrorsModal);
+  Modal.register('exportWarningsConfirm', _renderExportWarningsModal);
 
   _render();
 }
@@ -147,6 +149,7 @@ function _renderScaleTab() {
       push(new RescaleWorldCommand(prev, val));
     } else {
       setState(s => ({ ...s, print: { ...s.print, [field]: val } }));
+      MeshValidator.invalidateAll();   // exceedsBed depends on targetRatio (A6)
     }
   };
 
@@ -175,32 +178,51 @@ function _renderScaleTab() {
 }
 
 // ── Validation Tab ───────────────────────────────────────
+// Reads the A6 cache (state.scene.validation) instead of re-running topology
+// checks on every render (review M11). "Validate All" refreshes explicitly;
+// imports auto-validate already.
 
-async function _renderValidationTab() {
-  const validationMap = await MeshValidator.validateAllPrintParts();
+function _renderValidationTab() {
   const state = getState();
+  const cache = state.scene.validation ?? {};
+
+  // One row per print part; split-group siblings collapse to one display row.
+  const rows = [];
+  const seenGroups = new Set();
+  for (const [meshId, obj] of Object.entries(state.scene.objects)) {
+    if (!obj.isPrintPart || obj.isGhost) continue;
+    if (obj.sourceGroupId) {
+      if (seenGroups.has(obj.sourceGroupId)) continue;
+      seenGroups.add(obj.sourceGroupId);
+    }
+    rows.push({ meshId, obj, entry: cache[meshId] ?? null });
+  }
 
   let html = '<div class="pp-tab-content">';
+  html += '<div class="pp-field-group">';
+  html += `<button class="pp-export-btn" id="pp-validate-all">${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} Validate All</button>`;
+  html += '</div>';
 
-  if (validationMap.size === 0) {
+  if (!rows.length) {
     html += '<p class="pp-empty">No print parts to validate.</p>';
   } else {
-    for (const [meshId, results] of validationMap) {
-      const obj = state.scene.objects[meshId];
-      if (!obj) continue;
-
-      const hasErrors = results.some(r => r.severity === 'error');
-      const hasWarnings = results.some(r => r.severity === 'warning' && !hasErrors);
-      const icon_name = hasErrors ? 'AlertCircle' : hasWarnings ? 'AlertTriangle' : 'Check';
-      const icon_class = hasErrors ? 'error' : hasWarnings ? 'warning' : 'success';
+    for (const { meshId, obj, entry } of rows) {
+      const results = entry?.results ?? null;
+      const hasErrors = !!results?.some(r => r.severity === 'error');
+      const hasWarnings = !hasErrors && !!results?.some(r => r.severity === 'warning');
+      const icon_name = !results ? 'Circle' : hasErrors ? 'AlertCircle' : hasWarnings ? 'AlertTriangle' : 'Check';
+      const icon_class = !results ? 'pending' : hasErrors ? 'error' : hasWarnings ? 'warning' : 'success';
+      const staleBadge = entry?.stale ? ' <span class="pp-stale" title="Changed since last validation">stale</span>' : '';
 
       html += `<div class="pp-mesh-validation ${icon_class}">`;
       html += `<div class="pp-mesh-header">`;
       html += `${icon(icon_name, { class: 'inline' })}`;
-      html += `<span class="pp-mesh-name">${escapeHtml(obj.name)}</span>`;
+      html += `<span class="pp-mesh-name">${escapeHtml(obj.name)}</span>${staleBadge}`;
       html += `</div>`;
 
-      if (results.length > 0) {
+      if (!results) {
+        html += '<p class="pp-hint">Not validated yet.</p>';
+      } else if (results.length > 0) {
         html += '<ul class="pp-result-list">';
         for (const result of results) {
           const canFix = result.autoFixAvailable && !result.fixed;
@@ -222,6 +244,11 @@ async function _renderValidationTab() {
 
   const el = document.createElement('div');
   el.innerHTML = html;
+
+  el.querySelector('#pp-validate-all')?.addEventListener('click', async () => {
+    await MeshValidator.validateAllPrintParts();   // refreshes the cache
+    _render();
+  });
 
   // Wire auto-fix buttons
   el.querySelectorAll('.pp-autofix-btn').forEach(btn => {
@@ -303,10 +330,12 @@ function _renderExportTab() {
     return { selectedOnly, individually };
   };
 
-  // Wire export buttons. Validation now happens INSIDE the export (after the
-  // file-type auto-fix), so the panel just runs the export and only surfaces
-  // the error list for problems the auto-fix couldn't resolve.
+  // Wire export buttons. Hard errors are handled INSIDE the export (post
+  // auto-fix); cached WARNINGS gate with a confirm first (Blueprint §12
+  // export gate, arch B6) — display models are routinely non-watertight, so
+  // the default is "export anyway".
   const runExport = async (fn, opts) => {
+    if (_printPartsHaveWarnings() && !(await _confirmExportWithWarnings())) return;
     ProgressOverlay.show('Exporting…');
     try {
       await fn({ ...opts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
@@ -405,6 +434,7 @@ function _renderBedTab() {
       print: { ...s.print, targetPrinterId: next.printerId, bedDimensions: next.dims },
     }), { silent: true });
     SceneManager.rebuildBed();
+    MeshValidator.invalidateAll();   // exceedsBed results depend on bed dims (A6)
     if (getState().scene.overlays.bedPreview) {
       SceneManager.updateBedPreview(next.dims);
     }
@@ -529,8 +559,7 @@ async function _render() {
   if (_activeTab === 'scale') {
     _bodyEl.appendChild(_renderScaleTab());
   } else if (_activeTab === 'validation') {
-    const el = await _renderValidationTab();
-    _bodyEl.appendChild(el);
+    _bodyEl.appendChild(_renderValidationTab());
   } else if (_activeTab === 'bed') {
     _bodyEl.appendChild(_renderBedTab());
   } else if (_activeTab === 'preview') {
@@ -538,6 +567,45 @@ async function _render() {
   } else if (_activeTab === 'export') {
     _bodyEl.appendChild(_renderExportTab());
   }
+}
+
+// ── Export warning gate (A6 / B6) ────────────────────────
+
+/** True when any print part's cached, non-stale validation carries warnings. */
+function _printPartsHaveWarnings() {
+  const { objects, validation } = getState().scene;
+  for (const [meshId, obj] of Object.entries(objects)) {
+    if (!obj.isPrintPart || obj.isGhost) continue;
+    const e = validation?.[meshId];
+    if (e && !e.stale && e.results.some(r => r.severity === 'warning')) return true;
+  }
+  return false;
+}
+
+function _confirmExportWithWarnings() {
+  return new Promise(resolve => {
+    Modal.open('exportWarningsConfirm', {
+      onClose: (r) => resolve(r === 'export'),
+    });
+  });
+}
+
+function _renderExportWarningsModal({ close }) {
+  const el = document.createElement('div');
+  el.innerHTML = `
+    <div class="modal-content">
+      <h3>Validation warnings</h3>
+      <p>Some print parts have validation warnings (see Print ▸ Validation).
+         Slicers usually auto-repair these. Export anyway?</p>
+      <div class="modal-actions">
+        <button class="btn" data-action="cancel">Cancel</button>
+        <button class="btn btn-primary" data-action="export">Export anyway</button>
+      </div>
+    </div>
+  `;
+  el.querySelectorAll('[data-action]').forEach(b =>
+    b.addEventListener('click', () => close(b.dataset.action)));
+  return el;
 }
 
 // ── Modals ────────────────────────────────────────────────

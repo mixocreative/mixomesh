@@ -14,6 +14,7 @@ import { Modal } from '../ui/Modal.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
 import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
+import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
@@ -55,6 +56,7 @@ async function bootstrap() {
   });
 
   Modal.init();
+  MeshValidator.init();   // validation-cache invalidation hooks (A6)
   Outliner.init();
   PropertiesPanel.init();
   ShaderPanel.init();

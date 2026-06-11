@@ -1395,10 +1395,25 @@ siblings. Block / confirm-anyway semantics unchanged.
 - Outliner row icon updates correspondingly.
 - **DO NOT** open a modal on import.
 
+### Validation result cache (A6)
+Results are cached in `state.scene.validation` —
+`Record<meshId, { results, validatedAt, stale }>` — written by
+`validateMesh` for the LIVE registered mesh only (export clones carry the
+source meshId in metadata and must not pollute the cache). Group-scoped
+topology results attach to every split sibling. Invalidation:
+`TRANSFORM_COMMITTED` / `OBJECT_UPDATED` → stale (results kept for greyed
+display), `OBJECT_REMOVED` → dropped, `PROJECT_NEW/LOADED` → cleared, bed
+dims / targetRatio changes → `MeshValidator.invalidateAll()`. Never
+persisted — derived per session. Wire `MeshValidator.init()` at boot.
+Consumers: PrintPanel Validation tab (cache + "Validate All" button — no
+re-validation per render), Outliner row status badges, export warning gate.
+
 ### Pre-Export Gate
-- Re-runs validation on all Print Parts.
-- Errors → block export, show modal listing issues with per-mesh links.
-- Warnings only → confirmation "Export anyway?" (default yes).
+- Hard errors are caught INSIDE `_runExport` (post auto-fix) → block with
+  the error-list modal.
+- Cached non-stale warnings on print parts → PrintPanel confirms
+  "Export anyway?" before invoking the export (default yes — display
+  models are routinely non-watertight and slicers auto-repair).
 
 ---
 

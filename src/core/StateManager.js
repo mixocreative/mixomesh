@@ -11,6 +11,11 @@ const INITIAL_STATE = {
     assetLibrary: {},
     shaders: {},
     uvOverrides: {},
+    // Derived validation-result cache (arch A6): Record<meshId, { results,
+    // validatedAt, stale }>. Written by MeshValidator, NEVER persisted —
+    // recomputed per session. UI (PrintPanel tab, Outliner icons, export
+    // confirm) reads this instead of re-running topology checks.
+    validation: {},
     userSwatches: [],
     camera: {
       // Front-3/4 elevated default. Babylon ArcRotateCamera positions camera at

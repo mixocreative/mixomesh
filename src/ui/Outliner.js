@@ -25,6 +25,8 @@ const _SUBSCRIBE = [
   EVENTS.SELECTION_CHANGED,
   EVENTS.ACTIVE_OBJECT_CHANGED,
   EVENTS.PROJECT_LOADED,
+  EVENTS.VALIDATION_COMPLETE,   // status icons read the A6 cache
+  EVENTS.TRANSFORM_COMMITTED,   // stale-marking after moves
   EVENTS.COLLECTION_CREATED,
   EVENTS.COLLECTION_REMOVED,
   EVENTS.COLLECTION_RENAMED,
@@ -200,6 +202,7 @@ function _renderObjectRow(obj, depth) {
     id: obj.id,
     kind: 'object',
     name: obj.name,
+    nameSuffix: _validationBadge(obj.id),
     visible: obj.visible !== false,
     locked: !!obj.locked,
     isPrintPart: !!obj.isPrintPart,
@@ -210,6 +213,19 @@ function _renderObjectRow(obj, depth) {
     isGhost: obj.isGhost,
     isUnlinked: obj.isUnlinked,
   });
+}
+
+// Validation status badge from the A6 cache (Blueprint §13 Outliner row
+// icons). Static trusted markup beside the escaped name — title carries the
+// first message, escaped.
+function _validationBadge(meshId) {
+  const e = getState().scene.validation?.[meshId];
+  if (!e || !e.results.length) return '';
+  const hasErr = e.results.some(r => r.severity === 'error');
+  const name = hasErr ? 'CircleAlert' : 'AlertTriangle';
+  const cls = `ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}`;
+  const title = escapeAttr(`${e.stale ? '(stale) ' : ''}${e.results[0]?.message ?? 'validation issue'}`);
+  return `<span class="${cls}" title="${title}">${icon(name, { width: 11, height: 11 })}</span>`;
 }
 
 function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, isGhost, isUnlinked }) {
