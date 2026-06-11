@@ -573,9 +573,92 @@ export function updateShader(shaderId, field, value) {
   }, SILENT);
 
   const after = getState().scene.shaders[shaderId];
-  _setMaterialField(mat, field, value, after.type);
+  if (field === 'type') {
+    // Type changes can't be mutated in place — rebuild the Babylon material
+    // and reassign every linked mesh + UV-override clone (review H8).
+    _rebuildMaterialForType(shaderId, after);
+  } else {
+    _setMaterialField(mat, field, value, after.type);
+    // Per-mesh UV-override clones derive from this shader — they must track
+    // every field edit or they drift visually forever (review H7).
+    _applyFieldToUvClones(shaderId, field, value, after.type);
+  }
 
   dispatch(EVENTS.SHADER_UPDATED, { shaderId, field });
+}
+
+function _slotOf(mat) {
+  return ('albedoTexture' in mat) ? 'albedoTexture'
+       : ('baseTexture'   in mat) ? 'baseTexture'
+       : 'diffuseTexture';
+}
+
+/**
+ * Propagate one shader-field edit onto every UV-override clone derived from
+ * the shader. `uvBase` is skipped — the per-mesh override owns the clone's
+ * UV transform. Texture swaps re-clone so UV offsets stay mesh-private.
+ */
+function _applyFieldToUvClones(shaderId, field, value, type) {
+  if (field === 'uvBase') return;
+  for (const [meshId, entry] of _uvClones.entries()) {
+    if (entry.shaderId !== shaderId) continue;
+    if (field === 'diffuseTextureAssetId') {
+      const shared = value ? AssetLoader.getBabylonTexture(value) : null;
+      let tex = shared;
+      if (shared && typeof shared.clone === 'function') {
+        try { tex = shared.clone(); } catch { tex = shared; }
+      }
+      entry.material[_slotOf(entry.material)] = tex;
+      const uv = getState().scene.uvOverrides[meshId];
+      if (uv) _applyUVToMaterial(entry.material, uv);
+      continue;
+    }
+    _setMaterialField(entry.material, field, value, type);
+  }
+}
+
+/**
+ * Recreate the shader's Babylon material at a new type, carry the texture
+ * across, reassign linked meshes, and rebuild UV-override clones from the
+ * new base. The old material is disposed (textures survive — material
+ * dispose does not cascade to textures).
+ */
+function _rebuildMaterialForType(shaderId, entry) {
+  const old = _materials.get(shaderId);
+  const scene = SceneManager.getScene();
+  const next = _createBabylonMaterial(entry.type, entry.name, scene);
+  _applyEntryToMaterial(next, entry);
+  if (entry.diffuseTextureAssetId) {
+    _setMaterialField(next, 'diffuseTextureAssetId', entry.diffuseTextureAssetId, entry.type);
+  } else if (old) {
+    const tex = old[_slotOf(old)];
+    if (tex) {
+      next[_slotOf(next)] = tex;
+      _applyUVToMaterial(next, entry.uvBase);
+    }
+  }
+  _materials.set(shaderId, next);
+
+  for (const meshId of entry.linkedMeshIds) {
+    if (_uvClones.has(meshId)) continue;   // override meshes rebuilt below
+    const mesh = AssetLoader.getBabylonMesh(meshId);
+    if (mesh) mesh.material = next;
+  }
+
+  for (const [meshId, cloneEntry] of [..._uvClones.entries()]) {
+    if (cloneEntry.shaderId !== shaderId) continue;
+    try { cloneEntry.material.dispose?.(); } catch { /* */ }
+    _uvClones.delete(meshId);
+    const uv = getState().scene.uvOverrides[meshId];
+    if (uv) {
+      setUVOverride(meshId, uv);           // recreates the clone from `next`
+    } else {
+      const mesh = AssetLoader.getBabylonMesh(meshId);
+      if (mesh) mesh.material = next;
+    }
+  }
+
+  try { old?.dispose?.(); } catch { /* */ }
 }
 
 /**

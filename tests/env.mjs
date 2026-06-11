@@ -46,12 +46,28 @@ const real = {
     Identity:  () => ({ __m: 'I',  multiply() { return this; } }),
   },
   Color3: Object.assign(function (r, g, b) { return { r, g, b, scale: f => ({ r: r * f, g: g * f, b: b * f }) }; }, {
-    FromHexString: () => ({ r: 0.96, g: 0.62, b: 0.04, scale: f => vec(0.96 * f, 0.62 * f, 0.04 * f) }),
+    // Parses real hex so shader tests can assert colour values.
+    FromHexString: (hex) => {
+      const h = String(hex ?? '').replace('#', '');
+      const r = (parseInt(h.slice(0, 2), 16) || 0) / 255;
+      const g = (parseInt(h.slice(2, 4), 16) || 0) / 255;
+      const b = (parseInt(h.slice(4, 6), 16) || 0) / 255;
+      return { r, g, b, scale: f => vec(r * f, g * f, b * f) };
+    },
   }),
   Color4: function (r, g, b, a) { return { r, g, b, a }; },
   StandardMaterial: function (name) {
     return { name, specularPower: 64, diffuseColor: null,
-             diffuseTexture: null, albedoTexture: null, baseTexture: null };
+             diffuseTexture: null, albedoTexture: null, baseTexture: null,
+             alpha: 1,
+             clone(n) { return { ...this, name: n }; },
+             dispose() { this._disposed = true; } };
+  },
+  PBRMaterial: function (name) {
+    return { name, metallic: 0, roughness: 0.5, albedoColor: null,
+             albedoTexture: null, baseTexture: null, alpha: 1,
+             clone(n) { return { ...this, name: n }; },
+             dispose() { this._disposed = true; } };
   },
   Quaternion: Object.assign(function (x, y, z, w) { return { x, y, z, w }; }, {
     Identity: () => ({ x: 0, y: 0, z: 0, w: 1 }),
