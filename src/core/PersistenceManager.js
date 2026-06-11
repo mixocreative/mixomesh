@@ -6,7 +6,11 @@ import { SceneManager } from './SceneManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
 import { Selection } from './Selection.js';
-import { clear as historyClear } from './HistoryManager.js';
+import {
+  clear as historyClear,
+  getPosition as historyPosition,
+  isApplying as historyIsApplying,
+} from './HistoryManager.js';
 import { Toast } from '../ui/Toast.js';
 import {
   kvSet, kvGet, kvDelete, kvKeys,
@@ -706,16 +710,50 @@ function _confirmDirty() {
   });
 }
 
+// Position-based dirty (Blueprint §5): dirty ⇔ history position differs from
+// the position recorded at save/load/new, OR a non-undoable mutation fired
+// PROJECT_DIRTY since then (sticky). Command-driven dirty events arrive while
+// HistoryManager.isApplying() — the position diff already covers those, so
+// they must NOT stick (undo would never read clean otherwise).
+let _savedPosition = 0;
+let _sticky        = false;
+
+function _baseline() {
+  _savedPosition = historyPosition();
+  _sticky = false;
+  _dirty = false;
+}
+
+function _recomputeDirty() {
+  const next = _sticky || historyPosition() !== _savedPosition;
+  if (next === _dirty) return;
+  _dirty = next;
+  // Announce the transition so StatusBar/ProjectMenu track undo-driven
+  // changes too (undo/redo suppress PROJECT_DIRTY via withoutDirty).
+  dispatch(next ? EVENTS.PROJECT_DIRTY : EVENTS.PROJECT_SAVED, {});
+}
+
+/** @returns {boolean} current dirty state (position-based + sticky). */
+export function isDirty() {
+  return _dirty;
+}
+
 /** Wire dirty tracking. Call once at boot. */
 export function init() {
-  subscribe(EVENTS.PROJECT_DIRTY,  () => { _dirty = true; });
-  subscribe(EVENTS.PROJECT_SAVED,  () => { _dirty = false; });
-  subscribe(EVENTS.PROJECT_LOADED, () => { _dirty = false; });
-  subscribe(EVENTS.PROJECT_NEW,    () => { _dirty = false; });
+  subscribe(EVENTS.PROJECT_DIRTY, () => {
+    if (!historyIsApplying()) _sticky = true;
+    _dirty = true;
+  });
+  subscribe(EVENTS.PROJECT_SAVED,  _baseline);
+  subscribe(EVENTS.PROJECT_LOADED, _baseline);
+  subscribe(EVENTS.PROJECT_NEW,    _baseline);
+  subscribe(EVENTS.HISTORY_PUSHED, _recomputeDirty);
+  subscribe(EVENTS.HISTORY_UNDONE, _recomputeDirty);
+  subscribe(EVENTS.HISTORY_REDONE, _recomputeDirty);
 }
 
 export const PersistenceManager = {
-  init,
+  init, isDirty,
   save, saveAs, open, newProject,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,
