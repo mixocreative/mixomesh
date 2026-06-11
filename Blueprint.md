@@ -186,9 +186,134 @@ tests/                     ← headless harness — Node-native, no build (§14b
   idb-stub.mjs             ← in-memory mirror of src/core/idb.js
   env.mjs                  ← installEnv(): Babylon shim, atob/btoa, DOMParser
   export.test.mjs          ← PrintManager export pipeline
+  export-planner.test.mjs  ← filename/profile/scale planner
   validator.test.mjs       ← MeshValidator severity + position-welded manifold
+  validator-group.test.mjs ← sourceGroupId union topology checks
   persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
+  printer-profile.test.mjs ← default/fallback printer profile behavior
+  scale.test.mjs           ← ScaleMath contracts + compatibility helpers
+  split-on-import.test.mjs ← MultiMaterial split invariant
+  state-shape.test.mjs     ← default state and migration invariants
+  threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader contracts
 ```
+
+### 0.3b Rebuild Architecture Map
+
+This section is the short path for reconstructing the app if `src/` is lost.
+Module sections later in the file own the deeper contracts; this map records
+who creates data, who owns live resources, and which names must stay stable.
+
+#### Boot and Dependency Order
+
+`index.html` is the only shell. It contains static roots for the viewport,
+header, panels, modals, toasts, and progress overlay, then dynamically imports
+`/src/app/boot.ts`. A server that serves `.ts` with the wrong MIME type is not
+supported; the shell only turns that failure into a visible boot message.
+
+Boot order:
+1. `src/app/boot.ts` imports pinned Babylon packages, `@babylonjs/loaders`,
+   `@babylonjs/materials`, and `@babylonjs/serializers`.
+2. `boot.ts` builds `window.BABYLON` with the exact symbols used by the JS
+   modules: core scene/mesh/camera/math/material classes, `GridMaterial`,
+   `OBJExport`, and `STLExport`.
+3. `boot.ts` imports `src/app/main.ts`.
+4. `main.ts` blocks non-Chrome/Edge by requiring
+   `'showDirectoryPicker' in window`.
+5. `main.ts` initialises modules in this order: `Toast`, `StatusBar`,
+   `SceneManager`, `InputManager`, transform-commit history hook, `Modal`,
+   `Outliner`, `PropertiesPanel`, `ShaderPanel`, `PrintPanel`, `ContextMenu`,
+   `AssetPanel`, `ViewportToolbar`, `NavCube`, `PersistenceManager`,
+   `ProjectMenu`, `AppShell`, `ViewportDrop`.
+6. `main.ts` registers global project shortcuts (`Ctrl+S`,
+   `Ctrl+Shift+S`, `Ctrl+O`, `Ctrl+N`), reapplies overlay defaults, starts
+   autosave, focuses the canvas, then asks the Asset Panel to remount the last
+   folder.
+
+No module except `boot.ts` imports Babylon npm packages directly. Runtime JS
+modules read `window.BABYLON`; TypeScript-only contract modules may import
+types.
+
+#### Source of Truth by Concern
+
+| Concern | Source of truth | Runtime owners |
+|---|---|---|
+| App state | `src/core/StateManager.js` initial state and dispatch bus | all modules read via `getState()` and mutate via `setState()`/commands |
+| Events | `src/core/events.js` | callers import `EVENTS`; no raw strings in calling code |
+| Live Babylon meshes | `AssetLoader` `_meshRegistry` | state stores mesh ids only |
+| Live Babylon containers/textures/blob URLs | `AssetLoader` module-local maps | persistence asks `AssetLoader` for bytes; reset revokes URLs |
+| Selection visuals | `Selection` plus `SceneManager` highlight/gizmo APIs | state selection is silent against dirty |
+| Undo/redo | `HistoryManager` command stack | reversible scene/user edits push commands |
+| Printer behavior | `src/config/printers.json` | `PrinterProfiles`, `PrintPanel`, `SceneManager`, `PrintManager` |
+| Scale math | `src/core/scale/ScaleMath.js` and `.ts` type twin | import normalization, print planner, tests |
+| Editable presets | `src/config/scale-presets.json`, `src/config/swatches.json` | `PrintPanel`, `ShaderPanel` |
+| Persistence | `.mixo` v3.1 JSON plus IndexedDB handles/kv | `PersistenceManager`, `idb.js` |
+| Export packaging | `PrintManager` orchestrator plus `src/core/print/*` seams | `PrintPanel` invokes public export entry points |
+| UI markup safety | `src/ui/renderSafe.js` | every string-template UI renderer |
+
+#### Runtime Dataflow
+
+Import path:
+1. `AssetPanel` or `ViewportDrop` obtains a `File`, `Blob`, or
+   File System Access handle.
+2. `AssetLoader.loadFromBlob/loadFromHandle` validates the extension via
+   `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and calls
+   `splitMultiMaterialMeshesInContainer()` before shader registration.
+3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
+4. `AssetLoader` adds the container to the scene, bakes source unit and
+   authored ratio into scene scale, persists an `AssetEntry`, creates a
+   display-only `CollectionEntry`, and registers each geometry mesh as a
+   `SceneObject`.
+5. `AssetLoader` generates an idle thumbnail and queues non-blocking
+   validation.
+
+Edit path:
+1. Pointer/keyboard input goes through `InputManager` or delegated UI handlers.
+2. Reversible changes instantiate a `HistoryManager` command and call
+   `push(command)`.
+3. Commands update JSON state with `setState(..., { silent: true })` when they
+   also mutate Babylon objects, then call `markDirty()` once.
+4. Commands dispatch typed events so UI and scene modules refresh themselves.
+
+Save/load path:
+1. `PersistenceManager.save/saveAs` serialises JSON state, dehydrates Babylon
+   transforms, embeds asset bytes when available, writes `.mixo`, records a
+   recent-project entry, and clears autosave.
+2. `PersistenceManager.open/openRecent/recoverAutosave` clears history and
+   live resources, restores state first, restores shaders, resolves each asset
+   by the five-tier priority table in §11, binds meshes back to saved ids, then
+   restores groups, camera, overlays, selection, linked-shader index, and dirty
+   state.
+
+Export path:
+1. `PrintPanel` reads the selected printer profile and invokes one of
+   `PrintManager.exportOBJ/exportSTL/exportThreeMF`.
+2. `PrintManager._runExport` collects printable meshes, validates the source
+   scene, clones meshes with unique geometry, builds a plan from printer +
+   scene/print scale, runs ordered prep steps on clones, validates the prepared
+   clones, serializes, packages, and downloads.
+3. Export never mutates live scene meshes. Mimaki texture profiles keep UVs and
+   textures; filament profiles collapse to solid per-part color.
+
+#### Typed Contract Mirrors
+
+The current runtime still uses JavaScript for most app modules. A small set of
+TypeScript files lock schemas and compile-time contracts:
+
+- `src/import/ImportPipeline.ts` defines source-file, raw import, normalized
+  import, asset, collection, and scene-part shapes. It is a contract mirror,
+  not the runtime loader.
+- `src/export/ExportPipeline.ts` defines export request, mesh, package, and
+  plan shapes.
+- `src/export/ExportPlanner.ts` mirrors the runtime planner in
+  `src/core/print/ExportPlanner.js` for typed consumers. Keep function names
+  and filename rules in sync.
+- `src/core/printers/PrinterProfile.ts` and `PrinterProfiles.ts` validate the
+  printer JSON schema for TypeScript builds. Runtime export code uses
+  `src/core/print/PrinterProfiles.js`.
+- `src/core/scale/ScaleMath.ts` mirrors `ScaleMath.js`. Runtime tests import
+  the JS file; `npm run typecheck` validates the TS twin.
+
+If a runtime JS contract changes, update its TS mirror in the same turn.
 
 ### 0.4 Babylon-First Rule
 Before writing custom logic, check if Babylon provides it. **Required uses:**
@@ -486,6 +611,7 @@ export const EVENTS = {
   PROJECT_LOADED:          'project:loaded',
   PROJECT_SAVED:           'project:saved',
   PROJECT_DIRTY:           'project:dirty',
+  PROJECT_RENAMED:         'project:renamed',
   AUTOSAVE_WRITTEN:        'project:autosaved',
 
   // Camera
@@ -552,8 +678,8 @@ const initialState = {
   },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
-    workspace: 'layout',                                          // 'layout' | 'shade' | 'print' — see PART 13b
-    panelCollapsed: { right: false, bottom: false, left: false }, // user-toggled overrides on top of the workspace defaults
+    // Workspace fields are planned in PART 13b but are not part of the
+    // shipped v3.1 StateManager initial state.
   },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
@@ -880,12 +1006,23 @@ AssetLoader.loadFromBlob(blob, filename, position)    → Promise<MeshId[]>
 AssetLoader.loadTextureFromHandle(fileHandle)         → Promise<void>  // async thumbnail gen
 AssetLoader.loadTextureFromBlob(blob, filename)       → Promise<void>
 AssetLoader.registerImportedTexture(babylonTexture)   → Promise<assetId>  // glTF-embedded texture → asset entry + data URL thumbnail
-AssetLoader.loadAssetsForProject(assetEntries)        → Promise<void>  // uses AssetsManager
 AssetLoader.releaseAsset(assetId)                     → void
 AssetLoader.removeAsset(assetId)                      → void  // removes from state + dispatches ASSET_REGISTERED{type:'removed'}
 AssetLoader.instantiateAsset(assetId, position)       → Promise<MeshId[]>  // re-loads from cached blob URL; each call = independent scene objects
 AssetLoader.getContainer(assetId)                     → BABYLON.AssetContainer | null
+AssetLoader.getContainerGeomMeshes(assetId)           → BABYLON.AbstractMesh[]  // stable geometry-only order
+AssetLoader.getAssetBytes(assetId)                    → Promise<ArrayBuffer|null>
+AssetLoader.restoreContainer(assetId, blob, ext)      → Promise<BABYLON.AbstractMesh[]>  // project load; no state mutation
+AssetLoader.bindRestoredMesh(meshId, mesh, assetId, sourceUnit?) → void
+AssetLoader.restoreTexture(entry, blob)               → Promise<assetId>
+AssetLoader.registerAssetEntry(entry)                 → void
+AssetLoader.resetAll()                                → void
 AssetLoader.getBabylonTexture(assetId)                → BABYLON.Texture | null
+AssetLoader.getBabylonMesh(meshId)                    → BABYLON.AbstractMesh | null
+AssetLoader.cloneMeshAsNewObject(sourceMeshId, worldOffset) → MeshId | null
+AssetLoader.restoreCloneToScene(meshId, savedObj, mesh) → void
+AssetLoader.splitMultiMaterialMeshes(meshes, makeChild, genGroupId) → split plan
+AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
 ```
 
 ### AssetEntry
@@ -1446,18 +1583,22 @@ The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create 
 
 ### Public API
 ```js
-PrintManager.setWorkingRatio(num)             // 1, 12, 72 — denominator
-PrintManager.setTargetRatio(num)              // 1, 35, 48, 72 — denominator
-PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
-PrintManager.exportThreeMF(options)           → Promise<void>  // colour, mm-native
+PrintManager.exportThreeMF(options)           → Promise<void>  // printer-selected 3MF mode
+PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
+PrintManager.SCALE_PRESETS                    → scale-presets.json passthrough
 
 // options = { selectedOnly?:bool, individually?:bool, onProgress?:fn }
 //   selectedOnly  — restrict to current selection (default: all isPrintPart meshes)
 //   individually  — one file per mesh on disk (see "Export filenames" below)
 //                   (default: one combined file per format)
 ```
+
+`PrintManager` does not expose ratio setter functions in the Vite baseline.
+`PrintPanel` updates `state.print.targetRatio` directly for export-only scale
+changes and uses `HistoryManager.RescaleWorldCommand` for working-ratio rebake
+changes.
 
 ### Export filenames
 
@@ -1483,7 +1624,7 @@ a project-scoped name, so a per-mesh OBJ is independently usable.
 (File System Access save picker) and by `_loadProject` on opening a `.mixo`.
 Defaults to `'Untitled'`.
 
-**Save dialog.** `_triggerDownload(blob, suggestedName, hint)` is the single
+**Save dialog.** `src/core/print/Download.js::triggerDownload(blob, suggestedName, hint)` is the single
 disk-write seam. On Chrome/Edge it uses `window.showSaveFilePicker({ suggestedName, types })`
 so the user sees a Save-As dialog with the computed name pre-filled and can
 accept with one click. `AbortError` (user cancel) is silent — not an error,
@@ -1555,6 +1696,74 @@ Code seams:
 > blocking `src/ui/ProgressOverlay`. See §15 *Phase 6* for the full surface
 > (CSG2-needs-watertight, 3MF Z-up + baked viewer-invariant placement, etc.).
 
+### Split Print Modules
+
+`PrintManager.js` stays the orchestrator and serializer owner. Helper modules
+under `src/core/print/` keep reusable policy out of the large file:
+
+- `PrintScale.js`
+  - imports `scale-presets.json` and exports `SCALE_PRESETS`.
+  - `exportFactor()` returns `(state.print.workingRatio / state.print.targetRatio) * 1000`.
+  - `ratioSuffix()` returns `_r{workingRatio}to{targetRatio}` using current state.
+  - `exportBaseName(ctx)` returns safe `${project}${suffix}`.
+  - `perMeshBaseName(ctx, meshName)` returns safe `${project}_${mesh}${suffix}`.
+  - `getExportedDimensions(meshId)` returns world AABB size in target mm.
+  - `scaleSummary()` returns display strings for UI.
+- `PrinterProfiles.js`
+  - imports `printers.json`.
+  - exports `DEFAULT_PRINTER_ID = 'mimaki-3duj-553'`,
+    `DEFAULT_MIMAKI_3DUJ_553_BED`, `getPrinterProfile(id?)`,
+    `getDefaultPrinterProfile()`, `bedDimensionsForPrinter(id?)`,
+    `listPrinterProfiles()`, `getPrinterProfileMap()`, and
+    `printerProfileExists(id)`.
+  - Unknown ids fall back to the Mimaki default.
+- `ExportPlanner.js`
+  - `buildExportPlan(input)` resolves profile, normalizes
+    `selectedOnly/individually`, computes `printExportScale`, and carries the
+    mesh list through unchanged.
+  - `scaleFilenameSuffix(sceneScale, printScale)` returns `_r{scene}to{print}`;
+    non-integer tokens replace `.` with `p`.
+  - `exportBaseName(projectName, sceneScale, printScale)`,
+    `perMeshBaseName(projectName, meshName, sceneScale, printScale)`, and
+    `safeFilenameStem(value)` implement the filename contract.
+  - `profilePreservesTextures(profile)` is true only when color mode is
+    `texture-uv` and `prep` includes both `preserveUVs` and
+    `preserveTextures`.
+  - `profileUsesSolidPartColors(profile)` is true for `solid-per-part` or
+    `collapseToSolidColor`.
+- `PrintPrep.js`
+  - `createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg })` returns the
+    callable prep registry used by `PrintManager`.
+  - Step semantics: `fallbackMaterial` creates a neutral StandardMaterial when
+    missing; `flattenWorld` bakes world matrix plus export factor and resets
+    transform; `weld` delegates to the injected weld; `weldSolidOnly` skips
+    textured meshes; `optimizeIndices` calls Babylon when present;
+    `createNormals` calls `mesh.createNormals(true)`; `csg` delegates to
+    injected CSG; `csgSolidOnly` skips textured meshes.
+- `PrintFormats.js`
+  - `createFormats({ serializeOBJ, serializeSTL, serialize3MF })` returns
+    `{ obj, stl, '3mf' }`.
+  - OBJ prep: `fallbackMaterial`, `flattenWorld`, `weld`,
+    `optimizeIndices`, `createNormals`; CSG not required.
+  - STL prep: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
+    `createNormals`; CSG required.
+  - 3MF prep: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
+    `optimizeIndices`, `csgSolidOnly`, `createNormals`; CSG required, but
+    textured meshes keep UV seams.
+- `PrintPackaging.js`
+  - `packageAndDownload(out, fmtLabel, progress)` converts a blob package or
+    zip-entry package into a Blob. Zip packages use JSZip at call time. It
+    reports `0.9` packaging and `0.98` downloading before calling
+    `triggerDownload`.
+- `Download.js`
+  - `triggerDownload(blob, suggestedName, hint?)` uses
+    `showSaveFilePicker` first, treats `AbortError` as silent cancel, logs and
+    falls back to an anchor download for other picker failures.
+
+Keep these helpers small. If a new export target needs a new writer mode,
+add a serializer in `PrintManager`, add planner/type coverage, and add only
+generic reusable prep/packaging logic to the helper modules.
+
 ### Scale Math
 
 The asset loader has already baked unit conversion and the working ratio into the mesh's in-scene transform (see §8 *Import Scale Model*). The Print Manager only has to rescale from the **working ratio** to the **target ratio** and convert metres → millimetres:
@@ -1625,37 +1834,52 @@ Schema (one entry per printer, keyed by id):
 ```js
 {
   "<id>": {
-    displayName, vendor,                          // shown in UI dropdowns
-    format,                                       // 'obj+mtl' | '3mf-core' |
-                                                  // '3mf-materials-ext' |
-                                                  // '3mf-colorgroup' | 'stl'
-    color: { mode, colorSpace? },                 // mode: 'none' |
-                                                  //   'solid-per-part' (filament) |
-                                                  //   'texture-uv' (Mimaki) |
-                                                  //   'vertex-color'
-                                                  // colorSpace: 'sRGB' | 'linear'
-    texture: null | { maxSize, encoding },        // null for solid/none modes
-    bed: { x, y, z } | null,                      // mm; null = Custom
-    axis: { up, winding },                        // up: 'Y' | 'Z'; winding: 'ccw'|'cw'
-    unit: 'millimeter' | 'meter',
-    prep: [string, ...]                           // ordered PrintManager.PREP_STEPS keys
+    displayName: string,                          // shown in UI dropdowns
+    vendor: string,
+    format: '3mf-materials-ext' | '3mf-colorgroup' | 'obj+mtl' | 'stl',
+    color: {
+      mode: 'texture-uv' | 'solid-per-part' | 'none',
+      colorSpace?: 'sRGB'
+    },
+    texture: null | { maxSize: number, encoding: 'png' },
+    bed: { x: number|null, y: number|null, z: number|null },  // mm; null falls back to Mimaki default helper
+    axis: { up: 'Y' | 'Z', winding: 'cw' | 'ccw' },
+    unit: 'millimeter',
+    prep: ExportPrepStep[]
   }
 }
 ```
 
-`prep` keys reference entries in `PrintManager.PREP_STEPS`. Existing
-keys: `fallbackMaterial`, `flattenWorld`, plus texture-aware export keys:
-`preserveUVs`, `preserveTextures`, `collapseToSolidColor`,
-`synthesizeSolidColorPNG`, `splitGroupHints`.
+`ExportPrepStep` is locked by `src/core/printers/PrinterProfile.ts`:
+`fallbackMaterial`, `flattenWorld`, `preserveUVs`, `preserveTextures`,
+`collapseToSolidColor`, `synthesizeSolidColorPNG`, `weld`, `repairWinding`.
+Runtime format prep in `src/core/print/PrintFormats.js` also uses internal
+steps that do not appear in `printers.json`: `optimizeIndices`,
+`createNormals`, `csg`, `weldSolidOnly`, and `csgSolidOnly`.
+
+Current profile ids:
+- `mimaki-3duj-553`: default, `3mf-materials-ext`, `texture-uv`, 4096 PNG,
+  `508 × 508 × 305` mm, Z-up, CCW.
+- `mimaki-3duj-2207`: `3mf-materials-ext`, `texture-uv`, 2048 PNG,
+  `203 × 203 × 76` mm.
+- `bambu-x1c`, `bambu-a1`, `bambu-a1-mini`, `prusa-mk4`: `3mf-colorgroup`,
+  `solid-per-part`, no texture.
+- `elegoo-saturn-4-ultra`: `stl`, `none`, no texture.
+- `generic-obj-mtl-png`: `obj+mtl`, `texture-uv`, Y-up, solid-color PNG
+  synthesis allowed.
+- `custom`: `obj+mtl`, `solid-per-part`, null bed dimensions.
 
 Consumers:
 - `PrintPanel.js` reads `state.print.targetPrinterId` → looks up row → drives
   format/color UX, bed-size readout, and the export call.
 - `SceneManager.js` reads the same row's `bed` for the floor/bed preview
   geometry (replaces the old `bedPresets` lookup).
-- `PrintManager._runExport` reads `prep` to dispatch the right ordered
-  pipeline; format-specific serializers (`_buildOBJ`, `_build3MFModel`)
-  branch on `color.mode` for texture vs. solid behavior.
+- `PrintManager._serialize3MF` resolves the current printer row and chooses
+  Materials Extension for `format: '3mf-materials-ext'`; all other 3MF rows
+  use colorgroup. OBJ/STL calls use their explicit public entry points.
+- `src/core/print/ExportPlanner.js` reads printer id + scene/print scale to
+  produce filename suffixes, export scale, profile texture helpers, and the
+  request shape tested by `tests/export-planner.test.mjs`.
 
 Default seeded entry: `mimaki-3duj-553`. State default
 `state.print.targetPrinterId === 'mimaki-3duj-553'`. Each printer's `bed`
@@ -1674,54 +1898,37 @@ This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as we
 
 **Use `BABYLON.OBJExport.OBJ()`.** Do not write a custom OBJ serializer.
 
-```js
-import * as BABYLON from 'babylonjs';
-import 'babylonjs-serializers';
-import JSZip from 'jszip';
-
-async function exportOBJ({ partsOnly = true }) {
-  // 1. Collect meshes
-  const meshes = collectExportMeshes(partsOnly);
-
-  // 2. Apply export scale: (workingRatio / targetRatio) × 1000 (m at working → mm at target).
-  // OBJExport bakes mesh.scaling into output, so set scaling per mesh temporarily.
-  const prevScales = meshes.map(m => m.scaling.clone());
-  const f = (state.print.workingRatio / state.print.targetRatio) * 1000;
-  meshes.forEach(m => m.scaling.scaleInPlace(f));
-
-  // 3. Generate OBJ + MTL via Babylon
-  const matlibName = `${state.project.name}.mtl`;
-  const objString = BABYLON.OBJExport.OBJ(meshes, /*materials=*/ true, matlibName, /*globalposition=*/ true);
-  const mtlString = BABYLON.OBJExport.MTL(meshes);
-
-  // 4. Restore scales
-  meshes.forEach((m, i) => m.scaling = prevScales[i]);
-
-  // 5. Collect texture blobs from materials with diffuse textures
-  const textureBlobs = await collectTextureBlobs(meshes);
-
-  // 6. Bundle in zip
-  const zip = new JSZip();
-  zip.file(`${state.project.name}.obj`, objString);
-  zip.file(`${state.project.name}.mtl`, mtlString);
-  const texFolder = zip.folder('textures');
-  for (const [name, blob] of textureBlobs) texFolder.file(name, blob);
-
-  const archive = await zip.generateAsync({ type: 'blob' });
-  triggerDownload(archive, `${state.project.name}.zip`);
-}
-```
+Current implementation:
+1. `_runExport('obj', options)` collects print parts and clones each mesh.
+2. Each clone gets `makeGeometryUnique()` before prep.
+3. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weld`,
+   `optimizeIndices`, `createNormals`.
+4. `_serializeOBJ(ctx)` calls `BABYLON.OBJExport.OBJ(meshes, true,
+   mtlName, true)` and `BABYLON.OBJExport.MTL(meshes)`.
+5. Real diffuse/albedo/base textures are encoded as PNG blobs under
+   `textures/`.
+6. If `state.print.objBakeSolidTextures` is true, solid-color materials also
+   get synthetic 4×4 PNGs and matching `map_Kd` MTL lines.
+7. Output is always an outer `.zip`. Combined mode contains one OBJ, one MTL,
+   and texture entries. Individual mode contains per-mesh OBJ/MTL entries plus
+   shared texture entries.
+8. Live scene meshes are never scaled or rewritten.
 
 ### STL Export (Geometry-only fallback)
-```js
-function exportSTL() {
-  const meshes = collectExportMeshes(true);
-  // Apply scale baking same as OBJ flow
-  BABYLON.STLExport.CreateSTL(meshes, /*download=*/ true, state.project.name,
-    /*binary=*/ true, /*doNotBakeTransform=*/ false, /*supportInstanced=*/ false,
-    /*exportIndividualMeshes=*/ false);
-}
-```
+**Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
+carry shader, texture, or per-part color metadata.
+
+Current implementation:
+1. `_runExport('stl', options)` clones print parts and makes geometry unique.
+2. Format prep runs: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
+   `createNormals`.
+3. CSG2 is attempted only when available. Non-watertight parts skip CSG and
+   report an informational toast; validation still gates hard errors.
+4. `_serializeSTL(ctx)` calls Babylon STL serialization on prepared clones.
+5. Combined mode emits one `.stl`; individual mode emits an outer `.zip` with
+   one STL per mesh.
+6. STL remains a fallback for non-color printer targets, not a Mimaki
+   texture-preserving output.
 
 ### Export Gate
 - Re-validate all Print Parts via `MeshValidator.validateAllPrintParts()`.
@@ -1889,6 +2096,36 @@ Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
   ("Session is empty / mount a folder") imply that mounting is required to
   drop files, which is false — loose drag-drop is fully supported.
 
+### Viewport Drop (`src/ui/ViewportDrop.js`)
+
+Attaches drag/drop listeners to `#viewport` after `SceneManager` is ready.
+It owns the position handoff from browser drag events to asset loading.
+
+Supported drop sources:
+- Asset Panel session card: custom MIME `application/x-mixomesh-asset` with
+  `mountKey: '__session__'` and `path = assetId`. Calls
+  `AssetLoader.instantiateAsset(assetId, position)`.
+- Asset Panel library card: custom MIME with `mountKey`, relative `path`, and
+  filename. Retrieves a `FileSystemFileHandle` via
+  `AssetPanel.getFileHandle(mountKey, path)`, then calls
+  `AssetLoader.loadFromHandle(handle, position, { directoryHandleKey:
+  mountKey, originalPath: path })`.
+- OS file explorer: reads `DataTransferItem.getAsFile()` and, while still
+  inside the synchronous drop event, captures the Chrome-only
+  `getAsFileSystemHandle()` promise. Mesh extensions are checked through
+  `AssetLoader.isMeshExt(ext)`; unsupported files show a warning toast. Valid
+  files call `AssetLoader.loadFromBlob(file, file.name, position, { fileHandle })`
+  when a file handle exists, giving loose drops the tier-3 relink path in §11.
+
+Drop position:
+- Use `scene.createPickingRay()` at the drop coordinates.
+- Prefer ray intersection with the `grid` mesh.
+- Fallback to analytic intersection with the `y = 0` plane.
+- If the ray is parallel or behind the camera, use `BABYLON.Vector3.Zero()`.
+
+All async drop work runs through `safeAsync`. The module does not keep state
+and does not maintain its own extension table.
+
 ### Context Menu (`src/ui/ContextMenu.js`)
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
 
@@ -1972,6 +2209,13 @@ ProgressOverlay.hide()                      → void
 ---
 
 ## PART 13b — WORKSPACES & PANEL HIERARCHY
+
+**Status:** planned design, not part of the shipped Vite baseline. The active
+state shape in §4 does not include `ui.workspace` or `ui.panelCollapsed`, and
+`src/core/events.js` does not define `WORKSPACE_CHANGED` or
+`PANEL_COLLAPSED_CHANGED`. Implement this section only when the workspace
+feature lands; until then, rebuild the current app from PART 13's static shell
+and panel modules.
 
 **Design intent.** The user's workflow is linear — *Import → Arrange → Shade → Print* — not the swiss-army-knife DCC pattern. Tabbed panels with manual resize don't scale once the Print pipeline grows (Bed / Scale / Validation / Export, plus deferred Thickness / Orientation). Industry-standard fix is **workspace presets** (Blender top-bar pattern, also Substance Painter, Maya, Cinema 4D, Houdini): a tiny set of named panel layouts, one click to switch. The user stops resizing because the layout is *per task*, not freeform.
 
@@ -2186,7 +2430,7 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: layout per printer profile, texture dedup, UV round-trip via pseudo-loader regex, Bambu fallback to colorgroup |
 | `tests/validator-group.test.mjs` | 5 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam |
 
-**Total: 112 tests.** Drives the *real* modules — passing tests guarantee the load-path math, byte fidelity, and export pipeline. **Out of scope (deferred human Chrome pass):** live Babylon scene round-trip, `showSaveFilePicker` save flow (the picker prompts the user — verified live in Chrome; the test harness exercises the anchor-fallback branch of `_triggerDownload` only), autosave timer firing, Outliner ghost row UI, 3MF rendered in a slicer.
+**Total: 112 tests.** Drives the *real* modules — passing tests guarantee the load-path math, byte fidelity, and export pipeline. **Out of scope (deferred human Chrome pass):** live Babylon scene round-trip, `showSaveFilePicker` save flow (the picker prompts the user — verified live in Chrome; the test harness exercises the anchor-fallback branch of `triggerDownload` only), autosave timer firing, Outliner ghost row UI, 3MF rendered in a slicer.
 
 ### Browser Smoke Harness
 
