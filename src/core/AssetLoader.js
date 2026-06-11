@@ -719,13 +719,17 @@ function _makeBabylonChildMesh(spec) {
   const normals   = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.NormalKind);
   const uvs       = sourceMesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
   const indices   = sourceMesh.getIndices?.();
-  const subIdx    = indices ? Array.from(indices.slice(indexStart, indexStart + indexCount)) : [];
+  const subIdx    = indices ? indices.slice(indexStart, indexStart + indexCount) : [];
 
   const child = new BABYLON.Mesh(name, scene);
   const vd    = new BABYLON.VertexData();
-  if (positions) vd.positions = Array.from(positions);
-  if (normals)   vd.normals   = Array.from(normals);
-  if (uvs)       vd.uvs       = Array.from(uvs);
+  // Per-child TYPED copies (review M18). Copies are load-bearing — children
+  // sharing one buffer would corrupt each other when a later bake mutates
+  // vertex data in place. Typed copies cost ~4 bytes/float vs the old
+  // Array.from plain-number arrays (~8+ with boxing) on dense meshes.
+  if (positions) vd.positions = new Float32Array(positions);
+  if (normals)   vd.normals   = new Float32Array(normals);
+  if (uvs)       vd.uvs       = new Float32Array(uvs);
   vd.indices = subIdx;
   vd.applyToMesh(child);
 
@@ -1095,7 +1099,7 @@ export function removeAsset(assetId) {
     delete lib[assetId];
     return { ...s, scene: { ...s.scene, assetLibrary: lib } };
   });
-  dispatch(EVENTS.ASSET_REGISTERED, { type: 'removed', assetId });
+  dispatch(EVENTS.ASSET_REMOVED, { assetId });
 }
 
 export const AssetLoader = {

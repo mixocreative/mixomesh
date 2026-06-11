@@ -120,7 +120,7 @@ export function selectAll() {
 }
 
 /**
- * @param {'median'|'active'|'individual'|'cursor'} mode
+ * @param {'world'|'median'|'active'|'individual'|'cursor'} mode
  */
 export function setPivotMode(mode) {
   if (!VALID_PIVOTS.has(mode)) return;
@@ -130,7 +130,7 @@ export function setPivotMode(mode) {
   _applyVisuals();
 }
 
-/** Cycle through pivot modes in order: median → active → individual → cursor. */
+/** Cycle through pivot modes in order: world → median → active → individual → cursor. */
 export function cyclePivotMode() {
   const order = ['world', 'median', 'active', 'individual', 'cursor'];
   const cur = getState().selection.pivotMode;

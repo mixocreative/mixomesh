@@ -632,7 +632,8 @@ function _modalIsNoop(prev, next) {
 // ── Status hint ──────────────────────────────────────────
 
 function _defaultHint() {
-  return 'MMB: Orbit · Scroll: Zoom · G/R/S: Transform · F: Frame · Ctrl+G: Group';
+  // Matches the implemented CAD scheme (§7): RMB orbit, MMB pan.
+  return 'RMB: Orbit · MMB: Pan · Scroll: Zoom · G/R/S: Transform · F: Frame · Ctrl+G: Group';
 }
 
 function _updateHint() {
@@ -719,7 +720,6 @@ function _groupSelected() {
   const ids = Selection.getSelectedIds();
   if (ids.length < 1) return;
   push(new GroupCommand(ids));
-  const groups = getState().scene.groups;
   // Select the new group's children via their meshIds (groups aren't currently selectable).
   Selection.set(ids, ids[ids.length - 1]);
 }
@@ -738,9 +738,8 @@ function _ungroupSelected() {
 }
 
 function _toggleOrtho() {
-  if (!_scene?.activeCamera) return;
-  const isPersp = _scene.activeCamera.mode === BABYLON.Camera.PERSPECTIVE_CAMERA;
-  setCameraPreset(isPersp ? 'front' : 'perspective');
+  // In-place projection toggle preserving the current view direction (L25).
+  SceneManager.toggleOrthographic();
 }
 
 function _orbitCamera(deltaDegH, deltaDegV) {

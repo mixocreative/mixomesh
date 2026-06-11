@@ -56,6 +56,13 @@ const real = {
     },
   }),
   Color4: function (r, g, b, a) { return { r, g, b, a }; },
+  TransformNode: function (name, scene) {
+    const n = { name, parent: null, position: null, metadata: {},
+                setParent(p) { this.parent = p; },
+                dispose() { this._disposed = true; } };
+    scene?.transformNodes?.push?.(n);
+    return n;
+  },
   StandardMaterial: function (name) {
     return { name, specularPower: 64, diffuseColor: null,
              diffuseTexture: null, albedoTexture: null, baseTexture: null,

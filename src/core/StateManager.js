@@ -57,6 +57,12 @@ function _deepFreeze(obj) {
  * @returns {function} unsubscribe
  */
 export function subscribe(eventName, fn) {
+  if (typeof eventName !== 'string' || !eventName) {
+    // A typo'd EVENTS key is undefined — the listener would silently never
+    // fire (review A8). Fail loudly in dev; tolerate in prod.
+    if (DEV) throw new Error('subscribe: unknown event (typo in EVENTS key?)');
+    return () => {};
+  }
   if (!_listeners.has(eventName)) _listeners.set(eventName, new Set());
   _listeners.get(eventName).add(fn);
   return () => _listeners.get(eventName)?.delete(fn);
@@ -79,8 +85,16 @@ export function dispatch(eventName, payload) {
  * Return current application state. Deep-frozen in dev mode.
  * @returns {object}
  */
+let _devFrozenCache = null;   // invalidated on every state write (dev only)
+
 export function getState() {
-  if (DEV) return _deepFreeze(JSON.parse(JSON.stringify(_state)));
+  if (DEV) {
+    // Cache the frozen snapshot between writes — getState runs in hot paths
+    // (selection loops, per-frame hooks) and a deep clone per call made dev
+    // mode crawl (review L22).
+    if (!_devFrozenCache) _devFrozenCache = _deepFreeze(JSON.parse(JSON.stringify(_state)));
+    return _devFrozenCache;
+  }
   return _state;
 }
 
@@ -91,6 +105,7 @@ export function getState() {
  */
 export function setState(updaterFn, opts = {}) {
   _state = updaterFn(_state);
+  _devFrozenCache = null;
   if (!opts.silent && !_suppressDirty) {
     dispatch(EVENTS.PROJECT_DIRTY, null);
   }
@@ -122,6 +137,7 @@ export function markDirty() {
  */
 export function replaceState(next) {
   _state = next;
+  _devFrozenCache = null;
 }
 
 /** A deep clone of the pristine initial state (for New Project). */

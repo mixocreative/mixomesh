@@ -90,6 +90,7 @@ export function init() {
   _gridEl.addEventListener('dragstart', _onGridDragStart);
 
   subscribe(EVENTS.ASSET_REGISTERED,   () => _renderGrid());
+  subscribe(EVENTS.ASSET_REMOVED,      () => _renderGrid());
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
 
   Modal.register('remountFolder', ({ data, close }) => {

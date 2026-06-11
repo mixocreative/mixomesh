@@ -123,7 +123,9 @@ async function _serialiseAssetLibrary() {
         const buf = await AssetLoader.getAssetBytes(a.id);
         if (buf) {
           base.fileData    = _b64FromBuf(buf);
-          base.contentHash = await _sha256Hex(buf);
+          // Bytes are immutable per assetId — reuse the import-time hash
+          // instead of re-hashing on every save/autosave (review M16).
+          base.contentHash = a.contentHash ?? await _sha256Hex(buf);
         }
       } catch (err) {
         console.error(`Could not embed asset ${a.filename}:`, err);
@@ -480,7 +482,12 @@ async function _loadProject(doc) {
 
   SceneManager.rebuildBed();
   SceneManager.setGrid(getState().scene.grid);
+  // Edge colour BEFORE the wireframeEdges toggle so re-enabled edge
+  // renderers pick up the saved colour, not the default (review M19).
+  const savedEdgeColor = getState().scene.overlays?.wireframeEdgeColor;
+  if (typeof savedEdgeColor === 'string') SceneManager.setWireframeEdgeColor(savedEdgeColor);
   for (const [k, v] of Object.entries(getState().scene.overlays || {})) {
+    if (k === 'wireframeEdgeColor') continue;   // value, not a toggle
     SceneManager.setOverlay(k, !!v);
   }
   SceneManager.setScaleLock(getState().ui.scaleLocked !== false);

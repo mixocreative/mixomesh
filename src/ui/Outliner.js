@@ -1,7 +1,7 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, dispatch, getState, setState } from '../core/StateManager.js';
+import { subscribe, getState, setState } from '../core/StateManager.js';
 import { Selection } from '../core/Selection.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 
@@ -455,18 +455,9 @@ function _beginRename(rowEl, id, kind) {
 }
 
 function _renameCollection(collectionId, newName) {
-  setState(s => {
-    const col = s.scene.collections?.[collectionId];
-    if (!col) return s;
-    return {
-      ...s,
-      scene: {
-        ...s.scene,
-        collections: { ...s.scene.collections, [collectionId]: { ...col, name: newName } },
-      },
-    };
-  });
-  dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name: newName });
+  const prev = getState().scene.collections?.[collectionId]?.name;
+  if (prev == null || prev === newName) return;
+  push(new RenameCollectionCommand(collectionId, prev, newName));   // undoable (L30)
 }
 
 function _applySelectionHighlight() {

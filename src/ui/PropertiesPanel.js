@@ -53,6 +53,7 @@ export function init() {
     EVENTS.LOCK_CHANGED,
     EVENTS.OBJECT_RENAMED,
     EVENTS.ASSET_REGISTERED,
+    EVENTS.ASSET_REMOVED,
     EVENTS.ASSET_INSTANTIATED,
     EVENTS.SHADER_CREATED,
     EVENTS.SHADER_UPDATED,
@@ -534,7 +535,7 @@ function _renderShaderSection(obj) {
     : '';
 
   return `
-    <section class="pp-section">
+    <section class="pp-section" data-section="shader">
       <header class="pp-section-header">
         Shader${copyBtn}
         <span class="pp-multi">${meshIds.length === 1 ? '' : `(${meshIds.length} meshes)`}</span>

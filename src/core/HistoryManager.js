@@ -348,6 +348,33 @@ function _setName(id, requestedName) {
   dispatch(EVENTS.OBJECT_RENAMED, { id, name: finalName });
 }
 
+/** Rename an outliner collection (display bucket). Undoable (review L30). */
+export class RenameCollectionCommand {
+  constructor(collectionId, prevName, nextName) {
+    this.label = 'Rename Collection';
+    this._id = collectionId;
+    this._prev = prevName;
+    this._next = nextName;
+  }
+  execute() { _setCollectionName(this._id, this._next); markDirty(); }
+  undo()    { _setCollectionName(this._id, this._prev); }
+}
+
+function _setCollectionName(collectionId, name) {
+  setState(state => {
+    const col = state.scene.collections?.[collectionId];
+    if (!col) return state;
+    return {
+      ...state,
+      scene: {
+        ...state.scene,
+        collections: { ...state.scene.collections, [collectionId]: { ...col, name } },
+      },
+    };
+  }, SILENT);
+  dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name });
+}
+
 /**
  * Soft-delete: meshes are kept in memory (setEnabled(false)) so undo can
  * restore them without re-loading the asset. State entries are removed.
@@ -459,10 +486,14 @@ export class GroupCommand {
   }
   undo() {
     _withDetachedPivot(() => {
-      const meshes = this._ids.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
-      for (const m of meshes) {
-        // Unparent preserving world. Babylon's setParent(null) does this.
-        m.setParent(null);
+      for (const id of this._ids) {
+        const m = AssetLoader.getBabylonMesh(id);
+        if (!m) continue;
+        // Restore the CANONICAL Babylon parent — for nested groups that is
+        // the previous group's TransformNode, not scene root (review M17).
+        // setParent preserves the world transform either way.
+        const prevGroupNode = _findGroupNode(this._prevParents[id] ?? null);
+        m.setParent(prevGroupNode ?? null);
       }
       const node = _findGroupNode(this._groupId);
       if (node) node.dispose();
@@ -496,7 +527,10 @@ export class UngroupCommand {
     if (!this._snapshot) return;
     _withDetachedPivot(() => {
       const meshes = this._snapshot.childIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
-      for (const m of meshes) m.setParent(null);
+      // Members return to the dissolved group's PARENT node (or scene root
+      // for top-level groups) — review M17, mirrors GroupCommand.undo.
+      const parentNode = _findGroupNode(this._snapshot.parentId ?? null);
+      for (const m of meshes) m.setParent(parentNode ?? null);
       const node = _findGroupNode(this._groupId);
       if (node) node.dispose();
 
@@ -1024,6 +1058,11 @@ function _applyWorldRescale(fromRatio, toRatio) {
       scene: { ...s.scene, cursor3d: { x: c.x * factor, y: c.y * factor, z: c.z * factor } },
     };
   }, SILENT);
+
+  // Keep the Babylon cursor sphere in sync with the scaled state cursor —
+  // state moved but the visual stayed put before (review M13).
+  const c = getState().scene.cursor3d;
+  SceneManager.setCursor?.(new BABYLON.Vector3(c.x, c.y, c.z));
 }
 
 // ── Transform Swab / Smart Replace (Phase 6) ─────────────

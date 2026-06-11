@@ -12,6 +12,7 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText } from '../core/scale/ScaleMath.js';
+import { exportFactor } from '../core/print/PrintScale.js';
 
 // Printer profiles maintained in `config/printers.json` (single source of
 // truth — also drives export pipeline + color mode + texture handling).
@@ -26,11 +27,13 @@ export function init() {
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
 
-  // Re-render on state changes
+  // Re-render on state changes. (EVENTS.OBJECT_ADDED never existed — the
+  // import signal is ASSET_INSTANTIATED; review M11.)
   const events = [
     EVENTS.SELECTION_CHANGED,
-    EVENTS.OBJECT_ADDED,
+    EVENTS.ASSET_INSTANTIATED,
     EVENTS.OBJECT_REMOVED,
+    EVENTS.OBJECT_RESTORED,
   ];
   for (const ev of events) subscribe(ev, _render);
 
@@ -113,8 +116,8 @@ function _renderScaleTab() {
 
   html += '</div>';
 
-  // Export factor display
-  const factor = (workingRatio / targetRatio) * 1000;
+  // Export factor display — single source of truth in PrintScale (review L28).
+  const factor = exportFactor();
   html += `<div class="pp-info"><strong>Print export scale:</strong> ${factor.toFixed(2)} (scene BU → exported mm)</div>`;
 
   // Example dimensions

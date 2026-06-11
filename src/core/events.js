@@ -1,6 +1,7 @@
 export const EVENTS = {
   // Asset lifecycle
   ASSET_REGISTERED:        'asset:registered',
+  ASSET_REMOVED:           'asset:removed',
   ASSET_INSTANTIATED:      'asset:instantiated',
   ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',

@@ -79,6 +79,13 @@ let _dragSnapshot       = null;
 let _bodyDragOriginPivot = null; // pivot world position at body-drag start
 let _onTransformCommit  = null; // injected by src/app/main.ts to avoid circular imports
 
+// Per-frame caches — _applyFollowTarget runs in onBeforeRender and must not
+// call getState() there (Blueprint §14.4, review B11). Updated via events +
+// the setters below.
+let _cachedPreset     = 'perspective';
+let _cachedFollowMode = 'free';
+let _cachedActiveId   = null;
+
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
 
@@ -137,6 +144,18 @@ export function init(canvas) {
   subscribe(EVENTS.PROJECT_LOADED, () => {
     restoreCameraState(getState().scene.camera);
     _initiallyFramed = true;   // saved view honours user's last camera
+    const st = getState();
+    _cachedPreset     = st.scene.camera?.preset ?? 'perspective';
+    _cachedFollowMode = st.scene.camera?.followMode ?? 'free';
+    _cachedActiveId   = st.selection?.activeId ?? null;
+  });
+  subscribe(EVENTS.SELECTION_CHANGED, ({ activeId } = {}) => { _cachedActiveId = activeId ?? null; });
+  subscribe(EVENTS.ACTIVE_OBJECT_CHANGED, ({ activeId } = {}) => { _cachedActiveId = activeId ?? null; });
+
+  // Print-preview matte mode must also cover materials that arrive AFTER the
+  // toggle — imports while preview is ON kept their metallic (review M15).
+  subscribe(EVENTS.ASSET_INSTANTIATED, () => {
+    if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
   });
 
   // Auto-frame on the very first scene content of a session/project. Subsequent
@@ -152,7 +171,12 @@ export function init(canvas) {
       _initialFrameTimer = null;
     }, 50);
   });
-  subscribe(EVENTS.PROJECT_NEW, () => { _initiallyFramed = false; });
+  subscribe(EVENTS.PROJECT_NEW, () => {
+    _initiallyFramed = false;
+    _cachedPreset = 'perspective';
+    _cachedFollowMode = 'free';
+    _cachedActiveId = null;
+  });
 }
 
 /**
@@ -344,8 +368,25 @@ export function setCameraPreset(preset) {
     }
   });
 
+  _cachedPreset = preset;
   setState(s => ({ ...s, scene: { ...s.scene, camera: { ...s.scene.camera, preset } } }), { silent: true });
   dispatch(EVENTS.CAMERA_PRESET_CHANGED, { preset });
+}
+
+/**
+ * Toggle perspective ↔ orthographic IN PLACE, preserving the current view
+ * direction (review L25 — the old Numpad5 jumped to the front preset).
+ * The preset stays 'perspective', so ortho persists until toggled back —
+ * the pan/orbit auto-revert only fires for named face presets.
+ */
+export function toggleOrthographic() {
+  if (!_camera) return;
+  if (_camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) {
+    _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+  } else {
+    _camera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+    _syncOrtho();
+  }
 }
 
 /** Frame every registered scene mesh — used by Home button. */
@@ -883,6 +924,7 @@ export function setGizmoMode(mode) {
  */
 export function setFollowMode(mode) {
   if (!['free', 'followActive', 'worldOrigin'].includes(mode)) return;
+  _cachedFollowMode = mode;
   setState(s => ({
     ...s,
     scene: { ...s.scene, camera: { ...s.scene.camera, followMode: mode } },
@@ -907,8 +949,7 @@ function _applyFollowTarget() {
   // the preset back to 'perspective'. Captures both halves of the NavCube
   // face-click UX: "until user pans OR rotates".
   if (!_animating && _lastAppliedTarget && _camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) {
-    const preset = getState().scene?.camera?.preset;
-    if (preset && preset !== 'perspective') {
+    if (_cachedPreset && _cachedPreset !== 'perspective') {
       const dx = _camera.target.x - _lastAppliedTarget.x;
       const dy = _camera.target.y - _lastAppliedTarget.y;
       const dz = _camera.target.z - _lastAppliedTarget.z;
@@ -918,6 +959,7 @@ function _applyFollowTarget() {
         Math.abs(_camera.beta  - _lastAppliedBeta)  > REVERT_ANGLE_DELTA;
       if (panDivergence || orbitDivergence) {
         _camera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
+        _cachedPreset = 'perspective';
         setState(s => ({ ...s, scene: { ...s.scene, camera: { ...s.scene.camera, preset: 'perspective' } } }), { silent: true });
         dispatch(EVENTS.CAMERA_PRESET_CHANGED, { preset: 'perspective' });
       }
@@ -928,14 +970,13 @@ function _applyFollowTarget() {
   // doesn't trigger _syncOrtho otherwise, so the view would feel "frozen".
   if (_camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) _syncOrtho();
 
-  const mode = getState().scene?.camera?.followMode ?? 'free';
-  if (mode === 'free') return;
-  if (mode === 'worldOrigin') {
+  if (_cachedFollowMode === 'free') return;
+  if (_cachedFollowMode === 'worldOrigin') {
     _camera.target.set(0, 0, 0);
     return;
   }
   // followActive: track active object hierarchy bbox centre.
-  const activeId = getState().selection?.activeId;
+  const activeId = _cachedActiveId;
   if (!activeId) return;
   const mesh = _meshOf(activeId);
   if (!mesh) return;
@@ -1162,7 +1203,7 @@ export function cancelBodyDrag() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'printPreview'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'bedPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -1270,6 +1311,9 @@ function _setPrintPreviewMode(enabled) {
         mat.metallic = stored.originalMetallic;
       }
     }
+    // Prune — stale entries would restore outdated values on the next
+    // enable cycle and the map grew unbounded (review M15).
+    _printPreviewMaterialMap.clear();
   }
 }
 
@@ -1350,7 +1394,7 @@ export function pickMeshIdAt(x, y) {
 export const SceneManager = {
   init, setTransformCommitHandler,
   getScene, getEngine, getShadowGenerator,
-  setCameraPreset, frameSelected, frameAll, saveCameraState, restoreCameraState,
+  setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview,
