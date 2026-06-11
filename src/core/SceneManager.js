@@ -1,10 +1,6 @@
 import { EVENTS } from './events.js';
 import { subscribe, dispatch, getState, setState } from './StateManager.js';
 import {
-  ACCENT_HEX,
-  DEFAULT_GRID_CELL_MM,
-  DEFAULT_GRID_SUBDIV,
-  MM_PER_BU,
   AXES_SIZE,
   CAM_RADIUS_MIN,
   CAM_RADIUS_MAX,
@@ -21,22 +17,23 @@ import {
   TONE_EXPOSURE,
   REVERT_DELTA_SQ,
   REVERT_ANGLE_DELTA,
-  OUTLINE_RADIUS_PX,
-  OUTLINE_INTENSITY,
-  MASK_BRIGHTNESS_ACTIVE,
-  MASK_BRIGHTNESS_SELECTED,
 } from './scene/SceneConstants.js';
+import { initSelectionOutline, setActive, setSelected } from './scene/SelectionOutline.js';
+import {
+  initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
+  setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
+} from './scene/BedGrid.js';
+
+// Selection silhouette + bed/grid live in scene/SelectionOutline.js and
+// scene/BedGrid.js (review L29 split); re-exported so the SceneManager
+// surface is unchanged.
+export { setActive, setSelected };
 
 if (!window.BABYLON) {
   throw new Error('Babylon.js failed to load — check the Vite boot module in index.html');
 }
 
 const BABYLON = window.BABYLON;
-const GridMaterial = BABYLON.GridMaterial ?? null;
-
-// Selection ring colour — matches --accent in src/styles/tokens.css.
-const ACCENT_COLOR    = BABYLON.Color3.FromHexString(ACCENT_HEX);
-const ACCENT_DIM      = BABYLON.Color3.FromHexString(ACCENT_HEX).scale(0.55);
 
 let _engine    = null;
 let _scene     = null;
@@ -45,8 +42,6 @@ let _canvas    = null;
 let _gizmos    = null;
 let _axes      = null;   // { x, y, z } line meshes
 let _cursor    = null;
-let _ground    = null;
-let _bedLabels = [];   // single flat FRONT tag laid on the bed
 let _shadowGen = null;
 
 // Camera-preset animation state. _lastApplied* captures camera pose after a
@@ -62,13 +57,6 @@ let _animating         = false;
 let _initiallyFramed   = false;
 let _initialFrameTimer = null;
 
-// Custom selection outline (replaces HighlightLayer because HL's stencil mask
-// leaks on PBR materials that report any alpha mode).
-let _selMaskRTT          = null;   // RenderTargetTexture
-let _selMaskMatActive    = null;   // override for active mesh — full intensity
-let _selMaskMatSelected  = null;   // override for selected non-active — dim
-let _outlinePass         = null;
-const _maskMeshes  = new Set();
 // Pivot-based selection (see core/Selection.js + BLUEPRINT §7).
 let _pivotNode          = null;
 let _parentingSnapshots = [];   // [{ mesh, prevParent }]
@@ -125,9 +113,9 @@ export function init(canvas) {
   _setupBackground();
   _setupCamera();
   _setupLighting();
-  _setupGrid();
+  initBedGrid(_scene);
   _setupAxes();
-  _setupHighlight();
+  initSelectionOutline(_scene, _engine, _camera);
   _setupGizmos();
   _setupCursor();
 
@@ -563,140 +551,21 @@ function _setupLighting() {
   _shadowGen.darkness      = SHADOW_DARKNESS;
 }
 
-// ── Grid ─────────────────────────────────────────────────
-
-function _setupGrid() {
-  _rebuildGroundMesh();
-}
-
-/**
- * Rebuild the floor. Its footprint equals the printer bed XY
- * (state.print.bedDimensions, mm → BU); the grid lines drawn on it are styled
- * from state.scene.grid (minor cell size + subdivisions). Takes no arguments —
- * always reads current state so bed-size and grid edits both flow through here.
- */
-function _rebuildGroundMesh() {
-  const bed  = getState().print.bedDimensions;
-  const grid = getState().scene.grid ?? {};
-  const cellMM = grid.cellMM > 0 ? grid.cellMM : DEFAULT_GRID_CELL_MM;
-  const subdiv = grid.subdivisions > 0 ? grid.subdivisions : DEFAULT_GRID_SUBDIV;
-
-  const wBU    = bed.x / MM_PER_BU;          // bed X → ground width
-  const dBU    = bed.y / MM_PER_BU;          // bed Y → ground depth (Babylon Z)
-  const cellBU = cellMM / MM_PER_BU;
-
-  if (_ground) { _ground.dispose(); _ground = null; }
-
-  if (GridMaterial) {
-    _ground = BABYLON.MeshBuilder.CreateGround('grid', { width: wBU, height: dBU }, _scene);
-    _ground.isPickable     = false;
-    _ground.receiveShadows = true;
-    const mat = new GridMaterial('gridMat', _scene);
-    mat.gridRatio           = cellBU;
-    mat.majorUnitFrequency  = subdiv;
-    mat.minorUnitVisibility = 0.45;
-    mat.mainColor           = new BABYLON.Color3(0.08, 0.08, 0.10);
-    mat.lineColor           = new BABYLON.Color3(0.38, 0.38, 0.46);
-    mat.opacity             = 0.98;
-    mat.backFaceCulling     = false;
-    _ground.material = mat;
-  } else {
-    const longest = Math.max(wBU, dBU);
-    _ground = BABYLON.MeshBuilder.CreateGround('grid', {
-      width: wBU, height: dBU,
-      subdivisions: Math.max(10, Math.floor(longest / cellBU)),
-    }, _scene);
-    _ground.isPickable     = false;
-    _ground.receiveShadows = true;
-    const mat = new BABYLON.StandardMaterial('gridFallback', _scene);
-    mat.wireframe       = true;
-    mat.diffuseColor    = new BABYLON.Color3(0.32, 0.32, 0.40);
-    mat.backFaceCulling = false;
-    _ground.material = mat;
-  }
-
-  _rebuildBedLabels(wBU, dBU);
-}
-
-/**
- * Rebuild the single FRONT bed-edge tag. It lies flat on the ground plane as
- * part of the bed (not a billboard) and is drawn in the muted grid-line colour
- * so it reads as a quiet bed marking rather than a UI accent. Only FRONT is
- * shown — once the user knows the front edge the rest is implied, and four
- * upright tags were visual noise.
- */
-function _rebuildBedLabels(widthBU, depthBU) {
-  for (const lbl of _bedLabels) lbl.dispose();
-  _bedLabels = [];
-  const frontZ = depthBU / 2;                          // +Z edge = bed front
-  const labelW = Math.max(0.05, Math.min(widthBU, depthBU) * 0.16);
-  const labelH = labelW * 0.30;
-  const inset  = labelH * 0.55;                         // hug the front bed edge
-  const pos    = new BABYLON.Vector3(0, 0.004, frontZ - inset);  // 4 mm above bed
-  _bedLabels.push(_createBedLabelMesh('FRONT', pos, labelW, labelH));
-}
-
-function _createBedLabelMesh(text, position, width, height) {
-  const tex = new BABYLON.DynamicTexture(`bedLabelTex_${text}`, { width: 256, height: 80 }, _scene, false);
-  tex.hasAlpha = true;
-  const ctx = tex.getContext();
-  ctx.clearRect(0, 0, 256, 80);
-  // Grid-line colour (Color3 ≈ 0.38,0.38,0.46) so it belongs to the bed, but
-  // opaque enough to be seen at a shallow angle. Orientation handled by the
-  // mesh (rotation.x = +π/2 → normal up, glyphs read toward the front edge).
-  ctx.fillStyle = 'rgba(120, 120, 140, 0.9)';
-  ctx.font = 'bold 48px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128, 42);
-  tex.update();
-
-  const mat = new BABYLON.StandardMaterial(`bedLabelMat_${text}`, _scene);
-  mat.diffuseTexture = tex;
-  mat.emissiveTexture = tex;
-  mat.disableLighting = true;
-  mat.opacityTexture  = tex;       // alpha via texture
-  mat.backFaceCulling = false;
-  mat.zOffset         = -2;        // pull toward camera so the grid never hides it
-
-  const plane = BABYLON.MeshBuilder.CreatePlane(`bedLabel_${text}`, { width, height }, _scene);
-  plane.material = mat;
-  plane.position = position;
-  // Lay flat on the bed, textured face UP, text readable from the front-
-  // elevated camera. Verified live: rotateX(+90°) puts the non-mirrored
-  // face up but the glyphs run away from the viewer, so rotateY(180°)
-  // spins them back. (rotateX(-90°) mirrors the text; +90° alone is
-  // upside-down.) No billboard — it is part of the bed.
-  plane.rotation.set(Math.PI / 2, Math.PI, 0);
-  plane.isPickable = false;
-  plane.renderingGroupId = 0;
-  return plane;
-}
+// ── Grid / bed ───────────────────────────────────────────
+// Owned by scene/BedGrid.js; thin delegates keep the public surface.
 
 /**
  * Re-skin the grid lines. The floor footprint is unchanged (it tracks the
  * printer bed); only the minor cell size and major-line spacing change.
  * @param {{ cellMM?: number, subdivisions?: number }} grid
  */
-export function setGrid(grid) {
-  const prev = getState().scene.grid ?? {};
-  const cellMM = Number.isFinite(grid.cellMM) && grid.cellMM > 0
-    ? grid.cellMM : prev.cellMM ?? DEFAULT_GRID_CELL_MM;
-  const subdivisions = Number.isFinite(grid.subdivisions) && grid.subdivisions > 0
-    ? Math.round(grid.subdivisions) : prev.subdivisions ?? DEFAULT_GRID_SUBDIV;
-  setState(s => ({
-    ...s, scene: { ...s.scene, grid: { cellMM, subdivisions } },
-  }), { silent: true });
-  _rebuildGroundMesh();
-}
+export function setGrid(grid) { _bedSetGrid(grid); }
 
 /**
  * Rebuild the floor to match the current printer bed XY
  * (state.print.bedDimensions). Call after bed dimensions change.
  */
-export function rebuildBed() {
-  _rebuildGroundMesh();
-}
+export function rebuildBed() { _rebuildGround(); }
 
 // ── Axes overlay (1-pixel lines, no arrowheads) ─────────
 
@@ -724,147 +593,6 @@ function _setupAxes() {
     m.renderingGroupId  = 1;       // draw on top of the grid
   });
   _axes = { x, y, z };
-}
-
-// ── Selection silhouette (custom mask + post-process) ───
-
-// Why custom: Babylon's HighlightLayer composites via stencil, but the stencil
-// is only reliably written for materials with `transparencyMode === OPAQUE`.
-// Many glTF PBR materials report some alpha mode even when visually opaque,
-// which leaves the stencil unset → the halo's gaussian blur is added on top
-// of the mesh face. We instead render selected meshes into our own mask
-// render-target (forcing an opaque emissive override), then a fullscreen pass
-// dilates the mask and subtracts the original silhouette so by construction
-// the ring exists ONLY outside the mesh.
-function _setupHighlight() {
-  _selMaskMatActive = new BABYLON.StandardMaterial('mx-sel-mask-active', _scene);
-  _selMaskMatActive.emissiveColor   = new BABYLON.Color3(MASK_BRIGHTNESS_ACTIVE, MASK_BRIGHTNESS_ACTIVE, MASK_BRIGHTNESS_ACTIVE);
-  _selMaskMatActive.diffuseColor    = new BABYLON.Color3(0, 0, 0);
-  _selMaskMatActive.disableLighting = true;
-  _selMaskMatActive.backFaceCulling = false;
-
-  _selMaskMatSelected = new BABYLON.StandardMaterial('mx-sel-mask-selected', _scene);
-  _selMaskMatSelected.emissiveColor   = new BABYLON.Color3(MASK_BRIGHTNESS_SELECTED, MASK_BRIGHTNESS_SELECTED, MASK_BRIGHTNESS_SELECTED);
-  _selMaskMatSelected.diffuseColor    = new BABYLON.Color3(0, 0, 0);
-  _selMaskMatSelected.disableLighting = true;
-  _selMaskMatSelected.backFaceCulling = false;
-
-  _selMaskRTT = new BABYLON.RenderTargetTexture(
-    'mx-sel-mask-rt', { ratio: 0.5 }, _scene, false
-  );
-  _selMaskRTT.clearColor   = new BABYLON.Color4(0, 0, 0, 0);
-  _selMaskRTT.renderList   = [];
-  _selMaskRTT.activeCamera = _camera;
-  _selMaskRTT.refreshRate  = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONEVERYFRAME;
-  _scene.customRenderTargets.push(_selMaskRTT);
-
-  if (!BABYLON.Effect.ShadersStore['mxOutlineFragmentShader']) {
-    BABYLON.Effect.ShadersStore['mxOutlineFragmentShader'] = `
-      precision highp float;
-      varying vec2 vUV;
-      uniform sampler2D textureSampler;
-      uniform sampler2D maskSampler;
-      uniform vec3 outlineColor;
-      uniform vec2 texelSize;
-      uniform float outlineRadiusPx;
-      uniform float outlineIntensity;
-
-      void main() {
-        vec4 scene  = texture2D(textureSampler, vUV);
-        // Mask carries intensity in .r (1.0 = active, 0.5 = selected non-active,
-        // 0 = empty). The ring inherits this brightness so the active mesh
-        // glows stronger than the rest.
-        float center = texture2D(maskSampler, vUV).r;
-
-        // Sample at multiple radii with inner-weighted falloff for a soft edge.
-        // 16 angles × 4 radii = 64 taps.
-        float ring = 0.0;
-        const float TAU = 6.2831853;
-        for (int i = 0; i < 16; i++) {
-          float a = TAU * (float(i) + 0.5) / 16.0;
-          vec2 dir = vec2(cos(a), sin(a));
-          for (int j = 1; j <= 4; j++) {
-            float t = float(j) / 4.0;
-            float w = 1.0 - t * 0.45;
-            vec2 off = dir * outlineRadiusPx * t * texelSize;
-            ring = max(ring, texture2D(maskSampler, vUV + off).r * w);
-          }
-        }
-
-        // Subtract the silhouette so the ring exists only OUTSIDE the mesh.
-        ring = max(0.0, ring - center);
-        gl_FragColor = vec4(scene.rgb + outlineColor * ring * outlineIntensity, scene.a);
-      }
-    `;
-  }
-
-  _outlinePass = new BABYLON.PostProcess(
-    'mxOutline', 'mxOutline',
-    ['outlineColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
-    ['maskSampler'],
-    1.0, _camera, BABYLON.Texture.BILINEAR_SAMPLINGMODE
-  );
-  _outlinePass.onApply = (eff) => {
-    eff.setColor3('outlineColor', ACCENT_COLOR);
-    eff.setFloat2('texelSize',
-      1 / _engine.getRenderWidth(),
-      1 / _engine.getRenderHeight());
-    eff.setFloat('outlineRadiusPx',  OUTLINE_RADIUS_PX);
-    eff.setFloat('outlineIntensity', OUTLINE_INTENSITY);
-    eff.setTexture('maskSampler', _selMaskRTT);
-  };
-}
-
-function _setMaskMeshes(entries) {
-  // Remove old material overrides + clear renderList.
-  for (const m of _maskMeshes) {
-    try { _selMaskRTT.setMaterialForRendering(m, null); } catch { /* ignore */ }
-  }
-  _maskMeshes.clear();
-  _selMaskRTT.renderList.length = 0;
-
-  // Apply per-mesh override based on kind ('active' vs 'selected').
-  for (const { mesh, kind } of entries) {
-    if (!(mesh instanceof BABYLON.Mesh)) continue;
-    const mat = kind === 'active' ? _selMaskMatActive : _selMaskMatSelected;
-    _selMaskRTT.renderList.push(mesh);
-    try { _selMaskRTT.setMaterialForRendering(mesh, mat); } catch { /* ignore */ }
-    _maskMeshes.add(mesh);
-  }
-}
-
-// Module-local tracking — setActive + setSelected are called separately by
-// Selection.js, so we accumulate and refresh once.
-let _activeForOutline   = null;
-let _selectedForOutline = [];
-
-/**
- * Outline the active (primary-selected) mesh. Clears all prior outlines.
- * @param {any|null} mesh
- */
-export function setActive(mesh) {
-  _activeForOutline   = mesh ?? null;
-  _selectedForOutline = [];     // reset; setSelected adds the others after
-  _refreshOutlineSet();
-}
-
-/**
- * Outline a set of selected (non-active) meshes alongside the active one.
- * Must be called after setActive().
- * @param {any[]} meshes
- */
-export function setSelected(meshes) {
-  _selectedForOutline = (meshes ?? []).filter(m => m !== _activeForOutline);
-  _refreshOutlineSet();
-}
-
-function _refreshOutlineSet() {
-  const entries = [];
-  if (_activeForOutline) entries.push({ mesh: _activeForOutline, kind: 'active' });
-  for (const m of _selectedForOutline) {
-    if (m !== _activeForOutline) entries.push({ mesh: m, kind: 'selected' });
-  }
-  _setMaskMeshes(entries);
 }
 
 // ── Gizmo manager + pivot ────────────────────────────────
@@ -1209,8 +937,7 @@ export function cancelBodyDrag() {
 export function setOverlay(name, on) {
   switch (name) {
     case 'grid':
-      if (_ground) _ground.isVisible = on;
-      for (const lbl of _bedLabels) lbl.isVisible = on;
+      setGroundVisible(on);
       break;
     case 'axes':
       if (_axes) {
@@ -1229,11 +956,8 @@ export function setOverlay(name, on) {
       _setWireframeEdgesMode(on);
       break;
     case 'bedPreview':
-      if (on) updateBedPreview(getState().print.bedDimensions);
-      else {
-        const bed = _scene.getMeshByName('bedPreview');
-        if (bed) bed.dispose();
-      }
+      if (on) _bedUpdatePreview(getState().print.bedDimensions);
+      else disposeBedPreview();
       break;
   }
 }
@@ -1318,22 +1042,7 @@ function _setPrintPreviewMode(enabled) {
 }
 
 /** Resize / recreate the bed preview box from mm dimensions. */
-export function updateBedPreview(dims) {
-  const prev = _scene.getMeshByName('bedPreview');
-  if (prev) prev.dispose();
-
-  const mat = new BABYLON.StandardMaterial('bedPreviewMat', _scene);
-  mat.diffuseColor    = new BABYLON.Color3(0.3, 0.7, 1.0);
-  mat.alpha           = 0.07;
-  mat.backFaceCulling = false;
-
-  const box = BABYLON.MeshBuilder.CreateBox('bedPreview', {
-    width: dims.x / 1000, height: dims.z / 1000, depth: dims.y / 1000,
-  }, _scene);
-  box.material   = mat;
-  box.isPickable = false;
-  box.position.y = dims.z / 2000;
-}
+export function updateBedPreview(dims) { _bedUpdatePreview(dims); }
 
 // ── 3D cursor ────────────────────────────────────────────
 
@@ -1378,7 +1087,7 @@ export function pickMeshIdAt(x, y) {
   if (!_scene) return null;
   const result = _scene.pick(x, y, m => {
     if (!m?.isPickable) return false;
-    if (m === _ground || m.name === 'cursor3d' || m.name === 'bedPreview') return false;
+    if (m.name === 'grid' || m.name === 'cursor3d' || m.name === 'bedPreview') return false;
     return true;
   });
   if (!result?.hit || !result.pickedMesh) return null;
