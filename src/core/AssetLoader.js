@@ -43,6 +43,12 @@ const _newId = (prefix) => `${prefix}_${Date.now().toString(36)}_${++_idCounter}
 let _groupCounter = 0;
 const _newGroupId = () => `grp_${Date.now().toString(36)}_${++_groupCounter}`;
 
+/** sha256 hex of an ArrayBuffer — texture-identity scope (§10b). */
+async function _sha256Hex(buf) {
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // ── Public API ───────────────────────────────────────────
 
 /**
@@ -107,6 +113,12 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   const blobUrl = URL.createObjectURL(blob);
   _blobUrls.set(assetId, blobUrl);
 
+  // §10b texture-identity scope: hash the source bytes once. Reused as the
+  // AssetEntry contentHash so persistence doesn't re-hash at save time.
+  let sourceFileHash = null;
+  try { sourceFileHash = await _sha256Hex(await blob.arrayBuffer()); }
+  catch { /* hash is an identity optimisation — import proceeds without it */ }
+
   const loadToastId = Toast.show(`Loading ${filename}…`, 'loading');
 
   try {
@@ -121,7 +133,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // before ShaderLibrary walks container.materials.
     splitMultiMaterialMeshesInContainer(container);
 
-    const { byMaterial } = await ShaderLibrary.registerFromContainer(container);
+    const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
+      sourceAssetId: assetId, sourceFileHash,
+    });
 
     container.addAllToScene();
 
@@ -158,6 +172,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       modelRatio,
       directoryHandleKey: opts.directoryHandleKey ?? null,
       fileHandleKey,
+      contentHash: sourceFileHash,
       thumbnailDataUrl: null,
     };
     setState(s => ({
@@ -206,7 +221,9 @@ export async function instantiateAsset(assetId, position) {
       blobUrl, '', scene, null, asset.extension
     );
     splitMultiMaterialMeshesInContainer(container);
-    const { byMaterial } = await ShaderLibrary.registerFromContainer(container);
+    const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
+      sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
+    });
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
@@ -456,19 +473,20 @@ export function getBabylonTexture(assetId) {
  * registered, otherwise mints a new one.
  *
  * @param {BABYLON.BaseTexture} texture
+ * @param {{ sourceFileHash?: string|null, sourceAssetId?: string|null }} [ctx]
+ *   §10b identity scope — sourceFileHash is the sha256 of the source file the
+ *   texture arrived in; sourceAssetId is the owning mesh AssetEntry.
  * @returns {string|null}
  */
-export function registerImportedTexture(texture) {
+export function registerImportedTexture(texture, ctx = {}) {
   if (!texture) return null;
   for (const [id, t] of _textures.entries()) {
     if (t === texture) return id;
   }
-  // Content-dedupe by signature (texture name + dimensions + class). Two
-  // imports of the same glTF file produce different Babylon instances but
-  // identical metadata — reuse the canonical assetId so downstream shader
-  // entries share a textureAssetId, which in turn lets shader-content dedupe
-  // collapse the matching materials silently.
-  const dupId = _findImportedTextureBySignature(texture);
+  // Content-dedupe scoped by source file (§10b): same bytes re-imported reuse
+  // the canonical assetId; two DIFFERENT files never merge, even when loaders
+  // mint identical generic names ("Image_0") at equal dimensions (review H6).
+  const dupId = _findImportedTextureBySignature(texture, ctx);
   if (dupId) return dupId;
 
   const assetId = _newId('tex');
@@ -493,6 +511,9 @@ export function registerImportedTexture(texture) {
     kind: 'texture',
     directoryHandleKey: null,
     isImported: true,
+    sourceFileHash: ctx.sourceFileHash ?? null,
+    sourceAssetId: ctx.sourceAssetId ?? null,
+    babylonTextureName: typeof texture.name === 'string' ? texture.name : null,
     thumbnailDataUrl: null,   // populated async below
   };
   setState(s => ({
@@ -505,20 +526,23 @@ export function registerImportedTexture(texture) {
   return assetId;
 }
 
-function _importedTextureSignature(texture) {
+function _importedTextureSignature(texture, sourceFileHash) {
   const size = typeof texture.getSize === 'function' ? texture.getSize() : null;
   const w = size?.width ?? 0;
   const h = size?.height ?? 0;
   const cls = texture.constructor?.name ?? 'Texture';
-  return `${texture.name ?? ''}|${w}|${h}|${cls}`;
+  return `${sourceFileHash ?? ''}|${texture.name ?? ''}|${w}|${h}|${cls}`;
 }
 
-function _findImportedTextureBySignature(texture) {
-  const target = _importedTextureSignature(texture);
+function _findImportedTextureBySignature(texture, ctx = {}) {
+  // No file-hash scope → no content dedupe. Unscoped matching is exactly the
+  // cross-file aliasing bug (H6); instance identity was already checked.
+  if (!ctx.sourceFileHash) return null;
+  const target = _importedTextureSignature(texture, ctx.sourceFileHash);
   for (const [id, t] of _textures.entries()) {
     const entry = getState().scene.assetLibrary[id];
     if (!entry?.isImported) continue;
-    if (_importedTextureSignature(t) === target) return id;
+    if (_importedTextureSignature(t, entry.sourceFileHash) === target) return id;
   }
   return null;
 }
@@ -993,6 +1017,19 @@ export function bindRestoredMesh(meshId, mesh, assetId, sourceUnit = DEFAULT_SOU
 }
 
 /**
+ * Bind a restored container-owned texture instance under its persisted
+ * assetId (§10b reload rebind). PersistenceManager matches the instance by
+ * `babylonTextureName` inside the freshly restored container; this just
+ * registers it so `getBabylonTexture` / shader restore resolve it live.
+ * @param {string} assetId   persisted imported-texture asset id
+ * @param {BABYLON.BaseTexture} texture
+ */
+export function bindRestoredTexture(assetId, texture) {
+  if (!assetId || !texture) return;
+  _textures.set(assetId, texture);
+}
+
+/**
  * Recreate a user-loaded texture asset from embedded bytes, keeping its
  * persisted assetId so shader.diffuseTextureAssetId stays valid.
  * @param {object} entry  persisted AssetEntry (kind 'texture', !isImported)
@@ -1070,6 +1107,7 @@ export const AssetLoader = {
   releaseAsset, removeAsset, instantiateAsset, getContainer, getBabylonMesh, getDirectoryHandle,
   cloneMeshAsNewObject, restoreCloneToScene,
   getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh,
+  bindRestoredTexture,
   restoreTexture, registerAssetEntry, resetAll,
   bakeImportTransform, importScaleFactor,
 };

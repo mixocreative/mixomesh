@@ -73,7 +73,7 @@ function _createBabylonMaterial(type, name, scene) {
   return new BABYLON.StandardMaterial(name, scene);
 }
 
-function _buildEntryFromMaterial(material) {
+function _buildEntryFromMaterial(material, importCtx = {}) {
   const type = _detectType(material);
   let diffuseColor = FALLBACK_DIFFUSE;
   let opacity = 1, roughness = 0.5, metallic = 0;
@@ -89,10 +89,11 @@ function _buildEntryFromMaterial(material) {
   }
 
   // Whatever texture the material arrived with becomes a texture asset so the
-  // user can preview it, swap it onto another shader, or replace it.
+  // user can preview it, swap it onto another shader, or replace it. The
+  // import context scopes texture dedupe to the source file (§10b).
   const importedTex = material.albedoTexture ?? material.baseTexture ?? material.diffuseTexture;
   const diffuseTextureAssetId = importedTex
-    ? AssetLoader.registerImportedTexture(importedTex)
+    ? AssetLoader.registerImportedTexture(importedTex, importCtx)
     : null;
 
   return {
@@ -247,15 +248,17 @@ function _nextAvailableName(baseName) {
  * everything to Rename.
  *
  * @param {BABYLON.AssetContainer} container
+ * @param {{ sourceAssetId?: string|null, sourceFileHash?: string|null }} [importCtx]
+ *   §10b texture-identity scope, threaded into texture registration/dedupe.
  * @returns {Promise<{ shaderIds: string[], byMaterial: Map<BABYLON.Material, string> }>}
  */
-export async function registerFromContainer(container) {
-  const conflicts = _findNameConflicts(container);
+export async function registerFromContainer(container, importCtx = {}) {
+  const conflicts = _findNameConflicts(container, importCtx);
   const choices = conflicts.length ? await _promptMergeChoices(conflicts) : {};
-  return _doRegister(container, choices);
+  return _doRegister(container, choices, importCtx);
 }
 
-function _findNameConflicts(container) {
+function _findNameConflicts(container, importCtx = {}) {
   const existingByName = new Map();
   for (const [id, sh] of Object.entries(getState().scene.shaders)) {
     existingByName.set(sh.name, id);
@@ -269,7 +272,7 @@ function _findNameConflicts(container) {
     const existingId = existingByName.get(name);
     if (!existingId) continue;
     // Content match → auto-dedupe silently in _doRegister; no modal needed.
-    if (_findContentDuplicate(mat)) continue;
+    if (_findContentDuplicate(mat, importCtx)) continue;
     out.push({ name, existingShaderId: existingId, importedMaterial: mat });
   }
   return out;
@@ -281,8 +284,8 @@ function _findNameConflicts(container) {
  * prompting the user. Compares type, color, opacity, roughness, metallic,
  * uvBase, and texture asset id.
  */
-function _findContentDuplicate(mat) {
-  const fresh = _buildEntryFromMaterial(mat);
+function _findContentDuplicate(mat, importCtx = {}) {
+  const fresh = _buildEntryFromMaterial(mat, importCtx);
   const sig = _shaderSignature(fresh);
   for (const [id, sh] of Object.entries(getState().scene.shaders)) {
     if (_shaderSignature(sh) === sig) return id;
@@ -328,7 +331,7 @@ function _promptMergeChoices(conflicts) {
   });
 }
 
-function _doRegister(container, choices) {
+function _doRegister(container, choices, importCtx = {}) {
   const byMaterial = new Map();
   const shaderIds  = [];
 
@@ -342,7 +345,7 @@ function _doRegister(container, choices) {
     const name = mat.name || 'Material';
 
     // ── Auto-dedupe by content (any matching existing shader) ────────
-    const dupId = _findContentDuplicate(mat);
+    const dupId = _findContentDuplicate(mat, importCtx);
     if (dupId) {
       const existingMat = _materials.get(dupId);
       if (existingMat) {
@@ -381,7 +384,7 @@ function _doRegister(container, choices) {
       try { existingMat?.dispose(); } catch { /* */ }
       _materials.set(conflictId, mat);
 
-      const fresh = _buildEntryFromMaterial(mat);
+      const fresh = _buildEntryFromMaterial(mat, importCtx);
       setState(state => {
         const sh = state.scene.shaders[conflictId];
         if (!sh) return state;
@@ -412,7 +415,7 @@ function _doRegister(container, choices) {
 
     // Default path — register as a new shader. On 'rename' the name is bumped
     // to keep the scene's namespace unique.
-    const entry = _buildEntryFromMaterial(mat);
+    const entry = _buildEntryFromMaterial(mat, importCtx);
     if (conflictId) {
       entry.name = _nextAvailableName(name);
       mat.name = entry.name;

@@ -19,7 +19,10 @@ import {
 
 const BABYLON = window.BABYLON;
 
-const SCHEMA_VERSION = '3.1';
+// 3.2 adds §10b texture-identity fields (sourceFileHash / sourceAssetId /
+// babylonTextureName) on texture AssetEntries. 3.1 docs load unchanged —
+// missing fields skip the imported-texture rebind and fall back to colour.
+const SCHEMA_VERSION = '3.2';
 const FILE_EXT       = '.mixo';
 const FILE_TYPES     = [{
   description: 'MIXOMESH project',
@@ -105,6 +108,10 @@ async function _serialiseAssetLibrary() {
       directoryHandleKey: a.directoryHandleKey ?? null,
       fileHandleKey: a.fileHandleKey ?? null,
       isImported: !!a.isImported,
+      // §10b texture identity — drive dedupe scoping + reload rebind.
+      sourceFileHash: a.sourceFileHash ?? null,
+      sourceAssetId: a.sourceAssetId ?? null,
+      babylonTextureName: a.babylonTextureName ?? null,
       thumbnailDataUrl: typeof a.thumbnailDataUrl === 'string'
         && a.thumbnailDataUrl.startsWith('data:') ? a.thumbnailDataUrl : null,
       fileData: null, contentHash: null,
@@ -371,7 +378,17 @@ async function _loadProject(doc) {
     ui:        { ...s.ui, ...(data.ui || {}) },
   }), SILENT);
 
-  for (const sh of data.shaders || []) ShaderLibrary.restoreShader(sh);
+  // Assets restore BEFORE shaders (§11 Load Sequence) — restoreShader rebinds
+  // diffuseTextureAssetId via getBabylonTexture, which only resolves once
+  // user textures are restored and container-owned textures are rebound.
+  // The pre-3.2 shaders-first order silently dropped every texture binding.
+  const importedBySource = new Map();   // sourceAssetId → imported-texture entries
+  for (const a of data.assetLibrary || []) {
+    if (a.kind === 'texture' && a.isImported && a.sourceAssetId && a.babylonTextureName) {
+      if (!importedBySource.has(a.sourceAssetId)) importedBySource.set(a.sourceAssetId, []);
+      importedBySource.get(a.sourceAssetId).push(a);
+    }
+  }
 
   const assetRes = new Map();   // assetId → { status, geom? }
   const unmatched = [];
@@ -393,6 +410,13 @@ async function _loadProject(doc) {
       const geom = await AssetLoader.restoreContainer(a.id, r.blob, a.extension);
       const status = r.live ? 'live' : 'static';
       assetRes.set(a.id, { status, geom });
+      // §10b reload rebind: re-register this container's imported textures
+      // under their persisted assetIds so shader restore finds them live.
+      const container = AssetLoader.getContainer(a.id);
+      for (const t of importedBySource.get(a.id) ?? []) {
+        const tex = container?.textures?.find?.(x => x?.name === t.babylonTextureName);
+        if (tex) AssetLoader.bindRestoredTexture(t.id, tex);
+      }
       // Only nag for assets that were SUPPOSED to track a live file (had a
       // dir or file handle) but fell back to the embedded snapshot. A loose
       // drag-drop with no handle is an expected snapshot — never flag it,
@@ -405,6 +429,8 @@ async function _loadProject(doc) {
       assetRes.set(a.id, { status: 'ghost' });
     }
   }
+
+  for (const sh of data.shaders || []) ShaderLibrary.restoreShader(sh);
 
   const objMap = {};
   for (const o of data.sceneObjects || []) {
