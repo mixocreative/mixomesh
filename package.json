@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
     "test:headless": "node --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:export": "node tests/browser-export-smoke.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "9.6.2",
