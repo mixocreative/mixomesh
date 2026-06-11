@@ -134,16 +134,22 @@ src/
   core/
     events.js              ← imported by everything
     StateManager.js
-    HistoryManager.js
+    HistoryManager.js      ← undo/redo stack + façade re-exporting commands/*
+    commands/
+      support.js           ← shared command helpers (pivot detach, transforms, state patch)
+      TransformCommands.js ← Transform / BakeTransform / TransformSwab
+      HierarchyCommands.js ← Visibility/Lock/Rename*/Delete/Group/Ungroup/Duplicate/SmartReplace/PrintPart
+      ShaderCommands.js    ← ShaderCreate/Assign/Update/Duplicate/Delete, UVOverride, ColorApply
+      ScaleCommands.js     ← RescaleWorld + SourceUnit
     InputManager.js
-    SceneManager.js
+    SceneManager.js        ← engine/lighting/camera/gizmo orchestrator
     Selection.js           ← selection set + active id + pivot mode (§4b)
-    AssetLoader.js
+    AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js
     PersistenceManager.js
-    PrintManager.js        ← export seam (OBJ/STL/3MF), non-destructive
+    PrintManager.js        ← export orchestrator + OBJ/STL serializers, non-destructive
     print/
       PrintScale.js        ← scale presets, export factor, ratio filenames, dimensions
       PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
@@ -152,13 +158,20 @@ src/
       PrintPrep.js         ← reusable clone prep steps (flatten/weld/CSG/normals)
       PrintFormats.js      ← format registry: labels, prep order, serializers
       PrintPackaging.js    ← zip/blob packaging + download dispatch
+      ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared)
+      ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
     printers/              ← typed printer profile contracts + profile resolver
     scale/                 ← Authored/Scene/Print scale contracts
     assets/
       AssetTypes.js        ← supported extensions + extension parser
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
+      TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind
+      MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
+      BlobUrls.js          ← shared assetId → object-URL registry
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants
+      SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process
+      BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
@@ -339,21 +352,28 @@ Before writing custom logic, check if Babylon provides it. **Required uses:**
 If you find yourself writing > 30 lines of geometry / scene management code, stop and search the Babylon docs for an equivalent.
 
 ### 0.5 Module Size Targets (soft limits — split if exceeded)
+Revised 2026-06-11 after the L29 split pass; budgets below are HONEST — they
+match what the specced responsibilities actually cost.
+
 | Module | Target LOC |
 |---|---|
 | `events.js` | < 80 |
 | `StateManager.js` | < 200 |
-| `HistoryManager.js` | < 250 (all command classes in one file is OK) |
-| `InputManager.js` | < 300 |
-| `SceneManager.js` | < 400 |
-| `AssetLoader.js` | < 350 |
+| `HistoryManager.js` | < 200 (stack machinery + façade only; commands live in `core/commands/`) |
+| each `core/commands/*.js` | < 500 (HierarchyCommands is the big one by design) |
+| `InputManager.js` | < 750 (incl. modal G/R/S; extract `input/ModalTransform.js` if it grows) |
+| `SceneManager.js` | < 1000 (camera rig + pivot session extraction is the open follow-up; outline + bed/grid already split) |
+| each `core/scene/*.js` | < 250 |
+| `AssetLoader.js` | < 700 (mesh-side only; textures/split/blob-urls live in `core/assets/`) |
+| each `core/assets/*.js` | < 350 |
 | `ImportNormalizer.js` | < 150 |
-| `ShaderLibrary.js` | < 400 |
-| `MeshValidator.js` | < 300 |
-| `PersistenceManager.js` | < 400 |
-| `PrintManager.js` | < 350 |
-| `ThreeMFLoader.js` | < 250 (3MF import = inverse of 3MF export) |
-| Each `src/ui/*.js` | < 400 |
+| `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
+| `MeshValidator.js` | < 400 |
+| `PersistenceManager.js` | < 800 |
+| `PrintManager.js` | < 500 (orchestrator + OBJ/STL; 3MF writers + texture collection split out) |
+| each `core/print/*.js` | < 350 |
+| `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
+| Each `src/ui/*.js` | < 900 (PropertiesPanel/ShaderPanel are section stacks; split per-section when a panel exceeds this) |
 | `AppShell.js` | < 300 (shell controls + resize/collapse wiring) |
 | `src/app/main.ts` | < 220 (bootstrap + dependency wiring only) |
 
