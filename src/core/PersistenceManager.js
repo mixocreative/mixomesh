@@ -187,6 +187,7 @@ async function _buildDocument(opts = {}) {
     sceneSettings: {
       camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
       overlays: { ...s.scene.overlays },
+      render: { ...s.scene.render },
       grid: { ...s.scene.grid },
       cursor3d: { ...s.scene.cursor3d },
     },
@@ -377,6 +378,7 @@ async function _loadProject(doc) {
       ...s.scene,
       camera:   { ...s.scene.camera, ...(data.sceneSettings?.camera || {}) },
       overlays: { ...s.scene.overlays, ...(data.sceneSettings?.overlays || {}) },
+      render:   { ...s.scene.render, ...(data.sceneSettings?.render || {}) },
       grid:     { ...s.scene.grid, ...(data.sceneSettings?.grid || {}) },
       cursor3d: { ...s.scene.cursor3d, ...(data.sceneSettings?.cursor3d || {}) },
       userSwatches: data.userSwatches || [],
@@ -508,6 +510,7 @@ async function _loadProject(doc) {
     if (k === 'wireframeEdgeColor') continue;   // value, not a toggle
     SceneManager.setOverlay(k, !!v);
   }
+  SceneManager.applyRenderSettings(getState().scene.render);
   SceneManager.setScaleLock(getState().ui.scaleLocked !== false);
   ShaderLibrary.rebuildLinkedIndex();
 
@@ -631,8 +634,10 @@ export async function newProject() {
   SceneManager.rebuildBed();
   SceneManager.setGrid(getState().scene.grid);
   for (const [k, v] of Object.entries(getState().scene.overlays || {})) {
+    if (k === 'wireframeEdgeColor') continue;   // value, not a toggle
     SceneManager.setOverlay(k, !!v);
   }
+  SceneManager.applyRenderSettings(getState().scene.render);
   dispatch(EVENTS.PROJECT_NEW, {});
   _dirty = false;
   dispatch(EVENTS.PROJECT_SAVED, {});

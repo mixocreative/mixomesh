@@ -683,8 +683,11 @@ const initialState = {
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
     overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
-    // wireframeEdges + wireframeEdgeColor are written on first PrintPanel toggle
-    // (not in INITIAL_STATE); persistence restores them when present.
+    // wireframeEdges + wireframeEdgeColor are written on first viewport-toggle
+    // use (not in INITIAL_STATE); persistence restores them when present.
+    // Viewport render look (Scene panel) — defaults mirror SceneConstants;
+    // applied via SceneManager.applyRenderSettings on boot/load/new.
+    render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62 },
     grid: { cellMM: 10, subdivisions: 10 },  // line styling only; floor footprint = print.bedDimensions XY
     cursor3d: { x: 0, y: 0, z: 0 },
   },
@@ -1588,6 +1591,8 @@ Every field persisted. Restored exactly.
                 "followMode": "free" /* 'free' | 'followActive' | 'worldOrigin' */ },
     "overlays": { "grid": true, "axes": true, "wireframe": false, "printPreview": true,
                   "bedPreview": false, "wireframeEdges": false, "wireframeEdgeColor": "#f59e0b" },
+    "render": { "exposure": 1.05, "contrast": 1.10,
+                "shadowsEnabled": true, "shadowDarkness": 0.62 },
     "grid": { "cellMM": 10, "subdivisions": 10 },  /* line styling only; footprint = print.bedDimensions XY */
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
@@ -2131,8 +2136,10 @@ Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
    (Validation results are NOT a Properties section — they live in the
    Print ▸ Validation tab + Outliner row badges, both fed by the §9 cache.)
 
-**Scene** section (only when no object is active):
-- **Grid cell (mm)** + **Subdivisions** inputs → `SceneManager.setGrid({cellMM,subdivisions})` (state `scene.grid`). Read-only hint shows the current bed size; bed size itself is set in Print ▸ Bed.
+With no object active the panel shows only a "click a mesh" hint — Properties
+is object-scoped. Scene-wide settings (grid styling, grid/axes visibility,
+render look) live in the **Scene Panel** (`#rp-scene`, see below) so they stay
+reachable while something is selected.
 
 ### Copy active-to-selected — ↧ buttons (shipped post-Phase-7, 2026-05-18)
 Single header-level `↧` button on the **Transform**, **Shader**, and **UV
@@ -2277,6 +2284,19 @@ amber-highlight toggles + one swatch:
   `SceneManager.setOverlay('printPreview', on)`.
 State lives in `state.scene.overlays` (silent writes, same contract the
 Preview tab used). Re-renders on `PROJECT_LOADED` / `PROJECT_NEW`.
+
+### Scene Panel (`src/ui/ScenePanel.js`)
+Right-panel section `#rp-scene` (stacked after Shader Library, hidden in the
+Print workspace). Scene-wide settings, moved out of the Properties panel so
+they stay reachable while an object is selected (the old Scene section only
+rendered with nothing active — Properties is object-scoped now). Sections:
+- **Scene** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
+  axes visibility checkboxes (overlay contract), bed-size hint.
+- **Render** — exposure, contrast, shadows on/off, shadow darkness + a
+  "Reset render defaults" button. Writes `state.scene.render` (silent) and
+  applies via `SceneManager.applyRenderSettings`; persisted in
+  `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
+  `scene/SceneConstants.js` (TONE_EXPOSURE / TONE_CONTRAST / SHADOW_DARKNESS).
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 

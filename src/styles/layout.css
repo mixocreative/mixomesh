@@ -266,7 +266,11 @@
 body[data-workspace="layout"] #rp-print   { display: none; }
 body[data-workspace="shade"]  #rp-print   { display: none; }
 body[data-workspace="print"]  #rp-shaders,
+body[data-workspace="print"]  #rp-scene,
 body[data-workspace="print"]  .rp-splitter { display: none; }
+
+/* Scene panel: settings, not a workspace focus — compact, never greedy. */
+#rp-scene { flex: 0 1 auto; }
 
 #asset-panel.ap-outer-collapsed .ap-tree,
 #asset-panel.ap-outer-collapsed .ap-grid { display: none; }

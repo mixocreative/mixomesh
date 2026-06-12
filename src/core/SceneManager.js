@@ -367,6 +367,26 @@ function _setPrintPreviewMode(enabled) {
 /** Resize / recreate the bed preview box from mm dimensions. */
 export function updateBedPreview(dims) { _bedUpdatePreview(dims); }
 
+/**
+ * Apply viewport render settings (Scene panel / state.scene.render).
+ * Partial-safe: only the fields present are touched.
+ * @param {{ exposure?: number, contrast?: number,
+ *           shadowsEnabled?: boolean, shadowDarkness?: number }} [render]
+ */
+export function applyRenderSettings(render = {}) {
+  if (!_scene) return;
+  const ip = _scene.imageProcessingConfiguration;
+  if (Number.isFinite(render.exposure)) ip.exposure = render.exposure;
+  if (Number.isFinite(render.contrast)) ip.contrast = render.contrast;
+  if (_shadowGen) {
+    if (Number.isFinite(render.shadowDarkness)) _shadowGen.darkness = render.shadowDarkness;
+    const light = _shadowGen.getLight?.();
+    if (light && typeof render.shadowsEnabled === 'boolean') {
+      light.shadowEnabled = render.shadowsEnabled;
+    }
+  }
+}
+
 // ── 3D cursor ────────────────────────────────────────────
 
 function _setupCursor() {
@@ -436,7 +456,7 @@ export const SceneManager = {
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
-  setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview,
+  setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

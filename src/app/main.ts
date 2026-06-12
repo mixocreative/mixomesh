@@ -8,6 +8,7 @@ import { ViewportDrop } from '../ui/ViewportDrop.js';
 import { Outliner } from '../ui/Outliner.js';
 import { PropertiesPanel } from '../ui/PropertiesPanel.js';
 import { ShaderPanel } from '../ui/ShaderPanel.js';
+import { ScenePanel } from '../ui/ScenePanel.js';
 import { PrintPanel } from '../ui/PrintPanel.js';
 import { ContextMenu } from '../ui/ContextMenu.js';
 import { Modal } from '../ui/Modal.js';
@@ -63,6 +64,7 @@ async function bootstrap() {
   Outliner.init();
   PropertiesPanel.init();
   ShaderPanel.init();
+  ScenePanel.init();
   PrintPanel.init();
   ContextMenu.init();
   AssetPanel.init();
@@ -87,6 +89,7 @@ async function bootstrap() {
   InputManager.register('Ctrl+O', 'global', () => safeAsync(() => PersistenceManager.open()));
   InputManager.register('Ctrl+N', 'global', () => safeAsync(() => PersistenceManager.newProject()));
 
+  SceneManager.applyRenderSettings((getState() as { scene?: { render?: object } }).scene?.render ?? {});
   const overlays = (getState() as BootState).scene?.overlays;
   for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'bedPreview'] satisfies OverlayKey[]) {
     if (overlays?.[key]) SceneManager.setOverlay(key, true);

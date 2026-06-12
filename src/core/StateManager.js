@@ -27,6 +27,10 @@ const INITIAL_STATE = {
       followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
     overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
+    // Viewport render look (Scene panel). Defaults mirror scene/SceneConstants
+    // (TONE_EXPOSURE / TONE_CONTRAST / SHADOW_DARKNESS) — applied via
+    // SceneManager.applyRenderSettings on boot/load/new.
+    render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62 },
     // The scene floor footprint equals the printer bed XY (print.bedDimensions).
     // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,
     // subdivisions = how many minor cells between major lines.
