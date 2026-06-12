@@ -32,14 +32,15 @@ await test('freshState defaults: workspace layout, no overrides', () => {
   assert.deepEqual(ui.panelCollapsed, {});
 });
 
-await test('defaults table: three workspaces, outliner widths sane', () => {
-  assert.deepEqual(WORKSPACES, ['layout', 'shade', 'print']);
+await test('defaults table: four workspaces, outliner widths sane', () => {
+  assert.deepEqual(WORKSPACES, ['layout', 'shade', 'scene', 'print']);
   for (const ws of WORKSPACES) {
     const d = WORKSPACE_DEFAULTS[ws];
     assert.ok(d.outlinerWidth >= 140 && d.rightWidth >= 200 && d.assetHeight >= 80, ws);
   }
   assert.equal(WORKSPACE_DEFAULTS.layout.bottom, true,  'Layout = drop-target focus');
   assert.equal(WORKSPACE_DEFAULTS.shade.bottom,  false, 'Shade collapses the asset panel');
+  assert.equal(WORKSPACE_DEFAULTS.scene.bottom,  false, 'Scene collapses the asset panel');
   assert.equal(WORKSPACE_DEFAULTS.print.bottom,  false, 'Print collapses the asset panel');
 });
 

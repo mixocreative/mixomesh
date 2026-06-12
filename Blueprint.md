@@ -861,9 +861,10 @@ Ctrl+Shift+S    → save as
 Ctrl+N          → new project (confirm if dirty)
 Ctrl+O          → open
 
-Ctrl+1          → workspace: Layout     (see PART 13b)
-Ctrl+2          → workspace: Shade
-Ctrl+3          → workspace: Print
+Ctrl+Shift+1    → workspace: Layout     (see PART 13b — Ctrl+digit is Chrome-reserved)
+Ctrl+Shift+2    → workspace: Shade
+Ctrl+Shift+3    → workspace: Scene
+Ctrl+Shift+4    → workspace: Print
 ```
 
 **Panel toggles** (single keys; suppressed when an `<input>/<textarea>/<select>` has focus):
@@ -2293,8 +2294,9 @@ State lives in `state.scene.overlays` (silent writes, same contract the
 Preview tab used). Re-renders on `PROJECT_LOADED` / `PROJECT_NEW`.
 
 ### Scene Panel (`src/ui/ScenePanel.js`)
-Right-panel section `#rp-scene` (stacked after Shader Library, hidden in the
-Print workspace). Scene-wide settings, moved out of the Properties panel so
+Right-panel section `#rp-scene` — the specialist section of the **Scene
+workspace** (hidden in Layout / Shade / Print). Scene-wide settings, moved
+out of the Properties panel so
 they stay reachable while an object is selected (the old Scene section only
 rendered with nothing active — Properties is object-scoped now). Sections:
 - **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
@@ -2400,11 +2402,13 @@ localStorage persistence, `.mixo` ui-strip. Two deliberate v1 deviations:
   expand/collapse defaults in the workspace table below (e.g. "Transform
   expanded, Shader header-collapsed") are NOT implemented. Instead (2026-06-12
   decision: no repeated sections across workspaces unless genuinely needed)
-  each workspace shows Properties + exactly ONE specialist section:
-  Layout → **Scene** panel, Shade → **Shader Library**, Print → **Print**.
-  `ShaderPanel.focus()` auto-switches to Shade when invoked from another
-  workspace (Properties chip click / ContextMenu Set Shader). Expansion state
-  within visible panels is left to the user.
+  each workspace shows Properties + at most ONE specialist section:
+  Layout → none (arrange focus, asset panel visible), Shade → **Shader
+  Library**, Scene → **Scene** panel, Print → **Print**. FOUR workspaces —
+  Scene was promoted to its own workspace between Shade and Print
+  (user decision 2026-06-12). `ShaderPanel.focus()` auto-switches to Shade
+  when invoked from another workspace (Properties chip click / ContextMenu
+  Set Shader). Expansion state within visible panels is left to the user.
 
 **Design intent.** The user's workflow is linear — *Import → Arrange → Shade → Print* — not the swiss-army-knife DCC pattern. Tabbed panels with manual resize don't scale once the Print pipeline grows (Bed / Scale / Validation / Export, plus deferred Thickness / Orientation). Industry-standard fix is **workspace presets** (Blender top-bar pattern, also Substance Painter, Maya, Cinema 4D, Houdini): a tiny set of named panel layouts, one click to switch. The user stops resizing because the layout is *per task*, not freeform.
 
@@ -2418,8 +2422,9 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 
 | Workspace | Outliner | Properties | Scene Panel | Shader Library | Asset Panel | Print Panel |
 |---|---|---|---|---|---|---|
-| **Layout** (default — import & arrange) | visible 260px | visible | **visible** (grid / render / camera setup) | hidden | visible at default 220px (drop target focus) | hidden |
+| **Layout** (default — import & arrange) | visible 260px | visible | hidden | hidden | visible at default 220px (drop target focus) | hidden |
 | **Shade** (texture / shader / UV) | visible 220px (narrow) | visible | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
+| **Scene** (grid / render / camera setup) | visible 220px (narrow) | visible | **visible** | hidden | hidden | hidden |
 | **Print** (validate + export) | visible 220px (narrow) | visible | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
 
 Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.

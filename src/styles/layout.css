@@ -265,16 +265,21 @@
 
 /* Each workspace shows Properties + exactly ONE specialist section — no
    repeated sections across workspaces (they dilute the presets):
-     Layout → Scene (arrange + scene/render setup)
+     Layout → Properties + Asset panel (arrange focus, no specialist section)
      Shade  → Shader Library (ShaderPanel.focus auto-switches here)
+     Scene  → Scene (grid / render / camera setup)
      Print  → Print
    The splitter sits between Properties and Shader Library, so it only
    exists in Shade. */
 body[data-workspace="layout"] #rp-print,
 body[data-workspace="layout"] #rp-shaders,
+body[data-workspace="layout"] #rp-scene,
 body[data-workspace="layout"] .rp-splitter { display: none; }
 body[data-workspace="shade"]  #rp-print,
 body[data-workspace="shade"]  #rp-scene   { display: none; }
+body[data-workspace="scene"]  #rp-print,
+body[data-workspace="scene"]  #rp-shaders,
+body[data-workspace="scene"]  .rp-splitter { display: none; }
 body[data-workspace="print"]  #rp-shaders,
 body[data-workspace="print"]  #rp-scene,
 body[data-workspace="print"]  .rp-splitter { display: none; }

@@ -73,7 +73,7 @@ async function main() {
     if (setup?.error) throw new Error(`setup failed: ${setup.error}`);
     await sleep(800);   // settle: auto-frame animation + thumbnail
 
-    for (const ws of ['layout', 'shade', 'print']) {
+    for (const ws of ['layout', 'shade', 'scene', 'print']) {
       await evaluate(cdp, `(async () => {
         const { Workspace } = await import('/src/ui/Workspace.js');
         Workspace.setWorkspace('${ws}');

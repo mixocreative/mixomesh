@@ -19,18 +19,20 @@ const STORAGE_KEY = 'mixomesh_ui_workspace';
 const STORAGE_VERSION = 2;
 const SILENT = { silent: true };
 
-export const WORKSPACES = ['layout', 'shade', 'print'];
+export const WORKSPACES = ['layout', 'shade', 'scene', 'print'];
 
 /**
  * Per-workspace defaults. `right`/`bottom` are panel visibility (manual
  * panelCollapsed overrides layer on top); widths/heights feed the CSS grid
  * variables. Section visibility inside the right column (which of
- * Properties / Shader / Print show) is CSS-driven via body[data-workspace]
+ * Properties / Shader / Scene / Print show — one specialist section per
+ * workspace, no repeats) is CSS-driven via body[data-workspace]
  * (see layout.css) so it needs no per-panel JS.
  */
 export const WORKSPACE_DEFAULTS = {
   layout: { right: true, bottom: true,  outlinerWidth: 260, rightWidth: 300, assetHeight: 220, label: 'Layout' },
   shade:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 340, assetHeight: 220, label: 'Shade' },
+  scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene' },
   print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print' },
 };
 
@@ -98,12 +100,14 @@ export function init() {
 
   InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
   InputManager.register('Ctrl+Shift+@', 'global', () => setWorkspace('shade'));
-  InputManager.register('Ctrl+Shift+#', 'global', () => setWorkspace('print'));
+  InputManager.register('Ctrl+Shift+#', 'global', () => setWorkspace('scene'));
+  InputManager.register('Ctrl+Shift+$', 'global', () => setWorkspace('print'));
   // Shift+digit produces the symbol on US layouts; register the digit form
-  // too so non-US layouts that report '1'..'3' still work.
+  // too so non-US layouts that report '1'..'4' still work.
   InputManager.register('Ctrl+Shift+1', 'global', () => setWorkspace('layout'));
   InputManager.register('Ctrl+Shift+2', 'global', () => setWorkspace('shade'));
-  InputManager.register('Ctrl+Shift+3', 'global', () => setWorkspace('print'));
+  InputManager.register('Ctrl+Shift+3', 'global', () => setWorkspace('scene'));
+  InputManager.register('Ctrl+Shift+4', 'global', () => setWorkspace('print'));
 
   InputManager.register('N',  'global', () => togglePanel('right'));
   InputManager.register('T',  'global', () => togglePanel('bottom'));
