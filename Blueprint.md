@@ -178,6 +178,9 @@ src/
       BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
+    RenderOutput.js        ← Scene ▸ Rendering capture engine: PNG stills + turntable video
+    render/
+      RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
@@ -198,13 +201,16 @@ src/
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
     ViewportToggles.js     ← wireframe-edges + matte toggles docked under the NavCube
-    ScenePanel.js          ← Scene workspace panel: grid / render / camera settings
+    ScenePanel.js          ← Scene workspace panel: grid / render / camera / Rendering output
+    RenderFrame.js         ← Render-view compose overlay (aspect frame + darkening)
     Workspace.js           ← workspace presets (PART 13b): pill, hotkeys, scroll memory
     NumberScrub.js         ← wheel-scrub on number inputs (delegated, panel never scrolls)
     NavCube.js             ← top-left orientation widget
 tests/                     ← headless harness — Node-native, no build (§14b)
   register-hooks.mjs       ← `node:module.register` entry; runner uses --import
   browser-smoke.mjs        ← Vite-backed local Chrome/Edge CDP smoke test; no package deps
+  browser-video-check.mjs  ← HEADED turntable-recording check (`test:video`, manual — MediaRecorder freezes headless Chromium)
+  render-output.test.mjs   ← RenderMath: easing/format/frame-fit/filename contracts
   hooks.mjs                ← resolver hook: 'jszip' → stub, './idb.js' → stub
   jszip-stub.mjs           ← minimal JSZip for export tests
   idb-stub.mjs             ← in-memory mirror of src/core/idb.js
@@ -708,7 +714,17 @@ const initialState = {
     render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62,
               background: 'light' /* |'dark' */,
               keyIntensity: 0.70, fillIntensity: 0.25, hemiIntensity: 0.85,
-              fovDeg: 45.8, clipNearMM: 1 },
+              fovDeg: 45.8, clipNearMM: 1,
+              // Grade — tone-map curve + colour (Babylon imageProcessing).
+              toneMapping: 'aces' /* |'standard'|'neutral'|'off' */,
+              saturation: 0 /* colorCurves.globalSaturation, -100..100 */,
+              vignette: false, vignetteWeight: 1.5 },
+    // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
+    // turntable video. pose = stored render-camera composition (null until
+    // "Set view"); the Render-view toggle swaps the live camera to/from it.
+    renderOut: { width: 1920, height: 1080, transparent: false,
+                 pose: null /* { alpha, beta, radius, target, isOrthographic } */,
+                 turntable: { durationS: 8, fps: 30, direction: 'left' /* |'right' */, ease: true } },
     grid: { cellMM: 10, subdivisions: 10 },  // line styling only; floor footprint = print.bedDimensions XY
     cursor3d: { x: 0, y: 0, z: 0 },
   },
@@ -1621,7 +1637,12 @@ Every field persisted. Restored exactly.
                 "shadowsEnabled": true, "shadowDarkness": 0.62,
                 "background": "light", "keyIntensity": 0.70,
                 "fillIntensity": 0.25, "hemiIntensity": 0.85,
-                "fovDeg": 45.8, "clipNearMM": 1 },
+                "fovDeg": 45.8, "clipNearMM": 1,
+                "toneMapping": "aces", "saturation": 0,
+                "vignette": false, "vignetteWeight": 1.5 },
+    "renderOut": { "width": 1920, "height": 1080, "transparent": false,
+                   "pose": null, /* or saved camera pose for the Render view */
+                   "turntable": { "durationS": 8, "fps": 30, "direction": "left", "ease": true } },
     "grid": { "cellMM": 10, "subdivisions": 10 },  /* line styling only; footprint = print.bedDimensions XY */
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
@@ -2323,7 +2344,10 @@ rendered with nothing active — Properties is object-scoped now). Sections:
 - **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
   axes visibility checkboxes (overlay contract), bed-size hint.
 - **Render** — background Light/Dark (repaints the gradient backdrop +
-  clearColor), exposure, contrast, shadows on/off, shadow darkness,
+  clearColor), exposure, contrast, **tone map** (ACES / Neutral-KHR /
+  Standard / Off — `imageProcessing.toneMappingType`), **saturation**
+  (`colorCurves.globalSaturation`, −100..100, curves enabled only when ≠ 0),
+  **vignette** toggle + weight, shadows on/off, shadow darkness,
   key/fill/ambient light intensities + a "Reset render defaults" button.
 - **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
   `CameraRig.applyCameraOptics` via the same settings object.
@@ -2331,6 +2355,43 @@ All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
 `scene/SceneConstants.js`.
+- **Rendering** — output production (`state.scene.renderOut`, persisted in
+  `sceneSettings.renderOut`; capture engine = `core/RenderOutput.js`):
+  - **Resolution** preset (1080p / 4K / Square / Portrait) + custom W×H
+    (clamped 16–8192) and a **Transparent background** toggle (PNG only).
+  - **Render view** checkbox — compose mode: parks the free-nav camera pose,
+    jumps to the stored `renderOut.pose` (when set), and shows the
+    `ui/RenderFrame.js` overlay (aspect-fit rect for the output resolution;
+    giant box-shadow darkens outside; pointer-events pass through so nav
+    still works). **Set view** stores the current camera as the render pose.
+    Exits without touching the camera on `PROJECT_LOADED`/`PROJECT_NEW`.
+  - **Export PNG** — `RenderOutput.capturePng`: RTT screenshot
+    (`CreateScreenshotUsingRenderTargetAsync`) at the exact output
+    resolution. The RTT path skips the selection-silhouette post-process
+    (clean renders) while keeping tone mapping (material-level). Scene
+    furniture (grid / axes / bed preview / 3D cursor) is hidden for the
+    capture and restored; transparent mode disables the background Layer +
+    sets `clearColor` alpha 0 (`SceneManager.setBackgroundEnabled`).
+  - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
+    ease in/out: `RenderOutput.recordTurntable` sweeps `camera.alpha` a full
+    signed 360° around the current target (wall-clock-driven inside
+    `onBeforeRenderObservable`; sinusoidal ease via
+    `render/RenderMath.turntableAlpha`), recording the live canvas with
+    `canvas.captureStream` + MediaRecorder. Esc cancels; nav is locked
+    (`pointerEvents none`); hidden-tab `visibilitychange` cancels (paused
+    rAF would stall the sweep forever); camera pose restored after.
+    Container: mp4 `avc3` preferred (avc1 rejects mid-stream resolution
+    changes), WebM vp8 fallback — and an mp4 recording that comes back
+    empty auto-retries once as WebM. Filenames share the §12 export-stem
+    contract: `<project>_render_<w>x<h>[_alpha].png`,
+    `<project>_turntable_<s>s.<ext>` (`render/RenderMath.js`).
+  - ⚠ MediaRecorder is **broken in headless Chromium** (renderer freezes on
+    the first encoded frame — GPU and SwiftShader alike), so `npm test` /
+    `test:browser` only pin capture + UI; the encode itself is verified by
+    the **headed** `npm run test:video` (Chrome 149.0.7827 froze the same
+    way even headed/live on the dev machine — a Chrome-build bug; Edge 149
+    passes with a ~1.7 MB mp4 for a 2 s sweep; `VIDEO_CHECK_EDGE=1` forces
+    Edge).
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 
@@ -2445,7 +2506,7 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 |---|---|---|---|---|---|---|
 | **Layout** (default — import & arrange) | visible 260px | visible, task-filtered: Object / Transform / Source Unit / Print Part (Shader + UV hidden) | hidden | hidden | visible at default 220px (drop target focus) | hidden |
 | **Shading** (id `shade` — texture / shader / UV) | visible 220px (narrow) | visible, task-filtered: Object / Shader / UV Override (Transform + Source Unit + Print Part hidden) | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
-| **Scene** (grid / render / camera setup) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
+| **Scene** (grid / render / camera / Rendering output) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
 | **Print** (validate + export) | visible 220px (narrow) | **hidden** (per-object Print Part toggle lives in Layout; selective export via Print ▸ Export "selected only") | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
 
 Properties section filtering is pure CSS (`body[data-workspace]` +

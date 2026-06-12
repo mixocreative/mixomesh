@@ -188,6 +188,7 @@ async function _buildDocument(opts = {}) {
       camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
       overlays: { ...s.scene.overlays },
       render: { ...s.scene.render },
+      renderOut: { ...s.scene.renderOut },
       grid: { ...s.scene.grid },
       cursor3d: { ...s.scene.cursor3d },
     },
@@ -379,6 +380,13 @@ async function _loadProject(doc) {
       camera:   { ...s.scene.camera, ...(data.sceneSettings?.camera || {}) },
       overlays: { ...s.scene.overlays, ...(data.sceneSettings?.overlays || {}) },
       render:   { ...s.scene.render, ...(data.sceneSettings?.render || {}) },
+      renderOut: {
+        ...s.scene.renderOut, ...(data.sceneSettings?.renderOut || {}),
+        turntable: {
+          ...s.scene.renderOut?.turntable,
+          ...(data.sceneSettings?.renderOut?.turntable || {}),
+        },
+      },
       grid:     { ...s.scene.grid, ...(data.sceneSettings?.grid || {}) },
       cursor3d: { ...s.scene.cursor3d, ...(data.sceneSettings?.cursor3d || {}) },
       userSwatches: data.userSwatches || [],

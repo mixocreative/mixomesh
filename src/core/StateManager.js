@@ -37,6 +37,19 @@ const INITIAL_STATE = {
       background: 'light',
       keyIntensity: 0.70, fillIntensity: 0.25, hemiIntensity: 0.85,
       fovDeg: 45.8, clipNearMM: 1,
+      // Grade: tone-map curve + colour controls (Babylon imageProcessing).
+      // saturation is colorCurves.globalSaturation (-100..100, 0 = neutral).
+      toneMapping: 'aces',        // 'aces' | 'standard' | 'neutral' | 'off'
+      saturation: 0,
+      vignette: false, vignetteWeight: 1.5,
+    },
+    // Render output (Scene ▸ Rendering): PNG stills + turntable video.
+    // pose = saved render-camera composition (null until the user sets one);
+    // the render-view toggle swaps the live camera to/from it.
+    renderOut: {
+      width: 1920, height: 1080, transparent: false,
+      pose: null,   // { alpha, beta, radius, target, isOrthographic } | null
+      turntable: { durationS: 8, fps: 30, direction: 'left', ease: true },
     },
     // The scene floor footprint equals the printer bed XY (print.bedDimensions).
     // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,

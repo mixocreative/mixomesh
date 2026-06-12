@@ -184,6 +184,29 @@
 #right-panel.rp-outer-collapsed .rp-section,
 #right-panel.rp-outer-collapsed .rp-splitter { display: none; }
 
+/* ── Render-frame overlay (Scene ▸ Rendering compose mode) ── */
+/* Aspect-fit rect for the output resolution; the oversized box-shadow
+   darkens everything outside the frame. Pointer-events pass through so
+   the camera stays navigable while composing. */
+.render-frame {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  z-index: 12;
+}
+.render-frame-label {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
 /* ── Toast container ──────────────────────────────────── */
 #toast-container {
   position: fixed;

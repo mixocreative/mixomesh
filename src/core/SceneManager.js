@@ -59,6 +59,7 @@ let _axes      = null;   // { x, y, z } line meshes
 let _cursor    = null;
 let _shadowGen = null;
 let _bgTexture = null;   // gradient DynamicTexture — repainted on bg toggle
+let _bgLayer   = null;   // background Layer — disabled for transparent renders
 let _bgMode    = 'light';
 let _lights    = null;   // { hemi, key, fill } — Scene panel intensity sliders
 
@@ -146,8 +147,25 @@ function _setupBackground() {
   _bgTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
   _paintBackground('light');
 
-  const layer = new BABYLON.Layer('mx-bg', null, _scene, /* isBackground */ true);
-  layer.texture = _bgTexture;
+  _bgLayer = new BABYLON.Layer('mx-bg', null, _scene, /* isBackground */ true);
+  _bgLayer.texture = _bgTexture;
+}
+
+/**
+ * Enable/disable the gradient backdrop. Used by transparent PNG capture:
+ * off → layer skipped AND clearColor alpha 0, so the RTT screenshot keeps
+ * real alpha. Always restore to true afterwards.
+ * @param {boolean} on
+ */
+export function setBackgroundEnabled(on) {
+  if (!_scene) return;
+  if (_bgLayer) _bgLayer.isEnabled = !!on;
+  if (on) {
+    const bottom = _bgMode === 'dark' ? BG_DARK_BOTTOM : BG_GRADIENT_BOTTOM;
+    _scene.clearColor = BABYLON.Color4.FromHexString(bottom + 'ff');
+  } else {
+    _scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+  }
 }
 
 /** Repaint the gradient backdrop. @param {'light'|'dark'} mode */
@@ -392,13 +410,39 @@ export function updateBedPreview(dims) { _bedUpdatePreview(dims); }
  *           shadowsEnabled?: boolean, shadowDarkness?: number,
  *           background?: 'light'|'dark',
  *           keyIntensity?: number, fillIntensity?: number, hemiIntensity?: number,
- *           fovDeg?: number, clipNearMM?: number }} [render]
+ *           fovDeg?: number, clipNearMM?: number,
+ *           toneMapping?: 'aces'|'standard'|'neutral'|'off',
+ *           saturation?: number, vignette?: boolean, vignetteWeight?: number }} [render]
  */
 export function applyRenderSettings(render = {}) {
   if (!_scene) return;
   const ip = _scene.imageProcessingConfiguration;
   if (Number.isFinite(render.exposure)) ip.exposure = render.exposure;
   if (Number.isFinite(render.contrast)) ip.contrast = render.contrast;
+  if (typeof render.toneMapping === 'string') {
+    const IPC = BABYLON.ImageProcessingConfiguration;
+    const TYPES = {
+      aces:     IPC.TONEMAPPING_ACES,
+      standard: IPC.TONEMAPPING_STANDARD,
+      neutral:  IPC.TONEMAPPING_KHR_PBR_NEUTRAL ?? IPC.TONEMAPPING_ACES,
+    };
+    if (render.toneMapping === 'off') {
+      ip.toneMappingEnabled = false;
+    } else if (render.toneMapping in TYPES) {
+      ip.toneMappingEnabled = true;
+      ip.toneMappingType    = TYPES[render.toneMapping];
+    }
+  }
+  if (Number.isFinite(render.saturation)) {
+    // colorCurves only sampled when both flags are on; keep them off at
+    // neutral so untouched projects skip the extra shader work.
+    const sat = Math.max(-100, Math.min(100, render.saturation));
+    ip.colorCurvesEnabled = sat !== 0;
+    if (!ip.colorCurves) ip.colorCurves = new BABYLON.ColorCurves();
+    ip.colorCurves.globalSaturation = sat;
+  }
+  if (typeof render.vignette === 'boolean') ip.vignetteEnabled = render.vignette;
+  if (Number.isFinite(render.vignetteWeight)) ip.vignetteWeight = render.vignetteWeight;
   if (_shadowGen) {
     if (Number.isFinite(render.shadowDarkness)) _shadowGen.darkness = render.shadowDarkness;
     const light = _shadowGen.getLight?.();
@@ -488,6 +532,7 @@ export const SceneManager = {
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
+  setBackgroundEnabled,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

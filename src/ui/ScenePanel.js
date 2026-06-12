@@ -1,14 +1,24 @@
 // Scene panel (#rp-scene) — scene-wide settings, moved OUT of the Properties
 // panel so they're reachable while an object is selected (the old Scene
-// section only rendered when nothing was active). Two sections:
-//   Scene  — grid styling (cell mm / subdivisions) + grid/axes visibility
-//   Render — viewport look: exposure, contrast, shadows (state.scene.render,
-//            applied via SceneManager.applyRenderSettings, persisted in .mixo)
-// Hidden in the Print workspace via body[data-workspace] CSS (layout.css).
+// section only rendered when nothing was active). Sections:
+//   Grid      — grid styling (cell mm / subdivisions) + grid/axes visibility
+//   Render    — viewport look: exposure, contrast, tone map, saturation,
+//               vignette, shadows, lights (state.scene.render, applied via
+//               SceneManager.applyRenderSettings, persisted in .mixo)
+//   Camera    — optics (FOV / near clip)
+//   Rendering — output production (state.scene.renderOut): PNG stills
+//               (optionally transparent), render-view compose toggle with
+//               frame overlay, and turntable video (core/RenderOutput.js)
+// Hidden outside the Scene workspace via body[data-workspace] CSS (layout.css).
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
+import { capturePng, recordTurntable, isRecording } from '../core/RenderOutput.js';
+import { renderPngName, turntableVideoName, clampDimension } from '../core/render/RenderMath.js';
+import { RenderFrame } from './RenderFrame.js';
+import { Toast } from './Toast.js';
+import { triggerDownload } from '../core/print/Download.js';
 import {
   TONE_EXPOSURE, TONE_CONTRAST, SHADOW_DARKNESS,
   KEY_INTENSITY, FILL_INTENSITY, HEMI_INTENSITY,
@@ -27,17 +37,44 @@ const RENDER_DEFAULTS = {
   hemiIntensity: HEMI_INTENSITY,
   fovDeg: 45.8,       // Babylon ArcRotateCamera default fov 0.8 rad
   clipNearMM: 1,      // CameraRig boots with minZ 0.001 BU = 1 mm
+  toneMapping: 'aces',
+  saturation: 0,
+  vignette: false,
+  vignetteWeight: 1.5,
 };
 
+const RENDEROUT_DEFAULTS = {
+  width: 1920, height: 1080, transparent: false, pose: null,
+  turntable: { durationS: 8, fps: 30, direction: 'left', ease: true },
+};
+
+const RESOLUTION_PRESETS = [
+  { label: '1080p — 1920 × 1080', w: 1920, h: 1080 },
+  { label: '4K — 3840 × 2160',    w: 3840, h: 2160 },
+  { label: 'Square — 2048 × 2048', w: 2048, h: 2048 },
+  { label: 'Portrait — 1080 × 1920', w: 1080, h: 1920 },
+];
+
 let _bodyEl = null;
+// Render-view compose mode — session-only. navPose = where the user's free
+// navigation was when the toggle went on, restored on toggle off.
+const _rv = { active: false, navPose: null };
 
 export function init() {
   _bodyEl = document.getElementById('rp-scene-body');
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
-  subscribe(EVENTS.PROJECT_LOADED, _render);
-  subscribe(EVENTS.PROJECT_NEW, _render);
+  subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _render(); });
+  subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _render(); });
   _render();
+}
+
+// Drop out of compose mode without touching the camera — on project switch
+// the loaded/new camera state wins, the stale navPose must not clobber it.
+function _exitRenderView() {
+  _rv.active = false;
+  _rv.navPose = null;
+  RenderFrame.hide();
 }
 
 function _render() {
@@ -46,7 +83,10 @@ function _render() {
   const grid = s.scene.grid ?? { cellMM: 10, subdivisions: 10 };
   const overlays = s.scene.overlays ?? {};
   const render = { ...RENDER_DEFAULTS, ...(s.scene.render ?? {}) };
+  const ro = _ro();
+  const tt = ro.turntable;
   const bed = s.print.bedDimensions;
+  const presetIdx = RESOLUTION_PRESETS.findIndex(p => p.w === ro.width && p.h === ro.height);
 
   _bodyEl.innerHTML = `
     <section class="pp-section">
@@ -84,6 +124,26 @@ function _render() {
         <label>Contrast</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="contrast" value="${_fmt(render.contrast)}">
       </div>
+      <div class="pp-row">
+        <label>Tone map</label>
+        <select data-render-select="toneMapping">
+          <option value="aces" ${render.toneMapping === 'aces' ? 'selected' : ''}>ACES (filmic)</option>
+          <option value="neutral" ${render.toneMapping === 'neutral' ? 'selected' : ''}>Neutral (KHR)</option>
+          <option value="standard" ${render.toneMapping === 'standard' ? 'selected' : ''}>Standard</option>
+          <option value="off" ${render.toneMapping === 'off' ? 'selected' : ''}>Off (linear)</option>
+        </select>
+      </div>
+      <div class="pp-row">
+        <label>Saturation</label>
+        <input type="number" step="5" min="-100" max="100" data-render="saturation" value="${_fmt(render.saturation, 0)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-render-toggle="vignette" ${render.vignette ? 'checked' : ''}> Vignette</label>
+      </div>
+      <div class="pp-row">
+        <label>Vignette amt</label>
+        <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
+      </div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="shadowsEnabled" ${render.shadowsEnabled ? 'checked' : ''}> Shadows</label>
       </div>
@@ -118,8 +178,92 @@ function _render() {
         <input type="number" step="0.5" min="0.1" max="100" data-render="clipNearMM" value="${_fmt(render.clipNearMM, 1)}">
       </div>
     </section>
+    <section class="pp-section">
+      <header class="pp-section-header">Rendering</header>
+      <div class="pp-row">
+        <label>Resolution</label>
+        <select data-ro-preset>
+          ${RESOLUTION_PRESETS.map((p, i) =>
+            `<option value="${i}" ${i === presetIdx ? 'selected' : ''}>${p.label}</option>`).join('')}
+          <option value="custom" ${presetIdx === -1 ? 'selected' : ''}>Custom</option>
+        </select>
+      </div>
+      <div class="pp-row">
+        <label>Width px</label>
+        <input type="number" step="1" min="16" max="8192" data-ro="width" value="${_fmt(ro.width, 0)}">
+      </div>
+      <div class="pp-row">
+        <label>Height px</label>
+        <input type="number" step="1" min="16" max="8192" data-ro="height" value="${_fmt(ro.height, 0)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-ro-toggle="transparent" ${ro.transparent ? 'checked' : ''}> Transparent background (PNG)</label>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-action="render-view" ${_rv.active ? 'checked' : ''}> Render view</label>
+        <button type="button" class="pp-btn" data-action="set-view" title="Store the current camera as the render position">${ro.pose ? 'Update view' : 'Set view'}</button>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <button type="button" class="pp-btn" data-action="export-png">Export PNG</button>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Turntable — one full 360° around the current view.</span>
+      </div>
+      <div class="pp-row">
+        <label>Duration (s)</label>
+        <input type="number" step="1" min="1" max="120" data-tt="durationS" value="${_fmt(tt.durationS, 0)}">
+      </div>
+      <div class="pp-row">
+        <label>FPS</label>
+        <select data-tt-select="fps">
+          <option value="30" ${tt.fps !== 60 ? 'selected' : ''}>30</option>
+          <option value="60" ${tt.fps === 60 ? 'selected' : ''}>60</option>
+        </select>
+      </div>
+      <div class="pp-row">
+        <label>Direction</label>
+        <select data-tt-select="direction">
+          <option value="left" ${tt.direction !== 'right' ? 'selected' : ''}>Left</option>
+          <option value="right" ${tt.direction === 'right' ? 'selected' : ''}>Right</option>
+        </select>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-tt-toggle="ease" ${tt.ease ? 'checked' : ''}> Ease in / out</label>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <button type="button" class="pp-btn" data-action="export-video">Export video</button>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Video records the viewport live — Esc cancels.</span>
+      </div>
+    </section>
   `;
   _wire();
+}
+
+// renderOut accessor — state merged over defaults (turntable merged one level
+// deeper so a partial old save can't drop fields).
+function _ro() {
+  const stored = getState().scene.renderOut ?? {};
+  return {
+    ...RENDEROUT_DEFAULTS, ...stored,
+    turntable: { ...RENDEROUT_DEFAULTS.turntable, ...(stored.turntable ?? {}) },
+  };
+}
+
+function _setRenderOut(patch) {
+  setState(s => {
+    const cur = s.scene.renderOut ?? RENDEROUT_DEFAULTS;
+    const next = { ...RENDEROUT_DEFAULTS, ...cur, ...patch };
+    if (patch.turntable) {
+      next.turntable = { ...RENDEROUT_DEFAULTS.turntable, ...cur.turntable, ...patch.turntable };
+    }
+    return { ...s, scene: { ...s.scene, renderOut: next } };
+  }, SILENT);
+  if (_rv.active) {
+    const ro = _ro();
+    RenderFrame.show({ width: ro.width, height: ro.height });
+  }
 }
 
 function _wire() {
@@ -163,19 +307,136 @@ function _wire() {
     _escEnter(input);
   });
 
-  // Shadows toggle.
-  _bodyEl.querySelector('[data-render-toggle="shadowsEnabled"]')?.addEventListener('change', (e) => {
-    _setRender({ shadowsEnabled: e.target.checked });
+  // Boolean render toggles (shadows / vignette).
+  _bodyEl.querySelectorAll('[data-render-toggle]').forEach(box => {
+    box.addEventListener('change', () => {
+      _setRender({ [box.dataset.renderToggle]: box.checked });
+    });
   });
 
-  // Background select.
-  _bodyEl.querySelector('[data-render-select="background"]')?.addEventListener('change', (e) => {
-    _setRender({ background: e.target.value === 'dark' ? 'dark' : 'light' });
+  // Render selects (background / tone mapping).
+  _bodyEl.querySelectorAll('[data-render-select]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      _setRender({ [sel.dataset.renderSelect]: sel.value });
+    });
   });
 
   _bodyEl.querySelector('[data-action="render-reset"]')?.addEventListener('click', () => {
     _setRender({ ...RENDER_DEFAULTS });
     _render();
+  });
+
+  _wireRendering();
+}
+
+// ── Rendering (output) section ───────────────────────────
+
+function _wireRendering() {
+  _bodyEl.querySelector('[data-ro-preset]')?.addEventListener('change', (e) => {
+    const preset = RESOLUTION_PRESETS[Number(e.target.value)];
+    if (!preset) return;                      // Custom — W/H inputs drive it
+    _setRenderOut({ width: preset.w, height: preset.h });
+    _render();
+  });
+
+  _bodyEl.querySelectorAll('[data-ro]').forEach(input => {
+    input.addEventListener('change', () => {
+      const key = input.dataset.ro;
+      const value = clampDimension(input.value, RENDEROUT_DEFAULTS[key]);
+      _setRenderOut({ [key]: value });
+      _render();
+    });
+    _escEnter(input);
+  });
+
+  _bodyEl.querySelector('[data-ro-toggle="transparent"]')?.addEventListener('change', (e) => {
+    _setRenderOut({ transparent: e.target.checked });
+  });
+
+  // Render view — compose mode. ON: park free navigation, jump to the stored
+  // render pose (when one exists), show the frame. OFF: back to free nav.
+  _bodyEl.querySelector('[data-action="render-view"]')?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    const ro = _ro();
+    if (on) {
+      _rv.navPose = SceneManager.saveCameraState();
+      if (ro.pose) SceneManager.restoreCameraState(ro.pose);
+      RenderFrame.show({ width: ro.width, height: ro.height });
+      _rv.active = true;
+    } else {
+      if (_rv.navPose) SceneManager.restoreCameraState(_rv.navPose);
+      _exitRenderView();
+    }
+  });
+
+  _bodyEl.querySelector('[data-action="set-view"]')?.addEventListener('click', () => {
+    _setRenderOut({ pose: SceneManager.saveCameraState() });
+    Toast.show('Render position stored', 'success', 2000);
+    _render();
+  });
+
+  _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const ro = _ro();
+    btn.disabled = true;
+    btn.textContent = 'Rendering…';
+    try {
+      const blob = await capturePng(ro);
+      await triggerDownload(blob, renderPngName(getState().project.name, ro),
+        { mime: 'image/png', ext: 'png', description: 'PNG image' });
+      Toast.show(`PNG rendered (${ro.width} × ${ro.height})`, 'success', 3000);
+    } catch (err) {
+      console.error('PNG render failed:', err);
+      Toast.show('PNG render failed — see console', 'error', 5000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Export PNG';
+    }
+  });
+
+  _bodyEl.querySelectorAll('[data-tt]').forEach(input => {
+    input.addEventListener('change', () => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v) || v <= 0) { _render(); return; }
+      _setRenderOut({ turntable: { [input.dataset.tt]: v } });
+    });
+    _escEnter(input);
+  });
+  _bodyEl.querySelectorAll('[data-tt-select]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const key = sel.dataset.ttSelect;
+      _setRenderOut({ turntable: { [key]: key === 'fps' ? Number(sel.value) : sel.value } });
+    });
+  });
+  _bodyEl.querySelector('[data-tt-toggle="ease"]')?.addEventListener('change', (e) => {
+    _setRenderOut({ turntable: { ease: e.target.checked } });
+  });
+
+  _bodyEl.querySelector('[data-action="export-video"]')?.addEventListener('click', async (e) => {
+    if (isRecording()) return;
+    const btn = e.currentTarget;
+    const tt = _ro().turntable;
+    btn.disabled = true;
+    try {
+      const result = await recordTurntable({
+        ...tt,
+        onProgress: (f) => { btn.textContent = `Recording… ${Math.round(f * 100)}%`; },
+      });
+      if (!result) {
+        Toast.show('Turntable recording cancelled', 'info', 2500);
+      } else {
+        await triggerDownload(result.blob,
+          turntableVideoName(getState().project.name, tt.durationS, result.ext),
+          { mime: result.mime, ext: result.ext, description: 'Turntable video' });
+        Toast.show(`Turntable exported (${tt.durationS}s ${result.ext.toUpperCase()})`, 'success', 3500);
+      }
+    } catch (err) {
+      console.error('Turntable recording failed:', err);
+      Toast.show('Turntable recording failed — see console', 'error', 5000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Export video';
+    }
   });
 }
 
