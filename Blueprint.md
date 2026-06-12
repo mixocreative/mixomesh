@@ -971,7 +971,7 @@ SceneManager.endBodyDrag()
 SceneManager.cancelBodyDrag()                // restores pivot to pre-drag position
 
 // Overlays
-SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'bedPreview'|'wireframeEdges'
+SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'printPreview'|'bedPreview'|'wireframeEdges'
 SceneManager.setWireframeEdgeColor(hexColor)  // live-update edge color while wireframeEdges is on
 SceneManager.setGrid({cellMM,subdivisions})   // re-skins grid lines (footprint unchanged)
 SceneManager.rebuildBed()                     // rebuilds ground to current print.bedDimensions XY
@@ -2261,9 +2261,22 @@ and does not maintain its own extension table.
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
 
 ### Print Panel (`src/ui/PrintPanel.js`)
-Tabs: Scale / Validation / Bed / Preview / Export (Thickness + Orientation
-future). Preview owns print-preview matte mode + wireframe edges/colour.
+Tabs: Scale / Validation / Bed / Export (Thickness + Orientation future).
 Validation reads the §9 A6 cache with an explicit "Validate All".
+Display modes (print-preview matte, wireframe edges + colour) live in the
+viewport toggles under the NavCube — see Viewport Toggles below — so they
+work from every workspace; there is no Preview tab.
+
+### Viewport Toggles (`src/ui/ViewportToggles.js`)
+Vertical button stack docked under the NavCube (`#viewport-toggles`). Two
+amber-highlight toggles + one swatch:
+- **Wireframe edges** (`Grid3x3` icon) → `SceneManager.setOverlay('wireframeEdges', on)`.
+- **Edge colour** swatch, visible only while wireframe edges are ON →
+  `SceneManager.setWireframeEdgeColor(hex)`.
+- **Matte/flat** (`SunDim` icon) — print-preview mode, removes metallic →
+  `SceneManager.setOverlay('printPreview', on)`.
+State lives in `state.scene.overlays` (silent writes, same contract the
+Preview tab used). Re-renders on `PROJECT_LOADED` / `PROJECT_NEW`.
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 

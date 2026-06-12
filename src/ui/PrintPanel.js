@@ -21,7 +21,7 @@ import { exportFactor } from '../core/print/PrintScale.js';
 export const PRINTERS = printersData;
 
 let _bodyEl = null;
-let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'preview' | 'export'
+let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'export'
 
 export function init() {
   _bodyEl = document.getElementById('rp-print-body');
@@ -70,12 +70,14 @@ function _focusValidation() {
 // ── Tabs ──────────────────────────────────────────────────
 
 function _renderTabs() {
-  const tabs = ['scale', 'validation', 'bed', 'preview', 'export'];
+  // Preview controls (wireframe edges, matte/flat) moved to the viewport
+  // toggles under the NavCube (ui/ViewportToggles.js) so they're reachable
+  // from every workspace — no Preview tab.
+  const tabs = ['scale', 'validation', 'bed', 'export'];
   const labels = {
     scale: 'Scale',
     validation: 'Validation',
     bed: 'Bed',
-    preview: 'Preview',
     export: 'Export',
   };
 
@@ -498,76 +500,6 @@ function _renderBedTab() {
   return el;
 }
 
-// ── Preview Tab ──────────────────────────────────────────
-
-function _renderPreviewTab() {
-  const state = getState();
-  const isOn = state.scene.overlays.printPreview ?? false;
-  const wireOn = state.scene.overlays.wireframeEdges ?? false;
-  const wireColor = state.scene.overlays.wireframeEdgeColor ?? '#ffcc00';
-
-  let html = '<div class="pp-tab-content">';
-
-  html += '<div class="pp-field-group">';
-  html += '<label>Print Preview Mode</label>';
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-preview-toggle" ${isOn ? 'checked' : ''}>`;
-  html += '<label for="pp-preview-toggle">Matte/flat (removes metallic)</label>';
-  html += '</div>';
-  html += '</div>';
-
-  html += '<div class="pp-field-group">';
-  html += '<label>Wireframe Edges</label>';
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-wire-toggle" ${wireOn ? 'checked' : ''}>`;
-  html += '<label for="pp-wire-toggle">Show edge outlines on models</label>';
-  html += '</div>';
-  html += `<div class="pp-wire-color-row ${wireOn ? '' : 'pp-hidden'}">`;
-  html += '<label>Edge color</label>';
-  html += `<input type="color" id="pp-wire-color" value="${escapeAttr(_safeHex(wireColor))}">`;
-  html += '</div>';
-  html += '</div>';
-
-  html += '</div>';
-
-  const el = document.createElement('div');
-  el.innerHTML = html;
-
-  el.querySelector('#pp-preview-toggle').addEventListener('change', (e) => {
-    const enabled = e.target.checked;
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, overlays: { ...s.scene.overlays, printPreview: enabled } },
-    }), { silent: true });
-    SceneManager.setOverlay('printPreview', enabled);
-  });
-
-  const wireToggle = el.querySelector('#pp-wire-toggle');
-  const wireColorRow = el.querySelector('.pp-wire-color-row');
-  const wireColorInput = el.querySelector('#pp-wire-color');
-
-  wireToggle.addEventListener('change', (e) => {
-    const enabled = e.target.checked;
-    wireColorRow.classList.toggle('pp-hidden', !enabled);
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, overlays: { ...s.scene.overlays, wireframeEdges: enabled } },
-    }), { silent: true });
-    SceneManager.setOverlay('wireframeEdges', enabled);
-  });
-
-  wireColorInput.addEventListener('input', (e) => {
-    const color = e.target.value;
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, overlays: { ...s.scene.overlays, wireframeEdgeColor: color } },
-    }), { silent: true });
-    SceneManager.setWireframeEdgeColor(color);
-  });
-
-  return el;
-}
-
 // ── Main render ───────────────────────────────────────────
 
 async function _render() {
@@ -584,8 +516,6 @@ async function _render() {
     _bodyEl.appendChild(_renderValidationTab());
   } else if (_activeTab === 'bed') {
     _bodyEl.appendChild(_renderBedTab());
-  } else if (_activeTab === 'preview') {
-    _bodyEl.appendChild(_renderPreviewTab());
   } else if (_activeTab === 'export') {
     _bodyEl.appendChild(_renderExportTab());
   }
@@ -655,8 +585,3 @@ function _renderValidationErrorsModal({ data, close }) {
 }
 
 export const PrintPanel = { init };
-
-function _safeHex(value) {
-  const hex = String(value ?? '').trim();
-  return /^#[0-9a-f]{6}$/i.test(hex) ? hex : '#ffcc00';
-}

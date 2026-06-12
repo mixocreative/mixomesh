@@ -12,6 +12,7 @@ import { PrintPanel } from '../ui/PrintPanel.js';
 import { ContextMenu } from '../ui/ContextMenu.js';
 import { Modal } from '../ui/Modal.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
+import { ViewportToggles } from '../ui/ViewportToggles.js';
 import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
@@ -66,6 +67,7 @@ async function bootstrap() {
   ContextMenu.init();
   AssetPanel.init();
   ViewportToolbar.init();
+  ViewportToggles.init();
   NavCube.init();
   PersistenceManager.init();
   ProjectMenu.init();

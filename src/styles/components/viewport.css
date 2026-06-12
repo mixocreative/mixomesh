@@ -50,6 +50,40 @@
 }
 .vt-label { font-size: var(--fs-xs); font-weight: 500; }
 
+/* ── Viewport display toggles (under the NavCube) ────────── */
+.vp-toggles {
+  position: absolute;
+  top: 134px;            /* nav-cube top 16 + height 110 + 8 gap */
+  left: 16px;
+  width: 90px;           /* match nav-cube width — buttons centre under it */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  z-index: 10;
+}
+.vp-toggles .vt-btn {
+  background: rgba(19, 19, 22, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-strong);
+}
+.vp-toggles .vt-btn:hover { background: var(--bg-3); color: var(--text-0); }
+.vp-toggles .vt-btn.vt-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.vp-wire-color {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.vp-hidden { display: none; }
+
 /* ── Nav cube (Fusion 360 style) ─────────────────────────── */
 .nav-cube {
   position: absolute;
