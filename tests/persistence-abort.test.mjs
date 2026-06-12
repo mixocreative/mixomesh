@@ -9,7 +9,7 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 console.error = () => {};
-const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
+const { PersistenceManager, __test } = await import('../src/core/PersistenceManager.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { setState, getState, dispatch, subscribe } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
@@ -89,6 +89,30 @@ await test('newProject: dirty + "Cancel" → flow aborts, world intact', async (
 await test('saveAs → save: accepted picker → returns true', async () => {
   acceptPicker();
   assert.equal(await PersistenceManager.saveAs(), true);
+});
+
+await test('A9: autosave documents skip byte embedding; explicit saves keep it', async () => {
+  const { AssetLoader } = await import('../src/core/AssetLoader.js');
+  AssetLoader.getAssetBytes = async () => new Uint8Array([1, 2, 3, 4]).buffer;
+  AssetLoader.getBabylonMesh = () => null;
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: { a1: {
+      id: 'a1', name: 'A', filename: 'a.glb', extension: '.glb', kind: 'mesh',
+      sourceUnit: 'millimeters', unitConfirmed: true, modelRatio: 1,
+      directoryHandleKey: null, fileHandleKey: null, contentHash: 'cafe01',
+    } } },
+  }), { silent: true });
+
+  const full = await __test._buildDocument();
+  assert.ok(full.assetLibrary[0].fileData, 'explicit save embeds bytes');
+  assert.equal(full.assetLibrary[0].contentHash, 'cafe01', 'cached hash reused');
+
+  const auto = await __test._buildDocument({ skipEmbed: true });
+  assert.equal(auto.assetLibrary[0].fileData, null,
+    'autosave doc must not re-encode asset bytes every 60s (A9)');
+  assert.equal(auto.assetLibrary[0].contentHash, 'cafe01',
+    'hash kept so tier-2 relink still works on recovery');
 });
 
 console.log('\n' + out.join('\n'));

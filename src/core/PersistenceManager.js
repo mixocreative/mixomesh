@@ -96,7 +96,7 @@ function _stripFileData(a) {
   return rest;
 }
 
-async function _serialiseAssetLibrary() {
+async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
   const lib = getState().scene.assetLibrary;
   const out = [];
   for (const a of Object.values(lib)) {
@@ -117,14 +117,19 @@ async function _serialiseAssetLibrary() {
       fileData: null, contentHash: null,
     };
     // Embed bytes for meshes + user-loaded textures. glTF-embedded textures
-    // are owned by their container — no standalone bytes to keep.
-    if (!(a.kind === 'texture' && a.isImported)) {
+    // are owned by their container — no standalone bytes to keep. Autosave
+    // passes skipEmbed (arch A9): re-encoding every asset to base64 each
+    // 60s froze the main thread on big scenes; recovery resolves assets via
+    // the live tiers (dir / hash-scan / file handle) using the kept hash.
+    if (skipEmbed) {
+      base.contentHash = a.contentHash ?? null;
+    } else if (!(a.kind === 'texture' && a.isImported)) {
       try {
         const buf = await AssetLoader.getAssetBytes(a.id);
         if (buf) {
           base.fileData    = _b64FromBuf(buf);
           // Bytes are immutable per assetId — reuse the import-time hash
-          // instead of re-hashing on every save/autosave (review M16).
+          // instead of re-hashing on every save (review M16).
           base.contentHash = a.contentHash ?? await _sha256Hex(buf);
         }
       } catch (err) {
@@ -173,7 +178,7 @@ function _serialiseGroups() {
   });
 }
 
-async function _buildDocument() {
+async function _buildDocument(opts = {}) {
   const s = getState();
   return {
     version: SCHEMA_VERSION,
@@ -186,7 +191,7 @@ async function _buildDocument() {
       cursor3d: { ...s.scene.cursor3d },
     },
     print: { ...s.print },
-    assetLibrary: await _serialiseAssetLibrary(),
+    assetLibrary: await _serialiseAssetLibrary(opts),
     collections: Object.values(s.scene.collections ?? {}),
     shaders: Object.values(s.scene.shaders).map(({ linkedMeshIds, ...rest }) => rest),
     uvOverrides: { ...s.scene.uvOverrides },
@@ -694,7 +699,7 @@ export function startAutosave(ms = 60000) {
   _autosaveTimer = setInterval(async () => {
     if (!_dirty) return;
     try {
-      const doc = await _buildDocument();
+      const doc = await _buildDocument({ skipEmbed: true });   // A9
       await kvSet(`${AUTOSAVE_PREFIX}${getState().project.name}`, {
         savedAt: new Date().toISOString(), doc,
       });
@@ -808,5 +813,5 @@ export const PersistenceManager = {
 export const __test = {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
-  _arrToMap, _migrate,
+  _arrToMap, _migrate, _buildDocument,
 };
