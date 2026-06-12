@@ -1,21 +1,33 @@
 :root {
-  /* Surfaces */
-  --bg-0: #0a0a0b;
-  --bg-1: #131316;
-  --bg-2: #1a1a1f;
-  --bg-3: #232329;
-  --bg-4: #2d2d35;
+  /* Surfaces — Blender-style neutral grays (no blue cast), slightly lifted
+     so panels read as surfaces, not voids. Viewport gradient is unaffected
+     (Babylon-side, scene/SceneConstants.js). */
+  --bg-0: #111111;
+  --bg-1: #1d1d1d;
+  --bg-2: #252525;
+  --bg-3: #2f2f2f;
+  --bg-4: #3b3b3b;
 
-  --border:        #2a2a30;
-  --border-strong: #3a3a44;
+  /* Blender separates surfaces with darker seams (inset look), not lighter
+     outlines. -strong stays lighter for chips/handles that need an outline. */
+  --border:         #161616;
+  --border-strong:  #404040;
+  --border-section: #181818;
   --border-focus:  #f59e0b;
   --ring-focus:    rgba(245, 158, 11, 0.35);
 
+  /* Controls — Blender fields sit LIGHTER than their panel (inset pill). */
+  --ctl-bg:        #383838;
+  --ctl-bg-hover:  #434343;
+  --ctl-bg-active: #2c2c2c;
+  --ctl-border:    #202020;
+  --ctl-h: 22px;
+
   /* Text */
-  --text-0: #ededf0;
-  --text-1: #a1a1ab;
-  --text-2: #8a8a96;
-  --text-disabled: #5a5a64;
+  --text-0: #e8e8e8;
+  --text-1: #a8a8a8;
+  --text-2: #8c8c8c;
+  --text-disabled: #5e5e5e;
 
   /* Accent — yellow-orange (amber) */
   --accent:    #f59e0b;
@@ -47,9 +59,9 @@
   --sp-6: 16px;
   --sp-7: 24px;
 
-  /* Radii */
-  --r-sm: 3px;
-  --r-md: 5px;
+  /* Radii — Blender rounds controls at ~4 px */
+  --r-sm: 4px;
+  --r-md: 6px;
   --r-lg: 8px;
 
   /* Motion */

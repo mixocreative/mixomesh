@@ -1,0 +1,143 @@
+/* ── Blender-inspired control language ───────────────────────────────────
+   Loaded LAST so it wins the cascade. Borrows Blender 4.x's visual DNA:
+   - fields/buttons are light-gray inset pills (lighter than the panel, dark
+     seam border, lighten on hover, darken on press)
+   - property labels right-align against their values
+   - section headers are sentence case with a disclosure triangle (the
+     uppercase-tracking treatment is dropped)
+   - enum/tab groups are segmented: dark trough, active option = raised fill
+   - amber stays the one accent (locked palette — Blender's blue is NOT
+     borrowed). Tokens live in tokens.css (--ctl-*). */
+
+/* 1. Fields — every text/number/select control in the side panels. */
+.pp-body input[type="text"],
+.pp-body input[type="number"],
+.pp-body select,
+.pp-preset-select,
+.pp-ratio-input,
+.pp-xyz input,
+.pp-slot-dropdown,
+.sp-body input[type="text"],
+.sp-body input[type="number"],
+.sp-body select {
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  min-height: var(--ctl-h);
+  padding: 1px var(--sp-3);
+  box-sizing: border-box;
+  transition: background var(--dur-fast) var(--ease);
+}
+.pp-body input:hover:not(:disabled):not(:focus),
+.pp-body select:hover:not(:disabled),
+.pp-preset-select:hover,
+.pp-ratio-input:hover:not(:focus),
+.pp-xyz input:hover:not(:focus),
+.pp-slot-dropdown:hover,
+.sp-body input:hover:not(:disabled):not(:focus),
+.sp-body select:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+}
+.pp-body input:disabled,
+.pp-body select:disabled {
+  background: var(--bg-2);
+  border-color: transparent;
+}
+
+/* 2. Buttons — filled, not outlined; press darkens (Blender push feel). */
+.btn,
+.pp-btn,
+.pp-slot-action,
+.pp-export-btn,
+.pp-apply-btn,
+.sp-btn:not(.sp-btn-danger) {
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.btn:hover,
+.pp-btn:hover:not(:disabled),
+.pp-slot-action:hover,
+.pp-export-btn:hover,
+.sp-btn:hover:not(:disabled):not(.sp-btn-danger) {
+  background: var(--ctl-bg-hover);
+  border-color: var(--ctl-border);
+}
+.btn:active,
+.pp-btn:active:not(:disabled),
+.pp-slot-action:active,
+.pp-export-btn:active,
+.sp-btn:active:not(:disabled):not(.sp-btn-danger) {
+  background: var(--ctl-bg-active);
+}
+.btn-primary { background: var(--accent); border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+.pp-apply-btn:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 3. Property rows — labels right-align against their values, Blender's
+   strongest layout signature. Wider label column for breathing room. */
+.pp-row { grid-template-columns: 84px 1fr; }
+.pp-grid3 { grid-template-columns: 84px repeat(3, 1fr); }
+.pp-row label { text-align: right; }
+.pp-grid3 > label { justify-content: flex-end; text-align: right; }
+
+/* 4. Section headers — sentence case, slightly bolder, no letterspacing. */
+.rp-section-header,
+.pp-section-header,
+.sp-section-header,
+.ol-header {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rp-section-header:hover,
+.pp-section-header:hover,
+.sp-section-header:hover { color: var(--text-0); }
+
+/* 5. Tab strips → segmented control: dark trough, active = raised fill.
+   (Replaces the underline-tab treatment in print.css.) */
+.pp-tabs {
+  background: var(--bg-0);
+  border: none;
+  border-radius: var(--r-md);
+  padding: 2px;
+  gap: 2px;
+  margin: var(--sp-3) var(--sp-4) 0;
+}
+.pp-tab {
+  border-bottom: none;
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: var(--ctl-h);
+}
+.pp-tab:hover { background: var(--bg-2); }
+.pp-tab.active {
+  background: var(--ctl-bg);
+  border-bottom: none;
+  font-weight: 600;
+}
+
+/* 6. Checkboxes / radios / range — amber accent natively. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent);
+}
+
+/* 7. Scrollbars — thin flat Blender-style. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-4);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
