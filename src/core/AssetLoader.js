@@ -106,8 +106,10 @@ async function _collectObjSiblings(opts) {
 
   if (Array.isArray(opts.siblingFiles)) {
     for (const f of opts.siblingFiles) await add(f.name, f);
-  } else if (opts.directoryHandleKey && opts.originalPath) {
-    const root = _dirHandles.get(opts.directoryHandleKey);
+  } else if ((opts.dirHandle || opts.directoryHandleKey) && opts.originalPath) {
+    // Project restore passes the idb-resolved handle directly (the session
+    // mount map only fills after an explicit remount).
+    const root = opts.dirHandle ?? _dirHandles.get(opts.directoryHandleKey);
     if (root) {
       try {
         // Walk to the OBJ's parent directory, then enumerate its files.
@@ -775,15 +777,31 @@ export async function getAssetBytes(assetId) {
  * @param {string} assetId   the persisted asset id (reused, not minted)
  * @param {Blob}   blob
  * @param {string} extension e.g. '.glb'
+ * @param {{ dirHandle?: FileSystemDirectoryHandle, directoryHandleKey?: string,
+ *           originalPath?: string }} [opts]
+ *   OBJ restores pass the live directory so mtllib/texture references rebind
+ *   on reload (field report: OBJ materials lost after save/reopen).
  * @returns {Promise<BABYLON.AbstractMesh[]>} ordered geometry meshes
  */
-export async function restoreContainer(assetId, blob, extension) {
+export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const scene = SceneManager.getScene();
   const blobUrl = URL.createObjectURL(blob);
   setBlobUrl(assetId, blobUrl);
-  const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-    blobUrl, '', scene, null, extension
-  );
+
+  let siblings = null;
+  if (extension === '.obj') {
+    siblings = await _collectObjSiblings(opts);
+    if (siblings.size) _objSiblings.set(assetId, siblings);
+  }
+  const restoreUrls = _installSiblingUrls(siblings);
+  let container;
+  try {
+    container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
+      blobUrl, '', scene, null, extension
+    );
+  } finally {
+    restoreUrls();
+  }
   // Same split as the live import path — restored containers must match the
   // mesh-per-material shape the saved sceneObjects were minted under, so
   // containerMeshIndex lookups line up. Split is deterministic in subMesh order.

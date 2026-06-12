@@ -418,7 +418,16 @@ async function _loadProject(doc) {
     AssetLoader.registerAssetEntry(_stripFileData(a));
     if (!r) { assetRes.set(a.id, { status: 'ghost' }); continue; }
     try {
-      const geom = await AssetLoader.restoreContainer(a.id, r.blob, a.extension);
+      // OBJ: hand the live directory over so mtllib/texture siblings rebind
+      // (permission was just granted in _resolveAssetBlob's tier-1 attempt).
+      let restoreOpts = {};
+      if (a.extension === '.obj' && a.directoryHandleKey && a.originalPath) {
+        try {
+          const dirHandle = await getFileHandle(a.directoryHandleKey);
+          if (dirHandle) restoreOpts = { dirHandle, originalPath: a.originalPath };
+        } catch { /* no live dir — OBJ restores with default material */ }
+      }
+      const geom = await AssetLoader.restoreContainer(a.id, r.blob, a.extension, restoreOpts);
       const status = r.live ? 'live' : 'static';
       assetRes.set(a.id, { status, geom });
       // §10b reload rebind: re-register this container's imported textures
