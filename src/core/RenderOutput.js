@@ -268,12 +268,23 @@ export async function recordTurntable(opts = {}) {
   return result;
 }
 
-// H.264 High profile level by output area (level caps macroblock rate).
-function _avcCodecFor(w, h) {
+// Pick a supported H.264 encoder config — level by output area, then High →
+// Main → Constrained Baseline profile fallback so a future Chromium that
+// drops or restricts a profile (licensing, platform policy) still encodes.
+// Everything is feature-detected via isConfigSupported; no version checks.
+async function _pickAvcConfig(w, h, fps) {
   const area = w * h;
-  if (area <= 1920 * 1088) return 'avc1.640028';   // L4.0 — up to 1080p
-  if (area <= 4096 * 2304) return 'avc1.640033';   // L5.1 — up to 4K
-  return 'avc1.640034';                            // L5.2
+  const level = area <= 1920 * 1088 ? '28'      // L4.0 — up to 1080p
+              : area <= 4096 * 2304 ? '33'      // L5.1 — up to 4K
+              : '34';                           // L5.2
+  const codecs = [`avc1.6400${level}`, `avc1.4D40${level}`, `avc1.42E0${level}`];
+  for (const codec of codecs) {
+    const config = { codec, width: w, height: h, bitrate: _bitrateFor(w, h, fps), framerate: fps };
+    try {
+      if ((await VideoEncoder.isConfigSupported(config)).supported) return config;
+    } catch { /* malformed-for-this-build codec string — try the next */ }
+  }
+  return null;
 }
 
 function _bitrateFor(w, h, fps) {
@@ -290,10 +301,8 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
   const w = clampDimension(width, 1920) & ~1;    // H.264 wants even dimensions
   const h = clampDimension(height, 1080) & ~1;
   const frameCount = Math.max(1, Math.round(Math.max(1, durationS) * fps));
-  const codec = _avcCodecFor(w, h);
-  const config = { codec, width: w, height: h, bitrate: _bitrateFor(w, h, fps), framerate: fps };
-  const support = await VideoEncoder.isConfigSupported(config);
-  if (!support.supported) throw new Error(`H.264 encoding unsupported at ${w}×${h}`);
+  const config = await _pickAvcConfig(w, h, fps);
+  if (!config) throw new Error(`H.264 encoding unsupported at ${w}×${h}`);
 
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
@@ -301,8 +310,9 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
     fastStart: 'in-memory',
   });
   let encError = null;
+  let chunkCount = 0;
   const encoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    output: (chunk, meta) => { chunkCount++; muxer.addVideoChunk(chunk, meta); },
     error: (e) => { encError = e; },
   });
   encoder.configure(config);
@@ -340,8 +350,12 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
       while (encoder.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 10));
       onProgress?.(i / frameCount);
     }
-    await encoder.flush();
+    // flush() rejects when the encoder died mid-stream — surface either way.
+    await encoder.flush().catch((e) => { encError = encError ?? e; });
     if (encError) throw encError;
+    // The MediaRecorder lesson: an encoder can "succeed" while emitting
+    // nothing. Never hand the user an empty container.
+    if (chunkCount === 0) throw new Error('encoder produced no chunks');
     muxer.finalize();
     return {
       blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }),
