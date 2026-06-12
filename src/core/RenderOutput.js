@@ -1,35 +1,52 @@
 // Render output (Scene ▸ Rendering) — produces PNG stills and turntable
-// videos from the live viewport camera. The render-view toggle + frame
-// overlay (compose aids) live in ui/ScenePanel.js + ui/RenderFrame.js; this
-// module only captures.
+// videos. The render-view toggle + frame overlay (compose aids) live in
+// ui/ScenePanel.js + ui/RenderFrame.js; this module only captures.
 //
 // PNG path: Tools.CreateScreenshotUsingRenderTargetAsync — renders the scene
 // into an RTT at the exact output resolution. Two free wins from the RTT
-// path: the selection-silhouette post-process is NOT in the chain (clean
-// renders even with a selection), and tone mapping IS kept (it's applied at
-// material shading, not post). Scene furniture (grid / axes / bed preview /
-// 3D cursor) is hidden for the capture and restored after.
+// path: the camera post chain is NOT applied (clean renders even with a
+// selection silhouette — and SSAO, which is viewport-only by the same rule),
+// and tone mapping IS kept (it's applied at material shading, not post).
+// Scene furniture (grid / axes / bed preview / 3D cursor) is hidden for the
+// capture and restored after.
 //
-// Video path: canvas.captureStream + MediaRecorder (realtime — heavy scenes
-// may drop frames; a deterministic WebCodecs encoder is the upgrade path).
-// The camera alpha sweeps a full 360° around its current target with
-// optional sinusoidal ease in/out.
+// When a render pose is stored (renderOut.pose — auto-captured while Render
+// view is on), exports SHOOT FROM IT: the saved composition is the source of
+// truth, not wherever free navigation happens to be (UX audit U1). No pose →
+// current view.
+//
+// Video path: offline WebCodecs encode (primary) with a direct RTT-pixels →
+// VideoFrame feed — no per-frame PNG encode/decode round-trip (perf audit).
+// MediaRecorder is the fallback only when WebCodecs is missing; it
+// hard-freezes the renderer on Chrome 149 and in all headless Chromium.
 
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { getState } from './StateManager.js';
+import { EVENTS } from './events.js';
+import { getState, subscribe } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
 import { turntableProgress, pickVideoFormat, clampDimension } from './render/RenderMath.js';
 
 const BABYLON = window.BABYLON;
 
 let _recording = false;
-let _preview = null;   // { cancel } while a preview sweep plays
+let _preview = null;       // { cancel } while a preview sweep plays
+let _abortRecord = null;   // (reason) => void while a recording is in flight
 
 /** @returns {boolean} a turntable recording is in flight */
 export function isRecording() { return _recording; }
 
 /** @returns {boolean} a turntable preview is playing */
 export function isPreviewing() { return !!_preview; }
+
+// A project switch mid-capture must kill the sweep/encode immediately AND
+// must NOT restore the pre-capture camera afterwards — the loaded/new
+// project's camera wins (audit C2). Lights/env still restore: they are
+// app-fixed studio rig state, not project state.
+const _onProjectSwitch = () => {
+  _preview?.cancel('project');
+  _abortRecord?.('project');
+};
+subscribe(EVENTS.PROJECT_NEW, _onProjectSwitch);
+subscribe(EVENTS.PROJECT_LOADED, _onProjectSwitch);
 
 // ── Turntable sweep (shared by preview + record) ─────────
 //
@@ -54,7 +71,8 @@ export function isPreviewing() { return !!_preview; }
 /**
  * Capture everything the sweep touches. Returns { applyDelta, restore } —
  * shared by the live sweep (preview / realtime recording) and the offline
- * frame-by-frame encoder.
+ * frame-by-frame encoder. restore(skipCamera) leaves the camera alone on
+ * project-switch cancellation.
  */
 function _sweepRig() {
   const scene  = SceneManager.getScene();
@@ -89,21 +107,25 @@ function _sweepRig() {
     // sign a mid-sweep capture matches the baseline (lighting fixed relative
     // to camera); −δ made the env counter-rotate (sweepDiff > ctrlDiff).
     if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot + delta;
+    // The key light moved — the RENDERONCE shadow map must re-render.
+    SceneManager.invalidateShadows();
   };
 
-  const restore = () => {
-    SceneManager.restoreCameraState(startPose);
+  const restore = (skipCamera = false) => {
+    if (!skipCamera) SceneManager.restoreCameraState(startPose);
     if (key)  { key.direction = starts.keyDir;  key.position = starts.keyPos; }
     if (fill) fill.direction = starts.fillDir;
     if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot;
+    SceneManager.invalidateShadows();
   };
 
   return { applyDelta, restore };
 }
 
 /**
- * Start a live sweep. Returns { cancel } — cancel stops early and restores.
- * onComplete fires exactly once with 'done' | 'cancelled'.
+ * Start a live sweep. Returns { cancel } — cancel(reason) stops early and
+ * restores (camera excluded when reason === 'project'). onComplete fires
+ * exactly once with 'done' | 'cancelled'.
  */
 function _startSweep({ durationS = 8, direction = 'left', ease = true,
                        onProgress, onComplete }) {
@@ -115,12 +137,12 @@ function _startSweep({ durationS = 8, direction = 'left', ease = true,
   let finished = false;
   let observer = null;
 
-  const end = (result) => {
+  const end = (result, skipCamera = false) => {
     if (finished) return;
     finished = true;
     if (observer) scene.onBeforeRenderObservable.remove(observer);
     observer = null;
-    restore();
+    restore(skipCamera);
     onComplete?.(result);
   };
 
@@ -134,7 +156,7 @@ function _startSweep({ durationS = 8, direction = 'left', ease = true,
     onProgress?.(t);
   });
 
-  return { cancel: () => end('cancelled') };
+  return { cancel: (reason) => end('cancelled', reason === 'project') };
 }
 
 /**
@@ -181,11 +203,13 @@ export function stopPreview() { _preview?.cancel(); }
 // ── PNG still ────────────────────────────────────────────
 
 /**
- * Capture a PNG of the current camera view at the given resolution.
- * @param {{ width?: number, height?: number, transparent?: boolean }} opts
+ * Capture a PNG at the given resolution. With `pose`, shoots from that
+ * stored camera composition and puts free navigation back after.
+ * @param {{ width?: number, height?: number, transparent?: boolean,
+ *           pose?: object|null }} opts
  * @returns {Promise<Blob>}
  */
-export async function capturePng({ width, height, transparent = false } = {}) {
+export async function capturePng({ width, height, transparent = false, pose = null } = {}) {
   const engine = SceneManager.getEngine();
   const scene  = SceneManager.getScene();
   if (!engine || !scene) throw new Error('Scene not ready');
@@ -193,6 +217,8 @@ export async function capturePng({ width, height, transparent = false } = {}) {
   const w = clampDimension(width, 1920);
   const h = clampDimension(height, 1080);
 
+  const navPose = pose ? SceneManager.saveCameraState() : null;
+  if (pose) SceneManager.restoreCameraState(pose);
   const restore = _hideFurniture();
   if (transparent) {
     SceneManager.setBackgroundEnabled(false);
@@ -212,6 +238,7 @@ export async function capturePng({ width, height, transparent = false } = {}) {
       SceneManager.setBackgroundEnabled(true);
     }
     restore();
+    if (navPose) SceneManager.restoreCameraState(navPose);
   }
 }
 
@@ -236,49 +263,153 @@ function _hideFurniture() {
   };
 }
 
+// ── Offline frame renderer ───────────────────────────────
+//
+// Mirrors what Tools.CreateScreenshotUsingRenderTarget does internally —
+// camera.outputRenderTarget + a full scene.render() under engine-size
+// overrides — but reuses ONE RenderTargetTexture across all frames and
+// reads raw RGBA pixels instead of round-tripping every frame through
+// PNG encode → dataURL → fetch → decode → ImageBitmap (perf audit #1:
+// that round-trip dominated export time).
+
+function _createFrameTarget(scene, camera, w, h) {
+  const texture = new BABYLON.RenderTargetTexture(
+    'mx-rec-frame', { width: w, height: h }, scene, false, false
+  );
+  texture.renderList = null;          // render the live mesh list
+  texture.activeCamera = camera;
+  return texture;
+}
+
+function _renderSceneToTarget(scene, engine, camera, texture, w, h) {
+  engine.skipFrameRender = true;
+  const ogW = engine.getRenderWidth;
+  const ogH = engine.getRenderHeight;
+  // Internal passes size themselves off these — same override the Babylon
+  // screenshot helper installs.
+  engine.getRenderWidth  = (useScreen = false) =>
+    (!useScreen && engine._currentRenderTarget) ? engine._currentRenderTarget.width : w;
+  engine.getRenderHeight = (useScreen = false) =>
+    (!useScreen && engine._currentRenderTarget) ? engine._currentRenderTarget.height : h;
+  scene.incrementRenderId();
+  scene.resetCachedMaterial();
+  const oCam  = scene.activeCamera;
+  const oCams = scene.activeCameras;
+  const oOut  = camera.outputRenderTarget;
+  scene.activeCamera = camera;
+  scene.activeCameras = null;
+  camera.outputRenderTarget = texture;
+  try {
+    scene.render();
+  } finally {
+    scene.activeCamera = oCam;
+    scene.activeCameras = oCams;
+    camera.outputRenderTarget = oOut;
+    engine.getRenderWidth = ogW;
+    engine.getRenderHeight = ogH;
+    camera.getProjectionMatrix(true);   // drop the overridden-aspect cache
+    engine.skipFrameRender = false;
+  }
+}
+
+// WebGL reads rows bottom-up; VideoFrame wants top-down.
+function _flipRows(src, dst, w, h) {
+  const row = w * 4;
+  for (let y = 0; y < h; y++) {
+    dst.set(src.subarray(y * row, y * row + row), (h - 1 - y) * row);
+  }
+}
+
+/**
+ * Render one frame at w×h and return top-down RGBA bytes. Exported as the
+ * smoke-test probe for the offline encoder's frame source — an mp4 of
+ * black frames would still have plausible bytes; this catches it.
+ * @returns {Promise<Uint8Array>}
+ */
+export async function captureFrameRGBA({ width = 256, height = 256 } = {}) {
+  const engine = SceneManager.getEngine();
+  const scene  = SceneManager.getScene();
+  if (!engine || !scene) throw new Error('Scene not ready');
+  const camera = scene.activeCamera;
+  const w = clampDimension(width, 256);
+  const h = clampDimension(height, 256);
+  const texture = _createFrameTarget(scene, camera, w, h);
+  try {
+    await _waitReady(texture, camera);
+    _renderSceneToTarget(scene, engine, camera, texture, w, h);
+    const raw = new Uint8Array(w * h * 4);
+    await texture.readPixels(0, 0, raw, false);
+    const flipped = new Uint8Array(w * h * 4);
+    _flipRows(raw, flipped, w, h);
+    return flipped;
+  } finally {
+    texture.dispose();
+  }
+}
+
+async function _waitReady(texture, camera) {
+  for (let i = 0; i < 200; i++) {
+    if (texture.isReadyForRendering() && camera.isReady(true)) return;
+    await new Promise(r => setTimeout(r, 10));
+  }
+  throw new Error('Render target never became ready');
+}
+
 // ── Turntable video ──────────────────────────────────────
 
 /**
- * Record a full 360° turntable of the current view.
+ * Record a full 360° turntable.
  *
  * Primary path: OFFLINE WebCodecs encode — the sweep is stepped frame by
- * frame, each frame rendered into an RTT at the EXACT output resolution
- * (screen size irrelevant) and fed to a hardware VideoEncoder, muxed to mp4
- * by mp4-muxer. Deterministic (no dropped frames) and — crucially — it does
- * not touch MediaRecorder, which hard-freezes/crashes the renderer on
- * Chrome 149 (STATUS_BREAKPOINT) and in all headless Chromium.
+ * frame, each frame rendered into a reused RTT at the EXACT output
+ * resolution (screen size irrelevant), its pixels fed straight into a
+ * hardware VideoEncoder, muxed to mp4 by mp4-muxer (lazy-loaded).
+ * Deterministic (no dropped frames) and — crucially — it does not touch
+ * MediaRecorder, which hard-freezes/crashes the renderer on Chrome 149
+ * (STATUS_BREAKPOINT) and in all headless Chromium.
  *
  * Fallback (no WebCodecs): realtime MediaRecorder capture of the live
  * canvas at viewport size. mp4 preferred, with an auto-retry as WebM when
  * the mp4 encoder silently produces zero bytes.
  *
- * Esc cancels either path; resolves null when cancelled.
+ * With `pose`, the whole turntable shoots from the stored render
+ * composition; free navigation is restored after.
+ *
+ * Esc or a project switch cancels either path; resolves null when cancelled.
  * @param {{ durationS?: number, fps?: number, direction?: 'left'|'right',
  *           ease?: boolean, width?: number, height?: number,
- *           onProgress?: (frac: number) => void }} opts
+ *           pose?: object|null, onProgress?: (frac: number) => void }} opts
  * @returns {Promise<{ blob: Blob, ext: string, mime: string } | null>}
  */
 export async function recordTurntable(opts = {}) {
   if (_recording) return null;
-  if (typeof VideoEncoder === 'function') {
-    try {
-      return await _recordOffline(opts);
-    } catch (err) {
-      console.warn('WebCodecs offline encode failed — falling back to MediaRecorder:', err);
+  const navPose = opts.pose ? SceneManager.saveCameraState() : null;
+  if (opts.pose) SceneManager.restoreCameraState(opts.pose);
+  let projectSwitched = false;
+  try {
+    if (typeof VideoEncoder === 'function') {
+      try {
+        return await _recordOffline(opts, () => { projectSwitched = true; });
+      } catch (err) {
+        console.warn('WebCodecs offline encode failed — falling back to MediaRecorder:', err);
+      }
     }
+    if (typeof MediaRecorder !== 'function') {
+      throw new Error('Neither WebCodecs nor MediaRecorder is available in this browser');
+    }
+    const fmt = pickVideoFormat((m) => MediaRecorder.isTypeSupported(m));
+    const result = await _recordOnce(fmt, opts, () => { projectSwitched = true; });
+    if (result && result.blob.size === 0 && fmt.ext === 'mp4') {
+      console.warn('mp4 recording came back empty — retrying as WebM');
+      const webm = pickVideoFormat((m) =>
+        m.startsWith('video/webm') && MediaRecorder.isTypeSupported(m));
+      return await _recordOnce(webm, opts, () => { projectSwitched = true; });
+    }
+    return result;
+  } finally {
+    // Project switch: the new project's camera wins, never the stale pose.
+    if (navPose && !projectSwitched) SceneManager.restoreCameraState(navPose);
   }
-  if (typeof MediaRecorder !== 'function') {
-    throw new Error('Neither WebCodecs nor MediaRecorder is available in this browser');
-  }
-  const fmt = pickVideoFormat((m) => MediaRecorder.isTypeSupported(m));
-  const result = await _recordOnce(fmt, opts);
-  if (result && result.blob.size === 0 && fmt.ext === 'mp4') {
-    console.warn('mp4 recording came back empty — retrying as WebM');
-    const webm = pickVideoFormat((m) =>
-      m.startsWith('video/webm') && MediaRecorder.isTypeSupported(m));
-    return _recordOnce(webm, opts);
-  }
-  return result;
 }
 
 // Pick a supported H.264 encoder config — level by output area, then High →
@@ -306,10 +437,12 @@ function _bitrateFor(w, h, fps) {
 }
 
 async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', ease = true,
-                                width = 1920, height = 1080, onProgress } = {}) {
+                                width = 1920, height = 1080, onProgress } = {},
+                              onProjectSwitch) {
   const engine = SceneManager.getEngine();
   const scene  = SceneManager.getScene();
   if (!engine || !scene) throw new Error('Scene not ready');
+  const camera = scene.activeCamera;
 
   const w = clampDimension(width, 1920) & ~1;    // H.264 wants even dimensions
   const h = clampDimension(height, 1080) & ~1;
@@ -317,6 +450,9 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
   const config = await _pickAvcConfig(w, h, fps);
   if (!config) throw new Error(`H.264 encoding unsupported at ${w}×${h}`);
 
+  // Lazy: the muxer is only ever needed here — keep it out of the boot
+  // chunk (perf audit #2).
+  const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
     video: { codec: 'avc', width: w, height: h },
@@ -332,6 +468,11 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
 
   _recording = true;
   let cancelled = false;
+  let skipCameraRestore = false;
+  _abortRecord = (reason) => {
+    cancelled = true;
+    if (reason === 'project') { skipCameraRestore = true; onProjectSwitch?.(); }
+  };
   const onKey = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelled = true; }
   };
@@ -342,24 +483,28 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
   const rig = _sweepRig();
   const sign = direction === 'right' ? -1 : 1;
   const usPerFrame = 1_000_000 / fps;
+  const texture = _createFrameTarget(scene, camera, w, h);
+  const raw     = new Uint8Array(w * h * 4);   // reused across all frames
+  const flipped = new Uint8Array(w * h * 4);
 
   try {
+    await _waitReady(texture, camera);
     for (let i = 0; i < frameCount; i++) {
       if (cancelled) return null;
       if (encError) throw encError;
       // i/frameCount (not count−1): the last frame sits just short of 360°,
       // so the video loops cleanly back onto its first frame.
       rig.applyDelta(sign * 2 * Math.PI * turntableProgress(i / frameCount, ease));
-      const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
-        engine, scene.activeCamera, { width: w, height: h }, 'image/png');
-      const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
-      const frame = new VideoFrame(bitmap, {
+      _renderSceneToTarget(scene, engine, camera, texture, w, h);
+      await texture.readPixels(0, 0, raw, false);
+      _flipRows(raw, flipped, w, h);
+      const frame = new VideoFrame(flipped, {
+        format: 'RGBA', codedWidth: w, codedHeight: h,
         timestamp: Math.round(i * usPerFrame),
         duration: Math.round(usPerFrame),
       });
       encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
       frame.close();
-      bitmap.close();
       while (encoder.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 10));
       onProgress?.(i / frameCount);
     }
@@ -376,16 +521,19 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
     };
   } finally {
     try { encoder.close(); } catch { /* already closed on error */ }
+    texture.dispose();
     window.removeEventListener('keydown', onKey, true);
     canvas.style.pointerEvents = '';
-    rig.restore();
+    rig.restore(skipCameraRestore);
     restoreFurniture();
+    _abortRecord = null;
     _recording = false;
   }
 }
 
 function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
-                            ease = true, onProgress } = {}) {
+                            ease = true, onProgress } = {},
+                     onProjectSwitch) {
   const engine = SceneManager.getEngine();
   const scene  = SceneManager.getScene();
   const camera = SceneManager.getCamera();
@@ -406,17 +554,26 @@ function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
 
     let cancelled = false;
     let settled = false;
+    let skipCameraRestore = false;
     let watchdog = null;
     let sweep = null;
 
+    _abortRecord = (reason) => {
+      cancelled = true;
+      if (reason === 'project') { skipCameraRestore = true; onProjectSwitch?.(); }
+      if (rec.state !== 'inactive') rec.stop();
+      else settle(resolve, null);
+    };
+
     const cleanup = () => {
-      sweep?.cancel();   // idempotent — restores camera/lights/env
+      sweep?.cancel(skipCameraRestore ? 'project' : undefined);   // idempotent
       clearTimeout(watchdog);
       window.removeEventListener('keydown', onKey, true);
       document.removeEventListener('visibilitychange', onVisibility);
       canvas.style.pointerEvents = '';
       for (const t of stream.getTracks()) t.stop();
-      SceneManager.restoreCameraState(startPose);
+      if (!skipCameraRestore) SceneManager.restoreCameraState(startPose);
+      _abortRecord = null;
       _recording = false;
     };
     const settle = (fn, value) => {

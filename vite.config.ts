@@ -29,5 +29,9 @@ export default defineConfig({
         app: resolve(PROJECT_ROOT, 'index.html'),
       },
     },
+    // NOTE (perf audit 2026-06-13): forcing a @babylonjs manualChunks vendor
+    // chunk under rolldown DEFEATS tree-shaking — the vendor chunk came out
+    // 7.3 MB vs the 4.2 MB tree-shaken boot chunk. Don't re-add it. mp4-muxer
+    // splits itself out via the dynamic import in RenderOutput.js.
   },
 });

@@ -20,6 +20,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
+import { register as registerShortcut } from '../core/InputManager.js';
 import {
   capturePng, recordTurntable, isRecording,
   previewTurntable, stopPreview, isPreviewing,
@@ -56,7 +57,12 @@ const RENDER_DEFAULTS = {
   hdriEnabled: true,
   hdriPreset: 'studio',
   hdriIntensity: 0.6,
+  ssaoEnabled: true,
+  ssaoStrength: 1,
 };
+
+// Session-only inspection tool — never persisted (StateManager comment).
+const SECTION_DEFAULTS = { enabled: false, axis: 'z', offsetMM: 0, flip: false };
 
 const HDRI_PRESETS = [
   { id: 'studio',  label: 'Studio' },
@@ -80,7 +86,7 @@ const RESOLUTION_PRESETS = [
 // rule as workspaces). Environment + Camera start collapsed so the Rendering
 // section is reachable without scrolling (UX audit P1).
 const COLLAPSE_KEY = 'mixomesh.scenePanel.collapsed.v1';
-const COLLAPSE_DEFAULTS = { grid: false, environment: true, camera: true, rendering: false };
+const COLLAPSE_DEFAULTS = { grid: false, environment: true, camera: true, section: true, rendering: false };
 
 function _loadCollapsed() {
   try {
@@ -108,10 +114,27 @@ export function init() {
   _bodyEl = document.getElementById('rp-scene-body');
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
-  subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _render(); });
-  subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _render(); });
+  subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _applySection(); _render(); });
+  subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _applySection(); _render(); });
+  // HDRI .env files stream in (~0.2–1 MB) — lighting pops without feedback
+  // (UX audit U4). Only toast for USER-initiated changes; boot/load stay
+  // silent.
+  subscribe(EVENTS.HDRI_STATUS, ({ status, preset }) => {
+    if (status === 'error') {
+      Toast.show(`HDRI "${preset}" failed to load`, 'error', 4000);
+    } else if (_hdriToastWanted) {
+      Toast.show(`HDRI "${preset}" ready`, 'success', 2000);
+    }
+    _hdriToastWanted = false;
+  });
+  // Blender's F12 belongs to DevTools in a browser — Ctrl+Alt+E is the
+  // export-still hotkey instead (UX audit U3).
+  registerShortcut('Ctrl+Alt+E', 'global', () => { if (!_busy) _exportPng(); });
   _render();
 }
+
+let _hdriToastWanted = false;
+let _busy = false;   // a capture/preview is running — gate buttons + hotkey
 
 function _watchRenderPose() {
   const cam = SceneManager.getCamera?.();
@@ -270,6 +293,18 @@ function _render() {
         <label>Ambient</label>
         <input type="number" step="0.05" min="0" max="3" data-render="hemiIntensity" value="${_fmt(render.hemiIntensity)}">
       </div>
+      <div class="pp-subhead">Ambient occlusion</div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-render-toggle="ssaoEnabled" ${render.ssaoEnabled ? 'checked' : ''}> SSAO contact shadows</label>
+      </div>
+      ${render.ssaoEnabled ? `
+      <div class="pp-row">
+        <label>AO strength</label>
+        <input type="number" step="0.1" min="0" max="2" data-render="ssaoStrength" value="${_fmt(render.ssaoStrength, 1)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Viewport shading only — not in PNG/video exports.</span>
+      </div>` : ''}
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="render-reset">Reset environment</button>
       </div>`;
@@ -283,6 +318,33 @@ function _render() {
         <label>Near clip (mm)</label>
         <input type="number" step="0.5" min="0.1" max="100" data-render="clipNearMM" value="${_fmt(render.clipNearMM, 1)}">
       </div>`;
+
+  // Cross-section inspection plane (session-only). Cuts CONTENT only — the
+  // grid/floor/axes stay; offset is print-space mm along the chosen axis.
+  const section = { ...SECTION_DEFAULTS, ...(s.scene.section ?? {}) };
+  const sectionSec = `
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-sect-toggle="enabled" ${section.enabled ? 'checked' : ''}> Cut view</label>
+      </div>
+      ${section.enabled ? `
+      <div class="pp-row">
+        <label>Axis</label>
+        <select data-sect-select="axis">
+          <option value="x" ${section.axis === 'x' ? 'selected' : ''}>X</option>
+          <option value="y" ${section.axis === 'y' ? 'selected' : ''}>Y</option>
+          <option value="z" ${section.axis !== 'x' && section.axis !== 'y' ? 'selected' : ''}>Z (height)</option>
+        </select>
+      </div>
+      <div class="pp-row">
+        <label>Offset (mm)</label>
+        <input type="number" step="1" data-sect="offsetMM" value="${_fmt(section.offsetMM, 1)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-sect-toggle="flip" ${section.flip ? 'checked' : ''}> Flip side</label>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Models only — grid and floor stay. Shows in exports; shadows stay uncut.</span>
+      </div>` : ''}`;
 
   const renderingSec = `
       <div class="pp-subhead">Still</div>
@@ -309,10 +371,10 @@ function _render() {
         <label><input type="checkbox" data-action="render-view" ${_rv.active ? 'checked' : ''}> Render view</label>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">While on, the camera position is remembered automatically.</span>
+        <span class="pp-hint">While on, the camera position is remembered automatically.${ro.pose ? ' Exports shoot from the remembered view.' : ''}</span>
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="export-png">Export PNG</button>
+        <button type="button" class="pp-btn" data-action="export-png" title="Ctrl+Alt+E">Export PNG</button>
       </div>
       <div class="pp-subhead">Turntable</div>
       <div class="pp-row">
@@ -348,6 +410,7 @@ function _render() {
     _section('grid', 'Grid', gridSec)
     + _section('environment', 'Environment', envSec)
     + _section('camera', 'Camera', camSec)
+    + _section('section', 'Section', sectionSec)
     + _section('rendering', 'Rendering', renderingSec);
   _wire();
 }
@@ -434,16 +497,41 @@ function _wire() {
   _bodyEl.querySelectorAll('[data-render-toggle]').forEach(box => {
     box.addEventListener('change', () => {
       const key = box.dataset.renderToggle;
+      if (key === 'hdriEnabled' && box.checked) _hdriToastWanted = true;
       _setRender({ [key]: box.checked });
-      if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled'].includes(key)) _render();
+      if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled', 'ssaoEnabled'].includes(key)) _render();
     });
   });
 
-  // Render selects (background / tone mapping).
+  // Render selects (background / tone mapping / HDRI preset).
   _bodyEl.querySelectorAll('[data-render-select]').forEach(sel => {
     sel.addEventListener('change', () => {
+      if (sel.dataset.renderSelect === 'hdriPreset') _hdriToastWanted = true;
       _setRender({ [sel.dataset.renderSelect]: sel.value });
     });
+  });
+
+  // Section plane — session-only state + SceneManager.setSectionPlane.
+  // NB attribute prefix is data-SECT: data-sec is taken by the collapsible
+  // <section data-sec> wrappers, and change events BUBBLE — a [data-sec]
+  // selector here would attach to every section element and re-render the
+  // panel on any child input's change (the render-view detach bug).
+  _bodyEl.querySelectorAll('[data-sect-toggle]').forEach(box => {
+    box.addEventListener('change', () => {
+      _setSection({ [box.dataset.sectToggle]: box.checked });
+      if (box.dataset.sectToggle === 'enabled') _render();
+    });
+  });
+  _bodyEl.querySelector('[data-sect-select="axis"]')?.addEventListener('change', (e) => {
+    _setSection({ axis: e.target.value });
+  });
+  _bodyEl.querySelectorAll('[data-sect]').forEach(input => {
+    input.addEventListener('change', () => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v)) { _render(); return; }
+      _setSection({ [input.dataset.sect]: v });
+    });
+    _escEnter(input);
   });
 
   // Colour pickers (floor). `input` not `change` — live drag preview.
@@ -507,24 +595,7 @@ function _wireRendering() {
     }
   });
 
-  _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    const ro = _ro();
-    btn.disabled = true;
-    btn.textContent = 'Rendering…';
-    try {
-      const blob = await capturePng(ro);
-      await triggerDownload(blob, renderPngName(getState().project.name, ro),
-        { mime: 'image/png', ext: 'png', description: 'PNG image' });
-      Toast.show(`PNG rendered (${ro.width} × ${ro.height})`, 'success', 3000);
-    } catch (err) {
-      console.error('PNG render failed:', err);
-      Toast.show('PNG render failed — see console', 'error', 5000);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Export PNG';
-    }
-  });
+  _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', () => _exportPng());
 
   _bodyEl.querySelectorAll('[data-tt]').forEach(input => {
     input.addEventListener('change', () => {
@@ -549,29 +620,33 @@ function _wireRendering() {
   _bodyEl.querySelector('[data-action="preview-turntable"]')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (isPreviewing()) { stopPreview(); return; }
-    if (isRecording()) return;
+    if (isRecording() || _busy) return;
     const tt = _ro().turntable;
     btn.textContent = 'Stop preview';
+    _setBusy(true, { keepPreview: true });   // changing settings mid-sweep does nothing (U2)
     try {
       await previewTurntable(tt);
     } finally {
       btn.textContent = 'Preview';
+      _setBusy(false);
     }
   });
 
   _bodyEl.querySelector('[data-action="export-video"]')?.addEventListener('click', async (e) => {
-    if (isRecording()) return;
+    if (isRecording() || _busy) return;
     const btn = e.currentTarget;
     const ro = _ro();
     const tt = ro.turntable;
-    btn.disabled = true;
+    _setBusy(true);
     try {
       // Offline WebCodecs render at the output resolution (falls back to
-      // realtime MediaRecorder only when WebCodecs is missing).
+      // realtime MediaRecorder only when WebCodecs is missing). Shoots from
+      // the stored render composition when one exists (U1).
       const result = await recordTurntable({
         ...tt,
         width: ro.width,
         height: ro.height,
+        pose: ro.pose ?? null,
         onProgress: (f) => { btn.textContent = `Rendering… ${Math.round(f * 100)}% — Esc cancels`; },
       });
       if (!result) {
@@ -586,10 +661,44 @@ function _wireRendering() {
       console.error('Turntable recording failed:', err);
       Toast.show('Turntable recording failed — see console', 'error', 5000);
     } finally {
-      btn.disabled = false;
       btn.textContent = 'Export video';
+      _setBusy(false);
     }
   });
+}
+
+// One capture at a time: disable the rendering action buttons while any
+// runs (UX audit U2). keepPreview leaves the Preview button live — it
+// doubles as the Stop button during its own sweep.
+function _setBusy(on, { keepPreview = false } = {}) {
+  _busy = on;
+  for (const sel of ['export-png', 'export-video', 'preview-turntable']) {
+    if (keepPreview && sel === 'preview-turntable') continue;
+    const btn = _bodyEl?.querySelector(`[data-action="${sel}"]`);
+    if (btn) btn.disabled = on;
+  }
+}
+
+// Shared by the Export PNG button and Ctrl+Alt+E. Shoots from the stored
+// render composition when one exists (U1); current view otherwise.
+async function _exportPng() {
+  if (_busy) return;
+  const btn = _bodyEl?.querySelector('[data-action="export-png"]');
+  const ro = _ro();
+  _setBusy(true);
+  if (btn) btn.textContent = 'Rendering…';
+  try {
+    const blob = await capturePng({ ...ro, pose: ro.pose ?? null });
+    await triggerDownload(blob, renderPngName(getState().project.name, ro),
+      { mime: 'image/png', ext: 'png', description: 'PNG image' });
+    Toast.show(`PNG rendered (${ro.width} × ${ro.height})`, 'success', 3000);
+  } catch (err) {
+    console.error('PNG render failed:', err);
+    Toast.show('PNG render failed — see console', 'error', 5000);
+  } finally {
+    if (btn) btn.textContent = 'Export PNG';
+    _setBusy(false);
+  }
 }
 
 function _setRender(patch) {
@@ -598,6 +707,18 @@ function _setRender(patch) {
     scene: { ...s.scene, render: { ...RENDER_DEFAULTS, ...s.scene.render, ...patch } },
   }), SILENT);
   SceneManager.applyRenderSettings(getState().scene.render);
+}
+
+function _setSection(patch) {
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, section: { ...SECTION_DEFAULTS, ...s.scene.section, ...patch } },
+  }), SILENT);
+  _applySection();
+}
+
+function _applySection() {
+  SceneManager.setSectionPlane({ ...SECTION_DEFAULTS, ...(getState().scene.section ?? {}) });
 }
 
 function _escEnter(input) {
