@@ -320,6 +320,9 @@ async function main() {
         crosshair, previewResult, rigRestored, mid, hdri,
       };
     })()`);
+    // Surface page exceptions BEFORE pixel asserts — a handler that threw
+    // makes downstream asserts fail with misleading messages.
+    if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
     assert(rendering.frameShown, 'render-view toggle did not show the frame overlay');
     assert(rendering.frameHidden, 'render-view toggle did not hide the frame overlay');
@@ -346,6 +349,133 @@ async function main() {
       `HDRI probe insensitive — camera-only rotation barely changed the sphere: ${JSON.stringify(rendering.hdri)}`);
     assert(rendering.hdri.sweepDiff < rendering.hdri.ctrlDiff * 0.4,
       `HDRI rotated against the camera during the sweep (wrong rotationY sign?): ${JSON.stringify(rendering.hdri)}`);
+
+    // 2026-06-13 wave: offline frame source, section plane, bounce-in,
+    // RENDERONCE shadows with a real caster, SSAO toggle, project-switch
+    // recording abort.
+    const wave = await evaluate(cdp, `(async () => {
+      const ro = await import('/src/core/RenderOutput.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const fx = await import('/src/core/scene/ViewEffects.js');
+      const st = await import('/src/core/StateManager.js');
+      const ev = await import('/src/core/events.js');
+      const B = window.BABYLON;
+      const scene = sm.SceneManager.getScene();
+      const cam = sm.SceneManager.getCamera();
+      cam.target.set(0, 0, 0);
+      cam.alpha = Math.PI / 3; cam.beta = Math.PI / 4; cam.radius = 0.4243;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      // (1) Offline encoder frame source — raw RGBA must be real pixels
+      // (gradient backdrop ⇒ variance), top-down, opaque. An all-black or
+      // all-one-colour buffer means the manual RTT render path broke (an
+      // mp4 of black frames still has plausible bytes — this catches it).
+      const px = await ro.captureFrameRGBA({ width: 64, height: 64 });
+      const distinct = new Set();
+      for (let i = 0; i < px.length; i += 4) distinct.add((px[i] << 16) | (px[i+1] << 8) | px[i+2]);
+      const frameSrc = {
+        len: px.length, lenOk: px.length === 64 * 64 * 4,
+        distinct: distinct.size, alphaOk: px[3] === 255,
+      };
+
+      // (2) Section plane — box fully ABOVE z=0: no cut ⇒ visible (alpha 255
+      // at centre of a transparent capture), cut at offset 0 keeping below ⇒
+      // gone (alpha 0), flip ⇒ visible again. Pins the plane sign convention
+      // empirically, like the HDRI probe pinned rotationY.
+      const alphaAt = async (blob, x = 32, y = 32) => {
+        const bmp = await createImageBitmap(blob);
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const cx = c.getContext('2d');
+        cx.drawImage(bmp, 0, 0);
+        return cx.getImageData(x, y, 1, 1).data[3];
+      };
+      const secBox = B.MeshBuilder.CreateBox('smoke-sec', { size: 0.1 }, scene);
+      secBox.position.set(0, 0.06, 0);
+      secBox.metadata = { meshId: 'smoke-sec' };
+      sm.SceneManager.setSectionPlane({ enabled: false });
+      fx.registerSectionMeshes();
+      const aNoCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
+      sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: false });
+      const aCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
+      sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: true });
+      const aFlip = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
+      sm.SceneManager.setSectionPlane({ enabled: false });
+      const section = { aNoCut, aCut, aFlip };
+
+      // (3) Bounce-in — ASSET_INSTANTIATED scale-pops the mesh and MUST land
+      // exactly back on the original scaling (state transforms untouched).
+      const bBox = B.MeshBuilder.CreateBox('smoke-bounce', { size: 0.05 }, scene);
+      bBox.position.set(0.1, 0.025, 0);
+      bBox.metadata = { meshId: 'smoke-bounce' };
+      bBox.scaling.set(2, 2, 2);
+      st.dispatch(ev.EVENTS.ASSET_INSTANTIATED, { meshId: 'smoke-bounce' });
+      await new Promise(r => setTimeout(r, 80));
+      const midScale = bBox.scaling.x;
+      await new Promise(r => setTimeout(r, 600));
+      const bounce = {
+        midScale, animated: midScale > 0.5 && midScale < 1.999,
+        landedExact: bBox.scaling.x === 2 && bBox.scaling.y === 2 && bBox.scaling.z === 2,
+      };
+
+      // (4) RENDERONCE shadows with a real caster (the bounce box is now a
+      // registered caster): a transparent capture with the floor on must
+      // contain SOFT shadow pixels (alpha strictly between 0 and 255 — the
+      // blurred ESM edge). Broken/stale shadow map ⇒ only 0s and 255s.
+      sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorZMM: 0, shadowsEnabled: true });
+      const shBlob = await ro.capturePng({ width: 96, height: 96, transparent: true });
+      const bmp = await createImageBitmap(shBlob);
+      const c = new OffscreenCanvas(96, 96);
+      const cx = c.getContext('2d');
+      cx.drawImage(bmp, 0, 0);
+      const data = cx.getImageData(0, 0, 96, 96).data;
+      let soft = 0;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 8 && data[i] < 247) soft++;
+      }
+      sm.SceneManager.applyRenderSettings({ floorEnabled: false });
+      const shadows = { soft, ok: soft > 10 };
+
+      // (5) SSAO toggle — pipeline detaches/disposes cleanly. SwiftShader
+      // may not support SSAO2; tolerated (isSsaoActive stays false), but a
+      // toggle that LEAVES the pipeline attached after disable always fails.
+      sm.SceneManager.applyRenderSettings({ ssaoEnabled: true, ssaoStrength: 1 });
+      const ssaoOn = fx.isSsaoActive();
+      sm.SceneManager.applyRenderSettings({ ssaoEnabled: false });
+      const ssaoOffOk = !fx.isSsaoActive();
+      sm.SceneManager.applyRenderSettings({ ssaoEnabled: true });
+
+      // (6) Project switch aborts an in-flight recording (and frees the
+      // busy flag) instead of encoding a dead scene for 30 s.
+      const recP = ro.recordTurntable({ durationS: 5, fps: 10, width: 160, height: 96 });
+      await new Promise(r => setTimeout(r, 300));
+      st.dispatch(ev.EVENTS.PROJECT_NEW, {});
+      const recAborted = await Promise.race([
+        recP.then(v => v === null),
+        new Promise(r => setTimeout(() => r('timeout'), 8000)),
+      ]);
+      const recIdle = !ro.isRecording();
+
+      secBox.dispose();
+      bBox.dispose();
+      return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle };
+    })()`);
+    assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);
+    assert(wave.frameSrc.distinct > 16,
+      `offline frame source nearly uniform (${wave.frameSrc.distinct} colours) — manual RTT render broke`);
+    assert(wave.frameSrc.alphaOk, 'offline frame source not opaque with background on');
+    assert(wave.section.aNoCut === 255, `section box invisible before cut (alpha ${wave.section.aNoCut})`);
+    assert(wave.section.aCut === 0,
+      `section plane did not cut the box (alpha ${wave.section.aCut}) — clip sign convention broke`);
+    assert(wave.section.aFlip === 255, `section flip did not keep the other side (alpha ${wave.section.aFlip})`);
+    assert(wave.bounce.animated,
+      `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
+    assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');
+    assert(wave.shadows.ok,
+      `no soft shadow pixels with a caster + floor (${wave.shadows.soft}) — RENDERONCE shadow map stale or casters broken`);
+    assert(wave.ssaoOffOk, 'SSAO pipeline still active after toggle off');
+    assert(wave.recAborted === true, `project switch did not abort the recording (${wave.recAborted})`);
+    assert(wave.recIdle, 'isRecording stuck true after project-switch abort');
+    console.log(`  ssao: ${wave.ssaoOn ? 'active' : 'unsupported on this GPU (tolerated)'}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

@@ -78,9 +78,10 @@ loader/material/serializer APIs cannot drift independently of the core engine.
 Runtime contract:
 
 - `package.json` declares Vite, TypeScript, JSZip, mp4-muxer (turntable
-  video container — WebCodecs chunks → mp4, zero-dependency), and Babylon
-  npm packages. Tests use Node's built-in test runner unless a future
-  feature explicitly needs Vitest.
+  video container — WebCodecs chunks → mp4, zero-dependency; loaded via
+  dynamic `import()` in RenderOutput.js so it builds as its own lazy
+  chunk), and Babylon npm packages. Tests use Node's built-in test runner
+  unless a future feature explicitly needs Vitest.
 - `public/env/` holds the three prefiltered HDRI presets (`studio.env`,
   `neutral.env`, `outdoor.env` — copies of Babylon CDN environment assets,
   served at `/env/*` by Vite and copied into `dist/`).
@@ -94,7 +95,9 @@ Runtime contract:
 - `vite.config.ts` temporarily sets `build.chunkSizeWarningLimit = 5000`
   while `src/app/boot.ts` + `src/app/main.ts` bundle Babylon plus the migrated
   JS modules into one Vite entry. Lower/remove that budget when domain-level
-  code splitting lands.
+  code splitting lands. ⚠ Do NOT force a `@babylonjs` `manualChunks` vendor
+  chunk under rolldown (Vite 8): it defeats tree-shaking — measured 7.3 MB
+  vendor vs the 4.2 MB tree-shaken boot chunk (2026-06-13).
 - `tsconfig.json` temporarily enables `allowJs` with `checkJs: false` so the
   typed Vite bootstrap can import the migrated JavaScript modules before the
   entire app is converted to TypeScript. Remove both flags when those modules
@@ -185,6 +188,10 @@ src/
       BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
+      EnvironmentRig.js    ← 3-light studio + RENDERONCE shadows, shadow-catcher floor, HDRI IBL
+      ViewEffects.js       ← SSAO contact darkening + cross-section clip plane (viewport tools)
+      ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
+      EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
     RenderOutput.js        ← Scene ▸ Rendering capture engine: PNG stills + turntable video
     render/
       RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
@@ -261,8 +268,10 @@ Boot order:
    `@babylonjs/materials`, and `@babylonjs/serializers`.
 2. `boot.ts` builds `window.BABYLON` with the exact symbols used by the JS
    modules: core scene/mesh/camera/math/material classes, `CubeTexture`
-   (HDRI prefiltered env load), `GridMaterial`, `ShadowOnlyMaterial`
-   (transparent-PNG floor swap), `OBJExport`, and `STLExport`.
+   (HDRI prefiltered env load), `Plane` (section clip plane),
+   `SSAO2RenderingPipeline` (viewport AO), `GridMaterial`,
+   `ShadowOnlyMaterial` (transparent-PNG floor swap), `OBJExport`, and
+   `STLExport`.
 3. `boot.ts` imports `src/app/main.ts`.
 4. `main.ts` blocks non-Chrome/Edge by requiring
    `'showDirectoryPicker' in window`.
@@ -395,7 +404,7 @@ match what the specced responsibilities actually cost.
 | each `core/commands/*.js` | < 500 (HierarchyCommands is the big one by design) |
 | `InputManager.js` | < 750 (incl. modal G/R/S; extract `input/ModalTransform.js` if it grows) |
 | `SceneManager.js` | < 450 (engine/lighting/overlays orchestrator; camera, pivot, outline, bed/grid all split into `core/scene/`) |
-| each `core/scene/*.js` | < 250 (`CameraRig.js` < 500 — creation + custom nav + presets + framing + follow modes are one cohesive rig) |
+| each `core/scene/*.js` | < 250 (`CameraRig.js` < 550 — creation + custom nav + presets + framing + follow + optics + pose save/restore are one cohesive rig) |
 | `AssetLoader.js` | < 700 (mesh-side only; textures/split/blob-urls live in `core/assets/`) |
 | each `core/assets/*.js` | < 350 |
 | `ImportNormalizer.js` | < 150 |
@@ -678,6 +687,9 @@ export const EVENTS = {
   // Camera
   CAMERA_PRESET_CHANGED:   'camera:presetChanged',
 
+  // Environment
+  HDRI_STATUS:             'env:hdriStatus',   // { status: 'loaded'|'error', preset } — ScenePanel toasts user-initiated changes
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
@@ -741,10 +753,25 @@ const initialState = {
               // HDRI IBL — prefiltered .env presets in public/env/ (lighting
               // only, gradient backdrop stays; PBR materials).
               hdriEnabled: true, hdriPreset: 'studio' /* |'neutral'|'outdoor' */,
-              hdriIntensity: 0.6 },
+              hdriIntensity: 0.6,
+              // SSAO contact darkening (scene/ViewEffects.js) — VIEWPORT-ONLY
+              // post effect: RTT export paths skip the camera post chain by
+              // design (same rule that keeps the silhouette out of renders).
+              ssaoEnabled: true, ssaoStrength: 1 /* 0..2 */ },
+    // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
+    // deliberately NOT persisted. axis/offset are print-space (Z = up, mm);
+    // flip keeps the other side. Cuts CONTENT meshes only (per-mesh
+    // scene.clipPlane set/cleared in render observables) — grid/floor/axes/
+    // backdrop never sliced. The cut DOES appear in PNG/video exports
+    // (content renders through Mesh.render() in RTTs); the shadow-map pass
+    // renders depth directly, so shadows stay uncut (documented limit).
+    section: { enabled: false, axis: 'z' /* |'x'|'y' */, offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
-    // first Render-view use; auto-updated while the mode is on).
+    // first Render-view use; auto-updated while the mode is on). When a pose
+    // exists, Export PNG / Export video SHOOT FROM IT — the saved composition
+    // is the source of truth, not wherever free navigation happens to be;
+    // free navigation is restored afterwards.
     renderOut: { width: 1920, height: 1080, transparent: false,
                  pose: null /* { alpha, beta, radius, target, isOrthographic } */,
                  turntable: { durationS: 8, fps: 30, direction: 'left' /* |'right' */, ease: true } },
@@ -1040,10 +1067,18 @@ SceneManager.cancelBodyDrag()                // restores pivot to pre-drag posit
 
 // Overlays
 SceneManager.setOverlay(name, on)             // 'grid'|'axes'|'wireframe'|'printPreview'|'bedPreview'|'wireframeEdges'
-SceneManager.setWireframeEdgeColor(hexColor)  // live-update edge color while wireframeEdges is on
+SceneManager.setWireframeEdgeColor(hexColor)  // live-update edge color while wireframeEdges is on (scene/EdgeOverlay.js)
 SceneManager.setGrid({cellMM,subdivisions})   // re-skins grid lines (footprint unchanged)
 SceneManager.rebuildBed()                     // rebuilds ground to current print.bedDimensions XY
 SceneManager.updateBedPreview(dims)
+
+// Environment / effects (delegates — scene/EnvironmentRig.js + scene/ViewEffects.js)
+SceneManager.applyRenderSettings(render)      // partial-safe: grade + lights/shadows/floor/HDRI + SSAO + camera optics
+SceneManager.setBackgroundEnabled(on)         // gradient Layer + clearColor alpha — transparent PNG capture
+SceneManager.setFloorShadowOnly(on)           // floor ↔ ShadowOnlyMaterial swap during transparent capture
+SceneManager.setSectionPlane(section)         // cross-section clip plane ({enabled, axis, offsetMM, flip})
+SceneManager.invalidateShadows()              // re-arm the RENDERONCE shadow map for one render
+SceneManager.getShadowGenerator()             → BABYLON.ShadowGenerator
 
 // 3D Cursor
 SceneManager.getCursor()                      → Vector3
@@ -1058,7 +1093,7 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 - Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`). Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
 - Numpad face presets route through `setCameraPreset` (animated, bbox-fit — see *Camera Presets* below). Numpad5 toggles projection IN PLACE via `toggleOrthographic()`, preserving the current view direction.
 - **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_COLOR = '#f59e0b'` (amber — matches `--accent`).
-- **Wireframe edges:** `SceneManager.setOverlay('wireframeEdges', on)` calls `mesh.enableEdgesRendering(0.9, true)` / `mesh.disableEdgesRendering()` on every mesh with `.geometry`. Edge color and width stored in module-local `_wireframeEdgeState`. `setWireframeEdgeColor(hex)` parses hex to `BABYLON.Color4` and updates all live edge renderers.
+- **Wireframe edges (`scene/EdgeOverlay.js`):** `SceneManager.setOverlay('wireframeEdges', on)` builds a per-mesh CLONE sharing the source geometry, drawn with a wireframe emissive `StandardMaterial` (`zOffset −1`) over the textured base — `enableEdgesRendering` at any epsilon only showed sharp creases (field report). Clones carry `metadata.edgeOverlay` so they never pick, cast, or register. `setWireframeEdgeColor(hex)` live-updates the shared material.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
 - **Bed (grid):** ground plane footprint = the printer bed XY (`state.print.bedDimensions.x` × `.y`, mm → BU; default Mimaki 3DUJ-553 508 × 508 mm), rectangular. Lines drawn with `BABYLON.GridMaterial`, styled from `state.scene.grid` (`cellMM` minor cell size, `subdivisions` minor cells per major line; default 10 mm / 10). `SceneManager.rebuildBed()` resizes the floor when bed dimensions change (called from Print ▸ Bed); `SceneManager.setGrid({cellMM,subdivisions})` re-skins the lines (called from Properties ▸ Scene). The single flat `FRONT` tag sits at the `+Z` bed edge and scales with `min(width,depth)`. Old v3.1 saves with a scalar `scene.gridSize` are ignored; `scene.grid` falls back to the 10/10 default.
@@ -1090,23 +1125,50 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
   `TONE_CONTRAST` (1.10), `exposure` `TONE_EXPOSURE` (1.05). Applied at
   material shading so it bakes into the frame the selection-silhouette
   post-process samples — no post-chain conflict.
-- **3-light studio:** `HemisphericLight` (`HEMI_INTENSITY` 0.85, white sky,
-  `HEMI_GROUND_COLOR` soft floor bounce so undersides never go black) +
-  `DirectionalLight` "key" (`KEY_INTENSITY` 0.70) + opposite low
-  `DirectionalLight` "fill" (`FILL_INTENSITY` 0.25, **zero specular** so no
-  second highlight). The key drives a `ShadowGenerator` 2048², kernel-blurred
-  (`SHADOW_BLUR_KERNEL` 32), `darkness` `SHADOW_DARKNESS` 0.62 (soft contact,
-  not inky). `getShadowGenerator()` returns this. **Casters:**
-  `_ensureShadowCasters()` (ASSET_INSTANTIATED + PROJECT_LOADED) adds every
-  content mesh — ancestor-chain meshId walk, same as picking — to the
-  renderList idempotently; disposal self-removes. (The generator's renderList
-  starts empty; before 2026-06-13 nothing ever cast, so the bed's
-  `receiveShadows` was a no-op.)
-- All tunables are UPPER_SNAKE constants at the top of `SceneManager.js`.
-- **Deliberately not used:** `DefaultRenderingPipeline` / `SSAO2` — they
-  reorder the camera post-process chain and would risk the custom selection
-  silhouette pass. Revisit only with live verification (would add Fusion's
-  subtle ambient-occlusion contact darkening).
+- **3-light studio (`scene/EnvironmentRig.js`):** `HemisphericLight`
+  (`HEMI_INTENSITY` 0.85, white sky, `HEMI_GROUND_COLOR` soft floor bounce so
+  undersides never go black) + `DirectionalLight` "key" (`KEY_INTENSITY`
+  0.70) + opposite low `DirectionalLight` "fill" (`FILL_INTENSITY` 0.25,
+  **zero specular** so no second highlight). The key drives a
+  `ShadowGenerator` 2048², kernel-blurred (`SHADOW_BLUR_KERNEL` 32),
+  `darkness` `SHADOW_DARKNESS` 0.62 (soft contact, not inky).
+  `getShadowGenerator()` returns this. **Casters:** `ensureShadowCasters()`
+  (ASSET_INSTANTIATED + PROJECT_LOADED) adds every content mesh —
+  ancestor-chain meshId walk, same as picking — tracked by a `uniqueId` Set
+  (O(n), audit C3); disposal self-removes. (The generator's renderList starts
+  empty; before 2026-06-13 nothing ever cast, so the bed's `receiveShadows`
+  was a no-op.)
+- **Shadow map is RENDERONCE** (perf audit): the 2048² blurred ESM was the
+  largest fixed per-frame GPU cost, so it renders only when invalidated —
+  `invalidateShadows()` re-arms one render via `resetRefreshCounter()`.
+  Invalidation sources: caster `onAfterWorldMatrixUpdateObservable` (gizmo
+  drags, bounce-in, programmatic transforms), caster add/dispose, shadow
+  setting changes, and the turntable sweep's per-frame key-light rotation
+  (`RenderOutput._sweepRig.applyDelta`). Browser smoke pins soft (0<α<255)
+  shadow pixels with a real caster — a stale map fails it.
+- Tunables are UPPER_SNAKE constants in `scene/SceneConstants.js`; the
+  environment half of `applyRenderSettings` (lights/shadows/floor/HDRI)
+  delegates to `EnvironmentRig.applyEnvironmentSettings`, the effects half
+  (SSAO/section) to `ViewEffects.applyViewEffects`.
+- **SSAO (`scene/ViewEffects.js`, 2026-06-13):** `SSAO2RenderingPipeline`
+  attached to the nav camera while `render.ssaoEnabled` (default ON;
+  `ssaoStrength` 0..2 → `totalStrength`). Half-res AO, `radius` 0.009 BU
+  (~9 mm contact reach at the 300 mm working area), 12 samples. Lazily
+  constructed; disabling DISPOSES the pipeline. Construction is
+  try/catch-feature-detected — unsupported GPU/driver ⇒ stays off silently
+  (`isSsaoActive()` is the probe hook). **Viewport-only:** RTT export paths
+  skip the camera post chain, which is also what keeps the selection
+  silhouette out of renders — the silhouette post-process coexists with the
+  pipeline (smoke + screenshots verified). `DefaultRenderingPipeline` remains
+  deliberately unused.
+- **Bounce-in (`scene/ImportBounce.js`, 2026-06-13):** freshly instantiated
+  meshes scale-pop into place (260 ms, 0.6→easeOutBack overshoot→1). Pure
+  visual feel: the animation multiplies the mesh's own scaling and ends with
+  an EXACT `copyFrom` of the original vector (smoke pins the landing) — state
+  transforms never touched. Skipped under `prefers-reduced-motion`; project
+  loads never fire ASSET_INSTANTIATED (restore path uses `bindRestoredMesh`),
+  so bulk loads don't bounce by construction. Imports, drops, duplicates and
+  primitives do.
 
 ---
 
@@ -2375,13 +2437,22 @@ rendered with nothing active — Properties is object-scoped now).
 Every section is **collapsible** (same `.pp-collapsed` pattern as the
 Properties panel) with the collapse state persisted per-user in
 localStorage (`mixomesh.scenePanel.collapsed.v1` — NEVER in .mixo, same
-per-user rule as workspaces). Defaults: Environment + Camera collapsed so
-the Rendering section is reachable without scrolling. Long sections carry
-muted uppercase `.pp-subhead` sub-group labels (blender.css §8):
-Environment = Grade / Floor / Lights; Rendering = Still / Turntable.
-Dependent rows render only while their toggle is ON (vignette amount,
-floor colour + height, shadow darkness) and the panel re-renders on those
-toggles; floor-on + shadows-off shows a "floor won't catch any" hint.
+per-user rule as workspaces). Defaults: Environment + Camera + Section
+collapsed so the Rendering section is reachable without scrolling. Long
+sections carry muted uppercase `.pp-subhead` sub-group labels (blender.css
+§8): Environment = HDRI lighting / Grade / Floor / Lights / Ambient
+occlusion; Rendering = Still / Turntable. Dependent rows render only while
+their toggle is ON (vignette amount, floor colour + height, shadow
+darkness, AO strength, section axis/offset/flip) and the panel re-renders
+on those toggles; floor-on + shadows-off shows a "floor won't catch any"
+hint.
+
+⚠ **Attribute namespace:** the collapsible wrappers are
+`<section data-sec="${key}">` and change events BUBBLE — wiring a
+`[data-sec]`-prefixed selector for row inputs attaches the handler to every
+section element and re-renders the panel on any child's change (detached-
+node bug found by smoke 2026-06-13). The cross-section rows use `data-sect*`
+for exactly this reason; never introduce another `data-sec…` row attribute.
 Sections:
 - **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
   axes visibility checkboxes (overlay contract), bed-size hint.
@@ -2402,10 +2473,17 @@ Sections:
   `receiveShadows`, matte Standard material, positioned 0.05 mm below the
   requested height so Z=0 doesn't z-fight the bed grid; never registered /
   pickable / exported, stays VISIBLE in renders — it exists for them),
-  shadows on/off, shadow darkness, key/fill/ambient light intensities + a
-  "Reset environment" button.
+  shadows on/off, shadow darkness, key/fill/ambient light intensities,
+  **Ambient occlusion** (SSAO toggle, default ON + strength 0..2 — viewport
+  shading only, hint says so; see §7 SSAO) + a "Reset environment" button.
+  User-initiated HDRI toggle/preset changes toast on `HDRI_STATUS`
+  ('loaded' → "ready", 'error' → failure); boot/load stay silent.
 - **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
   `CameraRig.applyCameraOptics` via the same settings object.
+- **Section** — cross-section "Cut view" (state.scene.section, session-only):
+  axis X/Y/Z (print-space, Z = height), offset (mm), flip side →
+  `SceneManager.setSectionPlane`. Cuts content meshes only; hint documents
+  that grid/floor stay, the cut shows in exports, and shadows stay uncut.
 All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
@@ -2424,17 +2502,25 @@ All of it writes `state.scene.render` (silent) and applies via
     camera's `onViewMatrixChangedObservable`, plus a final snapshot on toggle
     off; there is no "Set view" button. Exits without touching the camera (or
     writing the stale pose) on `PROJECT_LOADED`/`PROJECT_NEW`.
-  - **Export PNG** — `RenderOutput.capturePng`: RTT screenshot
-    (`CreateScreenshotUsingRenderTargetAsync`) at the exact output
-    resolution. The RTT path skips the selection-silhouette post-process
-    (clean renders) while keeping tone mapping (material-level). Scene
-    furniture (grid / axes / bed preview / 3D cursor) is hidden for the
-    capture and restored; transparent mode disables the background Layer +
-    sets `clearColor` alpha 0 (`SceneManager.setBackgroundEnabled`), and an
-    ENABLED floor is swapped to a `ShadowOnlyMaterial` for the capture
+  - **Export PNG** (button, or **Ctrl+Alt+E** globally — Blender's F12
+    belongs to DevTools in a browser) — `RenderOutput.capturePng`: RTT
+    screenshot (`CreateScreenshotUsingRenderTargetAsync`) at the exact
+    output resolution. The RTT path skips the camera post chain — no
+    selection silhouette and no SSAO in renders — while keeping tone
+    mapping (material-level). Scene furniture (grid / axes / bed preview /
+    3D cursor) is hidden for the capture and restored; transparent mode
+    disables the background Layer + sets `clearColor` alpha 0
+    (`SceneManager.setBackgroundEnabled`), and an ENABLED floor is swapped
+    to a `ShadowOnlyMaterial` for the capture
     (`SceneManager.setFloorShadowOnly`) — its caught shadow lands in the
     alpha channel, the plane itself does not, so the export composites as
     model + floating soft shadow. Both swaps restore after.
+    **Pose rule (U1):** when `renderOut.pose` exists, Export PNG AND Export
+    video shoot FROM IT (capture applies the pose, restores free nav after);
+    no pose → current view. The render-view hint says so while a pose is
+    stored. **Busy rule (U2):** Export PNG / Export video / Preview disable
+    each other while any capture runs (Preview stays live during its own
+    sweep — it doubles as Stop).
   - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
     ease in/out, plus a **Preview** button (plays the sweep live, no
     recording — button toggles to "Stop preview", Esc also stops).
@@ -2464,13 +2550,29 @@ All of it writes `state.scene.render` (silent) and applies via
     `<project>_turntable_<s>s.<ext>` (`render/RenderMath.js`).
   - **Recording path 1 (primary): offline WebCodecs.** The sweep is stepped
     frame-by-frame (`i/frameCount` — the last frame sits just short of 360°
-    so the video loops cleanly), each frame rendered via the RTT screenshot
-    path at the EXACT output resolution (`renderOut.width × height`, screen
-    size irrelevant; furniture hidden like PNG), fed to a `VideoEncoder`
-    (H.264 High — level by area: L4.0 ≤ 1080p, L5.1 ≤ 4K; ~0.12
-    bits/px/frame clamped 4–40 Mbps; keyframe every 2 s; even dimensions
-    forced) and muxed by **mp4-muxer** (dependency) into an in-memory mp4.
-    Deterministic — no dropped frames.
+    so the video loops cleanly), each frame rendered at the EXACT output
+    resolution (`renderOut.width × height`, screen size irrelevant;
+    furniture hidden like PNG) and fed to a `VideoEncoder` (H.264 High —
+    level by area: L4.0 ≤ 1080p, L5.1 ≤ 4K; ~0.12 bits/px/frame clamped
+    4–40 Mbps; keyframe every 2 s; even dimensions forced), muxed by
+    **mp4-muxer** (dependency, LAZY `import()` — its chunk stays out of
+    boot) into an in-memory mp4. Deterministic — no dropped frames.
+    **Frame source (perf audit 2026-06-13):** NOT the PNG screenshot helper
+    per frame — `_renderSceneToTarget` replicates what
+    `CreateScreenshotUsingRenderTarget` does internally
+    (`camera.outputRenderTarget` + full `scene.render()` under
+    `engine.skipFrameRender` + getRenderWidth/Height overrides) into ONE
+    reused `RenderTargetTexture`, then `readPixels` → row-flip (WebGL is
+    bottom-up) → `new VideoFrame(rgba, {format:'RGBA'})`. Kills the
+    per-frame PNG encode→dataURL→fetch→decode→ImageBitmap round-trip that
+    dominated export time. `captureFrameRGBA()` exposes one frame of this
+    exact path as the smoke probe (asserts real pixel variance — an mp4 of
+    black frames still has plausible bytes).
+    **Project-switch guard (audit C2):** `PROJECT_NEW`/`PROJECT_LOADED`
+    cancel an in-flight preview/recording immediately, and the cancellation
+    skips the camera restore — the incoming project's camera wins, never a
+    stale pose. Lights/env rotation still restore (app-fixed studio rig).
+    Smoke pins the abort (recording resolves null, `isRecording()` clears).
   - **Recording path 2 (fallback, only when WebCodecs is missing): realtime
     MediaRecorder** of the live canvas at viewport size — mp4 `avc3`
     preferred (avc1 rejects mid-stream resolution changes), WebM vp8 retry
@@ -2833,7 +2935,11 @@ locally installed Chrome or Edge. It starts a temporary Vite server, opens
 the boot overlay to clear, and asserts the main shell panels/render canvas
 — plus the functional rendering-stack pins listed at the file-tree entry
 (PNG alpha, floor shadow-only swap, offline mp4, turntable rigidity, HDRI
-rotation probe).
+rotation probe) and the 2026-06-13 wave: offline frame-source pixel
+variance (`captureFrameRGBA`), the section-plane cut sign convention
+(no-cut/cut/flip alpha triple), bounce-in exact-scaling landing, soft
+shadow pixels with a real caster (RENDERONCE tripwire), the SSAO
+enable/disable toggle, and the project-switch recording abort.
 
 Companions: `npm run test:export` (functional export round-trip incl. the
 OBJ-worker path), `npm run test:video` (OPTIONAL, opens a small HEADED
