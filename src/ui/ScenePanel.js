@@ -57,8 +57,11 @@ const RESOLUTION_PRESETS = [
 
 let _bodyEl = null;
 // Render-view compose mode — session-only. navPose = where the user's free
-// navigation was when the toggle went on, restored on toggle off.
-const _rv = { active: false, navPose: null };
+// navigation was when the toggle went on, restored on toggle off. While
+// active, every camera move auto-stores the render pose (debounced via the
+// camera's view-matrix observable) — there is no "Set view" button; the
+// composition you leave is the composition you come back to.
+const _rv = { active: false, navPose: null, camObs: null, camTimer: null };
 
 export function init() {
   _bodyEl = document.getElementById('rp-scene-body');
@@ -69,9 +72,31 @@ export function init() {
   _render();
 }
 
+function _watchRenderPose() {
+  const cam = SceneManager.getCamera?.();
+  if (!cam?.onViewMatrixChangedObservable) return;
+  _rv.camObs = cam.onViewMatrixChangedObservable.add(() => {
+    clearTimeout(_rv.camTimer);
+    _rv.camTimer = setTimeout(() => {
+      if (_rv.active) _setRenderOut({ pose: SceneManager.saveCameraState() });
+    }, 250);
+  });
+}
+
+function _unwatchRenderPose() {
+  clearTimeout(_rv.camTimer);
+  _rv.camTimer = null;
+  if (_rv.camObs) {
+    SceneManager.getCamera?.()?.onViewMatrixChangedObservable?.remove(_rv.camObs);
+    _rv.camObs = null;
+  }
+}
+
 // Drop out of compose mode without touching the camera — on project switch
-// the loaded/new camera state wins, the stale navPose must not clobber it.
+// the loaded/new camera state wins, the stale navPose must not clobber it
+// (and the stale pose must not be written into the incoming project).
 function _exitRenderView() {
+  _unwatchRenderPose();
   _rv.active = false;
   _rv.navPose = null;
   RenderFrame.hide();
@@ -201,7 +226,9 @@ function _render() {
       </div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-action="render-view" ${_rv.active ? 'checked' : ''}> Render view</label>
-        <button type="button" class="pp-btn" data-action="set-view" title="Store the current camera as the render position">${ro.pose ? 'Update view' : 'Set view'}</button>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">While on, the camera position is remembered automatically.</span>
       </div>
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="export-png">Export PNG</button>
@@ -354,25 +381,25 @@ function _wireRendering() {
   });
 
   // Render view — compose mode. ON: park free navigation, jump to the stored
-  // render pose (when one exists), show the frame. OFF: back to free nav.
+  // render pose (when one exists), show the frame, and auto-store every
+  // subsequent camera move as the new render pose. OFF: snapshot the final
+  // pose, back to free nav.
   _bodyEl.querySelector('[data-action="render-view"]')?.addEventListener('change', (e) => {
     const on = e.target.checked;
     const ro = _ro();
     if (on) {
       _rv.navPose = SceneManager.saveCameraState();
       if (ro.pose) SceneManager.restoreCameraState(ro.pose);
+      else _setRenderOut({ pose: _rv.navPose });   // first use: current view IS the composition
       RenderFrame.show({ width: ro.width, height: ro.height });
       _rv.active = true;
+      _watchRenderPose();
     } else {
-      if (_rv.navPose) SceneManager.restoreCameraState(_rv.navPose);
+      _setRenderOut({ pose: SceneManager.saveCameraState() });   // final snapshot
+      const navPose = _rv.navPose;
       _exitRenderView();
+      if (navPose) SceneManager.restoreCameraState(navPose);
     }
-  });
-
-  _bodyEl.querySelector('[data-action="set-view"]')?.addEventListener('click', () => {
-    _setRenderOut({ pose: SceneManager.saveCameraState() });
-    Toast.show('Render position stored', 'success', 2000);
-    _render();
   });
 
   _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', async (e) => {

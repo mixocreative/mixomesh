@@ -2360,11 +2360,14 @@ All of it writes `state.scene.render` (silent) and applies via
   - **Resolution** preset (1080p / 4K / Square / Portrait) + custom W×H
     (clamped 16–8192) and a **Transparent background** toggle (PNG only).
   - **Render view** checkbox — compose mode: parks the free-nav camera pose,
-    jumps to the stored `renderOut.pose` (when set), and shows the
-    `ui/RenderFrame.js` overlay (aspect-fit rect for the output resolution;
-    giant box-shadow darkens outside; pointer-events pass through so nav
-    still works). **Set view** stores the current camera as the render pose.
-    Exits without touching the camera on `PROJECT_LOADED`/`PROJECT_NEW`.
+    jumps to the stored `renderOut.pose` (first use seeds it from the current
+    view), and shows the `ui/RenderFrame.js` overlay (aspect-fit rect for the
+    output resolution; giant box-shadow darkens outside; pointer-events pass
+    through so nav still works). The render pose updates AUTOMATICALLY while
+    the mode is on — every camera move is debounce-stored (250 ms) via the
+    camera's `onViewMatrixChangedObservable`, plus a final snapshot on toggle
+    off; there is no "Set view" button. Exits without touching the camera (or
+    writing the stale pose) on `PROJECT_LOADED`/`PROJECT_NEW`.
   - **Export PNG** — `RenderOutput.capturePng`: RTT screenshot
     (`CreateScreenshotUsingRenderTargetAsync`) at the exact output
     resolution. The RTT path skips the selection-silhouette post-process
