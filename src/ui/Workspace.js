@@ -1,0 +1,234 @@
+// Workspace presets (Blueprint PART 13b): three fixed task layouts
+// (Layout / Shade / Print) switched by a header pill or hotkeys, plus the
+// N / T / \ panel-collapse panic keys. Workspace + manual overrides + per-
+// workspace panel widths persist to localStorage (per-user preference, NOT
+// the .mixo file). v1 scope: panel-level visibility — per-SECTION expand
+// presets from the 13b table are a follow-up.
+//
+// Hotkey note: the spec said Ctrl+1/2/3, but Chrome reserves Ctrl+digit for
+// tab switching and never delivers it to the page — we bind Ctrl+Shift+1/2/3.
+
+import { EVENTS } from '../core/events.js';
+import { subscribe, dispatch, getState, setState } from '../core/StateManager.js';
+import { InputManager } from '../core/InputManager.js';
+
+const STORAGE_KEY = 'mixomesh_ui_workspace';
+const STORAGE_VERSION = 1;
+const SILENT = { silent: true };
+
+export const WORKSPACES = ['layout', 'shade', 'print'];
+
+/**
+ * Per-workspace defaults. `right`/`bottom` are panel visibility (manual
+ * panelCollapsed overrides layer on top); widths/heights feed the CSS grid
+ * variables. Section visibility inside the right column (which of
+ * Properties / Shader / Print show) is CSS-driven via body[data-workspace]
+ * (see layout.css) so it needs no per-panel JS.
+ */
+export const WORKSPACE_DEFAULTS = {
+  layout: { right: true, bottom: true,  outlinerWidth: 260, rightWidth: 300, assetHeight: 220, label: 'Layout' },
+  shade:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 340, assetHeight: 220, label: 'Shade' },
+  print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print' },
+};
+
+/**
+ * Resolution rule (13b): a manual override always wins; otherwise the
+ * workspace default decides. `collapsed[side] === true` hides; `false`
+ * shows even when the workspace default hides; `undefined`/absent defers.
+ * Pure — unit-tested headlessly.
+ */
+export function resolvePanelVisible(workspace, panelCollapsed, side) {
+  const override = panelCollapsed?.[side];
+  if (override === true) return false;
+  const def = WORKSPACE_DEFAULTS[workspace] ?? WORKSPACE_DEFAULTS.layout;
+  if (override === false) return true;
+  return side === 'left' ? true : !!def[side];   // outliner is pinned (13b)
+}
+
+/** Parse + migrate a stored localStorage blob. Pure — unit-tested. */
+export function parseStored(raw) {
+  try {
+    const data = JSON.parse(raw);
+    if (!data || data.v !== STORAGE_VERSION) return null;
+    return {
+      workspace: WORKSPACES.includes(data.workspace) ? data.workspace : 'layout',
+      panelCollapsed: {
+        left:   data.panelCollapsed?.left   === true,
+        right:  data.panelCollapsed?.right  === true,
+        bottom: data.panelCollapsed?.bottom === true,
+      },
+      widths: (data.widths && typeof data.widths === 'object') ? data.widths : {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+let _widths = {};   // workspace → { outlinerWidth, rightWidth, assetHeight }
+let _pillEl = null;
+
+// ── Init ─────────────────────────────────────────────────
+
+/** Seed state from localStorage, render the header pill, bind hotkeys. */
+export function init() {
+  const stored = typeof localStorage !== 'undefined'
+    ? parseStored(localStorage.getItem(STORAGE_KEY))
+    : null;
+  if (stored) {
+    _widths = stored.widths;
+    setState(s => ({
+      ...s,
+      ui: { ...s.ui, workspace: stored.workspace, panelCollapsed: stored.panelCollapsed },
+    }), SILENT);
+  }
+
+  _renderPill();
+  _applyDom();
+
+  InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
+  InputManager.register('Ctrl+Shift+@', 'global', () => setWorkspace('shade'));
+  InputManager.register('Ctrl+Shift+#', 'global', () => setWorkspace('print'));
+  // Shift+digit produces the symbol on US layouts; register the digit form
+  // too so non-US layouts that report '1'..'3' still work.
+  InputManager.register('Ctrl+Shift+1', 'global', () => setWorkspace('layout'));
+  InputManager.register('Ctrl+Shift+2', 'global', () => setWorkspace('shade'));
+  InputManager.register('Ctrl+Shift+3', 'global', () => setWorkspace('print'));
+
+  InputManager.register('N',  'global', () => togglePanel('right'));
+  InputManager.register('T',  'global', () => togglePanel('bottom'));
+  InputManager.register('\\', 'global', maxViewport);
+}
+
+// ── Public API ───────────────────────────────────────────
+
+/** Switch workspace. Resets manual panel overrides (13b resolution rule). */
+export function setWorkspace(name) {
+  if (!WORKSPACES.includes(name)) return;
+  const from = getState().ui.workspace;
+  if (from === name) return;
+
+  _captureWidths(from);
+  setState(s => ({
+    ...s,
+    ui: { ...s.ui, workspace: name, panelCollapsed: { left: false, right: false, bottom: false } },
+  }), SILENT);
+  _applyDom();
+  _persist();
+  dispatch(EVENTS.WORKSPACE_CHANGED, { from, to: name });
+}
+
+/** Flip one side's manual override (N / T hotkeys, 13b panic pattern). */
+export function togglePanel(side) {
+  const ui = getState().ui;
+  const visibleNow = resolvePanelVisible(ui.workspace, ui.panelCollapsed, side);
+  const collapsed = { ...ui.panelCollapsed, [side]: visibleNow };   // hide if visible, show if hidden
+  setState(s => ({ ...s, ui: { ...s.ui, panelCollapsed: collapsed } }), SILENT);
+  _applyDom();
+  _persist();
+  dispatch(EVENTS.PANEL_COLLAPSED_CHANGED, { side, collapsed: visibleNow });
+}
+
+/** \ — collapse right + bottom together; outliner stays pinned (13b). */
+export function maxViewport() {
+  setState(s => ({
+    ...s,
+    ui: { ...s.ui, panelCollapsed: { left: false, right: true, bottom: true } },
+  }), SILENT);
+  _applyDom();
+  _persist();
+  dispatch(EVENTS.PANEL_COLLAPSED_CHANGED, { side: 'right', collapsed: true });
+  dispatch(EVENTS.PANEL_COLLAPSED_CHANGED, { side: 'bottom', collapsed: true });
+}
+
+// ── DOM application ──────────────────────────────────────
+
+function _applyDom() {
+  const { workspace, panelCollapsed } = getState().ui;
+  const def = WORKSPACE_DEFAULTS[workspace];
+  const app = document.getElementById('app');
+  const rpEl = document.getElementById('right-panel');
+  const apEl = document.getElementById('asset-panel');
+  if (!app || !rpEl || !apEl) return;
+
+  document.body.dataset.workspace = workspace;
+
+  const w = _widths[workspace] ?? {};
+  const setVar = (name, val) => app.style.setProperty(name, `${val}px`);
+
+  const rightVisible  = resolvePanelVisible(workspace, panelCollapsed, 'right');
+  const bottomVisible = resolvePanelVisible(workspace, panelCollapsed, 'bottom');
+
+  rpEl.classList.toggle('rp-outer-collapsed', !rightVisible);
+  setVar('--right-panel-width', rightVisible ? (w.rightWidth ?? def.rightWidth) : 32);
+
+  apEl.classList.toggle('ap-outer-collapsed', !bottomVisible);
+  setVar('--asset-panel-height', bottomVisible ? (w.assetHeight ?? def.assetHeight) : 32);
+
+  setVar('--outliner-width', w.outlinerWidth ?? def.outlinerWidth);
+
+  _syncPill(workspace);
+}
+
+function _captureWidths(workspace) {
+  const olEl = document.getElementById('outliner');
+  const rpEl = document.getElementById('right-panel');
+  const apEl = document.getElementById('asset-panel');
+  if (!olEl || !rpEl || !apEl) return;
+  const cur = {
+    outlinerWidth: Math.round(olEl.getBoundingClientRect().width),
+    rightWidth:    Math.round(rpEl.getBoundingClientRect().width),
+    assetHeight:   Math.round(apEl.getBoundingClientRect().height),
+  };
+  // Don't memorise collapsed strips as "the width" — keep prior/default.
+  const prev = _widths[workspace] ?? {};
+  const def = WORKSPACE_DEFAULTS[workspace];
+  _widths[workspace] = {
+    outlinerWidth: cur.outlinerWidth > 60 ? cur.outlinerWidth : (prev.outlinerWidth ?? def.outlinerWidth),
+    rightWidth:    cur.rightWidth    > 60 ? cur.rightWidth    : (prev.rightWidth    ?? def.rightWidth),
+    assetHeight:   cur.assetHeight   > 60 ? cur.assetHeight   : (prev.assetHeight   ?? def.assetHeight),
+  };
+}
+
+function _persist() {
+  if (typeof localStorage === 'undefined') return;
+  const { workspace, panelCollapsed } = getState().ui;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      v: STORAGE_VERSION, workspace, panelCollapsed, widths: _widths,
+    }));
+  } catch { /* quota/privacy mode — preference loss only */ }
+}
+
+// ── Header pill ──────────────────────────────────────────
+
+function _renderPill() {
+  const header = document.getElementById('header');
+  if (!header) return;
+  _pillEl = document.createElement('div');
+  _pillEl.className = 'ws-switcher';
+  _pillEl.setAttribute('role', 'tablist');
+  _pillEl.setAttribute('aria-label', 'Workspace');
+  for (const name of WORKSPACES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ws-btn';
+    btn.dataset.ws = name;
+    btn.textContent = WORKSPACE_DEFAULTS[name].label;
+    btn.title = `${WORKSPACE_DEFAULTS[name].label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
+    btn.setAttribute('role', 'tab');
+    btn.addEventListener('click', () => setWorkspace(name));
+    _pillEl.appendChild(btn);
+  }
+  header.appendChild(_pillEl);
+}
+
+function _syncPill(workspace) {
+  if (!_pillEl) return;
+  _pillEl.querySelectorAll('.ws-btn').forEach(b => {
+    const active = b.dataset.ws === workspace;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+export const Workspace = { init, setWorkspace, togglePanel, maxViewport };

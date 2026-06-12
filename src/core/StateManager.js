@@ -41,7 +41,14 @@ const INITIAL_STATE = {
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
     objBakeSolidTextures: true,
   },
-  ui: { activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true },
+  ui: {
+    activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
+    // Workspaces (PART 13b) — per-user preference, seeded from localStorage,
+    // NEVER persisted in .mixo. Manual N/T/\ toggles layer on top of the
+    // active workspace's defaults; switching workspace resets them.
+    workspace: 'layout',                                   // 'layout' | 'shade' | 'print'
+    panelCollapsed: { left: false, right: false, bottom: false },
+  },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
 

@@ -64,6 +64,10 @@ export const EVENTS = {
   // Camera
   CAMERA_PRESET_CHANGED:   'camera:presetChanged',
 
+  // Workspaces (PART 13b)
+  WORKSPACE_CHANGED:       'ui:workspaceChanged',
+  PANEL_COLLAPSED_CHANGED: 'ui:panelCollapsedChanged',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
