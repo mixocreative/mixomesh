@@ -101,7 +101,16 @@ function _wireRightPanelSections() {
     }
     e.preventDefault();
   });
-  setTopHeight(metrics().current);
+  // Init aria ONLY — no flex pin. AppShell runs before Workspace applies the
+  // per-workspace section CSS, so pinning here freezes a transient boot
+  // layout (Properties ended up ~80px tall everywhere). The pin happens on
+  // the first actual drag / keyboard resize.
+  {
+    const { current, maxTop } = metrics();
+    splitter.setAttribute('aria-valuemin', String(MIN_SECTION_PX));
+    splitter.setAttribute('aria-valuemax', String(Math.round(maxTop)));
+    splitter.setAttribute('aria-valuenow', String(Math.round(current)));
+  }
 }
 
 function _wireOuterPanels() {

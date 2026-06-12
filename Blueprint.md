@@ -2422,10 +2422,14 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 
 | Workspace | Outliner | Properties | Scene Panel | Shader Library | Asset Panel | Print Panel |
 |---|---|---|---|---|---|---|
-| **Layout** (default — import & arrange) | visible 260px | visible | hidden | hidden | visible at default 220px (drop target focus) | hidden |
-| **Shade** (texture / shader / UV) | visible 220px (narrow) | visible | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
-| **Scene** (grid / render / camera setup) | visible 220px (narrow) | visible | **visible** | hidden | hidden | hidden |
-| **Print** (validate + export) | visible 220px (narrow) | visible | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
+| **Layout** (default — import & arrange) | visible 260px | visible, task-filtered: Object / Transform / Source Unit / Print Part (Shader + UV hidden) | hidden | hidden | visible at default 220px (drop target focus) | hidden |
+| **Shading** (id `shade` — texture / shader / UV) | visible 220px (narrow) | visible, task-filtered: Object / Shader / UV Override (Transform + Source Unit + Print Part hidden) | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
+| **Scene** (grid / render / camera setup) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
+| **Print** (validate + export) | visible 220px (narrow) | **hidden** (per-object Print Part toggle lives in Layout; selective export via Print ▸ Export "selected only") | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
+
+Properties section filtering is pure CSS (`body[data-workspace]` +
+`.pp-section[data-section]`, layout.css) — the panel renders everything,
+the workspace decides what shows.
 
 Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.
 

@@ -73,12 +73,41 @@ async function main() {
     if (setup?.error) throw new Error(`setup failed: ${setup.error}`);
     await sleep(800);   // settle: auto-frame animation + thumbnail
 
+    if (process.env.PROBE) {
+      const probe = await evaluate(cdp, `(() => {
+        const secs = [...document.querySelectorAll('#rp-properties-body .pp-section')];
+        return {
+          ws: document.body.dataset.workspace ?? '(unset)',
+          n: secs.length,
+          names: secs.map(s => s.dataset.section ?? '(none)'),
+          display: secs.map(s => getComputedStyle(s).display),
+          bodyLen: document.getElementById('rp-properties-body')?.innerHTML.length ?? -1,
+        };
+      })()`);
+      console.log('PROBE', JSON.stringify(probe));
+    }
+
     for (const ws of ['layout', 'shade', 'scene', 'print']) {
       await evaluate(cdp, `(async () => {
         const { Workspace } = await import('/src/ui/Workspace.js');
         Workspace.setWorkspace('${ws}');
       })()`);
       await sleep(400);
+      if (process.env.PROBE) {
+        const p = await evaluate(cdp, `(() => {
+          const body = document.getElementById('rp-properties-body');
+          const obj = body?.querySelector('[data-section="object"]');
+          const row = obj?.querySelector('.pp-row');
+          const name = obj?.querySelector('#pp-name');
+          const r = (el) => el ? { d: getComputedStyle(el).display, h: el.offsetHeight, w: el.offsetWidth } : null;
+          return {
+            ws: document.body.dataset.workspace,
+            body: r(body), obj: r(obj), row: r(row), name: r(name),
+            bodyScrollH: body?.scrollHeight,
+          };
+        })()`);
+        console.log('PROBE', JSON.stringify(p));
+      }
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
       const file = join(OUT_DIR, `ui-${ws}.png`);
       writeFileSync(file, Buffer.from(shot.data, 'base64'));

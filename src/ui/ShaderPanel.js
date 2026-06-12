@@ -67,7 +67,12 @@ function _onActiveObjectChanged({ activeId }) {
   const obj = getState().scene.objects[activeId];
   if (!obj?.shaderId) return;
   if (obj.shaderId === _editingId) return;
-  focus(obj.shaderId);
+  // Passive editor sync only — must NOT switch workspaces (focus() does);
+  // selecting an object while arranging would otherwise hijack the user
+  // into Shade on every click.
+  _editingId = obj.shaderId;
+  document.getElementById('rp-shaders')?.classList.remove('collapsed');
+  _render();
 }
 
 /** True when an editable element inside the Library currently has focus. */

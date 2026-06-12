@@ -279,13 +279,30 @@ body[data-workspace="shade"]  #rp-print,
 body[data-workspace="shade"]  #rp-scene   { display: none; }
 body[data-workspace="scene"]  #rp-print,
 body[data-workspace="scene"]  #rp-shaders,
+body[data-workspace="scene"]  #rp-properties,
 body[data-workspace="scene"]  .rp-splitter { display: none; }
 body[data-workspace="print"]  #rp-shaders,
 body[data-workspace="print"]  #rp-scene,
+body[data-workspace="print"]  #rp-properties,
 body[data-workspace="print"]  .rp-splitter { display: none; }
+
+/* Properties sections are task-filtered per workspace (no shader noise while
+   arranging; no transform noise while shading). Scene/Print hide the whole
+   Properties panel above, so only Layout and Shade filter. */
+body[data-workspace="layout"] .pp-section[data-section="shader"],
+body[data-workspace="layout"] .pp-section[data-section="uv-override"] { display: none; }
+body[data-workspace="shade"]  .pp-section[data-section="transform"],
+body[data-workspace="shade"]  .pp-section[data-section="source-unit"],
+body[data-workspace="shade"]  .pp-section[data-section="print-part"] { display: none; }
 
 /* Scene panel: settings, not a workspace focus — compact, never greedy. */
 #rp-scene { flex: 0 1 auto; }
+
+/* The Properties/Shader splitter pins #rp-properties with an inline
+   `flex: 0 0 <px>` (AppShell). That pin only makes sense in Shade — the one
+   workspace where two sections share the column. Everywhere else Properties
+   is alone and must fill the panel; !important beats the inline style. */
+body:not([data-workspace="shade"]) #rp-properties { flex: 1 1 0 !important; }
 
 #asset-panel.ap-outer-collapsed .ap-tree,
 #asset-panel.ap-outer-collapsed .ap-grid { display: none; }
