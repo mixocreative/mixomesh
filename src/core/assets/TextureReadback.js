@@ -75,10 +75,12 @@ export function flipRGBAVertically(rgba, width, height) {
   return rgba;
 }
 
-// Textures upload with invertY=false (glTF convention), so readback rows are
-// GL bottom-up; flipping restores source-image orientation. Verified live for
-// thumbnails; the export live-verify step (Bundle 1 Task 6) confirms the same
-// flag holds for slicer-side UV orientation. ONE switch — flip here, nowhere else.
+// Texture-orientation contract (pinned mechanically by the Y-flip assert in
+// tests/browser-export-smoke.mjs): glTF UV origin is TOP-left, 3MF Materials
+// texture space origin is BOTTOM-left, and our writer passes UVs through
+// unchanged — so the exported PNG must be the VERTICAL FLIP of the source
+// image. EXPORT_FLIP_Y = true produces exactly that. ONE switch — flip here,
+// nowhere else; the smoke fails if either side drifts.
 export const EXPORT_FLIP_Y = true;
 
 /**

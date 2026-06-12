@@ -142,14 +142,95 @@ async function main() {
     const raw = inflateSync(idat);
     assert(raw.some(b => b !== 0), 'texture PNG pixel data is all zeros — blank export (C1 regression)');
 
+    // Y-flip orientation assert (A2 follow-up). Convention contract:
+    // glTF UV origin is TOP-left; 3MF Materials texture space origin is
+    // BOTTOM-left. We write UVs through unchanged, so the spec-correct
+    // exported PNG is the VERTICAL FLIP of the source image — the source's
+    // top-left red texel must land at the exported PNG's BOTTOM-left
+    // (fixture rows: red,green / blue,white in image order). This pins
+    // EXPORT_FLIP_Y = true; a flip regression swaps the rows below.
+    const px = decodeTinyPng(pngBytes, raw);
+    assert(px.width === 2 && px.height === 2, `expected 2x2 texture, got ${px.width}x${px.height}`);
+    const at = (x, y) => px.rgba.subarray((y * px.width + x) * 4, (y * px.width + x) * 4 + 4);
+    const near = (v, t) => Math.abs(v - t) <= 40;
+    const tl = at(0, 0), bl = at(0, 1);
+    assert(near(bl[0], 255) && near(bl[1], 0) && near(bl[2], 0),
+      `bottom-left texel should be RED (3MF bottom-left origin), got rgba(${[...bl]}) — Y-flip regression (EXPORT_FLIP_Y)`);
+    assert(near(tl[0], 0) && near(tl[1], 0) && near(tl[2], 255),
+      `top-left texel should be BLUE, got rgba(${[...tl]})`);
+
+    // Re-import round-trip (A2 follow-up): the exported 3MF loads back through
+    // the real `.3mf` SceneLoader plugin with its texture bound.
+    const rt = await evaluate(cdp, `(async () => {
+      try {
+        const bin = atob(${JSON.stringify(result.b64)});
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        const { AssetLoader } = await import('/src/core/AssetLoader.js');
+        const meshIds = await AssetLoader.loadFromBlob(new Blob([buf]), 'roundtrip.3mf');
+        const textured = meshIds.some(id => {
+          const m = AssetLoader.getBabylonMesh(id);
+          const mat = m?.material;
+          return !!(mat && (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture));
+        });
+        return { count: meshIds.length, textured };
+      } catch (err) {
+        return { error: String(err?.stack ?? err) };
+      }
+    })()`);
+    if (rt?.error) throw new Error(`3MF re-import failed: ${rt.error}`);
+    assert(rt.count >= 1, 'round-trip import produced no meshes');
+    assert(rt.textured, 'round-trip mesh lost its texture — writer/loader mirror drift');
+
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
-    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, non-blank)`);
+    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, round-trip OK)`);
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);
     removeTempDir(userDataDir);
   }
+}
+
+/**
+ * Decode a tiny 8-bit RGBA PNG from its already-inflated scanlines —
+ * generic per-row unfilter (types 0-4), enough for the 2x2 fixture.
+ */
+function decodeTinyPng(png, raw) {
+  const width  = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const bpp = 4;                              // 8-bit RGBA
+  const stride = width * bpp;
+  const rgba = Buffer.alloc(height * stride);
+  let off = 0;
+  let prevRow = Buffer.alloc(stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[off++];
+    const row = Buffer.from(raw.subarray(off, off + stride));
+    off += stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? row[i - bpp] : 0;        // left (already unfiltered)
+      const b = prevRow[i];                          // up
+      const c = i >= bpp ? prevRow[i - bpp] : 0;     // up-left
+      switch (filter) {
+        case 0: break;
+        case 1: row[i] = (row[i] + a) & 0xff; break;
+        case 2: row[i] = (row[i] + b) & 0xff; break;
+        case 3: row[i] = (row[i] + ((a + b) >> 1)) & 0xff; break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          const pred = (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+          row[i] = (row[i] + pred) & 0xff;
+          break;
+        }
+        default: throw new Error(`unsupported PNG filter ${filter}`);
+      }
+    }
+    row.copy(rgba, y * stride);
+    prevRow = row;
+  }
+  return { width, height, rgba };
 }
 
 function collectIdat(png) {
