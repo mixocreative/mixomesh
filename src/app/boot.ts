@@ -45,7 +45,7 @@ import {
   VertexBuffer,
   VertexData,
 } from '@babylonjs/core';
-import { GridMaterial } from '@babylonjs/materials';
+import { GridMaterial, ShadowOnlyMaterial } from '@babylonjs/materials';
 import { OBJExport, STLExport } from '@babylonjs/serializers';
 import '@babylonjs/loaders';
 
@@ -94,6 +94,7 @@ window.BABYLON = {
   Scene,
   SceneLoader,
   ShadowGenerator,
+  ShadowOnlyMaterial,
   StandardMaterial,
   STLExport,
   Texture,

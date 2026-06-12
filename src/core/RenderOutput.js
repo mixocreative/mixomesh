@@ -194,7 +194,12 @@ export async function capturePng({ width, height, transparent = false } = {}) {
   const h = clampDimension(height, 1080);
 
   const restore = _hideFurniture();
-  if (transparent) SceneManager.setBackgroundEnabled(false);
+  if (transparent) {
+    SceneManager.setBackgroundEnabled(false);
+    // An enabled floor becomes a shadow-catcher only: its caught shadow
+    // lands in the alpha channel, the plane itself does not.
+    SceneManager.setFloorShadowOnly(true);
+  }
   try {
     const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
       engine, cam, { width: w, height: h }, 'image/png'
@@ -202,7 +207,10 @@ export async function capturePng({ width, height, transparent = false } = {}) {
     const blob = await (await fetch(dataUrl)).blob();
     return blob;
   } finally {
-    if (transparent) SceneManager.setBackgroundEnabled(true);
+    if (transparent) {
+      SceneManager.setFloorShadowOnly(false);
+      SceneManager.setBackgroundEnabled(true);
+    }
     restore();
   }
 }

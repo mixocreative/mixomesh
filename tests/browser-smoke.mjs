@@ -185,12 +185,12 @@ async function main() {
       const frameHidden = !frameEl || frameEl.style.display === 'none';
 
       const ro = await import('/src/core/RenderOutput.js');
-      const alphaAt = async (blob) => {
+      const alphaAt = async (blob, x = 2, y = 2) => {
         const bmp = await createImageBitmap(blob);
         const c = new OffscreenCanvas(bmp.width, bmp.height);
         const ctx = c.getContext('2d');
         ctx.drawImage(bmp, 0, 0);
-        return ctx.getImageData(2, 2, 1, 1).data[3];
+        return ctx.getImageData(x, y, 1, 1).data[3];
       };
       const tBlob = await ro.capturePng({ width: 64, height: 64, transparent: true });
       const oBlob = await ro.capturePng({ width: 64, height: 64, transparent: false });
@@ -297,6 +297,16 @@ async function main() {
       const floorOk = !!floor && floor.isEnabled()
         && Math.abs(floor.position.y - 0.00995) < 1e-6
         && floor.material?.diffuseColor?.r === 1 && floor.material?.diffuseColor?.g === 0;
+
+      // Transparent PNG with the floor ON: the capture swaps it to a
+      // shadow-catcher, so a no-shadow pixel must STAY alpha 0 (an opaque
+      // colour floor would read 255), and the swap must restore after.
+      sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorZMM: 0 });
+      const ftBlob = await ro.capturePng({ width: 64, height: 64, transparent: true });
+      // Sample the lower frame, where the (huge) floor plane definitely sits
+      // in view — the top corner is sky and would pass even with the bug.
+      const floorTransparentAlpha = await alphaAt(ftBlob, 32, 60);
+      const floorMatRestored = floor.material?.name === 'mx-env-floor-mat';
       sm.SceneManager.applyRenderSettings({ floorEnabled: false });
       const floorHidden = !floor.isEnabled();
 
@@ -306,7 +316,7 @@ async function main() {
         tSize: tBlob.size, tType: tBlob.type, tAlpha: await alphaAt(tBlob),
         oAlpha: await alphaAt(oBlob),
         videoOk, videoBytes: video?.blob?.size ?? 0,
-        floorOk, floorHidden,
+        floorOk, floorHidden, floorTransparentAlpha, floorMatRestored,
         crosshair, previewResult, rigRestored, mid, hdri,
       };
     })()`);
@@ -318,6 +328,11 @@ async function main() {
     assert(rendering.oAlpha === 255, `opaque capture should have alpha 255, got ${rendering.oAlpha}`);
     assert(rendering.videoOk, `offline turntable mp4 failed (${rendering.videoBytes} bytes)`);
     assert(rendering.floorOk, 'environment floor not created with colour + height');
+    // 0 where unshadowed, partial in a shadow — an opaque colour floor reads
+    // exactly 255, which is the regression this guards against.
+    assert(rendering.floorTransparentAlpha < 255,
+      `transparent PNG with floor on rendered an opaque floor (alpha ${rendering.floorTransparentAlpha}) — shadow-only swap missing`);
+    assert(rendering.floorMatRestored, 'floor material not restored after transparent capture');
     assert(rendering.floorHidden, 'environment floor did not disable');
     assert(rendering.crosshair, 'render-frame crosshair missing');
     assert(rendering.previewResult === 'done', `turntable preview should resolve done, got ${rendering.previewResult}`);

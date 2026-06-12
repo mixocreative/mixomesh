@@ -2418,7 +2418,11 @@ All of it writes `state.scene.render` (silent) and applies via
     (clean renders) while keeping tone mapping (material-level). Scene
     furniture (grid / axes / bed preview / 3D cursor) is hidden for the
     capture and restored; transparent mode disables the background Layer +
-    sets `clearColor` alpha 0 (`SceneManager.setBackgroundEnabled`).
+    sets `clearColor` alpha 0 (`SceneManager.setBackgroundEnabled`), and an
+    ENABLED floor is swapped to a `ShadowOnlyMaterial` for the capture
+    (`SceneManager.setFloorShadowOnly`) — its caught shadow lands in the
+    alpha channel, the plane itself does not, so the export composites as
+    model + floating soft shadow. Both swaps restore after.
   - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
     ease in/out, plus a **Preview** button (plays the sweep live, no
     recording — button toggles to "Stop preview", Esc also stops).

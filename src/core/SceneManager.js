@@ -78,7 +78,8 @@ let _edgeMat = null;
 // plane. Lazily created on first enable; never registered (no meshId), never
 // pickable, never exported, kept VISIBLE in renders (it exists for them).
 let _floor = null;
-let _floorMat = null;
+let _floorMat = null;        // solid-colour material (normal viewport look)
+let _floorShadowMat = null;  // ShadowOnlyMaterial — transparent-PNG capture
 
 // HDRI environment (Scene ▸ Environment) — prefiltered .env cube textures
 // bundled in public/env/. Lighting only: scene.environmentTexture drives
@@ -536,6 +537,27 @@ function _updateFloor(render) {
   }
 }
 
+/**
+ * Swap the floor between its solid-colour material and a shadow-only one.
+ * Transparent PNG capture uses this so an enabled floor contributes ONLY its
+ * caught shadow to the alpha channel instead of an opaque plane — model +
+ * floating soft shadow composite onto anything. No-op when the floor is off.
+ * @param {boolean} on  true = shadow-catcher only
+ */
+export function setFloorShadowOnly(on) {
+  if (!_floor || !_floor.isEnabled()) return;
+  if (on) {
+    if (!_floorShadowMat) {
+      _floorShadowMat = new BABYLON.ShadowOnlyMaterial('mx-env-floor-shadow', _scene);
+      const keyLight = _shadowGen?.getLight?.();
+      if (keyLight) _floorShadowMat.activeLight = keyLight;
+    }
+    _floor.material = _floorShadowMat;
+  } else {
+    _floor.material = _floorMat;
+  }
+}
+
 // ── HDRI environment lighting ────────────────────────────
 
 // Partial-safe like the rest of applyRenderSettings. Texture is created on
@@ -636,7 +658,7 @@ export const SceneManager = {
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
-  setBackgroundEnabled,
+  setBackgroundEnabled, setFloorShadowOnly,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
