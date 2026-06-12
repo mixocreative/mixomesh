@@ -10,6 +10,10 @@ export const CURSOR_DIAMETER = 0.003;
 
 export const BG_GRADIENT_TOP = '#e7ebef';
 export const BG_GRADIENT_BOTTOM = '#9aa4af';
+// Dark viewport variant (Scene ▸ Render background toggle) — Blender-ish
+// neutral grays, kept lighter than the UI panels so silhouettes still read.
+export const BG_DARK_TOP = '#3c4046';
+export const BG_DARK_BOTTOM = '#1e2126';
 export const HEMI_INTENSITY = 0.85;
 export const HEMI_GROUND_COLOR = '#c6cbd2';
 export const KEY_INTENSITY = 0.70;

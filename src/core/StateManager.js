@@ -28,9 +28,16 @@ const INITIAL_STATE = {
     },
     overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
     // Viewport render look (Scene panel). Defaults mirror scene/SceneConstants
-    // (TONE_EXPOSURE / TONE_CONTRAST / SHADOW_DARKNESS) — applied via
-    // SceneManager.applyRenderSettings on boot/load/new.
-    render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62 },
+    // (tone/shadow/light values) — applied via SceneManager.applyRenderSettings
+    // on boot/load/new. fovDeg 45.8° = Babylon's 0.8 rad default; clipNearMM 1
+    // = the 1 mm near plane CameraRig boots with.
+    render: {
+      exposure: 1.05, contrast: 1.10,
+      shadowsEnabled: true, shadowDarkness: 0.62,
+      background: 'light',
+      keyIntensity: 0.70, fillIntensity: 0.25, hemiIntensity: 0.85,
+      fovDeg: 45.8, clipNearMM: 1,
+    },
     // The scene floor footprint equals the printer bed XY (print.bedDimensions).
     // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,
     // subdivisions = how many minor cells between major lines.

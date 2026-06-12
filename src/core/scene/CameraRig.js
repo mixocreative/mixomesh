@@ -95,6 +95,20 @@ export function initCameraRig(scene, canvas) {
 /** @returns {BABYLON.ArcRotateCamera|null} */
 export function getCamera() { return _camera; }
 
+/**
+ * Apply camera optics from the Scene panel's render settings. Partial-safe.
+ * @param {{ fovDeg?: number, clipNearMM?: number }} [optics]
+ */
+export function applyCameraOptics(optics = {}) {
+  if (!_camera) return;
+  if (Number.isFinite(optics.fovDeg) && optics.fovDeg >= 5 && optics.fovDeg <= 140) {
+    _camera.fov = optics.fovDeg * Math.PI / 180;
+  }
+  if (Number.isFinite(optics.clipNearMM) && optics.clipNearMM > 0) {
+    _camera.minZ = optics.clipNearMM / 1000;   // mm → BU (1 BU = 1 m)
+  }
+}
+
 // ── Camera setup + pointer navigation ────────────────────
 
 function _setupCamera() {

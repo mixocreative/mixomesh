@@ -687,7 +687,11 @@ const initialState = {
     // use (not in INITIAL_STATE); persistence restores them when present.
     // Viewport render look (Scene panel) — defaults mirror SceneConstants;
     // applied via SceneManager.applyRenderSettings on boot/load/new.
-    render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62 },
+    // fovDeg 45.8 = Babylon's 0.8 rad default; clipNearMM 1 = 1 mm near plane.
+    render: { exposure: 1.05, contrast: 1.10, shadowsEnabled: true, shadowDarkness: 0.62,
+              background: 'light' /* |'dark' */,
+              keyIntensity: 0.70, fillIntensity: 0.25, hemiIntensity: 0.85,
+              fovDeg: 45.8, clipNearMM: 1 },
     grid: { cellMM: 10, subdivisions: 10 },  // line styling only; floor footprint = print.bedDimensions XY
     cursor3d: { x: 0, y: 0, z: 0 },
   },
@@ -1592,7 +1596,10 @@ Every field persisted. Restored exactly.
     "overlays": { "grid": true, "axes": true, "wireframe": false, "printPreview": true,
                   "bedPreview": false, "wireframeEdges": false, "wireframeEdgeColor": "#f59e0b" },
     "render": { "exposure": 1.05, "contrast": 1.10,
-                "shadowsEnabled": true, "shadowDarkness": 0.62 },
+                "shadowsEnabled": true, "shadowDarkness": 0.62,
+                "background": "light", "keyIntensity": 0.70,
+                "fillIntensity": 0.25, "hemiIntensity": 0.85,
+                "fovDeg": 45.8, "clipNearMM": 1 },
     "grid": { "cellMM": 10, "subdivisions": 10 },  /* line styling only; footprint = print.bedDimensions XY */
     "cursor3d": { "x":0, "y":0, "z":0 }
   },
@@ -2290,13 +2297,17 @@ Right-panel section `#rp-scene` (stacked after Shader Library, hidden in the
 Print workspace). Scene-wide settings, moved out of the Properties panel so
 they stay reachable while an object is selected (the old Scene section only
 rendered with nothing active — Properties is object-scoped now). Sections:
-- **Scene** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
+- **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
   axes visibility checkboxes (overlay contract), bed-size hint.
-- **Render** — exposure, contrast, shadows on/off, shadow darkness + a
-  "Reset render defaults" button. Writes `state.scene.render` (silent) and
-  applies via `SceneManager.applyRenderSettings`; persisted in
-  `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
-  `scene/SceneConstants.js` (TONE_EXPOSURE / TONE_CONTRAST / SHADOW_DARKNESS).
+- **Render** — background Light/Dark (repaints the gradient backdrop +
+  clearColor), exposure, contrast, shadows on/off, shadow darkness,
+  key/fill/ambient light intensities + a "Reset render defaults" button.
+- **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
+  `CameraRig.applyCameraOptics` via the same settings object.
+All of it writes `state.scene.render` (silent) and applies via
+`SceneManager.applyRenderSettings` (partial-safe); persisted in
+`sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
+`scene/SceneConstants.js`.
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 
@@ -2385,11 +2396,15 @@ events, `body[data-workspace]` CSS in layout.css, SceneManager resize hooks,
 localStorage persistence, `.mixo` ui-strip. Two deliberate v1 deviations:
 - **Hotkeys are `Ctrl+Shift+1/2/3`**, not the spec'd `Ctrl+1/2/3` — Chrome
   reserves Ctrl+digit for tab switching and never delivers it to the page.
-- **Panel-level presets only.** The per-SECTION expand/collapse defaults in
-  the workspace table below (e.g. "Transform expanded, Shader header-
-  collapsed") are NOT implemented — section visibility per workspace is
-  (Layout/Shade hide Print; Print hides Shader Library), but expansion state
-  within visible panels is left to the user. Follow-up if wanted.
+- **Section-visibility presets, not expand presets.** The per-SECTION
+  expand/collapse defaults in the workspace table below (e.g. "Transform
+  expanded, Shader header-collapsed") are NOT implemented. Instead (2026-06-12
+  decision: no repeated sections across workspaces unless genuinely needed)
+  each workspace shows Properties + exactly ONE specialist section:
+  Layout → **Scene** panel, Shade → **Shader Library**, Print → **Print**.
+  `ShaderPanel.focus()` auto-switches to Shade when invoked from another
+  workspace (Properties chip click / ContextMenu Set Shader). Expansion state
+  within visible panels is left to the user.
 
 **Design intent.** The user's workflow is linear — *Import → Arrange → Shade → Print* — not the swiss-army-knife DCC pattern. Tabbed panels with manual resize don't scale once the Print pipeline grows (Bed / Scale / Validation / Export, plus deferred Thickness / Orientation). Industry-standard fix is **workspace presets** (Blender top-bar pattern, also Substance Painter, Maya, Cinema 4D, Houdini): a tiny set of named panel layouts, one click to switch. The user stops resizing because the layout is *per task*, not freeform.
 
@@ -2401,11 +2416,11 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 
 ### The three workspaces
 
-| Workspace | Outliner | Properties | Shader Library | Asset Panel | Print Panel |
-|---|---|---|---|---|---|
-| **Layout** (default — import & arrange) | visible 260px | visible (Object + Transform expanded; Shader / UV header-collapsed) | header-collapsed | visible at default 220px (drop target focus) | hidden |
-| **Shade** (texture / shader / UV) | visible 220px (narrow) | visible (Shader + UV Override expanded; Transform header-collapsed) | visible, expanded — primary edit surface | collapsed to header bar (textures still drop OK; thumbnail browse via picker modal) | hidden |
-| **Print** (validate + export) | visible 220px (narrow) | collapsed except **Print Part** section | hidden | collapsed to header bar | visible at full height (Bed → Scale → Export, validation embedded as a checklist at the top of the Export tab per the option-A fold-in) |
+| Workspace | Outliner | Properties | Scene Panel | Shader Library | Asset Panel | Print Panel |
+|---|---|---|---|---|---|---|
+| **Layout** (default — import & arrange) | visible 260px | visible | **visible** (grid / render / camera setup) | hidden | visible at default 220px (drop target focus) | hidden |
+| **Shade** (texture / shader / UV) | visible 220px (narrow) | visible | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
+| **Print** (validate + export) | visible 220px (narrow) | visible | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
 
 Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.
 

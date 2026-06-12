@@ -5,6 +5,8 @@ import {
   CURSOR_DIAMETER,
   BG_GRADIENT_TOP,
   BG_GRADIENT_BOTTOM,
+  BG_DARK_TOP,
+  BG_DARK_BOTTOM,
   HEMI_INTENSITY,
   HEMI_GROUND_COLOR,
   KEY_INTENSITY,
@@ -20,7 +22,7 @@ import {
   setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
 } from './scene/BedGrid.js';
 import {
-  initCameraRig, getCamera,
+  initCameraRig, getCamera, applyCameraOptics,
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
   saveCameraState, restoreCameraState, setFollowMode,
 } from './scene/CameraRig.js';
@@ -56,6 +58,9 @@ let _scene     = null;
 let _axes      = null;   // { x, y, z } line meshes
 let _cursor    = null;
 let _shadowGen = null;
+let _bgTexture = null;   // gradient DynamicTexture — repainted on bg toggle
+let _bgMode    = 'light';
+let _lights    = null;   // { hemi, key, fill } — Scene panel intensity sliders
 
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
@@ -136,19 +141,30 @@ export function init(canvas) {
 // texture is enough — it stretches across the viewport; clamp wrap stops
 // edge bleed.
 function _setupBackground() {
-  const tex = new BABYLON.DynamicTexture('mx-bg-gradient', { width: 4, height: 512 }, _scene, false);
-  tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
-  tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
-  const ctx = tex.getContext();
-  const g = ctx.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0, BG_GRADIENT_TOP);
-  g.addColorStop(1, BG_GRADIENT_BOTTOM);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 4, 512);
-  tex.update();
+  _bgTexture = new BABYLON.DynamicTexture('mx-bg-gradient', { width: 4, height: 512 }, _scene, false);
+  _bgTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+  _bgTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+  _paintBackground('light');
 
   const layer = new BABYLON.Layer('mx-bg', null, _scene, /* isBackground */ true);
-  layer.texture = tex;
+  layer.texture = _bgTexture;
+}
+
+/** Repaint the gradient backdrop. @param {'light'|'dark'} mode */
+function _paintBackground(mode) {
+  if (!_bgTexture) return;
+  _bgMode = mode;
+  const top    = mode === 'dark' ? BG_DARK_TOP    : BG_GRADIENT_TOP;
+  const bottom = mode === 'dark' ? BG_DARK_BOTTOM : BG_GRADIENT_BOTTOM;
+  const ctx = _bgTexture.getContext();
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 512);
+  _bgTexture.update();
+  // Fallback solid (pre-layer frames + screenshot edges) tracks the bottom.
+  _scene.clearColor = BABYLON.Color4.FromHexString(bottom + 'ff');
 }
 
 // ── Lighting ─────────────────────────────────────────────
@@ -171,6 +187,8 @@ function _setupLighting() {
   const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(1, -1, 1), _scene);
   fill.intensity = FILL_INTENSITY;
   fill.specular  = new BABYLON.Color3(0, 0, 0);
+
+  _lights = { hemi, key, fill };
 
   _shadowGen = new BABYLON.ShadowGenerator(2048, key);
   _shadowGen.useBlurExponentialShadowMap = true;
@@ -371,7 +389,10 @@ export function updateBedPreview(dims) { _bedUpdatePreview(dims); }
  * Apply viewport render settings (Scene panel / state.scene.render).
  * Partial-safe: only the fields present are touched.
  * @param {{ exposure?: number, contrast?: number,
- *           shadowsEnabled?: boolean, shadowDarkness?: number }} [render]
+ *           shadowsEnabled?: boolean, shadowDarkness?: number,
+ *           background?: 'light'|'dark',
+ *           keyIntensity?: number, fillIntensity?: number, hemiIntensity?: number,
+ *           fovDeg?: number, clipNearMM?: number }} [render]
  */
 export function applyRenderSettings(render = {}) {
   if (!_scene) return;
@@ -385,6 +406,16 @@ export function applyRenderSettings(render = {}) {
       light.shadowEnabled = render.shadowsEnabled;
     }
   }
+  if ((render.background === 'light' || render.background === 'dark') &&
+      render.background !== _bgMode) {
+    _paintBackground(render.background);
+  }
+  if (_lights) {
+    if (Number.isFinite(render.hemiIntensity)) _lights.hemi.intensity = render.hemiIntensity;
+    if (Number.isFinite(render.keyIntensity))  _lights.key.intensity  = render.keyIntensity;
+    if (Number.isFinite(render.fillIntensity)) _lights.fill.intensity = render.fillIntensity;
+  }
+  applyCameraOptics(render);
 }
 
 // ── 3D cursor ────────────────────────────────────────────

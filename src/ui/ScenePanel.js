@@ -11,6 +11,7 @@ import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import {
   TONE_EXPOSURE, TONE_CONTRAST, SHADOW_DARKNESS,
+  KEY_INTENSITY, FILL_INTENSITY, HEMI_INTENSITY,
 } from '../core/scene/SceneConstants.js';
 
 const SILENT = { silent: true };
@@ -20,6 +21,12 @@ const RENDER_DEFAULTS = {
   contrast: TONE_CONTRAST,
   shadowsEnabled: true,
   shadowDarkness: SHADOW_DARKNESS,
+  background: 'light',
+  keyIntensity: KEY_INTENSITY,
+  fillIntensity: FILL_INTENSITY,
+  hemiIntensity: HEMI_INTENSITY,
+  fovDeg: 45.8,       // Babylon ArcRotateCamera default fov 0.8 rad
+  clipNearMM: 1,      // CameraRig boots with minZ 0.001 BU = 1 mm
 };
 
 let _bodyEl = null;
@@ -63,6 +70,13 @@ function _render() {
     <section class="pp-section">
       <header class="pp-section-header">Render</header>
       <div class="pp-row">
+        <label>Background</label>
+        <select data-render-select="background">
+          <option value="light" ${render.background !== 'dark' ? 'selected' : ''}>Light</option>
+          <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
+        </select>
+      </div>
+      <div class="pp-row">
         <label>Exposure</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="exposure" value="${_fmt(render.exposure)}">
       </div>
@@ -77,8 +91,31 @@ function _render() {
         <label>Shadow dark</label>
         <input type="number" step="0.05" min="0" max="1" data-render="shadowDarkness" value="${_fmt(render.shadowDarkness)}">
       </div>
+      <div class="pp-row">
+        <label>Key light</label>
+        <input type="number" step="0.05" min="0" max="3" data-render="keyIntensity" value="${_fmt(render.keyIntensity)}">
+      </div>
+      <div class="pp-row">
+        <label>Fill light</label>
+        <input type="number" step="0.05" min="0" max="3" data-render="fillIntensity" value="${_fmt(render.fillIntensity)}">
+      </div>
+      <div class="pp-row">
+        <label>Ambient</label>
+        <input type="number" step="0.05" min="0" max="3" data-render="hemiIntensity" value="${_fmt(render.hemiIntensity)}">
+      </div>
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="render-reset">Reset render defaults</button>
+      </div>
+    </section>
+    <section class="pp-section">
+      <header class="pp-section-header">Camera</header>
+      <div class="pp-row">
+        <label>FOV (deg)</label>
+        <input type="number" step="1" min="5" max="140" data-render="fovDeg" value="${_fmt(render.fovDeg, 1)}">
+      </div>
+      <div class="pp-row">
+        <label>Near clip (mm)</label>
+        <input type="number" step="0.5" min="0.1" max="100" data-render="clipNearMM" value="${_fmt(render.clipNearMM, 1)}">
       </div>
     </section>
   `;
@@ -129,6 +166,11 @@ function _wire() {
   // Shadows toggle.
   _bodyEl.querySelector('[data-render-toggle="shadowsEnabled"]')?.addEventListener('change', (e) => {
     _setRender({ shadowsEnabled: e.target.checked });
+  });
+
+  // Background select.
+  _bodyEl.querySelector('[data-render-select="background"]')?.addEventListener('change', (e) => {
+    _setRender({ background: e.target.value === 'dark' ? 'dark' : 'light' });
   });
 
   _bodyEl.querySelector('[data-action="render-reset"]')?.addEventListener('click', () => {

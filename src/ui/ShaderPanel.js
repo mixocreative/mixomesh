@@ -13,6 +13,7 @@ import { icon } from '../core/Icons.js';
 import { AssetPanel } from './AssetPanel.js';
 import { Modal } from './Modal.js';
 import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js';
+import { Workspace } from './Workspace.js';
 
 const DRAG_MIME       = 'application/x-mixomesh-asset';
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
@@ -750,6 +751,10 @@ function _safeHex(value) {
 export function focus(shaderId) {
   if (!getState().scene.shaders[shaderId]) return;
   _editingId = shaderId;
+  // The Library section only exists in the Shade workspace (sections are
+  // per-workspace, no repeats) — focusing from Properties / ContextMenu in
+  // another workspace must bring it on screen first.
+  if (document.body.dataset.workspace !== 'shade') Workspace.setWorkspace('shade');
   document.getElementById('rp-shaders')?.classList.remove('collapsed');
   _render();
 }
