@@ -165,6 +165,12 @@ export function init(canvas) {
     _cachedFollowMode = 'free';
     _cachedActiveId = null;
   });
+
+  // Workspace/panel layout changes resize the grid cell the canvas lives in —
+  // resize the engine on the next frame so the framebuffer matches (13b).
+  const _resizeNextFrame = () => requestAnimationFrame(() => _engine?.resize());
+  subscribe(EVENTS.WORKSPACE_CHANGED, _resizeNextFrame);
+  subscribe(EVENTS.PANEL_COLLAPSED_CHANGED, _resizeNextFrame);
 }
 
 /**

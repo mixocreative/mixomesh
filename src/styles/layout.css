@@ -249,3 +249,40 @@
 ::-webkit-scrollbar-track  { background: var(--bg-1); }
 ::-webkit-scrollbar-thumb  { background: var(--bg-4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ── Workspaces (PART 13b) ────────────────────────────── */
+/* Section visibility per workspace is declarative: flip body[data-workspace]
+   and the grid recomputes. Panel-level collapse uses the existing
+   *-outer-collapsed classes + grid variables (driven by ui/Workspace.js). */
+
+body[data-workspace="layout"] #rp-print   { display: none; }
+body[data-workspace="shade"]  #rp-print   { display: none; }
+body[data-workspace="print"]  #rp-shaders,
+body[data-workspace="print"]  .rp-splitter { display: none; }
+
+#asset-panel.ap-outer-collapsed .ap-tree,
+#asset-panel.ap-outer-collapsed .ap-grid { display: none; }
+
+/* Header workspace switcher pill */
+.ws-switcher {
+  margin-left: var(--sp-6);
+  display: flex;
+  gap: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 2px;
+}
+.ws-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  padding: 2px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ws-btn:hover  { background: var(--bg-3); color: var(--text-0); }
+.ws-btn.active { background: var(--accent); color: var(--accent-fg); }

@@ -200,7 +200,9 @@ async function _buildDocument(opts = {}) {
     groups: _serialiseGroups(),
     selection: { ...s.selection },
     gizmo: { ...s.gizmo },
-    ui: { ...s.ui },
+    // Workspace layout is a per-USER preference (localStorage, PART 13b) —
+    // a teammate opening this .mixo must not inherit the saver's layout.
+    ui: (({ workspace, panelCollapsed, ...rest }) => rest)(s.ui),
   };
 }
 
@@ -382,7 +384,9 @@ async function _loadProject(doc) {
     },
     selection: { ...s.selection, ...(data.selection || {}) },
     gizmo:     { ...s.gizmo, ...(data.gizmo || {}) },
-    ui:        { ...s.ui, ...(data.ui || {}) },
+    // Merge saved ui but keep THIS user's workspace layout (13b: per-user,
+    // not a project artefact — also guards docs from builds that saved it).
+    ui:        { ...s.ui, ...(data.ui || {}), workspace: s.ui.workspace, panelCollapsed: s.ui.panelCollapsed },
   }), SILENT);
 
   // Assets restore BEFORE shaders (§11 Load Sequence) — restoreShader rebinds

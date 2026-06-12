@@ -2328,12 +2328,17 @@ ProgressOverlay.hide()                      → void
 
 ## PART 13b — WORKSPACES & PANEL HIERARCHY
 
-**Status:** planned design, not part of the shipped Vite baseline. The active
-state shape in §4 does not include `ui.workspace` or `ui.panelCollapsed`, and
-`src/core/events.js` does not define `WORKSPACE_CHANGED` or
-`PANEL_COLLAPSED_CHANGED`. Implement this section only when the workspace
-feature lands; until then, rebuild the current app from PART 13's static shell
-and panel modules.
+**Status:** SHIPPED v1 (2026-06-12) — `src/ui/Workspace.js`, `ui.workspace` +
+`ui.panelCollapsed` in state, `WORKSPACE_CHANGED` / `PANEL_COLLAPSED_CHANGED`
+events, `body[data-workspace]` CSS in layout.css, SceneManager resize hooks,
+localStorage persistence, `.mixo` ui-strip. Two deliberate v1 deviations:
+- **Hotkeys are `Ctrl+Shift+1/2/3`**, not the spec'd `Ctrl+1/2/3` — Chrome
+  reserves Ctrl+digit for tab switching and never delivers it to the page.
+- **Panel-level presets only.** The per-SECTION expand/collapse defaults in
+  the workspace table below (e.g. "Transform expanded, Shader header-
+  collapsed") are NOT implemented — section visibility per workspace is
+  (Layout/Shade hide Print; Print hides Shader Library), but expansion state
+  within visible panels is left to the user. Follow-up if wanted.
 
 **Design intent.** The user's workflow is linear — *Import → Arrange → Shade → Print* — not the swiss-army-knife DCC pattern. Tabbed panels with manual resize don't scale once the Print pipeline grows (Bed / Scale / Validation / Export, plus deferred Thickness / Orientation). Industry-standard fix is **workspace presets** (Blender top-bar pattern, also Substance Painter, Maya, Cinema 4D, Houdini): a tiny set of named panel layouts, one click to switch. The user stops resizing because the layout is *per task*, not freeform.
 

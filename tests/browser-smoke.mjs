@@ -129,6 +129,9 @@ async function main() {
         modalRoot: !!document.querySelector('#modal-root'),
         progressRoot: !!document.querySelector('#progress-root'),
         rightToggles: document.querySelectorAll('.rp-section-header[aria-expanded]').length,
+        wsAttr: document.body.dataset.workspace,
+        wsButtons: document.querySelectorAll('.ws-switcher .ws-btn').length,
+        wsActive: document.querySelector('.ws-switcher .ws-btn.active')?.dataset.ws,
         before,
         collapsed,
         restored: firstToggle?.getAttribute('aria-expanded'),
@@ -150,6 +153,9 @@ async function main() {
     assert(snapshot.modalRoot, 'modal root missing');
     assert(snapshot.progressRoot, 'progress root missing');
     assert(snapshot.rightToggles >= 3, 'right-panel toggles missing aria-expanded');
+    assert(snapshot.wsAttr === 'layout', `body[data-workspace] should default to layout, got ${snapshot.wsAttr}`);
+    assert(snapshot.wsButtons === 3, 'workspace switcher pill missing its three buttons');
+    assert(snapshot.wsActive === 'layout', 'Layout pill button should be active by default');
     assert(snapshot.before === 'true' && snapshot.collapsed === 'false' && snapshot.restored === 'true',
       'right-panel toggle did not update aria-expanded');
     assert(snapshot.splitBefore !== snapshot.splitAfter,
