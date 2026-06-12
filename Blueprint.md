@@ -2350,7 +2350,19 @@ Right-panel section `#rp-scene` — the specialist section of the **Scene
 workspace** (hidden in Layout / Shade / Print). Scene-wide settings, moved
 out of the Properties panel so
 they stay reachable while an object is selected (the old Scene section only
-rendered with nothing active — Properties is object-scoped now). Sections:
+rendered with nothing active — Properties is object-scoped now).
+
+Every section is **collapsible** (same `.pp-collapsed` pattern as the
+Properties panel) with the collapse state persisted per-user in
+localStorage (`mixomesh.scenePanel.collapsed.v1` — NEVER in .mixo, same
+per-user rule as workspaces). Defaults: Environment + Camera collapsed so
+the Rendering section is reachable without scrolling. Long sections carry
+muted uppercase `.pp-subhead` sub-group labels (blender.css §8):
+Environment = Grade / Floor / Lights; Rendering = Still / Turntable.
+Dependent rows render only while their toggle is ON (vignette amount,
+floor colour + height, shadow darkness) and the panel re-renders on those
+toggles; floor-on + shadows-off shows a "floor won't catch any" hint.
+Sections:
 - **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
   axes visibility checkboxes (overlay contract), bed-size hint.
 - **Environment** (header renamed from "Render" 2026-06-13; state key stays
@@ -2365,7 +2377,7 @@ rendered with nothing active — Properties is object-scoped now). Sections:
   requested height so Z=0 doesn't z-fight the bed grid; never registered /
   pickable / exported, stays VISIBLE in renders — it exists for them),
   shadows on/off, shadow darkness, key/fill/ambient light intensities + a
-  "Reset render defaults" button.
+  "Reset environment" button.
 - **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
   `CameraRig.applyCameraOptics` via the same settings object.
 All of it writes `state.scene.render` (silent) and applies via

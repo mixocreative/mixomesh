@@ -1,14 +1,20 @@
 // Scene panel (#rp-scene) — scene-wide settings, moved OUT of the Properties
 // panel so they're reachable while an object is selected (the old Scene
-// section only rendered when nothing was active). Sections:
-//   Grid      — grid styling (cell mm / subdivisions) + grid/axes visibility
-//   Render    — viewport look: exposure, contrast, tone map, saturation,
-//               vignette, shadows, lights (state.scene.render, applied via
-//               SceneManager.applyRenderSettings, persisted in .mixo)
-//   Camera    — optics (FOV / near clip)
-//   Rendering — output production (state.scene.renderOut): PNG stills
-//               (optionally transparent), render-view compose toggle with
-//               frame overlay, and turntable video (core/RenderOutput.js)
+// section only rendered when nothing was active). Sections (each collapsible,
+// per-user localStorage — Environment + Camera start collapsed so Rendering,
+// the workspace's output workflow, is visible without scrolling):
+//   Grid        — grid styling (cell mm / subdivisions) + grid/axes visibility
+//   Environment — background, grade (exposure/contrast/tone map/saturation/
+//                 vignette), shadow-catcher floor, studio lights
+//                 (state.scene.render → SceneManager.applyRenderSettings,
+//                 persisted in .mixo). Dependent rows (vignette amount,
+//                 floor colour/height, shadow darkness) only render while
+//                 their toggle is ON.
+//   Camera      — optics (FOV / near clip)
+//   Rendering   — output production (state.scene.renderOut): Still (PNG,
+//                 optionally transparent, render-view compose toggle with
+//                 frame overlay) and Turntable (preview + video) via
+//                 core/RenderOutput.js
 // Hidden outside the Scene workspace via body[data-workspace] CSS (layout.css).
 
 import { EVENTS } from '../core/events.js';
@@ -61,6 +67,26 @@ const RESOLUTION_PRESETS = [
   { label: 'Portrait — 1080 × 1920', w: 1080, h: 1920 },
 ];
 
+// Per-user section collapse (localStorage, NEVER in .mixo — same per-user
+// rule as workspaces). Environment + Camera start collapsed so the Rendering
+// section is reachable without scrolling (UX audit P1).
+const COLLAPSE_KEY = 'mixomesh.scenePanel.collapsed.v1';
+const COLLAPSE_DEFAULTS = { grid: false, environment: true, camera: true, rendering: false };
+
+function _loadCollapsed() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? 'null');
+    return { ...COLLAPSE_DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
+  } catch {
+    return { ...COLLAPSE_DEFAULTS };
+  }
+}
+
+function _saveCollapsed() {
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(_collapsed)); } catch { /* private mode */ }
+}
+
+let _collapsed = _loadCollapsed();
 let _bodyEl = null;
 // Render-view compose mode — session-only. navPose = where the user's free
 // navigation was when the toggle went on, restored on toggle off. While
@@ -108,6 +134,14 @@ function _exitRenderView() {
   RenderFrame.hide();
 }
 
+function _section(key, title, inner) {
+  return `
+    <section class="pp-section ${_collapsed[key] ? 'pp-collapsed' : ''}" data-sec="${key}">
+      <header class="pp-section-header">${title}</header>
+      ${inner}
+    </section>`;
+}
+
 function _render() {
   if (!_bodyEl) return;
   const s = getState();
@@ -119,9 +153,7 @@ function _render() {
   const bed = s.print.bedDimensions;
   const presetIdx = RESOLUTION_PRESETS.findIndex(p => p.w === ro.width && p.h === ro.height);
 
-  _bodyEl.innerHTML = `
-    <section class="pp-section">
-      <header class="pp-section-header">Grid</header>
+  const gridSec = `
       <div class="pp-row">
         <label>Grid cell (mm)</label>
         <input type="number" step="1" min="0.1" data-grid="cellMM" value="${_fmt(grid.cellMM)}">
@@ -136,10 +168,11 @@ function _render() {
       </div>
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">Bed ${_fmt(bed.x)} × ${_fmt(bed.y)} mm — set in Print ▸ Bed.</span>
-      </div>
-    </section>
-    <section class="pp-section">
-      <header class="pp-section-header">Environment</header>
+      </div>`;
+
+  // Dependent rows render only while their toggle is ON (UX audit P1 —
+  // dead-looking controls). The toggles re-render the panel on change.
+  const envSec = `
       <div class="pp-row">
         <label>Background</label>
         <select data-render-select="background">
@@ -147,6 +180,7 @@ function _render() {
           <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
         </select>
       </div>
+      <div class="pp-subhead">Grade</div>
       <div class="pp-row">
         <label>Exposure</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="exposure" value="${_fmt(render.exposure)}">
@@ -171,25 +205,34 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="vignette" ${render.vignette ? 'checked' : ''}> Vignette</label>
       </div>
+      ${render.vignette ? `
       <div class="pp-row">
         <label>Vignette amt</label>
         <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
-      </div>
+      </div>` : ''}
+      <div class="pp-subhead">Floor</div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="floorEnabled" ${render.floorEnabled ? 'checked' : ''}> Floor</label>
-        <input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">
+        ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">` : ''}
       </div>
+      ${render.floorEnabled ? `
       <div class="pp-row">
         <label>Floor Z (mm)</label>
         <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
-      </div>
+      </div>` : ''}
+      ${render.floorEnabled && !render.shadowsEnabled ? `
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Shadows are off — the floor won't catch any.</span>
+      </div>` : ''}
+      <div class="pp-subhead">Lights</div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="shadowsEnabled" ${render.shadowsEnabled ? 'checked' : ''}> Shadows</label>
       </div>
+      ${render.shadowsEnabled ? `
       <div class="pp-row">
         <label>Shadow dark</label>
         <input type="number" step="0.05" min="0" max="1" data-render="shadowDarkness" value="${_fmt(render.shadowDarkness)}">
-      </div>
+      </div>` : ''}
       <div class="pp-row">
         <label>Key light</label>
         <input type="number" step="0.05" min="0" max="3" data-render="keyIntensity" value="${_fmt(render.keyIntensity)}">
@@ -203,11 +246,10 @@ function _render() {
         <input type="number" step="0.05" min="0" max="3" data-render="hemiIntensity" value="${_fmt(render.hemiIntensity)}">
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="render-reset">Reset render defaults</button>
-      </div>
-    </section>
-    <section class="pp-section">
-      <header class="pp-section-header">Camera</header>
+        <button type="button" class="pp-btn" data-action="render-reset">Reset environment</button>
+      </div>`;
+
+  const camSec = `
       <div class="pp-row">
         <label>FOV (deg)</label>
         <input type="number" step="1" min="5" max="140" data-render="fovDeg" value="${_fmt(render.fovDeg, 1)}">
@@ -215,10 +257,10 @@ function _render() {
       <div class="pp-row">
         <label>Near clip (mm)</label>
         <input type="number" step="0.5" min="0.1" max="100" data-render="clipNearMM" value="${_fmt(render.clipNearMM, 1)}">
-      </div>
-    </section>
-    <section class="pp-section">
-      <header class="pp-section-header">Rendering</header>
+      </div>`;
+
+  const renderingSec = `
+      <div class="pp-subhead">Still</div>
       <div class="pp-row">
         <label>Resolution</label>
         <select data-ro-preset>
@@ -247,9 +289,7 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="export-png">Export PNG</button>
       </div>
-      <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Turntable — one full 360° around the current view.</span>
-      </div>
+      <div class="pp-subhead">Turntable</div>
       <div class="pp-row">
         <label>Duration (s)</label>
         <input type="number" step="1" min="1" max="120" data-tt="durationS" value="${_fmt(tt.durationS, 0)}">
@@ -276,10 +316,14 @@ function _render() {
         <button type="button" class="pp-btn" data-action="export-video">Export video</button>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Video renders at the output resolution above — Esc cancels.</span>
-      </div>
-    </section>
-  `;
+        <span class="pp-hint">One full 360° at the resolution above.</span>
+      </div>`;
+
+  _bodyEl.innerHTML =
+    _section('grid', 'Grid', gridSec)
+    + _section('environment', 'Environment', envSec)
+    + _section('camera', 'Camera', camSec)
+    + _section('rendering', 'Rendering', renderingSec);
   _wire();
 }
 
@@ -309,6 +353,17 @@ function _setRenderOut(patch) {
 }
 
 function _wire() {
+  // Section collapse — same .pp-collapsed pattern as the Properties panel,
+  // but persisted per-user.
+  _bodyEl.querySelectorAll('.pp-section[data-sec]').forEach(sec => {
+    sec.querySelector(':scope > .pp-section-header')?.addEventListener('click', () => {
+      const key = sec.dataset.sec;
+      sec.classList.toggle('pp-collapsed');
+      _collapsed[key] = sec.classList.contains('pp-collapsed');
+      _saveCollapsed();
+    });
+  });
+
   // Grid styling → SceneManager.setGrid (writes state.scene.grid itself).
   _bodyEl.querySelectorAll('[data-grid]').forEach(input => {
     input.addEventListener('change', () => {
@@ -349,10 +404,13 @@ function _wire() {
     _escEnter(input);
   });
 
-  // Boolean render toggles (shadows / vignette).
+  // Boolean render toggles. vignette / floorEnabled / shadowsEnabled gate
+  // dependent rows, so those re-render the panel.
   _bodyEl.querySelectorAll('[data-render-toggle]').forEach(box => {
     box.addEventListener('change', () => {
-      _setRender({ [box.dataset.renderToggle]: box.checked });
+      const key = box.dataset.renderToggle;
+      _setRender({ [key]: box.checked });
+      if (['vignette', 'floorEnabled', 'shadowsEnabled'].includes(key)) _render();
     });
   });
 
@@ -461,8 +519,8 @@ function _wireRendering() {
     _setRenderOut({ turntable: { ease: e.target.checked } });
   });
 
-  // Preview — plays the sweep live (camera + lights rotate around world
-  // origin together), no recording. Button toggles to Stop; Esc also stops.
+  // Preview — plays the sweep live (camera + lights rotate around the world
+  // axis together), no recording. Button toggles to Stop; Esc also stops.
   _bodyEl.querySelector('[data-action="preview-turntable"]')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (isPreviewing()) { stopPreview(); return; }
@@ -489,7 +547,7 @@ function _wireRendering() {
         ...tt,
         width: ro.width,
         height: ro.height,
-        onProgress: (f) => { btn.textContent = `Rendering… ${Math.round(f * 100)}%`; },
+        onProgress: (f) => { btn.textContent = `Rendering… ${Math.round(f * 100)}% — Esc cancels`; },
       });
       if (!result) {
         Toast.show('Turntable recording cancelled', 'info', 2500);
