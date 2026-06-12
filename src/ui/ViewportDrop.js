@@ -107,16 +107,37 @@ function _handleDrop(e, position) {
   }
   if (!entries.length) return;
 
+  // Split the drop set: meshes load; .mtl + images ride along as SIBLINGS so
+  // OBJ material/texture references resolve (they can't fetch relative to a
+  // blob URL — field report: "obj fails to read mtl"). Drop obj+mtl+textures
+  // together and they bind.
+  const meshEntries = [];
+  const siblingFiles = [];
   for (const { file, handleP } of entries) {
     const ext = _extOf(file.name);
-    if (!AssetLoader.isMeshExt(ext)) {
+    if (AssetLoader.isMeshExt(ext)) {
+      meshEntries.push({ file, handleP });
+    } else if (ext === '.mtl' || AssetLoader.isTextureExt(ext)) {
+      siblingFiles.push(file);
+    } else {
       Toast.show(`Skipped ${file.name}: unsupported (${ext || 'no ext'})`, 'warning', 4000);
-      continue;
     }
+  }
+  if (!meshEntries.length) {
+    if (siblingFiles.length) {
+      Toast.show('Drop the model file together with its .mtl/textures (or mount the folder).', 'info', 5000);
+    }
+    return;
+  }
+
+  for (const { file, handleP } of meshEntries) {
     safeAsync(async () => {
       const h = await handleP;
       const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
-      await AssetLoader.loadFromBlob(file, file.name, position, fileHandle ? { fileHandle } : {});
+      await AssetLoader.loadFromBlob(file, file.name, position, {
+        ...(fileHandle ? { fileHandle } : {}),
+        ...(siblingFiles.length ? { siblingFiles } : {}),
+      });
     });
   }
 }

@@ -387,3 +387,11 @@
   text-align: center;
   padding: var(--sp-2);
 }
+
+/* Section nesting per PART 13b elevation rule (field-report fix). */
+.sp-section {
+  background: var(--bg-2);
+  border: 1px solid var(--border-section);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+}

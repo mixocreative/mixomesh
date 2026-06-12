@@ -245,11 +245,11 @@ function _renderTransformSection(mesh, multi) {
   return `
     <section class="pp-section" data-section="transform">
       <header class="pp-section-header">Transform${copyBtn}</header>
-      <div class="pp-grid3 pp-readonly">
+      <div class="pp-grid3">
         <label>Size (mm)</label>
-        <span class="pp-readout">${sizeMM ? _fmt(sizeMM.x) : '—'}</span>
-        <span class="pp-readout">${sizeMM ? _fmt(sizeMM.y) : '—'}</span>
-        <span class="pp-readout">${sizeMM ? _fmt(sizeMM.z) : '—'}</span>
+        <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
+        <input type="number" step="0.1" min="0.001" data-size-axis="y" value="${sizeMM ? _fmt(sizeMM.y) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
+        <input type="number" step="0.1" min="0.001" data-size-axis="z" value="${sizeMM ? _fmt(sizeMM.z) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
       </div>
       <div class="pp-grid3">
         <label>Pos (mm)</label>
@@ -330,6 +330,15 @@ function _wireTransformSection(meshId) {
     });
   });
 
+  _bodyEl.querySelectorAll('[data-size-axis]').forEach(input => {
+    if (input.disabled) return;
+    input.addEventListener('change', () => _commitSizeInput(meshId, input));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { _render(); }
+    });
+  });
+
   _bodyEl.querySelectorAll('[data-apply]').forEach(btn => {
     if (btn.disabled) return;
     btn.addEventListener('click', () => {
@@ -383,6 +392,37 @@ function _copyTransformFromActive() {
   }
   if (!Object.keys(next).length) return;
   push(new TransformCommand(prev, next));
+}
+
+/**
+ * Edit the world-space Size readout directly: scale the mesh so its bounding
+ * box matches the typed mm value. Scale-locked (default) keeps proportions —
+ * one axis edit scales all three; unlocked scales the edited axis only.
+ * One undoable TransformCommand either way (field request).
+ */
+function _commitSizeInput(meshId, input) {
+  const mesh = AssetLoader.getBabylonMesh(meshId);
+  if (!mesh) return;
+  const axis = input.dataset.sizeAxis;
+  const newMM = parseFloat(input.value);
+  const sizeBU = _hierarchyWorldSize(mesh);
+  const curMM = sizeBU ? sizeBU[axis] * 1000 : 0;
+  if (!Number.isFinite(newMM) || newMM <= 0 || curMM <= 1e-6) { _render(); return; }
+  const factor = newMM / curMM;
+  if (Math.abs(factor - 1) < 1e-9) return;
+
+  const prev = _captureAbsolute(mesh);
+  const next = _captureAbsolute(mesh);
+  const locked = getState().ui?.scaleLocked !== false;
+  if (locked) {
+    next.scaling.x = prev.scaling.x * factor;
+    next.scaling.y = prev.scaling.y * factor;
+    next.scaling.z = prev.scaling.z * factor;
+  } else {
+    next.scaling[axis] = prev.scaling[axis] * factor;
+  }
+  push(new TransformCommand({ [meshId]: prev }, { [meshId]: next }));
+  _render();
 }
 
 function _commitTransformInput(meshId, input) {

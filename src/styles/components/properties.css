@@ -299,3 +299,27 @@
 .pp-scale-lock:hover { color: var(--accent); border-color: var(--accent); }
 .pp-locked + .pp-row .pp-scale-lock,
 .pp-scale-row.pp-locked ~ .pp-row-inline .pp-scale-lock { color: var(--accent); border-color: var(--accent); }
+
+/* ── Field-report fixes 2026-06-12 ─────────────────────── */
+/* Labels that carry an Apply button overflowed their 70px grid cell across
+   the first input. Let the button wrap under the label text instead. */
+.pp-grid3 > label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.pp-apply-btn { margin-left: 0; }
+
+/* Section nesting per PART 13b elevation rule: panel = bg-1, section = bg-2,
+   controls = bg-3. Sections were flat on the panel surface and the
+   parent-child relationship read as blended. */
+.pp-section {
+  background: var(--bg-2);
+  border: 1px solid var(--border-section);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+}
+.pp-section-header { border-bottom: 1px solid var(--border-section); }

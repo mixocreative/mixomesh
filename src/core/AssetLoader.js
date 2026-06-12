@@ -54,6 +54,83 @@ async function _sha256Hex(buf) {
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ── OBJ sibling resolution (field report: "obj fails to read mtl") ──────
+// OBJ loads from a blob URL, so the loader's relative `mtllib` / texture
+// requests can't resolve. We map sibling filenames → object URLs (from a
+// multi-file drop or the file's mounted directory) and swap
+// BABYLON.Tools.PreprocessUrl for the duration of the load. The map is kept
+// per assetId so re-instantiation rebinds materials too.
+
+const _objSiblings = new Map();   // assetId → Map<lowercase filename, objectURL>
+const MAX_SIBLING_FILES = 64;
+
+async function _collectObjSiblings(opts) {
+  const map = new Map();
+  const add = async (name, fileOrHandle) => {
+    if (map.size >= MAX_SIBLING_FILES) return;
+    const ext = _extOf(name);
+    if (ext !== '.mtl' && !isTextureExt(ext)) return;
+    try {
+      const file = typeof fileOrHandle.getFile === 'function' ? await fileOrHandle.getFile() : fileOrHandle;
+      map.set(name.toLowerCase(), URL.createObjectURL(file));
+    } catch { /* unreadable sibling — material falls back */ }
+  };
+
+  if (Array.isArray(opts.siblingFiles)) {
+    for (const f of opts.siblingFiles) await add(f.name, f);
+  } else if (opts.directoryHandleKey && opts.originalPath) {
+    const root = _dirHandles.get(opts.directoryHandleKey);
+    if (root) {
+      try {
+        // Walk to the OBJ's parent directory, then enumerate its files.
+        const parts = String(opts.originalPath).split(/[\\/]+/).filter(Boolean);
+        let dir = root;
+        for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+        for await (const [name, handle] of dir.entries()) {
+          if (handle.kind === 'file') await add(name, handle);
+        }
+      } catch { /* directory walk failed — material falls back */ }
+    }
+  }
+  return map;
+}
+
+/** Swap Tools.PreprocessUrl to serve sibling files by filename. Returns restore fn. */
+function _installSiblingUrls(map) {
+  if (!map?.size || !BABYLON.Tools) return () => {};
+  const prev = BABYLON.Tools.PreprocessUrl;
+  BABYLON.Tools.PreprocessUrl = (url) => {
+    const name = String(url).split(/[\\/]/).pop()?.toLowerCase();
+    const hit = name ? map.get(name) : null;
+    if (hit) return hit;
+    return typeof prev === 'function' ? prev(url) : url;
+  };
+  return () => { BABYLON.Tools.PreprocessUrl = prev; };
+}
+
+/** Warn when the OBJ references a .mtl no sibling satisfies. */
+async function _warnMissingMtl(blob, filename, map) {
+  try {
+    const head = await blob.slice(0, 65536).text();
+    const refs = [...head.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)]
+      .map(m => m[1].trim().split(/[\\/]/).pop()?.toLowerCase())
+      .filter(Boolean);
+    const missing = refs.filter(r => !map?.has(r));
+    if (missing.length) {
+      Toast.show(
+        `${filename} references ${missing[0]} — drop the .mtl + textures together with the .obj, or import from a mounted folder.`,
+        'warning', 7000);
+    }
+  } catch { /* hint only */ }
+}
+
+function _revokeObjSiblings(assetId) {
+  const map = _objSiblings.get(assetId);
+  if (!map) return;
+  for (const url of map.values()) URL.revokeObjectURL(url);
+  _objSiblings.delete(assetId);
+}
+
 // ── Public API ───────────────────────────────────────────
 
 /**
@@ -124,7 +201,17 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   try { sourceFileHash = await _sha256Hex(await blob.arrayBuffer()); }
   catch { /* hash is an identity optimisation — import proceeds without it */ }
 
+  // OBJ: resolve mtllib/texture references against drop-set or directory
+  // siblings (blob URLs have no usable base URL).
+  let siblings = null;
+  if (ext === '.obj') {
+    siblings = await _collectObjSiblings(opts);
+    if (siblings.size) _objSiblings.set(assetId, siblings);
+    _warnMissingMtl(blob, filename, siblings);   // fire-and-forget hint
+  }
+
   const loadToastId = Toast.show(`Loading ${filename}…`, 'loading');
+  const restoreUrls = _installSiblingUrls(siblings);
 
   try {
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
@@ -198,8 +285,11 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   } catch (err) {
     Toast.dismiss(loadToastId);
     revokeBlobUrl(assetId);
+    _revokeObjSiblings(assetId);
     _containers.delete(assetId);
     throw err;
+  } finally {
+    restoreUrls();
   }
 }
 
@@ -220,6 +310,8 @@ export async function instantiateAsset(assetId, position) {
 
   const scene = SceneManager.getScene();
   const loadToastId = Toast.show(`Loading ${asset.filename}…`, 'loading');
+  // Re-instantiated OBJs need their sibling map again for MTL/textures.
+  const restoreUrls = _installSiblingUrls(_objSiblings.get(assetId));
   try {
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
       blobUrl, '', scene, null, asset.extension
@@ -241,6 +333,8 @@ export async function instantiateAsset(assetId, position) {
   } catch (err) {
     Toast.dismiss(loadToastId);
     throw err;
+  } finally {
+    restoreUrls();
   }
 }
 
@@ -266,6 +360,7 @@ export function releaseAsset(assetId) {
       _containers.delete(assetId);
     }
     revokeBlobUrl(assetId);
+    _revokeObjSiblings(assetId);
   }
 
   setState(s => {
@@ -694,6 +789,7 @@ export function resetAll() {
   }
   resetTextures();
   revokeAllBlobUrls();
+  for (const id of [..._objSiblings.keys()]) _revokeObjSiblings(id);
   _containers.clear();
   _meshRegistry.clear();
 }
