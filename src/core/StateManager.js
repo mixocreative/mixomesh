@@ -49,7 +49,14 @@ const INITIAL_STATE = {
       // Lighting only — the gradient backdrop stays; affects PBR materials
       // (imported glTF/OBJ). Intensity = scene.environmentIntensity.
       hdriEnabled: true, hdriPreset: 'studio', hdriIntensity: 0.6,
+      // SSAO contact darkening (scene/ViewEffects.js) — viewport-only post
+      // effect (the RTT export paths skip the camera post chain by design).
+      ssaoEnabled: true, ssaoStrength: 1,
     },
+    // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
+    // deliberately not persisted (it's an inspection tool, not a scene look).
+    // axis/offset are print-space (Z = up, mm); flip keeps the other side.
+    section: { enabled: false, axis: 'z', offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering): PNG stills + turntable video.
     // pose = saved render-camera composition (null until the user sets one);
     // the render-view toggle swaps the live camera to/from it.

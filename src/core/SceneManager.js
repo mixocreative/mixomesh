@@ -7,15 +7,18 @@ import {
   BG_GRADIENT_BOTTOM,
   BG_DARK_TOP,
   BG_DARK_BOTTOM,
-  HEMI_INTENSITY,
-  HEMI_GROUND_COLOR,
-  KEY_INTENSITY,
-  FILL_INTENSITY,
-  SHADOW_DARKNESS,
-  SHADOW_BLUR_KERNEL,
   TONE_CONTRAST,
   TONE_EXPOSURE,
 } from './scene/SceneConstants.js';
+import {
+  initEnvironmentRig, applyEnvironmentSettings, ensureShadowCasters,
+  getShadowGenerator, invalidateShadows, setFloorShadowOnly,
+} from './scene/EnvironmentRig.js';
+import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes } from './scene/ViewEffects.js';
+import { initImportBounce } from './scene/ImportBounce.js';
+import {
+  initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
+} from './scene/EdgeOverlay.js';
 import { initSelectionOutline, setActive, setSelected } from './scene/SelectionOutline.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
@@ -32,11 +35,13 @@ import {
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 } from './scene/PivotSession.js';
 
-// Selection silhouette, bed/grid, camera rig, and pivot session live in
-// scene/SelectionOutline.js, scene/BedGrid.js, scene/CameraRig.js, and
-// scene/PivotSession.js (review L29 split + §0.5 budget); re-exported so the
-// SceneManager surface is unchanged.
+// Selection silhouette, bed/grid, camera rig, pivot session, environment
+// (lights/shadows/floor/HDRI), view effects (SSAO/section), and import bounce
+// live in scene/*.js (review L29 split + §0.5 budget + audit C1); re-exported
+// so the SceneManager surface is unchanged.
 export { setActive, setSelected };
+export { getShadowGenerator, invalidateShadows, setFloorShadowOnly, setSectionPlane };
+export { setWireframeEdgeColor };
 export {
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
   saveCameraState, restoreCameraState, setFollowMode,
@@ -57,36 +62,12 @@ let _engine    = null;
 let _scene     = null;
 let _axes      = null;   // { x, y, z } line meshes
 let _cursor    = null;
-let _shadowGen = null;
 let _bgTexture = null;   // gradient DynamicTexture — repainted on bg toggle
 let _bgLayer   = null;   // background Layer — disabled for transparent renders
 let _bgMode    = 'light';
-let _lights    = null;   // { hemi, key, fill } — Scene panel intensity sliders
 
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
-
-// Wireframe-edges overlay: per-mesh clone sharing the source geometry, drawn
-// with a wireframe emissive material over the textured base (field report:
-// edgesRenderer at epsilon 0.9 only showed sharp creases — users expect the
-// full triangle wireframe WITH the texture still visible underneath).
-const _wireframeEdgeState = { enabled: false, color: new BABYLON.Color3(1, 0.8, 0) };
-const _edgeOverlays = new Map();   // meshId → overlay mesh
-let _edgeMat = null;
-
-// Environment floor (Scene ▸ Environment) — solid-colour shadow-catcher
-// plane. Lazily created on first enable; never registered (no meshId), never
-// pickable, never exported, kept VISIBLE in renders (it exists for them).
-let _floor = null;
-let _floorMat = null;        // solid-colour material (normal viewport look)
-let _floorShadowMat = null;  // ShadowOnlyMaterial — transparent-PNG capture
-
-// HDRI environment (Scene ▸ Environment) — prefiltered .env cube textures
-// bundled in public/env/. Lighting only: scene.environmentTexture drives
-// PBR IBL while the gradient backdrop Layer stays the visible background.
-const HDRI_PRESETS = ['studio', 'neutral', 'outdoor'];
-let _hdriTex    = null;   // live CubeTexture (kept while enabled)
-let _hdriPreset = null;   // which preset _hdriTex was built from
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -118,10 +99,13 @@ export function init(canvas) {
 
   _setupBackground();
   const camera = initCameraRig(_scene, canvas);
-  _setupLighting();
+  initEnvironmentRig(_scene);
   initBedGrid(_scene);
   _setupAxes();
   initSelectionOutline(_scene, _engine, camera);
+  initViewEffects(_scene, camera);
+  initImportBounce(_scene);
+  initEdgeOverlay(_scene);
   _setupCursor();
   initPivotSession(_scene, { getCursorPosition: getCursor });
 
@@ -141,10 +125,11 @@ export function init(canvas) {
   // be added (without this the bed/floor receiveShadows but nothing casts).
   subscribe(EVENTS.ASSET_INSTANTIATED, () => {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
-    if (_wireframeEdgeState.enabled) _setWireframeEdgesMode(true);
-    _ensureShadowCasters();
+    if (isEdgeOverlayEnabled()) setWireframeEdgesMode(true);
+    ensureShadowCasters();
+    registerSectionMeshes();
   });
-  subscribe(EVENTS.PROJECT_LOADED, _ensureShadowCasters);
+  subscribe(EVENTS.PROJECT_LOADED, () => { ensureShadowCasters(); registerSectionMeshes(); });
 
   // Workspace/panel layout changes resize the grid cell the canvas lives in —
   // resize the engine on the next frame so the framebuffer matches (13b).
@@ -201,61 +186,6 @@ function _paintBackground(mode) {
   _bgTexture.update();
   // Fallback solid (pre-layer frames + screenshot edges) tracks the bottom.
   _scene.clearColor = BABYLON.Color4.FromHexString(bottom + 'ff');
-}
-
-// ── Lighting ─────────────────────────────────────────────
-
-// Neutral 3-light studio: broad hemispheric fill (sky white, soft floor
-// bounce so undersides never go black), one soft key for form + a single
-// gentle contact shadow, and a low opposite fill with no specular so it
-// adds no second highlight. Reads flat-and-even like Fusion's default env.
-function _setupLighting() {
-  const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), _scene);
-  hemi.intensity   = HEMI_INTENSITY;
-  hemi.diffuse     = new BABYLON.Color3(1, 1, 1);
-  hemi.groundColor = BABYLON.Color3.FromHexString(HEMI_GROUND_COLOR);
-  hemi.specular    = new BABYLON.Color3(0.15, 0.15, 0.15);
-
-  const key = new BABYLON.DirectionalLight('key', new BABYLON.Vector3(-1, -2, -1), _scene);
-  key.intensity = KEY_INTENSITY;
-  key.position  = new BABYLON.Vector3(6, 12, 6);
-
-  const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(1, -1, 1), _scene);
-  fill.intensity = FILL_INTENSITY;
-  fill.specular  = new BABYLON.Color3(0, 0, 0);
-
-  _lights = { hemi, key, fill };
-
-  _shadowGen = new BABYLON.ShadowGenerator(2048, key);
-  _shadowGen.useBlurExponentialShadowMap = true;
-  _shadowGen.useKernelBlur = true;
-  _shadowGen.blurKernel    = SHADOW_BLUR_KERNEL;
-  _shadowGen.darkness      = SHADOW_DARKNESS;
-}
-
-// Register every content mesh as a shadow caster (idempotent — checks the
-// renderList). Disposal self-removes so the list never holds dead meshes.
-function _ensureShadowCasters() {
-  const map = _shadowGen?.getShadowMap();
-  if (!map) return;
-  // Content = any mesh whose ancestor chain carries a registered meshId
-  // (glTF parents wrap geometry-bearing children that have no id of their
-  // own — same walk as pickMeshIdAt). Edge overlays never cast.
-  const ownsContent = (m) => {
-    let node = m;
-    while (node) {
-      if (node.metadata?.edgeOverlay) return false;
-      if (node.metadata?.meshId) return true;
-      node = node.parent;
-    }
-    return false;
-  };
-  for (const mesh of _scene.meshes) {
-    if (!mesh.geometry || !ownsContent(mesh)) continue;
-    if (map.renderList.includes(mesh)) continue;
-    _shadowGen.addShadowCaster(mesh, false);
-    mesh.onDisposeObservable.addOnce(() => _shadowGen?.removeShadowCaster(mesh, false));
-  }
 }
 
 // ── Grid / bed ───────────────────────────────────────────
@@ -328,73 +258,12 @@ export function setOverlay(name, on) {
       _setPrintPreviewMode(on);
       break;
     case 'wireframeEdges':
-      _setWireframeEdgesMode(on);
+      setWireframeEdgesMode(on);
       break;
     case 'bedPreview':
       if (on) _bedUpdatePreview(getState().print.bedDimensions);
       else disposeBedPreview();
       break;
-  }
-}
-
-/**
- * Update the wireframe edge color and re-apply if edges are currently enabled.
- * @param {string} hexColor  e.g. '#ffcc00'
- */
-export function setWireframeEdgeColor(hexColor) {
-  try {
-    _wireframeEdgeState.color = BABYLON.Color3.FromHexString(hexColor);
-  } catch {
-    return;
-  }
-  if (_edgeMat) _edgeMat.emissiveColor = _wireframeEdgeState.color;
-}
-
-function _edgeMaterial() {
-  if (!_edgeMat) {
-    _edgeMat = new BABYLON.StandardMaterial('mx-edge-overlay', _scene);
-    _edgeMat.wireframe       = true;
-    _edgeMat.disableLighting = true;
-    _edgeMat.emissiveColor   = _wireframeEdgeState.color;
-    _edgeMat.diffuseColor    = new BABYLON.Color3(0, 0, 0);
-    _edgeMat.zOffset         = -1;   // pull lines toward the camera — no z-fighting
-  }
-  return _edgeMat;
-}
-
-function _ensureEdgeOverlay(mesh) {
-  const id = mesh.metadata?.meshId;
-  if (!id) return;
-  const existing = _edgeOverlays.get(id);
-  if (existing && !existing.isDisposed?.()) return;
-  _edgeOverlays.delete(id);   // stale (parent container disposed) — rebuild
-  // Clone shares the source geometry (no copy); parenting to the source and
-  // zeroing the local transform keeps it coincident through every move.
-  const overlay = mesh.clone(`edges_${id}`, mesh, /*doNotCloneChildren*/ true);
-  if (!overlay) return;
-  overlay.position.set(0, 0, 0);
-  overlay.rotationQuaternion = BABYLON.Quaternion.Identity();
-  overlay.rotation?.set?.(0, 0, 0);
-  overlay.scaling.set(1, 1, 1);
-  overlay.material   = _edgeMaterial();
-  overlay.isPickable = false;
-  overlay.metadata   = { edgeOverlay: true };   // never a registered meshId
-  _edgeOverlays.set(id, overlay);
-}
-
-function _disposeEdgeOverlays() {
-  for (const o of _edgeOverlays.values()) {
-    try { o.dispose(); } catch { /* parent may already be gone */ }
-  }
-  _edgeOverlays.clear();
-}
-
-function _setWireframeEdgesMode(enabled) {
-  _wireframeEdgeState.enabled = enabled;
-  if (!enabled) { _disposeEdgeOverlays(); return; }
-  for (const mesh of _scene.meshes) {
-    if (!mesh.geometry || !mesh.metadata?.meshId) continue;
-    _ensureEdgeOverlay(mesh);
   }
 }
 
@@ -486,106 +355,15 @@ export function applyRenderSettings(render = {}) {
   }
   if (typeof render.vignette === 'boolean') ip.vignetteEnabled = render.vignette;
   if (Number.isFinite(render.vignetteWeight)) ip.vignetteWeight = render.vignetteWeight;
-  _updateFloor(render);
-  _updateHdri(render);
-  if (_shadowGen) {
-    if (Number.isFinite(render.shadowDarkness)) _shadowGen.darkness = render.shadowDarkness;
-    const light = _shadowGen.getLight?.();
-    if (light && typeof render.shadowsEnabled === 'boolean') {
-      light.shadowEnabled = render.shadowsEnabled;
-    }
-  }
   if ((render.background === 'light' || render.background === 'dark') &&
       render.background !== _bgMode) {
     _paintBackground(render.background);
   }
-  if (_lights) {
-    if (Number.isFinite(render.hemiIntensity)) _lights.hemi.intensity = render.hemiIntensity;
-    if (Number.isFinite(render.keyIntensity))  _lights.key.intensity  = render.keyIntensity;
-    if (Number.isFinite(render.fillIntensity)) _lights.fill.intensity = render.fillIntensity;
-  }
+  // Lights / shadows / floor / HDRI — scene/EnvironmentRig.js (audit C1).
+  applyEnvironmentSettings(render);
+  // SSAO + section plane — scene/ViewEffects.js.
+  applyViewEffects(render);
   applyCameraOptics(render);
-}
-
-// ── Environment floor ────────────────────────────────────
-
-// Partial-safe like the rest of applyRenderSettings: only touches what the
-// patch carries. Sized generously off the printer bed so shadows of framed
-// content always land on it.
-function _updateFloor(render) {
-  if (typeof render.floorEnabled === 'boolean') {
-    if (render.floorEnabled && !_floor) {
-      const bed = getState().print.bedDimensions;
-      const size = Math.max(bed.x, bed.y) * 4 / 1000;   // mm → BU, 4× bed
-      _floor = BABYLON.MeshBuilder.CreateGround('mx-env-floor', { width: size, height: size }, _scene);
-      _floor.isPickable = false;
-      _floor.receiveShadows = true;
-      _floorMat = new BABYLON.StandardMaterial('mx-env-floor-mat', _scene);
-      _floorMat.specularColor = new BABYLON.Color3(0, 0, 0);   // matte — no hot highlight
-      _floor.material = _floorMat;
-    }
-    if (_floor) _floor.setEnabled(render.floorEnabled);
-  }
-  if (!_floor) return;
-  if (typeof render.floorColor === 'string') {
-    try { _floorMat.diffuseColor = BABYLON.Color3.FromHexString(render.floorColor); } catch { /* keep */ }
-  }
-  if (Number.isFinite(render.floorZMM)) {
-    // 0.05 mm below the requested height — at the default Z=0 the bed grid
-    // ground sits at exactly y=0 and an opaque coplanar floor would z-fight.
-    _floor.position.y = render.floorZMM / 1000 - 0.00005;
-  }
-}
-
-/**
- * Swap the floor between its solid-colour material and a shadow-only one.
- * Transparent PNG capture uses this so an enabled floor contributes ONLY its
- * caught shadow to the alpha channel instead of an opaque plane — model +
- * floating soft shadow composite onto anything. No-op when the floor is off.
- * @param {boolean} on  true = shadow-catcher only
- */
-export function setFloorShadowOnly(on) {
-  if (!_floor || !_floor.isEnabled()) return;
-  if (on) {
-    if (!_floorShadowMat) {
-      _floorShadowMat = new BABYLON.ShadowOnlyMaterial('mx-env-floor-shadow', _scene);
-      const keyLight = _shadowGen?.getLight?.();
-      if (keyLight) _floorShadowMat.activeLight = keyLight;
-    }
-    _floor.material = _floorShadowMat;
-  } else {
-    _floor.material = _floorMat;
-  }
-}
-
-// ── HDRI environment lighting ────────────────────────────
-
-// Partial-safe like the rest of applyRenderSettings. Texture is created on
-// first enable / preset change and disposed on preset change; toggling off
-// detaches it from the scene but keeps it cached for cheap re-enable.
-function _updateHdri(render) {
-  if (typeof render.hdriPreset === 'string' && HDRI_PRESETS.includes(render.hdriPreset)
-      && render.hdriPreset !== _hdriPreset && _hdriTex) {
-    _hdriTex.dispose();
-    _hdriTex = null;
-    _hdriPreset = null;
-  }
-  if (typeof render.hdriEnabled === 'boolean') {
-    if (render.hdriEnabled) {
-      const preset = HDRI_PRESETS.includes(render.hdriPreset) ? render.hdriPreset
-                   : (_hdriPreset ?? 'studio');
-      if (!_hdriTex) {
-        _hdriTex = BABYLON.CubeTexture.CreateFromPrefilteredData(`env/${preset}.env`, _scene);
-        _hdriPreset = preset;
-      }
-      _scene.environmentTexture = _hdriTex;
-    } else {
-      _scene.environmentTexture = null;
-    }
-  }
-  if (Number.isFinite(render.hdriIntensity)) {
-    _scene.environmentIntensity = Math.max(0, Math.min(4, render.hdriIntensity));
-  }
 }
 
 // ── 3D cursor ────────────────────────────────────────────
@@ -623,9 +401,6 @@ export function getScene() { return _scene; }
 /** @returns {BABYLON.Engine} */
 export function getEngine() { return _engine; }
 
-/** @returns {BABYLON.ShadowGenerator} */
-export function getShadowGenerator() { return _shadowGen; }
-
 /** @returns {string|null} meshId picked at canvas (x, y), or null. */
 export function pickMeshIdAt(x, y) {
   if (!_scene) return null;
@@ -658,7 +433,7 @@ export const SceneManager = {
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
-  setBackgroundEnabled, setFloorShadowOnly,
+  setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

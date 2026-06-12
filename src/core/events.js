@@ -65,6 +65,9 @@ export const EVENTS = {
   // Camera
   CAMERA_PRESET_CHANGED:   'camera:presetChanged',
 
+  // Environment
+  HDRI_STATUS:             'env:hdriStatus',   // { status: 'loaded'|'error', preset }
+
   // Workspaces (PART 13b)
   WORKSPACE_CHANGED:       'ui:workspaceChanged',
   PANEL_COLLAPSED_CHANGED: 'ui:panelCollapsedChanged',
