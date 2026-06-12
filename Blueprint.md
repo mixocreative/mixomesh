@@ -117,8 +117,9 @@ src/
     scale-presets.json     ← SCALE_PRESETS (PrintManager)
     swatches.json          ← DEFAULT_SWATCHES (ShaderLibrary)
   styles/
-    tokens.css             ← CSS variables (colors, spacing, type)
-    layout.css             ← panel grid, splitters
+    tokens.css             ← CSS variables (neutral Blender-gray surfaces, --ctl-* control tokens)
+    layout.css             ← panel grid, splitters, per-workspace section visibility
+    blender.css            ← Blender-inspired control language overrides (loaded LAST)
     components.css         ← compatibility note; subsystem CSS is split below
     components/
       asset.css
@@ -142,7 +143,10 @@ src/
       ShaderCommands.js    ← ShaderCreate/Assign/Update/Duplicate/Delete, UVOverride, ColorApply
       ScaleCommands.js     ← RescaleWorld + SourceUnit
     InputManager.js
-    SceneManager.js        ← engine/lighting/camera/gizmo orchestrator
+    SceneManager.js        ← engine/lighting/overlays orchestrator (camera/pivot split into scene/)
+    WorkerImport.js        ← main side of worker OBJ parse: rebuild meshes from transferables
+    workers/
+      ObjParse.worker.js   ← Babylon OBJ/MTL loader in a NullEngine worker (no UI freeze)
     Selection.js           ← selection set + active id + pivot mode (§4b)
     AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
@@ -169,9 +173,11 @@ src/
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
       BlobUrls.js          ← shared assetId → object-URL registry
     scene/
-      SceneConstants.js    ← viewport/grid/camera/outline constants
+      SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process
       BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
+      CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
+      PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
@@ -191,6 +197,10 @@ src/
     ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b)
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
+    ViewportToggles.js     ← wireframe-edges + matte toggles docked under the NavCube
+    ScenePanel.js          ← Scene workspace panel: grid / render / camera settings
+    Workspace.js           ← workspace presets (PART 13b): pill, hotkeys, scroll memory
+    NumberScrub.js         ← wheel-scrub on number inputs (delegated, panel never scrolls)
     NavCube.js             ← top-left orientation widget
 tests/                     ← headless harness — Node-native, no build (§14b)
   register-hooks.mjs       ← `node:module.register` entry; runner uses --import
@@ -395,38 +405,45 @@ If a file grows past 1.5× target, split by responsibility. Smaller files → fa
 
 Single dark theme. Pro-tool aesthetic. No theme switcher in v1.
 
+**Blender-inspired pass (2026-06-12):** surfaces went neutral gray (blue cast
+removed), controls became light-gray inset pills (lighter than the panel,
+dark seam border, hover lighten / press darken), property labels right-align,
+section headers are sentence case, tab strips are segmented controls. The
+component-level overrides live in `src/styles/blender.css`, loaded LAST in
+index.html; the tokens below are the current values.
+
 ```css
 :root {
   /* Surfaces — FIXED-ASSIGNMENT elevation ladder. The ladder isn't a free
      palette; each rung has a documented role so the parent-child panel
      hierarchy reads at a glance (PART 13b). Don't reuse a rung at the
      wrong level — that's what blends the hierarchy. */
-  --bg-0: #0a0a0b;          /* viewport / app background */
-  --bg-1: #131316;          /* top-level panel surface (Outliner, Properties, Shader, Asset, Print) */
-  --bg-2: #1a1a1f;          /* section surface inside a panel (.pp-section, .sp-section, .ap-card) */
-  --bg-3: #232329;          /* control surface — inputs, default buttons, selected rows */
-  --bg-4: #2d2d35;          /* hover / pressed elevation on top of --bg-3 */
+  --bg-0: #111111;          /* viewport / app background */
+  --bg-1: #1d1d1d;          /* top-level panel surface (Outliner, Properties, Shader, Asset, Print) */
+  --bg-2: #252525;          /* section surface inside a panel (.pp-section, .sp-section, .ap-card) */
+  --bg-3: #2f2f2f;          /* control surface — inputs, default buttons, selected rows */
+  --bg-4: #3b3b3b;          /* hover / pressed elevation on top of --bg-3 */
 
-  --border:        #2a2a30;
-  --border-strong: #3a3a44;
-  --border-focus:  #06b6d4;
+  /* Blender separates surfaces with darker SEAMS (inset look), not lighter
+     outlines; -strong stays lighter for chips/handles needing an outline. */
+  --border:         #161616;
+  --border-strong:  #404040;
+  --border-section: #181818;
+  --border-focus:  #f59e0b;
   --ring-focus:    rgba(245, 158, 11, 0.35);  /* 2px box-shadow ring on input :focus — keyboard a11y */
 
-  /* Semantic border roles — DERIVED from --border / --border-strong but
-     used by panel-vs-section hierarchy (see PART 13b "Workspaces & Panel
-     Hierarchy"). Touch these to re-tune the visual depth of the panel
-     tree without re-grepping every selector. */
-  --border-panel:   var(--border-strong);   /* between top-level panels */
-  --border-section: var(--border);          /* between sections inside a panel */
+  /* Controls — Blender fields sit LIGHTER than their panel (inset pill). */
+  --ctl-bg:        #383838;
+  --ctl-bg-hover:  #434343;
+  --ctl-bg-active: #2c2c2c;
+  --ctl-border:    #202020;
+  --ctl-h: 22px;
 
-  /* Text — tertiary lightened 2026-05-18 (UI audit) so labels +
-     section headers reach ≥ 5:1 WCAG AA on --bg-1 / --bg-2 panels.
-     Disabled also lightened so disabled inputs/buttons remain legible
-     without needing a compounding opacity multiplier. */
-  --text-0: #ededf0;        /* primary */
-  --text-1: #a1a1ab;        /* secondary */
-  --text-2: #8a8a96;        /* tertiary, hints */
-  --text-disabled: #5a5a64;
+  /* Text */
+  --text-0: #e8e8e8;        /* primary */
+  --text-1: #a8a8a8;        /* secondary */
+  --text-2: #8c8c8c;        /* tertiary, hints */
+  --text-disabled: #5e5e5e;
 
   /* Accent — yellow-orange (amber); locked Phase 3, user confirmed */
   --accent:    #f59e0b;
@@ -706,8 +723,12 @@ const initialState = {
   },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
-    // Workspace fields are planned in PART 13b but are not part of the
-    // shipped v3.1 StateManager initial state.
+    // Workspaces (PART 13b) — per-user (localStorage v2), NEVER in .mixo.
+    workspace: 'layout',     // 'layout' | 'shade' | 'scene' | 'print'
+    // TRI-STATE per side: true = force-hide, false = force-show, ABSENT =
+    // defer to the workspace default. Must start EMPTY — a concrete false is
+    // a force-show override that defeats every workspace preset.
+    panelCollapsed: {},
   },
   gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
 };
@@ -2433,7 +2454,13 @@ the workspace decides what shows.
 
 Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.
 
-**Top-bar UI.** Workspace switcher is a three-button pill in the header, between the Project menu and the right-side controls. Active button highlighted with `--accent`. Tooltip on each button shows the hotkey (`Ctrl+1` / `Ctrl+2` / `Ctrl+3`). Module: `src/ui/WorkspaceSwitcher.js`.
+**Top-bar UI.** Workspace switcher is a four-button pill in the header (icon + label per button: Box / Palette / SunDim / Printer). Active button highlighted with `--accent`. Tooltip on each button shows the hotkey (`Ctrl+Shift+1..4`). Module: `src/ui/Workspace.js` (`_renderPill`).
+
+**Switch ergonomics.** Right-panel scroll positions are remembered per
+workspace (session-only `_scroll` map, captured on switch-away, restored on
+switch-back). The Properties empty state is task-aware: empty scene → import
+hint; Shading → "select an object to edit its shader"; else the generic mesh
+hint (re-rendered on `WORKSPACE_CHANGED`).
 
 ### Elevation token assignment (the hierarchy contract)
 
