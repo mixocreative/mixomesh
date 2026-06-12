@@ -77,9 +77,10 @@ loader/material/serializer APIs cannot drift independently of the core engine.
 
 Runtime contract:
 
-- `package.json` declares Vite, TypeScript, JSZip, and Babylon npm packages.
-  Tests use Node's built-in test runner unless a future feature explicitly
-  needs Vitest.
+- `package.json` declares Vite, TypeScript, JSZip, mp4-muxer (turntable
+  video container — WebCodecs chunks → mp4, zero-dependency), and Babylon
+  npm packages. Tests use Node's built-in test runner unless a future
+  feature explicitly needs Vitest.
 - Dependency install is npm-first via `node scripts/install-deps.mjs`, which
   forces repo-local `.tmp/` and `.npm-cache/` paths and bypasses broken
   user-level npm shims on Windows by invoking the system npm CLI through Node.
@@ -201,7 +202,7 @@ src/
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
     ViewportToggles.js     ← wireframe-edges + matte toggles docked under the NavCube
-    ScenePanel.js          ← Scene workspace panel: grid / render / camera / Rendering output
+    ScenePanel.js          ← Scene workspace panel: grid / environment (incl. floor) / camera / Rendering output
     RenderFrame.js         ← Render-view compose overlay (aspect frame + darkening)
     Workspace.js           ← workspace presets (PART 13b): pill, hotkeys, scroll memory
     NumberScrub.js         ← wheel-scrub on number inputs (delegated, panel never scrolls)
@@ -724,7 +725,7 @@ const initialState = {
               floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0 },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
-    // "Set view"); the Render-view toggle swaps the live camera to/from it.
+    // first Render-view use; auto-updated while the mode is on).
     renderOut: { width: 1920, height: 1080, transparent: false,
                  pose: null /* { alpha, beta, radius, target, isOrthographic } */,
                  turntable: { durationS: 8, fps: 30, direction: 'left' /* |'right' */, ease: true } },
@@ -2548,7 +2549,7 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 |---|---|---|---|---|---|---|
 | **Layout** (default — import & arrange) | visible 260px | visible, task-filtered: Object / Transform / Source Unit / Print Part (Shader + UV hidden) | hidden | hidden | visible at default 220px (drop target focus) | hidden |
 | **Shading** (id `shade` — texture / shader / UV) | visible 220px (narrow) | visible, task-filtered: Object / Shader / UV Override (Transform + Source Unit + Print Part hidden) | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
-| **Scene** (grid / render / camera / Rendering output) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
+| **Scene** (grid / environment / camera / Rendering output) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
 | **Print** (validate + export) | visible 220px (narrow) | **hidden** (per-object Print Part toggle lives in Layout; selective export via Print ▸ Export "selected only") | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
 
 Properties section filtering is pure CSS (`body[data-workspace]` +

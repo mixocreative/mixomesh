@@ -23,11 +23,17 @@ npm run typecheck
 npm run build
 npm run test
 npm run test:browser
+npm run test:export
 ```
 
-The browser smoke test starts a temporary Vite server and drives Chrome or Edge
-through the DevTools Protocol. Add targeted manual Chrome or slicer checks when
-changing browser-only file picker flows or external export compatibility.
+The browser smokes start a temporary Vite server and drive Chrome or Edge
+through the DevTools Protocol (`test:browser` covers UI + rendering output
+including a real headless turntable mp4; `test:export` is the functional
+export round-trip). `npm run test:video` is an OPTIONAL headed check — it
+opens a small visible browser window for a full-size turntable recording
+(`VIDEO_CHECK_EDGE=1` forces Edge). Add targeted manual Chrome or slicer
+checks when changing browser-only file picker flows or external export
+compatibility.
 
 ## Dependency Notes
 
