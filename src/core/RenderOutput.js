@@ -33,37 +33,36 @@ export function isPreviewing() { return !!_preview; }
 
 // ── Turntable sweep (shared by preview + record) ─────────
 //
-// The camera does NOT move or pan: it is first re-aimed at the world
-// vertical axis (pivot = (0, currentTargetHeight, 0) — keeps the framing
-// height), then ONLY its azimuth (alpha) sweeps a full 360° around that
-// fixed pivot. The target never moves during the sweep, so there is zero
-// panning; the model at the world centre spins in place on screen.
+// RIGID rotation of the whole camera rig around the WORLD vertical axis
+// through the origin — the camera is NEVER re-aimed and NEVER pans: the
+// framing you start with is exactly what rotates. Per-frame, the same
+// world rotation is applied to the camera (alpha + target together) so the
+// rig's pose relative to the world is a pure rotation about the origin
+// axis; on screen, the world spins about where the origin projects while
+// the composition is preserved. No jump at start, no drift.
 //
 // The directional studio lights AND (when one exists)
 // scene.environmentTexture rotate by the same angle — lights moving with
 // the camera is what makes it read as "model spinning on a turntable under
 // fixed studio lighting" instead of "camera flying around the model".
 //
-// Light world-rotation matrix is RotationY(−δ) for camera alpha +δ
-// (ArcRotate's α moves the camera +X→+Z while Babylon's RotationY(+θ) maps
-// +X→−Z, so the sign flips). Hemi light points straight up — no-op.
+// The world matrix is RotationY(−δ) for camera alpha +δ (ArcRotate's α
+// moves the camera +X→+Z while Babylon's RotationY(+θ) maps +X→−Z, so the
+// sign flips — verified numerically: |position| stays on the origin circle
+// only with this pairing). Hemi light points straight up — no-op.
 
 /**
- * Re-aim the camera at the world axis and capture everything the sweep
- * touches. Returns { applyDelta, restore } — shared by the live sweep
- * (preview / realtime recording) and the offline frame-by-frame encoder.
+ * Capture everything the sweep touches. Returns { applyDelta, restore } —
+ * shared by the live sweep (preview / realtime recording) and the offline
+ * frame-by-frame encoder.
  */
 function _sweepRig() {
   const scene  = SceneManager.getScene();
   const camera = SceneManager.getCamera();
 
-  const startPose = SceneManager.saveCameraState();
-  // Re-aim at the world axis, preserving the camera position — setTarget()
-  // rebuilds alpha/beta/radius from the current position, which is exactly
-  // the jump we want here (and exactly why the per-frame code below must
-  // never assign `camera.target =`).
-  camera.setTarget(new BABYLON.Vector3(0, camera.target.y, 0));
-  const baseAlpha = camera.alpha;
+  const startPose   = SceneManager.saveCameraState();
+  const startAlpha  = camera.alpha;
+  const startTarget = camera.target.clone();
 
   const key  = scene.getLightByName('key');
   const fill = scene.getLightByName('fill');
@@ -75,7 +74,12 @@ function _sweepRig() {
 
   const applyDelta = (delta) => {
     const m = BABYLON.Matrix.RotationY(-delta);
-    camera.alpha = baseAlpha + delta;   // target stays pinned — no pan
+    camera.alpha = startAlpha + delta;
+    // MUTATE the target — the `camera.target = v` SETTER calls setTarget(),
+    // which re-aims (rebuilds alpha/beta from the current position) and
+    // would silently overwrite the alpha line above. Same reason CameraRig's
+    // pan uses addInPlace.
+    camera.target.copyFrom(BABYLON.Vector3.TransformCoordinates(startTarget, m));
     if (key) {
       key.direction = BABYLON.Vector3.TransformCoordinates(starts.keyDir, m);
       key.position  = BABYLON.Vector3.TransformCoordinates(starts.keyPos, m);

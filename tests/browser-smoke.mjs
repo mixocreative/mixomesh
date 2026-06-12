@@ -205,11 +205,13 @@ async function main() {
       const videoOk = !!video && video.ext === 'mp4' && video.blob.size > 1000;
 
       // Turntable PREVIEW (no MediaRecorder — headless-safe): with the target
-      // PANNED off-origin, a 1 s sweep must (a) actually MOVE the camera on a
-      // circle around the world origin — |position| constant, position
-      // displaced mid-sweep (the ArcRotate target SETTER re-aims instead of
-      // moving, which froze the position; mutation is required) — and
-      // (b) resolve 'done' restoring the whole rig.
+      // PANNED off-origin, a 1 s sweep must be a RIGID rotation about the
+      // world origin: (a) the camera MOVES on a circle around the origin —
+      // |position| constant, displaced mid-sweep (the ArcRotate target SETTER
+      // re-aims instead of moving, which froze the position; mutation is
+      // required); (b) the target circles the origin at its starting radius —
+      // |target| constant (a re-aim-at-axis bug would snap it to 0); and
+      // (c) resolve 'done' restoring the whole rig.
       const sm = await import('/src/core/SceneManager.js');
       const cam = sm.SceneManager.getCamera();
       const keyLight = sm.SceneManager.getScene().getLightByName('key');
@@ -222,15 +224,17 @@ async function main() {
       const p0 = { x: cam.position.x, z: cam.position.z, len: cam.position.length() };
       const previewPromise = ro.previewTurntable({ durationS: 1, direction: 'left', ease: true });
       await new Promise(r => setTimeout(r, 450));
+      const t0len = Math.hypot(t0.x, t0.z);
       const mid = {
         moved: Math.hypot(cam.position.x - p0.x, cam.position.z - p0.z) > 0.01,
         lenOk: Math.abs(cam.position.length() - p0.len) < 1e-3,
-        // No pan: the sweep re-aims at the world axis and the target must
-        // stay PINNED there for the whole rotation.
-        targetPinned: Math.abs(cam.target.x) < 1e-9 && Math.abs(cam.target.z) < 1e-9,
+        // Rigid rotation: target circles the origin at its starting radius.
+        // A re-aim bug snaps it to the axis (radius 0); a setter bug stops
+        // the camera moving. Both are caught.
+        targetOnCircle: Math.abs(Math.hypot(cam.target.x, cam.target.z) - t0len) < 1e-4,
         p0len: p0.len, midLen: cam.position.length(),
         alpha: cam.alpha, beta: cam.beta, radius: cam.radius,
-        tx: cam.target.x, tz: cam.target.z,
+        tx: cam.target.x, tz: cam.target.z, t0len,
       };
       const previewResult = await previewPromise;
       const rigRestored = Math.abs(cam.alpha - a0) < 1e-6
@@ -275,8 +279,8 @@ async function main() {
     assert(rendering.mid.moved, 'mid-sweep camera position did not move — target setter re-aim bug');
     assert(rendering.mid.lenOk,
       `mid-sweep camera left the origin circle — sweep is not a world-origin rotation: ${JSON.stringify(rendering.mid)}`);
-    assert(rendering.mid.targetPinned,
-      `mid-sweep target moved (pan) — should stay pinned to the world axis: ${JSON.stringify(rendering.mid)}`);
+    assert(rendering.mid.targetOnCircle,
+      `mid-sweep target left its origin circle — re-aim or pan crept in: ${JSON.stringify(rendering.mid)}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

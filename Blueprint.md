@@ -2409,20 +2409,24 @@ All of it writes `state.scene.render` (silent) and applies via
     ease in/out, plus a **Preview** button (plays the sweep live, no
     recording — button toggles to "Stop preview", Esc also stops).
     **Sweep semantics (`RenderOutput._sweepRig`, shared by preview +
-    record): the camera does NOT move or pan.** It is first re-aimed at the
-    world vertical axis via `setTarget((0, targetHeight, 0))` (setTarget
-    rebuilds alpha/beta/radius from the current position — the one place
-    that re-aim is wanted; per-frame code must NEVER assign
-    `camera.target =`, the setter re-aims instead of moving), then ONLY
-    alpha sweeps 360° around that pinned pivot. The key/fill directional
-    lights (direction + key position) and `scene.environmentTexture
-    .rotationY` (when one exists) rotate by the same angle — lights moving
-    with the camera is what makes it read as "model spinning on a turntable
-    under fixed studio lighting". Light world matrix is `RotationY(−δ)` for
-    alpha +δ (ArcRotate α moves the camera +X→+Z, Babylon RotationY(+θ)
-    maps +X→−Z — sign flips); hemi points straight up, no-op. Sinusoidal
-    ease via `render/RenderMath.turntableProgress`; full rig restored after
-    done/cancel; Esc cancels; nav locked during. Filenames share the §12
+    record): RIGID rotation of the camera rig about the WORLD vertical axis
+    through the origin — the camera is never re-aimed and never pans.** The
+    framing you start with is exactly what rotates: per-frame
+    `camera.alpha = start + δ` AND `camera.target.copyFrom(RotY(−δ)·T₀)`
+    together form a pure world rotation (target MUTATED, never assigned —
+    the `camera.target =` setter calls setTarget() which re-aims and would
+    silently overwrite the alpha write). The key/fill directional lights
+    (direction + key position) and `scene.environmentTexture.rotationY`
+    (when one exists) rotate by the same angle — lights moving with the
+    camera is what makes it read as "model spinning on a turntable under
+    fixed studio lighting". World matrix is `RotationY(−δ)` for alpha +δ
+    (ArcRotate α moves the camera +X→+Z, Babylon RotationY(+θ) maps +X→−Z —
+    sign flips; verified numerically). Hemi points straight up, no-op.
+    Sinusoidal ease via `render/RenderMath.turntableProgress`; full rig
+    restored after done/cancel; Esc cancels; nav locked during. The smoke
+    pins both invariants with a panned composition: |position| AND |target|
+    each stay on their origin circles mid-sweep (catches the re-aim bug and
+    the setter bug). Filenames share the §12
     export-stem contract: `<project>_render_<w>x<h>[_alpha].png`,
     `<project>_turntable_<s>s.<ext>` (`render/RenderMath.js`).
   - **Recording path 1 (primary): offline WebCodecs.** The sweep is stepped
