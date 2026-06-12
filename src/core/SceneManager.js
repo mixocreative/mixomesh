@@ -74,6 +74,12 @@ const _wireframeEdgeState = { enabled: false, color: new BABYLON.Color3(1, 0.8, 
 const _edgeOverlays = new Map();   // meshId → overlay mesh
 let _edgeMat = null;
 
+// Environment floor (Scene ▸ Environment) — solid-colour shadow-catcher
+// plane. Lazily created on first enable; never registered (no meshId), never
+// pickable, never exported, kept VISIBLE in renders (it exists for them).
+let _floor = null;
+let _floorMat = null;
+
 // ── Init ─────────────────────────────────────────────────
 
 /**
@@ -122,11 +128,15 @@ export function init(canvas) {
 
   // Print-preview matte mode must also cover materials that arrive AFTER the
   // toggle — imports while preview is ON kept their metallic (review M15).
-  // Same rule for the wireframe-edges overlay.
+  // Same rule for the wireframe-edges overlay. Shadow casters too: the
+  // ShadowGenerator's renderList starts empty, so every registered mesh must
+  // be added (without this the bed/floor receiveShadows but nothing casts).
   subscribe(EVENTS.ASSET_INSTANTIATED, () => {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
     if (_wireframeEdgeState.enabled) _setWireframeEdgesMode(true);
+    _ensureShadowCasters();
   });
+  subscribe(EVENTS.PROJECT_LOADED, _ensureShadowCasters);
 
   // Workspace/panel layout changes resize the grid cell the canvas lives in —
   // resize the engine on the next frame so the framebuffer matches (13b).
@@ -213,6 +223,31 @@ function _setupLighting() {
   _shadowGen.useKernelBlur = true;
   _shadowGen.blurKernel    = SHADOW_BLUR_KERNEL;
   _shadowGen.darkness      = SHADOW_DARKNESS;
+}
+
+// Register every content mesh as a shadow caster (idempotent — checks the
+// renderList). Disposal self-removes so the list never holds dead meshes.
+function _ensureShadowCasters() {
+  const map = _shadowGen?.getShadowMap();
+  if (!map) return;
+  // Content = any mesh whose ancestor chain carries a registered meshId
+  // (glTF parents wrap geometry-bearing children that have no id of their
+  // own — same walk as pickMeshIdAt). Edge overlays never cast.
+  const ownsContent = (m) => {
+    let node = m;
+    while (node) {
+      if (node.metadata?.edgeOverlay) return false;
+      if (node.metadata?.meshId) return true;
+      node = node.parent;
+    }
+    return false;
+  };
+  for (const mesh of _scene.meshes) {
+    if (!mesh.geometry || !ownsContent(mesh)) continue;
+    if (map.renderList.includes(mesh)) continue;
+    _shadowGen.addShadowCaster(mesh, false);
+    mesh.onDisposeObservable.addOnce(() => _shadowGen?.removeShadowCaster(mesh, false));
+  }
 }
 
 // ── Grid / bed ───────────────────────────────────────────
@@ -443,6 +478,7 @@ export function applyRenderSettings(render = {}) {
   }
   if (typeof render.vignette === 'boolean') ip.vignetteEnabled = render.vignette;
   if (Number.isFinite(render.vignetteWeight)) ip.vignetteWeight = render.vignetteWeight;
+  _updateFloor(render);
   if (_shadowGen) {
     if (Number.isFinite(render.shadowDarkness)) _shadowGen.darkness = render.shadowDarkness;
     const light = _shadowGen.getLight?.();
@@ -460,6 +496,36 @@ export function applyRenderSettings(render = {}) {
     if (Number.isFinite(render.fillIntensity)) _lights.fill.intensity = render.fillIntensity;
   }
   applyCameraOptics(render);
+}
+
+// ── Environment floor ────────────────────────────────────
+
+// Partial-safe like the rest of applyRenderSettings: only touches what the
+// patch carries. Sized generously off the printer bed so shadows of framed
+// content always land on it.
+function _updateFloor(render) {
+  if (typeof render.floorEnabled === 'boolean') {
+    if (render.floorEnabled && !_floor) {
+      const bed = getState().print.bedDimensions;
+      const size = Math.max(bed.x, bed.y) * 4 / 1000;   // mm → BU, 4× bed
+      _floor = BABYLON.MeshBuilder.CreateGround('mx-env-floor', { width: size, height: size }, _scene);
+      _floor.isPickable = false;
+      _floor.receiveShadows = true;
+      _floorMat = new BABYLON.StandardMaterial('mx-env-floor-mat', _scene);
+      _floorMat.specularColor = new BABYLON.Color3(0, 0, 0);   // matte — no hot highlight
+      _floor.material = _floorMat;
+    }
+    if (_floor) _floor.setEnabled(render.floorEnabled);
+  }
+  if (!_floor) return;
+  if (typeof render.floorColor === 'string') {
+    try { _floorMat.diffuseColor = BABYLON.Color3.FromHexString(render.floorColor); } catch { /* keep */ }
+  }
+  if (Number.isFinite(render.floorZMM)) {
+    // 0.05 mm below the requested height — at the default Z=0 the bed grid
+    // ground sits at exactly y=0 and an opaque coplanar floor would z-fight.
+    _floor.position.y = render.floorZMM / 1000 - 0.00005;
+  }
 }
 
 // ── 3D cursor ────────────────────────────────────────────

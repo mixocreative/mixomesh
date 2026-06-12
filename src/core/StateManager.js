@@ -42,6 +42,9 @@ const INITIAL_STATE = {
       toneMapping: 'aces',        // 'aces' | 'standard' | 'neutral' | 'off'
       saturation: 0,
       vignette: false, vignetteWeight: 1.5,
+      // Environment floor — solid-colour shadow-catcher plane (Scene ▸
+      // Environment). zMM = height in print-space Z (Babylon Y), mm.
+      floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0,
     },
     // Render output (Scene ▸ Rendering): PNG stills + turntable video.
     // pose = saved render-camera composition (null until the user sets one);

@@ -718,7 +718,9 @@ const initialState = {
               // Grade — tone-map curve + colour (Babylon imageProcessing).
               toneMapping: 'aces' /* |'standard'|'neutral'|'off' */,
               saturation: 0 /* colorCurves.globalSaturation, -100..100 */,
-              vignette: false, vignetteWeight: 1.5 },
+              vignette: false, vignetteWeight: 1.5,
+              // Environment floor — shadow-catcher plane (Z in print-space mm).
+              floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0 },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
     // "Set view"); the Render-view toggle swaps the live camera to/from it.
@@ -1073,7 +1075,12 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
   `DirectionalLight` "fill" (`FILL_INTENSITY` 0.25, **zero specular** so no
   second highlight). The key drives a `ShadowGenerator` 2048², kernel-blurred
   (`SHADOW_BLUR_KERNEL` 32), `darkness` `SHADOW_DARKNESS` 0.62 (soft contact,
-  not inky). `getShadowGenerator()` returns this — shadow casters unchanged.
+  not inky). `getShadowGenerator()` returns this. **Casters:**
+  `_ensureShadowCasters()` (ASSET_INSTANTIATED + PROJECT_LOADED) adds every
+  content mesh — ancestor-chain meshId walk, same as picking — to the
+  renderList idempotently; disposal self-removes. (The generator's renderList
+  starts empty; before 2026-06-13 nothing ever cast, so the bed's
+  `receiveShadows` was a no-op.)
 - All tunables are UPPER_SNAKE constants at the top of `SceneManager.js`.
 - **Deliberately not used:** `DefaultRenderingPipeline` / `SSAO2` — they
   reorder the camera post-process chain and would risk the custom selection
@@ -1639,7 +1646,8 @@ Every field persisted. Restored exactly.
                 "fillIntensity": 0.25, "hemiIntensity": 0.85,
                 "fovDeg": 45.8, "clipNearMM": 1,
                 "toneMapping": "aces", "saturation": 0,
-                "vignette": false, "vignetteWeight": 1.5 },
+                "vignette": false, "vignetteWeight": 1.5,
+                "floorEnabled": false, "floorColor": "#9a9a9a", "floorZMM": 0 },
     "renderOut": { "width": 1920, "height": 1080, "transparent": false,
                    "pose": null, /* or saved camera pose for the Render view */
                    "turntable": { "durationS": 8, "fps": 30, "direction": "left", "ease": true } },
@@ -2343,12 +2351,19 @@ they stay reachable while an object is selected (the old Scene section only
 rendered with nothing active — Properties is object-scoped now). Sections:
 - **Grid** — grid cell (mm) + subdivisions (`SceneManager.setGrid`), grid +
   axes visibility checkboxes (overlay contract), bed-size hint.
-- **Render** — background Light/Dark (repaints the gradient backdrop +
-  clearColor), exposure, contrast, **tone map** (ACES / Neutral-KHR /
-  Standard / Off — `imageProcessing.toneMappingType`), **saturation**
-  (`colorCurves.globalSaturation`, −100..100, curves enabled only when ≠ 0),
-  **vignette** toggle + weight, shadows on/off, shadow darkness,
-  key/fill/ambient light intensities + a "Reset render defaults" button.
+- **Environment** (header renamed from "Render" 2026-06-13; state key stays
+  `scene.render` — no save migration) — background Light/Dark (repaints the
+  gradient backdrop + clearColor), exposure, contrast, **tone map** (ACES /
+  Neutral-KHR / Standard / Off — `imageProcessing.toneMappingType`),
+  **saturation** (`colorCurves.globalSaturation`, −100..100, curves enabled
+  only when ≠ 0), **vignette** toggle + weight, **floor** (solid-colour
+  shadow-catcher plane: enable + colour picker + Z height in mm —
+  `floorEnabled`/`floorColor`/`floorZMM`; lazily-created ground 4× bed size,
+  `receiveShadows`, matte Standard material, positioned 0.05 mm below the
+  requested height so Z=0 doesn't z-fight the bed grid; never registered /
+  pickable / exported, stays VISIBLE in renders — it exists for them),
+  shadows on/off, shadow darkness, key/fill/ambient light intensities + a
+  "Reset render defaults" button.
 - **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
   `CameraRig.applyCameraOptics` via the same settings object.
 All of it writes `state.scene.render` (silent) and applies via

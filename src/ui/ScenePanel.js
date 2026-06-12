@@ -41,6 +41,9 @@ const RENDER_DEFAULTS = {
   saturation: 0,
   vignette: false,
   vignetteWeight: 1.5,
+  floorEnabled: false,
+  floorColor: '#9a9a9a',
+  floorZMM: 0,
 };
 
 const RENDEROUT_DEFAULTS = {
@@ -133,7 +136,7 @@ function _render() {
       </div>
     </section>
     <section class="pp-section">
-      <header class="pp-section-header">Render</header>
+      <header class="pp-section-header">Environment</header>
       <div class="pp-row">
         <label>Background</label>
         <select data-render-select="background">
@@ -168,6 +171,14 @@ function _render() {
       <div class="pp-row">
         <label>Vignette amt</label>
         <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
+      </div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-render-toggle="floorEnabled" ${render.floorEnabled ? 'checked' : ''}> Floor</label>
+        <input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">
+      </div>
+      <div class="pp-row">
+        <label>Floor Z (mm)</label>
+        <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
       </div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="shadowsEnabled" ${render.shadowsEnabled ? 'checked' : ''}> Shadows</label>
@@ -345,6 +356,13 @@ function _wire() {
   _bodyEl.querySelectorAll('[data-render-select]').forEach(sel => {
     sel.addEventListener('change', () => {
       _setRender({ [sel.dataset.renderSelect]: sel.value });
+    });
+  });
+
+  // Colour pickers (floor). `input` not `change` — live drag preview.
+  _bodyEl.querySelectorAll('[data-render-color]').forEach(picker => {
+    picker.addEventListener('input', () => {
+      _setRender({ [picker.dataset.renderColor]: picker.value });
     });
   });
 

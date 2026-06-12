@@ -204,12 +204,24 @@ async function main() {
         && ['video/mp4;codecs=avc3.42E01E', 'video/webm;codecs=vp8', 'video/webm']
           .some(m => MediaRecorder.isTypeSupported(m));
 
+      // Environment floor: enabling creates the shadow-catcher plane with the
+      // requested colour + height (0.05 mm anti-z-fight offset below).
+      const sm = await import('/src/core/SceneManager.js');
+      sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorColor: '#ff0000', floorZMM: 10 });
+      const scene = sm.SceneManager.getScene();
+      const floor = scene.getMeshByName('mx-env-floor');
+      const floorOk = !!floor && floor.isEnabled()
+        && Math.abs(floor.position.y - 0.00995) < 1e-6
+        && floor.material?.diffuseColor?.r === 1 && floor.material?.diffuseColor?.g === 0;
+      sm.SceneManager.applyRenderSettings({ floorEnabled: false });
+      const floorHidden = !floor.isEnabled();
+
       ws.setWorkspace('layout');
       return {
         hasControls, frameShown, frameHidden,
         tSize: tBlob.size, tType: tBlob.type, tAlpha: await alphaAt(tBlob),
         oAlpha: await alphaAt(oBlob),
-        recordable,
+        recordable, floorOk, floorHidden,
       };
     })()`);
     assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
@@ -219,6 +231,8 @@ async function main() {
     assert(rendering.tAlpha === 0, `transparent capture should have alpha 0, got ${rendering.tAlpha}`);
     assert(rendering.oAlpha === 255, `opaque capture should have alpha 255, got ${rendering.oAlpha}`);
     assert(rendering.recordable, 'turntable machinery unavailable (recordTurntable / MediaRecorder)');
+    assert(rendering.floorOk, 'environment floor not created with colour + height');
+    assert(rendering.floorHidden, 'environment floor did not disable');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
