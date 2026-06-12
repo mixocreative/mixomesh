@@ -15,6 +15,7 @@
 // The camera alpha sweeps a full 360° around its current target with
 // optional sinusoidal ease in/out.
 
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { getState } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
 import { turntableProgress, pickVideoFormat, clampDimension } from './render/RenderMath.js';
@@ -32,29 +33,38 @@ export function isPreviewing() { return !!_preview; }
 
 // ── Turntable sweep (shared by preview + record) ─────────
 //
-// The whole rig — camera AND the directional studio lights AND (when one
-// exists) scene.environmentTexture — rotates around the WORLD ORIGIN
-// together. Rotating the lights with the camera is what makes it read as
-// "model spinning on a turntable under fixed studio lighting" instead of
-// "camera flying around the model".
+// The camera does NOT move or pan: it is first re-aimed at the world
+// vertical axis (pivot = (0, currentTargetHeight, 0) — keeps the framing
+// height), then ONLY its azimuth (alpha) sweeps a full 360° around that
+// fixed pivot. The target never moves during the sweep, so there is zero
+// panning; the model at the world centre spins in place on screen.
 //
-// Geometry: camera.alpha += δ orbits the camera azimuth; the matching
-// world-rotation for everything else is RotationY(−δ) (ArcRotate's α moves
-// the camera +X→+Z while Babylon's RotationY(+θ) maps +X→−Z, so the sign
-// flips). Hemi light points straight up — rotation is a no-op, skipped.
+// The directional studio lights AND (when one exists)
+// scene.environmentTexture rotate by the same angle — lights moving with
+// the camera is what makes it read as "model spinning on a turntable under
+// fixed studio lighting" instead of "camera flying around the model".
+//
+// Light world-rotation matrix is RotationY(−δ) for camera alpha +δ
+// (ArcRotate's α moves the camera +X→+Z while Babylon's RotationY(+θ) maps
+// +X→−Z, so the sign flips). Hemi light points straight up — no-op.
 
 /**
- * Start a sweep. Returns { cancel } — cancel(force) stops early and restores.
- * onComplete fires exactly once with 'done' | 'cancelled'.
+ * Re-aim the camera at the world axis and capture everything the sweep
+ * touches. Returns { applyDelta, restore } — shared by the live sweep
+ * (preview / realtime recording) and the offline frame-by-frame encoder.
  */
-function _startSweep({ durationS = 8, direction = 'left', ease = true,
-                       onProgress, onComplete }) {
+function _sweepRig() {
   const scene  = SceneManager.getScene();
   const camera = SceneManager.getCamera();
-  const durationMs = Math.max(1, durationS) * 1000;
 
-  const startAlpha  = camera.alpha;
-  const startTarget = camera.target.clone();
+  const startPose = SceneManager.saveCameraState();
+  // Re-aim at the world axis, preserving the camera position — setTarget()
+  // rebuilds alpha/beta/radius from the current position, which is exactly
+  // the jump we want here (and exactly why the per-frame code below must
+  // never assign `camera.target =`).
+  camera.setTarget(new BABYLON.Vector3(0, camera.target.y, 0));
+  const baseAlpha = camera.alpha;
+
   const key  = scene.getLightByName('key');
   const fill = scene.getLightByName('fill');
   const starts = {
@@ -63,19 +73,9 @@ function _startSweep({ durationS = 8, direction = 'left', ease = true,
     envRot:  scene.environmentTexture?.rotationY ?? 0,
   };
 
-  let startTs = 0;
-  let finished = false;
-  let observer = null;
-
   const applyDelta = (delta) => {
     const m = BABYLON.Matrix.RotationY(-delta);
-    camera.alpha = startAlpha + delta;
-    // MUTATE the target — the `camera.target = v` SETTER calls setTarget(),
-    // which re-derives alpha/beta from the current position (re-aims instead
-    // of moving) and silently overwrote the alpha line above, making the
-    // sweep depend on camera facing/pan. Same reason CameraRig's pan uses
-    // addInPlace.
-    camera.target.copyFrom(BABYLON.Vector3.TransformCoordinates(startTarget, m));
+    camera.alpha = baseAlpha + delta;   // target stays pinned — no pan
     if (key) {
       key.direction = BABYLON.Vector3.TransformCoordinates(starts.keyDir, m);
       key.position  = BABYLON.Vector3.TransformCoordinates(starts.keyPos, m);
@@ -87,12 +87,28 @@ function _startSweep({ durationS = 8, direction = 'left', ease = true,
   };
 
   const restore = () => {
-    camera.alpha = startAlpha;
-    camera.target.copyFrom(startTarget);
+    SceneManager.restoreCameraState(startPose);
     if (key)  { key.direction = starts.keyDir;  key.position = starts.keyPos; }
     if (fill) fill.direction = starts.fillDir;
     if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot;
   };
+
+  return { applyDelta, restore };
+}
+
+/**
+ * Start a live sweep. Returns { cancel } — cancel stops early and restores.
+ * onComplete fires exactly once with 'done' | 'cancelled'.
+ */
+function _startSweep({ durationS = 8, direction = 'left', ease = true,
+                       onProgress, onComplete }) {
+  const scene = SceneManager.getScene();
+  const durationMs = Math.max(1, durationS) * 1000;
+  const { applyDelta, restore } = _sweepRig();
+
+  let startTs = 0;
+  let finished = false;
+  let observer = null;
 
   const end = (result) => {
     if (finished) return;
@@ -211,20 +227,35 @@ function _hideFurniture() {
 
 /**
  * Record a full 360° turntable of the current view.
- * Realtime capture: the viewport IS the recording — input is locked and Esc
- * cancels. Resolves null when cancelled.
  *
- * Container: mp4 preferred, BUT Chrome's isTypeSupported can report mp4 while
- * the H.264 encoder silently produces zero bytes (observed in headless /
- * SwiftShader). An empty mp4 result auto-retries once as WebM.
+ * Primary path: OFFLINE WebCodecs encode — the sweep is stepped frame by
+ * frame, each frame rendered into an RTT at the EXACT output resolution
+ * (screen size irrelevant) and fed to a hardware VideoEncoder, muxed to mp4
+ * by mp4-muxer. Deterministic (no dropped frames) and — crucially — it does
+ * not touch MediaRecorder, which hard-freezes/crashes the renderer on
+ * Chrome 149 (STATUS_BREAKPOINT) and in all headless Chromium.
+ *
+ * Fallback (no WebCodecs): realtime MediaRecorder capture of the live
+ * canvas at viewport size. mp4 preferred, with an auto-retry as WebM when
+ * the mp4 encoder silently produces zero bytes.
+ *
+ * Esc cancels either path; resolves null when cancelled.
  * @param {{ durationS?: number, fps?: number, direction?: 'left'|'right',
- *           ease?: boolean, onProgress?: (frac: number) => void }} opts
+ *           ease?: boolean, width?: number, height?: number,
+ *           onProgress?: (frac: number) => void }} opts
  * @returns {Promise<{ blob: Blob, ext: string, mime: string } | null>}
  */
 export async function recordTurntable(opts = {}) {
   if (_recording) return null;
+  if (typeof VideoEncoder === 'function') {
+    try {
+      return await _recordOffline(opts);
+    } catch (err) {
+      console.warn('WebCodecs offline encode failed — falling back to MediaRecorder:', err);
+    }
+  }
   if (typeof MediaRecorder !== 'function') {
-    throw new Error('MediaRecorder not supported in this browser');
+    throw new Error('Neither WebCodecs nor MediaRecorder is available in this browser');
   }
   const fmt = pickVideoFormat((m) => MediaRecorder.isTypeSupported(m));
   const result = await _recordOnce(fmt, opts);
@@ -235,6 +266,95 @@ export async function recordTurntable(opts = {}) {
     return _recordOnce(webm, opts);
   }
   return result;
+}
+
+// H.264 High profile level by output area (level caps macroblock rate).
+function _avcCodecFor(w, h) {
+  const area = w * h;
+  if (area <= 1920 * 1088) return 'avc1.640028';   // L4.0 — up to 1080p
+  if (area <= 4096 * 2304) return 'avc1.640033';   // L5.1 — up to 4K
+  return 'avc1.640034';                            // L5.2
+}
+
+function _bitrateFor(w, h, fps) {
+  // ~0.12 bits/pixel/frame — visually clean for screen content; clamped.
+  return Math.round(Math.min(40e6, Math.max(4e6, w * h * fps * 0.12)));
+}
+
+async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', ease = true,
+                                width = 1920, height = 1080, onProgress } = {}) {
+  const engine = SceneManager.getEngine();
+  const scene  = SceneManager.getScene();
+  if (!engine || !scene) throw new Error('Scene not ready');
+
+  const w = clampDimension(width, 1920) & ~1;    // H.264 wants even dimensions
+  const h = clampDimension(height, 1080) & ~1;
+  const frameCount = Math.max(1, Math.round(Math.max(1, durationS) * fps));
+  const codec = _avcCodecFor(w, h);
+  const config = { codec, width: w, height: h, bitrate: _bitrateFor(w, h, fps), framerate: fps };
+  const support = await VideoEncoder.isConfigSupported(config);
+  if (!support.supported) throw new Error(`H.264 encoding unsupported at ${w}×${h}`);
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width: w, height: h },
+    fastStart: 'in-memory',
+  });
+  let encError = null;
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => { encError = e; },
+  });
+  encoder.configure(config);
+
+  _recording = true;
+  let cancelled = false;
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelled = true; }
+  };
+  window.addEventListener('keydown', onKey, true);
+  const canvas = engine.getRenderingCanvas();
+  canvas.style.pointerEvents = 'none';   // camera is scripted during the sweep
+  const restoreFurniture = _hideFurniture();   // presentation render — no grid/axes
+  const rig = _sweepRig();
+  const sign = direction === 'right' ? -1 : 1;
+  const usPerFrame = 1_000_000 / fps;
+
+  try {
+    for (let i = 0; i < frameCount; i++) {
+      if (cancelled) return null;
+      if (encError) throw encError;
+      // i/frameCount (not count−1): the last frame sits just short of 360°,
+      // so the video loops cleanly back onto its first frame.
+      rig.applyDelta(sign * 2 * Math.PI * turntableProgress(i / frameCount, ease));
+      const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
+        engine, scene.activeCamera, { width: w, height: h }, 'image/png');
+      const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+      const frame = new VideoFrame(bitmap, {
+        timestamp: Math.round(i * usPerFrame),
+        duration: Math.round(usPerFrame),
+      });
+      encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      frame.close();
+      bitmap.close();
+      while (encoder.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 10));
+      onProgress?.(i / frameCount);
+    }
+    await encoder.flush();
+    if (encError) throw encError;
+    muxer.finalize();
+    return {
+      blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }),
+      ext: 'mp4', mime: 'video/mp4',
+    };
+  } finally {
+    try { encoder.close(); } catch { /* already closed on error */ }
+    window.removeEventListener('keydown', onKey, true);
+    canvas.style.pointerEvents = '';
+    rig.restore();
+    restoreFurniture();
+    _recording = false;
+  }
 }
 
 function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',

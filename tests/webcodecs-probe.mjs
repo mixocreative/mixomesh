@@ -1,3 +1,14 @@
+// Turntable video check (`npm run test:video`) — MANUAL/optional, NOT part
+// of `npm test`: it opens a small HEADED browser window for ~15 s, because
+// MediaRecorder + canvas.captureStream hard-freezes the renderer in headless
+// Chrome (GPU and SwiftShader alike; rec.start returns, then the main thread
+// blocks — even timers stop).
+//
+// 2026-06-13 finding: Chrome 149.0.7827.54 on this machine freezes the SAME
+// way even HEADED, even on a trivial 2D-canvas recording in the user's own
+// profile — a Chrome-build bug, not app code. Edge 149 records fine (1.7 MB
+// mp4 for a 2 s turntable). Default browser pick may therefore fail on
+// Chrome; set VIDEO_CHECK_EDGE=1 to force Edge.
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,8 +19,6 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
-// 30 s: the Rendering eval records a 1 s turntable (possibly twice — the
-// mp4→WebM empty-result retry) on a SwiftShader render loop.
 const CDP_COMMAND_TIMEOUT_MS = 30000;
 
 async function main() {
@@ -36,12 +45,13 @@ async function main() {
   vite.stderr.on('data', chunk => viteOutput.push(String(chunk)));
 
   const browser = spawn(browserPath, [
+    // HEADED on purpose: MediaRecorder + canvas.captureStream hard-freezes
+    // the renderer in headless Chrome (GPU and SwiftShader alike — rec.start
+    // blocks the main thread; even timers stop). A small real window for a
+    // few seconds is the only way to exercise the actual encode path.
     '--headless=new',
     '--no-sandbox',
     '--disable-dev-shm-usage',
-    '--use-angle=swiftshader',
-    '--use-gl=angle',
-    '--enable-unsafe-swiftshader',
     '--enable-experimental-web-platform-features',
     '--no-first-run',
     '--no-default-browser-check',
@@ -104,183 +114,43 @@ async function main() {
       && !!document.querySelector('#status-bar')
     `), 30000, 'main UI');
 
-    const snapshot = await evaluate(cdp, `(() => {
-      const splitter = document.querySelector('[data-rp-splitter]');
-      const firstToggle = document.querySelector('.rp-section-header');
-      const before = firstToggle?.getAttribute('aria-expanded');
-      firstToggle?.click();
-      const collapsed = firstToggle?.getAttribute('aria-expanded');
-      firstToggle?.click();
-      splitter?.focus();
-      const splitBefore = splitter?.getAttribute('aria-valuenow');
-      splitter?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-      const splitAfter = splitter?.getAttribute('aria-valuenow');
-      return {
-        title: document.title,
-        babylon: {
-          Engine: !!window.BABYLON?.Engine,
-          GridMaterial: !!window.BABYLON?.GridMaterial,
-          OBJExport: !!window.BABYLON?.OBJExport,
-          SceneLoader: !!window.BABYLON?.SceneLoader,
-        },
-        canvas: !!document.querySelector('#renderCanvas'),
-        toolbar: !!document.querySelector('.pm-bar'),
-        outliner: !!document.querySelector('#ol-list'),
-        assetGrid: !!document.querySelector('#ap-grid'),
-        toastRoot: !!document.querySelector('#toast-container[aria-live]'),
-        modalRoot: !!document.querySelector('#modal-root'),
-        progressRoot: !!document.querySelector('#progress-root'),
-        rightToggles: document.querySelectorAll('.rp-section-header[aria-expanded]').length,
-        wsAttr: document.body.dataset.workspace,
-        wsButtons: document.querySelectorAll('.ws-switcher .ws-btn').length,
-        wsActive: document.querySelector('.ws-switcher .ws-btn.active')?.dataset.ws,
-        before,
-        collapsed,
-        restored: firstToggle?.getAttribute('aria-expanded'),
-        splitBefore,
-        splitAfter,
-      };
-    })()`);
-
-    assert(snapshot.title === 'MIXOMESH', 'document title missing');
-    assert(snapshot.babylon.Engine, 'BABYLON.Engine missing');
-    assert(snapshot.babylon.GridMaterial, 'BABYLON.GridMaterial missing');
-    assert(snapshot.babylon.OBJExport, 'BABYLON.OBJExport missing');
-    assert(snapshot.babylon.SceneLoader, 'BABYLON.SceneLoader missing');
-    assert(snapshot.canvas, 'canvas missing');
-    assert(snapshot.toolbar, 'project toolbar missing');
-    assert(snapshot.outliner, 'outliner list missing');
-    assert(snapshot.assetGrid, 'asset grid missing');
-    assert(snapshot.toastRoot, 'toast root missing');
-    assert(snapshot.modalRoot, 'modal root missing');
-    assert(snapshot.progressRoot, 'progress root missing');
-    assert(snapshot.rightToggles >= 3, 'right-panel toggles missing aria-expanded');
-    assert(snapshot.wsAttr === 'layout', `body[data-workspace] should default to layout, got ${snapshot.wsAttr}`);
-    assert(snapshot.wsButtons === 4, 'workspace switcher pill missing its four buttons (Layout/Shade/Scene/Print)');
-    assert(snapshot.wsActive === 'layout', 'Layout pill button should be active by default');
-    assert(snapshot.before === 'true' && snapshot.collapsed === 'false' && snapshot.restored === 'true',
-      'right-panel toggle did not update aria-expanded');
-    assert(snapshot.splitBefore !== snapshot.splitAfter,
-      'right splitter keyboard resize did not change aria-valuenow');
-
-    // Scene ▸ Rendering: UI present, render-view frame overlay toggles, and
-    // capturePng produces a real PNG (transparent variant has alpha 0 on an
-    // empty scene; opaque variant has the backdrop at alpha 255).
-    const rendering = await evaluate(cdp, `(async () => {
-      const ws = await import('/src/ui/Workspace.js');
-      ws.setWorkspace('scene');
-      const body = document.querySelector('#rp-scene-body');
-      const hasControls = !!body?.querySelector('[data-action="export-png"]')
-        && !!body?.querySelector('[data-action="export-video"]')
-        && !!body?.querySelector('[data-render-select="toneMapping"]')
-        && !!body?.querySelector('[data-ro="width"]');
-
-      const rv = body?.querySelector('[data-action="render-view"]');
-      rv?.click();
-      const frameEl = document.querySelector('.render-frame');
-      const frameShown = !!frameEl && frameEl.style.display !== 'none'
-        && frameEl.getBoundingClientRect().width > 10;
-      const crosshair = !!frameEl?.querySelector('.render-frame-cross');
-      rv?.click();
-      const frameHidden = !frameEl || frameEl.style.display === 'none';
-
-      const ro = await import('/src/core/RenderOutput.js');
-      const alphaAt = async (blob) => {
-        const bmp = await createImageBitmap(blob);
-        const c = new OffscreenCanvas(bmp.width, bmp.height);
-        const ctx = c.getContext('2d');
-        ctx.drawImage(bmp, 0, 0);
-        return ctx.getImageData(2, 2, 1, 1).data[3];
-      };
-      const tBlob = await ro.capturePng({ width: 64, height: 64, transparent: true });
-      const oBlob = await ro.capturePng({ width: 64, height: 64, transparent: false });
-
-      // Turntable EXPORT — the offline WebCodecs path works headless (it
-      // never touches MediaRecorder, which wedges headless Chromium), so the
-      // real encode is pinned right here: 1 s @ 10 fps, 320×180 mp4.
-      const video = await ro.recordTurntable({
-        durationS: 1, fps: 10, width: 320, height: 180,
-        direction: 'left', ease: true,
+    const result = await evaluate(cdp, `(async () => {
+      if (typeof VideoEncoder !== 'function') return { supported: false };
+      const supports = {};
+      for (const codec of ['avc1.42001f', 'avc3.42001f', 'vp09.00.10.08', 'vp8']) {
+        try {
+          const s = await VideoEncoder.isConfigSupported({ codec, width: 320, height: 240, bitrate: 1_000_000, framerate: 30 });
+          supports[codec] = s.supported;
+        } catch (e) { supports[codec] = 'threw: ' + e.message; }
+      }
+      // Encode 10 real frames through H.264.
+      let err = null;
+      const sizes = [];
+      const enc = new VideoEncoder({
+        output: (chunk) => sizes.push(chunk.byteLength),
+        error: (e) => { err = String(e); },
       });
-      const videoOk = !!video && video.ext === 'mp4' && video.blob.size > 1000;
-
-      // Turntable PREVIEW (no MediaRecorder — headless-safe): with the target
-      // PANNED off-origin, a 1 s sweep must (a) actually MOVE the camera on a
-      // circle around the world origin — |position| constant, position
-      // displaced mid-sweep (the ArcRotate target SETTER re-aims instead of
-      // moving, which froze the position; mutation is required) — and
-      // (b) resolve 'done' restoring the whole rig.
-      const sm = await import('/src/core/SceneManager.js');
-      const cam = sm.SceneManager.getCamera();
-      const keyLight = sm.SceneManager.getScene().getLightByName('key');
-      cam.target.set(0.06, 0, 0.03);   // pan composition off-origin
-      // position is derived NEXT frame — wait one before sampling baselines
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const a0 = cam.alpha;
-      const t0 = { x: cam.target.x, z: cam.target.z };
-      const d0 = { x: keyLight.direction.x, z: keyLight.direction.z };
-      const p0 = { x: cam.position.x, z: cam.position.z, len: cam.position.length() };
-      const previewPromise = ro.previewTurntable({ durationS: 1, direction: 'left', ease: true });
-      await new Promise(r => setTimeout(r, 450));
-      const mid = {
-        moved: Math.hypot(cam.position.x - p0.x, cam.position.z - p0.z) > 0.01,
-        lenOk: Math.abs(cam.position.length() - p0.len) < 1e-3,
-        // No pan: the sweep re-aims at the world axis and the target must
-        // stay PINNED there for the whole rotation.
-        targetPinned: Math.abs(cam.target.x) < 1e-9 && Math.abs(cam.target.z) < 1e-9,
-        p0len: p0.len, midLen: cam.position.length(),
-        alpha: cam.alpha, beta: cam.beta, radius: cam.radius,
-        tx: cam.target.x, tz: cam.target.z,
-      };
-      const previewResult = await previewPromise;
-      const rigRestored = Math.abs(cam.alpha - a0) < 1e-6
-        && Math.abs(cam.target.x - t0.x) < 1e-6 && Math.abs(cam.target.z - t0.z) < 1e-6
-        && Math.abs(keyLight.direction.x - d0.x) < 1e-6
-        && Math.abs(keyLight.direction.z - d0.z) < 1e-6;
-      cam.target.set(0, 0, 0);   // undo the pan for later checks
-
-      // Environment floor: enabling creates the shadow-catcher plane with the
-      // requested colour + height (0.05 mm anti-z-fight offset below).
-      sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorColor: '#ff0000', floorZMM: 10 });
-      const scene = sm.SceneManager.getScene();
-      const floor = scene.getMeshByName('mx-env-floor');
-      const floorOk = !!floor && floor.isEnabled()
-        && Math.abs(floor.position.y - 0.00995) < 1e-6
-        && floor.material?.diffuseColor?.r === 1 && floor.material?.diffuseColor?.g === 0;
-      sm.SceneManager.applyRenderSettings({ floorEnabled: false });
-      const floorHidden = !floor.isEnabled();
-
-      ws.setWorkspace('layout');
-      return {
-        hasControls, frameShown, frameHidden,
-        tSize: tBlob.size, tType: tBlob.type, tAlpha: await alphaAt(tBlob),
-        oAlpha: await alphaAt(oBlob),
-        videoOk, videoBytes: video?.blob?.size ?? 0,
-        floorOk, floorHidden,
-        crosshair, previewResult, rigRestored, mid,
-      };
+      enc.configure({ codec: 'avc1.42001f', width: 320, height: 240, bitrate: 1_000_000, framerate: 30 });
+      const cnv = new OffscreenCanvas(320, 240);
+      const ctx = cnv.getContext('2d');
+      for (let i = 0; i < 10; i++) {
+        ctx.fillStyle = 'hsl(' + i * 36 + ',60%,50%)';
+        ctx.fillRect(0, 0, 320, 240);
+        const frame = new VideoFrame(cnv, { timestamp: i * 33333 });
+        enc.encode(frame, { keyFrame: i === 0 });
+        frame.close();
+      }
+      await enc.flush();
+      enc.close();
+      return { supported: true, supports, chunks: sizes.length, bytes: sizes.reduce((a, b) => a + b, 0), err };
     })()`);
-    assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
-    assert(rendering.frameShown, 'render-view toggle did not show the frame overlay');
-    assert(rendering.frameHidden, 'render-view toggle did not hide the frame overlay');
-    assert(rendering.tSize > 100 && rendering.tType === 'image/png', 'transparent capturePng did not return a PNG blob');
-    assert(rendering.tAlpha === 0, `transparent capture should have alpha 0, got ${rendering.tAlpha}`);
-    assert(rendering.oAlpha === 255, `opaque capture should have alpha 255, got ${rendering.oAlpha}`);
-    assert(rendering.videoOk, `offline turntable mp4 failed (${rendering.videoBytes} bytes)`);
-    assert(rendering.floorOk, 'environment floor not created with colour + height');
-    assert(rendering.floorHidden, 'environment floor did not disable');
-    assert(rendering.crosshair, 'render-frame crosshair missing');
-    assert(rendering.previewResult === 'done', `turntable preview should resolve done, got ${rendering.previewResult}`);
-    assert(rendering.rigRestored, 'turntable preview did not restore camera + key light');
-    assert(rendering.mid.moved, 'mid-sweep camera position did not move — target setter re-aim bug');
-    assert(rendering.mid.lenOk,
-      `mid-sweep camera left the origin circle — sweep is not a world-origin rotation: ${JSON.stringify(rendering.mid)}`);
-    assert(rendering.mid.targetPinned,
-      `mid-sweep target moved (pan) — should stay pinned to the world axis: ${JSON.stringify(rendering.mid)}`);
 
+    console.log('webcodecs:', JSON.stringify(result));
+    assert(result.supported, 'VideoEncoder missing');
+    assert(result.chunks === 10 && result.bytes > 500, `encode produced ${result.chunks} chunks / ${result.bytes} bytes`);
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
-    console.log('PASS Vite browser smoke');
+    console.log('PASS WebCodecs probe (headless)');
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);
@@ -324,7 +194,10 @@ function findBrowser() {
   const local = process.env.LOCALAPPDATA;
   const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
   const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
-  const absoluteCandidates = [
+  const absoluteCandidates = process.env.VIDEO_CHECK_EDGE ? [
+    join(programFiles, 'Microsoft/Edge/Application/msedge.exe'),
+    join(programFilesX86, 'Microsoft/Edge/Application/msedge.exe'),
+  ] : [
     join(programFiles, 'Google/Chrome/Application/chrome.exe'),
     join(programFilesX86, 'Google/Chrome/Application/chrome.exe'),
     local ? join(local, 'Google/Chrome/Application/chrome.exe') : '',

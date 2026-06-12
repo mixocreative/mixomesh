@@ -209,7 +209,8 @@ src/
 tests/                     ← headless harness — Node-native, no build (§14b)
   register-hooks.mjs       ← `node:module.register` entry; runner uses --import
   browser-smoke.mjs        ← Vite-backed local Chrome/Edge CDP smoke test; no package deps
-  browser-video-check.mjs  ← HEADED turntable-recording check (`test:video`, manual — MediaRecorder freezes headless Chromium)
+  browser-video-check.mjs  ← HEADED full-size turntable check (`test:video`, manual)
+  webcodecs-probe.mjs      ← headless VideoEncoder sanity probe (diagnostic, not in npm scripts)
   render-output.test.mjs   ← RenderMath: easing/format/frame-fit/filename contracts
   hooks.mjs                ← resolver hook: 'jszip' → stub, './idb.js' → stub
   jszip-stub.mjs           ← minimal JSZip for export tests
@@ -2394,32 +2395,45 @@ All of it writes `state.scene.render` (silent) and applies via
   - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
     ease in/out, plus a **Preview** button (plays the sweep live, no
     recording — button toggles to "Stop preview", Esc also stops).
-    `RenderOutput._startSweep` (shared by preview + record) rotates the
-    WHOLE rig around the world origin together: `camera.alpha += δ`,
-    `camera.target`, the key/fill directional lights (direction + key
-    position), and `scene.environmentTexture.rotationY` when one exists —
-    rotating the lights with the camera is what makes it read as "model
-    spinning on a turntable under fixed studio lighting". The matching
-    world matrix is `RotationY(−δ)` (ArcRotate α moves the camera +X→+Z,
-    Babylon RotationY(+θ) maps +X→−Z — sign flips); hemi light points
-    straight up, rotation no-op. Wall-clock-driven inside
-    `onBeforeRenderObservable`, sinusoidal ease via
-    `render/RenderMath.turntableProgress`. Recording wraps the sweep with
-    `canvas.captureStream` + MediaRecorder. Esc cancels; nav is locked
-    (`pointerEvents none`); hidden-tab `visibilitychange` cancels (paused
-    rAF would stall the sweep forever); the full rig is restored after.
-    Container: mp4 `avc3` preferred (avc1 rejects mid-stream resolution
-    changes), WebM vp8 fallback — and an mp4 recording that comes back
-    empty auto-retries once as WebM. Filenames share the §12 export-stem
-    contract: `<project>_render_<w>x<h>[_alpha].png`,
+    **Sweep semantics (`RenderOutput._sweepRig`, shared by preview +
+    record): the camera does NOT move or pan.** It is first re-aimed at the
+    world vertical axis via `setTarget((0, targetHeight, 0))` (setTarget
+    rebuilds alpha/beta/radius from the current position — the one place
+    that re-aim is wanted; per-frame code must NEVER assign
+    `camera.target =`, the setter re-aims instead of moving), then ONLY
+    alpha sweeps 360° around that pinned pivot. The key/fill directional
+    lights (direction + key position) and `scene.environmentTexture
+    .rotationY` (when one exists) rotate by the same angle — lights moving
+    with the camera is what makes it read as "model spinning on a turntable
+    under fixed studio lighting". Light world matrix is `RotationY(−δ)` for
+    alpha +δ (ArcRotate α moves the camera +X→+Z, Babylon RotationY(+θ)
+    maps +X→−Z — sign flips); hemi points straight up, no-op. Sinusoidal
+    ease via `render/RenderMath.turntableProgress`; full rig restored after
+    done/cancel; Esc cancels; nav locked during. Filenames share the §12
+    export-stem contract: `<project>_render_<w>x<h>[_alpha].png`,
     `<project>_turntable_<s>s.<ext>` (`render/RenderMath.js`).
-  - ⚠ MediaRecorder is **broken in headless Chromium** (renderer freezes on
-    the first encoded frame — GPU and SwiftShader alike), so `npm test` /
-    `test:browser` only pin capture + UI; the encode itself is verified by
-    the **headed** `npm run test:video` (Chrome 149.0.7827 froze the same
-    way even headed/live on the dev machine — a Chrome-build bug; Edge 149
-    passes with a ~1.7 MB mp4 for a 2 s sweep; `VIDEO_CHECK_EDGE=1` forces
-    Edge).
+  - **Recording path 1 (primary): offline WebCodecs.** The sweep is stepped
+    frame-by-frame (`i/frameCount` — the last frame sits just short of 360°
+    so the video loops cleanly), each frame rendered via the RTT screenshot
+    path at the EXACT output resolution (`renderOut.width × height`, screen
+    size irrelevant; furniture hidden like PNG), fed to a `VideoEncoder`
+    (H.264 High — level by area: L4.0 ≤ 1080p, L5.1 ≤ 4K; ~0.12
+    bits/px/frame clamped 4–40 Mbps; keyframe every 2 s; even dimensions
+    forced) and muxed by **mp4-muxer** (dependency) into an in-memory mp4.
+    Deterministic — no dropped frames.
+  - **Recording path 2 (fallback, only when WebCodecs is missing): realtime
+    MediaRecorder** of the live canvas at viewport size — mp4 `avc3`
+    preferred (avc1 rejects mid-stream resolution changes), WebM vp8 retry
+    on an empty mp4 result; hidden-tab `visibilitychange` cancels.
+  - ⚠ **MediaRecorder is broken**: it hard-freezes/crashes the renderer in
+    ALL headless Chromium, and in Chrome 149 even headed/live
+    (STATUS_BREAKPOINT — reproduced on a trivial 2D canvas; Chrome-build
+    bug, Edge 149 fine). **WebCodecs is unaffected** (verified by
+    `tests/webcodecs-probe.mjs`), which is why the offline path exists and
+    is the default — video export works on Chrome 149 through it. The
+    browser smoke records a real 1 s mp4 HEADLESS via the offline path;
+    `npm run test:video` (headed; `VIDEO_CHECK_EDGE=1` forces Edge) covers
+    a full-size sweep.
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 
