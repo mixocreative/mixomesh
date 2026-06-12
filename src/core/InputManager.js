@@ -171,13 +171,11 @@ function _onPointer(info) {
 function _onSelectionPointerDown(info) {
   const ev = info.event;
 
-  // Probe the raw pick first. If we hit a non-meshId pickable (a gizmo arrow,
-  // for example), leave the selection untouched so the gizmo can take over.
-  const raw = _scene.pick(_scene.pointerX, _scene.pointerY);
-  if (raw?.hit && raw.pickedMesh && !raw.pickedMesh.metadata?.meshId) {
-    return;
-  }
-
+  // No raw-pick pre-guard: gizmo arrows live in Babylon's utility layer and
+  // are never returned by main-scene picks, so the old "leave selection for
+  // the gizmo" early-return only ever fired on stray helper meshes — making
+  // clicks on real content randomly dead (field report: selection buggy).
+  // pickMeshIdAt's predicate now ignores everything without a meshId chain.
   const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
 
   // Shift-click is a multi-select gesture — toggle and skip drag.

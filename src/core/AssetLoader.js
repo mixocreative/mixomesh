@@ -310,6 +310,12 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   }
   clone.metadata   = { ...(sourceMesh.metadata ?? {}), meshId: newId };
   clone.isVisible  = sourceMesh.isVisible !== false;
+  // Duplicating while the wireframe-edges overlay is ON also clones the
+  // overlay child — dispose it; SceneManager re-ensures a tracked one via
+  // the ASSET_INSTANTIATED hook.
+  for (const child of clone.getChildMeshes?.(true) ?? []) {
+    if (child.metadata?.edgeOverlay) { try { child.dispose(); } catch { /* */ } }
+  }
   _meshRegistry.set(newId, clone);
 
   const newObj = {

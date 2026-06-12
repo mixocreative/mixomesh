@@ -77,8 +77,13 @@ let _cachedActiveId   = null;
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
 
-// Wireframe edge rendering tracking
-const _wireframeEdgeState = { enabled: false, color: new BABYLON.Color4(1, 0.8, 0, 1) };
+// Wireframe-edges overlay: per-mesh clone sharing the source geometry, drawn
+// with a wireframe emissive material over the textured base (field report:
+// edgesRenderer at epsilon 0.9 only showed sharp creases — users expect the
+// full triangle wireframe WITH the texture still visible underneath).
+const _wireframeEdgeState = { enabled: false, color: new BABYLON.Color3(1, 0.8, 0) };
+const _edgeOverlays = new Map();   // meshId → overlay mesh
+let _edgeMat = null;
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -128,6 +133,12 @@ export function init(canvas) {
   _scene.onBeforeRenderObservable.add(_applyFollowTarget);
   _engine.runRenderLoop(() => _scene.render());
   window.addEventListener('resize', () => _engine.resize());
+  // Panel splitter drags resize the canvas's grid cell WITHOUT any window
+  // or workspace event — without this the canvas CSS-stretches and the
+  // render distorts (elongated). ResizeObserver is the catch-all.
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => _engine?.resize()).observe(canvas);
+  }
 
   subscribe(EVENTS.PROJECT_LOADED, () => {
     restoreCameraState(getState().scene.camera);
@@ -142,8 +153,10 @@ export function init(canvas) {
 
   // Print-preview matte mode must also cover materials that arrive AFTER the
   // toggle — imports while preview is ON kept their metallic (review M15).
+  // Same rule for the wireframe-edges overlay.
   subscribe(EVENTS.ASSET_INSTANTIATED, () => {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
+    if (_wireframeEdgeState.enabled) _setWireframeEdgesMode(true);
   });
 
   // Auto-frame on the very first scene content of a session/project. Subsequent
@@ -974,31 +987,58 @@ export function setOverlay(name, on) {
  */
 export function setWireframeEdgeColor(hexColor) {
   try {
-    const c = BABYLON.Color3.FromHexString(hexColor);
-    _wireframeEdgeState.color = new BABYLON.Color4(c.r, c.g, c.b, 1);
+    _wireframeEdgeState.color = BABYLON.Color3.FromHexString(hexColor);
   } catch {
     return;
   }
-  if (!_wireframeEdgeState.enabled) return;
-  for (const mesh of _scene.meshes) {
-    if (mesh._edgesRenderer) mesh.edgesColor = _wireframeEdgeState.color;
+  if (_edgeMat) _edgeMat.emissiveColor = _wireframeEdgeState.color;
+}
+
+function _edgeMaterial() {
+  if (!_edgeMat) {
+    _edgeMat = new BABYLON.StandardMaterial('mx-edge-overlay', _scene);
+    _edgeMat.wireframe       = true;
+    _edgeMat.disableLighting = true;
+    _edgeMat.emissiveColor   = _wireframeEdgeState.color;
+    _edgeMat.diffuseColor    = new BABYLON.Color3(0, 0, 0);
+    _edgeMat.zOffset         = -1;   // pull lines toward the camera — no z-fighting
   }
+  return _edgeMat;
+}
+
+function _ensureEdgeOverlay(mesh) {
+  const id = mesh.metadata?.meshId;
+  if (!id) return;
+  const existing = _edgeOverlays.get(id);
+  if (existing && !existing.isDisposed?.()) return;
+  _edgeOverlays.delete(id);   // stale (parent container disposed) — rebuild
+  // Clone shares the source geometry (no copy); parenting to the source and
+  // zeroing the local transform keeps it coincident through every move.
+  const overlay = mesh.clone(`edges_${id}`, mesh, /*doNotCloneChildren*/ true);
+  if (!overlay) return;
+  overlay.position.set(0, 0, 0);
+  overlay.rotationQuaternion = BABYLON.Quaternion.Identity();
+  overlay.rotation?.set?.(0, 0, 0);
+  overlay.scaling.set(1, 1, 1);
+  overlay.material   = _edgeMaterial();
+  overlay.isPickable = false;
+  overlay.metadata   = { edgeOverlay: true };   // never a registered meshId
+  _edgeOverlays.set(id, overlay);
+}
+
+function _disposeEdgeOverlays() {
+  for (const o of _edgeOverlays.values()) {
+    try { o.dispose(); } catch { /* parent may already be gone */ }
+  }
+  _edgeOverlays.clear();
 }
 
 function _setWireframeEdgesMode(enabled) {
   _wireframeEdgeState.enabled = enabled;
+  if (!enabled) { _disposeEdgeOverlays(); return; }
   for (const mesh of _scene.meshes) {
-    if (!mesh.geometry) continue;
-    // Edge outlines apply to imported content only — skip grid / axes /
-    // bedPreview / nav-cube helpers (no metadata.meshId stamp).
-    if (!mesh.metadata?.meshId) continue;
-    if (enabled) {
-      mesh.enableEdgesRendering(0.9, true);
-      mesh.edgesColor = _wireframeEdgeState.color;
-      mesh.edgesWidth = 1.0;
-    } else {
-      mesh.disableEdgesRendering();
-    }
+    if (!mesh.geometry || !mesh.metadata?.meshId) continue;
+    _ensureEdgeOverlay(mesh);
   }
 }
 
@@ -1091,10 +1131,17 @@ export function getShadowGenerator() { return _shadowGen; }
 /** @returns {string|null} meshId picked at canvas (x, y), or null. */
 export function pickMeshIdAt(x, y) {
   if (!_scene) return null;
+  // Predicate accepts ONLY meshes whose ancestor chain carries a registered
+  // meshId — helper meshes (grid, labels, previews, edge overlays, anything
+  // future) can never eat the pick by sitting in front of real content.
   const result = _scene.pick(x, y, m => {
     if (!m?.isPickable) return false;
-    if (m.name === 'grid' || m.name === 'cursor3d' || m.name === 'bedPreview') return false;
-    return true;
+    let node = m;
+    while (node) {
+      if (node.metadata?.meshId) return true;
+      node = node.parent;
+    }
+    return false;
   });
   if (!result?.hit || !result.pickedMesh) return null;
   let node = result.pickedMesh;
