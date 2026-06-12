@@ -1149,6 +1149,16 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
 1. Receive FileHandle or Blob.
 2. Create Blob URL via URL.createObjectURL.
 3. BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, null, extension).
+   `.obj` EXCEPTION: parses in a worker when `Worker` exists
+   (`src/core/workers/ObjParse.worker.js` runs the SAME Babylon OBJ/MTL loader
+   against a NullEngine scene — no parser drift; geometry returns as
+   transferable buffers and `src/core/WorkerImport.js` rebuilds real
+   meshes/StandardMaterials/textures into an AssetContainer). Babylon's OBJ
+   parse is synchronous text — big files froze the UI when parsed on the main
+   thread. MTL/texture sibling resolution uses the same filename→objectURL map
+   inside the worker. Any worker failure falls back to the main-thread
+   SceneLoader path (headless tests always take the fallback; the worker path
+   is pinned by the browser export smoke's OBJ block).
    Supported: `.glb .gltf .obj .stl` (Babylon loaders package) + `.3mf`
    (`src/core/ThreeMFLoader.js`, a self-registered SceneLoader plugin — Babylon
    ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`:
