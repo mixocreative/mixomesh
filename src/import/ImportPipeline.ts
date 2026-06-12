@@ -1,4 +1,4 @@
-import type { AuthoredScale } from '../core/scale/ScaleMath';
+import type { AuthoredScale } from '../core/scale/ScaleTypes';
 
 export type SourceFileRead = {
   fileName: string;

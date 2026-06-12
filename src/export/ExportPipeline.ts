@@ -1,4 +1,4 @@
-import type { PrintScale, SceneScale } from '../core/scale/ScaleMath';
+import type { PrintScale, SceneScale } from '../core/scale/ScaleTypes';
 import type { PrinterProfile } from '../core/printers/PrinterProfile';
 
 export type DimensionsMM = {

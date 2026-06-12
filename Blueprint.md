@@ -160,8 +160,8 @@ src/
       PrintPackaging.js    ← zip/blob packaging + download dispatch
       ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared)
       ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
-    printers/              ← typed printer profile contracts + profile resolver
-    scale/                 ← Authored/Scene/Print scale contracts
+    printers/              ← PrinterProfile.ts (type-only printer JSON schema)
+    scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
     assets/
       AssetTypes.js        ← supported extensions + extension parser
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
@@ -258,7 +258,7 @@ types.
 | Selection visuals | `Selection` plus `SceneManager` highlight/gizmo APIs | state selection is silent against dirty |
 | Undo/redo | `HistoryManager` command stack | reversible scene/user edits push commands |
 | Printer behavior | `src/config/printers.json` | `PrinterProfiles`, `PrintPanel`, `SceneManager`, `PrintManager` |
-| Scale math | `src/core/scale/ScaleMath.js` and `.ts` type twin | import normalization, print planner, tests |
+| Scale math | `src/core/scale/ScaleMath.js` (types in `ScaleTypes.ts`) | import normalization, print planner, tests |
 | Editable presets | `src/config/scale-presets.json`, `src/config/swatches.json` | `PrintPanel`, `ShaderPanel` |
 | Persistence | `.mixo` v3.1 JSON plus IndexedDB handles/kv | `PersistenceManager`, `idb.js` |
 | Export packaging | `PrintManager` orchestrator plus `src/core/print/*` seams | `PrintPanel` invokes public export entry points |
@@ -308,26 +308,25 @@ Export path:
 3. Export never mutates live scene meshes. Mimaki texture profiles keep UVs and
    textures; filament profiles collapse to solid per-part color.
 
-#### Typed Contract Mirrors
+#### Typed Contract Modules (type-only — NO runtime twins)
 
-The current runtime still uses JavaScript for most app modules. A small set of
-TypeScript files lock schemas and compile-time contracts:
+The runtime is JavaScript; a small set of TYPE-ONLY TypeScript files lock
+schemas at compile time. The earlier runtime-mirror files (`ScaleMath.ts`,
+`printers/PrinterProfiles.ts`, `export/ExportPlanner.ts`) were deleted
+2026-06-11 (arch review A7) — a manual "keep the twin in sync" rule is a
+drift liability, and the headless tests already pin the runtime behaviour.
 
-- `src/import/ImportPipeline.ts` defines source-file, raw import, normalized
-  import, asset, collection, and scene-part shapes. It is a contract mirror,
-  not the runtime loader.
-- `src/export/ExportPipeline.ts` defines export request, mesh, package, and
-  plan shapes.
-- `src/export/ExportPlanner.ts` mirrors the runtime planner in
-  `src/core/print/ExportPlanner.js` for typed consumers. Keep function names
-  and filename rules in sync.
-- `src/core/printers/PrinterProfile.ts` and `PrinterProfiles.ts` validate the
-  printer JSON schema for TypeScript builds. Runtime export code uses
-  `src/core/print/PrinterProfiles.js`.
-- `src/core/scale/ScaleMath.ts` mirrors `ScaleMath.js`. Runtime tests import
-  the JS file; `npm run typecheck` validates the TS twin.
+- `src/core/scale/ScaleTypes.ts` — SourceUnit / AuthoredScale / SceneScale /
+  PrintScale shapes. Runtime math lives in `ScaleMath.js`.
+- `src/core/printers/PrinterProfile.ts` — printer JSON schema types.
+  Runtime resolver is `src/core/print/PrinterProfiles.js`.
+- `src/import/ImportPipeline.ts` — source-file, raw import, normalized
+  import, asset, collection, and scene-part shapes.
+- `src/export/ExportPipeline.ts` — export request, mesh, package, and plan
+  shapes.
 
-If a runtime JS contract changes, update its TS mirror in the same turn.
+These files contain types and `import type` only — never executable mirrors
+of runtime functions.
 
 ### 0.4 Babylon-First Rule
 Before writing custom logic, check if Babylon provides it. **Required uses:**
