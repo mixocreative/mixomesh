@@ -336,7 +336,7 @@ Before writing custom logic, check if Babylon provides it. **Required uses:**
 |---|---|
 | OBJ + MTL export | `BABYLON.OBJExport.OBJ(meshes, materials, matlibname)` |
 | STL export | `BABYLON.STLExport.CreateSTL(meshes, ...)` |
-| Selection outline | `BABYLON.HighlightLayer` (1 layer, 2 intensities) |
+| Selection outline | custom mask-RTT silhouette (`scene/SelectionOutline.js`) — HighlightLayer REJECTED: its stencil leaks onto PBR faces reporting any alpha mode (§7) |
 | Asset thumbnails | `BABYLON.Tools.CreateScreenshotUsingRenderTarget(engine, camera, size, cb)` |
 | World axes overlay | `new BABYLON.AxesViewer(scene, size)` |
 | Grid overlay | `BABYLON.GridMaterial` on a ground plane |
@@ -576,6 +576,7 @@ element.innerHTML = icon('Eye', { class: 'icon-sm' });
 export const EVENTS = {
   // Asset lifecycle
   ASSET_REGISTERED:        'asset:registered',
+  ASSET_REMOVED:           'asset:removed',
   ASSET_INSTANTIATED:      'asset:instantiated',
   ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',
@@ -772,7 +773,8 @@ HistoryManager.beginBatch(label)    → void  // start collecting into a BatchCo
 HistoryManager.endBatch()           → void  // finish and push the batch as one entry
 ```
 
-### Standard Commands (one file, all classes)
+### Standard Commands (in `src/core/commands/` — Transform / Hierarchy /
+### Shader / Scale modules + shared `support.js`; HistoryManager re-exports all)
 Implemented in Phase 3:
 - `TransformCommand` — `{ prev, next, alreadyApplied? }` keyed by meshId. Sets absolute transforms via `setParent(null)` cycle so the world position survives the change. Used by both gizmo drag-end and Properties Panel input commits.
 - `VisibilityCommand`, `LockCommand`, `RenameCommand`
@@ -794,8 +796,12 @@ Phase 5 implementations:
 - `RescaleWorldCommand` — `{ prevRatio, nextRatio }` — re-bakes every registered mesh's vertex data by `prev/next`, scales every ancestor `TransformNode.position` (via WeakSet dedup), scales `state.scene.cursor3d`, updates `state.print.workingRatio`. Undo runs the inverse factor.
 - `BakeTransformCommand` — `{ meshId, kind: 'rotation' | 'scale' }` — bakes either the current rotation OR scaling into vertices and resets that component to identity. Position is left untouched. Snapshots pre-bake position + normal vertex buffers so undo restores exact bytes (no FP drift on repeated cycles).
 
-Stubs (real bodies in later phases):
-`SmartReplaceCommand`, `TransformSwabCommand`.
+Phase 6+ implementations:
+- `SmartReplaceCommand`, `TransformSwabCommand` — fully implemented (context
+  menu "Smart Replace" / "Transform Swab").
+- `SourceUnitCommand` — per-asset unit re-bake (inverse-factor undo), pushed
+  by Properties ▸ Source Unit (review M12).
+- `RenameCollectionCommand` — undoable outliner collection rename (L30).
 
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
@@ -824,7 +830,10 @@ Stubs (real bodies in later phases):
 
 **File: `src/core/InputManager.js`**
 
-Uses `scene.onKeyboardObservable` and `scene.onPointerObservable` — no `addEventListener` calls outside this module.
+Owns viewport pointer/keyboard input via `scene.onPointerObservable` plus
+document-level shortcut routing. DOM-widget listeners (panel buttons, inputs,
+drag targets) live in their own UI modules — the rule is "viewport input
+flows through InputManager", not "no addEventListener anywhere" (B2).
 
 ### Public API
 ```js
@@ -873,7 +882,7 @@ Enter / LMB    → confirm op
 
 A              → select all (toggle: all → none if all already selected)
 Alt+A          → deselect all
-B              → box select (drag marquee)
+B              → box select (drag marquee) — PLANNED, not implemented
 Shift+LMB      → add/remove from selection
 
 F              → frame selected
@@ -915,7 +924,7 @@ LMB drag on mesh    → translate selection on the horizontal plane
                       Tinkercad style). A drag has to clear ~4 px to engage —
                       shorter LMB presses are still a plain click.
 Shift+LMB           → add / remove from selection (no drag)
-LMB drag empty      → box select
+LMB drag empty      → box select — PLANNED, not implemented
 RMB during body drag → cancel (pivot snaps back, no history push)
 RMB click            → context menu (deferred to UP; suppressed if drag > 4 px)
 RMB drag             → pan camera target
@@ -979,8 +988,8 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 ```
 
 ### Implementation Notes
-- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Defaults tuned for a 300 mm working area: `radius=0.4`, `lowerRadiusLimit=0.02`, `upperRadiusLimit=5`, `wheelPrecision=500`, `panningSensibility=5000`. Compute ortho bounds from `camera.radius` and aspect on every preset change.
-- Numpad presets set `alpha` and `beta` then call `camera.rebuildAnglesAndRadius()`.
+- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`). Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
+- Numpad face presets route through `setCameraPreset` (animated, bbox-fit — see *Camera Presets* below). Numpad5 toggles projection IN PLACE via `toggleOrthographic()`, preserving the current view direction.
 - **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_COLOR = '#f59e0b'` (amber — matches `--accent`).
 - **Wireframe edges:** `SceneManager.setOverlay('wireframeEdges', on)` calls `mesh.enableEdgesRendering(0.9, true)` / `mesh.disableEdgesRendering()` on every mesh with `.geometry`. Edge color and width stored in module-local `_wireframeEdgeState`. `setWireframeEdgeColor(hex)` parses hex to `BABYLON.Color4` and updates all live edge renderers.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
@@ -1042,7 +1051,7 @@ AssetLoader.loadTextureFromHandle(fileHandle)         → Promise<void>  // asyn
 AssetLoader.loadTextureFromBlob(blob, filename)       → Promise<void>
 AssetLoader.registerImportedTexture(babylonTexture)   → Promise<assetId>  // glTF-embedded texture → asset entry + data URL thumbnail
 AssetLoader.releaseAsset(assetId)                     → void
-AssetLoader.removeAsset(assetId)                      → void  // removes from state + dispatches ASSET_REGISTERED{type:'removed'}
+AssetLoader.removeAsset(assetId)                      → void  // removes from state + dispatches ASSET_REMOVED
 AssetLoader.instantiateAsset(assetId, position)       → Promise<MeshId[]>  // re-loads from cached blob URL; each call = independent scene objects
 AssetLoader.getContainer(assetId)                     → BABYLON.AssetContainer | null
 AssetLoader.getContainerGeomMeshes(assetId)           → BABYLON.AbstractMesh[]  // stable geometry-only order
@@ -1390,8 +1399,8 @@ siblings. Block / confirm-anyway semantics unchanged.
 - Toast progression:
   - `loading` "Validating [name]…"
   - `success` "✓ [name]" (auto-dismiss 3s) — if clean
-  - `warning` "⚠ [name]: 2 warnings" (persistent, clickable → Print Panel)
-  - `error` "✗ [name]: 3 errors" (persistent, clickable)
+  - `warning` "⚠ [name]: 2 warnings" (persistent; click-through → Print Panel is PLANNED)
+  - `error` "✗ [name]: 3 errors" (persistent; click-through PLANNED)
 - Outliner row icon updates correspondingly.
 - **DO NOT** open a modal on import.
 
@@ -1635,10 +1644,16 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 ```
 
 ### Autosave
-- Interval 60s when `isDirty === true`.
+- Interval 60s when dirty (position-based — see §5 dirty contract).
 - Writes full JSON to IndexedDB key `autosave_${projectName}`.
-- On startup, if autosave entry exists AND is newer than last explicit save → recovery banner: "Autosave from [time]. Recover?" [Recover][Discard].
+- Startup does NOT auto-offer recovery: the boot flow re-mounts the last
+  asset folder instead (AssetPanel.promptRemount — deliberate Phase 6
+  decision: folder relink beats session recovery for this workflow).
+  `recoverAutosave()` exists for an explicit recovery entry point.
 - Cleared after successful explicit save.
+- Known cost (arch A9, accepted for now): each autosave re-embeds all asset
+  bytes as base64 on the main thread. Planned relief: autosave docs without
+  `fileData` (recovery resolves via live tiers + last explicit save).
 
 ### Recent Projects
 - Max 10. Stored under IndexedDB key `recent_projects`.
@@ -2050,12 +2065,15 @@ otherwise the panel falls back to its placeholder icon.
 
 ### Outliner (`src/ui/Outliner.js`)
 - Renders unified tree from `state.scene.objects` + `state.scene.groups` + `state.scene.collections`.
-- Row icons via `Icons.icon(name, attrs)` — see Part 2.
-- Drag-to-reparent: `dragstart` on row, `dragover` on group, `drop` → `PARENT_CHANGED`.
-- Multi-select: `Shift+click` range, `Ctrl+click` toggle. Dispatch `SELECTION_CHANGED`.
-- Double-click row name → inline rename (text input, blur/Enter commits via `RenameCommand`).
-- Search bar: filters by name / shader / part-label / validation status.
-- Ghost rows: red `CircleAlert` icon, right-click → Relink (file picker).
+- Row icons via `Icons.icon(name, attrs)` — see Part 2. Validation status
+  badges (warning/error, stale-dimmed) read the §9 A6 cache and render as
+  trusted markup after the escaped name.
+- Drag-to-reparent (`PARENT_CHANGED`) — PLANNED, not implemented.
+- Multi-select: `Shift+click` add, `Ctrl+click` toggle. Dispatch `SELECTION_CHANGED`.
+- Double-click row name → inline rename (text input, blur/Enter commits via `RenameCommand`; collections via `RenameCollectionCommand`).
+- Search bar (name / shader / validation filters) — PLANNED, not implemented.
+- Ghost rows: red `CircleAlert` icon. Relink runs from the unmatched-assets
+  modal (ProjectMenu) — per-row right-click relink is PLANNED.
 - **Row layout** uses a 6-column grid: `[indent] [type-icon] [name] [visibility] [lock] [print-part]`. The print-part column shows a `Printer` icon button on object rows (highlighted amber when `isPrintPart: true`); group rows get a blank placeholder span to keep alignment. Clicking the icon toggles `isPrintPart` via `PrintPartCommand`.
 
 #### Collections (Blender-style import buckets)
@@ -2095,8 +2113,9 @@ Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 3. **Source Unit** — dropdown + `AlertTriangle` if unconfirmed + "Confirm" button.
 4. **Shader** (Phase 4, binding-only) — Lists distinct shaders bound to current selection as **slots**. Active mesh's shader appears first. Multi-selection across meshes with different shaders → one slot per shader. Per-slot UI: texture thumbnail chip or color preview, shader name, linked mesh-count badge, combined `<select>` with optgroup "Replace with → [list of all scene shaders]" + synthetic action "Duplicate in place". Click chip/name area → Library `focus(shaderId)`. **No color picker, sliders, or UV inputs here** — those live only in the Shader Library. Properties Shader is binding-only.
 5. **UV Override** — offset/scale/rotation inputs per-mesh; "Reset to Default" button. Mesh-specific UI.
-6. **Print Part** — toggle + label + tolerance.
-7. **Validation** — collapsed list of issues with per-issue Auto-Fix button.
+6. **Print Part** — export toggle.
+   (Validation results are NOT a Properties section — they live in the
+   Print ▸ Validation tab + Outliner row badges, both fed by the §9 cache.)
 
 **Scene** section (only when no object is active):
 - **Grid cell (mm)** + **Subdivisions** inputs → `SceneManager.setGrid({cellMM,subdivisions})` (state `scene.grid`). Read-only hint shows the current bed size; bed size itself is set in Print ▸ Bed.
@@ -2228,7 +2247,9 @@ and does not maintain its own extension table.
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
 
 ### Print Panel (`src/ui/PrintPanel.js`)
-Tabs: Scale / Validation / Bed / Thickness (future) / Orientation (future) / Export.
+Tabs: Scale / Validation / Bed / Preview / Export (Thickness + Orientation
+future). Preview owns print-preview matte mode + wireframe edges/colour.
+Validation reads the §9 A6 cache with an explicit "Validate All".
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 
@@ -2613,7 +2634,7 @@ records what landed and the current verification baseline.
 | Validation v1 = 3 checks only | Future Pro version adds thin-wall, self-intersect, overhang |
 | Numpad shortcuts assume numpad | `Alt+1/3/7` registered as alternates |
 | OBJ+MTL slicer support varies | Informational tooltip — not a blocking warning |
-| IndexedDB FS handle permission resets per session | Non-blocking re-grant banner |
+| IndexedDB FS handle permission resets per session | Boot remount-folder modal (AssetPanel.promptRemount) re-grants via its button gesture; per-asset relink via the unmatched-assets modal |
 
 ---
 
