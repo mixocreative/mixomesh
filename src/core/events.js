@@ -14,6 +14,7 @@ export const EVENTS = {
   // Validation
   VALIDATION_STARTED:      'validation:started',
   VALIDATION_COMPLETE:     'validation:complete',
+  VALIDATION_FOCUS_REQUESTED: 'validation:focusRequested', // toast click-through → Print Panel Validation tab (B5)
 
   // Selection
   SELECTION_CHANGED:       'selection:changed',

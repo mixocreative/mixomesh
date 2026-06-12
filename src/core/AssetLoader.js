@@ -744,11 +744,15 @@ function _queueValidation(meshId) {
       }
       const errs  = results.filter(r => r.severity === 'error').length;
       const warns = results.filter(r => r.severity === 'warning').length;
+      // B5 click-through: clicking the persistent toast opens the Print
+      // Panel's Validation tab (PrintPanel subscribes; event avoids a
+      // core→ui→core import cycle).
+      const onClick = () => dispatch(EVENTS.VALIDATION_FOCUS_REQUESTED, { meshId });
       if (errs > 0) {
         const w = warns ? `, ${warns} warning${warns === 1 ? '' : 's'}` : '';
-        Toast.show(`✗ ${name}: ${errs} error${errs === 1 ? '' : 's'}${w}`, 'error', 0);
+        Toast.show(`✗ ${name}: ${errs} error${errs === 1 ? '' : 's'}${w}`, 'error', 0, { onClick });
       } else {
-        Toast.show(`⚠ ${name}: ${warns} warning${warns === 1 ? '' : 's'}`, 'warning', 0);
+        Toast.show(`⚠ ${name}: ${warns} warning${warns === 1 ? '' : 's'}`, 'warning', 0, { onClick });
       }
     } catch (err) {
       Toast.dismiss(toastId);

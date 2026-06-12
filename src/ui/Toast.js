@@ -17,7 +17,7 @@ const _active = new Map(); // id → { el, timerId }
 let _idCounter = 0;
 function _nextId() { return `toast_${++_idCounter}`; }
 
-function _render(id, message, type) {
+function _render(id, message, type, onClick) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.dataset.id = id;
@@ -28,6 +28,16 @@ function _render(id, message, type) {
   msgEl.className = 'toast-msg';
   msgEl.textContent = message;
   el.append(iconEl, msgEl);
+  if (typeof onClick === 'function') {
+    el.classList.add('toast-clickable');
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    const activate = () => { dismiss(id); onClick(); };
+    el.addEventListener('click', activate);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+  }
   return el;
 }
 
@@ -42,14 +52,16 @@ function _evict() {
  * @param {string} message
  * @param {'info'|'success'|'warning'|'error'|'loading'} [type]
  * @param {number} [duration]  ms; 0 = persistent; loading type is always persistent
+ * @param {{ onClick?: () => void }} [opts]  onClick makes the toast a button:
+ *   click / Enter / Space dismisses it then runs the handler (B5 click-through)
  * @returns {string} toast id (pass to dismiss())
  */
-export function show(message, type = 'info', duration = 4000) {
+export function show(message, type = 'info', duration = 4000, opts = {}) {
   if (!_container) return '';
   _evict();
 
   const id = _nextId();
-  const el = _render(id, message, type);
+  const el = _render(id, message, type, opts.onClick);
   _container.appendChild(el);
 
   const autoDismiss = type !== 'loading' && duration > 0;

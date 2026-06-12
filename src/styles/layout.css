@@ -230,6 +230,14 @@
 .toast-icon { display: flex; align-items: center; flex-shrink: 0; }
 .toast-msg  { flex: 1; line-height: 1.4; }
 
+/* B5 click-through: validation toasts act as buttons → Print Panel */
+.toast.toast-clickable { cursor: pointer; }
+.toast.toast-clickable:hover,
+.toast.toast-clickable:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-2);
+}
+
 .toast.info    .toast-icon { color: var(--info); }
 .toast.success .toast-icon { color: var(--success); }
 .toast.warning .toast-icon { color: var(--warning); }

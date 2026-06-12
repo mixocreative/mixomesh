@@ -9,6 +9,7 @@ import { Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
+import { Workspace } from './Workspace.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText } from '../core/scale/ScaleMath.js';
@@ -38,10 +39,31 @@ export function init() {
   ];
   for (const ev of events) subscribe(ev, _render);
 
+  // B5 toast click-through: a clicked validation toast surfaces this panel's
+  // Validation tab.
+  subscribe(EVENTS.VALIDATION_FOCUS_REQUESTED, _focusValidation);
+
   // Register validation modals
   Modal.register('validationErrors', _renderValidationErrorsModal);
   Modal.register('exportWarningsConfirm', _renderExportWarningsModal);
 
+  _render();
+}
+
+/**
+ * Bring the Validation tab on screen: switch to the Print workspace (the
+ * only one whose right column shows this panel), clear a manual right-panel
+ * collapse, expand the section if the user folded it, then activate the tab.
+ */
+function _focusValidation() {
+  Workspace.setWorkspace('print');
+  if (getState().ui.panelCollapsed?.right === true) Workspace.togglePanel('right');
+  const sec = document.getElementById('rp-print');
+  if (sec?.classList.contains('collapsed')) {
+    sec.classList.remove('collapsed');
+    sec.querySelector('.rp-section-header')?.setAttribute('aria-expanded', 'true');
+  }
+  _activeTab = 'validation';
   _render();
 }
 

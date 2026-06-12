@@ -1408,8 +1408,13 @@ siblings. Block / confirm-anyway semantics unchanged.
 - Toast progression:
   - `loading` "Validating [name]…"
   - `success` "✓ [name]" (auto-dismiss 3s) — if clean
-  - `warning` "⚠ [name]: 2 warnings" (persistent; click-through → Print Panel is PLANNED)
-  - `error` "✗ [name]: 3 errors" (persistent; click-through PLANNED)
+  - `warning` "⚠ [name]: 2 warnings" (persistent; click → Print Panel Validation tab)
+  - `error` "✗ [name]: 3 errors" (persistent; click → Print Panel Validation tab)
+- Click-through wiring (B5): the toast's `onClick` dispatches
+  `EVENTS.VALIDATION_FOCUS_REQUESTED` (event, not import — avoids a
+  core→ui→core cycle); PrintPanel handles it by switching to the Print
+  workspace, clearing a manual right-panel collapse, expanding the section,
+  and activating the Validation tab.
 - Outliner row icon updates correspondingly.
 - **DO NOT** open a modal on import.
 
@@ -2298,6 +2303,9 @@ Collapses non-essential segments below 1280px.
 - Max 4 stacked bottom-right.
 - Types: info / success / warning / error / loading.
 - `loading` shows spinning `Loader2` icon (CSS rotation), ignores duration.
+- `show(message, type, duration, { onClick })` — an `onClick` makes the toast
+  a button (`role="button"`, focusable, Enter/Space): activation dismisses the
+  toast then runs the handler. Used by validation toasts (B5 click-through).
 
 ### Modal (`src/ui/Modal.js`)
 Generic. Listens for `MODAL_OPEN`. Renders by id (`shaderMerge`, `dirtyConfirm`, `validationErrors`, etc.).
