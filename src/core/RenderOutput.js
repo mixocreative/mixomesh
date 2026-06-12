@@ -70,7 +70,12 @@ function _startSweep({ durationS = 8, direction = 'left', ease = true,
   const applyDelta = (delta) => {
     const m = BABYLON.Matrix.RotationY(-delta);
     camera.alpha = startAlpha + delta;
-    camera.target = BABYLON.Vector3.TransformCoordinates(startTarget, m);
+    // MUTATE the target — the `camera.target = v` SETTER calls setTarget(),
+    // which re-derives alpha/beta from the current position (re-aims instead
+    // of moving) and silently overwrote the alpha line above, making the
+    // sweep depend on camera facing/pan. Same reason CameraRig's pan uses
+    // addInPlace.
+    camera.target.copyFrom(BABYLON.Vector3.TransformCoordinates(startTarget, m));
     if (key) {
       key.direction = BABYLON.Vector3.TransformCoordinates(starts.keyDir, m);
       key.position  = BABYLON.Vector3.TransformCoordinates(starts.keyPos, m);

@@ -480,6 +480,19 @@ function _wireRendering() {
     if (isRecording()) return;
     const btn = e.currentTarget;
     const tt = _ro().turntable;
+    // Chrome 149 ships a MediaRecorder bug that freezes or hard-crashes the
+    // tab (STATUS_BREAKPOINT) on ANY canvas recording — reproduced on a
+    // trivial 2D canvas outside this app. Edge 149 and other versions are
+    // fine. Warn before letting the user risk their session.
+    const ua = navigator.userAgent;
+    const chromeMajor = Number(ua.match(/Chrom(?:e|ium)\/(\d+)/)?.[1] ?? 0);
+    if (chromeMajor === 149 && !ua.includes('Edg/')) {
+      const proceed = window.confirm(
+        'Chrome 149 has a known bug that can freeze or crash this tab during video recording '
+        + '(STATUS_BREAKPOINT). Save your project first, or use Edge / a newer Chrome for video export.\n\n'
+        + 'Try recording anyway?');
+      if (!proceed) return;
+    }
     btn.disabled = true;
     try {
       const result = await recordTurntable({

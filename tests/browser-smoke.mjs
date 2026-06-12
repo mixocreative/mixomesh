@@ -205,20 +205,37 @@ async function main() {
         && ['video/mp4;codecs=avc3.42E01E', 'video/webm;codecs=vp8', 'video/webm']
           .some(m => MediaRecorder.isTypeSupported(m));
 
-      // Turntable PREVIEW (no MediaRecorder — headless-safe): 1 s sweep must
-      // resolve 'done' and restore the whole rig (camera alpha/target + key
-      // light direction).
+      // Turntable PREVIEW (no MediaRecorder — headless-safe): with the target
+      // PANNED off-origin, a 1 s sweep must (a) actually MOVE the camera on a
+      // circle around the world origin — |position| constant, position
+      // displaced mid-sweep (the ArcRotate target SETTER re-aims instead of
+      // moving, which froze the position; mutation is required) — and
+      // (b) resolve 'done' restoring the whole rig.
       const sm = await import('/src/core/SceneManager.js');
       const cam = sm.SceneManager.getCamera();
       const keyLight = sm.SceneManager.getScene().getLightByName('key');
+      cam.target.set(0.06, 0, 0.03);   // pan composition off-origin
+      // position is derived NEXT frame — wait one before sampling baselines
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       const a0 = cam.alpha;
       const t0 = { x: cam.target.x, z: cam.target.z };
       const d0 = { x: keyLight.direction.x, z: keyLight.direction.z };
-      const previewResult = await ro.previewTurntable({ durationS: 1, direction: 'left', ease: true });
+      const p0 = { x: cam.position.x, z: cam.position.z, len: cam.position.length() };
+      const previewPromise = ro.previewTurntable({ durationS: 1, direction: 'left', ease: true });
+      await new Promise(r => setTimeout(r, 450));
+      const mid = {
+        moved: Math.hypot(cam.position.x - p0.x, cam.position.z - p0.z) > 0.01,
+        lenOk: Math.abs(cam.position.length() - p0.len) < 1e-4,
+        p0len: p0.len, midLen: cam.position.length(),
+        alpha: cam.alpha, beta: cam.beta, radius: cam.radius,
+        tx: cam.target.x, tz: cam.target.z,
+      };
+      const previewResult = await previewPromise;
       const rigRestored = Math.abs(cam.alpha - a0) < 1e-6
         && Math.abs(cam.target.x - t0.x) < 1e-6 && Math.abs(cam.target.z - t0.z) < 1e-6
         && Math.abs(keyLight.direction.x - d0.x) < 1e-6
         && Math.abs(keyLight.direction.z - d0.z) < 1e-6;
+      cam.target.set(0, 0, 0);   // undo the pan for later checks
 
       // Environment floor: enabling creates the shadow-catcher plane with the
       // requested colour + height (0.05 mm anti-z-fight offset below).
@@ -237,7 +254,7 @@ async function main() {
         tSize: tBlob.size, tType: tBlob.type, tAlpha: await alphaAt(tBlob),
         oAlpha: await alphaAt(oBlob),
         recordable, floorOk, floorHidden,
-        crosshair, previewResult, rigRestored,
+        crosshair, previewResult, rigRestored, mid,
       };
     })()`);
     assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
@@ -252,6 +269,9 @@ async function main() {
     assert(rendering.crosshair, 'render-frame crosshair missing');
     assert(rendering.previewResult === 'done', `turntable preview should resolve done, got ${rendering.previewResult}`);
     assert(rendering.rigRestored, 'turntable preview did not restore camera + key light');
+    assert(rendering.mid.moved, 'mid-sweep camera position did not move — target setter re-aim bug');
+    assert(rendering.mid.lenOk,
+      `mid-sweep camera left the origin circle — sweep is not a world-origin rotation: ${JSON.stringify(rendering.mid)}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
