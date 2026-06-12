@@ -11,6 +11,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, dispatch, getState, setState } from '../core/StateManager.js';
 import { InputManager } from '../core/InputManager.js';
+import { icon } from '../core/Icons.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
 // v2: panelCollapsed went tri-state (absent = defer to workspace default).
@@ -30,10 +31,10 @@ export const WORKSPACES = ['layout', 'shade', 'scene', 'print'];
  * (see layout.css) so it needs no per-panel JS.
  */
 export const WORKSPACE_DEFAULTS = {
-  layout: { right: true, bottom: true,  outlinerWidth: 260, rightWidth: 300, assetHeight: 220, label: 'Layout' },
-  shade:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 340, assetHeight: 220, label: 'Shading' },
-  scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene' },
-  print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print' },
+  layout: { right: true, bottom: true,  outlinerWidth: 260, rightWidth: 300, assetHeight: 220, label: 'Layout',  icon: 'Box' },
+  shade:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 340, assetHeight: 220, label: 'Shading', icon: 'Palette' },
+  scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene',   icon: 'SunDim' },
+  print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print',   icon: 'Printer' },
 };
 
 /**
@@ -78,6 +79,7 @@ export function parseStored(raw) {
 }
 
 let _widths = {};   // workspace → { outlinerWidth, rightWidth, assetHeight }
+let _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
 let _pillEl = null;
 
 // ── Init ─────────────────────────────────────────────────
@@ -123,6 +125,7 @@ export function setWorkspace(name) {
   if (from === name) return;
 
   _captureWidths(from);
+  _captureScroll(from);
   // Reset = NO overrides ({}), so the new workspace's defaults decide.
   // `false` would be a force-show override on every side — the bug that made
   // Layout and Shade look identical.
@@ -131,6 +134,7 @@ export function setWorkspace(name) {
     ui: { ...s.ui, workspace: name, panelCollapsed: {} },
   }), SILENT);
   _applyDom();
+  _restoreScroll(name);
   _persist();
   dispatch(EVENTS.WORKSPACE_CHANGED, { from, to: name });
 }
@@ -187,6 +191,28 @@ function _applyDom() {
   _syncPill(workspace);
 }
 
+// Remember each right-panel body's scroll position per workspace (session
+// only) — switching away and back shouldn't lose your place in a long panel.
+function _captureScroll(workspace) {
+  const out = {};
+  document.querySelectorAll('#right-panel .rp-body').forEach(el => {
+    if (el.id && el.scrollTop > 0) out[el.id] = el.scrollTop;
+  });
+  _scroll[workspace] = out;
+}
+
+function _restoreScroll(workspace) {
+  const saved = _scroll[workspace];
+  if (!saved) return;
+  // After the panels re-render for the new workspace.
+  requestAnimationFrame(() => {
+    for (const [id, top] of Object.entries(saved)) {
+      const el = document.getElementById(id);
+      if (el) el.scrollTop = top;
+    }
+  });
+}
+
 function _captureWidths(workspace) {
   const olEl = document.getElementById('outliner');
   const rpEl = document.getElementById('right-panel');
@@ -227,12 +253,13 @@ function _renderPill() {
   _pillEl.setAttribute('role', 'tablist');
   _pillEl.setAttribute('aria-label', 'Workspace');
   for (const name of WORKSPACES) {
+    const def = WORKSPACE_DEFAULTS[name];
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'ws-btn';
     btn.dataset.ws = name;
-    btn.textContent = WORKSPACE_DEFAULTS[name].label;
-    btn.title = `${WORKSPACE_DEFAULTS[name].label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
+    btn.innerHTML = `${icon(def.icon, { width: 13, height: 13 })}<span>${def.label}</span>`;
+    btn.title = `${def.label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
     btn.setAttribute('role', 'tab');
     btn.addEventListener('click', () => setWorkspace(name));
     _pillEl.appendChild(btn);

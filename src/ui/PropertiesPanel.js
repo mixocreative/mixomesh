@@ -61,6 +61,7 @@ export function init() {
     EVENTS.SHADER_DUPLICATED,
     EVENTS.COLOR_APPLIED,
     EVENTS.UV_OVERRIDE_CHANGED,
+    EVENTS.WORKSPACE_CHANGED,    // empty-state hint is workspace-specific
   ];
   for (const ev of events) subscribe(ev, _render);
   Modal.register('shader-picker', _shaderPickerRenderer);
@@ -77,8 +78,15 @@ function _render() {
 
   if (!obj) {
     // Scene-wide settings live in the Scene panel (#rp-scene) now — this
-    // panel is object-scoped only.
-    _bodyEl.innerHTML = '<div class="pp-empty">Click a mesh to edit its properties.</div>';
+    // panel is object-scoped only. Hint matches the workspace's task.
+    const hasObjects = Object.keys(objects).length > 0;
+    const ws = document.body.dataset.workspace ?? 'layout';
+    const hint = !hasObjects
+      ? 'Drop a .glb / .obj / .stl / .3mf into the viewport,<br>or drag one in from the Asset panel.'
+      : ws === 'shade'
+        ? 'Select an object to edit its shader.'
+        : 'Click a mesh to edit its properties.';
+    _bodyEl.innerHTML = `<div class="pp-empty">${hint}</div>`;
     return;
   }
 

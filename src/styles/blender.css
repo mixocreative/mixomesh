@@ -123,6 +123,21 @@
   font-weight: 600;
 }
 
+/* 5b. Shading UV grid — the 2-col cells were cramped (tiny hit areas).
+   Full-width rows, right-aligned labels, standard control height. */
+.sp-uv-grid { grid-template-columns: 1fr; gap: var(--sp-2); }
+.sp-uv-cell { grid-template-columns: 84px 1fr; }
+.sp-uv-cell label { text-align: right; }
+.sp-uv-cell input {
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  min-height: var(--ctl-h);
+  padding: 1px var(--sp-3);
+  box-sizing: border-box;
+}
+.sp-uv-cell input:hover:not(:focus) { background: var(--ctl-bg-hover); }
+
 /* 6. Checkboxes / radios / range — amber accent natively. */
 input[type="checkbox"],
 input[type="radio"],

@@ -326,7 +326,11 @@ body:not([data-workspace="shade"]) #rp-properties { flex: 1 1 0 !important; }
   padding: 2px 10px;
   border-radius: var(--r-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
+.ws-btn svg { flex-shrink: 0; }
 .ws-btn:hover  { background: var(--bg-3); color: var(--text-0); }
 .ws-btn.active { background: var(--accent); color: var(--accent-fg); }
