@@ -361,8 +361,8 @@ match what the specced responsibilities actually cost.
 | `HistoryManager.js` | < 200 (stack machinery + façade only; commands live in `core/commands/`) |
 | each `core/commands/*.js` | < 500 (HierarchyCommands is the big one by design) |
 | `InputManager.js` | < 750 (incl. modal G/R/S; extract `input/ModalTransform.js` if it grows) |
-| `SceneManager.js` | < 1000 (camera rig + pivot session extraction is the open follow-up; outline + bed/grid already split) |
-| each `core/scene/*.js` | < 250 |
+| `SceneManager.js` | < 450 (engine/lighting/overlays orchestrator; camera, pivot, outline, bed/grid all split into `core/scene/`) |
+| each `core/scene/*.js` | < 250 (`CameraRig.js` < 500 — creation + custom nav + presets + framing + follow modes are one cohesive rig) |
 | `AssetLoader.js` | < 700 (mesh-side only; textures/split/blob-urls live in `core/assets/`) |
 | each `core/assets/*.js` | < 350 |
 | `ImportNormalizer.js` | < 150 |
