@@ -182,9 +182,57 @@ async function main() {
     assert(rt.count >= 1, 'round-trip import produced no meshes');
     assert(rt.textured, 'round-trip mesh lost its texture — writer/loader mirror drift');
 
+    // OBJ worker import: the off-main-thread parse path (WorkerImport +
+    // ObjParse.worker) must produce a mesh with its MTL material bound, and
+    // must NOT have fallen back to the main-thread loader (the fallback
+    // logs 'OBJ worker parse failed'). Headless Node tests can't cover this
+    // — no Worker — so this block is the only mechanical check of the
+    // worker path.
+    const obj = await evaluate(cdp, `(async () => {
+      try {
+        const objText = 'mtllib wcube.mtl\\no WCube\\nv 0 0 0\\nv 0.05 0 0\\nv 0.05 0.05 0\\nv 0 0.05 0\\nusemtl RedMat\\nf 1 2 3\\nf 1 3 4\\n';
+        const mtlText = 'newmtl RedMat\\nKd 1 0 0\\n';
+        const { AssetLoader } = await import('/src/core/AssetLoader.js');
+        const { isWorkerImportSupported } = await import('/src/core/WorkerImport.js');
+        let fellBack = false;
+        const origWarn = console.warn;
+        console.warn = (...a) => {
+          if (String(a[0]).includes('OBJ worker parse failed')) fellBack = true;
+          origWarn.apply(console, a);
+        };
+        let meshIds;
+        try {
+          meshIds = await AssetLoader.loadFromBlob(
+            new Blob([objText]), 'wcube.obj', undefined,
+            { siblingFiles: [new File([mtlText], 'wcube.mtl')] });
+        } finally {
+          console.warn = origWarn;
+        }
+        const mesh = AssetLoader.getBabylonMesh(meshIds[0] ?? '');
+        const c = mesh?.material?.diffuseColor;
+        return {
+          supported: isWorkerImportSupported(),
+          fellBack,
+          count: meshIds.length,
+          verts: mesh?.getTotalVertices?.() ?? 0,
+          diffuse: c ? [c.r, c.g, c.b] : null,
+        };
+      } catch (err) {
+        return { error: String(err?.stack ?? err) };
+      }
+    })()`);
+    if (obj?.error) throw new Error(`OBJ worker import failed: ${obj.error}`);
+    assert(obj.supported, 'Worker unavailable in browser smoke — worker import path untestable');
+    assert(!obj.fellBack, 'OBJ import fell back to main-thread parse — worker path broken');
+    assert(obj.count === 1, `expected 1 OBJ mesh, got ${obj.count}`);
+    assert(obj.verts >= 3, `OBJ mesh has too few vertices (${obj.verts})`);
+    assert(obj.diffuse && Math.abs(obj.diffuse[0] - 1) < 0.05
+      && obj.diffuse[1] < 0.05 && obj.diffuse[2] < 0.05,
+      `OBJ MTL material not bound through worker path — diffuse ${JSON.stringify(obj.diffuse)}`);
+
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
-    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, round-trip OK)`);
+    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, round-trip OK, OBJ worker OK)`);
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);

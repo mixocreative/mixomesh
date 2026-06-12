@@ -23,6 +23,7 @@ import {
 } from './assets/AssetTypes.js';
 import { parseScaleRatioText } from './scale/ScaleMath.js';
 import { setBlobUrl, getBlobUrl, revokeBlobUrl, revokeAllBlobUrls } from './assets/BlobUrls.js';
+import { isWorkerImportSupported, loadObjContainerViaWorker } from './WorkerImport.js';
 import {
   splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer,
 } from './assets/MeshSplit.js';
@@ -171,6 +172,24 @@ function _revokeObjSiblings(assetId) {
   _objSiblings.delete(assetId);
 }
 
+/**
+ * Load an AssetContainer from a blob URL. OBJ parses in a worker when
+ * available (Babylon's OBJ loader is a synchronous text parse — big files
+ * freeze the UI for seconds on the main thread); any worker failure falls
+ * back to the main-thread SceneLoader path, which the installed
+ * PreprocessUrl sibling swap still covers.
+ */
+async function _loadContainer(blobUrl, ext, scene, onProgress, siblings) {
+  if (ext === '.obj' && isWorkerImportSupported()) {
+    try {
+      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined);
+    } catch (err) {
+      console.warn('OBJ worker parse failed — main-thread fallback:', err);
+    }
+  }
+  return BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, onProgress, ext);
+}
+
 // ── Public API ───────────────────────────────────────────
 
 /**
@@ -254,9 +273,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   const restoreUrls = _installSiblingUrls(siblings);
 
   try {
-    const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-      blobUrl, '', scene, _importProgress(filename), ext
-    );
+    const container = await _loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
     _containers.set(assetId, container);
     ProgressOverlay.update(0.8, `Materials for ${filename}…`);
 
@@ -353,10 +370,11 @@ export async function instantiateAsset(assetId, position) {
   const scene = SceneManager.getScene();
   _importBegin(`Reading ${asset.filename}…`);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
-  const restoreUrls = _installSiblingUrls(_objSiblings.get(assetId));
+  const siblings = _objSiblings.get(assetId);
+  const restoreUrls = _installSiblingUrls(siblings);
   try {
-    const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-      blobUrl, '', scene, _importProgress(asset.filename), asset.extension
+    const container = await _loadContainer(
+      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings
     );
     splitMultiMaterialMeshesInContainer(container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
@@ -796,9 +814,7 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const restoreUrls = _installSiblingUrls(siblings);
   let container;
   try {
-    container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-      blobUrl, '', scene, null, extension
-    );
+    container = await _loadContainer(blobUrl, extension, scene, null, siblings);
   } finally {
     restoreUrls();
   }
