@@ -19,6 +19,7 @@ import { PersistenceManager } from '../core/PersistenceManager.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
 import { Workspace } from '../ui/Workspace.js';
+import { NumberScrub } from '../ui/NumberScrub.js';
 
 type TransformCommit = {
   prev: unknown;
@@ -70,6 +71,7 @@ async function bootstrap() {
   ProjectMenu.init();
   AppShell.init();
   Workspace.init();   // after AppShell — applies workspace layout over the shell defaults
+  NumberScrub.init(); // wheel-scrub on number inputs (panel never scrolls under them)
 
   const viewport = document.getElementById('viewport');
   if (!viewport) throw new Error('Viewport root missing');

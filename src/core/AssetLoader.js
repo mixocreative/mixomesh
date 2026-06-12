@@ -10,6 +10,7 @@ import { SceneManager } from './SceneManager.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
 import { MeshValidator } from './MeshValidator.js';
 import { Toast } from '../ui/Toast.js';
+import { ProgressOverlay } from '../ui/ProgressOverlay.js';
 import { putHandle, getHandle } from './idb.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
@@ -64,6 +65,33 @@ async function _sha256Hex(buf) {
 const _objSiblings = new Map();   // assetId → Map<lowercase filename, objectURL>
 const MAX_SIBLING_FILES = 64;
 
+// ── Import progress overlay (field request) ─────────────────────────────
+// Imports block the UI thread during parse; the overlay stops false clicks
+// and shows real byte progress where Babylon reports it. Ref-counted so a
+// multi-file drop keeps one overlay up until the LAST import finishes.
+
+let _importDepth = 0;
+
+function _importBegin(label) {
+  if (++_importDepth === 1) ProgressOverlay.show('Importing…');
+  ProgressOverlay.update(0.02, label);
+}
+
+function _importProgress(filename) {
+  return (evt) => {
+    if (evt?.lengthComputable && evt.total > 0) {
+      ProgressOverlay.update(0.02 + 0.73 * (evt.loaded / evt.total), `Reading ${filename}…`);
+    } else {
+      ProgressOverlay.update(0.4, `Reading ${filename}…`);
+    }
+  };
+}
+
+function _importEnd() {
+  _importDepth = Math.max(0, _importDepth - 1);
+  if (_importDepth === 0) ProgressOverlay.hide();
+}
+
 async function _collectObjSiblings(opts) {
   const map = new Map();
   const add = async (name, fileOrHandle) => {
@@ -98,30 +126,40 @@ async function _collectObjSiblings(opts) {
 /** Swap Tools.PreprocessUrl to serve sibling files by filename. Returns restore fn. */
 function _installSiblingUrls(map) {
   if (!map?.size || !BABYLON.Tools) return () => {};
+  // Same-name fallback: when the OBJ's mtllib statement names a file we don't
+  // have but exactly ONE .mtl sibling exists, serve that one (artists rename
+  // OBJs without updating mtllib constantly).
+  const mtlUrls = [...map.entries()].filter(([n]) => n.endsWith('.mtl')).map(([, u]) => u);
+  const soloMtl = mtlUrls.length === 1 ? mtlUrls[0] : null;
   const prev = BABYLON.Tools.PreprocessUrl;
   BABYLON.Tools.PreprocessUrl = (url) => {
     const name = String(url).split(/[\\/]/).pop()?.toLowerCase();
     const hit = name ? map.get(name) : null;
     if (hit) return hit;
+    if (soloMtl && name?.endsWith('.mtl')) return soloMtl;
     return typeof prev === 'function' ? prev(url) : url;
   };
   return () => { BABYLON.Tools.PreprocessUrl = prev; };
 }
 
-/** Warn when the OBJ references a .mtl no sibling satisfies. */
-async function _warnMissingMtl(blob, filename, map) {
+/**
+ * Note when the OBJ references a .mtl no sibling satisfies. A missing MTL is
+ * a VALID import (mesh gets the fallback material) — console note only, no
+ * toast nagging (field request).
+ */
+async function _noteMissingMtl(blob, filename, map) {
   try {
     const head = await blob.slice(0, 65536).text();
     const refs = [...head.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)]
       .map(m => m[1].trim().split(/[\\/]/).pop()?.toLowerCase())
       .filter(Boolean);
+    const hasAnyMtl = [...(map?.keys() ?? [])].some(n => n.endsWith('.mtl'));
     const missing = refs.filter(r => !map?.has(r));
-    if (missing.length) {
-      Toast.show(
-        `${filename} references ${missing[0]} — drop the .mtl + textures together with the .obj, or import from a mounted folder.`,
-        'warning', 7000);
+    if (missing.length && !hasAnyMtl) {
+      console.warn(`${filename}: references ${missing[0]} but no .mtl was provided — using default material. ` +
+        'Drop the .mtl/textures together with the .obj, or import from a mounted folder, to bind materials.');
     }
-  } catch { /* hint only */ }
+  } catch { /* note only */ }
 }
 
 function _revokeObjSiblings(assetId) {
@@ -207,17 +245,18 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   if (ext === '.obj') {
     siblings = await _collectObjSiblings(opts);
     if (siblings.size) _objSiblings.set(assetId, siblings);
-    _warnMissingMtl(blob, filename, siblings);   // fire-and-forget hint
+    _noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
   }
 
-  const loadToastId = Toast.show(`Loading ${filename}…`, 'loading');
+  _importBegin(`Reading ${filename}…`);
   const restoreUrls = _installSiblingUrls(siblings);
 
   try {
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-      blobUrl, '', scene, null, ext
+      blobUrl, '', scene, _importProgress(filename), ext
     );
     _containers.set(assetId, container);
+    ProgressOverlay.update(0.8, `Materials for ${filename}…`);
 
     // One-mesh-one-shader invariant: any MultiMaterial mesh splits into
     // N single-material siblings, each stamped with a shared sourceGroupId.
@@ -229,6 +268,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceAssetId: assetId, sourceFileHash,
     });
 
+    ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
     container.addAllToScene();
 
     // Apply unit + working-ratio scaling. modelRatio comes from a glTF "ratio"
@@ -276,20 +316,20 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const collectionId = _createCollectionFromFilename(filename, assetId);
     const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
 
-    Toast.dismiss(loadToastId);
+    ProgressOverlay.update(0.98, `${filename} ready`);
 
     _scheduleIdle(() => _generateThumbnailFor(assetId));
     for (const meshId of meshIds) _queueValidation(meshId);
 
     return meshIds;
   } catch (err) {
-    Toast.dismiss(loadToastId);
     revokeBlobUrl(assetId);
     _revokeObjSiblings(assetId);
     _containers.delete(assetId);
     throw err;
   } finally {
     restoreUrls();
+    _importEnd();
   }
 }
 
@@ -309,12 +349,12 @@ export async function instantiateAsset(assetId, position) {
   if (!blobUrl) throw new Error(`No cached data for ${asset.filename} — cannot re-instantiate`);
 
   const scene = SceneManager.getScene();
-  const loadToastId = Toast.show(`Loading ${asset.filename}…`, 'loading');
+  _importBegin(`Reading ${asset.filename}…`);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
   const restoreUrls = _installSiblingUrls(_objSiblings.get(assetId));
   try {
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-      blobUrl, '', scene, null, asset.extension
+      blobUrl, '', scene, _importProgress(asset.filename), asset.extension
     );
     splitMultiMaterialMeshesInContainer(container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
@@ -327,14 +367,11 @@ export async function instantiateAsset(assetId, position) {
 
     const collectionId = _createCollectionFromFilename(asset.filename, assetId);
     const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
-    Toast.dismiss(loadToastId);
     for (const meshId of meshIds) _queueValidation(meshId);
     return meshIds;
-  } catch (err) {
-    Toast.dismiss(loadToastId);
-    throw err;
   } finally {
     restoreUrls();
+    _importEnd();
   }
 }
 
