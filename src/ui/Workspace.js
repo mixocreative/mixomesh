@@ -13,7 +13,10 @@ import { subscribe, dispatch, getState, setState } from '../core/StateManager.js
 import { InputManager } from '../core/InputManager.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
-const STORAGE_VERSION = 1;
+// v2: panelCollapsed went tri-state (absent = defer to workspace default).
+// v1 blobs wrote a concrete false for every side, which v2 reads as
+// force-show — parseStored migrates v1 by keeping only the `true` overrides.
+const STORAGE_VERSION = 2;
 const SILENT = { silent: true };
 
 export const WORKSPACES = ['layout', 'shade', 'print'];
@@ -45,18 +48,26 @@ export function resolvePanelVisible(workspace, panelCollapsed, side) {
   return side === 'left' ? true : !!def[side];   // outliner is pinned (13b)
 }
 
-/** Parse + migrate a stored localStorage blob. Pure — unit-tested. */
+/** Parse + migrate a stored localStorage blob. Pure — unit-tested.
+ * panelCollapsed is tri-state per side (true = force-hide, false =
+ * force-show, absent = defer to workspace default) — only explicit booleans
+ * survive parsing; coercing absent → false would force-show every panel and
+ * erase the workspace differences. */
 export function parseStored(raw) {
   try {
     const data = JSON.parse(raw);
-    if (!data || data.v !== STORAGE_VERSION) return null;
+    if (!data || (data.v !== STORAGE_VERSION && data.v !== 1)) return null;
+    const panelCollapsed = {};
+    for (const side of ['left', 'right', 'bottom']) {
+      const v = data.panelCollapsed?.[side];
+      // v1 wrote false for every side as its "no override" — keep only true.
+      if (data.v === 1 ? v === true : typeof v === 'boolean') {
+        panelCollapsed[side] = v;
+      }
+    }
     return {
       workspace: WORKSPACES.includes(data.workspace) ? data.workspace : 'layout',
-      panelCollapsed: {
-        left:   data.panelCollapsed?.left   === true,
-        right:  data.panelCollapsed?.right  === true,
-        bottom: data.panelCollapsed?.bottom === true,
-      },
+      panelCollapsed,
       widths: (data.widths && typeof data.widths === 'object') ? data.widths : {},
     };
   } catch {
@@ -108,9 +119,12 @@ export function setWorkspace(name) {
   if (from === name) return;
 
   _captureWidths(from);
+  // Reset = NO overrides ({}), so the new workspace's defaults decide.
+  // `false` would be a force-show override on every side — the bug that made
+  // Layout and Shade look identical.
   setState(s => ({
     ...s,
-    ui: { ...s.ui, workspace: name, panelCollapsed: { left: false, right: false, bottom: false } },
+    ui: { ...s.ui, workspace: name, panelCollapsed: {} },
   }), SILENT);
   _applyDom();
   _persist();
@@ -132,7 +146,7 @@ export function togglePanel(side) {
 export function maxViewport() {
   setState(s => ({
     ...s,
-    ui: { ...s.ui, panelCollapsed: { left: false, right: true, bottom: true } },
+    ui: { ...s.ui, panelCollapsed: { right: true, bottom: true } },
   }), SILENT);
   _applyDom();
   _persist();

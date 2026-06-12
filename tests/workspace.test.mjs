@@ -26,7 +26,10 @@ async function test(name, fn) {
 await test('freshState defaults: workspace layout, no overrides', () => {
   const ui = freshState().ui;
   assert.equal(ui.workspace, 'layout');
-  assert.deepEqual(ui.panelCollapsed, { left: false, right: false, bottom: false });
+  // EMPTY = defer everything to workspace defaults. A concrete `false` is a
+  // force-show override that would defeat every workspace preset (the
+  // Layout↔Shade "no visible difference" bug).
+  assert.deepEqual(ui.panelCollapsed, {});
 });
 
 await test('defaults table: three workspaces, outliner widths sane', () => {
@@ -41,35 +44,49 @@ await test('defaults table: three workspaces, outliner widths sane', () => {
 });
 
 await test('resolution rule: override beats default; outliner pinned', () => {
-  const none = { left: false, right: false, bottom: false };
-  // Workspace default decides when no override.
+  const none = {};   // no overrides — workspace default decides
   assert.equal(resolvePanelVisible('layout', none, 'bottom'), true);
+  assert.equal(resolvePanelVisible('shade', none, 'bottom'), false,
+    'no override → Shade default hides the asset panel (the visible workspace difference)');
+  assert.equal(resolvePanelVisible('print', none, 'bottom'), false);
   // false-override means "user explicitly popped it back up".
-  assert.equal(resolvePanelVisible('shade', none, 'bottom'), true,
+  assert.equal(resolvePanelVisible('shade', { bottom: false }, 'bottom'), true,
     'panelCollapsed.bottom=false re-shows a workspace-hidden panel');
-  assert.equal(resolvePanelVisible('shade', { ...none, bottom: undefined }, 'bottom'), false,
-    'absent override defers to the Shade default (hidden)');
   // true-override always hides.
-  assert.equal(resolvePanelVisible('layout', { ...none, right: true }, 'right'), false);
+  assert.equal(resolvePanelVisible('layout', { right: true }, 'right'), false);
   // Outliner is pinned: workspace defaults never hide it.
   assert.equal(resolvePanelVisible('print', none, 'left'), true);
-  assert.equal(resolvePanelVisible('print', { ...none, left: true }, 'left'), false,
+  assert.equal(resolvePanelVisible('print', { left: true }, 'left'), false,
     'manual collapse still allowed');
 });
 
 await test('parseStored: valid blob round-trips, garbage/wrong-version → null', () => {
   const good = parseStored(JSON.stringify({
-    v: 1, workspace: 'shade',
-    panelCollapsed: { right: true },
+    v: 2, workspace: 'shade',
+    panelCollapsed: { right: true, bottom: false },
     widths: { shade: { outlinerWidth: 200 } },
   }));
   assert.equal(good.workspace, 'shade');
-  assert.deepEqual(good.panelCollapsed, { left: false, right: true, bottom: false });
+  // Tri-state survives parsing: only EXPLICIT overrides come back; the
+  // absent side stays absent (defers to workspace default), never coerced
+  // to a force-show false.
+  assert.deepEqual(good.panelCollapsed, { right: true, bottom: false });
   assert.equal(good.widths.shade.outlinerWidth, 200);
+
+  // v1 migration: every side was written as a concrete boolean ("false" was
+  // v1's no-override) — only true (force-hide) survives.
+  const v1 = parseStored(JSON.stringify({
+    v: 1, workspace: 'print',
+    panelCollapsed: { left: false, right: true, bottom: false },
+    widths: {},
+  }));
+  assert.equal(v1.workspace, 'print');
+  assert.deepEqual(v1.panelCollapsed, { right: true },
+    'v1 false noise dropped; true overrides kept');
 
   assert.equal(parseStored('not json'), null);
   assert.equal(parseStored(JSON.stringify({ v: 99, workspace: 'shade' })), null, 'future version rejected');
-  assert.equal(parseStored(JSON.stringify({ v: 1, workspace: 'bogus' })).workspace, 'layout',
+  assert.equal(parseStored(JSON.stringify({ v: 2, workspace: 'bogus' })).workspace, 'layout',
     'unknown workspace falls back to layout');
 });
 
