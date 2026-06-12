@@ -180,6 +180,7 @@ async function main() {
       const frameEl = document.querySelector('.render-frame');
       const frameShown = !!frameEl && frameEl.style.display !== 'none'
         && frameEl.getBoundingClientRect().width > 10;
+      const crosshair = !!frameEl?.querySelector('.render-frame-cross');
       rv?.click();
       const frameHidden = !frameEl || frameEl.style.display === 'none';
 
@@ -204,9 +205,23 @@ async function main() {
         && ['video/mp4;codecs=avc3.42E01E', 'video/webm;codecs=vp8', 'video/webm']
           .some(m => MediaRecorder.isTypeSupported(m));
 
+      // Turntable PREVIEW (no MediaRecorder — headless-safe): 1 s sweep must
+      // resolve 'done' and restore the whole rig (camera alpha/target + key
+      // light direction).
+      const sm = await import('/src/core/SceneManager.js');
+      const cam = sm.SceneManager.getCamera();
+      const keyLight = sm.SceneManager.getScene().getLightByName('key');
+      const a0 = cam.alpha;
+      const t0 = { x: cam.target.x, z: cam.target.z };
+      const d0 = { x: keyLight.direction.x, z: keyLight.direction.z };
+      const previewResult = await ro.previewTurntable({ durationS: 1, direction: 'left', ease: true });
+      const rigRestored = Math.abs(cam.alpha - a0) < 1e-6
+        && Math.abs(cam.target.x - t0.x) < 1e-6 && Math.abs(cam.target.z - t0.z) < 1e-6
+        && Math.abs(keyLight.direction.x - d0.x) < 1e-6
+        && Math.abs(keyLight.direction.z - d0.z) < 1e-6;
+
       // Environment floor: enabling creates the shadow-catcher plane with the
       // requested colour + height (0.05 mm anti-z-fight offset below).
-      const sm = await import('/src/core/SceneManager.js');
       sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorColor: '#ff0000', floorZMM: 10 });
       const scene = sm.SceneManager.getScene();
       const floor = scene.getMeshByName('mx-env-floor');
@@ -222,6 +237,7 @@ async function main() {
         tSize: tBlob.size, tType: tBlob.type, tAlpha: await alphaAt(tBlob),
         oAlpha: await alphaAt(oBlob),
         recordable, floorOk, floorHidden,
+        crosshair, previewResult, rigRestored,
       };
     })()`);
     assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
@@ -233,6 +249,9 @@ async function main() {
     assert(rendering.recordable, 'turntable machinery unavailable (recordTurntable / MediaRecorder)');
     assert(rendering.floorOk, 'environment floor not created with colour + height');
     assert(rendering.floorHidden, 'environment floor did not disable');
+    assert(rendering.crosshair, 'render-frame crosshair missing');
+    assert(rendering.previewResult === 'done', `turntable preview should resolve done, got ${rendering.previewResult}`);
+    assert(rendering.rigRestored, 'turntable preview did not restore camera + key light');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

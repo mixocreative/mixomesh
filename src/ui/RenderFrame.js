@@ -25,6 +25,9 @@ export function show({ width, height } = {}) {
     _label = document.createElement('span');
     _label.className = 'render-frame-label';
     _el.appendChild(_label);
+    const cross = document.createElement('span');
+    cross.className = 'render-frame-cross';
+    _el.appendChild(cross);
     viewport.appendChild(_el);
     if (typeof ResizeObserver === 'function') {
       _ro = new ResizeObserver(() => { if (_active) _layout(); });

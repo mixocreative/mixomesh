@@ -207,6 +207,33 @@
   white-space: nowrap;
 }
 
+/* Centre crosshair — composition aid while Render view is on. */
+.render-frame-cross {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  opacity: 0.8;
+}
+.render-frame-cross::before,
+.render-frame-cross::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+}
+.render-frame-cross::before {
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+.render-frame-cross::after {
+  top: 0; bottom: 0; left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+
 /* ── Toast container ──────────────────────────────────── */
 #toast-container {
   position: fixed;

@@ -17,14 +17,140 @@
 
 import { getState } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
-import { turntableAlpha, pickVideoFormat, clampDimension } from './render/RenderMath.js';
+import { turntableProgress, pickVideoFormat, clampDimension } from './render/RenderMath.js';
 
 const BABYLON = window.BABYLON;
 
 let _recording = false;
+let _preview = null;   // { cancel } while a preview sweep plays
 
 /** @returns {boolean} a turntable recording is in flight */
 export function isRecording() { return _recording; }
+
+/** @returns {boolean} a turntable preview is playing */
+export function isPreviewing() { return !!_preview; }
+
+// ── Turntable sweep (shared by preview + record) ─────────
+//
+// The whole rig — camera AND the directional studio lights AND (when one
+// exists) scene.environmentTexture — rotates around the WORLD ORIGIN
+// together. Rotating the lights with the camera is what makes it read as
+// "model spinning on a turntable under fixed studio lighting" instead of
+// "camera flying around the model".
+//
+// Geometry: camera.alpha += δ orbits the camera azimuth; the matching
+// world-rotation for everything else is RotationY(−δ) (ArcRotate's α moves
+// the camera +X→+Z while Babylon's RotationY(+θ) maps +X→−Z, so the sign
+// flips). Hemi light points straight up — rotation is a no-op, skipped.
+
+/**
+ * Start a sweep. Returns { cancel } — cancel(force) stops early and restores.
+ * onComplete fires exactly once with 'done' | 'cancelled'.
+ */
+function _startSweep({ durationS = 8, direction = 'left', ease = true,
+                       onProgress, onComplete }) {
+  const scene  = SceneManager.getScene();
+  const camera = SceneManager.getCamera();
+  const durationMs = Math.max(1, durationS) * 1000;
+
+  const startAlpha  = camera.alpha;
+  const startTarget = camera.target.clone();
+  const key  = scene.getLightByName('key');
+  const fill = scene.getLightByName('fill');
+  const starts = {
+    keyDir:  key?.direction.clone(),  keyPos: key?.position.clone(),
+    fillDir: fill?.direction.clone(),
+    envRot:  scene.environmentTexture?.rotationY ?? 0,
+  };
+
+  let startTs = 0;
+  let finished = false;
+  let observer = null;
+
+  const applyDelta = (delta) => {
+    const m = BABYLON.Matrix.RotationY(-delta);
+    camera.alpha = startAlpha + delta;
+    camera.target = BABYLON.Vector3.TransformCoordinates(startTarget, m);
+    if (key) {
+      key.direction = BABYLON.Vector3.TransformCoordinates(starts.keyDir, m);
+      key.position  = BABYLON.Vector3.TransformCoordinates(starts.keyPos, m);
+    }
+    if (fill) fill.direction = BABYLON.Vector3.TransformCoordinates(starts.fillDir, m);
+    // Sign chosen to match the analytic lights; verify against a real HDR
+    // when IBL lands (no environmentTexture exists yet).
+    if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot - delta;
+  };
+
+  const restore = () => {
+    camera.alpha = startAlpha;
+    camera.target.copyFrom(startTarget);
+    if (key)  { key.direction = starts.keyDir;  key.position = starts.keyPos; }
+    if (fill) fill.direction = starts.fillDir;
+    if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot;
+  };
+
+  const end = (result) => {
+    if (finished) return;
+    finished = true;
+    if (observer) scene.onBeforeRenderObservable.remove(observer);
+    observer = null;
+    restore();
+    onComplete?.(result);
+  };
+
+  observer = scene.onBeforeRenderObservable.add(() => {
+    const now = performance.now();
+    if (!startTs) startTs = now;
+    const t = (now - startTs) / durationMs;
+    if (t >= 1) { end('done'); return; }
+    const sign = direction === 'right' ? -1 : 1;
+    applyDelta(sign * 2 * Math.PI * turntableProgress(t, ease));
+    onProgress?.(t);
+  });
+
+  return { cancel: () => end('cancelled') };
+}
+
+/**
+ * Play the turntable live in the viewport — no recording. Esc, hiding the
+ * tab, or stopPreview() stops it early; rig is restored either way.
+ * @returns {Promise<'done'|'cancelled'|null>} null when already busy
+ */
+export function previewTurntable({ durationS = 8, direction = 'left', ease = true,
+                                   onProgress } = {}) {
+  if (_recording || _preview) return Promise.resolve(null);
+  const engine = SceneManager.getEngine();
+  const scene  = SceneManager.getScene();
+  const camera = SceneManager.getCamera();
+  if (!engine || !scene || !camera) return Promise.reject(new Error('Scene not ready'));
+  const canvas = engine.getRenderingCanvas();
+
+  return new Promise((resolve) => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); sweep.cancel(); }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') sweep.cancel();
+    };
+    const sweep = _startSweep({
+      durationS, direction, ease, onProgress,
+      onComplete: (result) => {
+        window.removeEventListener('keydown', onKey, true);
+        document.removeEventListener('visibilitychange', onVisibility);
+        canvas.style.pointerEvents = '';
+        _preview = null;
+        resolve(result);
+      },
+    });
+    _preview = sweep;
+    canvas.style.pointerEvents = 'none';
+    window.addEventListener('keydown', onKey, true);
+    document.addEventListener('visibilitychange', onVisibility);
+  });
+}
+
+/** Stop a playing preview early (rig restored). */
+export function stopPreview() { _preview?.cancel(); }
 
 // ── PNG still ────────────────────────────────────────────
 
@@ -118,8 +244,7 @@ function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
 
   _recording = true;
   return new Promise((resolve, reject) => {
-    const startAlpha = camera.alpha;
-    const startPose  = SceneManager.saveCameraState();
+    const startPose = SceneManager.saveCameraState();
     const stream = canvas.captureStream(fps);
     const rec = fmt.mime
       ? new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: 16_000_000 })
@@ -129,13 +254,11 @@ function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
 
     let cancelled = false;
     let settled = false;
-    let startTs = 0;
-    let observer = null;
     let watchdog = null;
+    let sweep = null;
 
     const cleanup = () => {
-      if (observer) scene.onBeforeRenderObservable.remove(observer);
-      observer = null;
+      sweep?.cancel();   // idempotent — restores camera/lights/env
       clearTimeout(watchdog);
       window.removeEventListener('keydown', onKey, true);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -180,19 +303,11 @@ function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
     // resolve with whatever arrived rather than hanging forever.
     watchdog = setTimeout(finish, durationMs + 8000);
 
-    // Drive alpha from wall-clock time inside the render loop — frame-rate
-    // independent, and the recorder samples whatever the loop produces.
-    observer = scene.onBeforeRenderObservable.add(() => {
-      const now = performance.now();
-      if (!startTs) startTs = now;
-      const t = (now - startTs) / durationMs;
-      if (t >= 1) {
-        camera.alpha = turntableAlpha(startAlpha, 1, { direction, ease });
-        if (rec.state === 'recording') rec.stop();
-        return;
-      }
-      camera.alpha = turntableAlpha(startAlpha, t, { direction, ease });
-      onProgress?.(t);
+    // Shared sweep drives camera + lights (+ env) from wall-clock time inside
+    // the render loop; the recorder samples whatever the loop produces.
+    sweep = _startSweep({
+      durationS, direction, ease, onProgress,
+      onComplete: () => { if (rec.state === 'recording') rec.stop(); },
     });
 
     canvas.style.pointerEvents = 'none';     // lock nav — the camera is scripted

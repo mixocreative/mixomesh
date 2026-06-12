@@ -2377,7 +2377,8 @@ All of it writes `state.scene.render` (silent) and applies via
   - **Render view** checkbox — compose mode: parks the free-nav camera pose,
     jumps to the stored `renderOut.pose` (first use seeds it from the current
     view), and shows the `ui/RenderFrame.js` overlay (aspect-fit rect for the
-    output resolution; giant box-shadow darkens outside; pointer-events pass
+    output resolution; giant box-shadow darkens outside; centre crosshair as
+    a composition aid; pointer-events pass
     through so nav still works). The render pose updates AUTOMATICALLY while
     the mode is on — every camera move is debounce-stored (250 ms) via the
     camera's `onViewMatrixChangedObservable`, plus a final snapshot on toggle
@@ -2391,13 +2392,22 @@ All of it writes `state.scene.render` (silent) and applies via
     capture and restored; transparent mode disables the background Layer +
     sets `clearColor` alpha 0 (`SceneManager.setBackgroundEnabled`).
   - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
-    ease in/out: `RenderOutput.recordTurntable` sweeps `camera.alpha` a full
-    signed 360° around the current target (wall-clock-driven inside
-    `onBeforeRenderObservable`; sinusoidal ease via
-    `render/RenderMath.turntableAlpha`), recording the live canvas with
+    ease in/out, plus a **Preview** button (plays the sweep live, no
+    recording — button toggles to "Stop preview", Esc also stops).
+    `RenderOutput._startSweep` (shared by preview + record) rotates the
+    WHOLE rig around the world origin together: `camera.alpha += δ`,
+    `camera.target`, the key/fill directional lights (direction + key
+    position), and `scene.environmentTexture.rotationY` when one exists —
+    rotating the lights with the camera is what makes it read as "model
+    spinning on a turntable under fixed studio lighting". The matching
+    world matrix is `RotationY(−δ)` (ArcRotate α moves the camera +X→+Z,
+    Babylon RotationY(+θ) maps +X→−Z — sign flips); hemi light points
+    straight up, rotation no-op. Wall-clock-driven inside
+    `onBeforeRenderObservable`, sinusoidal ease via
+    `render/RenderMath.turntableProgress`. Recording wraps the sweep with
     `canvas.captureStream` + MediaRecorder. Esc cancels; nav is locked
     (`pointerEvents none`); hidden-tab `visibilitychange` cancels (paused
-    rAF would stall the sweep forever); camera pose restored after.
+    rAF would stall the sweep forever); the full rig is restored after.
     Container: mp4 `avc3` preferred (avc1 rejects mid-stream resolution
     changes), WebM vp8 fallback — and an mp4 recording that comes back
     empty auto-retries once as WebM. Filenames share the §12 export-stem

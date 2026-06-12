@@ -14,7 +14,10 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
-import { capturePng, recordTurntable, isRecording } from '../core/RenderOutput.js';
+import {
+  capturePng, recordTurntable, isRecording,
+  previewTurntable, stopPreview, isPreviewing,
+} from '../core/RenderOutput.js';
 import { renderPngName, turntableVideoName, clampDimension } from '../core/render/RenderMath.js';
 import { RenderFrame } from './RenderFrame.js';
 import { Toast } from './Toast.js';
@@ -269,6 +272,7 @@ function _render() {
         <label><input type="checkbox" data-tt-toggle="ease" ${tt.ease ? 'checked' : ''}> Ease in / out</label>
       </div>
       <div class="pp-row pp-row-inline">
+        <button type="button" class="pp-btn" data-action="preview-turntable">${isPreviewing() ? 'Stop preview' : 'Preview'}</button>
         <button type="button" class="pp-btn" data-action="export-video">Export video</button>
       </div>
       <div class="pp-row pp-row-inline">
@@ -455,6 +459,21 @@ function _wireRendering() {
   });
   _bodyEl.querySelector('[data-tt-toggle="ease"]')?.addEventListener('change', (e) => {
     _setRenderOut({ turntable: { ease: e.target.checked } });
+  });
+
+  // Preview — plays the sweep live (camera + lights rotate around world
+  // origin together), no recording. Button toggles to Stop; Esc also stops.
+  _bodyEl.querySelector('[data-action="preview-turntable"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (isPreviewing()) { stopPreview(); return; }
+    if (isRecording()) return;
+    const tt = _ro().turntable;
+    btn.textContent = 'Stop preview';
+    try {
+      await previewTurntable(tt);
+    } finally {
+      btn.textContent = 'Preview';
+    }
   });
 
   _bodyEl.querySelector('[data-action="export-video"]')?.addEventListener('click', async (e) => {
