@@ -80,6 +80,13 @@ let _edgeMat = null;
 let _floor = null;
 let _floorMat = null;
 
+// HDRI environment (Scene ▸ Environment) — prefiltered .env cube textures
+// bundled in public/env/. Lighting only: scene.environmentTexture drives
+// PBR IBL while the gradient backdrop Layer stays the visible background.
+const HDRI_PRESETS = ['studio', 'neutral', 'outdoor'];
+let _hdriTex    = null;   // live CubeTexture (kept while enabled)
+let _hdriPreset = null;   // which preset _hdriTex was built from
+
 // ── Init ─────────────────────────────────────────────────
 
 /**
@@ -479,6 +486,7 @@ export function applyRenderSettings(render = {}) {
   if (typeof render.vignette === 'boolean') ip.vignetteEnabled = render.vignette;
   if (Number.isFinite(render.vignetteWeight)) ip.vignetteWeight = render.vignetteWeight;
   _updateFloor(render);
+  _updateHdri(render);
   if (_shadowGen) {
     if (Number.isFinite(render.shadowDarkness)) _shadowGen.darkness = render.shadowDarkness;
     const light = _shadowGen.getLight?.();
@@ -525,6 +533,36 @@ function _updateFloor(render) {
     // 0.05 mm below the requested height — at the default Z=0 the bed grid
     // ground sits at exactly y=0 and an opaque coplanar floor would z-fight.
     _floor.position.y = render.floorZMM / 1000 - 0.00005;
+  }
+}
+
+// ── HDRI environment lighting ────────────────────────────
+
+// Partial-safe like the rest of applyRenderSettings. Texture is created on
+// first enable / preset change and disposed on preset change; toggling off
+// detaches it from the scene but keeps it cached for cheap re-enable.
+function _updateHdri(render) {
+  if (typeof render.hdriPreset === 'string' && HDRI_PRESETS.includes(render.hdriPreset)
+      && render.hdriPreset !== _hdriPreset && _hdriTex) {
+    _hdriTex.dispose();
+    _hdriTex = null;
+    _hdriPreset = null;
+  }
+  if (typeof render.hdriEnabled === 'boolean') {
+    if (render.hdriEnabled) {
+      const preset = HDRI_PRESETS.includes(render.hdriPreset) ? render.hdriPreset
+                   : (_hdriPreset ?? 'studio');
+      if (!_hdriTex) {
+        _hdriTex = BABYLON.CubeTexture.CreateFromPrefilteredData(`env/${preset}.env`, _scene);
+        _hdriPreset = preset;
+      }
+      _scene.environmentTexture = _hdriTex;
+    } else {
+      _scene.environmentTexture = null;
+    }
+  }
+  if (Number.isFinite(render.hdriIntensity)) {
+    _scene.environmentIntensity = Math.max(0, Math.min(4, render.hdriIntensity));
   }
 }
 

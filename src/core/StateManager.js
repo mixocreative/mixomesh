@@ -45,6 +45,10 @@ const INITIAL_STATE = {
       // Environment floor — solid-colour shadow-catcher plane (Scene ▸
       // Environment). zMM = height in print-space Z (Babylon Y), mm.
       floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0,
+      // HDRI image-based lighting (prefiltered .env files in public/env/).
+      // Lighting only — the gradient backdrop stays; affects PBR materials
+      // (imported glTF/OBJ). Intensity = scene.environmentIntensity.
+      hdriEnabled: true, hdriPreset: 'studio', hdriIntensity: 0.6,
     },
     // Render output (Scene ▸ Rendering): PNG stills + turntable video.
     // pose = saved render-camera composition (null until the user sets one);

@@ -85,9 +85,10 @@ function _sweepRig() {
       key.position  = BABYLON.Vector3.TransformCoordinates(starts.keyPos, m);
     }
     if (fill) fill.direction = BABYLON.Vector3.TransformCoordinates(starts.fillDir, m);
-    // Sign chosen to match the analytic lights; verify against a real HDR
-    // when IBL lands (no environmentTexture exists yet).
-    if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot - delta;
+    // +δ verified EMPIRICALLY (browser-smoke mirror-sphere probe): with this
+    // sign a mid-sweep capture matches the baseline (lighting fixed relative
+    // to camera); −δ made the env counter-rotate (sweepDiff > ctrlDiff).
+    if (scene.environmentTexture) scene.environmentTexture.rotationY = starts.envRot + delta;
   };
 
   const restore = () => {

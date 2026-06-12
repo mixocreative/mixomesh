@@ -243,6 +243,52 @@ async function main() {
         && Math.abs(keyLight.direction.z - d0.z) < 1e-6;
       cam.target.set(0, 0, 0);   // undo the pan for later checks
 
+      // HDRI sweep sign — with a mirror sphere at the origin and HDRI
+      // lighting on, the turntable must keep lighting FIXED RELATIVE TO THE
+      // CAMERA: a mid-sweep capture matches the baseline, while rotating the
+      // camera alone (negative control — env left in place) does not.
+      const B = window.BABYLON;
+      sm.SceneManager.applyRenderSettings({ hdriEnabled: true, hdriPreset: 'studio', hdriIntensity: 1 });
+      const sc = sm.SceneManager.getScene();
+      for (let i = 0; i < 100 && !sc.environmentTexture?.isReady?.(); i++) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const probe = B.MeshBuilder.CreateSphere('hdri-probe', { diameter: 0.12, segments: 32 }, sc);
+      const probeMat = new B.PBRMaterial('hdri-probe-mat', sc);
+      probeMat.metallic = 1;
+      probeMat.roughness = 0.08;
+      probe.material = probeMat;
+      cam.target.set(0, 0, 0);
+      cam.alpha = Math.PI / 3; cam.beta = Math.PI / 3; cam.radius = 0.4;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const grab = async () => {
+        const blob = await ro.capturePng({ width: 96, height: 96 });
+        const bmp = await createImageBitmap(blob);
+        const c2 = new OffscreenCanvas(96, 96);
+        const cx = c2.getContext('2d');
+        cx.drawImage(bmp, 0, 0);
+        return cx.getImageData(0, 0, 96, 96).data;
+      };
+      const meanDiff = (a, b) => {
+        let sum = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          sum += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+        }
+        return sum / (a.length / 4);
+      };
+      const basePix = await grab();
+      cam.alpha += Math.PI / 2;   // negative control: camera alone
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const ctrlPix = await grab();
+      cam.alpha -= Math.PI / 2;
+      const sweepPromise = ro.previewTurntable({ durationS: 2, direction: 'left', ease: false });
+      await new Promise(r => setTimeout(r, 500));   // ~90° into the sweep
+      const sweepPix = await grab();
+      await sweepPromise;
+      const hdri = { sweepDiff: meanDiff(basePix, sweepPix), ctrlDiff: meanDiff(basePix, ctrlPix) };
+      probe.dispose();
+      probeMat.dispose();
+
       // Environment floor: enabling creates the shadow-catcher plane with the
       // requested colour + height (0.05 mm anti-z-fight offset below).
       sm.SceneManager.applyRenderSettings({ floorEnabled: true, floorColor: '#ff0000', floorZMM: 10 });
@@ -261,7 +307,7 @@ async function main() {
         oAlpha: await alphaAt(oBlob),
         videoOk, videoBytes: video?.blob?.size ?? 0,
         floorOk, floorHidden,
-        crosshair, previewResult, rigRestored, mid,
+        crosshair, previewResult, rigRestored, mid, hdri,
       };
     })()`);
     assert(rendering.hasControls, 'Scene ▸ Rendering controls missing');
@@ -281,6 +327,10 @@ async function main() {
       `mid-sweep camera left the origin circle — sweep is not a world-origin rotation: ${JSON.stringify(rendering.mid)}`);
     assert(rendering.mid.targetOnCircle,
       `mid-sweep target left its origin circle — re-aim or pan crept in: ${JSON.stringify(rendering.mid)}`);
+    assert(rendering.hdri.ctrlDiff > 4,
+      `HDRI probe insensitive — camera-only rotation barely changed the sphere: ${JSON.stringify(rendering.hdri)}`);
+    assert(rendering.hdri.sweepDiff < rendering.hdri.ctrlDiff * 0.4,
+      `HDRI rotated against the camera during the sweep (wrong rotationY sign?): ${JSON.stringify(rendering.hdri)}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

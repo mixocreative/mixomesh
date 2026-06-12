@@ -53,7 +53,16 @@ const RENDER_DEFAULTS = {
   floorEnabled: false,
   floorColor: '#9a9a9a',
   floorZMM: 0,
+  hdriEnabled: true,
+  hdriPreset: 'studio',
+  hdriIntensity: 0.6,
 };
+
+const HDRI_PRESETS = [
+  { id: 'studio',  label: 'Studio' },
+  { id: 'neutral', label: 'Neutral' },
+  { id: 'outdoor', label: 'Outdoor' },
+];
 
 const RENDEROUT_DEFAULTS = {
   width: 1920, height: 1080, transparent: false, pose: null,
@@ -180,6 +189,22 @@ function _render() {
           <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
         </select>
       </div>
+      <div class="pp-subhead">HDRI lighting</div>
+      <div class="pp-row pp-row-inline">
+        <label><input type="checkbox" data-render-toggle="hdriEnabled" ${render.hdriEnabled ? 'checked' : ''}> HDRI</label>
+      </div>
+      ${render.hdriEnabled ? `
+      <div class="pp-row">
+        <label>Preset</label>
+        <select data-render-select="hdriPreset">
+          ${HDRI_PRESETS.map(p =>
+            `<option value="${p.id}" ${render.hdriPreset === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="pp-row">
+        <label>Intensity</label>
+        <input type="number" step="0.1" min="0" max="4" data-render="hdriIntensity" value="${_fmt(render.hdriIntensity, 1)}">
+      </div>` : ''}
       <div class="pp-subhead">Grade</div>
       <div class="pp-row">
         <label>Exposure</label>
@@ -410,7 +435,7 @@ function _wire() {
     box.addEventListener('change', () => {
       const key = box.dataset.renderToggle;
       _setRender({ [key]: box.checked });
-      if (['vignette', 'floorEnabled', 'shadowsEnabled'].includes(key)) _render();
+      if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled'].includes(key)) _render();
     });
   });
 

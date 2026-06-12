@@ -81,6 +81,9 @@ Runtime contract:
   video container — WebCodecs chunks → mp4, zero-dependency), and Babylon
   npm packages. Tests use Node's built-in test runner unless a future
   feature explicitly needs Vitest.
+- `public/env/` holds the three prefiltered HDRI presets (`studio.env`,
+  `neutral.env`, `outdoor.env` — copies of Babylon CDN environment assets,
+  served at `/env/*` by Vite and copied into `dist/`).
 - Dependency install is npm-first via `node scripts/install-deps.mjs`, which
   forces repo-local `.tmp/` and `.npm-cache/` paths and bypasses broken
   user-level npm shims on Windows by invoking the system npm CLI through Node.
@@ -722,7 +725,11 @@ const initialState = {
               saturation: 0 /* colorCurves.globalSaturation, -100..100 */,
               vignette: false, vignetteWeight: 1.5,
               // Environment floor — shadow-catcher plane (Z in print-space mm).
-              floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0 },
+              floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0,
+              // HDRI IBL — prefiltered .env presets in public/env/ (lighting
+              // only, gradient backdrop stays; PBR materials).
+              hdriEnabled: true, hdriPreset: 'studio' /* |'neutral'|'outdoor' */,
+              hdriIntensity: 0.6 },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
     // first Render-view use; auto-updated while the mode is on).
@@ -1649,7 +1656,8 @@ Every field persisted. Restored exactly.
                 "fovDeg": 45.8, "clipNearMM": 1,
                 "toneMapping": "aces", "saturation": 0,
                 "vignette": false, "vignetteWeight": 1.5,
-                "floorEnabled": false, "floorColor": "#9a9a9a", "floorZMM": 0 },
+                "floorEnabled": false, "floorColor": "#9a9a9a", "floorZMM": 0,
+                "hdriEnabled": true, "hdriPreset": "studio", "hdriIntensity": 0.6 },
     "renderOut": { "width": 1920, "height": 1080, "transparent": false,
                    "pose": null, /* or saved camera pose for the Render view */
                    "turntable": { "durationS": 8, "fps": 30, "direction": "left", "ease": true } },
@@ -2367,7 +2375,13 @@ Sections:
   axes visibility checkboxes (overlay contract), bed-size hint.
 - **Environment** (header renamed from "Render" 2026-06-13; state key stays
   `scene.render` — no save migration) — background Light/Dark (repaints the
-  gradient backdrop + clearColor), exposure, contrast, **tone map** (ACES /
+  gradient backdrop + clearColor), **HDRI lighting** (default ON: toggle +
+  preset Studio/Neutral/Outdoor + intensity — prefiltered `.env` cube
+  textures bundled in `public/env/` (Babylon asset CDN copies), loaded via
+  `CubeTexture.CreateFromPrefilteredData` into `scene.environmentTexture`;
+  LIGHTING ONLY — no skybox, the gradient backdrop stays visible; drives
+  IBL on PBR materials i.e. every imported model; texture cached across
+  toggle off/on, disposed on preset change), exposure, contrast, **tone map** (ACES /
   Neutral-KHR / Standard / Off — `imageProcessing.toneMappingType`),
   **saturation** (`colorCurves.globalSaturation`, −100..100, curves enabled
   only when ≠ 0), **vignette** toggle + weight, **floor** (solid-colour
@@ -2421,7 +2435,10 @@ All of it writes `state.scene.render` (silent) and applies via
     camera is what makes it read as "model spinning on a turntable under
     fixed studio lighting". World matrix is `RotationY(−δ)` for alpha +δ
     (ArcRotate α moves the camera +X→+Z, Babylon RotationY(+θ) maps +X→−Z —
-    sign flips; verified numerically). Hemi points straight up, no-op.
+    sign flips; verified numerically). environmentTexture.rotationY uses
+    **+δ** — verified EMPIRICALLY by the smoke's mirror-sphere probe (a
+    mid-sweep capture must match the baseline while a camera-only rotation
+    must not; −δ counter-rotated the env). Hemi points straight up, no-op.
     Sinusoidal ease via `render/RenderMath.turntableProgress`; full rig
     restored after done/cancel; Esc cancels; nav locked during. The smoke
     pins both invariants with a panned composition: |position| AND |target|
