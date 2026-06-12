@@ -111,6 +111,9 @@ vite.config.ts             ← Vite dev/build config
 tsconfig.json              ← TypeScript migration config
 scripts/
   install-deps.mjs         ← dependency bootstrap with local cache/temp paths
+  ui-screenshot.mjs        ← headless 4-workspace capture harness (PROBE=1 dumps geometry)
+public/
+  env/                     ← HDRI presets: studio/neutral/outdoor .env (prefiltered cube textures)
 src/
   app/boot.ts              ← Babylon npm namespace bridge
   app/main.ts              ← app bootstrap + dependency wiring
@@ -212,7 +215,15 @@ src/
     NavCube.js             ← top-left orientation widget
 tests/                     ← headless harness — Node-native, no build (§14b)
   register-hooks.mjs       ← `node:module.register` entry; runner uses --import
-  browser-smoke.mjs        ← Vite-backed local Chrome/Edge CDP smoke test; no package deps
+  browser-smoke.mjs        ← Vite-backed local Chrome/Edge CDP smoke test; no package deps.
+                             Beyond shell/UI checks it functionally pins the rendering stack:
+                             transparent (alpha 0) + opaque (alpha 255) PNG capture, the
+                             floor shadow-only swap (lower-frame alpha < 255 with floor on),
+                             a real 1 s offline-WebCodecs mp4 recorded headless, the rigid
+                             turntable invariants (|position| AND |target| on origin circles
+                             mid-sweep with a panned composition), the HDRI mirror-sphere
+                             rotation probe (mid-sweep capture ≈ baseline, camera-only ≠),
+                             render-frame overlay + crosshair, and Scene-panel controls
   browser-video-check.mjs  ← HEADED full-size turntable check (`test:video`, manual)
   webcodecs-probe.mjs      ← headless VideoEncoder sanity probe (diagnostic, not in npm scripts)
   render-output.test.mjs   ← RenderMath: easing/format/frame-fit/filename contracts
@@ -249,8 +260,9 @@ Boot order:
 1. `src/app/boot.ts` imports pinned Babylon packages, `@babylonjs/loaders`,
    `@babylonjs/materials`, and `@babylonjs/serializers`.
 2. `boot.ts` builds `window.BABYLON` with the exact symbols used by the JS
-   modules: core scene/mesh/camera/math/material classes, `GridMaterial`,
-   `OBJExport`, and `STLExport`.
+   modules: core scene/mesh/camera/math/material classes, `CubeTexture`
+   (HDRI prefiltered env load), `GridMaterial`, `ShadowOnlyMaterial`
+   (transparent-PNG floor swap), `OBJExport`, and `STLExport`.
 3. `boot.ts` imports `src/app/main.ts`.
 4. `main.ts` blocks non-Chrome/Edge by requiring
    `'showDirectoryPicker' in window`.
@@ -2795,8 +2807,17 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/state-shape.test.mjs` | 10 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = true`, persistence migration shallow-merge handles missing keys |
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: layout per printer profile, texture dedup, UV round-trip via pseudo-loader regex, Bambu fallback to colorgroup |
 | `tests/validator-group.test.mjs` | 5 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam |
+| `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |
 
-**Total: 112 tests.** Drives the *real* modules — passing tests guarantee the load-path math, byte fidelity, and export pipeline. **Out of scope (deferred human Chrome pass):** live Babylon scene round-trip, `showSaveFilePicker` save flow (the picker prompts the user — verified live in Chrome; the test harness exercises the anchor-fallback branch of `triggerDownload` only), autosave timer firing, Outliner ghost row UI, 3MF rendered in a slicer.
+The table is NOT exhaustive — `npm test` runs every `tests/*.test.mjs`
+(see the file tree; later additions cover workspaces, texture identity,
+hybrid asset resolve, shader rebinds, validation cache, …). Drives the
+*real* modules — passing tests guarantee the load-path math, byte
+fidelity, and export pipeline. **Out of scope (headless):** live Babylon
+scene round-trip, `showSaveFilePicker` save flow (the picker prompts the
+user — verified live in Chrome; the test harness exercises the
+anchor-fallback branch of `triggerDownload` only), autosave timer firing,
+Outliner ghost row UI, 3MF rendered in a slicer.
 
 ### Browser Smoke Harness
 
@@ -2809,7 +2830,16 @@ node tests/browser-smoke.mjs
 The script uses only Node built-ins, the repo-local Vite executable, and a
 locally installed Chrome or Edge. It starts a temporary Vite server, opens
 `index.html`, verifies the local npm-built Babylon namespace, waits for
-the boot overlay to clear, and asserts the main shell panels/render canvas.
+the boot overlay to clear, and asserts the main shell panels/render canvas
+— plus the functional rendering-stack pins listed at the file-tree entry
+(PNG alpha, floor shadow-only swap, offline mp4, turntable rigidity, HDRI
+rotation probe).
+
+Companions: `npm run test:export` (functional export round-trip incl. the
+OBJ-worker path), `npm run test:video` (OPTIONAL, opens a small HEADED
+window — MediaRecorder freezes headless Chromium; `VIDEO_CHECK_EDGE=1`
+forces Edge), and `tests/webcodecs-probe.mjs` (diagnostic: VideoEncoder
+sanity in headless Chrome).
 It launches the browser headless with a
 remote-debugging port, drives Chrome DevTools Protocol directly, and fails on
 page exceptions or console errors. Assertions cover app boot, canvas, project
