@@ -823,11 +823,13 @@ const initialState = {
     // drivers. Instead:
     //  (a) FILL — per clipped solid, a shared-geometry CLONE (parent=null with
     //      the source world matrix baked, no metadata.meshId) renders the
-    //      source's BACK faces with a flat opaque striped unlit material (front
-    //      faces culled via flipped `sideOrientation`). Looking into the cut, the
-    //      solid interior fills with a solid cap colour instead of a see-through
-    //      lit shell. Clone shares geometry (no RAM dup), gets its own clip
-    //      observers so its front half is cut to match, idempotent per mesh.
+    //      source's BACK faces with a SEMI-TRANSPARENT amber (#f59e0b) striped
+    //      unlit material — translucent body (α0.30) + denser stripes (α0.78),
+    //      alpha-blended, depth-write off (front faces culled via flipped
+    //      `sideOrientation`). Looking into the cut, the interior reads as a
+    //      translucent amber hatched section instead of a lit hollow shell.
+    //      Clone shares geometry (no RAM dup), gets its own clip observers so its
+    //      front half is cut to match, idempotent per mesh.
     //  (b) BORDER — a thin accent rectangle OUTLINE (LinesMesh) at the plane
     //      extent so the plane is visible even where the cut misses the solid.
     // Both carry no metadata.meshId (auto-excluded from clip/shadow/mask). The
@@ -2632,10 +2634,11 @@ Sections:
   `SceneManager.getSectionExtentMM(axis)`), flip side → `SceneManager.setSectionPlane`.
   The slider drives the cut live on `input` (cheap — no extra geometry pass);
   the axis select re-renders so the range follows. Cuts content meshes only; an
-  a back-face FILL clone makes the solid interior read solid (hides the hollow
-  shell, any GPU, no stencil) and an accent border outlines the plane (both
-  viewport-only — inspection, not real geometry). Hint documents that grid/floor
-  stay, the geometric cut shows in exports, shadows stay uncut.
+  a back-face FILL clone renders the cut interior as a translucent amber
+  (#f59e0b) hatched section — semi-transparent body + denser stripes, any GPU,
+  no stencil — and an accent border outlines the plane (both viewport-only —
+  inspection, not real geometry). Hint documents that grid/floor stay, the
+  geometric cut shows in exports, shadows stay uncut.
 All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror

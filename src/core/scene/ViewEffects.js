@@ -182,40 +182,44 @@ function _contentBounds() {
 
 function _buildStripeTexture() {
   const N = 256;
-  const tex = new BABYLON.DynamicTexture('mx-section-stripes', N, _scene, false);
+  const tex = new BABYLON.DynamicTexture('mx-section-stripes', N, _scene, true);
   const ctx = tex.getContext();
-  // OPAQUE fill + dark diagonal hatch — the cut face reads as a SOLID machined
-  // cross-section (Fusion-style) and, with depth-write on, OCCLUDES the hollow
-  // interior / back faces behind the plane. Semi-transparency is deliberately
-  // NOT used: a see-through face would reveal the hollow it's meant to hide.
-  ctx.fillStyle = `rgb(${ACCENT_RGB})`;
+  // Theme accent #f59e0b throughout: a SEMI-TRANSPARENT amber fill with denser
+  // (less-transparent) amber diagonal stripes on top, so the stripes read over
+  // the translucent body — Fusion-style hatched section.
+  ctx.clearRect(0, 0, N, N);
+  ctx.fillStyle = `rgba(${ACCENT_RGB}, 0.30)`;     // translucent body
   ctx.fillRect(0, 0, N, N);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.32)';
+  ctx.strokeStyle = `rgba(${ACCENT_RGB}, 0.78)`;    // stripes — same amber, MORE opaque
   ctx.lineWidth = 16;
   for (let i = -N; i < N * 2; i += 48) {
     ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + N, N); ctx.stroke();
   }
   tex.update();
-  return tex;   // opaque (no hasAlpha) — occludes what's behind the cut
+  tex.hasAlpha = true;
+  return tex;
 }
 
-// Shared back-face fill material: flat opaque stripes, unlit. Renders the
-// source mesh's BACK faces (front culled via flipped sideOrientation) so the
-// solid interior fills with a solid cap colour. zOffset pushes it just behind
-// the skin to avoid z-fighting double-sided source materials.
+// Shared back-face fill material: SEMI-TRANSPARENT amber (#f59e0b) stripes,
+// unlit. Renders the source mesh's BACK faces (front culled via flipped
+// sideOrientation) so the cut interior reads as a translucent amber section
+// with denser stripes. Alpha-blended (emissive carries the amber so it reads
+// the same under any lighting).
 function _ensureCapMaterial() {
   if (_capMat) return _capMat;
   _capTex = _buildStripeTexture();
   const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
   mat.diffuseTexture  = _capTex;
   mat.emissiveTexture = _capTex;
+  mat.useAlphaFromDiffuseTexture = true;
+  mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
   mat.disableLighting = true;
+  mat.disableDepthWrite = true;        // translucent overlay — don't occlude
   mat.backFaceCulling = true;
   // Flip winding interpretation → the source's back faces become "front" and
   // render; the original front faces cull. (Imports are CCW-front; if a model
   // reads inverted, flip this one constant.)
   mat.sideOrientation = BABYLON.Material.ClockWiseSideOrientation;
-  mat.zOffset = 1;
   _capMat = mat;
   return mat;
 }
