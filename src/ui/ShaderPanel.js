@@ -375,7 +375,7 @@ function _wireList() {
 function _renderEditorEmpty() {
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>${sectionIcon('SlidersHorizontal')}Editor</span></header>
+      <header class="sp-section-header"><span>${sectionIcon('Edit3')}Editor</span></header>
       <div class="sp-empty">Select a shader above to edit it.</div>
     </section>
   `;
@@ -389,7 +389,7 @@ function _renderEditor(sh) {
 
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>${sectionIcon('SlidersHorizontal')}Editor</span></header>
+      <header class="sp-section-header"><span>${sectionIcon('Edit3')}Editor</span></header>
 
       <div class="sp-row-form">
         <label>Name</label>

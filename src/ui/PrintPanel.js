@@ -81,10 +81,10 @@ function _renderTabs() {
     export: 'Export',
   };
   const tabIcons = {
-    scale: 'Ruler',
+    scale: 'Percent',
     validation: 'CheckCircle',
-    bed: 'Box',
-    export: 'Download',
+    bed: 'Maximize',
+    export: 'FileDown',
   };
 
   let html = '<div class="pp-tabs" role="tablist" aria-label="Print settings">';

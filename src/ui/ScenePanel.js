@@ -240,7 +240,7 @@ function _render() {
         <label>Intensity</label>
         <input type="number" step="0.1" min="0" max="4" data-render="hdriIntensity" value="${_fmt(render.hdriIntensity, 1)}">
       </div>` : ''}
-      ${_subhead('Grade', 'Contrast')}
+      ${_subhead('Grade', 'Wand2')}
       <div class="pp-row">
         <label>Exposure</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="exposure" value="${_fmt(render.exposure)}">
@@ -359,7 +359,7 @@ function _render() {
       </div>` : ''}`;
 
   const renderingSec = `
-      ${_subhead('Still', 'Image')}
+      ${_subhead('Still', 'ImageDown')}
       <div class="pp-row">
         <label>Resolution</label>
         <select data-ro-preset>
@@ -388,7 +388,7 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="export-png" title="Ctrl+Alt+E">Export PNG</button>
       </div>
-      ${_subhead('Turntable', 'RotateCw')}
+      ${_subhead('Turntable', 'Disc3')}
       <div class="pp-row">
         <label>Duration (s)</label>
         <input type="number" step="1" min="1" max="120" data-tt="durationS" value="${_fmt(tt.durationS, 0)}">
