@@ -184,19 +184,27 @@ function _buildStripeTexture() {
   const N = 256;
   const tex = new BABYLON.DynamicTexture('mx-section-stripes', N, _scene, true);
   const ctx = tex.getContext();
-  // Theme accent #f59e0b throughout: a SEMI-TRANSPARENT amber fill with denser
-  // (less-transparent) amber diagonal stripes on top, so the stripes read over
-  // the translucent body — Fusion-style hatched section.
+  // The texture carries ONLY the diagonal stripe ALPHA pattern in white — the
+  // amber (#f59e0b) hue comes from the material's emissiveColor, so the colour
+  // is exact regardless of blending. White body (α0.45) + denser white stripes
+  // (α0.92). PLANAR-projected (set below) so the diagonals are uniform in world
+  // space rather than smeared across the model's own UVs (which gave no visible
+  // stripes on textured / UV-less meshes).
   ctx.clearRect(0, 0, N, N);
-  ctx.fillStyle = `rgba(${ACCENT_RGB}, 0.30)`;     // translucent body
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';     // translucent body
   ctx.fillRect(0, 0, N, N);
-  ctx.strokeStyle = `rgba(${ACCENT_RGB}, 0.78)`;    // stripes — same amber, MORE opaque
-  ctx.lineWidth = 16;
-  for (let i = -N; i < N * 2; i += 48) {
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';    // stripes — more opaque
+  ctx.lineWidth = 18;
+  for (let i = -N; i < N * 2; i += 44) {
     ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + N, N); ctx.stroke();
   }
   tex.update();
   tex.hasAlpha = true;
+  // Planar projection in WORLD space → uniform diagonal stripes on any geometry,
+  // independent of the model's UVs.
+  tex.coordinatesMode = BABYLON.Texture.PLANAR_MODE;
+  tex.uScale = 6;
+  tex.vScale = 6;
   return tex;
 }
 
@@ -209,8 +217,12 @@ function _ensureCapMaterial() {
   if (_capMat) return _capMat;
   _capTex = _buildStripeTexture();
   const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
-  mat.diffuseTexture  = _capTex;
-  mat.emissiveTexture = _capTex;
+  // Colour = constant amber emissive (exact #f59e0b); the texture supplies only
+  // the diagonal stripe ALPHA. disableLighting → output is pure emissive amber,
+  // alpha-modulated by the stripe pattern.
+  mat.emissiveColor = _accent.clone();
+  mat.diffuseColor  = new BABYLON.Color3(0, 0, 0);
+  mat.diffuseTexture = _capTex;                 // alpha pattern only
   mat.useAlphaFromDiffuseTexture = true;
   mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
   mat.disableLighting = true;

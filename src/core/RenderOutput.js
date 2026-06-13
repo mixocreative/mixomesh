@@ -15,15 +15,15 @@
 // truth, not wherever free navigation happens to be (UX audit U1). No pose →
 // current view.
 //
-// Video path: offline WebCodecs encode (primary) with a direct RTT-pixels →
+// Video path: offline WebCodecs encode ONLY, with a direct RTT-pixels →
 // VideoFrame feed — no per-frame PNG encode/decode round-trip (perf audit).
-// MediaRecorder is the fallback only when WebCodecs is missing; it
-// hard-freezes the renderer on Chrome 149 and in all headless Chromium.
+// The MediaRecorder fallback was REMOVED: it hard-freezes the renderer on
+// Chrome 149 and in all headless Chromium, so it was never a safe fallback.
 
 import { EVENTS } from './events.js';
 import { getState, subscribe } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
-import { turntableProgress, pickVideoFormat, clampDimension } from './render/RenderMath.js';
+import { turntableProgress, clampDimension } from './render/RenderMath.js';
 
 const BABYLON = window.BABYLON;
 
@@ -403,22 +403,19 @@ async function _waitReady(texture, camera) {
 /**
  * Record a full 360° turntable.
  *
- * Primary path: OFFLINE WebCodecs encode — the sweep is stepped frame by
- * frame, each frame rendered into a reused RTT at the EXACT output
- * resolution (screen size irrelevant), its pixels fed straight into a
- * hardware VideoEncoder, muxed to mp4 by mp4-muxer (lazy-loaded).
- * Deterministic (no dropped frames) and — crucially — it does not touch
- * MediaRecorder, which hard-freezes/crashes the renderer on Chrome 149
- * (STATUS_BREAKPOINT) and in all headless Chromium.
+ * OFFLINE WebCodecs encode — the sweep is stepped frame by frame, each frame
+ * rendered into a reused RTT at the EXACT output resolution (screen size
+ * irrelevant), its pixels fed straight into a hardware VideoEncoder, muxed to
+ * mp4 by mp4-muxer (lazy-loaded). Deterministic (no dropped frames).
  *
- * Fallback (no WebCodecs): realtime MediaRecorder capture of the live
- * canvas at viewport size. mp4 preferred, with an auto-retry as WebM when
- * the mp4 encoder silently produces zero bytes.
+ * WebCodecs is the ONLY path — the old MediaRecorder fallback was dropped: it
+ * hard-freezes/crashes the renderer on Chrome 149 (STATUS_BREAKPOINT) and in
+ * all headless Chromium, so it was never a safe fallback. No WebCodecs ⇒ a
+ * clear error (Chrome/Edge required), not a hung tab.
  *
- * With `pose`, the whole turntable shoots from the stored render
- * composition; free navigation is restored after.
- *
- * Esc or a project switch cancels either path; resolves null when cancelled.
+ * With `pose`, the whole turntable shoots from the stored render composition;
+ * free navigation is restored after. Esc or a project switch cancels; resolves
+ * null when cancelled.
  * @param {{ durationS?: number, fps?: number, direction?: 'left'|'right',
  *           ease?: boolean, width?: number, height?: number,
  *           pose?: object|null, onProgress?: (frac: number) => void }} opts
@@ -426,29 +423,14 @@ async function _waitReady(texture, camera) {
  */
 export async function recordTurntable(opts = {}) {
   if (_recording) return null;
+  if (typeof VideoEncoder !== 'function') {
+    throw new Error('Video export requires WebCodecs (Chrome or Edge) — this browser has no VideoEncoder.');
+  }
   const navPose = opts.pose ? SceneManager.saveCameraState() : null;
   if (opts.pose) SceneManager.restoreCameraState(opts.pose);
   let projectSwitched = false;
   try {
-    if (typeof VideoEncoder === 'function') {
-      try {
-        return await _recordOffline(opts, () => { projectSwitched = true; });
-      } catch (err) {
-        console.warn('WebCodecs offline encode failed — falling back to MediaRecorder:', err);
-      }
-    }
-    if (typeof MediaRecorder !== 'function') {
-      throw new Error('Neither WebCodecs nor MediaRecorder is available in this browser');
-    }
-    const fmt = pickVideoFormat((m) => MediaRecorder.isTypeSupported(m));
-    const result = await _recordOnce(fmt, opts, () => { projectSwitched = true; });
-    if (result && result.blob.size === 0 && fmt.ext === 'mp4') {
-      console.warn('mp4 recording came back empty — retrying as WebM');
-      const webm = pickVideoFormat((m) =>
-        m.startsWith('video/webm') && MediaRecorder.isTypeSupported(m));
-      return await _recordOnce(webm, opts, () => { projectSwitched = true; });
-    }
-    return result;
+    return await _recordOffline(opts, () => { projectSwitched = true; });
   } finally {
     // Project switch: the new project's camera wins, never the stale pose.
     if (navPose && !projectSwitched) SceneManager.restoreCameraState(navPose);
@@ -574,97 +556,3 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
   }
 }
 
-function _recordOnce(fmt, { durationS = 8, fps = 30, direction = 'left',
-                            ease = true, onProgress } = {},
-                     onProjectSwitch) {
-  const engine = SceneManager.getEngine();
-  const scene  = SceneManager.getScene();
-  const camera = SceneManager.getCamera();
-  if (!engine || !scene || !camera) return Promise.reject(new Error('Scene not ready'));
-
-  const canvas = engine.getRenderingCanvas();
-  const durationMs = Math.max(1, durationS) * 1000;
-
-  _recording = true;
-  return new Promise((resolve, reject) => {
-    const startPose = SceneManager.saveCameraState();
-    const stream = canvas.captureStream(fps);
-    const rec = fmt.mime
-      ? new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: 16_000_000 })
-      : new MediaRecorder(stream, { videoBitsPerSecond: 16_000_000 });
-    const chunks = [];
-    rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
-
-    let cancelled = false;
-    let settled = false;
-    let skipCameraRestore = false;
-    let watchdog = null;
-    let sweep = null;
-
-    _abortRecord = (reason) => {
-      cancelled = true;
-      if (reason === 'project') { skipCameraRestore = true; onProjectSwitch?.(); }
-      if (rec.state !== 'inactive') rec.stop();
-      else settle(resolve, null);
-    };
-
-    const cleanup = () => {
-      sweep?.cancel(skipCameraRestore ? 'project' : undefined);   // idempotent
-      clearTimeout(watchdog);
-      window.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('visibilitychange', onVisibility);
-      canvas.style.pointerEvents = '';
-      for (const t of stream.getTracks()) t.stop();
-      if (!skipCameraRestore) SceneManager.restoreCameraState(startPose);
-      _abortRecord = null;
-      _recording = false;
-    };
-    const settle = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      fn(value);
-    };
-
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        cancelled = true;
-        if (rec.state !== 'inactive') rec.stop();
-      }
-    };
-    // Hidden tab = paused rAF = frozen render loop: the sweep would stall
-    // and the recording would never finish. Cancel instead of hanging.
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        cancelled = true;
-        if (rec.state !== 'inactive') rec.stop();
-        else settle(resolve, null);
-      }
-    };
-
-    const finish = () => {
-      if (cancelled) { settle(resolve, null); return; }
-      const mime = fmt.mime ? fmt.mime.split(';')[0] : (rec.mimeType || 'video/webm').split(';')[0];
-      settle(resolve, { blob: new Blob(chunks, { type: mime }), ext: fmt.ext, mime });
-    };
-    rec.onstop = finish;
-    rec.onerror = (e) => settle(reject, e.error ?? new Error('MediaRecorder error'));
-    // A broken encoder can go inactive without ever firing onstop/onerror —
-    // resolve with whatever arrived rather than hanging forever.
-    watchdog = setTimeout(finish, durationMs + 8000);
-
-    // Shared sweep drives camera + lights (+ env) from wall-clock time inside
-    // the render loop; the recorder samples whatever the loop produces.
-    sweep = _startSweep({
-      durationS, direction, ease, onProgress,
-      onComplete: () => { if (rec.state === 'recording') rec.stop(); },
-    });
-
-    canvas.style.pointerEvents = 'none';     // lock nav — the camera is scripted
-    window.addEventListener('keydown', onKey, true);
-    document.addEventListener('visibilitychange', onVisibility);
-    rec.start(250);                          // collect in 250 ms chunks
-  });
-}

@@ -824,10 +824,13 @@ const initialState = {
     //  (a) FILL — per clipped solid, a shared-geometry CLONE (parent=null with
     //      the source world matrix baked, no metadata.meshId) renders the
     //      source's BACK faces with a SEMI-TRANSPARENT amber (#f59e0b) striped
-    //      unlit material — translucent body (α0.30) + denser stripes (α0.78),
-    //      alpha-blended, depth-write off (front faces culled via flipped
-    //      `sideOrientation`). Looking into the cut, the interior reads as a
-    //      translucent amber hatched section instead of a lit hollow shell.
+    //      unlit material — hue is a constant amber EMISSIVE (#f59e0b, so it's
+    //      exact regardless of blending); a PLANAR-projected stripe texture
+    //      supplies only the ALPHA pattern (translucent body α0.45 + denser
+    //      stripes α0.92) so the diagonals stay uniform in world space rather
+    //      than smeared across the model's own UVs. alpha-blended, depth-write
+    //      off (front faces culled via flipped `sideOrientation`). Looking into
+    //      the cut, the interior reads as a translucent amber hatched section.
     //      Clone shares geometry (no RAM dup), gets its own clip observers so its
     //      front half is cut to match, idempotent per mesh.
     //  (b) BORDER — a thin accent rectangle OUTLINE (LinesMesh) at the plane
@@ -2728,19 +2731,15 @@ All of it writes `state.scene.render` (silent) and applies via
     skips the camera restore — the incoming project's camera wins, never a
     stale pose. Lights/env rotation still restore (app-fixed studio rig).
     Smoke pins the abort (recording resolves null, `isRecording()` clears).
-  - **Recording path 2 (fallback, only when WebCodecs is missing): realtime
-    MediaRecorder** of the live canvas at viewport size — mp4 `avc3`
-    preferred (avc1 rejects mid-stream resolution changes), WebM vp8 retry
-    on an empty mp4 result; hidden-tab `visibilitychange` cancels.
-  - ⚠ **MediaRecorder is broken**: it hard-freezes/crashes the renderer in
-    ALL headless Chromium, and in Chrome 149 even headed/live
-    (STATUS_BREAKPOINT — reproduced on a trivial 2D canvas; Chrome-build
-    bug, Edge 149 fine). **WebCodecs is unaffected** (verified by
-    `tests/webcodecs-probe.mjs`), which is why the offline path exists and
-    is the default — video export works on Chrome 149 through it. The
-    browser smoke records a real 1 s mp4 HEADLESS via the offline path;
-    `npm run test:video` (headed; `VIDEO_CHECK_EDGE=1` forces Edge) covers
-    a full-size sweep.
+  - **WebCodecs is the ONLY path** — the MediaRecorder fallback was REMOVED.
+    ⚠ MediaRecorder hard-freezes/crashes the renderer in ALL headless Chromium
+    and in Chrome 149 even headed/live (STATUS_BREAKPOINT — reproduced on a
+    trivial 2D canvas; Chrome-build bug, Edge 149 fine), so it was never a safe
+    fallback. No WebCodecs (`typeof VideoEncoder !== 'function'`) ⇒ a clear
+    "needs Chrome/Edge" error, not a hung tab. WebCodecs is unaffected (verified
+    by `tests/webcodecs-probe.mjs`). The browser smoke records a real 1 s mp4
+    HEADLESS via this path; `npm run test:video` (headed; `VIDEO_CHECK_EDGE=1`
+    forces Edge) covers a full-size sweep.
 
 ### Viewport Toolbar (`src/ui/ViewportToolbar.js`)
 
@@ -3100,10 +3099,11 @@ shadow pixels with a real caster (RENDERONCE tripwire), the SSAO
 enable/disable toggle, and the project-switch recording abort.
 
 Companions: `npm run test:export` (functional export round-trip incl. the
-OBJ-worker path), `npm run test:video` (OPTIONAL, opens a small HEADED
-window — MediaRecorder freezes headless Chromium; `VIDEO_CHECK_EDGE=1`
-forces Edge), and `tests/webcodecs-probe.mjs` (diagnostic: VideoEncoder
-sanity in headless Chrome).
+OBJ-worker path), `npm run test:video` (OPTIONAL headed full-size sweep;
+`VIDEO_CHECK_EDGE=1` forces Edge — video is WebCodecs-only now, MediaRecorder
+removed), `npm run test:webgpu` (WebGPU backend + WGSL + capture; headless SKIPs
+without an adapter, `WEBGPU_HEADFUL=1` for a real GPU), and
+`tests/webcodecs-probe.mjs` (diagnostic: VideoEncoder sanity in headless Chrome).
 It launches the browser headless with a
 remote-debugging port, drives Chrome DevTools Protocol directly, and fails on
 page exceptions or console errors. Assertions cover app boot, canvas, project
