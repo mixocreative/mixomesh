@@ -1,6 +1,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState } from '../core/StateManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { SettingsStore } from '../core/SettingsStore.js';
 import { HistoryManager, RenameProjectCommand } from '../core/HistoryManager.js';
 import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
@@ -27,6 +28,7 @@ export function init() {
       <button class="pm-btn" data-act="recent" title="Recent projects">${icon('Clock', { width: 15, height: 15 })}</button>
       <div class="pm-recent-list hidden"></div>
     </div>
+    <button class="pm-btn pm-btn-reset" data-act="reset-settings" title="Reset all settings to defaults">${icon('RotateCcw', { width: 15, height: 15 })}</button>
   `;
   header.appendChild(bar);
   _recentWrap = bar.querySelector('.pm-recent-list');
@@ -40,6 +42,10 @@ export function init() {
     if (act === 'save')   safeAsync(() => PersistenceManager.save());
     if (act === 'saveas') safeAsync(() => PersistenceManager.saveAs());
     if (act === 'recent') _toggleRecent();
+    if (act === 'reset-settings') {
+      SettingsStore.resetAll();
+      Toast.show('Settings reset to defaults', 'info', 2000);
+    }
   });
 
   document.addEventListener('pointerdown', (e) => {

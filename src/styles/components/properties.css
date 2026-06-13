@@ -27,6 +27,28 @@
   user-select: none;
 }
 .pp-section-header:hover { color: var(--text-1); }
+
+/* Per-section ↺ reset — pushed to the right edge, revealed on header hover /
+   keyboard focus so it doesn't clutter the header at rest. */
+.pp-sec-reset {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--r-sm, 3px);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.pp-section-header:hover .pp-sec-reset { opacity: 1; }
+.pp-sec-reset:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+.pp-sec-reset:hover { color: var(--accent); background: var(--bg-2); }
+.pp-sec-reset svg { width: 13px; height: 13px; display: block; }
+
 .pp-section-header::before {
   content: '';
   width: 0;

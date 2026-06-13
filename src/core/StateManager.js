@@ -1,4 +1,5 @@
 import { EVENTS } from './events.js';
+import DS from '../config/default-settings.json' with { type: 'json' };
 
 const DEV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
@@ -26,44 +27,23 @@ const INITIAL_STATE = {
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
       followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, uvCheckerView: false, invertedFaces: false, bedPreview: false },
+    // Display prefs (grid/axes/printPreview) come from default-settings.json
+    // (per-user persisted). Inspection modes (wireframe/baseColor/uvChecker/
+    // invertedFaces/bedPreview) are SESSION-ONLY — always boot off.
+    overlays: { ...DS.overlays, wireframe: false, baseColorView: false, uvCheckerView: false, invertedFaces: false, bedPreview: false },
     // Viewport render look (Scene panel). Defaults mirror scene/SceneConstants
     // (tone/shadow/light values) — applied via SceneManager.applyRenderSettings
     // on boot/load/new. fovDeg 45.8° = Babylon's 0.8 rad default; clipNearMM 1
     // = the 1 mm near plane CameraRig boots with.
-    render: {
-      exposure: 1.05, contrast: 1.10,
-      shadowsEnabled: true, shadowDarkness: 0.62,
-      background: 'light',
-      keyIntensity: 0.70, fillIntensity: 0.25, hemiIntensity: 0.85,
-      fovDeg: 45.8, clipNearMM: 1,
-      // Grade: tone-map curve + colour controls (Babylon imageProcessing).
-      // saturation is colorCurves.globalSaturation (-100..100, 0 = neutral).
-      toneMapping: 'aces',        // 'aces' | 'standard' | 'neutral' | 'off'
-      saturation: 0,
-      vignette: false, vignetteWeight: 1.5,
-      // Environment floor — solid-colour shadow-catcher plane (Scene ▸
-      // Environment). zMM = height in print-space Z (Babylon Y), mm.
-      // floorDiameterMM: round disc diameter; 0 = auto (4× largest bed dim).
-      floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0, floorDiameterMM: 0,
-      // HDRI image-based lighting (prefiltered .env files in public/env/).
-      // Lighting only — the gradient backdrop stays; affects PBR materials
-      // (imported glTF/OBJ). Intensity = scene.environmentIntensity.
-      hdriEnabled: true, hdriPreset: 'studio', hdriIntensity: 0.6,
-      // SSAO contact darkening (scene/ViewEffects.js) — viewport-only post
-      // effect (the RTT export paths skip the camera post chain by design).
-      // DEFAULT OFF: SSAO2 runs a geometry prePass that re-renders all scene
-      // geometry every frame; on a heavy import (80k+ tris) that caused
-      // ~250-330 ms frame stalls that read as a frozen import (and could
-      // wedge a TDR-prone GPU/driver). Opt-in for capable machines.
-      ssaoEnabled: false, ssaoStrength: 1,
-      // Viewport texture cap (assets/TextureCap.js) — downsamples the GPU copy
-      // of textures for VRAM relief on heavy 4096²+ scenes. 0 = OFF (full res,
-      // default). Export is UNAFFECTED: it reads the full-res source frozen at
-      // import (assets/TextureSource.js), so capping never degrades Mimaki
-      // output. Persisted with the render look.
-      textureCapPx: 0,
-    },
+    // Viewport render look (Scene ▸ Environment/Camera). Factory values from
+    // config/default-settings.json (per-user persisted via SettingsStore);
+    // applied via SceneManager.applyRenderSettings on boot/load/new. Field
+    // notes: saturation = colorCurves.globalSaturation (-100..100); floor =
+    // solid-colour shadow-catcher (zMM height, floorDiameterMM 0 = auto 4×
+    // bed); HDRI = prefiltered .env lighting only; ssaoEnabled default OFF
+    // (SSAO2 prePass stalls heavy imports); textureCapPx 0 = full res (export
+    // always reads the frozen full-res source, never the capped GPU copy).
+    render: { ...DS.render },
     // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
     // deliberately not persisted (it's an inspection tool, not a scene look).
     // axis/offset are print-space (Z = up, mm); flip keeps the other side.
@@ -71,25 +51,19 @@ const INITIAL_STATE = {
     // Render output (Scene ▸ Rendering): PNG stills + turntable video.
     // pose = saved render-camera composition (null until the user sets one);
     // the render-view toggle swaps the live camera to/from it.
-    renderOut: {
-      width: 1920, height: 1080, transparent: false,
-      pose: null,   // { alpha, beta, radius, target, isOrthographic } | null
-      turntable: { durationS: 8, fps: 30, direction: 'left', ease: true },
-    },
+    // Render output (Scene ▸ Rendering): PNG stills + turntable video. Factory
+    // from default-settings.json; `pose` (saved render-camera composition) is
+    // NOT a per-user setting — session/project only, so it lives here not in
+    // the config file.
+    renderOut: { ...DS.renderOut, pose: null },
     // The scene floor footprint equals the printer bed XY (print.bedDimensions).
     // `grid` only styles the lines drawn on it: cellMM = minor cell size in mm,
     // subdivisions = how many minor cells between major lines.
-    grid: { cellMM: 10, subdivisions: 10 },
+    grid: { ...DS.grid },
     cursor3d: { x: 0, y: 0, z: 0 },
   },
-  selection: { selectedIds: [], activeId: null, pivotMode: 'active' },
-  print: {
-    workingRatio: 1, targetRatio: 1,
-    targetPrinterId: 'mimaki-3duj-553',
-    bedDimensions: { x: 508, y: 508, z: 305 },
-    minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
-    objBakeSolidTextures: true,
-  },
+  selection: { selectedIds: [], activeId: null, pivotMode: DS.pivotMode },
+  print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions } },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
     // Workspaces (PART 13b) — per-user preference, seeded from localStorage,
@@ -102,7 +76,9 @@ const INITIAL_STATE = {
     workspace: 'layout',                                   // 'layout' | 'shade' | 'print'
     panelCollapsed: {},
   },
-  gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
+  // mode (translate/rotate/scale) is a transient tool state — not persisted;
+  // space + snap come from default-settings.json (per-user).
+  gizmo: { mode: 'translate', space: DS.gizmo.space, snap: { ...DS.gizmo.snap } },
 };
 
 let _state = JSON.parse(JSON.stringify(INITIAL_STATE));

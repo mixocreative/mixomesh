@@ -722,6 +722,55 @@ async function main() {
     const overlayMade = await evaluate(cdp, `!!document.querySelector('.box-select')`);
     assert(overlayMade, 'box-select overlay element was never created by the pointer routing');
 
+    // ── Settings persistence + reset + logo ──────────────────────────────
+    // (1) Logo renders in the header. (2) A user-edited setting saves to
+    // localStorage with content slices excluded. (3) resetSection restores one
+    // section to factory + rewrites storage. (4) resetAll clears the key +
+    // restores everything. Drives SettingsStore directly (the panel handlers
+    // just call these), plus a DOM check for the logo.
+    const settings = await evaluate(cdp, `(async () => {
+      const ss = (await import('/src/core/SettingsStore.js')).SettingsStore;
+      const sm = await import('/src/core/StateManager.js');
+      const DS = (await import('/src/config/default-settings.json', { with: { type: 'json' } })).default;
+      const KEY = 'mx-settings-v1';
+
+      const logo = document.querySelector('#app-logo');
+      const logoOk = !!logo && /logo\\.svg$/.test(logo.getAttribute('src') || '')
+        && logo.getBoundingClientRect().width > 10;
+
+      // (2) edit a setting → save → read back the blob
+      sm.setState(s => ({ ...s, scene: { ...s.scene, render: { ...s.scene.render, exposure: 1.77 } } }), { silent: true });
+      sm.setState(s => ({ ...s, scene: { ...s.scene, objects: { junk: { id: 'junk' } } } }), { silent: true });
+      ss.save();
+      const saved = JSON.parse(localStorage.getItem(KEY));
+      const savedExposure = saved?.settings?.render?.exposure;
+      const excludesObjects = !('objects' in (saved?.settings ?? {}))
+        && !('scene' in (saved?.settings ?? {}));
+
+      // (3) resetSection(environment) → exposure back to factory. The store
+      // persists on a ~300 ms debounce — wait it out before reading storage.
+      ss.resetSection('environment');
+      const afterSection = sm.getState().scene.render.exposure;
+      await new Promise(r => setTimeout(r, 400));
+      const savedAfterSection = JSON.parse(localStorage.getItem(KEY))?.settings?.render?.exposure;
+
+      // (4) dirty again, then resetAll → key cleared + state factory
+      sm.setState(s => ({ ...s, print: { ...s.print, workingRatio: 9 } }), { silent: true });
+      ss.save();
+      ss.resetAll();
+      const keyCleared = localStorage.getItem(KEY) === null;
+      const ratioReset = sm.getState().print.workingRatio === DS.print.workingRatio;
+
+      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, ratioReset, dsExposure: DS.render.exposure };
+    })()`);
+    assert(settings.logoOk, 'header logo (#app-logo) missing or not rendered');
+    assert(settings.savedExposure === 1.77, 'edited setting was not persisted to localStorage');
+    assert(settings.excludesObjects, 'persisted settings leaked content (scene/objects)');
+    assert(settings.afterSection === settings.dsExposure, 'resetSection did not restore the factory value');
+    assert(settings.savedAfterSection === settings.dsExposure, 'resetSection did not re-persist the restored value');
+    assert(settings.keyCleared, 'resetAll did not clear the settings localStorage key');
+    assert(settings.ratioReset, 'resetAll did not restore print settings to factory');
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

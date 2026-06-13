@@ -22,6 +22,7 @@ import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { register as registerShortcut } from '../core/InputManager.js';
+import { SettingsStore } from '../core/SettingsStore.js';
 import { sectionIcon } from '../core/Icons.js';
 import {
   capturePng, recordTurntable, isRecording,
@@ -128,6 +129,9 @@ export function init() {
   _bodyEl.classList.add('pp-body');
   subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _applySection(); _render(); });
   subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _applySection(); _render(); });
+  // A section / all reset rewrote the settings — re-render to show the
+  // restored values.
+  subscribe(EVENTS.SETTINGS_RESET, _render);
   // HDRI .env files stream in (~0.2–1 MB) — lighting pops without feedback
   // (UX audit U4). Only toast for USER-initiated changes; boot/load stay
   // silent.
@@ -184,9 +188,16 @@ const SECTION_ICONS = {
 };
 
 function _section(key, title, inner) {
+  // Resettable sections get a ↺ button (reset that section to factory). The
+  // Cross Section is session-only so it has no SettingsStore section → no
+  // button. The button must stopPropagation in _wire (the header also toggles
+  // collapse).
+  const resetBtn = SettingsStore.SECTION_KEYS.includes(key)
+    ? `<button type="button" class="pp-sec-reset" data-reset-sec="${key}" title="Reset ${title} to defaults" aria-label="Reset ${title} to defaults">${sectionIcon('RotateCcw')}</button>`
+    : '';
   return `
     <section class="pp-section ${_collapsed[key] ? 'pp-collapsed' : ''}" data-sec="${key}">
-      <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${title}</header>
+      <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${title}${resetBtn}</header>
       ${inner}
     </section>`;
 }
@@ -517,6 +528,14 @@ function _wire() {
       sec.classList.toggle('pp-collapsed');
       _collapsed[key] = sec.classList.contains('pp-collapsed');
       _saveCollapsed();
+    });
+  });
+
+  // Per-section ↺ reset — stopPropagation so the header doesn't also collapse.
+  _bodyEl.querySelectorAll('[data-reset-sec]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      SettingsStore.resetSection(btn.dataset.resetSec);
     });
   });
 

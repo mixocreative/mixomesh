@@ -7,6 +7,7 @@ import { capturePng } from './RenderOutput.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
 import { Selection } from './Selection.js';
+import { SettingsStore } from './SettingsStore.js';
 import {
   clear as historyClear,
   getPosition as historyPosition,
@@ -645,14 +646,13 @@ export async function newProject() {
   historyClear();
   _resetWorld();
   _fileHandle = null;
-  SceneManager.rebuildBed();
-  SceneManager.setGrid(getState().scene.grid);
+  // New starts from the user's last-used settings, not raw factory (File-wins
+  // applies to OPENING a .mixo, not to New). seedBootState merges the persisted
+  // per-user settings onto the fresh factory state; applyToScene pushes the
+  // whole look (render/grid/overlays/bed/gizmo/pivot) to the engine.
+  SettingsStore.seedBootState();
+  SettingsStore.applyToScene();
   SceneManager.setCursorFromState(getState().scene.cursor3d);
-  for (const [k, v] of Object.entries(getState().scene.overlays || {})) {
-    if (k === 'wireframeEdgeColor') continue;   // value, not a toggle
-    SceneManager.setOverlay(k, !!v);
-  }
-  SceneManager.applyRenderSettings(getState().scene.render);
   dispatch(EVENTS.PROJECT_NEW, {});
   _dirty = false;
   dispatch(EVENTS.PROJECT_SAVED, {});

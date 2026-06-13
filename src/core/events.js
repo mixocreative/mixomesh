@@ -77,6 +77,10 @@ export const EVENTS = {
   WORKSPACE_CHANGED:       'ui:workspaceChanged',
   PANEL_COLLAPSED_CHANGED: 'ui:panelCollapsedChanged',
 
+  // Per-user settings (SettingsStore) — fired after a section / all reset so
+  // the Scene + Print panels re-render to the restored values.
+  SETTINGS_RESET:          'settings:reset',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',

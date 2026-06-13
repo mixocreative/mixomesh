@@ -1,7 +1,6 @@
 import { Toast, safeAsync } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { SceneManager } from '../core/SceneManager.js';
-import { getState } from '../core/StateManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { AssetPanel } from '../ui/AssetPanel.js';
 import { ViewportDrop } from '../ui/ViewportDrop.js';
@@ -20,6 +19,7 @@ import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { SettingsStore } from '../core/SettingsStore.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
 import { Workspace } from '../ui/Workspace.js';
@@ -34,12 +34,6 @@ type TransformCommit = {
 };
 
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
-type OverlayKey = 'grid' | 'axes' | 'wireframe' | 'printPreview' | 'baseColorView' | 'uvCheckerView' | 'invertedFaces' | 'bedPreview';
-type BootState = {
-  scene?: {
-    overlays?: Partial<Record<OverlayKey, boolean>>;
-  };
-};
 
 if (!('showDirectoryPicker' in window)) {
   renderBlockingMessage(
@@ -62,6 +56,11 @@ async function bootstrap() {
   (window as unknown as { __MX_ENGINE?: string }).__MX_ENGINE =
     SceneManager.isWebGPU() ? 'webgpu' : 'webgl';
   InputManager.init(SceneManager.getScene());
+
+  // Seed per-user panel settings (render look, grid, overlays, print, gizmo,
+  // pivot) onto the factory boot state BEFORE panels render. File-wins: this
+  // only affects the empty boot / New scene; opening a .mixo overrides it.
+  SettingsStore.seedBootState();
 
   SceneManager.setTransformCommitHandler(({ prev, next, alreadyApplied }: TransformCommit) => {
     push(new TransformCommand(prev, next, { alreadyApplied }));
@@ -88,6 +87,7 @@ async function bootstrap() {
   NumberScrub.init(); // wheel-scrub on number inputs (panel never scrolls under them)
   CursorPanel.init(); // 3D-cursor N-panel (Shift+N) — mounts into #viewport
   CopyPaste.init();   // Ctrl+C / Ctrl+V with aspect chooser
+  SettingsStore.init(); // autosave hooks on the Scene/Print panel bodies (now mounted)
 
   const viewport = document.getElementById('viewport');
   if (!viewport) throw new Error('Viewport root missing');
@@ -101,11 +101,9 @@ async function bootstrap() {
   InputManager.register('Ctrl+O', 'global', () => safeAsync(() => PersistenceManager.open()));
   InputManager.register('Ctrl+N', 'global', () => safeAsync(() => PersistenceManager.newProject()));
 
-  SceneManager.applyRenderSettings((getState() as { scene?: { render?: object } }).scene?.render ?? {});
-  const overlays = (getState() as BootState).scene?.overlays;
-  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'baseColorView', 'uvCheckerView', 'invertedFaces', 'bedPreview'] satisfies OverlayKey[]) {
-    if (overlays?.[key]) SceneManager.setOverlay(key, true);
-  }
+  // Push the seeded settings (render look, grid, display overlays, bed, gizmo
+  // space, pivot) to the engine. Inspection overlays sit factory-off here.
+  SettingsStore.applyToScene();
 
   PersistenceManager.startAutosave();
   canvas.focus();

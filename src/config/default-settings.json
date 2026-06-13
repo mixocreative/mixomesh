@@ -1,0 +1,49 @@
+{
+  "_comment": "Factory defaults for per-user PANEL settings (NOT object/content). Single source of truth: StateManager.INITIAL_STATE consumes this, SettingsStore seeds/saves/resets against it. Edit here to change the default setup everywhere (boot, New project, every reset button). Object properties, live camera pose, cross-section, cursor, project name are NOT here by design.",
+  "render": {
+    "exposure": 1.05,
+    "contrast": 1.10,
+    "shadowsEnabled": true,
+    "shadowDarkness": 0.62,
+    "background": "light",
+    "keyIntensity": 0.70,
+    "fillIntensity": 0.25,
+    "hemiIntensity": 0.85,
+    "fovDeg": 45.8,
+    "clipNearMM": 1,
+    "toneMapping": "aces",
+    "saturation": 0,
+    "vignette": false,
+    "vignetteWeight": 1.5,
+    "floorEnabled": false,
+    "floorColor": "#9a9a9a",
+    "floorZMM": 0,
+    "floorDiameterMM": 0,
+    "hdriEnabled": true,
+    "hdriPreset": "studio",
+    "hdriIntensity": 0.6,
+    "ssaoEnabled": false,
+    "ssaoStrength": 1,
+    "textureCapPx": 0
+  },
+  "renderOut": {
+    "width": 1920,
+    "height": 1080,
+    "transparent": false,
+    "turntable": { "durationS": 8, "fps": 30, "direction": "left", "ease": true }
+  },
+  "grid": { "cellMM": 10, "subdivisions": 10 },
+  "overlays": { "grid": true, "axes": true, "printPreview": true },
+  "print": {
+    "workingRatio": 1,
+    "targetRatio": 1,
+    "targetPrinterId": "mimaki-3duj-553",
+    "bedDimensions": { "x": 508, "y": 508, "z": 305 },
+    "minWallThickness": 1.2,
+    "printMode": "fdm",
+    "chordTolerance": 0.05,
+    "objBakeSolidTextures": true
+  },
+  "gizmo": { "space": "world", "snap": { "translate": 1.0, "rotate": 15, "scale": 0.1 } },
+  "pivotMode": "active"
+}

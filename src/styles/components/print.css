@@ -4,6 +4,22 @@
   gap: 0;
   border-bottom: 1px solid var(--border);
 }
+/* ↺ reset print settings — right-aligned in the tab bar. */
+.pp-tab-reset {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-2);
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--r-sm, 3px);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.pp-tab-reset:hover { color: var(--accent); background: var(--bg-2); }
+.pp-tab-reset svg { width: 14px; height: 14px; display: block; }
 .pp-tab {
   background: transparent;
   border: none;

@@ -4,6 +4,7 @@ import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
+import { SettingsStore } from '../core/SettingsStore.js';
 import { push, RescaleWorldCommand } from '../core/HistoryManager.js';
 import { Toast } from './Toast.js';
 import { icon, sectionIcon } from '../core/Icons.js';
@@ -38,6 +39,8 @@ export function init() {
     EVENTS.VALIDATION_COMPLETE,   // cache updates from import auto-validate (A6)
   ];
   for (const ev of events) subscribe(ev, _render);
+  // A print reset (or reset-all) rewrote print settings — re-render to show them.
+  subscribe(EVENTS.SETTINGS_RESET, _render);
 
   // B5 toast click-through: a clicked validation toast surfaces this panel's
   // Validation tab.
@@ -93,6 +96,9 @@ function _renderTabs() {
     const selected = tab === _activeTab ? 'true' : 'false';
     html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(tabIcons[tab])}${escapeHtml(labels[tab])}</button>`;
   }
+  // ↺ resets the whole print settings slice (scale / bed / export) — they
+  // share one state slice, so one button covers all three settings tabs.
+  html += `<button class="pp-tab-reset" data-act="reset-print" title="Reset print settings to defaults" aria-label="Reset print settings to defaults">${sectionIcon('RotateCcw')}</button>`;
   html += '</div>';
 
   const el = document.createElement('div');
@@ -103,6 +109,8 @@ function _renderTabs() {
       _render();
     });
   });
+  el.querySelector('[data-act="reset-print"]')?.addEventListener('click',
+    () => SettingsStore.resetSection('print'));
 
   return el;
 }

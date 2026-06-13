@@ -126,6 +126,7 @@ src/
     printers.json          ← printer profiles (single source of truth)
     scale-presets.json     ← SCALE_PRESETS (PrintManager)
     swatches.json          ← DEFAULT_SWATCHES (ShaderLibrary)
+    default-settings.json  ← factory per-user PANEL settings (StateManager INITIAL_STATE + SettingsStore)
   styles/
     tokens.css             ← CSS variables (neutral Blender-gray surfaces, --ctl-* control tokens)
     layout.css             ← panel grid, splitters, per-workspace section visibility
@@ -161,6 +162,7 @@ src/
       MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
     Selection.js           ← selection set + active id + pivot mode (§4b)
     BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
+    SettingsStore.js       ← per-user PANEL settings: localStorage persist + seed + per-section/all reset (§ Settings persistence)
     AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
@@ -314,6 +316,8 @@ types.
 | Printer behavior | `src/config/printers.json` | `PrinterProfiles`, `PrintPanel`, `SceneManager`, `PrintManager` |
 | Scale math | `src/core/scale/ScaleMath.js` (types in `ScaleTypes.ts`) | import normalization, print planner, tests |
 | Editable presets | `src/config/scale-presets.json`, `src/config/swatches.json` | `PrintPanel`, `ShaderPanel` |
+| Default panel settings | `src/config/default-settings.json` | `StateManager` INITIAL_STATE, `SettingsStore` (seed/save/reset) |
+| Per-user settings persistence | `SettingsStore` + `localStorage['mx-settings-v1']` | seeds boot/New; File-wins on `.mixo` open; reset buttons |
 | Persistence | `.mixo` v3.1 JSON plus IndexedDB handles/kv | `PersistenceManager`, `idb.js` |
 | Export packaging | `PrintManager` orchestrator plus `src/core/print/*` seams | `PrintPanel` invokes public export entry points |
 | UI markup safety | `src/ui/renderSafe.js` | every string-template UI renderer |
@@ -2986,6 +2990,49 @@ Switching workspace **resets** `panelCollapsed` to all-`false` so the new worksp
 Workspace + `panelCollapsed` + per-workspace panel widths persist to `localStorage.mixomesh_ui_workspace` (JSON object). NOT stored in `.mixo` — workspace is a *user preference*, not a project artefact. A teammate opening the same `.mixo` on a different monitor shouldn't inherit the saver's layout.
 
 Boot sequence: `PersistenceManager.init` (or a small `src/ui/Workspace.js` module) reads `localStorage` → seeds `state.ui.workspace + panelCollapsed` before the first render. Missing key → workspace defaults to `'layout'`. Schema version field in the localStorage blob so future shape changes can migrate.
+
+## Per-user settings persistence (`core/SettingsStore.js`)
+
+Separate from the workspace/layout persistence above: the browser remembers the
+user's last-used **panel settings** so a fresh boot / New project starts with
+them. **Content is never persisted here** — objects, shaders, UV, selection,
+live camera pose, cross-section, cursor live in the `.mixo` file only.
+
+**Factory defaults** live in **`src/config/default-settings.json`** — the single
+source of truth, consumed by `StateManager.INITIAL_STATE` for those slices AND
+by every reset. Edit the JSON to change the default setup everywhere (boot, New,
+all reset buttons), no code change.
+
+**Persisted slices** (`SettingsStore.SCHEMA`): `scene.render` (full look/grade/
+env/HDRI/SSAO/textureCap), `scene.renderOut` (minus `pose` — a session/project
+composition), `scene.grid`, `scene.overlays` (display prefs `grid`/`axes`/
+`printPreview` ONLY — inspection modes like wireframe stay session-only),
+`print` (all), `gizmo` (`space`+`snap`, not transient `mode`),
+`selection.pivotMode`. A corrupt/old blob can only inject SCHEMA-known paths
+(`mergeSettings` narrows to known keys).
+
+**Precedence — FILE WINS:** `seedBootState()` merges persisted settings onto the
+factory boot state at state init (before panels render); `applyToScene()` pushes
+them to the engine (replaces the old inline boot block in `main.ts`). New
+(`PersistenceManager.newProject`) re-seeds per-user defaults. Opening a `.mixo`
+restores the file's slices directly and never re-seeds — so a loaded project's
+look is authoritative.
+
+**Save trigger:** debounced `scheduleSave()` on USER edits only — a capturing
+`change`/`input` listener on `#rp-scene-body` + `#rp-print-body`, plus the
+`GIZMO_CHANGED`/`PIVOT_MODE_CHANGED` events. Programmatic applies (boot/load)
+bypass it, preserving File-wins.
+
+**Reset:** per-section `↺` buttons (`SettingsStore.SECTION_KEYS`:
+grid/environment/camera/rendering on the Scene panel, one `print` button on the
+Print tab bar — Properties/object + session-only Cross-Section have none) call
+`resetSection(key)`; the top-bar `↺` (ProjectMenu `.pm-bar`) calls `resetAll()`
+(settings only — workspace/widths/section-collapse untouched). Both restore from
+`default-settings.json`, re-apply to the scene, and dispatch `SETTINGS_RESET`
+(Scene + Print panels re-render).
+
+**Header logo:** `#app-logo` (`public/logo.svg`, white wordmark) is pinned
+far-left of `#header`, before the editable `#project-name`.
 
 ### Module sketch
 

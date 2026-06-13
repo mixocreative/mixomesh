@@ -22,6 +22,14 @@
   user-select: none;
 }
 
+/* Brand logo — far-left of the header, white wordmark on the dark chrome. */
+#app-logo {
+  height: 26px;
+  width: auto;
+  display: block;
+  flex: 0 0 auto;
+}
+
 #project-name {
   font-size: var(--fs-md);
   color: var(--text-0);
