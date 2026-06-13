@@ -494,6 +494,10 @@ async function main() {
       const baseOff = bcMat.unlit === false;
       bcBox.dispose(); bcMat.dispose();
       const modeOpts = document.querySelectorAll('.vt-mode option').length;
+      // Resin-grey default: material-less meshes render with scene.defaultMaterial,
+      // set to matte medium-light grey at init.
+      const dm = scene.defaultMaterial;
+      const dmGrey = !!dm && Math.abs((dm.diffuseColor?.r ?? 0) - 0.72) < 0.01;
 
       // (6b2) UV-checker mode: a content material's base texture swaps to the
       // checker and restores.
@@ -529,13 +533,14 @@ async function main() {
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
-               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff };
+               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey };
     })()`);
     assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
     assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
     assert(wave.modeOpts === 4, `display-mode selector should have 4 options (Shaded/Matte/Base/UV), got ${wave.modeOpts}`);
     assert(wave.uvOn, 'UV-checker mode did not swap the base texture to the checker');
     assert(wave.uvOff, 'UV-checker mode did not restore the original base texture');
+    assert(wave.dmGrey, 'scene.defaultMaterial not set to resin grey (material-less meshes would render white)');
     assert(wave.invOn, 'inverted/back-face highlight created no red back-face clones when on');
     assert(!wave.invOff, 'inverted/back-face highlight clones not disposed when off');
     assert(wave.outlineOffWhenEmpty, 'selection-outline mask RTT not detached when selection is empty (per-frame waste)');

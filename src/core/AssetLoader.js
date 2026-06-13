@@ -243,17 +243,30 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
  *   `fileHandleKey` = an already-persisted key (project restore path).
  * @returns {Promise<string[]>} created meshIds
  */
-// Untextured imports default to a light-medium grey so they read like raw
-// (ED/grey-resin) prints instead of stark white. Only materials with NO base
-// texture AND a near-white base colour are touched — intentional colours and
-// textured models are left alone. Sets the actual base colour (so it also
-// exports sensibly).
+// Untextured imports default to a medium-light grey so they read like raw
+// (ED/grey-resin) prints instead of stark white. Two cases:
+//   - mesh has NO material (STL with no shader / missing) → ASSIGN a shared
+//     matte grey material (relying on scene.defaultMaterial proved unreliable);
+//   - mesh has an UNTEXTURED + near-white material → recolour its base to grey.
+// Textured or intentionally-coloured materials are left untouched. Sets the
+// actual colour so it also exports sensibly.
+let _resinGreyMat = null;
+function _resinGrey() {
+  if (_resinGreyMat) return _resinGreyMat;
+  const B = window.BABYLON;
+  const m = new B.StandardMaterial('mx-resin-grey', SceneManager.getScene());
+  m.diffuseColor  = new B.Color3(0.72, 0.72, 0.72);
+  m.specularColor = new B.Color3(0, 0, 0);   // matte — no plastic hotspot
+  _resinGreyMat = m;
+  return m;
+}
 function _applyResinDefault(container) {
-  const GREY = new (window.BABYLON.Color3)(0.72, 0.72, 0.72);   // medium-light, resin-like
+  const GREY = new (window.BABYLON.Color3)(0.72, 0.72, 0.72);
   const nearWhite = (c) => !c || (c.r > 0.85 && c.g > 0.85 && c.b > 0.85);
   for (const mesh of container.meshes ?? []) {
+    if (!mesh.getTotalVertices?.()) continue;   // skip transform/root nodes
     const mat = mesh.material;
-    if (!mat) continue;
+    if (!mat) { mesh.material = _resinGrey(); continue; }   // material-less STL
     if ('albedoTexture' in mat) {            // PBRMaterial
       if (!mat.albedoTexture && nearWhite(mat.albedoColor)) mat.albedoColor = GREY.clone();
     } else if ('diffuseTexture' in mat) {    // StandardMaterial (STL/OBJ)

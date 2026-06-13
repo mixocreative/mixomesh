@@ -330,9 +330,11 @@ Import path:
    medium-light grey (0.72) so raw imports read like grey/ED-resin prints instead
    of stark white; textured or intentionally-coloured materials are untouched
    (sets the real base colour, so it also exports grey). Meshes with NO material
-   at all (STL with no shader, missing/ghost) render with `scene.defaultMaterial`,
-   which `SceneManager.init` sets to the same matte medium-light grey — so the
-   resin look covers both the has-material-but-white and the no-material cases.
+   at all (STL with no shader, missing/ghost) are ASSIGNED a shared matte grey
+   `StandardMaterial` (`_resinGrey`) — relying on `scene.defaultMaterial` alone
+   proved unreliable, so the material is set explicitly; `SceneManager.init` also
+   greys `scene.defaultMaterial` as a belt-and-braces fallback. Covers both the
+   has-material-but-white and the no-material (STL) cases.
 4. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a
