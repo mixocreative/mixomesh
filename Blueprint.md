@@ -155,13 +155,15 @@ src/
     InputManager.js
     SceneManager.js        ← engine/lighting/overlays orchestrator (camera/pivot split into scene/)
     WorkerImport.js        ← main side of worker OBJ parse: rebuild meshes from transferables
+    ValidateWorker.js      ← main side of worker topology validation (transfer pos/idx, get counts)
     workers/
       ObjParse.worker.js   ← Babylon OBJ/MTL loader in a NullEngine worker (no UI freeze)
+      MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
     Selection.js           ← selection set + active id + pivot mode (§4b)
     AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
-    MeshValidator.js
+    MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
     PersistenceManager.js
     PrintManager.js        ← export orchestrator + OBJ/STL serializers, non-destructive
     print/
@@ -192,6 +194,7 @@ src/
       ViewEffects.js       ← SSAO contact darkening + cross-section clip plane (viewport tools)
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
+      AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
     RenderOutput.js        ← Scene ▸ Rendering capture engine: PNG stills + turntable video
     render/
       RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
@@ -409,7 +412,7 @@ match what the specced responsibilities actually cost.
 | each `core/assets/*.js` | < 350 |
 | `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
-| `MeshValidator.js` | < 400 |
+| `MeshValidator.js` | < 460 (topology worker plumbing + group-union; pure topology lives in `workers/MeshValidate.worker.js`) |
 | `PersistenceManager.js` | < 800 |
 | `PrintManager.js` | < 500 (orchestrator + OBJ/STL; 3MF writers + texture collection split out) |
 | each `core/print/*.js` | < 350 |
@@ -1090,9 +1093,10 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 ```
 
 ### Implementation Notes
+- **Adaptive resolution (`scene/AdaptiveResolution.js`, perf 2026-06-13):** the engine does NOT use raw `adaptToDeviceRatio` — full devicePixelRatio on a 2×/4K display is 4× the fragments and tanks heavy 4096²/high-poly print scenes. `initAdaptiveResolution(engine)` sets a CAPPED base hardware-scaling level (effective DPR ≤ 1.5) and runs a safety-valve controller on `onEndFrameObservable`: rolling-avg frame time > 45 ms for a window steps scaling UP (fewer pixels, clamp ≤ 2.0 = half-res/axis); < 28 ms eases back toward base. Exports/turntable render into their own RTT at an explicit size (`CreateScreenshotUsingRenderTarget` overrides the engine render size), so canvas scaling never affects output quality.
 - Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`). Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
 - Numpad face presets route through `setCameraPreset` (animated, bbox-fit — see *Camera Presets* below). Numpad5 toggles projection IN PLACE via `toggleOrthographic()`, preserving the current view direction.
-- **Selection silhouette:** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials at top of SceneManager: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_COLOR = '#f59e0b'` (amber — matches `--accent`).
+- **Selection silhouette (`scene/SelectionOutline.js`):** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials in `scene/SceneConstants.js`: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_HEX = '#f59e0b'` (amber — matches `--accent`). **Gated (perf 2026-06-13):** the mask RTT and the 64-tap fullscreen pass are DETACHED whenever the selection is empty (`_setOutlineEnabled`) — they were running every frame for zero benefit, a real cost at 4K over heavy scenes; re-attached on the first selection. Browser smoke pins detach-when-empty / attach-when-selected.
 - **Wireframe edges (`scene/EdgeOverlay.js`):** `SceneManager.setOverlay('wireframeEdges', on)` builds a per-mesh CLONE sharing the source geometry, drawn with a wireframe emissive `StandardMaterial` (`zOffset −1`) over the textured base — `enableEdgesRendering` at any epsilon only showed sharp creases (field report). Clones carry `metadata.edgeOverlay` so they never pick, cast, or register. `setWireframeEdgeColor(hex)` live-updates the shared material.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median` or `active`; `individual` and `cursor` currently fall through to `median`). Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
@@ -1478,13 +1482,26 @@ no regression.
 **File: `src/core/MeshValidator.js`**
 
 ### Scope (v1)
-Three critical checks only. Pure JS — no WASM. Each handles 50k+ triangle meshes in under 200ms.
+Three critical checks only. Pure JS — no WASM.
 
 | Check | Severity | Method | Auto-Fix |
 |---|---|---|---|
 | Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | Merge by distance |
-| Inverted normals | **warning** (Phase 6) | Cast ray from face centroid along normal; if it exits the mesh it's correct, else inverted (majority vote) | Flip winding |
+| Inverted normals | **warning** (Phase 6) | **Signed mesh volume** (one O(tris) pass; V<0 ⇒ inward winding) — replaced the old 64-ray heuristic (O(tris) PER ray) 2026-06-13 | Flip winding |
 | Exceeds bed volume | warning | Compare mesh world AABB to bed dims | None |
+
+> **Topology runs in a Web Worker (perf goal 2026-06-13).** The non-manifold
+> + inverted-winding pass is the heavy part on dense print meshes (80k+ tris
+> ≈ 450 ms of weld + edge-map on the main thread — a felt freeze when several
+> heavy models import). `MeshValidator._topology` posts a COPY of
+> positions/indices to `workers/MeshValidate.worker.js` (via `ValidateWorker.js`,
+> transferables) and awaits the counts; the UI thread never blocks (measured
+> ~12 ms wall, warm worker). The worker uses NUMERIC packed keys for the weld
+> + edge maps (no per-vertex/edge string allocation) and signed-volume
+> inverted-normals (no rays/octree). Inline pure-JS fallback runs when Worker
+> is unavailable (Node tests). The bed-bounds check stays on the main thread
+> (needs the world matrix; trivial). Group-union topology (split shells) is
+> built on the main thread then posted the same way.
 
 > **Phase 6 severity change.** Non-manifold + inverted-normals were `error`
 > (hard-blocked export). A colour-print *assembly* tool works with downloaded

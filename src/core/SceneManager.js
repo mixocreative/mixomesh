@@ -19,6 +19,7 @@ import { initImportBounce } from './scene/ImportBounce.js';
 import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
 } from './scene/EdgeOverlay.js';
+import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
 import { initSelectionOutline, setActive, setSelected } from './scene/SelectionOutline.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
@@ -80,7 +81,9 @@ export function init(canvas) {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  _engine.adaptToDeviceRatio = true;
+  // NOTE: device-pixel-ratio is handled by initAdaptiveResolution (capped +
+  // dynamic), NOT the raw adaptToDeviceRatio — full DPR on a 2×/4K display is
+  // 4× the fragments and tanks heavy 4096²/high-poly print scenes.
 
   _scene = new BABYLON.Scene(_engine);
   // Fallback solid = gradient base, so any frame before the backdrop layer
@@ -108,6 +111,8 @@ export function init(canvas) {
   initEdgeOverlay(_scene);
   _setupCursor();
   initPivotSession(_scene, { getCursorPosition: getCursor });
+  // Cap effective DPR + safety-valve dynamic downscale for heavy scenes.
+  initAdaptiveResolution(_engine);
 
   _engine.runRenderLoop(() => _scene.render());
   window.addEventListener('resize', () => _engine.resize());

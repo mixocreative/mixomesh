@@ -455,10 +455,25 @@ async function main() {
       ]);
       const recIdle = !ro.isRecording();
 
+      // (7) Selection-outline gating (perf 2026-06-13): the mask RTT + 64-tap
+      // outline pass must be DETACHED when nothing is selected (per-frame cost
+      // for zero benefit) and re-attached when a mesh is selected.
+      const maskInRT = () => scene.customRenderTargets.some(t => t.name === 'mx-sel-mask-rt');
+      sm.SceneManager.setActive(null);
+      await new Promise(r => requestAnimationFrame(r));
+      const outlineOffWhenEmpty = !maskInRT();
+      sm.SceneManager.setActive(bBox);
+      await new Promise(r => requestAnimationFrame(r));
+      const outlineOnWhenSelected = maskInRT();
+      sm.SceneManager.setActive(null);
+
       secBox.dispose();
       bBox.dispose();
-      return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle };
+      return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
+               outlineOffWhenEmpty, outlineOnWhenSelected };
     })()`);
+    assert(wave.outlineOffWhenEmpty, 'selection-outline mask RTT not detached when selection is empty (per-frame waste)');
+    assert(wave.outlineOnWhenSelected, 'selection-outline mask RTT not re-attached when a mesh is selected');
     assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);
     assert(wave.frameSrc.distinct > 16,
       `offline frame source nearly uniform (${wave.frameSrc.distinct} colours) — manual RTT render broke`);

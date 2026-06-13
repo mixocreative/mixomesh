@@ -20,6 +20,9 @@ import {
 const BABYLON = window.BABYLON;
 
 let _engine = null;
+let _scene  = null;
+let _camera = null;
+let _outlineActive = false;        // pass + mask RTT gated on a non-empty selection
 let _selMaskRTT          = null;   // RenderTargetTexture
 let _selMaskMatActive    = null;   // override for active mesh — full intensity
 let _selMaskMatSelected  = null;   // override for selected non-active — dim
@@ -34,6 +37,8 @@ let _selectedForOutline = [];
 /** Build mask materials, mask RTT, and the fullscreen outline pass. */
 export function initSelectionOutline(scene, engine, camera) {
   _engine = engine;
+  _scene  = scene;
+  _camera = camera;
   const ACCENT_COLOR = BABYLON.Color3.FromHexString(ACCENT_HEX);
 
   _selMaskMatActive = new BABYLON.StandardMaterial('mx-sel-mask-active', scene);
@@ -118,6 +123,34 @@ export function initSelectionOutline(scene, engine, camera) {
     eff.setFloat('outlineIntensity', OUTLINE_INTENSITY);
     eff.setTexture('maskSampler', _selMaskRTT);
   };
+
+  // Gate OFF until something is selected: the 64-tap fullscreen outline pass
+  // and the mask RTT render were running EVERY frame even with an empty
+  // selection — pure waste, and costly at 4K over heavy scenes (perf goal
+  // 2026-06-13). _refreshOutlineSet re-enables them when a selection exists.
+  // The PostProcess ctor just attached the pass and the mask RTT is already
+  // in customRenderTargets, so the live state IS "on" — reflect that before
+  // toggling off, or the early-out guard would skip the detach.
+  _outlineActive = true;
+  _setOutlineEnabled(false);
+}
+
+// Attach/detach the outline post-process + the mask render-target together.
+// Detached, neither costs anything per frame; the common "nothing selected"
+// state is free.
+function _setOutlineEnabled(on) {
+  if (on === _outlineActive) return;
+  _outlineActive = on;
+  if (on) {
+    if (_scene && !_scene.customRenderTargets.includes(_selMaskRTT)) {
+      _scene.customRenderTargets.push(_selMaskRTT);
+    }
+    _camera?.attachPostProcess(_outlinePass);
+  } else {
+    const i = _scene ? _scene.customRenderTargets.indexOf(_selMaskRTT) : -1;
+    if (i >= 0) _scene.customRenderTargets.splice(i, 1);
+    _camera?.detachPostProcess(_outlinePass);
+  }
 }
 
 function _setMaskMeshes(entries) {
@@ -165,4 +198,5 @@ function _refreshOutlineSet() {
     if (m !== _activeForOutline) entries.push({ mesh: m, kind: 'selected' });
   }
   _setMaskMeshes(entries);
+  _setOutlineEnabled(entries.length > 0);
 }

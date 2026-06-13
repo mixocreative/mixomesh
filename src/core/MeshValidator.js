@@ -1,15 +1,13 @@
 import { EVENTS } from './events.js';
 import { dispatch, getState, setState, subscribe } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
+import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 // ── Tunables ─────────────────────────────────────────────
 const MERGE_DISTANCE   = 1e-4;      // 0.1 mm (Babylon units = meters)
-const NORMAL_SAMPLE    = 64;        // faces sampled for inverted-normal vote
-const RAY_OFFSET       = 1e-3;      // 1 mm — push ray start outside surface
-const RAY_LENGTH       = 100;       // generous; we only need a hit flag
 const TRI_BUDGET_AUTO  = 100_000;   // BLUEPRINT §14.3 — vertex budget
 
 // ── Geometry helpers ─────────────────────────────────────
@@ -69,49 +67,46 @@ function _checkNonManifold(positions, indices) {
 }
 
 /**
- * Cast a ray from each sampled face's centroid along its normal. If the ray
- * re-enters the mesh, the normal is pointing inward. Majority vote decides
- * the entire mesh's winding (a low-fi but cheap heuristic).
+ * Inverted-winding test via signed mesh volume — one O(tris) pass, no ray
+ * casts or octree (the old 64-ray heuristic was O(tris) PER ray = the heavy
+ * part of validation on dense meshes). V < 0 ⇒ inward winding. Robust for
+ * closed meshes; a cheap heuristic for open ones (same status as before).
+ * Sign is transform-invariant, so local positions are fine.
  */
-function _checkInvertedNormals(mesh, positions, indices) {
-  const triCount = indices.length / 3;
-  if (triCount === 0) return false;
-
-  const step = Math.max(1, Math.floor(triCount / NORMAL_SAMPLE));
-  let inwardVotes = 0;
-  let sampled     = 0;
-
-  const a = new BABYLON.Vector3();
-  const b = new BABYLON.Vector3();
-  const c = new BABYLON.Vector3();
-
-  const worldMatrix = mesh.getWorldMatrix();
-
-  for (let t = 0; t < triCount; t += step) {
-    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
-    a.set(positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]);
-    b.set(positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]);
-    c.set(positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]);
-
-    const aw = BABYLON.Vector3.TransformCoordinates(a, worldMatrix);
-    const bw = BABYLON.Vector3.TransformCoordinates(b, worldMatrix);
-    const cw = BABYLON.Vector3.TransformCoordinates(c, worldMatrix);
-
-    const centroid = aw.add(bw).add(cw).scaleInPlace(1 / 3);
-    const edge1    = bw.subtract(aw);
-    const edge2    = cw.subtract(aw);
-    const normal   = BABYLON.Vector3.Cross(edge1, edge2);
-    if (normal.lengthSquared() < 1e-12) continue;
-    normal.normalize();
-
-    const origin = centroid.add(normal.scale(RAY_OFFSET));
-    const ray    = new BABYLON.Ray(origin, normal, RAY_LENGTH);
-    const hit    = mesh.intersects(ray, true);
-    if (hit.hit) inwardVotes++;
-    sampled++;
+function _checkInvertedNormals(positions, indices) {
+  let v6 = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const i0 = indices[i] * 3, i1 = indices[i + 1] * 3, i2 = indices[i + 2] * 3;
+    const ax = positions[i0], ay = positions[i0 + 1], az = positions[i0 + 2];
+    const bx = positions[i1], by = positions[i1 + 1], bz = positions[i1 + 2];
+    const cx = positions[i2], cy = positions[i2 + 1], cz = positions[i2 + 2];
+    const crx = by * cz - bz * cy;
+    const cry = bz * cx - bx * cz;
+    const crz = bx * cy - by * cx;
+    v6 += ax * crx + ay * cry + az * crz;
   }
+  return v6 < 0;
+}
 
-  return sampled > 0 && (inwardVotes / sampled) > 0.5;
+/**
+ * Topology pass (non-manifold edge count + inverted winding) for one
+ * positions/indices pair. Runs in a Web Worker when available so a heavy
+ * print model (80k+ tris) never blocks the UI thread; falls back to the
+ * inline pure-JS path (Node tests, no Worker).
+ * @returns {Promise<{ badEdgeCount: number, inverted: boolean }>}
+ */
+async function _topology(positions, indices) {
+  if (isValidateWorkerSupported()) {
+    try {
+      return await validateTopologyInWorker(positions, indices);
+    } catch {
+      /* worker unavailable / crashed — fall through to inline */
+    }
+  }
+  return {
+    badEdgeCount: _checkNonManifold(positions, indices),
+    inverted: _checkInvertedNormals(positions, indices),
+  };
 }
 
 /**
@@ -210,7 +205,7 @@ export async function validateGroup(sourceGroupId) {
   const { positions, indices } = _buildGroupUnion(siblings);
   if (!positions.length || !indices.length) return results;
 
-  const badEdgeCount = _checkNonManifold(positions, indices);
+  const { badEdgeCount } = await _topology(positions, indices);
   if (badEdgeCount > 0) {
     results.push({
       type: 'nonManifold',
@@ -310,7 +305,7 @@ export async function validateMesh(mesh) {
       const groupResults = await validateGroup(groupId);
       results.push(...groupResults);
     } else {
-      const badEdgeCount = _checkNonManifold(positions, indices);
+      const { badEdgeCount, inverted } = await _topology(positions, indices);
       if (badEdgeCount > 0) {
         // Warning, not error: a colored-print assembly tool works with downloaded
         // display models that are frequently non-watertight, and slicers
@@ -324,7 +319,6 @@ export async function validateMesh(mesh) {
           message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
         });
       }
-      const inverted = _checkInvertedNormals(mesh, positions, indices);
       if (inverted) {
         results.push({
           type: 'invertedNormals',
