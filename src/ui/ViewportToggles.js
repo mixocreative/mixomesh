@@ -27,6 +27,7 @@ function _render() {
   if (!_root) return;
   const overlays = getState().scene.overlays ?? {};
   const wireOn  = overlays.wireframeEdges ?? false;
+  const invOn   = overlays.invertedFaces ?? false;
   const wireColor = _safeHex(overlays.wireframeEdgeColor ?? '#ffcc00');
   const mode = overlays.baseColorView ? 'base' : overlays.printPreview ? 'matte' : 'shaded';
 
@@ -43,6 +44,11 @@ function _render() {
     </button>
     <input type="color" class="vp-wire-color ${wireOn ? '' : 'vp-hidden'}"
            value="${escapeAttr(wireColor)}" title="Wireframe edge color">
+    <button class="vt-btn ${invOn ? 'vt-on' : ''}" data-toggle="invertedFaces"
+            title="Inverted / back-face check — red where back faces show (holes or flipped faces)"
+            aria-pressed="${invOn ? 'true' : 'false'}">
+      ${icon('AlertTriangle', { width: 15, height: 15 })}
+    </button>
   `;
   _wire();
 }

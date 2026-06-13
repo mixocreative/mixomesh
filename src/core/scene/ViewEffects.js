@@ -160,7 +160,6 @@ export function getSectionExtentMM(axis) {
 //    is visible even where the cut misses the solid.
 
 let _capMat   = null;               // shared back-face fill material
-let _capTex   = null;
 let _borderMesh = null;
 const _capClones = new Map();       // source mesh → back-face fill clone
 
@@ -180,59 +179,31 @@ function _contentBounds() {
   return { min, max, center: min.add(max).scale(0.5), size: max.subtract(min) };
 }
 
-function _buildStripeTexture() {
-  const N = 256;
-  const tex = new BABYLON.DynamicTexture('mx-section-stripes', N, _scene, true);
-  const ctx = tex.getContext();
-  // The texture carries ONLY the diagonal stripe ALPHA pattern in white — the
-  // amber (#f59e0b) hue comes from the material's emissiveColor, so the colour
-  // is exact regardless of blending. White body (α0.45) + denser white stripes
-  // (α0.92). PLANAR-projected (set below) so the diagonals are uniform in world
-  // space rather than smeared across the model's own UVs (which gave no visible
-  // stripes on textured / UV-less meshes).
-  ctx.clearRect(0, 0, N, N);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';     // translucent body
-  ctx.fillRect(0, 0, N, N);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';    // stripes — more opaque
-  ctx.lineWidth = 18;
-  for (let i = -N; i < N * 2; i += 44) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + N, N); ctx.stroke();
-  }
-  tex.update();
-  tex.hasAlpha = true;
-  // PROJECTION (screen-space) coords → a uniform diagonal hatch regardless of
-  // the model's UVs (PLANAR/EXPLICIT gave no stripes on textured / UV-less
-  // meshes). Screen-projected hatch is a standard CAD section look.
-  tex.coordinatesMode = BABYLON.Texture.PROJECTION_MODE;
-  tex.uScale = 28;
-  tex.vScale = 28;
-  return tex;
-}
-
-// Shared back-face fill material: SEMI-TRANSPARENT amber (#f59e0b) stripes,
-// unlit. Renders the source mesh's BACK faces (front culled via flipped
-// sideOrientation) so the cut interior reads as a translucent amber section
-// with denser stripes. Alpha-blended (emissive carries the amber so it reads
-// the same under any lighting).
+// Shared back-face fill material — a CustomMaterial (StandardMaterial subclass,
+// so clip-plane + alpha blending are handled for free). Amber (#f59e0b) emissive
+// body; diagonal stripes are computed PER-FRAGMENT from WORLD position (no UVs,
+// no coordinatesMode — those never drove the stripe alpha across textured /
+// UV-less meshes). Renders the source's BACK faces (front culled via flipped
+// sideOrientation) so the cut interior reads as a hatched amber section.
+// (CustomMaterial emits GLSL; on the opt-in WebGPU backend the stripe injection
+// would need transpilation — acceptable, WebGPU is experimental.)
 function _ensureCapMaterial() {
   if (_capMat) return _capMat;
-  _capTex = _buildStripeTexture();
-  const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
-  // Colour = constant amber emissive (exact #f59e0b); the texture supplies only
-  // the diagonal stripe ALPHA. disableLighting → output is pure emissive amber,
-  // alpha-modulated by the stripe pattern.
-  mat.emissiveColor = _accent.clone();
+  const mat = new BABYLON.CustomMaterial('mx-section-cap-mat', _scene);
+  mat.emissiveColor = _accent.clone();           // exact amber #f59e0b
   mat.diffuseColor  = new BABYLON.Color3(0, 0, 0);
-  mat.diffuseTexture = _capTex;                 // alpha pattern only
-  mat.useAlphaFromDiffuseTexture = true;
-  mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
   mat.disableLighting = true;
-  mat.disableDepthWrite = true;        // translucent overlay — don't occlude
   mat.backFaceCulling = true;
-  // Flip winding interpretation → the source's back faces become "front" and
-  // render; the original front faces cull. (Imports are CCW-front; if a model
-  // reads inverted, flip this one constant.)
   mat.sideOrientation = BABYLON.Material.ClockWiseSideOrientation;
+  mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+  mat.alpha = 0.999;                             // force the transparent pipeline
+  // Diagonal world-space stripes (~4 mm period; 1 BU = 1 m). Body α0.32, stripe
+  // α0.92 — the denser stripes read over the translucent body.
+  mat.Fragment_Before_FragColor(`
+    float mxd = (vPositionW.x - vPositionW.y + vPositionW.z) * 250.0;
+    float mxStripe = step(0.5, fract(mxd));
+    color.a = mix(0.32, 0.92, mxStripe);
+  `);
   _capMat = mat;
   return mat;
 }
@@ -322,7 +293,6 @@ function _disposeSectionViz() {
   for (const [, clone] of _capClones) { try { clone.dispose(); } catch { /* */ } }
   _capClones.clear();
   if (_capMat)     { _capMat.dispose(); _capMat = null; }
-  if (_capTex)     { _capTex.dispose(); _capTex = null; }
   if (_borderMesh) { _borderMesh.dispose(); _borderMesh = null; }
 }
 

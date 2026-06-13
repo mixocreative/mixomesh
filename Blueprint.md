@@ -194,6 +194,7 @@ src/
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
       EnvironmentRig.js    ← 3-light studio + RENDERONCE shadows, shadow-catcher floor, HDRI IBL
       ViewEffects.js       ← SSAO + cross-section: clip plane + back-face fill (solid interior) + cut-plane border
+      BackfaceCheck.js     ← inverted/back-face highlight (red back-face clones, viewport overlay)
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
@@ -325,6 +326,11 @@ Import path:
    `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and calls
    `splitMultiMaterialMeshesInContainer()` before shader registration.
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
+   Then `_applyResinDefault()` recolours UNTEXTURED + near-white materials to a
+   light-medium grey (0.62) so raw imports (STL/OBJ, default-white glTF) read
+   like grey/ED-resin prints instead of stark white; textured or
+   intentionally-coloured materials are left untouched. Sets the real base
+   colour, so it also exports grey.
 4. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a
@@ -787,7 +793,7 @@ const initialState = {
     // ArcRotateCamera positions camera at target + R·(sinβ cosα, cosβ, sinβ sinα).
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, invertedFaces: false, bedPreview: false },
     // wireframeEdges + wireframeEdgeColor are written on first viewport-toggle
     // use (not in INITIAL_STATE); persistence restores them when present.
     // Viewport render look (Scene panel) — defaults mirror SceneConstants;
@@ -824,17 +830,16 @@ const initialState = {
     // drivers. Instead:
     //  (a) FILL — per clipped solid, a shared-geometry CLONE (parent=null with
     //      the source world matrix baked, no metadata.meshId) renders the
-    //      source's BACK faces with a SEMI-TRANSPARENT amber (#f59e0b) striped
-    //      unlit material — hue is a constant amber EMISSIVE (#f59e0b, so it's
-    //      exact regardless of blending); a PROJECTION-mode (screen-space)
-    //      stripe texture
-    //      supplies only the ALPHA pattern (translucent body α0.45 + denser
-    //      stripes α0.92) so the diagonals stay uniform in world space rather
-    //      than smeared across the model's own UVs. alpha-blended, depth-write
-    //      off (front faces culled via flipped `sideOrientation`). Looking into
-    //      the cut, the interior reads as a translucent amber hatched section.
-    //      Clone shares geometry (no RAM dup), gets its own clip observers so its
-    //      front half is cut to match, idempotent per mesh.
+    //      source's BACK faces with a `CustomMaterial` (StandardMaterial
+    //      subclass → clip-plane + alpha handled for free). Amber EMISSIVE
+    //      (#f59e0b, exact); diagonal stripes are computed PER-FRAGMENT from
+    //      WORLD position in `Fragment_Before_FragColor` (~4 mm period; body
+    //      α0.32, stripe α0.92) — NOT a texture: UVs / coordinatesMode never
+    //      drove the stripe alpha on textured/UV-less meshes, so it was moved to
+    //      a fragment computation. Clone shares geometry (no RAM dup), gets its
+    //      own clip observers so its front half is cut to match, idempotent per
+    //      mesh. (CustomMaterial emits GLSL → the stripe injection needs
+    //      transpilation on the opt-in WebGPU backend; acceptable.)
     //  (b) BORDER — a thin accent rectangle OUTLINE (LinesMesh) at the plane
     //      extent so the plane is visible even where the cut misses the solid.
     // Both carry no metadata.meshId (auto-excluded from clip/shadow/mask). The
@@ -2566,10 +2571,14 @@ modes replace how the surface shades (only one at a time), overlays layer on top
   reads source materials.
 - **Wireframe edges** overlay (`MeshTriangle`) → `setOverlay('wireframeEdges', on)`,
   + an **edge-colour** swatch shown only while it's on.
+- **Inverted / back-face check** overlay (`AlertTriangle`) → `setOverlay('invertedFaces', on)`
+  → `scene/BackfaceCheck.js`: a shared-geometry red back-face clone per content
+  solid (front culled via flipped `sideOrientation`, no `meshId`), so any RED
+  visible from outside = a hole or inverted face. Viewport-only; re-applied on
+  `ASSET_INSTANTIATED` / `PROJECT_LOADED` when on; disposed when off.
 State lives in `state.scene.overlays` (silent writes). Re-renders on
-`PROJECT_LOADED` / `PROJECT_NEW`. (Inspection follow-ups not yet built:
-inverted/back-face highlight + UV-checker — they need per-mesh clone / texture-
-swap machinery with export+perf care.)
+`PROJECT_LOADED` / `PROJECT_NEW`. (Inspection follow-up not yet built: UV-checker
+mode — texture-swap that interacts with TextureSource/export, needs its own pass.)
 
 ### Scene Panel (`src/ui/ScenePanel.js`)
 Right-panel section `#rp-scene` — the specialist section of the **Scene

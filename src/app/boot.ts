@@ -51,7 +51,7 @@ import {
   VertexData,
   WebGPUEngine,
 } from '@babylonjs/core';
-import { GridMaterial, ShadowOnlyMaterial } from '@babylonjs/materials';
+import { CustomMaterial, GridMaterial, ShadowOnlyMaterial } from '@babylonjs/materials';
 import { OBJExport, STLExport } from '@babylonjs/serializers';
 import '@babylonjs/loaders';
 
@@ -74,6 +74,7 @@ window.BABYLON = {
   Color4,
   Constants,
   CubeTexture,
+  CustomMaterial,
   DirectionalLight,
   DynamicTexture,
   EasingFunction,

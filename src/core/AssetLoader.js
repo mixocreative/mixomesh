@@ -243,6 +243,25 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
  *   `fileHandleKey` = an already-persisted key (project restore path).
  * @returns {Promise<string[]>} created meshIds
  */
+// Untextured imports default to a light-medium grey so they read like raw
+// (ED/grey-resin) prints instead of stark white. Only materials with NO base
+// texture AND a near-white base colour are touched — intentional colours and
+// textured models are left alone. Sets the actual base colour (so it also
+// exports sensibly).
+function _applyResinDefault(container) {
+  const GREY = new (window.BABYLON.Color3)(0.62, 0.62, 0.62);
+  const nearWhite = (c) => !c || (c.r > 0.85 && c.g > 0.85 && c.b > 0.85);
+  for (const mesh of container.meshes ?? []) {
+    const mat = mesh.material;
+    if (!mat) continue;
+    if ('albedoTexture' in mat) {            // PBRMaterial
+      if (!mat.albedoTexture && nearWhite(mat.albedoColor)) mat.albedoColor = GREY.clone();
+    } else if ('diffuseTexture' in mat) {    // StandardMaterial (STL/OBJ)
+      if (!mat.diffuseTexture && nearWhite(mat.diffuseColor)) mat.diffuseColor = GREY.clone();
+    }
+  }
+}
+
 export async function loadFromBlob(blob, filename, position, opts = {}) {
   const ext = _extOf(filename);
   if (!SUPPORTED_EXTENSIONS.includes(ext)) {
@@ -286,6 +305,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash,
     });
+
+    _applyResinDefault(container);
 
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
     container.addAllToScene();

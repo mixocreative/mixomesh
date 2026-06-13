@@ -16,6 +16,7 @@ import {
 } from './scene/EnvironmentRig.js';
 import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes, setSectionVizVisible, isSectionVizVisible, getSectionExtentMM } from './scene/ViewEffects.js';
 import { initImportBounce } from './scene/ImportBounce.js';
+import { initBackfaceCheck, setBackfaceCheck, refreshBackfaceClones, isBackfaceCheckOn } from './scene/BackfaceCheck.js';
 import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
 } from './scene/EdgeOverlay.js';
@@ -108,6 +109,7 @@ export async function init(canvas) {
   initSelectionOutline(_scene, _engine, camera);
   initViewEffects(_scene, camera);
   initImportBounce(_scene);
+  initBackfaceCheck(_scene);
   initEdgeOverlay(_scene);
   _setupCursor();
   initPivotSession(_scene, { getCursorPosition: getCursor });
@@ -132,10 +134,15 @@ export async function init(canvas) {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
     if (getState().scene.overlays?.baseColorView) _setBaseColorMode(true);
     if (isEdgeOverlayEnabled()) setWireframeEdgesMode(true);
+    if (isBackfaceCheckOn()) refreshBackfaceClones();
     ensureShadowCasters();
     registerSectionMeshes();
   });
-  subscribe(EVENTS.PROJECT_LOADED, () => { ensureShadowCasters(); registerSectionMeshes(); });
+  subscribe(EVENTS.PROJECT_LOADED, () => {
+    ensureShadowCasters();
+    registerSectionMeshes();
+    if (isBackfaceCheckOn()) refreshBackfaceClones();
+  });
 
   // Workspace/panel layout changes resize the grid cell the canvas lives in —
   // resize the engine on the next frame so the framebuffer matches (13b).
@@ -308,7 +315,7 @@ function _setupAxes() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'invertedFaces'|'bedPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -331,6 +338,9 @@ export function setOverlay(name, on) {
       break;
     case 'baseColorView':
       _setBaseColorMode(on);
+      break;
+    case 'invertedFaces':
+      setBackfaceCheck(on);
       break;
     case 'wireframeEdges':
       setWireframeEdgesMode(on);
