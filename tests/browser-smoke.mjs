@@ -302,6 +302,14 @@ async function main() {
         && Math.abs(floor.position.y - 0.00995) < 1e-6
         && floor.material?.diffuseColor?.r === 1 && floor.material?.diffuseColor?.g === 0;
 
+      // Round disc + diameter: floorDiameterMM=500 ⇒ unit-disc scale 0.5;
+      // 0 ⇒ AUTO (4× bed, ≫ 0.5). Disc geometry has many verts (vs ground's 4).
+      sm.SceneManager.applyRenderSettings({ floorDiameterMM: 500 });
+      const floorDiaScaled = Math.abs(floor.scaling.x - 0.5) < 1e-6;
+      sm.SceneManager.applyRenderSettings({ floorDiameterMM: 0 });
+      const floorAutoScaled = floor.scaling.x > 0.5;
+      const floorIsDisc = (floor.getTotalVertices?.() ?? 0) > 8;
+
       // Transparent PNG with the floor ON: the capture swaps it to a
       // shadow-catcher, so a no-shadow pixel must STAY alpha 0 (an opaque
       // colour floor would read 255), and the swap must restore after.
@@ -321,6 +329,7 @@ async function main() {
         oAlpha: await alphaAt(oBlob),
         videoOk, videoBytes: video?.blob?.size ?? 0,
         floorOk, floorHidden, floorTransparentAlpha, floorMatRestored,
+        floorDiaScaled, floorAutoScaled, floorIsDisc,
         crosshair, previewResult, rigRestored, mid, hdri,
       };
     })()`);
@@ -335,6 +344,9 @@ async function main() {
     assert(rendering.oAlpha === 255, `opaque capture should have alpha 255, got ${rendering.oAlpha}`);
     assert(rendering.videoOk, `offline turntable mp4 failed (${rendering.videoBytes} bytes)`);
     assert(rendering.floorOk, 'environment floor not created with colour + height');
+    assert(rendering.floorIsDisc, 'environment floor is not a round disc (too few verts)');
+    assert(rendering.floorDiaScaled, 'floorDiameterMM=500 did not scale the disc to 0.5 BU');
+    assert(rendering.floorAutoScaled, 'floorDiameterMM=0 did not restore the auto (4× bed) size');
     // 0 where unshadowed, partial in a shadow — an opaque colour floor reads
     // exactly 255, which is the regression this guards against.
     assert(rendering.floorTransparentAlpha < 255,
@@ -403,12 +415,15 @@ async function main() {
       // Striped indicator plane exists while the cut is on (viewport aid;
       // RenderOutput hides it during capture, so it must NOT affect aCut).
       const vizWhenOn = !!scene.getMeshByName('mx-section-plane');
+      // Cut-plane BORDER outline accompanies the cap while the cut is on.
+      const borderWhenOn = !!scene.getMeshByName('mx-section-border');
       const aCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: true });
       const aFlip = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: false });
       const vizWhenOff = !!scene.getMeshByName('mx-section-plane');
-      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff };
+      const borderWhenOff = !!scene.getMeshByName('mx-section-border');
+      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff, borderWhenOn, borderWhenOff };
 
       // (3) Bounce-in — ASSET_INSTANTIATED scale-pops the mesh and MUST land
       // exactly back on the original scaling (state transforms untouched).
@@ -490,8 +505,10 @@ async function main() {
     assert(wave.section.aCut === 0,
       `section plane did not cut the box (alpha ${wave.section.aCut}) — clip sign convention broke`);
     assert(wave.section.aFlip === 255, `section flip did not keep the other side (alpha ${wave.section.aFlip})`);
-    assert(wave.section.vizWhenOn, 'cross-section indicator plane missing while cut is on');
-    assert(!wave.section.vizWhenOff, 'cross-section indicator plane not disposed when cut turned off');
+    assert(wave.section.vizWhenOn, 'cross-section cap plane missing while cut is on');
+    assert(!wave.section.vizWhenOff, 'cross-section cap plane not disposed when cut turned off');
+    assert(wave.section.borderWhenOn, 'cut-plane border outline missing while cut is on');
+    assert(!wave.section.borderWhenOff, 'cut-plane border outline not disposed when cut turned off');
     assert(wave.bounce.animated,
       `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
     assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');

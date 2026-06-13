@@ -148,18 +148,23 @@ export function applyEnvironmentSettings(render = {}) {
 function _updateFloor(render) {
   if (typeof render.floorEnabled === 'boolean') {
     if (render.floorEnabled && !_floor) {
-      const bed = getState().print.bedDimensions;
-      const size = Math.max(bed.x, bed.y) * 4 / 1000;   // mm → BU, 4× bed
-      _floor = BABYLON.MeshBuilder.CreateGround('mx-env-floor', { width: size, height: size }, _scene);
+      // Round disc (was a square ground). Built as a unit disc — radius 0.5 ⇒
+      // 1 BU diameter — and SCALED to the requested diameter, so a diameter
+      // change never rebuilds the mesh. Rotated flat (normal +Y).
+      _floor = BABYLON.MeshBuilder.CreateDisc('mx-env-floor', { radius: 0.5, tessellation: 96 }, _scene);
+      _floor.rotation.x = Math.PI / 2;
       _floor.isPickable = false;
       _floor.receiveShadows = true;
       _floorMat = new BABYLON.StandardMaterial('mx-env-floor-mat', _scene);
       _floorMat.specularColor = new BABYLON.Color3(0, 0, 0);   // matte — no hot highlight
+      _floorMat.backFaceCulling = false;                       // visible from below
       _floor.material = _floorMat;
+      _applyFloorDiameter(render.floorDiameterMM);
     }
     if (_floor) _floor.setEnabled(render.floorEnabled);
   }
   if (!_floor) return;
+  if ('floorDiameterMM' in render) _applyFloorDiameter(render.floorDiameterMM);
   if (typeof render.floorColor === 'string') {
     try { _floorMat.diffuseColor = BABYLON.Color3.FromHexString(render.floorColor); } catch { /* keep */ }
   }
@@ -168,6 +173,17 @@ function _updateFloor(render) {
     // ground sits at exactly y=0 and an opaque coplanar floor would z-fight.
     _floor.position.y = render.floorZMM / 1000 - 0.00005;
   }
+}
+
+// Diameter in mm → uniform XY scale on the unit disc. ≤0 / unset = AUTO
+// (4× the largest bed dimension — the legacy square-floor size).
+function _applyFloorDiameter(mm) {
+  if (!_floor) return;
+  const bed = getState().print.bedDimensions;
+  const autoMM = Math.max(bed.x, bed.y) * 4;
+  const diaMM = Number.isFinite(mm) && mm > 0 ? mm : autoMM;
+  const d = diaMM / 1000;                 // mm → BU (= disc diameter, radius 0.5×d)
+  _floor.scaling.set(d, d, 1);
 }
 
 /**

@@ -5,42 +5,34 @@
 // stays clean until expanded.
 
 import { Modal } from './Modal.js';
-import { dismiss } from './Toast.js';
+import { reportError, guard } from './Status.js';
 import { escapeHtml } from './renderSafe.js';
 
+// Owns the `importError` modal RENDERER; the error POLICY (when to show it)
+// lives in Status (reportError modal route / guard). safeImport is the import
+// adapter over guard, exactly as safeAsync is the toast adapter.
 export function init() {
   Modal.register('importError', _render);
 }
 
 /**
- * Show the import-error modal.
- * @param {string} filename  the file that failed (for the heading)
- * @param {unknown} err      the thrown error
+ * Show the import-error modal for an already-caught error.
+ * @param {string} filename
+ * @param {unknown} err
  */
 export function showImportError(filename, err) {
-  const message = err?.message ? String(err.message) : String(err ?? 'Unknown error');
-  const detail = err?.stack ? String(err.stack)
-    : err?.cause ? String(err.cause)
-    : '';
-  Modal.open('importError', { filename: filename ?? 'file', message, detail });
+  reportError(err, { title: 'Import failed', modal: true, filename });
 }
 
 /**
- * Wrap an import entry point. On failure: log, dismiss any loading toast, and
- * show the detail modal instead of a transient error toast. Drop-in for the
- * generic safeAsync at every model/texture import call site.
+ * Wrap an import entry point — failures surface the detail modal (via Status),
+ * not a transient toast. Drop-in for safeAsync at model/texture import sites.
  * @param {() => Promise<unknown>} fn
  * @param {string} filename
  * @param {string} [loadingToastId]
  */
-export async function safeImport(fn, filename, loadingToastId) {
-  try {
-    await fn();
-  } catch (err) {
-    console.error(`Import failed for ${filename}:`, err);
-    if (loadingToastId) dismiss(loadingToastId);
-    showImportError(filename, err);
-  }
+export function safeImport(fn, filename, loadingToastId) {
+  return guard(fn, { title: 'Import failed', modal: true, filename, loadingToastId });
 }
 
 // Map common failure messages to an actionable hint.

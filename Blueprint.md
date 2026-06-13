@@ -193,7 +193,7 @@ src/
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
       EnvironmentRig.js    ← 3-light studio + RENDERONCE shadows, shadow-catcher floor, HDRI IBL
-      ViewEffects.js       ← SSAO + cross-section clip plane + striped indicator quad (viewport tools)
+      ViewEffects.js       ← SSAO + cross-section: clip plane + stencil cap (solid interior) + cut-plane border
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
@@ -212,6 +212,7 @@ src/
     PrintPanel.js
     StatusBar.js
     Toast.js
+    Status.js              ← centralized error + loading policy (reportError / guard / runTask / safeAsync)
     Modal.js               ← generic modal helper
     AppShell.js            ← shell controls: panel collapse/resize + boot status
     renderSafe.js          ← escaping helpers + validated image data URLs
@@ -799,8 +800,9 @@ const initialState = {
               toneMapping: 'aces' /* |'standard'|'neutral'|'off' */,
               saturation: 0 /* colorCurves.globalSaturation, -100..100 */,
               vignette: false, vignetteWeight: 1.5,
-              // Environment floor — shadow-catcher plane (Z in print-space mm).
-              floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0,
+              // Environment floor — round shadow-catcher DISC (Z in print-space
+              // mm). floorDiameterMM: 0 = auto (4× largest bed dim).
+              floorEnabled: false, floorColor: '#9a9a9a', floorZMM: 0, floorDiameterMM: 0,
               // HDRI IBL — prefiltered .env presets in public/env/ (lighting
               // only, gradient backdrop stays; PBR materials).
               hdriEnabled: true, hdriPreset: 'studio' /* |'neutral'|'outdoor' */,
@@ -813,16 +815,19 @@ const initialState = {
     // Section", internal key stays `section`). SESSION-ONLY — deliberately NOT
     // persisted. axis/offset are print-space (Z = up, mm); flip keeps the other
     // side. Cuts CONTENT meshes only (per-mesh scene.clipPlane set/cleared in
-    // render observables) — grid/floor/axes/backdrop never sliced. A semi-
-    // transparent, diagonally-striped INDICATOR quad (Fusion-360 style) is
-    // drawn at the cut so the user sees where/which-axis the cut is; it carries
-    // no metadata.meshId, so it is auto-excluded from clipping, shadow casters,
-    // and the selection mask. The geometric cut DOES appear in PNG/video
-    // exports (content renders through Mesh.render() in RTTs); the striped
-    // indicator is viewport furniture — RenderOutput._hideFurniture hides it
-    // during capture (like grid/axes) so it never pollutes a render. The
-    // shadow-map pass renders depth directly, so shadows stay uncut (documented
-    // limit).
+    // render observables) — grid/floor/axes/backdrop never sliced. Two
+    // Fusion-360-style VIEWPORT aids accompany the cut: (a) a stencil CAP that
+    // stripes ONLY the solid interior cross-section — every clipped content
+    // material renders with `stencil` INVERT (even-odd parity, no extra geometry
+    // pass — heavy-asset perf), and a cap quad at the plane draws only where
+    // stencil != 0; exact for watertight meshes; (b) a thin accent BORDER
+    // outline (LinesMesh) at the plane extent so the plane is visible even where
+    // the cut misses the solid. Both carry no metadata.meshId (auto-excluded
+    // from clip/shadow/mask). The geometric cut DOES appear in PNG/video exports
+    // (content renders through Mesh.render() in RTTs); the cap + border + the
+    // stencil writes are viewport furniture — RenderOutput._hideFurniture hides
+    // them during capture so stripes never pollute a render. The shadow-map pass
+    // renders depth directly, so shadows stay uncut (documented limit).
     section: { enabled: false, axis: 'z' /* |'x'|'y' */, offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
@@ -1840,7 +1845,7 @@ Every field persisted. Restored exactly.
                 "fovDeg": 45.8, "clipNearMM": 1,
                 "toneMapping": "aces", "saturation": 0,
                 "vignette": false, "vignetteWeight": 1.5,
-                "floorEnabled": false, "floorColor": "#9a9a9a", "floorZMM": 0,
+                "floorEnabled": false, "floorColor": "#9a9a9a", "floorZMM": 0, "floorDiameterMM": 0,
                 "hdriEnabled": true, "hdriPreset": "studio", "hdriIntensity": 0.6 },
     "renderOut": { "width": 1920, "height": 1080, "transparent": false,
                    "pose": null, /* or saved camera pose for the Render view */
@@ -2595,12 +2600,14 @@ Sections:
   toggle off/on, disposed on preset change), exposure, contrast, **tone map** (ACES /
   Neutral-KHR / Standard / Off — `imageProcessing.toneMappingType`),
   **saturation** (`colorCurves.globalSaturation`, −100..100, curves enabled
-  only when ≠ 0), **vignette** toggle + weight, **floor** (solid-colour
-  shadow-catcher plane: enable + colour picker + Z height in mm —
-  `floorEnabled`/`floorColor`/`floorZMM`; lazily-created ground 4× bed size,
-  `receiveShadows`, matte Standard material, positioned 0.05 mm below the
-  requested height so Z=0 doesn't z-fight the bed grid; never registered /
-  pickable / exported, stays VISIBLE in renders — it exists for them),
+  only when ≠ 0), **vignette** toggle + weight, **floor** (round shadow-catcher
+  DISC: enable + colour picker + Z height in mm + diameter in mm —
+  `floorEnabled`/`floorColor`/`floorZMM`/`floorDiameterMM`; a unit disc
+  (`CreateDisc`, radius 0.5) SCALED to the diameter so resizing never rebuilds
+  the mesh, diameter 0 = auto (4× largest bed dim), `receiveShadows`, matte
+  Standard material, positioned 0.05 mm below the requested height so Z=0
+  doesn't z-fight the bed grid; never registered / pickable / exported, stays
+  VISIBLE in renders — it exists for them),
   shadows on/off, shadow darkness, key/fill/ambient light intensities,
   **Ambient occlusion** (SSAO toggle, default ON + strength 0..2 — viewport
   shading only, hint says so; see §7 SSAO) + a "Reset environment" button.
@@ -2610,8 +2617,10 @@ Sections:
   `CameraRig.applyCameraOptics` via the same settings object.
 - **Section** — cross-section "Cut view" (state.scene.section, session-only):
   axis X/Y/Z (print-space, Z = height), offset (mm), flip side →
-  `SceneManager.setSectionPlane`. Cuts content meshes only; hint documents
-  that grid/floor stay, the cut shows in exports, and shadows stay uncut.
+  `SceneManager.setSectionPlane`. Cuts content meshes only; a stencil cap
+  stripes the solid interior cross-section and an accent border outlines the
+  plane (both viewport-only). Hint documents that grid/floor stay, the
+  geometric cut shows in exports, and shadows stay uncut.
 All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
@@ -2961,18 +2970,21 @@ Order when it lands:
 
 ## PART 14 — STABILITY PATTERNS
 
-### 14.1 safeAsync
+### 14.1 Status — centralized error + loading policy (`src/ui/Status.js`)
+ONE module owns the two cross-cutting concerns; everything else delegates, so
+changing how the app surfaces failures or shows progress is a single edit.
 ```js
-export async function safeAsync(fn, loadingToastId) {
-  try { await fn(); }
-  catch (err) {
-    console.error(err);
-    if (loadingToastId) Toast.dismiss(loadingToastId);
-    Toast.show(`Error: ${err.message}`, 'error', 0);
-  }
-}
+reportError(err, { title, modal, filename })  // toast, or the detail modal (import/export)
+guard(fn, { title, modal, filename, loadingToastId })  // run + route failure → reportError
+runTask(label, fn, { overlay })               // ONE loading path (overlay | loading toast), always cleaned up
+safeAsync(fn, loadingToastId)                 // toast-policy adapter = guard({title:'Error'})
 ```
-Wrap every async UI entry point.
+Adapters delegate here: `safeAsync` (re-exported from `Toast.js` for compat) and
+`ImportError.safeImport` (= `guard({ modal:true })`). Wrap every async UI entry
+point in `safeAsync`/`safeImport`. DELIBERATELY out of scope: intentional silent
+fallbacks (`catch { /* optional */ }`) and domain loaders with their own staged
+/ nested progress (`AssetLoader` import overlay, `PrintManager` export) — those
+aren't the shared concern and centralizing them would be false-DRY.
 
 ### 14.2 Disposal Discipline
 **On delete mesh:**

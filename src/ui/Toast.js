@@ -94,17 +94,6 @@ export function init() {
 
 export const Toast = { init, show, dismiss };
 
-/**
- * Wrap an async UI entry point. Shows an error toast on failure.
- * @param {function} fn  Async function to call.
- * @param {string} [loadingToastId]  Dismiss this loading toast on error.
- */
-export async function safeAsync(fn, loadingToastId) {
-  try {
-    await fn();
-  } catch (err) {
-    console.error(err);
-    if (loadingToastId) dismiss(loadingToastId);
-    show(`Error: ${err.message}`, 'error', 0);
-  }
-}
+// `safeAsync` moved to ./Status.js (centralized error/loading policy). Import it
+// from there; this re-export keeps older import paths working.
+export { safeAsync } from './Status.js';

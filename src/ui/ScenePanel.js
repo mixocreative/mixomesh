@@ -56,6 +56,7 @@ const RENDER_DEFAULTS = {
   floorEnabled: false,
   floorColor: '#9a9a9a',
   floorZMM: 0,
+  floorDiameterMM: 0,
   hdriEnabled: true,
   hdriPreset: 'studio',
   hdriIntensity: 0.6,
@@ -311,6 +312,10 @@ function _render() {
       <div class="pp-row">
         <label>Floor Z (mm)</label>
         <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
+      </div>
+      <div class="pp-row">
+        <label title="0 = auto (4× the largest bed dimension)">Diameter (mm)</label>
+        <input type="number" step="10" min="0" data-render="floorDiameterMM" value="${_fmt(render.floorDiameterMM, 0)}" placeholder="auto">
       </div>` : ''}
       ${render.floorEnabled && !render.shadowsEnabled ? `
       <div class="pp-row pp-row-inline">
