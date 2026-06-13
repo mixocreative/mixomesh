@@ -754,14 +754,18 @@ async function main() {
       await new Promise(r => setTimeout(r, 400));
       const savedAfterSection = JSON.parse(localStorage.getItem(KEY))?.settings?.render?.exposure;
 
-      // (4) dirty again, then resetAll → key cleared + state factory
-      sm.setState(s => ({ ...s, print: { ...s.print, workingRatio: 9 } }), { silent: true });
+      // (4) dirty again, then resetAll → key cleared + state factory. A scene
+      // is loaded (the diag STL), so the ratio fields are PROTECTED: workingRatio
+      // must survive, a non-ratio print field (minWallThickness) must reset.
+      sm.setState(s => ({ ...s, print: { ...s.print, workingRatio: 9, minWallThickness: 9 } }), { silent: true });
       ss.save();
+      const sceneLoaded = Object.keys(sm.getState().scene.objects).length > 0;
       ss.resetAll();
       const keyCleared = localStorage.getItem(KEY) === null;
-      const ratioReset = sm.getState().print.workingRatio === DS.print.workingRatio;
+      const ratioPreserved = sm.getState().print.workingRatio === 9;
+      const wallReset = sm.getState().print.minWallThickness === DS.print.minWallThickness;
 
-      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, ratioReset, dsExposure: DS.render.exposure };
+      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioPreserved, wallReset, dsExposure: DS.render.exposure };
     })()`);
     assert(settings.logoOk, 'header logo (#app-logo) missing or not rendered');
     assert(settings.savedExposure === 1.77, 'edited setting was not persisted to localStorage');
@@ -769,7 +773,9 @@ async function main() {
     assert(settings.afterSection === settings.dsExposure, 'resetSection did not restore the factory value');
     assert(settings.savedAfterSection === settings.dsExposure, 'resetSection did not re-persist the restored value');
     assert(settings.keyCleared, 'resetAll did not clear the settings localStorage key');
-    assert(settings.ratioReset, 'resetAll did not restore print settings to factory');
+    assert(settings.sceneLoaded, 'expected a loaded scene (diag STL) for the ratio-guard check');
+    assert(settings.ratioPreserved, 'resetAll wrongly reset workingRatio under a loaded scene');
+    assert(settings.wallReset, 'resetAll did not reset a non-ratio print field');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

@@ -79,6 +79,26 @@ function _narrow(obj, fields) {
   return out;
 }
 
+// Fields that must NOT be reset while a scene is loaded — they are tied to the
+// live geometry. workingRatio rebakes every mesh (BU↔mm mapping); targetRatio
+// drives export/preview scale + bed fit. Snapping them back to factory under a
+// loaded scene would silently rescale or mis-fit the user's content, so a reset
+// preserves them when objects exist. (On an empty scene / New, they reset.)
+const SCENE_PROTECTED = { print: ['workingRatio', 'targetRatio'] };
+function _sceneLoaded(state) {
+  return Object.keys(state?.scene?.objects ?? {}).length > 0;
+}
+// Drop scene-protected fields from a factory partial when the scene is loaded,
+// so the current (cur-spread) values survive the reset.
+function _guardFactory(sliceKey, factory, state) {
+  if (!_sceneLoaded(state)) return factory;
+  const prot = SCENE_PROTECTED[sliceKey];
+  if (!prot) return factory;
+  const out = { ...factory };
+  for (const f of prot) delete out[f];
+  return out;
+}
+
 // ── Pure core (unit-tested) ──────────────────────────────
 
 /** The persisted subset of a full state object: { key → value }. */
@@ -141,7 +161,7 @@ export function applySectionToState(state, sectionKey) {
       continue;
     }
     const cur = _get(out, entry.path) ?? {};
-    const factory = _narrow(DS[part.slice], part.fields ?? entry.fields);
+    const factory = _guardFactory(part.slice, _narrow(DS[part.slice], part.fields ?? entry.fields), out);
     out = _setPath(out, entry.path, { ..._clone(cur), ...factory });
   }
   return out;
@@ -153,7 +173,8 @@ export function factoryState(state) {
   for (const e of SCHEMA) {
     if (e.scalar) { out = _setPath(out, e.path, _clone(DS[e.key])); continue; }
     const cur = _get(out, e.path) ?? {};
-    out = _setPath(out, e.path, { ..._clone(cur), ..._narrow(DS[e.key], e.fields) });
+    const factory = _guardFactory(e.key, _narrow(DS[e.key], e.fields), out);
+    out = _setPath(out, e.path, { ..._clone(cur), ...factory });
   }
   return out;
 }

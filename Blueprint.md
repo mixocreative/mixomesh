@@ -3031,6 +3031,13 @@ Print tab bar — Properties/object + session-only Cross-Section have none) call
 `default-settings.json`, re-apply to the scene, and dispatch `SETTINGS_RESET`
 (Scene + Print panels re-render).
 
+**Scene-protected fields:** when a scene is loaded (`state.scene.objects`
+non-empty), a reset PRESERVES `print.workingRatio` + `print.targetRatio`
+(`SettingsStore.SCENE_PROTECTED`) — `workingRatio` rebakes every mesh and
+`targetRatio` drives export/bed-fit, so snapping them to factory under loaded
+content would silently rescale the scene. On an empty scene / New they reset
+normally. All other fields (bed, wall, mode, render, grid…) always reset.
+
 **Header logo:** `#app-logo` (`public/logo.svg`, white wordmark) is pinned
 far-left of `#header`, before the editable `#project-name`.
 

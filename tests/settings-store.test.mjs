@@ -107,17 +107,43 @@ test('applySectionToState(grid) resets grid + grid/axes overlays only', () => {
   assert.equal(out.scene.overlays.printPreview, false);   // untouched
 });
 
-test('factoryState resets every persisted slice but leaves content', () => {
+test('reset PRESERVES ratio fields when a scene is loaded (no silent rescale)', () => {
   const s = freshState();
+  s.scene.objects = { m: { id: 'm' } };       // scene loaded
+  s.print.workingRatio = 4;
+  s.print.targetRatio = 35;
+  s.print.minWallThickness = 9;               // non-ratio — should still reset
+  const sec = applySectionToState(s, 'print');
+  assert.equal(sec.print.workingRatio, 4, 'workingRatio must survive reset under a loaded scene');
+  assert.equal(sec.print.targetRatio, 35, 'targetRatio must survive reset under a loaded scene');
+  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'non-ratio print field still resets');
+
+  const all = factoryState(s);
+  assert.equal(all.print.workingRatio, 4);
+  assert.equal(all.print.targetRatio, 35);
+  assert.equal(all.print.minWallThickness, DS.print.minWallThickness);
+});
+
+test('reset DOES reset ratios on an empty scene (New / no objects)', () => {
+  const s = freshState();                      // no objects
+  s.print.workingRatio = 4;
+  s.print.targetRatio = 35;
+  const out = applySectionToState(s, 'print');
+  assert.equal(out.print.workingRatio, DS.print.workingRatio);
+  assert.equal(out.print.targetRatio, DS.print.targetRatio);
+});
+
+test('factoryState resets every persisted slice but leaves content', () => {
+  const s = freshState();                       // empty scene → ratios reset too
   s.scene.render.exposure = 9;
   s.print.workingRatio = 7;
+  s.print.minWallThickness = 9;
   s.gizmo.snap.translate = 5;
   s.selection.pivotMode = 'world';
-  s.scene.objects = { keep: { id: 'keep' } };
   const out = factoryState(s);
   assert.equal(out.scene.render.exposure, DS.render.exposure);
-  assert.equal(out.print.workingRatio, DS.print.workingRatio);
+  assert.equal(out.print.workingRatio, DS.print.workingRatio);   // no objects → resets
+  assert.equal(out.print.minWallThickness, DS.print.minWallThickness);
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);
-  assert.deepEqual(out.scene.objects, { keep: { id: 'keep' } });   // content survives
 });
