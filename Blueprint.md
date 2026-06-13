@@ -820,7 +820,10 @@ const initialState = {
     // stripes ONLY the solid interior cross-section — every clipped content
     // material renders with `stencil` INVERT (even-odd parity, no extra geometry
     // pass — heavy-asset perf), and a cap quad at the plane draws only where
-    // stencil != 0; exact for watertight meshes; (b) a thin accent BORDER
+    // stencil != 0; exact for watertight meshes. The cap is OPAQUE + depth-
+    // writing so it OCCLUDES the hollow interior / back faces behind the plane
+    // (the cut reads solid, not see-through — semi-transparent would reveal the
+    // hollow it hides); (b) a thin accent BORDER
     // outline (LinesMesh) at the plane extent so the plane is visible even where
     // the cut misses the solid. Both carry no metadata.meshId (auto-excluded
     // from clip/shadow/mask). The geometric cut DOES appear in PNG/video exports
@@ -1167,6 +1170,7 @@ SceneManager.applyRenderSettings(render)      // partial-safe: grade + lights/sh
 SceneManager.setBackgroundEnabled(on)         // gradient Layer + clearColor alpha — transparent PNG capture
 SceneManager.setFloorShadowOnly(on)           // floor ↔ ShadowOnlyMaterial swap during transparent capture
 SceneManager.setSectionPlane(section)         // cross-section clip plane ({enabled, axis, offsetMM, flip})
+SceneManager.getSectionExtentMM(axis)         → { minMM, maxMM, hasContent } — content extent along axis (offset-slider range)
 SceneManager.invalidateShadows()              // re-arm the RENDERONCE shadow map for one render
 SceneManager.getShadowGenerator()             → BABYLON.ShadowGenerator
 
@@ -2616,11 +2620,14 @@ Sections:
 - **Camera** — FOV (deg, clamped 5–140) and near clip (mm) →
   `CameraRig.applyCameraOptics` via the same settings object.
 - **Section** — cross-section "Cut view" (state.scene.section, session-only):
-  axis X/Y/Z (print-space, Z = height), offset (mm), flip side →
-  `SceneManager.setSectionPlane`. Cuts content meshes only; a stencil cap
-  stripes the solid interior cross-section and an accent border outlines the
-  plane (both viewport-only). Hint documents that grid/floor stay, the
-  geometric cut shows in exports, and shadows stay uncut.
+  axis X/Y/Z (print-space, Z = height), offset via a **range SLIDER** whose
+  min/max span the content extent along the axis (lowest..highest point, from
+  `SceneManager.getSectionExtentMM(axis)`), flip side → `SceneManager.setSectionPlane`.
+  The slider drives the cut live on `input` (cheap — no extra geometry pass);
+  the axis select re-renders so the range follows. Cuts content meshes only; an
+  OPAQUE stencil cap stripes the solid interior cross-section (hides the hollow)
+  and an accent border outlines the plane (both viewport-only). Hint documents
+  that grid/floor stay, the geometric cut shows in exports, shadows stay uncut.
 All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror

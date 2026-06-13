@@ -14,7 +14,7 @@ import {
   initEnvironmentRig, applyEnvironmentSettings, ensureShadowCasters,
   getShadowGenerator, invalidateShadows, setFloorShadowOnly,
 } from './scene/EnvironmentRig.js';
-import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes, setSectionVizVisible, isSectionVizVisible } from './scene/ViewEffects.js';
+import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes, setSectionVizVisible, isSectionVizVisible, getSectionExtentMM } from './scene/ViewEffects.js';
 import { initImportBounce } from './scene/ImportBounce.js';
 import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
@@ -41,7 +41,7 @@ import {
 // live in scene/*.js (review L29 split + §0.5 budget + audit C1); re-exported
 // so the SceneManager surface is unchanged.
 export { setActive, setSelected };
-export { getShadowGenerator, invalidateShadows, setFloorShadowOnly, setSectionPlane };
+export { getShadowGenerator, invalidateShadows, setFloorShadowOnly, setSectionPlane, getSectionExtentMM };
 export { setWireframeEdgeColor };
 export {
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
@@ -504,7 +504,7 @@ export const SceneManager = {
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
-  setSectionVizVisible, isSectionVizVisible,
+  setSectionVizVisible, isSectionVizVisible, getSectionExtentMM,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

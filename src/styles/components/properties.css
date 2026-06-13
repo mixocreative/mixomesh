@@ -323,3 +323,13 @@
   padding: var(--sp-3) var(--sp-4);
 }
 .pp-section-header { border-bottom: 1px solid var(--border-section); }
+
+/* Cross-section offset slider: range fills the row, value reads out at the end */
+.pp-row input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--accent, #f59e0b); }
+.pp-range-out {
+  min-width: 3.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2, #9aa0a6);
+  font-size: var(--fs-sm);
+}

@@ -124,6 +124,22 @@ export function setSectionPlane(section = {}) {
   _setAllStencil(true);    // cap mesh now exists — turn on the interior mask
 }
 
+/**
+ * Content extent along a section axis, in print-space mm — the slider range
+ * (lowest..highest point). Reuses the cap's `_contentBounds` (no extra cost).
+ * Axis maps to Babylon: x→X, y→Z, z→Y (print Z = up = Babylon Y).
+ * @param {'x'|'y'|'z'} axis
+ * @returns {{ minMM: number, maxMM: number, hasContent: boolean }}
+ */
+export function getSectionExtentMM(axis) {
+  const b = _contentBounds();
+  if (!b) return { minMM: -150, maxMM: 150, hasContent: false };
+  const a = axis in AXIS_NORMALS ? axis : 'z';
+  const lo = a === 'x' ? b.min.x : a === 'y' ? b.min.z : b.min.y;
+  const hi = a === 'x' ? b.max.x : a === 'y' ? b.max.z : b.max.y;
+  return { minMM: lo * 1000, maxMM: hi * 1000, hasContent: true };
+}
+
 // ── Cross-section cap + cut-plane border (Fusion-360-style) ──
 //
 // Two viewport aids, both shown only while the cut is on:
@@ -169,17 +185,19 @@ function _buildStripeTexture() {
   const N = 256;
   const tex = new BABYLON.DynamicTexture('mx-section-stripes', N, _scene, false);
   const ctx = tex.getContext();
-  ctx.clearRect(0, 0, N, N);
-  ctx.fillStyle = `rgba(${ACCENT_RGB}, 0.22)`;     // translucent fill
+  // OPAQUE fill + dark diagonal hatch — the cut face reads as a SOLID machined
+  // cross-section (Fusion-style) and, with depth-write on, OCCLUDES the hollow
+  // interior / back faces behind the plane. Semi-transparency is deliberately
+  // NOT used: a see-through face would reveal the hollow it's meant to hide.
+  ctx.fillStyle = `rgb(${ACCENT_RGB})`;
   ctx.fillRect(0, 0, N, N);
-  ctx.strokeStyle = `rgba(${ACCENT_RGB}, 0.7)`;     // brighter diagonal hatch
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.32)';
   ctx.lineWidth = 16;
   for (let i = -N; i < N * 2; i += 48) {
     ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + N, N); ctx.stroke();
   }
   tex.update();
-  tex.hasAlpha = true;
-  return tex;
+  return tex;   // opaque (no hasAlpha) — occludes what's behind the cut
 }
 
 // Configure a clipped content material to INVERT the stencil where it draws,
@@ -215,11 +233,12 @@ function _updateSectionViz(axis, off) {
     const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
     mat.diffuseTexture  = _capTex;
     mat.emissiveTexture = _capTex;
-    mat.useAlphaFromDiffuseTexture = true;
     mat.disableLighting = true;
     mat.backFaceCulling = false;
-    mat.disableDepthWrite = true;
-    // Draw ONLY where the clipped solids set the stencil (interior at the plane).
+    // OPAQUE + depth-write ON (defaults): the cap sits at the cut plane — the
+    // frontmost surface after clipping — so it occludes the back faces / hollow
+    // interior behind it, making the cut read solid. Drawn ONLY where the
+    // clipped solids set the stencil (the actual interior cross-section).
     mat.stencil.enabled  = true;
     mat.stencil.func     = BABYLON.Constants.NOTEQUAL;
     mat.stencil.funcRef  = 0;

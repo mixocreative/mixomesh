@@ -382,6 +382,11 @@ function _render() {
   // Cross-section inspection plane (session-only). Cuts CONTENT only — the
   // grid/floor/axes stay; offset is print-space mm along the chosen axis.
   const section = { ...SECTION_DEFAULTS, ...(s.scene.section ?? {}) };
+  // Offset slider spans the content's extent along the axis (lowest..highest
+  // point) — reuses the cap's bounds (no extra cost).
+  const sext = SceneManager.getSectionExtentMM(section.axis);
+  const sStep = Math.max(0.1, Math.round((sext.maxMM - sext.minMM) / 2) / 100);
+  const sVal = Math.max(sext.minMM, Math.min(sext.maxMM, section.offsetMM));
   const sectionSec = `
       <div class="pp-row pp-row-inline">
         ${_toggle('data-sect-toggle', 'enabled', 'Cut view', section.enabled)}
@@ -397,7 +402,10 @@ function _render() {
       </div>
       <div class="pp-row">
         <label>Offset (mm)</label>
-        <input type="number" step="1" data-sect="offsetMM" value="${_fmt(section.offsetMM, 1)}">
+        <input type="range" data-sect-range="offsetMM"
+          min="${_fmt(sext.minMM, 1)}" max="${_fmt(sext.maxMM, 1)}" step="${sStep}"
+          value="${_fmt(sVal, 1)}">
+        <output class="pp-range-out" data-sect-out>${_fmt(sVal, 1)}</output>
       </div>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-sect-toggle="flip" ${section.flip ? 'checked' : ''}> Flip side</label>
@@ -594,6 +602,17 @@ function _wire() {
   });
   _bodyEl.querySelector('[data-sect-select="axis"]')?.addEventListener('change', (e) => {
     _setSection({ axis: e.target.value });
+    _render();   // offset slider range follows the new axis extent (lo..hi)
+  });
+  // Offset SLIDER — range spans the content extent (set in _render). 'input'
+  // fires every drag tick: live cut + live value readout. _setSection →
+  // setSectionPlane is cheap (no extra geometry pass), so dragging is smooth.
+  _bodyEl.querySelector('[data-sect-range]')?.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    if (!Number.isFinite(v)) return;
+    const out = _bodyEl.querySelector('[data-sect-out]');
+    if (out) out.textContent = v.toFixed(1);
+    _setSection({ offsetMM: v });
   });
   _bodyEl.querySelectorAll('[data-sect]').forEach(input => {
     input.addEventListener('change', () => {

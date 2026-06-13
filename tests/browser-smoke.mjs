@@ -423,7 +423,10 @@ async function main() {
       sm.SceneManager.setSectionPlane({ enabled: false });
       const vizWhenOff = !!scene.getMeshByName('mx-section-plane');
       const borderWhenOff = !!scene.getMeshByName('mx-section-border');
-      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff, borderWhenOn, borderWhenOff };
+      // Offset-slider range = content extent along the axis (lowest..highest).
+      const ext = sm.SceneManager.getSectionExtentMM('z');
+      const extentOk = ext.hasContent && ext.maxMM > ext.minMM;
+      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff, borderWhenOn, borderWhenOff, extentOk };
 
       // (3) Bounce-in — ASSET_INSTANTIATED scale-pops the mesh and MUST land
       // exactly back on the original scaling (state transforms untouched).
@@ -509,6 +512,7 @@ async function main() {
     assert(!wave.section.vizWhenOff, 'cross-section cap plane not disposed when cut turned off');
     assert(wave.section.borderWhenOn, 'cut-plane border outline missing while cut is on');
     assert(!wave.section.borderWhenOff, 'cut-plane border outline not disposed when cut turned off');
+    assert(wave.section.extentOk, 'getSectionExtentMM did not return a valid content extent for the offset slider');
     assert(wave.bounce.animated,
       `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
     assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');
