@@ -414,14 +414,15 @@ async function main() {
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: false });
       // Striped indicator plane exists while the cut is on (viewport aid;
       // RenderOutput hides it during capture, so it must NOT affect aCut).
-      const vizWhenOn = !!scene.getMeshByName('mx-section-plane');
-      // Cut-plane BORDER outline accompanies the cap while the cut is on.
+      // Back-face FILL clone + cut-plane BORDER accompany the cut while on.
+      const hasFill = () => scene.meshes.some(m => m.name.startsWith('mx-section-cap-'));
+      const vizWhenOn = hasFill();
       const borderWhenOn = !!scene.getMeshByName('mx-section-border');
       const aCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: true });
       const aFlip = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: false });
-      const vizWhenOff = !!scene.getMeshByName('mx-section-plane');
+      const vizWhenOff = hasFill();
       const borderWhenOff = !!scene.getMeshByName('mx-section-border');
       // Offset-slider range = content extent along the axis (lowest..highest).
       const ext = sm.SceneManager.getSectionExtentMM('z');
@@ -508,8 +509,8 @@ async function main() {
     assert(wave.section.aCut === 0,
       `section plane did not cut the box (alpha ${wave.section.aCut}) — clip sign convention broke`);
     assert(wave.section.aFlip === 255, `section flip did not keep the other side (alpha ${wave.section.aFlip})`);
-    assert(wave.section.vizWhenOn, 'cross-section cap plane missing while cut is on');
-    assert(!wave.section.vizWhenOff, 'cross-section cap plane not disposed when cut turned off');
+    assert(wave.section.vizWhenOn, 'cross-section back-face fill clone missing while cut is on');
+    assert(!wave.section.vizWhenOff, 'cross-section fill clone not disposed when cut turned off');
     assert(wave.section.borderWhenOn, 'cut-plane border outline missing while cut is on');
     assert(!wave.section.borderWhenOff, 'cut-plane border outline not disposed when cut turned off');
     assert(wave.section.extentOk, 'getSectionExtentMM did not return a valid content extent for the offset slider');

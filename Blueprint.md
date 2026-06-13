@@ -193,7 +193,7 @@ src/
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
       EnvironmentRig.js    ← 3-light studio + RENDERONCE shadows, shadow-catcher floor, HDRI IBL
-      ViewEffects.js       ← SSAO + cross-section: clip plane + stencil cap (solid interior) + cut-plane border
+      ViewEffects.js       ← SSAO + cross-section: clip plane + back-face fill (solid interior) + cut-plane border
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
@@ -816,21 +816,27 @@ const initialState = {
     // persisted. axis/offset are print-space (Z = up, mm); flip keeps the other
     // side. Cuts CONTENT meshes only (per-mesh scene.clipPlane set/cleared in
     // render observables) — grid/floor/axes/backdrop never sliced. Two
-    // Fusion-360-style VIEWPORT aids accompany the cut: (a) a stencil CAP that
-    // stripes ONLY the solid interior cross-section — every clipped content
-    // material renders with `stencil` INVERT (even-odd parity, no extra geometry
-    // pass — heavy-asset perf), and a cap quad at the plane draws only where
-    // stencil != 0; exact for watertight meshes. The cap is OPAQUE + depth-
-    // writing so it OCCLUDES the hollow interior / back faces behind the plane
-    // (the cut reads solid, not see-through — semi-transparent would reveal the
-    // hollow it hides); (b) a thin accent BORDER
-    // outline (LinesMesh) at the plane extent so the plane is visible even where
-    // the cut misses the solid. Both carry no metadata.meshId (auto-excluded
-    // from clip/shadow/mask). The geometric cut DOES appear in PNG/video exports
-    // (content renders through Mesh.render() in RTTs); the cap + border + the
-    // stencil writes are viewport furniture — RenderOutput._hideFurniture hides
-    // them during capture so stripes never pollute a render. The shadow-map pass
-    // renders depth directly, so shadows stay uncut (documented limit).
+    // Two VIEWPORT inspection aids accompany the cut (NO real geometry — that
+    // would be CSG2, the export path; these are preview-only and reliable on
+    // every GPU). A stencil cap was tried and REJECTED: its even-odd parity is
+    // depth-gated and GPU-dependent → showed the hollow back-face shell on some
+    // drivers. Instead:
+    //  (a) FILL — per clipped solid, a shared-geometry CLONE (parent=null with
+    //      the source world matrix baked, no metadata.meshId) renders the
+    //      source's BACK faces with a flat opaque striped unlit material (front
+    //      faces culled via flipped `sideOrientation`). Looking into the cut, the
+    //      solid interior fills with a solid cap colour instead of a see-through
+    //      lit shell. Clone shares geometry (no RAM dup), gets its own clip
+    //      observers so its front half is cut to match, idempotent per mesh.
+    //  (b) BORDER — a thin accent rectangle OUTLINE (LinesMesh) at the plane
+    //      extent so the plane is visible even where the cut misses the solid.
+    // Both carry no metadata.meshId (auto-excluded from clip/shadow/mask). The
+    // geometric cut DOES appear in PNG/video exports; the fill + border are
+    // viewport furniture — RenderOutput._hideFurniture hides them during capture.
+    // The shadow-map pass renders depth directly, so shadows stay uncut (limit).
+    // NOTE for a color-print tool: a REAL cut face for export/print is geometry,
+    // not visual — that is the CSG2 path (PrintManager._csgRebake already uses
+    // CSG2); a future "apply cut" would intersect the solid with the half-space.
     section: { enabled: false, axis: 'z' /* |'x'|'y' */, offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
@@ -2625,9 +2631,10 @@ Sections:
   `SceneManager.getSectionExtentMM(axis)`), flip side → `SceneManager.setSectionPlane`.
   The slider drives the cut live on `input` (cheap — no extra geometry pass);
   the axis select re-renders so the range follows. Cuts content meshes only; an
-  OPAQUE stencil cap stripes the solid interior cross-section (hides the hollow)
-  and an accent border outlines the plane (both viewport-only). Hint documents
-  that grid/floor stay, the geometric cut shows in exports, shadows stay uncut.
+  a back-face FILL clone makes the solid interior read solid (hides the hollow
+  shell, any GPU, no stencil) and an accent border outlines the plane (both
+  viewport-only — inspection, not real geometry). Hint documents that grid/floor
+  stay, the geometric cut shows in exports, shadows stay uncut.
 All of it writes `state.scene.render` (silent) and applies via
 `SceneManager.applyRenderSettings` (partial-safe); persisted in
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror

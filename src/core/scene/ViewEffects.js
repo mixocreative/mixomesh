@@ -121,7 +121,6 @@ export function setSectionPlane(section = {}) {
   _plane = new BABYLON.Plane(n.x, n.y, n.z, section.flip ? off : -off);
   registerSectionMeshes();
   _updateSectionViz(axis, off);
-  _setAllStencil(true);    // cap mesh now exists — turn on the interior mask
 }
 
 /**
@@ -140,30 +139,29 @@ export function getSectionExtentMM(axis) {
   return { minMM: lo * 1000, maxMM: hi * 1000, hasContent: true };
 }
 
-// ── Cross-section cap + cut-plane border (Fusion-360-style) ──
+// ── Cross-section fill + cut-plane border (inspection preview) ──
 //
-// Two viewport aids, both shown only while the cut is on:
+// Two VIEWPORT aids, both shown only while the cut is on. INSPECTION-ONLY — no
+// real geometry is created (that would be CSG2, the export path); these never
+// appear in renders (RenderOutput hides them during capture, the geometric cut
+// still does). Reliable on every GPU — NO stencil (the stencil cap's even-odd
+// parity is depth-gated and GPU-dependent → it showed the hollow back-face
+// shell on some drivers).
 //
-//  • CAP — the actual solid interior cross-section, striped + semi-transparent.
-//    Done with the STENCIL buffer, NOT an extra geometry pass (heavy-asset
-//    perf): while the section is on, every clipped content material renders
-//    with `stencil` INVERT, so at each pixel the stencil parity flips once per
-//    solid surface the camera ray crosses → set inside the solid, clear outside
-//    (even-odd rule; exact for watertight meshes — print models). A cap quad at
-//    the plane then draws ONLY where stencil != 0, so the stripes fill just the
-//    solid's cut face, never the empty bounds around it.
-//  • BORDER — a thin accent rectangle OUTLINE at the plane extent so the user
-//    sees the plane position and that cut-view is active, even where the cut
-//    misses the solid.
-//
-// Neither carries metadata.meshId → both auto-excluded from clipping, shadow
-// casters, and the selection mask. RenderOutput hides them during PNG/video
-// capture (the geometric cut still renders; the stripes/border do not).
+//  • FILL — for each clipped solid, a shared-geometry CLONE renders its BACK
+//    faces with a flat opaque striped material (front faces culled via flipped
+//    sideOrientation). Looking into the cut, the solid interior fills with a
+//    solid cap colour instead of a see-through lit shell. Clone shares the
+//    source geometry (no RAM dup), parent = null with the source world matrix
+//    baked in + no metadata.meshId → auto-excluded from clip/shadow/mask. It
+//    gets its own clip observers so its front half is cut away to match.
+//  • BORDER — a thin accent rectangle OUTLINE at the plane extent so the plane
+//    is visible even where the cut misses the solid.
 
-let _capMesh    = null;
-let _capTex     = null;
+let _capMat   = null;               // shared back-face fill material
+let _capTex   = null;
 let _borderMesh = null;
-const _sectionMeshes = new Set();   // content mesh refs (for stencil toggling)
+const _capClones = new Map();       // source mesh → back-face fill clone
 
 function _contentBounds() {
   if (!_scene) return null;
@@ -200,56 +198,68 @@ function _buildStripeTexture() {
   return tex;   // opaque (no hasAlpha) — occludes what's behind the cut
 }
 
-// Configure a clipped content material to INVERT the stencil where it draws,
-// so the cap quad can mask itself to the solid interior. Reversible.
-function _setMeshStencil(mesh, on) {
-  const mat = mesh.material;
-  if (!mat || !mat.stencil) return;
-  if (on) {
-    mat.stencil.enabled  = true;
-    mat.stencil.mask     = 0xFF;
-    mat.stencil.func     = BABYLON.Constants.ALWAYS;
-    mat.stencil.funcRef  = 1;
-    mat.stencil.funcMask = 0xFF;
-    mat.stencil.opStencilFail       = BABYLON.Constants.KEEP;
-    mat.stencil.opDepthFail         = BABYLON.Constants.KEEP;
-    mat.stencil.opStencilDepthPass  = BABYLON.Constants.INVERT;
-  } else {
-    mat.stencil.enabled = false;
-  }
+// Shared back-face fill material: flat opaque stripes, unlit. Renders the
+// source mesh's BACK faces (front culled via flipped sideOrientation) so the
+// solid interior fills with a solid cap colour. zOffset pushes it just behind
+// the skin to avoid z-fighting double-sided source materials.
+function _ensureCapMaterial() {
+  if (_capMat) return _capMat;
+  _capTex = _buildStripeTexture();
+  const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
+  mat.diffuseTexture  = _capTex;
+  mat.emissiveTexture = _capTex;
+  mat.disableLighting = true;
+  mat.backFaceCulling = true;
+  // Flip winding interpretation → the source's back faces become "front" and
+  // render; the original front faces cull. (Imports are CCW-front; if a model
+  // reads inverted, flip this one constant.)
+  mat.sideOrientation = BABYLON.Material.ClockWiseSideOrientation;
+  mat.zOffset = 1;
+  _capMat = mat;
+  return mat;
 }
 
-function _setAllStencil(on) {
-  for (const m of _sectionMeshes) { if (!m.isDisposed?.()) _setMeshStencil(m, on); }
+// One shared-geometry clone per cut solid, rendering its back faces as the fill.
+function _ensureCapClone(mesh) {
+  if (_capClones.has(mesh) || !mesh.geometry || mesh.metadata?.sectionPlaneViz) return;
+  const clone = mesh.clone(`mx-section-cap-${mesh.uniqueId}`, null, true);
+  if (!clone) return;
+  // Bake the source world transform (parent = null + no meshId → auto-excluded
+  // from clip/shadow/mask by the existing ancestor-walks). Static for the
+  // duration of the cut (inspection); rebuilt if the cut is re-applied.
+  const s = new BABYLON.Vector3(), r = new BABYLON.Quaternion(), p = new BABYLON.Vector3();
+  mesh.computeWorldMatrix(true).decompose(s, r, p);
+  clone.parent = null;
+  clone.position.copyFrom(p);
+  clone.rotationQuaternion = r;
+  clone.scaling.copyFrom(s);
+  clone.material = _ensureCapMaterial();
+  clone.isPickable = false;
+  clone.metadata = { sectionPlaneViz: true };
+  clone.onBeforeRenderObservable.add(() => { if (_plane) _scene.clipPlane = _plane; });
+  clone.onAfterRenderObservable.add(() => { if (_scene.clipPlane) _scene.clipPlane = null; });
+  _capClones.set(mesh, clone);
+}
+
+// Ensure a fill clone for every current content solid; prune dead sources.
+function _refreshCapClones() {
+  for (const [src, clone] of _capClones) {
+    if (src.isDisposed?.()) { clone.dispose(); _capClones.delete(src); }
+  }
+  for (const m of _scene.meshes) {
+    if (!m.geometry || m.metadata?.sectionPlaneViz) continue;
+    let node = m, isContent = false;
+    while (node) { if (node.metadata?.meshId) { isContent = true; break; } node = node.parent; }
+    if (isContent) _ensureCapClone(m);
+  }
 }
 
 function _updateSectionViz(axis, off) {
   const b = _contentBounds();
   if (!b) { _disposeSectionViz(); return; }   // empty scene — nothing to show
 
-  // Cap quad — stencil-masked to the solid interior.
-  if (!_capMesh) {
-    _capTex = _buildStripeTexture();
-    const mat = new BABYLON.StandardMaterial('mx-section-cap-mat', _scene);
-    mat.diffuseTexture  = _capTex;
-    mat.emissiveTexture = _capTex;
-    mat.disableLighting = true;
-    mat.backFaceCulling = false;
-    // OPAQUE + depth-write ON (defaults): the cap sits at the cut plane — the
-    // frontmost surface after clipping — so it occludes the back faces / hollow
-    // interior behind it, making the cut read solid. Drawn ONLY where the
-    // clipped solids set the stencil (the actual interior cross-section).
-    mat.stencil.enabled  = true;
-    mat.stencil.func     = BABYLON.Constants.NOTEQUAL;
-    mat.stencil.funcRef  = 0;
-    mat.stencil.funcMask = 0xFF;
-    _capMesh = BABYLON.MeshBuilder.CreatePlane('mx-section-plane',
-      { size: 1, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, _scene);
-    _capMesh.material = mat;
-    _capMesh.isPickable = false;
-    _capMesh.metadata = { sectionPlaneViz: true };
-    _capMesh.renderingGroupId = 1;     // after opaque content (which writes stencil)
-  }
+  _refreshCapClones();   // back-face fill per cut solid (idempotent)
+
   // Border outline — rebuilt each update (LinesMesh extent changes with axis).
   if (_borderMesh) { _borderMesh.dispose(); _borderMesh = null; }
 
@@ -258,9 +268,6 @@ function _updateSectionViz(axis, off) {
   const hw = (a) => a * MARGIN / 2;    // half-width helper
   let corners;
   if (axis === 'x') {
-    _capMesh.rotation.set(0, Math.PI / 2, 0);
-    _capMesh.scaling.set(size.z * MARGIN, size.y * MARGIN, 1);
-    _capMesh.position.set(off, center.y, center.z);
     const dz = hw(size.z), dy = hw(size.y);
     corners = [
       new BABYLON.Vector3(off, center.y - dy, center.z - dz),
@@ -269,9 +276,6 @@ function _updateSectionViz(axis, off) {
       new BABYLON.Vector3(off, center.y + dy, center.z - dz),
     ];
   } else if (axis === 'y') {                 // print Y = Babylon Z
-    _capMesh.rotation.set(0, 0, 0);
-    _capMesh.scaling.set(size.x * MARGIN, size.y * MARGIN, 1);
-    _capMesh.position.set(center.x, center.y, off);
     const dx = hw(size.x), dy = hw(size.y);
     corners = [
       new BABYLON.Vector3(center.x - dx, center.y - dy, off),
@@ -280,9 +284,6 @@ function _updateSectionViz(axis, off) {
       new BABYLON.Vector3(center.x - dx, center.y + dy, off),
     ];
   } else {                                   // 'z' — print height = Babylon Y
-    _capMesh.rotation.set(Math.PI / 2, 0, 0);
-    _capMesh.scaling.set(size.x * MARGIN, size.z * MARGIN, 1);
-    _capMesh.position.set(center.x, off, center.z);
     const dx = hw(size.x), dz = hw(size.z);
     corners = [
       new BABYLON.Vector3(center.x - dx, off, center.z - dz),
@@ -300,29 +301,28 @@ function _updateSectionViz(axis, off) {
 }
 
 function _disposeSectionViz() {
-  _setAllStencil(false);
-  if (_capMesh)    { _capMesh.material?.dispose(); _capMesh.dispose(); _capMesh = null; }
-  if (_capTex)     { _capTex.dispose();  _capTex  = null; }
+  for (const [, clone] of _capClones) { try { clone.dispose(); } catch { /* */ } }
+  _capClones.clear();
+  if (_capMat)     { _capMat.dispose(); _capMat = null; }
+  if (_capTex)     { _capTex.dispose(); _capTex = null; }
   if (_borderMesh) { _borderMesh.dispose(); _borderMesh = null; }
 }
 
-/** Is the cross-section cap/border currently shown? */
+/** Is the cross-section fill/border currently shown? */
 export function isSectionVizVisible() {
-  return !!_capMesh && _capMesh.isEnabled();
+  return !!_borderMesh && _borderMesh.isEnabled();
 }
 
 /**
- * Show/hide the cross-section cap + border. They are VIEWPORT aids, so
+ * Show/hide the cross-section fill + border. They are VIEWPORT aids, so
  * RenderOutput hides them during PNG/video capture (like grid/axes furniture) —
- * the geometric CUT still appears in exports, but the stripes/border do not.
- * Hiding also drops the content stencil writes so capture is unaffected.
+ * the geometric CUT still appears in exports, but the fill/border do not.
  * No-op when the section is off (no meshes).
  * @param {boolean} on
  */
 export function setSectionVizVisible(on) {
-  if (_capMesh)    _capMesh.setEnabled(!!on);
+  for (const [, clone] of _capClones) clone.setEnabled(!!on);
   if (_borderMesh) _borderMesh.setEnabled(!!on);
-  if (_capMesh) _setAllStencil(!!on);
 }
 
 /**
@@ -330,7 +330,8 @@ export function setSectionVizVisible(on) {
  * have them yet (idempotent — _sectionIds). Called on enable and on the
  * same import/load hooks as shadow casters. Observers are permanent and
  * read _plane each render: null = zero-cost no-op when the section is off.
- * Also enables the cap stencil on newly-registered meshes while a cut is live.
+ * Also builds the back-face fill clone for newly-imported solids while a cut
+ * is live.
  */
 export function registerSectionMeshes() {
   if (!_scene) return;
@@ -343,14 +344,11 @@ export function registerSectionMeshes() {
     return false;
   };
   for (const mesh of _scene.meshes) {
-    if (!mesh.geometry || !isContent(mesh)) continue;
-    if (!_sectionIds.has(mesh.uniqueId)) {
-      _sectionIds.add(mesh.uniqueId);
-      _sectionMeshes.add(mesh);
-      mesh.onBeforeRenderObservable.add(() => { if (_plane) _scene.clipPlane = _plane; });
-      mesh.onAfterRenderObservable.add(() => { if (_scene.clipPlane) _scene.clipPlane = null; });
-      mesh.onDisposeObservable.addOnce(() => { _sectionIds.delete(mesh.uniqueId); _sectionMeshes.delete(mesh); });
-    }
-    if (_plane && _capMesh) _setMeshStencil(mesh, true);   // late import during a live cut
+    if (!mesh.geometry || _sectionIds.has(mesh.uniqueId) || !isContent(mesh)) continue;
+    _sectionIds.add(mesh.uniqueId);
+    mesh.onBeforeRenderObservable.add(() => { if (_plane) _scene.clipPlane = _plane; });
+    mesh.onAfterRenderObservable.add(() => { if (_scene.clipPlane) _scene.clipPlane = null; });
+    mesh.onDisposeObservable.addOnce(() => _sectionIds.delete(mesh.uniqueId));
   }
+  if (_plane) _refreshCapClones();   // late import during a live cut
 }
