@@ -326,15 +326,17 @@ Import path:
    `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and calls
    `splitMultiMaterialMeshesInContainer()` before shader registration.
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
-   Then `_applyResinDefault()` recolours UNTEXTURED + near-white materials to a
-   medium-light grey (0.72) so raw imports read like grey/ED-resin prints instead
-   of stark white; textured or intentionally-coloured materials are untouched
-   (sets the real base colour, so it also exports grey). Meshes with NO material
-   at all (STL with no shader, missing/ghost) are ASSIGNED a shared matte grey
-   `StandardMaterial` (`_resinGrey`) — relying on `scene.defaultMaterial` alone
-   proved unreliable, so the material is set explicitly; `SceneManager.init` also
-   greys `scene.defaultMaterial` as a belt-and-braces fallback. Covers both the
-   has-material-but-white and the no-material (STL) cases.
+   **Resin-grey for shaderless geometry (never overrides imports):**
+   - `_applyResinDefault()` runs AFTER `addAllToScene` (so geometry is bound) and
+     assigns a shared matte grey `StandardMaterial` (`_resinGrey`, 0.72, specular
+     0) ONLY to meshes with NO material — STL / missing / shaderless. Imported
+     materials are NEVER touched, white or not (authored content is preserved).
+   - Shaderless FACES (submesh slots with no material in a multi-material mesh)
+     fall through to `scene.defaultMaterial`, which `SceneManager.init` greys to
+     the same value. So shaderless OBJECTS get an explicit grey material;
+     shaderless FACES get the greyed render-time default. Nothing else is
+     overridden. (Earlier bug: a `getTotalVertices()` guard returned 0 on
+     container meshes pre-`addAllToScene`, skipping STL → stayed white.)
 4. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a

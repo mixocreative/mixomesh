@@ -243,13 +243,12 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
  *   `fileHandleKey` = an already-persisted key (project restore path).
  * @returns {Promise<string[]>} created meshIds
  */
-// Untextured imports default to a medium-light grey so they read like raw
-// (ED/grey-resin) prints instead of stark white. Two cases:
-//   - mesh has NO material (STL with no shader / missing) → ASSIGN a shared
-//     matte grey material (relying on scene.defaultMaterial proved unreliable);
-//   - mesh has an UNTEXTURED + near-white material → recolour its base to grey.
-// Textured or intentionally-coloured materials are left untouched. Sets the
-// actual colour so it also exports sensibly.
+// Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
+// material at all (STL / missing). Imported materials are NEVER touched, even
+// if white: that is authored content. (Shaderless FACES — submesh slots with no
+// material in a multi-material mesh — fall through to `scene.defaultMaterial`,
+// which SceneManager.init also greys.) A single shared matte grey material is
+// assigned so the mesh is a visible, selectable grey-resin object.
 let _resinGreyMat = null;
 function _resinGrey() {
   if (_resinGreyMat) return _resinGreyMat;
@@ -261,17 +260,9 @@ function _resinGrey() {
   return m;
 }
 function _applyResinDefault(container) {
-  const GREY = new (window.BABYLON.Color3)(0.72, 0.72, 0.72);
-  const nearWhite = (c) => !c || (c.r > 0.85 && c.g > 0.85 && c.b > 0.85);
   for (const mesh of container.meshes ?? []) {
-    if (!mesh.getTotalVertices?.()) continue;   // skip transform/root nodes
-    const mat = mesh.material;
-    if (!mat) { mesh.material = _resinGrey(); continue; }   // material-less STL
-    if ('albedoTexture' in mat) {            // PBRMaterial
-      if (!mat.albedoTexture && nearWhite(mat.albedoColor)) mat.albedoColor = GREY.clone();
-    } else if ('diffuseTexture' in mat) {    // StandardMaterial (STL/OBJ)
-      if (!mat.diffuseTexture && nearWhite(mat.diffuseColor)) mat.diffuseColor = GREY.clone();
-    }
+    if (!mesh.geometry) continue;            // skip root / transform nodes
+    if (!mesh.material) mesh.material = _resinGrey();   // shaderless → grey; imports untouched
   }
 }
 
@@ -319,10 +310,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceAssetId: assetId, sourceFileHash,
     });
 
-    _applyResinDefault(container);
-
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
     container.addAllToScene();
+    _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
     // Apply unit + working-ratio scaling. modelRatio comes from a glTF "ratio"
     // custom property if present (Blender custom prop), else 1:1. The result is
