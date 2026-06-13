@@ -599,22 +599,48 @@ export function icon(name, attrs = {}) {
 
 When a later phase needs a new icon, grab its `d` / child markup from
 [lucide.dev/icons](https://lucide.dev/icons) (view source on the icon's
-SVG) and add an entry to `ICON_PATHS`. Names below are the ones the rest
-of this blueprint references — add them in the phase that first uses
-each one:
-- Outliner: `Eye` / `EyeOff` (visibility), `Lock` / `Unlock`, `AlertTriangle`, `CircleAlert`, `Printer`, `CheckCircle2`, `XCircle`, `Folder`, `FolderOpen`, `Box`
-- Header: `Save`, `FolderOpen`, `FilePlus`, `FilePenLine` (Save As), `Undo2`, `Redo2`
-- Status bar: `Circle` (dirty), `Check` (saved)
-- Viewport toolbar: `Move3D`, `RotateCcw`, `Scale3D`, `CircleDot`, `Box`, `Crosshair`, `Circle`, `RotateCw`, `Orbit`, `Eye`, `LocateFixed`
-- Asset panel: `Upload`, `Image`, `RefreshCw`
-- Print panel: `Printer`, `Ruler`, `Layers`, `RotateCw`, `Download`, `AlertOctagon`
-- Toast: `Info`, `CheckCircle`, `AlertTriangle`, `XCircle`, `Loader2` (spinner — animate via CSS)
-- Shader panel: `Palette`, `Copy`, `Trash2`, `Plus`, `Edit3`, `Focus`
-- Context menu icon audit: focus/select-linked use `Focus`; transform sampling uses `Pipette`; duplicate/save-as stay visually distinct (`Copy` vs `FilePenLine`). Rationale: toolbar and menu icons must distinguish action semantics at a glance, so one glyph must not represent unrelated operations such as scale, frame/focus, free camera, and world-origin follow.
+SVG) and add an entry to `ICON_PATHS`.
+
+### `sectionIcon(name)` — header glyph chip (2026-06-13 icon pass)
+
+Every panel header (top-level panels, sub-section headers, Scene sub-group
+labels, Print tabs) carries a leading 13 px glyph via:
+
+```js
+export function sectionIcon(name) {
+  return `<span class="sec-icon" aria-hidden="true">${icon(name, { width: 13, height: 13 })}</span>`;
+}
+```
+
+`.sec-icon` styling is in `blender.css` §8b (inline-flex, slots after the
+collapse chevron, brightens with the header on hover). The four top-level
+right-panel headers are static in `index.html`, so their glyphs are inlined
+SVG (same paths) rather than a `sectionIcon` call.
+
+**Icon-uniqueness contract (2026-06-13): no two *identity* glyphs repeat.**
+Every panel / section / sub-group / Print tab / viewport toggle uses a
+DISTINCT symbol so the chrome is scannable. *Functional* glyphs that should
+stay consistent are exempt and intentionally repeat: copy buttons (`Copy`),
+the export action buttons (`Download`), warning badges (`AlertTriangle`),
+accordion chevrons, texture-slot thumbnails (`Image`), visibility (`Eye`).
+When adding a header/tab/toggle glyph, pick one not already in the identity
+map below.
+
+Identity map (each unique):
+- **Right-panel top-level** (index.html inline): Properties=`SlidersHorizontal`, Shader Library=`Palette`, Scene=`Boxes`, Print=`Printer`
+- **Properties sections**: Object=`Shapes`, Transform=`Move`, Authored Scale=`Ruler`, Shader=`Brush`, UV Override=`Map`, Print Part=`Tag`
+- **Shader sections**: Scene Shaders=`Layers`, Editor=`Edit3`, Swatches=`Swatches`
+- **Scene sections**: Grid=`Grid3x3`, Environment=`Sun`, Camera=`Camera`, Section=`Scissors`, Rendering=`Clapperboard`
+- **Scene sub-groups**: HDRI=`Globe`, Grade=`Wand2`, Floor=`FloorPlane`, Lights=`Lightbulb`, Ambient occlusion=`Aperture`, Still=`ImageDown`, Turntable=`Disc3`
+- **Print tabs**: Scale=`Percent`, Validation=`CheckCircle`, Bed=`Maximize`, Export=`FileDown`
+- **Viewport toggles**: wireframe edges=`MeshTriangle` (irregular scalene triangle + one internal edge — a wireframe facet), matte/flat=`Contrast` (half-filled disc)
+- **Viewport toolbar** (own cluster): `Move3D`/`RotateCcw`/`Scale3D` gizmo modes, `CircleDot`/`Box`/`Crosshair`/`Circle` pivots, `Orbit`/`Eye`/`LocateFixed` camera modes, `RotateCw` gizmo-space toggle
+- Other functional: Outliner `Eye`/`EyeOff`/`Lock`/`Unlock`/`Printer`/`Folder`(Open)/`Box`; Header `Save`/`FolderOpen`/`FilePlus`/`FilePenLine`/`Clock`; Status bar `Circle`/`Check`; Asset panel `Upload`/`Image`/`RefreshCw`/`ChevronDown`; Toast `Info`/`CheckCircle`/`AlertTriangle`/`XCircle`/`Loader2`; Shader `Plus`/`Copy`/`Image`/`AlertTriangle`; Context menu `Focus`/`Pipette`/`Copy`/`FilePenLine`
 
 Render in DOM:
 ```js
-element.innerHTML = icon('Eye', { class: 'icon-sm' });
+element.innerHTML = icon('Eye', { class: 'icon-sm' });   // raw glyph
+header.innerHTML  = sectionIcon('Box') + 'Object';        // header chip + label
 ```
 
 ---
@@ -2446,10 +2472,12 @@ work from every workspace; there is no Preview tab.
 ### Viewport Toggles (`src/ui/ViewportToggles.js`)
 Vertical button stack docked under the NavCube (`#viewport-toggles`). Two
 amber-highlight toggles + one swatch:
-- **Wireframe edges** (`Grid3x3` icon) → `SceneManager.setOverlay('wireframeEdges', on)`.
+- **Wireframe edges** (`MeshTriangle` icon — irregular scalene triangle with
+  one internal edge, reads as a wireframe facet) → `SceneManager.setOverlay('wireframeEdges', on)`.
 - **Edge colour** swatch, visible only while wireframe edges are ON →
   `SceneManager.setWireframeEdgeColor(hex)`.
-- **Matte/flat** (`SunDim` icon) — print-preview mode, removes metallic →
+- **Matte/flat** (`Contrast` icon — half-filled disc, a sphere lit on one
+  side) — print-preview mode, removes metallic →
   `SceneManager.setOverlay('printPreview', on)`.
 State lives in `state.scene.overlays` (silent writes, same contract the
 Preview tab used). Re-renders on `PROJECT_LOADED` / `PROJECT_NEW`.
@@ -2473,6 +2501,17 @@ their toggle is ON (vignette amount, floor colour + height, shadow
 darkness, AO strength, section axis/offset/flip) and the panel re-renders
 on those toggles; floor-on + shadows-off shows a "floor won't catch any"
 hint.
+
+**Three-tier visual hierarchy (blender.css §8, 2026-06-13).** Tiers 2 and 3
+read near-identically before. Now: tier 1 = top-level panel bar
+(`.rp-section-header`, filled `--bg-1`); tier 2 = `.pp-section-header` —
+brighter (`--text-1`, weight 600) with an **accent disclosure triangle**,
+and its body is **indented under a vertical guide rail** (`border-left` on
+each non-header child, `--bg-4`; spacing via padding not margin so the rail
+stays continuous through sub-group dividers); tier 3 = `.pp-subhead` — dim
+uppercase, hairline divider (`--bg-3`), nested inside the indented body.
+Each header carries a leading `sectionIcon` glyph (see Part 2). Shared
+`.pp-section` covers Properties + Scene.
 
 ⚠ **Attribute namespace:** the collapsible wrappers are
 `<section data-sec="${key}">` and change events BUBBLE — wiring a
@@ -2736,7 +2775,7 @@ the workspace decides what shows.
 
 Outliner is **pinned** in every workspace — you always need the scene list to know what you're working on. The user can still hide it via `panelCollapsed.left` (manual override), but it isn't a workspace default.
 
-**Top-bar UI.** Workspace switcher is a four-button pill in the header (icon + label per button: Box / Palette / SunDim / Printer). Active button highlighted with `--accent`. Tooltip on each button shows the hotkey (`Ctrl+Shift+1..4`). Module: `src/ui/Workspace.js` (`_renderPill`).
+**Top-bar UI.** Workspace switcher is a four-button pill in the header (icon + label per button: Layout=`Box` / Shading=`Palette` / Scene=`Boxes` / Print=`Printer` — Scene mirrors the Scene-panel top glyph; `Boxes` ≠ the Layout `Box` and avoids the old `SunDim` clash with the Environment `Sun`). Active button highlighted with `--accent`. Tooltip on each button shows the hotkey (`Ctrl+Shift+1..4`). Module: `src/ui/Workspace.js` (`_renderPill`).
 
 **Switch ergonomics.** Right-panel scroll positions are remembered per
 workspace (session-only `_scroll` map, captured on switch-away, restored on

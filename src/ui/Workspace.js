@@ -33,7 +33,7 @@ export const WORKSPACES = ['layout', 'shade', 'scene', 'print'];
 export const WORKSPACE_DEFAULTS = {
   layout: { right: true, bottom: true,  outlinerWidth: 260, rightWidth: 300, assetHeight: 220, label: 'Layout',  icon: 'Box' },
   shade:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 340, assetHeight: 220, label: 'Shading', icon: 'Palette' },
-  scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene',   icon: 'SunDim' },
+  scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene',   icon: 'Boxes' },
   print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print',   icon: 'Printer' },
 };
 
