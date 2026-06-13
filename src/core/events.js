@@ -20,6 +20,9 @@ export const EVENTS = {
   SELECTION_CHANGED:       'selection:changed',
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
 
+  // 3D cursor
+  CURSOR_CHANGED:          'scene:cursorChanged',
+
   // Transform
   TRANSFORM_COMMITTED:     'transform:committed',
 

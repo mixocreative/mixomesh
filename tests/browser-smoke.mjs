@@ -138,6 +138,7 @@ async function main() {
         wsAttr: document.body.dataset.workspace,
         wsButtons: document.querySelectorAll('.ws-switcher .ws-btn').length,
         wsActive: document.querySelector('.ws-switcher .ws-btn.active')?.dataset.ws,
+        nPanel: !!document.querySelector('#n-panel .np-body') && !!document.querySelector('#n-panel input[data-axis="x"]'),
         before,
         collapsed,
         restored: firstToggle?.getAttribute('aria-expanded'),
@@ -162,6 +163,7 @@ async function main() {
     assert(snapshot.wsAttr === 'layout', `body[data-workspace] should default to layout, got ${snapshot.wsAttr}`);
     assert(snapshot.wsButtons === 4, 'workspace switcher pill missing its four buttons (Layout/Shade/Scene/Print)');
     assert(snapshot.wsActive === 'layout', 'Layout pill button should be active by default');
+    assert(snapshot.nPanel, '3D-cursor N-panel (with XYZ inputs) not mounted into the viewport');
     assert(snapshot.before === 'true' && snapshot.collapsed === 'false' && snapshot.restored === 'true',
       'right-panel toggle did not update aria-expanded');
     assert(snapshot.splitBefore !== snapshot.splitAfter,
@@ -530,10 +532,29 @@ async function main() {
       const outlineOnWhenSelected = maskInRT();
       sm.SceneManager.setActive(null);
 
+      // (8) 3D cursor (Blender N-panel feature): the ball + ring/crosshair
+      // meshes exist, and setCursor writes through to state.scene.cursor3d.
+      const cursorBall = !!scene.getMeshByName('cursor3d');
+      const cursorRing = !!scene.getMeshByName('cursor3dRing');
+      sm.SceneManager.setCursor(new B.Vector3(0.1, 0.02, -0.05));
+      const cState = st.getState().scene.cursor3d;
+      const cursorStateSync = Math.abs(cState.x - 0.1) < 1e-6 && Math.abs(cState.z + 0.05) < 1e-6;
+      sm.SceneManager.setCursor(new B.Vector3(0, 0, 0));
+
+      // (9) Two-tone selection outline: active emissive carries in R, the other
+      // selected objects in G — the channel split that lets the pass tint the
+      // active a darker orange.
+      const amA = scene.materials.find(m => m.name === 'mx-sel-mask-active');
+      const amS = scene.materials.find(m => m.name === 'mx-sel-mask-selected');
+      const maskTwoTone = !!amA && !!amS
+        && amA.emissiveColor.r === 1 && amA.emissiveColor.g === 0
+        && amS.emissiveColor.r === 0 && amS.emissiveColor.g === 1;
+
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
-               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey };
+               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey,
+               cursorBall, cursorRing, cursorStateSync, maskTwoTone };
     })()`);
     assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
     assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
@@ -545,6 +566,10 @@ async function main() {
     assert(!wave.invOff, 'inverted/back-face highlight clones not disposed when off');
     assert(wave.outlineOffWhenEmpty, 'selection-outline mask RTT not detached when selection is empty (per-frame waste)');
     assert(wave.outlineOnWhenSelected, 'selection-outline mask RTT not re-attached when a mesh is selected');
+    assert(wave.cursorBall, '3D cursor ball mesh (cursor3d) missing');
+    assert(wave.cursorRing, '3D cursor ring mesh (cursor3dRing) missing');
+    assert(wave.cursorStateSync, 'SceneManager.setCursor did not write through to state.scene.cursor3d');
+    assert(wave.maskTwoTone, 'selection-outline mask is not two-channel (active R / selected G) — two-tone outline broken');
     assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);
     assert(wave.frameSrc.distinct > 16,
       `offline frame source nearly uniform (${wave.frameSrc.distinct} colours) — manual RTT render broke`);

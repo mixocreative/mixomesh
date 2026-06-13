@@ -2,7 +2,6 @@ import { EVENTS } from './events.js';
 import { subscribe, getState } from './StateManager.js';
 import {
   AXES_SIZE,
-  CURSOR_DIAMETER,
   BG_GRADIENT_TOP,
   BG_GRADIENT_BOTTOM,
   BG_DARK_TOP,
@@ -22,6 +21,7 @@ import {
 } from './scene/EdgeOverlay.js';
 import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
 import { initSelectionOutline, setActive, setSelected } from './scene/SelectionOutline.js';
+import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState } from './scene/Cursor3D.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
   setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
@@ -63,7 +63,6 @@ const BABYLON = window.BABYLON;
 let _engine    = null;
 let _scene     = null;
 let _axes      = null;   // { x, y, z } line meshes
-let _cursor    = null;
 let _bgTexture = null;   // gradient DynamicTexture — repainted on bg toggle
 let _bgLayer   = null;   // background Layer — disabled for transparent renders
 let _bgMode    = 'light';
@@ -126,7 +125,7 @@ export async function init(canvas) {
   initImportBounce(_scene);
   initBackfaceCheck(_scene);
   initEdgeOverlay(_scene);
-  _setupCursor();
+  initCursor3D(_scene);
   initPivotSession(_scene, { getCursorPosition: getCursor });
   // Cap effective DPR + safety-valve dynamic downscale for heavy scenes.
   initAdaptiveResolution(_engine);
@@ -576,33 +575,6 @@ export function applyRenderSettings(render = {}) {
   applyCameraOptics(render);
 }
 
-// ── 3D cursor ────────────────────────────────────────────
-
-function _setupCursor() {
-  _cursor = BABYLON.MeshBuilder.CreateSphere('cursor3d', { diameter: CURSOR_DIAMETER, segments: 6 }, _scene);
-  const mat = new BABYLON.StandardMaterial('cursorMat', _scene);
-  mat.diffuseColor  = new BABYLON.Color3(1, 1, 0.2);
-  mat.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.05);
-  _cursor.material   = mat;
-  _cursor.isPickable = false;
-  _cursor.isVisible  = false;     // only shown when pivotMode === 'cursor'
-}
-
-/** Toggle 3D cursor visibility (used by pivotMode='cursor'). */
-export function setCursorVisible(on) {
-  if (_cursor) _cursor.isVisible = !!on;
-}
-
-/** @returns {BABYLON.Vector3} */
-export function getCursor() {
-  return _cursor ? _cursor.position.clone() : BABYLON.Vector3.Zero();
-}
-
-/** @param {BABYLON.Vector3} v3 */
-export function setCursor(v3) {
-  if (_cursor) _cursor.position.copyFrom(v3);
-}
-
 // ── Accessors ────────────────────────────────────────────
 
 /** @returns {BABYLON.Scene} */
@@ -645,7 +617,7 @@ export const SceneManager = {
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
   setSectionVizVisible, isSectionVizVisible, getSectionExtentMM,
-  getCursor, setCursor, setCursorVisible,
+  getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 };

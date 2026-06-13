@@ -511,6 +511,7 @@ async function _loadProject(doc) {
 
   SceneManager.rebuildBed();
   SceneManager.setGrid(getState().scene.grid);
+  SceneManager.setCursorFromState(getState().scene.cursor3d);
   // Edge colour BEFORE the wireframeEdges toggle so re-enabled edge
   // renderers pick up the saved colour, not the default (review M19).
   const savedEdgeColor = getState().scene.overlays?.wireframeEdgeColor;
@@ -646,6 +647,7 @@ export async function newProject() {
   _fileHandle = null;
   SceneManager.rebuildBed();
   SceneManager.setGrid(getState().scene.grid);
+  SceneManager.setCursorFromState(getState().scene.cursor3d);
   for (const [k, v] of Object.entries(getState().scene.overlays || {})) {
     if (k === 'wireframeEdgeColor') continue;   // value, not a toggle
     SceneManager.setOverlay(k, !!v);

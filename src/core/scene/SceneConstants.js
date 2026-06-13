@@ -7,6 +7,8 @@ export const AXES_SIZE = 0.05;
 export const CAM_RADIUS_MIN = 0.02;
 export const CAM_RADIUS_MAX = 5;
 export const CURSOR_DIAMETER = 0.003;
+// 3D-cursor ring/crosshair tint — the app accent amber (matches selection theme).
+export const CURSOR_HEX = '#f59e0b';
 
 export const BG_GRADIENT_TOP = '#e7ebef';
 export const BG_GRADIENT_BOTTOM = '#9aa4af';
@@ -29,3 +31,7 @@ export const OUTLINE_RADIUS_PX = 4.5;
 export const OUTLINE_INTENSITY = 2.0;
 export const MASK_BRIGHTNESS_ACTIVE = 1.0;
 export const MASK_BRIGHTNESS_SELECTED = 0.5;
+// Two-tone selection outline: the ACTIVE object gets a deeper/darker orange so
+// it reads apart from the other (accent-amber) selected objects.
+export const OUTLINE_ACTIVE_HEX   = '#c2410c';   // orange-700 (darker)
+export const OUTLINE_SELECTED_HEX = ACCENT_HEX;  // amber accent

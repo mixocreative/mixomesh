@@ -10,11 +10,10 @@
 // the ring exists ONLY outside the mesh.
 
 import {
-  ACCENT_HEX,
+  OUTLINE_ACTIVE_HEX,
+  OUTLINE_SELECTED_HEX,
   OUTLINE_RADIUS_PX,
   OUTLINE_INTENSITY,
-  MASK_BRIGHTNESS_ACTIVE,
-  MASK_BRIGHTNESS_SELECTED,
 } from './SceneConstants.js';
 
 const BABYLON = window.BABYLON;
@@ -39,16 +38,21 @@ export function initSelectionOutline(scene, engine, camera) {
   _engine = engine;
   _scene  = scene;
   _camera = camera;
-  const ACCENT_COLOR = BABYLON.Color3.FromHexString(ACCENT_HEX);
+  const ACTIVE_COLOR   = BABYLON.Color3.FromHexString(OUTLINE_ACTIVE_HEX);
+  const SELECTED_COLOR = BABYLON.Color3.FromHexString(OUTLINE_SELECTED_HEX);
 
+  // Two-channel mask so the outline pass can tint the ACTIVE object (mask .r)
+  // a darker orange and the other SELECTED objects (mask .g) the accent amber —
+  // a single grey-intensity channel couldn't carry which-is-which without a
+  // threshold that misfires at the dilation fringe.
   _selMaskMatActive = new BABYLON.StandardMaterial('mx-sel-mask-active', scene);
-  _selMaskMatActive.emissiveColor   = new BABYLON.Color3(MASK_BRIGHTNESS_ACTIVE, MASK_BRIGHTNESS_ACTIVE, MASK_BRIGHTNESS_ACTIVE);
+  _selMaskMatActive.emissiveColor   = new BABYLON.Color3(1, 0, 0);   // active → R
   _selMaskMatActive.diffuseColor    = new BABYLON.Color3(0, 0, 0);
   _selMaskMatActive.disableLighting = true;
   _selMaskMatActive.backFaceCulling = false;
 
   _selMaskMatSelected = new BABYLON.StandardMaterial('mx-sel-mask-selected', scene);
-  _selMaskMatSelected.emissiveColor   = new BABYLON.Color3(MASK_BRIGHTNESS_SELECTED, MASK_BRIGHTNESS_SELECTED, MASK_BRIGHTNESS_SELECTED);
+  _selMaskMatSelected.emissiveColor   = new BABYLON.Color3(0, 1, 0); // selected → G
   _selMaskMatSelected.diffuseColor    = new BABYLON.Color3(0, 0, 0);
   _selMaskMatSelected.disableLighting = true;
   _selMaskMatSelected.backFaceCulling = false;
@@ -80,16 +84,17 @@ export function initSelectionOutline(scene, engine, camera) {
       varying vec2 vUV;
       uniform sampler2D textureSampler;
       uniform sampler2D maskSampler;
-      uniform vec3 outlineColor;
+      uniform vec3 activeColor;
+      uniform vec3 selectedColor;
       uniform vec2 texelSize;
       uniform float outlineRadiusPx;
       uniform float outlineIntensity;
 
       void main() {
         vec4 scene  = texture2D(textureSampler, vUV);
-        float center = texture2D(maskSampler, vUV).r;
+        vec2 center = texture2D(maskSampler, vUV).rg;  // r=active, g=selected
 
-        float ring = 0.0;
+        vec2 ring = vec2(0.0);
         const float TAU = 6.2831853;
         for (int i = 0; i < 16; i++) {
           float a = TAU * (float(i) + 0.5) / 16.0;
@@ -98,12 +103,14 @@ export function initSelectionOutline(scene, engine, camera) {
             float t = float(j) / 4.0;
             float w = 1.0 - t * 0.45;
             vec2 off = dir * outlineRadiusPx * t * texelSize;
-            ring = max(ring, texture2D(maskSampler, vUV + off).r * w);
+            ring = max(ring, texture2D(maskSampler, vUV + off).rg * w);
           }
         }
 
-        ring = max(0.0, ring - center);
-        gl_FragColor = vec4(scene.rgb + outlineColor * ring * outlineIntensity, scene.a);
+        ring = max(vec2(0.0), ring - center);
+        // Active drawn over selected where rings overlap.
+        vec3 add = selectedColor * ring.g * (1.0 - ring.r) + activeColor * ring.r;
+        gl_FragColor = vec4(scene.rgb + add * outlineIntensity, scene.a);
       }
     `;
   }
@@ -117,7 +124,8 @@ export function initSelectionOutline(scene, engine, camera) {
       var textureSampler: texture_2d<f32>;
       var maskSamplerSampler: sampler;
       var maskSampler: texture_2d<f32>;
-      uniform outlineColor: vec3f;
+      uniform activeColor: vec3f;
+      uniform selectedColor: vec3f;
       uniform texelSize: vec2f;
       uniform outlineRadiusPx: f32;
       uniform outlineIntensity: f32;
@@ -125,9 +133,9 @@ export function initSelectionOutline(scene, engine, camera) {
       @fragment
       fn main(input: FragmentInputs) -> FragmentOutputs {
         var scene: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
-        var center: f32 = textureSample(maskSampler, maskSamplerSampler, input.vUV).r;
+        var center: vec2f = textureSample(maskSampler, maskSamplerSampler, input.vUV).rg;
 
-        var ring: f32 = 0.0;
+        var ring: vec2f = vec2f(0.0);
         let TAU: f32 = 6.2831853;
         for (var i: i32 = 0; i < 16; i = i + 1) {
           let a: f32 = TAU * (f32(i) + 0.5) / 16.0;
@@ -136,18 +144,19 @@ export function initSelectionOutline(scene, engine, camera) {
             let t: f32 = f32(j) / 4.0;
             let w: f32 = 1.0 - t * 0.45;
             let off: vec2f = dir * uniforms.outlineRadiusPx * t * uniforms.texelSize;
-            ring = max(ring, textureSample(maskSampler, maskSamplerSampler, input.vUV + off).r * w);
+            ring = max(ring, textureSample(maskSampler, maskSamplerSampler, input.vUV + off).rg * w);
           }
         }
 
-        ring = max(0.0, ring - center);
-        fragmentOutputs.color = vec4f(scene.rgb + uniforms.outlineColor * ring * uniforms.outlineIntensity, scene.a);
+        ring = max(vec2f(0.0), ring - center);
+        let add: vec3f = uniforms.selectedColor * ring.g * (1.0 - ring.r) + uniforms.activeColor * ring.r;
+        fragmentOutputs.color = vec4f(scene.rgb + add * uniforms.outlineIntensity, scene.a);
       }
     `;
   }
 
   _outlinePass = new BABYLON.PostProcess('mxOutline', 'mxOutline', {
-    uniforms: ['outlineColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
+    uniforms: ['activeColor', 'selectedColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
     samplers: ['maskSampler'],
     size: 1.0,
     camera,
@@ -157,7 +166,8 @@ export function initSelectionOutline(scene, engine, camera) {
     shaderLanguage: isWGPU ? BABYLON.ShaderLanguage.WGSL : BABYLON.ShaderLanguage.GLSL,
   });
   _outlinePass.onApply = (eff) => {
-    eff.setColor3('outlineColor', ACCENT_COLOR);
+    eff.setColor3('activeColor', ACTIVE_COLOR);
+    eff.setColor3('selectedColor', SELECTED_COLOR);
     eff.setFloat2('texelSize',
       1 / _engine.getRenderWidth(),
       1 / _engine.getRenderHeight());
