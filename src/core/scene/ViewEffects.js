@@ -131,12 +131,13 @@ export function setSectionPlane(section = {}) {
  * @returns {{ minMM: number, maxMM: number, hasContent: boolean }}
  */
 export function getSectionExtentMM(axis) {
+  const BUFFER_MM = 10;   // 1 cm past each end so the plane can fully clear the model
   const b = _contentBounds();
   if (!b) return { minMM: -150, maxMM: 150, hasContent: false };
   const a = axis in AXIS_NORMALS ? axis : 'z';
   const lo = a === 'x' ? b.min.x : a === 'y' ? b.min.z : b.min.y;
   const hi = a === 'x' ? b.max.x : a === 'y' ? b.max.z : b.max.y;
-  return { minMM: lo * 1000, maxMM: hi * 1000, hasContent: true };
+  return { minMM: lo * 1000 - BUFFER_MM, maxMM: hi * 1000 + BUFFER_MM, hasContent: true };
 }
 
 // ── Cross-section fill + cut-plane border (inspection preview) ──

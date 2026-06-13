@@ -1176,7 +1176,7 @@ SceneManager.applyRenderSettings(render)      // partial-safe: grade + lights/sh
 SceneManager.setBackgroundEnabled(on)         // gradient Layer + clearColor alpha — transparent PNG capture
 SceneManager.setFloorShadowOnly(on)           // floor ↔ ShadowOnlyMaterial swap during transparent capture
 SceneManager.setSectionPlane(section)         // cross-section clip plane ({enabled, axis, offsetMM, flip})
-SceneManager.getSectionExtentMM(axis)         → { minMM, maxMM, hasContent } — content extent along axis (offset-slider range)
+SceneManager.getSectionExtentMM(axis)         → { minMM, maxMM, hasContent } — content extent along axis ±1cm buffer (offset-slider range)
 SceneManager.invalidateShadows()              // re-arm the RENDERONCE shadow map for one render
 SceneManager.getShadowGenerator()             → BABYLON.ShadowGenerator
 
@@ -2627,7 +2627,8 @@ Sections:
   `CameraRig.applyCameraOptics` via the same settings object.
 - **Section** — cross-section "Cut view" (state.scene.section, session-only):
   axis X/Y/Z (print-space, Z = height), offset via a **range SLIDER** whose
-  min/max span the content extent along the axis (lowest..highest point, from
+  min/max span the content extent along the axis (lowest..highest point + a 1 cm
+  buffer each end so the plane can fully clear the model, from
   `SceneManager.getSectionExtentMM(axis)`), flip side → `SceneManager.setSectionPlane`.
   The slider drives the cut live on `input` (cheap — no extra geometry pass);
   the axis select re-renders so the range follows. Cuts content meshes only; an
