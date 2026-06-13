@@ -44,14 +44,15 @@ export function init() {
   _root.querySelector('[data-act="sel-to-cursor"]')?.addEventListener('click', () => CursorTools.selectionToCursor());
   _root.querySelector('[data-act="cursor-to-sel"]')?.addEventListener('click', () => CursorTools.cursorToSelection());
   _root.querySelector('[data-act="cursor-to-origin"]')?.addEventListener('click', () => CursorTools.cursorToWorldOrigin());
+  _root.querySelector('[data-act="show-cursor"]')?.addEventListener('click', _toggleShowCursor);
   _root.querySelector('[data-act="pivot-cursor"]')?.addEventListener('click', _togglePivotCursor);
 
   InputManager.register('Shift+N', 'global', toggle);
   subscribe(EVENTS.CURSOR_CHANGED, _refreshInputs);
-  subscribe(EVENTS.SELECTION_CHANGED, _syncPivotButton);
+  subscribe(EVENTS.SELECTION_CHANGED, _syncButtons);
 
   _refreshInputs();
-  _syncPivotButton();
+  _syncButtons();
 }
 
 function _markup() {
@@ -73,6 +74,7 @@ function _markup() {
         <button class="np-btn" data-act="cursor-to-origin">Cursor → World Origin</button>
       </div>
       <div class="np-section">
+        <button class="np-btn np-toggle" data-act="show-cursor">Show 3D Cursor</button>
         <button class="np-btn np-toggle" data-act="pivot-cursor">Use Cursor as Pivot</button>
       </div>
     </div>
@@ -89,6 +91,12 @@ export function toggle() {
     // Restore: cursor only stays visible if it's the active pivot.
     SceneManager.setCursorVisible(getState().selection.pivotMode === 'cursor');
   }
+  _syncButtons();
+}
+
+function _toggleShowCursor() {
+  SceneManager.setCursorVisible(!SceneManager.isCursorVisible());
+  _syncButtons();
 }
 
 function _commitFromInputs() {
@@ -115,15 +123,22 @@ function _refreshInputs() {
 function _togglePivotCursor() {
   const isCursor = getState().selection.pivotMode === 'cursor';
   Selection.setPivotMode(isCursor ? 'median' : 'cursor');
-  _syncPivotButton();
+  _syncButtons();
 }
 
-function _syncPivotButton() {
-  const btn = _root?.querySelector('[data-act="pivot-cursor"]');
-  if (!btn) return;
-  const on = getState().selection.pivotMode === 'cursor';
-  btn.classList.toggle('np-on', on);
-  btn.textContent = on ? 'Cursor Pivot: On' : 'Use Cursor as Pivot';
+function _syncButtons() {
+  const pivotBtn = _root?.querySelector('[data-act="pivot-cursor"]');
+  if (pivotBtn) {
+    const on = getState().selection.pivotMode === 'cursor';
+    pivotBtn.classList.toggle('np-on', on);
+    pivotBtn.textContent = on ? 'Cursor Pivot: On' : 'Use Cursor as Pivot';
+  }
+  const showBtn = _root?.querySelector('[data-act="show-cursor"]');
+  if (showBtn) {
+    const vis = SceneManager.isCursorVisible();
+    showBtn.classList.toggle('np-on', vis);
+    showBtn.textContent = vis ? 'Hide 3D Cursor' : 'Show 3D Cursor';
+  }
 }
 
 export const CursorPanel = { init, toggle };
