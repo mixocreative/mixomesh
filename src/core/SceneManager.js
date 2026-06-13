@@ -164,7 +164,9 @@ async function _createEngine(canvas) {
 }
 
 async function _tryWebGPU(canvas) {
-  // OPT-IN ONLY (`?engine=webgpu`). WebGPU is fully functional now — engine +
+  // OPT-IN ONLY (`?engine=webgpu` or `localStorage.mxEngine='webgpu'`; the URL
+  // param wins so `?engine=webgl` is a force-off escape hatch). WebGPU is fully
+  // functional now — engine +
   // WGSL selection-outline twin + ALL capture (PNG / video / thumbnail) verified
   // correct on a real adapter (`WEBGPU_HEADFUL=1 npm run test:webgpu`); the old
   // capture blocker (empty readback) was the missing command-buffer flush, fixed
@@ -173,7 +175,7 @@ async function _tryWebGPU(canvas) {
   // one-liner once it's been exercised on more hardware. Note: the print export
   // itself is engine-independent (textures read source bytes, geometry reads mesh
   // data — neither touches the GPU), so WebGPU never threatens the Mimaki LOCK.
-  if (!_webgpuRequested()) return null;
+  if (_preferredEngine() !== 'webgpu') return null;
   if (!BABYLON.WebGPUEngine || !navigator.gpu) return null;
   if (!(await BABYLON.WebGPUEngine.IsSupportedAsync)) return null;
   const engine = new BABYLON.WebGPUEngine(canvas, { stencil: true, antialias: true });
@@ -181,10 +183,17 @@ async function _tryWebGPU(canvas) {
   return engine;
 }
 
-function _webgpuRequested() {
+// Engine preference: `?engine=` URL param wins (so `?engine=webgl` is an escape
+// hatch that always forces WebGL), then a persisted `localStorage.mxEngine`
+// (lets the user live on WebGPU without re-typing the param), else WebGL.
+function _preferredEngine() {
   try {
-    return new URLSearchParams(location.search).get('engine') === 'webgpu';
-  } catch { return false; }
+    const q = new URLSearchParams(location.search).get('engine');
+    if (q === 'webgpu' || q === 'webgl') return q;
+    const ls = localStorage.getItem('mxEngine');
+    if (ls === 'webgpu' || ls === 'webgl') return ls;
+  } catch { /* no window/localStorage (tests) */ }
+  return 'webgl';
 }
 
 function _withTimeout(promise, ms, label) {

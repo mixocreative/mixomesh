@@ -1092,7 +1092,9 @@ Shift+RMB            → place 3D cursor at hit point
 
 ### Render backend (WebGL default, WebGPU opt-in)
 `init()` is **async** — it calls `_createEngine()`, which prefers WebGPU only
-when opted in via `?engine=webgpu` and otherwise uses WebGL. The whole WebGPU
+when opted in (`?engine=webgpu` URL param, or a persisted
+`localStorage.mxEngine='webgpu'`; the URL param wins, so `?engine=webgl` is a
+force-off escape hatch) and otherwise uses WebGL. The whole WebGPU
 attempt (support probe + `initAsync`) is raced against an 8 s timeout; any
 failure/timeout falls back to `new BABYLON.Engine` so boot never bricks.
 `SceneManager.isWebGPU()` reports the live backend; `main.ts` mirrors it to
