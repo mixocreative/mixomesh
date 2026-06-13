@@ -211,6 +211,7 @@ src/
     ContextMenu.js
     PrintPanel.js
     StatusBar.js
+    MeshStats.js           ← live tris / mm dims / watertight in the status-bar centre (selection-driven)
     Toast.js
     Status.js              ← centralized error + loading policy (reportError / guard / runTask / safeAsync)
     Modal.js               ← generic modal helper
@@ -221,7 +222,7 @@ src/
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
-    ViewportToggles.js     ← wireframe-edges + matte toggles docked under the NavCube
+    ViewportToggles.js     ← display-mode selector (Shaded/Matte/Base Color) + wireframe-edges overlay, under the NavCube
     ScenePanel.js          ← Scene workspace panel: grid / environment (incl. floor) / camera / Rendering output
     RenderFrame.js         ← Render-view compose overlay (aspect frame + darkening)
     Workspace.js           ← workspace presets (PART 13b): pill, hotkeys, scroll memory
@@ -786,7 +787,7 @@ const initialState = {
     // ArcRotateCamera positions camera at target + R·(sinβ cosα, cosβ, sinβ sinα).
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, bedPreview: false },
     // wireframeEdges + wireframeEdgeColor are written on first viewport-toggle
     // use (not in INITIAL_STATE); persistence restores them when present.
     // Viewport render look (Scene panel) — defaults mirror SceneConstants;
@@ -825,7 +826,8 @@ const initialState = {
     //      the source world matrix baked, no metadata.meshId) renders the
     //      source's BACK faces with a SEMI-TRANSPARENT amber (#f59e0b) striped
     //      unlit material — hue is a constant amber EMISSIVE (#f59e0b, so it's
-    //      exact regardless of blending); a PLANAR-projected stripe texture
+    //      exact regardless of blending); a PROJECTION-mode (screen-space)
+    //      stripe texture
     //      supplies only the ALPHA pattern (translucent body α0.45 + denser
     //      stripes α0.92) so the diagonals stay uniform in world space rather
     //      than smeared across the model's own UVs. alpha-blended, depth-write
@@ -2552,17 +2554,22 @@ viewport toggles under the NavCube — see Viewport Toggles below — so they
 work from every workspace; there is no Preview tab.
 
 ### Viewport Toggles (`src/ui/ViewportToggles.js`)
-Vertical button stack docked under the NavCube (`#viewport-toggles`). Two
-amber-highlight toggles + one swatch:
-- **Wireframe edges** (`MeshTriangle` icon — irregular scalene triangle with
-  one internal edge, reads as a wireframe facet) → `SceneManager.setOverlay('wireframeEdges', on)`.
-- **Edge colour** swatch, visible only while wireframe edges are ON →
-  `SceneManager.setWireframeEdgeColor(hex)`.
-- **Matte/flat** (`Contrast` icon — half-filled disc, a sphere lit on one
-  side) — print-preview mode, removes metallic →
-  `SceneManager.setOverlay('printPreview', on)`.
-State lives in `state.scene.overlays` (silent writes, same contract the
-Preview tab used). Re-renders on `PROJECT_LOADED` / `PROJECT_NEW`.
+Docked under the NavCube (`#viewport-toggles`). A mutually-exclusive **display-
+mode** selector + independent **overlay** toggles — the MODE/OVERLAY split:
+modes replace how the surface shades (only one at a time), overlays layer on top.
+- **Display mode** `<select>` — **Shaded** (default-ish) · **Matte** (print
+  preview, removes metallic → `setOverlay('printPreview', on)`) · **Base Color**
+  (flat albedo, what Mimaki inks — PBR `unlit` / Standard `disableLighting`+emissive
+  → `setOverlay('baseColorView', on)`). `_setMode` always drives BOTH overlays so
+  picking one clears the other. Both modes are VIEWPORT-ONLY + export-safe — they
+  store/restore per material exactly like print-preview's metallic swap; export
+  reads source materials.
+- **Wireframe edges** overlay (`MeshTriangle`) → `setOverlay('wireframeEdges', on)`,
+  + an **edge-colour** swatch shown only while it's on.
+State lives in `state.scene.overlays` (silent writes). Re-renders on
+`PROJECT_LOADED` / `PROJECT_NEW`. (Inspection follow-ups not yet built:
+inverted/back-face highlight + UV-checker — they need per-mesh clone / texture-
+swap machinery with export+perf care.)
 
 ### Scene Panel (`src/ui/ScenePanel.js`)
 Right-panel section `#rp-scene` — the specialist section of the **Scene
@@ -2770,7 +2777,10 @@ Interactions:
 ### Status Bar (`src/ui/StatusBar.js`)
 Single bar at bottom. Segments:
 - **Left:** current op hint or default shortcuts.
-- **Center:** active object summary `[name] X:0.0 Y:0.0 Z:0.0 mm`.
+- **Center:** live mesh stats for the selection (`src/ui/MeshStats.js` →
+  `StatusBar.setCenter`): `△ 82k · 120×80×45 mm · ✓ watertight` — triangle
+  count, print-space W×D×H in mm, and watertight state (no error-severity
+  validation results). Selection-driven; empties when nothing is selected.
 - **Right:** undo/redo labels, polycount, save state (`Circle` for dirty, `Check` for saved).
 
 Collapses non-essential segments below 1280px.

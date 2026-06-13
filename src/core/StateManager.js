@@ -26,7 +26,7 @@ const INITIAL_STATE = {
       target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
       followMode: 'free',          // 'free' | 'followActive' | 'worldOrigin'
     },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, bedPreview: false },
     // Viewport render look (Scene panel). Defaults mirror scene/SceneConstants
     // (tone/shadow/light values) — applied via SceneManager.applyRenderSettings
     // on boot/load/new. fovDeg 45.8° = Babylon's 0.8 rad default; clipNearMM 1

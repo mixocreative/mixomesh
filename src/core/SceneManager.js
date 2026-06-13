@@ -69,6 +69,7 @@ let _bgMode    = 'light';
 
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
+const _baseColorMaterialMap = new Map();    // materialId → { unlit, disableLighting, emissive }
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -129,6 +130,7 @@ export async function init(canvas) {
   // be added (without this the bed/floor receiveShadows but nothing casts).
   subscribe(EVENTS.ASSET_INSTANTIATED, () => {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
+    if (getState().scene.overlays?.baseColorView) _setBaseColorMode(true);
     if (isEdgeOverlayEnabled()) setWireframeEdgesMode(true);
     ensureShadowCasters();
     registerSectionMeshes();
@@ -306,7 +308,7 @@ function _setupAxes() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'bedPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -326,6 +328,9 @@ export function setOverlay(name, on) {
       break;
     case 'printPreview':
       _setPrintPreviewMode(on);
+      break;
+    case 'baseColorView':
+      _setBaseColorMode(on);
       break;
     case 'wireframeEdges':
       setWireframeEdgesMode(on);
@@ -379,6 +384,48 @@ function _setPrintPreviewMode(enabled) {
     // Prune — stale entries would restore outdated values on the next
     // enable cycle and the map grew unbounded (review M15).
     _printPreviewMaterialMap.clear();
+  }
+}
+
+/**
+ * Base-color (flat albedo) inspection mode — shows what Mimaki actually inks,
+ * unlit. PBR → `unlit`; Standard → `disableLighting` with diffuse copied to
+ * emissive so the colour still shows. Stores + restores per material, exactly
+ * like print-preview's metallic swap (viewport-only; export reads source).
+ */
+function _setBaseColorMode(enabled) {
+  if (enabled) {
+    for (const mesh of _scene.meshes) {
+      const mat = mesh.material;
+      if (!mat) continue;
+      const matId = mat.uniqueId.toString();
+      if (!_baseColorMaterialMap.has(matId)) {
+        _baseColorMaterialMap.set(matId, {
+          unlit: mat.unlit,
+          disableLighting: mat.disableLighting,
+          emissive: mat.emissiveColor?.clone?.() ?? null,
+        });
+      }
+      if ('unlit' in mat) {
+        mat.unlit = true;                                   // PBR — flat albedo
+      } else if ('disableLighting' in mat) {
+        if (mat.diffuseColor && mat.emissiveColor) mat.emissiveColor = mat.diffuseColor.clone();
+        mat.disableLighting = true;                         // StandardMaterial
+      }
+    }
+  } else {
+    for (const mesh of _scene.meshes) {
+      const mat = mesh.material;
+      if (!mat) continue;
+      const stored = _baseColorMaterialMap.get(mat.uniqueId.toString());
+      if (!stored) continue;
+      if ('unlit' in mat) mat.unlit = stored.unlit ?? false;
+      else if ('disableLighting' in mat) {
+        mat.disableLighting = stored.disableLighting ?? false;
+        if (stored.emissive && mat.emissiveColor) mat.emissiveColor = stored.emissive;
+      }
+    }
+    _baseColorMaterialMap.clear();
   }
 }
 

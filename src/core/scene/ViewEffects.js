@@ -200,11 +200,12 @@ function _buildStripeTexture() {
   }
   tex.update();
   tex.hasAlpha = true;
-  // Planar projection in WORLD space → uniform diagonal stripes on any geometry,
-  // independent of the model's UVs.
-  tex.coordinatesMode = BABYLON.Texture.PLANAR_MODE;
-  tex.uScale = 6;
-  tex.vScale = 6;
+  // PROJECTION (screen-space) coords → a uniform diagonal hatch regardless of
+  // the model's UVs (PLANAR/EXPLICIT gave no stripes on textured / UV-less
+  // meshes). Screen-projected hatch is a standard CAD section look.
+  tex.coordinatesMode = BABYLON.Texture.PROJECTION_MODE;
+  tex.uScale = 28;
+  tex.vScale = 28;
   return tex;
 }
 

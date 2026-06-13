@@ -1,8 +1,10 @@
-// Viewport display toggles — docked under the NavCube (user request
-// 2026-06-12): Wireframe Edges and Matte/flat (print preview, removes
-// metallic), plus the edge-colour swatch shown while wireframe is on.
-// These replaced the Print Panel's Preview tab so display modes are
-// reachable from EVERY workspace, not just Print.
+// Viewport display controls — docked under the NavCube, reachable from EVERY
+// workspace. A mutually-exclusive SHADING MODE selector (Shaded / Matte /
+// Base Color — they all replace how the surface shades, so only one at a time)
+// plus independent OVERLAY toggles (Wireframe edges) that layer on any mode.
+// Matte = print-preview (no metallic); Base Color = flat albedo (what Mimaki
+// inks). Modes are viewport-only and export-safe (mirror print-preview's
+// store/restore; export reads source materials).
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
@@ -25,10 +27,15 @@ function _render() {
   if (!_root) return;
   const overlays = getState().scene.overlays ?? {};
   const wireOn  = overlays.wireframeEdges ?? false;
-  const matteOn = overlays.printPreview ?? false;
   const wireColor = _safeHex(overlays.wireframeEdgeColor ?? '#ffcc00');
+  const mode = overlays.baseColorView ? 'base' : overlays.printPreview ? 'matte' : 'shaded';
 
   _root.innerHTML = `
+    <select class="vt-mode" data-mode title="Display mode (shading)">
+      <option value="shaded" ${mode === 'shaded' ? 'selected' : ''}>Shaded</option>
+      <option value="matte"  ${mode === 'matte'  ? 'selected' : ''}>Matte</option>
+      <option value="base"   ${mode === 'base'   ? 'selected' : ''}>Base Color</option>
+    </select>
     <button class="vt-btn ${wireOn ? 'vt-on' : ''}" data-toggle="wireframeEdges"
             title="Wireframe edges — show edge outlines on models"
             aria-pressed="${wireOn ? 'true' : 'false'}">
@@ -36,16 +43,26 @@ function _render() {
     </button>
     <input type="color" class="vp-wire-color ${wireOn ? '' : 'vp-hidden'}"
            value="${escapeAttr(wireColor)}" title="Wireframe edge color">
-    <button class="vt-btn ${matteOn ? 'vt-on' : ''}" data-toggle="printPreview"
-            title="Matte/flat preview — removes metallic for print-like shading"
-            aria-pressed="${matteOn ? 'true' : 'false'}">
-      ${icon('Contrast', { width: 15, height: 15 })}
-    </button>
   `;
   _wire();
 }
 
+// Set the exclusive shading mode: matte = printPreview, base = baseColorView,
+// shaded = neither. Always drive BOTH overlays so switching modes turns the
+// other off.
+function _setMode(mode) {
+  const matte = mode === 'matte';
+  const base  = mode === 'base';
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, overlays: { ...s.scene.overlays, printPreview: matte, baseColorView: base } },
+  }), { silent: true });
+  SceneManager.setOverlay('printPreview', matte);
+  SceneManager.setOverlay('baseColorView', base);
+}
+
 function _wire() {
+  _root.querySelector('.vt-mode')?.addEventListener('change', (e) => _setMode(e.target.value));
   _root.querySelectorAll('[data-toggle]').forEach(btn => {
     btn.addEventListener('click', () => {
       const name = btn.dataset.toggle;

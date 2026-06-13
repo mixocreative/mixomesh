@@ -15,6 +15,7 @@ import { Modal } from '../ui/Modal.js';
 import { ImportError } from '../ui/ImportError.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
 import { ViewportToggles } from '../ui/ViewportToggles.js';
+import { MeshStats } from '../ui/MeshStats.js';
 import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
@@ -31,7 +32,7 @@ type TransformCommit = {
 };
 
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
-type OverlayKey = 'grid' | 'axes' | 'wireframe' | 'printPreview' | 'bedPreview';
+type OverlayKey = 'grid' | 'axes' | 'wireframe' | 'printPreview' | 'baseColorView' | 'bedPreview';
 type BootState = {
   scene?: {
     overlays?: Partial<Record<OverlayKey, boolean>>;
@@ -76,6 +77,7 @@ async function bootstrap() {
   AssetPanel.init();
   ViewportToolbar.init();
   ViewportToggles.init();
+  MeshStats.init();       // live mesh stats in the status-bar centre segment
   NavCube.init();
   PersistenceManager.init();
   ProjectMenu.init();
@@ -97,7 +99,7 @@ async function bootstrap() {
 
   SceneManager.applyRenderSettings((getState() as { scene?: { render?: object } }).scene?.render ?? {});
   const overlays = (getState() as BootState).scene?.overlays;
-  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'bedPreview'] satisfies OverlayKey[]) {
+  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'baseColorView', 'bedPreview'] satisfies OverlayKey[]) {
     if (overlays?.[key]) SceneManager.setOverlay(key, true);
   }
 

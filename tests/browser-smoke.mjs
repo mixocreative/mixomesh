@@ -482,6 +482,19 @@ async function main() {
       ]);
       const recIdle = !ro.isRecording();
 
+      // (6b) Base-color display mode: a PBR material flips to unlit and
+      // restores (viewport-only; mirrors the print-preview store/restore).
+      const bcBox = B.MeshBuilder.CreateBox('smoke-basecolor', { size: 0.04 }, scene);
+      bcBox.metadata = { meshId: 'smoke-basecolor' };
+      const bcMat = new B.PBRMaterial('smoke-pbr', scene);
+      bcBox.material = bcMat;
+      sm.SceneManager.setOverlay('baseColorView', true);
+      const baseOn = bcMat.unlit === true;
+      sm.SceneManager.setOverlay('baseColorView', false);
+      const baseOff = bcMat.unlit === false;
+      bcBox.dispose(); bcMat.dispose();
+      const modeOpts = document.querySelectorAll('.vt-mode option').length;
+
       // (7) Selection-outline gating (perf 2026-06-13): the mask RTT + 64-tap
       // outline pass must be DETACHED when nothing is selected (per-frame cost
       // for zero benefit) and re-attached when a mesh is selected.
@@ -497,8 +510,11 @@ async function main() {
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
-               outlineOffWhenEmpty, outlineOnWhenSelected };
+               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts };
     })()`);
+    assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
+    assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
+    assert(wave.modeOpts === 3, `display-mode selector should have 3 options (Shaded/Matte/Base), got ${wave.modeOpts}`);
     assert(wave.outlineOffWhenEmpty, 'selection-outline mask RTT not detached when selection is empty (per-frame waste)');
     assert(wave.outlineOnWhenSelected, 'selection-outline mask RTT not re-attached when a mesh is selected');
     assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);

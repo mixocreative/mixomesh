@@ -73,6 +73,20 @@
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+/* Display-mode selector — matches the chip look (dark, blurred, bordered) */
+.vp-toggles .vt-mode {
+  width: 100%;
+  height: 26px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  background: rgba(19, 19, 22, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.vp-toggles .vt-mode:hover { color: var(--text-0); }
 .vp-wire-color {
   width: 28px;
   height: 18px;
