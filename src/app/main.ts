@@ -32,7 +32,7 @@ type TransformCommit = {
 };
 
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
-type OverlayKey = 'grid' | 'axes' | 'wireframe' | 'printPreview' | 'baseColorView' | 'invertedFaces' | 'bedPreview';
+type OverlayKey = 'grid' | 'axes' | 'wireframe' | 'printPreview' | 'baseColorView' | 'uvCheckerView' | 'invertedFaces' | 'bedPreview';
 type BootState = {
   scene?: {
     overlays?: Partial<Record<OverlayKey, boolean>>;
@@ -99,7 +99,7 @@ async function bootstrap() {
 
   SceneManager.applyRenderSettings((getState() as { scene?: { render?: object } }).scene?.render ?? {});
   const overlays = (getState() as BootState).scene?.overlays;
-  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'baseColorView', 'invertedFaces', 'bedPreview'] satisfies OverlayKey[]) {
+  for (const key of ['grid', 'axes', 'wireframe', 'printPreview', 'baseColorView', 'uvCheckerView', 'invertedFaces', 'bedPreview'] satisfies OverlayKey[]) {
     if (overlays?.[key]) SceneManager.setOverlay(key, true);
   }
 

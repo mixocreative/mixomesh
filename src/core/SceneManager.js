@@ -71,6 +71,8 @@ let _bgMode    = 'light';
 // Print preview material tracking
 const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic }
 const _baseColorMaterialMap = new Map();    // materialId → { unlit, disableLighting, emissive }
+const _uvCheckerMaterialMap = new Map();    // materialId → { key, tex } (original base texture)
+let _uvCheckerTex = null;                   // shared checker DynamicTexture
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -133,6 +135,7 @@ export async function init(canvas) {
   subscribe(EVENTS.ASSET_INSTANTIATED, () => {
     if (getState().scene.overlays?.printPreview) _setPrintPreviewMode(true);
     if (getState().scene.overlays?.baseColorView) _setBaseColorMode(true);
+    if (getState().scene.overlays?.uvCheckerView) _setUvCheckerMode(true);
     if (isEdgeOverlayEnabled()) setWireframeEdgesMode(true);
     if (isBackfaceCheckOn()) refreshBackfaceClones();
     ensureShadowCasters();
@@ -315,7 +318,7 @@ function _setupAxes() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'invertedFaces'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'uvCheckerView'|'invertedFaces'|'bedPreview'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -341,6 +344,9 @@ export function setOverlay(name, on) {
       break;
     case 'invertedFaces':
       setBackfaceCheck(on);
+      break;
+    case 'uvCheckerView':
+      _setUvCheckerMode(on);
       break;
     case 'wireframeEdges':
       setWireframeEdgesMode(on);
@@ -436,6 +442,70 @@ function _setBaseColorMode(enabled) {
       }
     }
     _baseColorMaterialMap.clear();
+  }
+}
+
+// Shared UV-checker texture — an 8×8 grey checker with amber grid lines, mapped
+// by each mesh's own UVs so stretching / density / seams are visible. Wrap so
+// UVs outside 0–1 tile.
+function _ensureCheckerTexture() {
+  if (_uvCheckerTex) return _uvCheckerTex;
+  const N = 512, cells = 8, s = N / cells;
+  const tex = new BABYLON.DynamicTexture('mx-uv-checker', N, _scene, false);
+  const ctx = tex.getContext();
+  for (let y = 0; y < cells; y++) {
+    for (let x = 0; x < cells; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#3a3a3a' : '#d0d0d0';
+      ctx.fillRect(x * s, y * s, s, s);
+    }
+  }
+  ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';   // accent grid lines
+  ctx.lineWidth = 2;
+  for (let i = 0; i <= cells; i++) {
+    ctx.beginPath(); ctx.moveTo(i * s, 0); ctx.lineTo(i * s, N);
+    ctx.moveTo(0, i * s); ctx.lineTo(N, i * s); ctx.stroke();
+  }
+  tex.update();
+  tex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+  tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+  _uvCheckerTex = tex;
+  return tex;
+}
+
+function _isContentMesh(mesh) {
+  let node = mesh;
+  while (node) { if (node.metadata?.meshId) return true; node = node.parent; }
+  return false;
+}
+
+/**
+ * UV-checker inspection mode — swaps each CONTENT material's base texture for a
+ * checker (shows UV density / stretching / seams; a flat result = no UVs).
+ * Stores + restores the original texture like the other modes (viewport-only;
+ * export reads the frozen TextureSource, not the checker). Skips furniture +
+ * the section/back-face viz clones.
+ */
+function _setUvCheckerMode(enabled) {
+  if (enabled) {
+    const checker = _ensureCheckerTexture();
+    for (const mesh of _scene.meshes) {
+      const mat = mesh.material;
+      if (!mat || mesh.metadata?.sectionPlaneViz || mesh.metadata?.backfaceViz) continue;
+      if (!_isContentMesh(mesh)) continue;
+      const matId = mat.uniqueId.toString();
+      const key = 'albedoTexture' in mat ? 'albedoTexture' : 'diffuseTexture' in mat ? 'diffuseTexture' : null;
+      if (!key) continue;
+      if (!_uvCheckerMaterialMap.has(matId)) _uvCheckerMaterialMap.set(matId, { key, tex: mat[key] });
+      mat[key] = checker;
+    }
+  } else {
+    for (const mesh of _scene.meshes) {
+      const mat = mesh.material;
+      if (!mat) continue;
+      const stored = _uvCheckerMaterialMap.get(mat.uniqueId.toString());
+      if (stored) mat[stored.key] = stored.tex;
+    }
+    _uvCheckerMaterialMap.clear();
   }
 }
 

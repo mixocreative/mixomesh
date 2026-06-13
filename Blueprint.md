@@ -793,7 +793,7 @@ const initialState = {
     // ArcRotateCamera positions camera at target + R·(sinβ cosα, cosβ, sinβ sinα).
     // β = π/4 (45° elevation), α = π/3 (front-right quadrant), R = 0.3 / cos(π/4).
     camera: { preset: 'perspective', alpha: Math.PI/3, beta: Math.PI/4, radius: 0.4243, target: {x:0,y:0,z:0}, isOrthographic: false, followMode: 'free' /* 'free'|'followActive'|'worldOrigin' */ },
-    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, invertedFaces: false, bedPreview: false },
+    overlays: { grid: true, axes: true, wireframe: false, printPreview: true, baseColorView: false, uvCheckerView: false, invertedFaces: false, bedPreview: false },
     // wireframeEdges + wireframeEdgeColor are written on first viewport-toggle
     // use (not in INITIAL_STATE); persistence restores them when present.
     // Viewport render look (Scene panel) — defaults mirror SceneConstants;
@@ -2562,13 +2562,16 @@ work from every workspace; there is no Preview tab.
 Docked under the NavCube (`#viewport-toggles`). A mutually-exclusive **display-
 mode** selector + independent **overlay** toggles — the MODE/OVERLAY split:
 modes replace how the surface shades (only one at a time), overlays layer on top.
-- **Display mode** `<select>` — **Shaded** (default-ish) · **Matte** (print
-  preview, removes metallic → `setOverlay('printPreview', on)`) · **Base Color**
-  (flat albedo, what Mimaki inks — PBR `unlit` / Standard `disableLighting`+emissive
-  → `setOverlay('baseColorView', on)`). `_setMode` always drives BOTH overlays so
-  picking one clears the other. Both modes are VIEWPORT-ONLY + export-safe — they
-  store/restore per material exactly like print-preview's metallic swap; export
-  reads source materials.
+- **Display mode** `<select>` — **Shaded** · **Matte** (print preview, removes
+  metallic → `setOverlay('printPreview', on)`) · **Base Color** (flat albedo,
+  what Mimaki inks — PBR `unlit` / Standard `disableLighting`+emissive →
+  `setOverlay('baseColorView', on)`) · **UV Checker** (swaps each CONTENT
+  material's base texture for a shared checker — shows UV density/seams; flat =
+  no UVs → `setOverlay('uvCheckerView', on)`). `_setMode` always drives ALL THREE
+  mode overlays so picking one clears the others. All modes are VIEWPORT-ONLY +
+  export-safe — they store/restore per material exactly like print-preview's
+  metallic swap; export reads the frozen source textures/materials, never the
+  checker/unlit override.
 - **Wireframe edges** overlay (`MeshTriangle`) → `setOverlay('wireframeEdges', on)`,
   + an **edge-colour** swatch shown only while it's on.
 - **Inverted / back-face check** overlay (`AlertTriangle`) → `setOverlay('invertedFaces', on)`
@@ -2577,8 +2580,8 @@ modes replace how the surface shades (only one at a time), overlays layer on top
   visible from outside = a hole or inverted face. Viewport-only; re-applied on
   `ASSET_INSTANTIATED` / `PROJECT_LOADED` when on; disposed when off.
 State lives in `state.scene.overlays` (silent writes). Re-renders on
-`PROJECT_LOADED` / `PROJECT_NEW`. (Inspection follow-up not yet built: UV-checker
-mode — texture-swap that interacts with TextureSource/export, needs its own pass.)
+`PROJECT_LOADED` / `PROJECT_NEW`. Mode overlays re-applied on `ASSET_INSTANTIATED`
+so late imports pick up the active mode.
 
 ### Scene Panel (`src/ui/ScenePanel.js`)
 Right-panel section `#rp-scene` — the specialist section of the **Scene

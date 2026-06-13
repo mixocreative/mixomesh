@@ -495,6 +495,18 @@ async function main() {
       bcBox.dispose(); bcMat.dispose();
       const modeOpts = document.querySelectorAll('.vt-mode option').length;
 
+      // (6b2) UV-checker mode: a content material's base texture swaps to the
+      // checker and restores.
+      const uvBox = B.MeshBuilder.CreateBox('smoke-uv', { size: 0.04 }, scene);
+      uvBox.metadata = { meshId: 'smoke-uv' };
+      const uvMat = new B.PBRMaterial('smoke-uvmat', scene);
+      uvBox.material = uvMat;
+      sm.SceneManager.setOverlay('uvCheckerView', true);
+      const uvOn = uvMat.albedoTexture?.name === 'mx-uv-checker';
+      sm.SceneManager.setOverlay('uvCheckerView', false);
+      const uvOff = !uvMat.albedoTexture;
+      uvBox.dispose(); uvMat.dispose();
+
       // (6c) Inverted/back-face highlight: toggling on creates red back-face
       // clones for content solids; off disposes them.
       sm.SceneManager.setOverlay('invertedFaces', true);
@@ -517,11 +529,13 @@ async function main() {
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
-               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff };
+               outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff };
     })()`);
     assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
     assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
-    assert(wave.modeOpts === 3, `display-mode selector should have 3 options (Shaded/Matte/Base), got ${wave.modeOpts}`);
+    assert(wave.modeOpts === 4, `display-mode selector should have 4 options (Shaded/Matte/Base/UV), got ${wave.modeOpts}`);
+    assert(wave.uvOn, 'UV-checker mode did not swap the base texture to the checker');
+    assert(wave.uvOff, 'UV-checker mode did not restore the original base texture');
     assert(wave.invOn, 'inverted/back-face highlight created no red back-face clones when on');
     assert(!wave.invOff, 'inverted/back-face highlight clones not disposed when off');
     assert(wave.outlineOffWhenEmpty, 'selection-outline mask RTT not detached when selection is empty (per-frame waste)');

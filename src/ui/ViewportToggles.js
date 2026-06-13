@@ -29,13 +29,17 @@ function _render() {
   const wireOn  = overlays.wireframeEdges ?? false;
   const invOn   = overlays.invertedFaces ?? false;
   const wireColor = _safeHex(overlays.wireframeEdgeColor ?? '#ffcc00');
-  const mode = overlays.baseColorView ? 'base' : overlays.printPreview ? 'matte' : 'shaded';
+  const mode = overlays.uvCheckerView ? 'uv'
+    : overlays.baseColorView ? 'base'
+    : overlays.printPreview ? 'matte'
+    : 'shaded';
 
   _root.innerHTML = `
     <select class="vt-mode" data-mode title="Display mode (shading)">
       <option value="shaded" ${mode === 'shaded' ? 'selected' : ''}>Shaded</option>
       <option value="matte"  ${mode === 'matte'  ? 'selected' : ''}>Matte</option>
       <option value="base"   ${mode === 'base'   ? 'selected' : ''}>Base Color</option>
+      <option value="uv"     ${mode === 'uv'     ? 'selected' : ''}>UV Checker</option>
     </select>
     <button class="vt-btn ${wireOn ? 'vt-on' : ''}" data-toggle="wireframeEdges"
             title="Wireframe edges — show edge outlines on models"
@@ -59,12 +63,14 @@ function _render() {
 function _setMode(mode) {
   const matte = mode === 'matte';
   const base  = mode === 'base';
+  const uv    = mode === 'uv';
   setState(s => ({
     ...s,
-    scene: { ...s.scene, overlays: { ...s.scene.overlays, printPreview: matte, baseColorView: base } },
+    scene: { ...s.scene, overlays: { ...s.scene.overlays, printPreview: matte, baseColorView: base, uvCheckerView: uv } },
   }), { silent: true });
   SceneManager.setOverlay('printPreview', matte);
   SceneManager.setOverlay('baseColorView', base);
+  SceneManager.setOverlay('uvCheckerView', uv);
 }
 
 function _wire() {
