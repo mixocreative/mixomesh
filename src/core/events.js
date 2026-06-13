@@ -19,6 +19,7 @@ export const EVENTS = {
   // Selection
   SELECTION_CHANGED:       'selection:changed',
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
+  PIVOT_MODE_CHANGED:      'selection:pivotModeChanged',
 
   // 3D cursor
   CURSOR_CHANGED:          'scene:cursorChanged',

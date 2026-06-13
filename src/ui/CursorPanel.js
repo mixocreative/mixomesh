@@ -50,6 +50,7 @@ export function init() {
   InputManager.register('Shift+N', 'global', toggle);
   subscribe(EVENTS.CURSOR_CHANGED, _refreshInputs);
   subscribe(EVENTS.SELECTION_CHANGED, _syncButtons);
+  subscribe(EVENTS.PIVOT_MODE_CHANGED, _syncButtons);   // stay in sync with the toolbar's pivot group
 
   _refreshInputs();
   _syncButtons();

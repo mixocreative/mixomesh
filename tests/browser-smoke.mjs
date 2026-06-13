@@ -550,11 +550,24 @@ async function main() {
         && amA.emissiveColor.r === 1 && amA.emissiveColor.g === 0
         && amS.emissiveColor.r === 0 && amS.emissiveColor.g === 1;
 
+      // (10) Pivot-mode sync: the toolbar's Cursor button + the N-panel's
+      // "Use Cursor as Pivot" toggle both reflect state via PIVOT_MODE_CHANGED.
+      const sel = await import('/src/core/Selection.js');
+      sel.Selection.setPivotMode('cursor');
+      await new Promise(r => requestAnimationFrame(r));
+      const tbCursorOn = !!document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
+      const npPivotOn  = !!document.querySelector('#n-panel [data-act="pivot-cursor"].np-on');
+      sel.Selection.setPivotMode('median');
+      await new Promise(r => requestAnimationFrame(r));
+      const tbCursorOff = !document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
+      const npPivotOff  = !document.querySelector('#n-panel [data-act="pivot-cursor"].np-on');
+      const pivotSync = tbCursorOn && npPivotOn && tbCursorOff && npPivotOff;
+
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
                outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey,
-               cursorBall, cursorRing, cursorStateSync, maskTwoTone };
+               cursorBall, cursorRing, cursorStateSync, maskTwoTone, pivotSync };
     })()`);
     assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
     assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
@@ -570,6 +583,7 @@ async function main() {
     assert(wave.cursorRing, '3D cursor ring mesh (cursor3dRing) missing');
     assert(wave.cursorStateSync, 'SceneManager.setCursor did not write through to state.scene.cursor3d');
     assert(wave.maskTwoTone, 'selection-outline mask is not two-channel (active R / selected G) — two-tone outline broken');
+    assert(wave.pivotSync, 'pivot-mode not synced across toolbar + N-panel (PIVOT_MODE_CHANGED wiring broken)');
     assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);
     assert(wave.frameSrc.distinct > 16,
       `offline frame source nearly uniform (${wave.frameSrc.distinct} colours) — manual RTT render broke`);

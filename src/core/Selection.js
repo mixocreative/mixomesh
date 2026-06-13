@@ -128,6 +128,7 @@ export function setPivotMode(mode) {
   setState(s => ({ ...s, selection: { ...s.selection, pivotMode: mode } }), SILENT);
   SceneManager.setCursorVisible?.(mode === 'cursor');
   _applyVisuals();
+  dispatch(EVENTS.PIVOT_MODE_CHANGED, { mode });
 }
 
 /** Cycle through pivot modes in order: world → median → active → individual → cursor. */

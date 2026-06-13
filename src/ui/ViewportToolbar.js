@@ -43,6 +43,7 @@ export function init() {
   for (const ev of [
     EVENTS.SELECTION_CHANGED,
     EVENTS.ACTIVE_OBJECT_CHANGED,
+    EVENTS.PIVOT_MODE_CHANGED,
     EVENTS.CAMERA_PRESET_CHANGED,
     EVENTS.PROJECT_LOADED,
   ]) subscribe(ev, _render);
