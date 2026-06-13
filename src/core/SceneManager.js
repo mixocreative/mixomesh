@@ -94,9 +94,12 @@ export async function init(canvas) {
   _scene.clearColor   = BABYLON.Color4.FromHexString(BG_GRADIENT_BOTTOM + 'ff');
   _scene.ambientColor = new BABYLON.Color3(1, 1, 1);
 
-  // Material-less meshes (STL with no shader, missing/ghost) render with the
-  // scene default material — make it a matte medium-light grey so raw imports
-  // look like grey/ED-resin prints instead of stark white.
+  // SINGLE SOURCE for the shaderless / resin-grey look. `scene.defaultMaterial`
+  // is what Babylon renders for material-less FACES, AND `AssetLoader` assigns
+  // this exact instance to material-less OBJECTS (STL / missing) — so both cases
+  // share one material. Tune the grey HERE and both follow. Matte medium grey
+  // (0.5, not lighter — the bright 3-light studio + ACES + exposure washes a
+  // 0.72 grey to near-white; 0.5 reads as clear grey once lit).
   const _dm = _scene.defaultMaterial;
   if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.5, 0.5, 0.5);
   if (_dm?.specularColor) _dm.specularColor = new BABYLON.Color3(0, 0, 0);

@@ -245,27 +245,17 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
  */
 // Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
 // material at all (STL / missing). Imported materials are NEVER touched, even
-// if white: that is authored content. (Shaderless FACES — submesh slots with no
-// material in a multi-material mesh — fall through to `scene.defaultMaterial`,
-// which SceneManager.init also greys.) A single shared matte grey material is
-// assigned so the mesh is a visible, selectable grey-resin object.
-let _resinGreyMat = null;
-function _resinGrey() {
-  if (_resinGreyMat) return _resinGreyMat;
-  const B = window.BABYLON;
-  const m = new B.StandardMaterial('mx-resin-grey', SceneManager.getScene());
-  // 0.5 albedo, not 0.72 — under the bright 3-light studio rig + ACES + exposure
-  // a lighter grey washes out to near-white; 0.5 reads as a clear medium grey
-  // (ED/grey-resin look) once lit. Matte (no specular hotspot).
-  m.diffuseColor  = new B.Color3(0.5, 0.5, 0.5);
-  m.specularColor = new B.Color3(0, 0, 0);
-  _resinGreyMat = m;
-  return m;
-}
+// if white: that is authored content.
+//
+// UNITY: shaderless OBJECTS are assigned the SAME `scene.defaultMaterial` that
+// shaderless FACES (submesh slots with no material) already render with. One
+// material, one place to tune the grey — `SceneManager.init` sets its colour.
+// Change it there and both cases follow.
 function _applyResinDefault(container) {
+  const grey = SceneManager.getScene().defaultMaterial;
   for (const mesh of container.meshes ?? []) {
     if (!mesh.geometry) continue;            // skip root / transform nodes
-    if (!mesh.material) mesh.material = _resinGrey();   // shaderless → grey; imports untouched
+    if (!mesh.material) mesh.material = grey; // shaderless → shared default; imports untouched
   }
 }
 

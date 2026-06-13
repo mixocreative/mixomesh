@@ -326,21 +326,22 @@ Import path:
    `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and calls
    `splitMultiMaterialMeshesInContainer()` before shader registration.
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
-   **Resin-grey for shaderless geometry (never overrides imports):**
-   - `_applyResinDefault()` runs AFTER `addAllToScene` (so geometry is bound) and
-     assigns a shared matte grey `StandardMaterial` (`_resinGrey`, albedo **0.5**,
-     specular 0) ONLY to meshes with NO material — STL / missing / shaderless.
-     (0.5, not lighter: under the bright 3-light studio + ACES + exposure a 0.72
-     grey washes to near-white — 0.5 reads as a clear medium grey once lit. The
-     STL mesh provably gets this material; browser smoke imports a real ASCII STL
-     and asserts it.) Imported
-     materials are NEVER touched, white or not (authored content is preserved).
-   - Shaderless FACES (submesh slots with no material in a multi-material mesh)
-     fall through to `scene.defaultMaterial`, which `SceneManager.init` greys to
-     the same value. So shaderless OBJECTS get an explicit grey material;
-     shaderless FACES get the greyed render-time default. Nothing else is
-     overridden. (Earlier bug: a `getTotalVertices()` guard returned 0 on
-     container meshes pre-`addAllToScene`, skipping STL → stayed white.)
+   **Resin-grey for shaderless geometry — ONE material, never overrides imports:**
+   - SINGLE SOURCE = `scene.defaultMaterial`, greyed once in `SceneManager.init`
+     (matte, albedo **0.5** — 0.72 washes to near-white under the bright 3-light
+     studio + ACES + exposure; 0.5 reads as clear grey once lit). Tune the grey
+     THERE and both cases below follow — unity.
+   - Shaderless FACES (submesh slots with no material) render with it
+     automatically (Babylon's render-time fallback).
+   - Shaderless OBJECTS (STL / missing — no material at all) are ASSIGNED that
+     SAME instance by `_applyResinDefault()` (runs AFTER `addAllToScene` so
+     geometry is bound; guard `!mesh.geometry`) — so the mesh has a concrete,
+     selectable, exportable material that IS `scene.defaultMaterial`.
+   - Imported materials are NEVER touched, white or not (no recolour branch).
+     Browser smoke imports a real ASCII STL and asserts its material IS
+     `scene.defaultMaterial` at 0.5. (Earlier bugs: a `getTotalVertices()` guard
+     returned 0 on container meshes pre-`addAllToScene` → STL skipped; and the
+     old 0.72 washed white — both fixed.)
 4. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a

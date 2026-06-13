@@ -613,14 +613,14 @@ async function main() {
       const c = mat?.diffuseColor ?? mat?.albedoColor ?? null;
       return {
         err, found: !!mesh,
-        matName: mat?.name ?? null, matClass: mat?.getClassName?.() ?? 'none',
+        isDefault: mat === scene.defaultMaterial,   // UNITY: same shared material
         color: c ? [+c.r.toFixed(2), +c.g.toFixed(2), +c.b.toFixed(2)] : null,
       };
     })()`);
     assert(!stlDiag.err, `STL import threw: ${stlDiag.err}`);
     assert(stlDiag.found, 'STL mesh not found after import');
-    assert(stlDiag.matName === 'mx-resin-grey',
-      `shaderless STL did not get the resin-grey material (got ${stlDiag.matName} / ${stlDiag.matClass})`);
+    assert(stlDiag.isDefault,
+      'shaderless STL was not assigned the shared scene.defaultMaterial (unity broken)');
     assert(stlDiag.color && stlDiag.color[0] === 0.5,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
