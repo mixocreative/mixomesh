@@ -675,6 +675,53 @@ async function main() {
     assert(stlDiag.color && stlDiag.color[0] === 0.4,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
+    // ── Box (marquee) selection ──────────────────────────────────────────
+    // Two complementary live checks against the origin STL mesh:
+    //  (1) PROJECTION — frame the mesh, then run the module's real projector +
+    //      hit-test over a full-canvas rect. Proves the live transform matrix /
+    //      viewport / bounding-centre pipeline finds a real Babylon mesh (the
+    //      part the headless unit tests stub out).
+    //  (2) ROUTING — drive a synthetic left-drag through InputManager's pointer
+    //      observable and confirm the overlay is created and no exception is
+    //      thrown. Proves the gesture coexists with body-drag / context-menu /
+    //      camera nav wiring (the "will it crash" concern). Coordinate-exact
+    //      selection under synthetic events is left to the unit tests.
+    const boxProj = await evaluate(cdp, `(async () => {
+      const sel = await import('/src/core/Selection.js');
+      const sm  = await import('/src/core/SceneManager.js');
+      const bs  = await import('/src/core/BoxSelect.js');
+      const scene = sm.SceneManager.getScene();
+      const mesh  = scene.meshes.find(m => m.metadata?.meshId);
+      sm.SceneManager.frameSelected([mesh]);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const cv = document.querySelector('#renderCanvas').getBoundingClientRect();
+      const rect = { sx: 0, sy: 0, ex: cv.width, ey: cv.height };
+      const hits = bs.BoxSelect.meshIdsInRect(scene.meshes, rect, bs.BoxSelect.projectToScreen);
+      return { hits: hits.length, hasContentId: !!mesh?.metadata?.meshId };
+    })()`);
+    assert(boxProj.hasContentId, 'no content mesh in scene to box-select');
+    assert(boxProj.hits >= 1, 'live projection hit-test found no mesh inside a full-canvas rect');
+
+    const boxRect = await evaluate(cdp, `(() => {
+      const cv = document.querySelector('#renderCanvas').getBoundingClientRect();
+      return {
+        x0: Math.round(cv.left + 20),  y0: Math.round(cv.top + 90),
+        x1: Math.round(cv.right - 20), y1: Math.round(cv.bottom - 20),
+      };
+    })()`);
+    const mouse = (type, x, y) => cdp.send('Input.dispatchMouseEvent', {
+      type, x, y, button: 'left',
+      buttons: type === 'mouseReleased' ? 0 : 1,
+      clickCount: type === 'mouseMoved' ? 0 : 1,
+    });
+    await mouse('mousePressed', boxRect.x0, boxRect.y0);
+    await mouse('mouseMoved', Math.round((boxRect.x0 + boxRect.x1) / 2), Math.round((boxRect.y0 + boxRect.y1) / 2));
+    await mouse('mouseMoved', boxRect.x1, boxRect.y1);
+    await mouse('mouseReleased', boxRect.x1, boxRect.y1);
+    await sleep(60);
+    const overlayMade = await evaluate(cdp, `!!document.querySelector('.box-select')`);
+    assert(overlayMade, 'box-select overlay element was never created by the pointer routing');
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

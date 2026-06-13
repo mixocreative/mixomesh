@@ -1,6 +1,7 @@
 import { undo, redo, push, TransformCommand, VisibilityCommand, LockCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand } from './HistoryManager.js';
 import { SceneManager, setCameraPreset } from './SceneManager.js';
 import { Selection } from './Selection.js';
+import { BoxSelect } from './BoxSelect.js';
 import { getState, dispatch } from './StateManager.js';
 import { EVENTS } from './events.js';
 import { Toast } from '../ui/Toast.js';
@@ -58,6 +59,8 @@ function _handleKeyDown(e) {
     return;  // block normal shortcuts during a modal op
   }
 
+  if (e.key === 'Escape' && BoxSelect.isActive()) { BoxSelect.cancel(); e.preventDefault(); return; }
+
   const key = _buildKey(e);
   const fn  = _handlers.get(`${key}::${_currentContext}`) ?? _handlers.get(`${key}::global`);
   if (fn) { e.preventDefault(); fn(e); }
@@ -79,6 +82,7 @@ function _handleKeyUp(e) {
 export function init(scene) {
   _scene = scene;
   _canvas = scene.getEngine().getRenderingCanvas();
+  BoxSelect.init(scene);
   _registerAll();
   document.addEventListener('keydown', _handleKeyDown);
   document.addEventListener('keyup',   _handleKeyUp);
@@ -139,6 +143,7 @@ function _onPointer(info) {
     }
     if (_modal)        _onModalMouseMove(ev);
     else if (_bodyDrag) _onBodyDragMove();
+    else if (BoxSelect.isActive()) BoxSelect.update(_scene.pointerX, _scene.pointerY);
     return;
   }
 
@@ -150,6 +155,7 @@ function _onPointer(info) {
     }
     if (ev.button === 0) _onSelectionPointerDown(info);
     else if (ev.button === 2) {
+      if (BoxSelect.isActive()) { BoxSelect.cancel(); return; }
       if (_bodyDrag) { _onBodyDragCancel(); return; }
       if (ev.shiftKey) { _placeCursorAtPick(); return; }
       // Defer the context menu until RMB-UP so RMB-drag can pan the camera
@@ -160,6 +166,7 @@ function _onPointer(info) {
   }
 
   if (info.type === PointerEventTypes.POINTERUP) {
+    if (BoxSelect.isActive() && ev.button === 0) { BoxSelect.end(); return; }
     if (_bodyDrag && ev.button === 0) _onBodyDragUp();
     if (ev.button === 2 && _rmbPending) {
       _onContextMenuRMB(_rmbPending.info);
@@ -181,13 +188,14 @@ function _onSelectionPointerDown(info) {
   // Shift-click is a multi-select gesture — toggle and skip drag.
   if (ev.shiftKey) {
     if (id) Selection.toggle(id);
-    else    /* clicking empty space with shift is a no-op */;
+    else    BoxSelect.begin(_scene.pointerX, _scene.pointerY, true);  // Shift-drag empty → additive marquee
     return;
   }
 
-  // Empty pick → clear selection. Nothing to drag.
+  // Empty pick → start a marquee. A sub-threshold drag falls back to a plain
+  // click (clears the selection) inside BoxSelect.end(). Nothing to body-drag.
   if (!id) {
-    Selection.clear();
+    BoxSelect.begin(_scene.pointerX, _scene.pointerY, false);
     return;
   }
 

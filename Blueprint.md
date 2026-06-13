@@ -160,6 +160,7 @@ src/
       ObjParse.worker.js   ← Babylon OBJ/MTL loader in a NullEngine worker (no UI freeze)
       MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
     Selection.js           ← selection set + active id + pivot mode (§4b)
+    BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
     AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
@@ -1072,7 +1073,7 @@ Enter / LMB    → confirm op
 
 A              → select all (toggle: all → none if all already selected)
 Alt+A          → deselect all
-B              → box select (drag marquee) — PLANNED, not implemented
+LMB drag empty → box select (drag marquee); Shift+drag = additive (see Mouse)
 Shift+LMB      → add/remove from selection
 
 F              → frame selected
@@ -1114,7 +1115,15 @@ LMB drag on mesh    → translate selection on the horizontal plane
                       Tinkercad style). A drag has to clear ~4 px to engage —
                       shorter LMB presses are still a plain click.
 Shift+LMB           → add / remove from selection (no drag)
-LMB drag empty      → box select — PLANNED, not implemented
+LMB drag empty      → box / marquee select (core/BoxSelect.js). Starts only on
+                      an EMPTY left-down, so it never competes with body-drag
+                      (left-down on a mesh) or camera nav (left button unused by
+                      the camera). Every content mesh whose bounding-box centre
+                      projects inside the rect is selected; Shift+drag ADDS to
+                      the current selection. A sub-3 px drag falls back to a
+                      plain empty click (clears, unless additive). Esc / RMB
+                      mid-drag cancels. Overlay is a plain <div> (.box-select) —
+                      never touches the RTT, so exports stay byte-identical.
 RMB during body drag → cancel (pivot snaps back, no history push)
 RMB click            → context menu (deferred to UP; suppressed if drag > 4 px)
 RMB drag             → pan camera target

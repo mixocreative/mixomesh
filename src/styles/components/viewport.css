@@ -265,3 +265,15 @@
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+
+/* ── Box (marquee) selection ─────────────────────────────── */
+/* Drawn over the canvas during a left-drag across empty space. pointer-events
+   stay off so it never intercepts the pointer stream driving the drag. */
+.box-select {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 5;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
