@@ -22,12 +22,20 @@
   user-select: none;
 }
 
-/* Brand logo — far-left of the header, white wordmark on the dark chrome. */
+/* Brand logo — inline SVG, far-left of the header. currentColor lets it theme
+   with the header text (white wordmark on the dark chrome); no asset request,
+   no base-path dependency. */
 #app-logo {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-0);
+}
+#app-logo svg {
   height: 26px;
   width: auto;
   display: block;
-  flex: 0 0 auto;
+  fill: currentColor;
 }
 
 #project-name {

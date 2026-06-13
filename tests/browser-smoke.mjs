@@ -734,9 +734,8 @@ async function main() {
       const DS = (await import('/src/config/default-settings.json', { with: { type: 'json' } })).default;
       const KEY = 'mx-settings-v1';
 
-      const logo = document.querySelector('#app-logo');
-      const logoOk = !!logo && /logo\\.svg$/.test(logo.getAttribute('src') || '')
-        && logo.getBoundingClientRect().width > 10;
+      const logoSvg = document.querySelector('#app-logo svg');
+      const logoOk = !!logoSvg && logoSvg.getBoundingClientRect().width > 10;
 
       // (2) edit a setting → save → read back the blob
       sm.setState(s => ({ ...s, scene: { ...s.scene, render: { ...s.scene.render, exposure: 1.77 } } }), { silent: true });

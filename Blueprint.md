@@ -3038,8 +3038,11 @@ non-empty), a reset PRESERVES `print.workingRatio` + `print.targetRatio`
 content would silently rescale the scene. On an empty scene / New they reset
 normally. All other fields (bed, wall, mode, render, grid…) always reset.
 
-**Header logo:** `#app-logo` (`public/logo.svg`, white wordmark) is pinned
-far-left of `#header`, before the editable `#project-name`.
+**Header logo:** `#app-logo` is an **inline** SVG wordmark in `index.html`,
+pinned far-left of `#header` before the editable `#project-name`. Inline (not
+an `<img>`/`public/` asset) so it has no HTTP request and no base-path
+dependency, and `fill: currentColor` themes it with the header text. Sized via
+CSS (`#app-logo svg { height: 26px }`).
 
 ### Module sketch
 
