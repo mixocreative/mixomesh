@@ -56,6 +56,12 @@ const INITIAL_STATE = {
       // ~250-330 ms frame stalls that read as a frozen import (and could
       // wedge a TDR-prone GPU/driver). Opt-in for capable machines.
       ssaoEnabled: false, ssaoStrength: 1,
+      // Viewport texture cap (assets/TextureCap.js) — downsamples the GPU copy
+      // of textures for VRAM relief on heavy 4096²+ scenes. 0 = OFF (full res,
+      // default). Export is UNAFFECTED: it reads the full-res source frozen at
+      // import (assets/TextureSource.js), so capping never degrades Mimaki
+      // output. Persisted with the render look.
+      textureCapPx: 0,
     },
     // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
     // deliberately not persisted (it's an inspection tool, not a scene look).

@@ -20,6 +20,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
+import { AssetLoader } from '../core/AssetLoader.js';
 import { register as registerShortcut } from '../core/InputManager.js';
 import { sectionIcon } from '../core/Icons.js';
 import {
@@ -60,7 +61,16 @@ const RENDER_DEFAULTS = {
   hdriIntensity: 0.6,
   ssaoEnabled: false,
   ssaoStrength: 1,
+  textureCapPx: 0,
 };
+
+// Viewport texture-cap options (assets/TextureCap.js). 0 = full res.
+const TEXCAP_PRESETS = [
+  { px: 0,    label: 'Off (full res)' },
+  { px: 4096, label: '4096 px' },
+  { px: 2048, label: '2048 px' },
+  { px: 1024, label: '1024 px' },
+];
 
 // Session-only inspection tool — never persisted (StateManager comment).
 const SECTION_DEFAULTS = { enabled: false, axis: 'z', offsetMM: 0, flip: false };
@@ -186,6 +196,28 @@ function _subhead(label, iconName) {
   return `<div class="pp-subhead">${sectionIcon(iconName)}${label}</div>`;
 }
 
+// Toggle BUTTON for boolean feature/mode switches. Checkbox→toggle audit
+// (2026-06-13): on/off FEATURES read better as a pressed button than a tick —
+// checkboxes are kept only for sub-options nested under an already-enabled
+// feature (Transparent PNG, Ease, Flip side). aria-pressed drives a11y, the
+// styled dot, and the wiring's current-state read. `dataAttr` reuses the
+// existing change-handler hooks (data-render-toggle / data-overlay /
+// data-sect-toggle / data-action) so only the event type differs.
+function _toggle(dataAttr, key, label, on) {
+  return `<button type="button" class="pp-toggle${on ? ' pp-toggle-on' : ''}" `
+    + `${dataAttr}="${key}" aria-pressed="${on ? 'true' : 'false'}">`
+    + `<span class="pp-toggle-dot" aria-hidden="true"></span>${label}</button>`;
+}
+// New value to APPLY when an element fires: a button toggles its aria-pressed,
+// a checkbox reports its post-change `checked`.
+const _nextVal = (el) => el.tagName === 'BUTTON' ? el.getAttribute('aria-pressed') !== 'true' : el.checked;
+const _evt     = (el) => el.tagName === 'BUTTON' ? 'click' : 'change';
+function _reflectToggle(el, on) {
+  if (el.tagName !== 'BUTTON') return;
+  el.classList.toggle('pp-toggle-on', on);
+  el.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
 function _render() {
   if (!_bodyEl) return;
   const s = getState();
@@ -207,8 +239,8 @@ function _render() {
         <input type="number" step="1" min="1" data-grid="subdivisions" value="${_fmt(grid.subdivisions, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-overlay="grid" ${overlays.grid ? 'checked' : ''}> Grid</label>
-        <label><input type="checkbox" data-overlay="axes" ${overlays.axes ? 'checked' : ''}> Axes</label>
+        ${_toggle('data-overlay', 'grid', 'Grid', overlays.grid)}
+        ${_toggle('data-overlay', 'axes', 'Axes', overlays.axes)}
       </div>
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">Bed ${_fmt(bed.x)} × ${_fmt(bed.y)} mm — set in Print ▸ Bed.</span>
@@ -226,7 +258,7 @@ function _render() {
       </div>
       ${_subhead('HDRI lighting', 'Globe')}
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-render-toggle="hdriEnabled" ${render.hdriEnabled ? 'checked' : ''}> HDRI</label>
+        ${_toggle('data-render-toggle', 'hdriEnabled', 'HDRI', render.hdriEnabled)}
       </div>
       ${render.hdriEnabled ? `
       <div class="pp-row">
@@ -263,7 +295,7 @@ function _render() {
         <input type="number" step="5" min="-100" max="100" data-render="saturation" value="${_fmt(render.saturation, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-render-toggle="vignette" ${render.vignette ? 'checked' : ''}> Vignette</label>
+        ${_toggle('data-render-toggle', 'vignette', 'Vignette', render.vignette)}
       </div>
       ${render.vignette ? `
       <div class="pp-row">
@@ -272,7 +304,7 @@ function _render() {
       </div>` : ''}
       ${_subhead('Floor', 'FloorPlane')}
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-render-toggle="floorEnabled" ${render.floorEnabled ? 'checked' : ''}> Floor</label>
+        ${_toggle('data-render-toggle', 'floorEnabled', 'Floor', render.floorEnabled)}
         ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">` : ''}
       </div>
       ${render.floorEnabled ? `
@@ -286,7 +318,7 @@ function _render() {
       </div>` : ''}
       ${_subhead('Lights', 'Lightbulb')}
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-render-toggle="shadowsEnabled" ${render.shadowsEnabled ? 'checked' : ''}> Shadows</label>
+        ${_toggle('data-render-toggle', 'shadowsEnabled', 'Shadows', render.shadowsEnabled)}
       </div>
       ${render.shadowsEnabled ? `
       <div class="pp-row">
@@ -307,7 +339,7 @@ function _render() {
       </div>
       ${_subhead('Ambient occlusion', 'Aperture')}
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-render-toggle="ssaoEnabled" ${render.ssaoEnabled ? 'checked' : ''}> SSAO contact shadows</label>
+        ${_toggle('data-render-toggle', 'ssaoEnabled', 'SSAO contact shadows', render.ssaoEnabled)}
       </div>
       ${render.ssaoEnabled ? `
       <div class="pp-row">
@@ -317,6 +349,17 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">Viewport shading only — not in PNG/video exports.</span>
       </div>` : ''}
+      ${_subhead('Performance', 'Gauge')}
+      <div class="pp-row">
+        <label>Texture cap</label>
+        <select data-texcap>
+          ${TEXCAP_PRESETS.map(p =>
+            `<option value="${p.px}" ${(render.textureCapPx || 0) === p.px ? 'selected' : ''}>${p.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">Caps GPU texture size to save VRAM on heavy scenes. Exports stay full-res.</span>
+      </div>
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="render-reset">Reset environment</button>
       </div>`;
@@ -336,7 +379,7 @@ function _render() {
   const section = { ...SECTION_DEFAULTS, ...(s.scene.section ?? {}) };
   const sectionSec = `
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-sect-toggle="enabled" ${section.enabled ? 'checked' : ''}> Cut view</label>
+        ${_toggle('data-sect-toggle', 'enabled', 'Cut view', section.enabled)}
       </div>
       ${section.enabled ? `
       <div class="pp-row">
@@ -380,7 +423,7 @@ function _render() {
         <label><input type="checkbox" data-ro-toggle="transparent" ${ro.transparent ? 'checked' : ''}> Transparent background (PNG)</label>
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-action="render-view" ${_rv.active ? 'checked' : ''}> Render view</label>
+        ${_toggle('data-action', 'render-view', 'Render view', _rv.active)}
       </div>
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">While on, the camera position is remembered automatically.${ro.pose ? ' Exports shoot from the remembered view.' : ''}</span>
@@ -422,7 +465,7 @@ function _render() {
     _section('grid', 'Grid', gridSec)
     + _section('environment', 'Environment', envSec)
     + _section('camera', 'Camera', camSec)
-    + _section('section', 'Section', sectionSec)
+    + _section('section', 'Cross Section', sectionSec)
     + _section('rendering', 'Rendering', renderingSec);
   _wire();
 }
@@ -480,16 +523,19 @@ function _wire() {
     _escEnter(input);
   });
 
-  // Grid/axes visibility — same overlay contract the viewport toggles use.
-  _bodyEl.querySelectorAll('[data-overlay]').forEach(box => {
-    box.addEventListener('change', () => {
-      const name = box.dataset.overlay;
-      const enabled = box.checked;
+  // Grid/axes visibility — toggle buttons (checkbox→toggle audit). No
+  // dependent rows, so reflect the pressed state in place instead of a full
+  // re-render.
+  _bodyEl.querySelectorAll('[data-overlay]').forEach(el => {
+    el.addEventListener(_evt(el), () => {
+      const name = el.dataset.overlay;
+      const enabled = _nextVal(el);
       setState(s => ({
         ...s,
         scene: { ...s.scene, overlays: { ...s.scene.overlays, [name]: enabled } },
       }), SILENT);
       SceneManager.setOverlay(name, enabled);
+      _reflectToggle(el, enabled);
     });
   });
 
@@ -504,14 +550,18 @@ function _wire() {
     _escEnter(input);
   });
 
-  // Boolean render toggles. vignette / floorEnabled / shadowsEnabled gate
-  // dependent rows, so those re-render the panel.
-  _bodyEl.querySelectorAll('[data-render-toggle]').forEach(box => {
-    box.addEventListener('change', () => {
-      const key = box.dataset.renderToggle;
-      if (key === 'hdriEnabled' && box.checked) _hdriToastWanted = true;
-      _setRender({ [key]: box.checked });
+  // Boolean render features — now toggle BUTTONS (checkbox→toggle audit).
+  // vignette / floorEnabled / shadowsEnabled / hdriEnabled / ssaoEnabled gate
+  // dependent rows, so those re-render the panel (which also re-paints the
+  // pressed state from fresh state).
+  _bodyEl.querySelectorAll('[data-render-toggle]').forEach(el => {
+    el.addEventListener(_evt(el), () => {
+      const key = el.dataset.renderToggle;
+      const next = _nextVal(el);
+      if (key === 'hdriEnabled' && next) _hdriToastWanted = true;
+      _setRender({ [key]: next });
       if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled', 'ssaoEnabled'].includes(key)) _render();
+      else _reflectToggle(el, next);
     });
   });
 
@@ -528,10 +578,13 @@ function _wire() {
   // <section data-sec> wrappers, and change events BUBBLE — a [data-sec]
   // selector here would attach to every section element and re-render the
   // panel on any child input's change (the render-view detach bug).
-  _bodyEl.querySelectorAll('[data-sect-toggle]').forEach(box => {
-    box.addEventListener('change', () => {
-      _setSection({ [box.dataset.sectToggle]: box.checked });
-      if (box.dataset.sectToggle === 'enabled') _render();
+  // Cut view = toggle button (gates dependent rows → _render). Flip = checkbox
+  // (sub-option of an enabled cut). _evt/_nextVal handle both element kinds.
+  _bodyEl.querySelectorAll('[data-sect-toggle]').forEach(el => {
+    el.addEventListener(_evt(el), () => {
+      const key = el.dataset.sectToggle;
+      _setSection({ [key]: _nextVal(el) });
+      if (key === 'enabled') _render();
     });
   });
   _bodyEl.querySelector('[data-sect-select="axis"]')?.addEventListener('change', (e) => {
@@ -553,9 +606,19 @@ function _wire() {
     });
   });
 
+  // Texture cap — store on scene.render then re-cap every live texture.
+  // Downscales from / restores to the per-texture full-res source; export
+  // reads that source so output stays full-res regardless of the cap.
+  _bodyEl.querySelector('[data-texcap]')?.addEventListener('change', (e) => {
+    const px = Number(e.target.value) || 0;
+    _setRender({ textureCapPx: px });
+    AssetLoader.recapAllTextures(px);
+  });
+
   _bodyEl.querySelector('[data-action="render-reset"]')?.addEventListener('click', () => {
     _setRender({ ...RENDER_DEFAULTS });
     _render();
+    AssetLoader.recapAllTextures(RENDER_DEFAULTS.textureCapPx);
   });
 
   _wireRendering();
@@ -589,8 +652,9 @@ function _wireRendering() {
   // render pose (when one exists), show the frame, and auto-store every
   // subsequent camera move as the new render pose. OFF: snapshot the final
   // pose, back to free nav.
-  _bodyEl.querySelector('[data-action="render-view"]')?.addEventListener('change', (e) => {
-    const on = e.target.checked;
+  _bodyEl.querySelector('[data-action="render-view"]')?.addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    const on = !_rv.active;     // toggle button
     const ro = _ro();
     if (on) {
       _rv.navPose = SceneManager.saveCameraState();
@@ -605,6 +669,7 @@ function _wireRendering() {
       _exitRenderView();
       if (navPose) SceneManager.restoreCameraState(navPose);
     }
+    _reflectToggle(btn, _rv.active);
   });
 
   _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', () => _exportPng());

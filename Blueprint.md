@@ -181,7 +181,9 @@ src/
     assets/
       AssetTypes.js        ← supported extensions + extension parser
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
-      TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind
+      TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind, recap-all
+      TextureSource.js     ← full-res export-PNG per assetId, frozen pre-cap (export fidelity)
+      TextureCap.js        ← viewport texture cap: capture-then-downscale GPU, export reads source
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
       BlobUrls.js          ← shared assetId → object-URL registry
     scene/
@@ -191,7 +193,7 @@ src/
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
       EnvironmentRig.js    ← 3-light studio + RENDERONCE shadows, shadow-catcher floor, HDRI IBL
-      ViewEffects.js       ← SSAO contact darkening + cross-section clip plane (viewport tools)
+      ViewEffects.js       ← SSAO + cross-section clip plane + striped indicator quad (viewport tools)
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
@@ -630,12 +632,29 @@ Identity map (each unique):
 - **Right-panel top-level** (index.html inline): Properties=`SlidersHorizontal`, Shader Library=`Palette`, Scene=`Boxes`, Print=`Printer`
 - **Properties sections**: Object=`Shapes`, Transform=`Move`, Authored Scale=`Ruler`, Shader=`Brush`, UV Override=`Map`, Print Part=`Tag`
 - **Shader sections**: Scene Shaders=`Layers`, Editor=`Edit3`, Swatches=`Swatches`
-- **Scene sections**: Grid=`Grid3x3`, Environment=`Sun`, Camera=`Camera`, Section=`Scissors`, Rendering=`Clapperboard`
-- **Scene sub-groups**: HDRI=`Globe`, Grade=`Wand2`, Floor=`FloorPlane`, Lights=`Lightbulb`, Ambient occlusion=`Aperture`, Still=`ImageDown`, Turntable=`Disc3`
+- **Scene sections**: Grid=`Grid3x3`, Environment=`Sun`, Camera=`Camera`, Cross Section=`Scissors`, Rendering=`Clapperboard`
+- **Scene sub-groups**: HDRI=`Globe`, Grade=`Wand2`, Floor=`FloorPlane`, Lights=`Lightbulb`, Ambient occlusion=`Aperture`, Performance=`Gauge`, Still=`ImageDown`, Turntable=`Disc3`
 - **Print tabs**: Scale=`Percent`, Validation=`CheckCircle`, Bed=`Maximize`, Export=`FileDown`
 - **Viewport toggles**: wireframe edges=`MeshTriangle` (irregular scalene triangle + one internal edge — a wireframe facet), matte/flat=`Contrast` (half-filled disc)
 - **Viewport toolbar** (own cluster): `Move3D`/`RotateCcw`/`Scale3D` gizmo modes, `CircleDot`/`Box`/`Crosshair`/`Circle` pivots, `Orbit`/`Eye`/`LocateFixed` camera modes, `RotateCw` gizmo-space toggle
 - Other functional: Outliner `Eye`/`EyeOff`/`Lock`/`Unlock`/`Printer`/`Folder`(Open)/`Box`; Header `Save`/`FolderOpen`/`FilePlus`/`FilePenLine`/`Clock`; Status bar `Circle`/`Check`; Asset panel `Upload`/`Image`/`RefreshCw`/`ChevronDown`; Toast `Info`/`CheckCircle`/`AlertTriangle`/`XCircle`/`Loader2`; Shader `Plus`/`Copy`/`Image`/`AlertTriangle`; Context menu `Focus`/`Pipette`/`Copy`/`FilePenLine`
+
+**Toggle buttons vs checkboxes (checkbox→toggle audit 2026-06-13).** Boolean
+**feature / mode / visibility** switches are pressable toggle buttons (`.pp-toggle`
++ status dot, `aria-pressed`; blender.css §8c) — they read state at a glance and
+match the viewport `.vt-btn` language. Native checkboxes are kept only for
+**sub-options nested under an already-enabled feature** (a checked option among
+inputs, not a live switch). Current split:
+- **Toggle buttons** — Scene: HDRI, Vignette, Floor, Shadows, SSAO, Grid, Axes,
+  Cut view (Cross Section), Render view. Properties: Visible (`Eye`/`EyeOff`),
+  Locked (`Lock`/`Unlock`), Export as print part. Print: Show bed volume.
+- **Stay checkboxes** — Scene: Transparent background (PNG), Ease in/out, Flip
+  side. Print export tab: Selected only, Each individually, Bake solid colors.
+- **Wiring contract:** `data-*` hooks are unchanged; only the event differs
+  (button = `click`, checkbox = `change`). ScenePanel's `_evt`/`_nextVal`/
+  `_reflectToggle` helpers branch on `el.tagName`. A toggle that gates dependent
+  rows triggers a panel `_render()` (which re-paints the pressed state); a toggle
+  that doesn't reflects its pressed state in place.
 
 Render in DOM:
 ```js
@@ -787,13 +806,20 @@ const initialState = {
               // post effect: RTT export paths skip the camera post chain by
               // design (same rule that keeps the silhouette out of renders).
               ssaoEnabled: false, ssaoStrength: 1 /* 0..2 — default OFF, heavy prePass */ },
-    // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
-    // deliberately NOT persisted. axis/offset are print-space (Z = up, mm);
-    // flip keeps the other side. Cuts CONTENT meshes only (per-mesh
-    // scene.clipPlane set/cleared in render observables) — grid/floor/axes/
-    // backdrop never sliced. The cut DOES appear in PNG/video exports
-    // (content renders through Mesh.render() in RTTs); the shadow-map pass
-    // renders depth directly, so shadows stay uncut (documented limit).
+    // Cross Section inspection plane (scene/ViewEffects.js; UI label "Cross
+    // Section", internal key stays `section`). SESSION-ONLY — deliberately NOT
+    // persisted. axis/offset are print-space (Z = up, mm); flip keeps the other
+    // side. Cuts CONTENT meshes only (per-mesh scene.clipPlane set/cleared in
+    // render observables) — grid/floor/axes/backdrop never sliced. A semi-
+    // transparent, diagonally-striped INDICATOR quad (Fusion-360 style) is
+    // drawn at the cut so the user sees where/which-axis the cut is; it carries
+    // no metadata.meshId, so it is auto-excluded from clipping, shadow casters,
+    // and the selection mask. The geometric cut DOES appear in PNG/video
+    // exports (content renders through Mesh.render() in RTTs); the striped
+    // indicator is viewport furniture — RenderOutput._hideFurniture hides it
+    // during capture (like grid/axes) so it never pollutes a render. The
+    // shadow-map pass renders depth directly, so shadows stay uncut (documented
+    // limit).
     section: { enabled: false, axis: 'z' /* |'x'|'y' */, offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
     // turntable video. pose = stored render-camera composition (null until
@@ -1120,6 +1146,7 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 
 ### Implementation Notes
 - **Adaptive resolution (`scene/AdaptiveResolution.js`, perf 2026-06-13):** the engine does NOT use raw `adaptToDeviceRatio` — full devicePixelRatio on a 2×/4K display is 4× the fragments and tanks heavy 4096²/high-poly print scenes. `initAdaptiveResolution(engine)` sets a CAPPED base hardware-scaling level (effective DPR ≤ 1.5) and runs a safety-valve controller on `onEndFrameObservable`: rolling-avg frame time > 45 ms for a window steps scaling UP (fewer pixels, clamp ≤ 2.0 = half-res/axis); < 28 ms eases back toward base. Exports/turntable render into their own RTT at an explicit size (`CreateScreenshotUsingRenderTarget` overrides the engine render size), so canvas scaling never affects output quality.
+- **Viewport texture cap + export-from-source (`assets/TextureSource.js` + `assets/TextureCap.js`, perf 2026-06-13):** the one lever left for genuinely large texture counts. THE LOCK it works around: Mimaki export reads pixels off the LIVE GPU texture (`print/ExportTextures.js` → `TextureReadback.readTextureRGBA`), so any viewport-side texture downscale would silently degrade the export. The fix decouples the two. **Capture:** at the texture-asset registration seam (`TextureAssets.js` — user-loaded, imported, and restored paths all schedule it at idle) `captureAndCap(assetId, texture)` freezes the full-res, export-ready PNG into `TextureSource` via the SAME `textureToPngBlob()` the export uses — so it is orientation/encoding identical by construction (the glTF↔3MF Y-flip lives only in `TextureReadback.EXPORT_FLIP_Y`). Capture happens BEFORE any downscale. **Cap:** `applyCapToTexture` re-decodes the stored source to a canvas at `min(capPx, srcMax)` and `Texture.updateURL`s the GPU copy (same instance, so material bindings + the export assetId→texture map stay valid; raising the cap restores detail from source — a downscale is never permanent). **Export:** `ExportTextures.textureToBlob(tex, assetId)` returns the captured source blob verbatim when present (full-res, regardless of the viewport cap), falling back to a live GPU readback only when no source was captured. State: `scene.render.textureCapPx` (0 = off/full, default; 4096/2048/1024), persisted with the render look; the Scene ▸ Environment ▸ Performance select writes it and calls `AssetLoader.recapAllTextures(px)`. Default OFF — opt-in VRAM relief. Pinned by `tests/texture-source.test.mjs` (first-writer-wins capture, export-prefers-source, GPU fallback) and the export Y-flip smoke (source path is byte-correct).
 - Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`). Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
 - Numpad face presets route through `setCameraPreset` (animated, bbox-fit — see *Camera Presets* below). Numpad5 toggles projection IN PLACE via `toggleOrthographic()`, preserving the current view direction.
 - **Selection silhouette (`scene/SelectionOutline.js`):** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive-white override material (full brightness for `active`, ~0.5 for `selected`), then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `outlineColor × ring` to the scene. By construction the ring exists only outside the mesh. Dials in `scene/SceneConstants.js`: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `ACCENT_HEX = '#f59e0b'` (amber — matches `--accent`). **Gated (perf 2026-06-13):** the mask RTT and the 64-tap fullscreen pass are DETACHED whenever the selection is empty (`_setOutlineEnabled`) — they were running every frame for zero benefit, a real cost at 4K over heavy scenes; re-attached on the first selection. Browser smoke pins detach-when-empty / attach-when-selected.

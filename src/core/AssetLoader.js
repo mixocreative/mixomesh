@@ -30,7 +30,7 @@ import {
 import {
   loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
   registerImportedTexture, bindRestoredTexture, restoreTexture,
-  releaseTextureAsset, resetTextures,
+  releaseTextureAsset, resetTextures, recapAllTextures,
 } from './assets/TextureAssets.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
@@ -546,7 +546,7 @@ export { isTextureExt };
 // AssetLoader surface (and its callers/tests) stay unchanged.
 export {
   loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
-  registerImportedTexture, bindRestoredTexture, restoreTexture,
+  registerImportedTexture, bindRestoredTexture, restoreTexture, recapAllTextures,
 };
 
 // Split-on-import — owned by ./assets/MeshSplit.js.
@@ -883,7 +883,7 @@ export const AssetLoader = {
   mountDirectory, restoreDirectory,
   loadFromHandle, loadFromBlob,
   loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
-  registerImportedTexture,
+  registerImportedTexture, recapAllTextures,
   isMeshExt, isTextureExt,
   releaseAsset, removeAsset, instantiateAsset, getContainer, getBabylonMesh, getDirectoryHandle,
   cloneMeshAsNewObject, restoreCloneToScene,

@@ -257,9 +257,14 @@ function _hideFurniture() {
   }
   const cursorWasVisible = s.selection?.pivotMode === 'cursor';
   if (cursorWasVisible) SceneManager.setCursorVisible(false);
+  // The cross-section INDICATOR plane is viewport furniture — the geometric
+  // cut still renders, but the striped overlay must not pollute exports.
+  const sectionVizWas = SceneManager.isSectionVizVisible?.();
+  if (sectionVizWas) SceneManager.setSectionVizVisible(false);
   return () => {
     for (const name of hidden) SceneManager.setOverlay(name, true);
     if (cursorWasVisible) SceneManager.setCursorVisible(true);
+    if (sectionVizWas) SceneManager.setSectionVizVisible(true);
   };
 }
 

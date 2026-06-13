@@ -12,7 +12,7 @@ import {
 } from '../core/HistoryManager.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
-import { icon } from '../core/Icons.js';
+import { icon, sectionIcon } from '../core/Icons.js';
 import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 
@@ -142,8 +142,8 @@ function _renderObjectSection(obj, multi, total) {
         <input type="text" id="pp-name" value="${_escape(nameVal)}" ${nameDisabled}>
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" id="pp-visible" ${visible ? 'checked' : ''}> Visible</label>
-        <label><input type="checkbox" id="pp-locked"  ${locked  ? 'checked' : ''}> Locked</label>
+        <button type="button" class="pp-toggle${visible ? ' pp-toggle-on' : ''}" id="pp-visible" aria-pressed="${visible ? 'true' : 'false'}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })} Visible</button>
+        <button type="button" class="pp-toggle${locked ? ' pp-toggle-on' : ''}" id="pp-locked" aria-pressed="${locked ? 'true' : 'false'}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })} Locked</button>
       </div>
     </section>
   `;
@@ -166,11 +166,14 @@ function _wireObjectSection(obj) {
     });
   }
 
-  visEl?.addEventListener('change', () => {
-    push(new VisibilityCommand([obj.id], { [obj.id]: !!obj.visible }, visEl.checked));
+  // Visible / Locked are toggle BUTTONS (checkbox→toggle audit) — object mode
+  // switches with eye/lock glyphs. The panel re-renders on VISIBILITY_CHANGED
+  // / LOCK_CHANGED, so the pressed state + glyph repaint from fresh state.
+  visEl?.addEventListener('click', () => {
+    push(new VisibilityCommand([obj.id], { [obj.id]: !!obj.visible }, visEl.getAttribute('aria-pressed') !== 'true'));
   });
-  lockEl?.addEventListener('change', () => {
-    push(new LockCommand([obj.id], { [obj.id]: !!obj.locked }, lockEl.checked));
+  lockEl?.addEventListener('click', () => {
+    push(new LockCommand([obj.id], { [obj.id]: !!obj.locked }, lockEl.getAttribute('aria-pressed') !== 'true'));
   });
 }
 
@@ -861,17 +864,22 @@ function _renderPrintPartSection(obj) {
     <section class="pp-section" data-section="print-part">
       <header class="pp-section-header">${sectionIcon('Tag')}Print Part</header>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" id="pp-is-print-part" ${isPrintPart ? 'checked' : ''}> Export as print part</label>
+        <button type="button" class="pp-toggle${isPrintPart ? ' pp-toggle-on' : ''}" id="pp-is-print-part" aria-pressed="${isPrintPart ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>Export as print part</button>
       </div>
     </section>
   `;
 }
 
 function _wirePrintPartSection(obj) {
+  // Per-object export flag = toggle button (checkbox→toggle audit). No
+  // PRINT_PART re-render subscription, so reflect the pressed state in place.
   const cb = _bodyEl.querySelector('#pp-is-print-part');
   if (!cb) return;
-  cb.addEventListener('change', () => {
-    push(new PrintPartCommand(obj.id, !!obj.isPrintPart, cb.checked));
+  cb.addEventListener('click', () => {
+    const next = cb.getAttribute('aria-pressed') !== 'true';
+    push(new PrintPartCommand(obj.id, !!obj.isPrintPart, next));
+    cb.classList.toggle('pp-toggle-on', next);
+    cb.setAttribute('aria-pressed', next ? 'true' : 'false');
   });
 }
 

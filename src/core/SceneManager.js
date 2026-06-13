@@ -14,7 +14,7 @@ import {
   initEnvironmentRig, applyEnvironmentSettings, ensureShadowCasters,
   getShadowGenerator, invalidateShadows, setFloorShadowOnly,
 } from './scene/EnvironmentRig.js';
-import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes } from './scene/ViewEffects.js';
+import { initViewEffects, applyViewEffects, setSectionPlane, registerSectionMeshes, setSectionVizVisible, isSectionVizVisible } from './scene/ViewEffects.js';
 import { initImportBounce } from './scene/ImportBounce.js';
 import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
@@ -439,6 +439,7 @@ export const SceneManager = {
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
+  setSectionVizVisible, isSectionVizVisible,
   getCursor, setCursor, setCursorVisible,
   pickMeshIdAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,

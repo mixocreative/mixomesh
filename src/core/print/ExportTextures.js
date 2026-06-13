@@ -4,12 +4,29 @@
 
 import { getState } from '../StateManager.js';
 import { textureToPngBlob } from '../assets/TextureReadback.js';
+import { getTextureSource } from '../assets/TextureSource.js';
 
 export function clamp255(c) { return Math.max(0, Math.min(255, Math.round((c ?? 0) * 255))); }
 export function hex2(n) { return n.toString(16).padStart(2, '0').toUpperCase(); }
 
-/** Convert a Babylon texture to a PNG blob via the shared readback seam. */
-export async function textureToBlob(texture) {
+/**
+ * Convert a Babylon texture to a PNG blob for export.
+ *
+ * Prefers the FULL-RES SOURCE captured at import (TextureSource.js) over a
+ * GPU readback: the viewport texture cap may have downscaled the GPU copy, but
+ * the source is frozen at full resolution — this is what keeps Mimaki exports
+ * bit-for-bit full-res regardless of the viewport cap. The source PNG is the
+ * same single-flip readback the GPU path produces (captured via
+ * textureToPngBlob before any cap), so it is orientation-identical. Falls back
+ * to a live GPU readback when no source was captured (no cap in play).
+ * @param {BABYLON.BaseTexture} texture
+ * @param {string|null} [assetId]  asset id to look up the captured source
+ */
+export async function textureToBlob(texture, assetId = null) {
+  if (assetId) {
+    const src = getTextureSource(assetId);
+    if (src?.blob) return src.blob;
+  }
   const blob = await textureToPngBlob(texture);
   if (!blob) throw new Error(`Texture readback failed for ${texture?.name ?? 'texture'}`);
   return blob;
@@ -51,7 +68,7 @@ export async function collectTextureBlobs(meshes) {
       const assetId = getAssetIdForTexture(tex);
       if (!assetId || textureMap.has(assetId)) continue;
       try {
-        const blob = await textureToBlob(tex);
+        const blob = await textureToBlob(tex, assetId);
         textureMap.set(assetId, { name: tex.name || assetId, blob });
       } catch (err) {
         console.error(`Failed to export texture ${tex.name}:`, err);
@@ -113,7 +130,7 @@ export async function collectMimakiTextures(meshList, BABYLON) {
       usedNames.add(filename);
       path = `3D/Textures/${filename}`;
       try {
-        const blob = await textureToBlob(tex);
+        const blob = await textureToBlob(tex, assetId);
         blobByPath.set(path, blob);
         pathByAssetId.set(assetId, path);
       } catch (err) {

@@ -10,6 +10,8 @@ import { SceneManager } from '../SceneManager.js';
 import { extOf as _extOf, isTextureExt } from './AssetTypes.js';
 import { textureToDataUrl } from './TextureReadback.js';
 import { setBlobUrl, revokeBlobUrl } from './BlobUrls.js';
+import { captureAndCap, applyCapToTexture, currentCapPx, clearCapUrl, clearCapUrls } from './TextureCap.js';
+import { clearTextureSource, clearTextureSources } from './TextureSource.js';
 
 const BABYLON = window.BABYLON;
 
@@ -96,6 +98,11 @@ export async function loadTextureFromBlob(blob, filename, opts = {}) {
     scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: entry } },
   }), { silent: true });
   dispatch(EVENTS.ASSET_REGISTERED, { assetId, entry });
+
+  // Freeze the full-res export source, then apply the active viewport cap
+  // (idle — a full-res readback/encode on a 4096² is heavy and must never
+  // block the load). Capture-before-cap order lives in captureAndCap.
+  _scheduleIdle(() => captureAndCap(assetId, texture));
 
   return assetId;
 }
@@ -195,6 +202,10 @@ function _filenameFromUrl(url) {
 async function _generateImportedTextureThumbnail(assetId, texture) {
   try {
     await _awaitTextureReady(texture);
+    // Freeze the full-res export source + apply the viewport cap BEFORE the
+    // thumbnail readback (capture-before-cap). The thumbnail is 128 px, so it
+    // is unaffected by a subsequent GPU downscale.
+    await captureAndCap(assetId, texture);
     const dataUrl = await textureToDataUrl(texture, TEX_THUMB_SIZE);
     if (!dataUrl) return;
     setState(s => {
@@ -264,6 +275,7 @@ export async function restoreTexture(entry, blob) {
     ...s,
     scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: { ...entry, thumbnailDataUrl: blobUrl } } },
   }), { silent: true });
+  _scheduleIdle(() => captureAndCap(entry.id, texture));
   return entry.id;
 }
 
@@ -280,6 +292,8 @@ export function releaseTextureAsset(assetId, entry) {
   if (tex && !entry.isImported) tex.dispose();
   _textures.delete(assetId);
   revokeBlobUrl(assetId);
+  clearCapUrl(assetId);
+  clearTextureSource(assetId);
   return true;
 }
 
@@ -290,4 +304,18 @@ export function resetTextures() {
     if (t && !e?.isImported) { try { t.dispose(); } catch { /* */ } }
   }
   _textures.clear();
+  clearCapUrls();
+  clearTextureSources();
+}
+
+/**
+ * Re-apply the viewport texture cap to every live texture — called when the
+ * user changes scene.render.textureCapPx. Downscales from / restores to the
+ * stored full-res source per texture; export is unaffected (reads the source).
+ * @param {number} [capPx] defaults to the active cap in state
+ */
+export function recapAllTextures(capPx = currentCapPx()) {
+  for (const [id, tex] of _textures.entries()) {
+    applyCapToTexture(id, tex, capPx);
+  }
 }

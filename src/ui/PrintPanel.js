@@ -444,10 +444,8 @@ function _renderBedTab() {
   html += '</div>';
 
   html += '<div class="pp-field-group">';
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-bed-show" ${showVolume ? 'checked' : ''}>`;
-  html += '<label for="pp-bed-show">Show bed volume in viewport</label>';
-  html += '</div>';
+  // Viewport visibility = toggle button (checkbox→toggle audit 2026-06-13).
+  html += `<button type="button" class="pp-toggle${showVolume ? ' pp-toggle-on' : ''}" id="pp-bed-show" aria-pressed="${showVolume ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>Show bed volume in viewport</button>`;
   html += '<div class="pp-info">Models exceeding the bed are flagged in Validation.</div>';
   html += '</div>';
 
@@ -494,13 +492,16 @@ function _renderBedTab() {
     });
   });
 
-  el.querySelector('#pp-bed-show').addEventListener('change', (e) => {
-    const on = e.target.checked;
+  el.querySelector('#pp-bed-show').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    const on = btn.getAttribute('aria-pressed') !== 'true';
     setState(s => ({
       ...s,
       scene: { ...s.scene, overlays: { ...s.scene.overlays, bedPreview: on } },
     }), { silent: true });
     SceneManager.setOverlay('bedPreview', on);
+    btn.classList.toggle('pp-toggle-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
 
   return el;

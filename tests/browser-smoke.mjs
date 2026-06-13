@@ -396,11 +396,15 @@ async function main() {
       fx.registerSectionMeshes();
       const aNoCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: false });
+      // Striped indicator plane exists while the cut is on (viewport aid;
+      // RenderOutput hides it during capture, so it must NOT affect aCut).
+      const vizWhenOn = !!scene.getMeshByName('mx-section-plane');
       const aCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: true });
       const aFlip = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: false });
-      const section = { aNoCut, aCut, aFlip };
+      const vizWhenOff = !!scene.getMeshByName('mx-section-plane');
+      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff };
 
       // (3) Bounce-in — ASSET_INSTANTIATED scale-pops the mesh and MUST land
       // exactly back on the original scaling (state transforms untouched).
@@ -482,6 +486,8 @@ async function main() {
     assert(wave.section.aCut === 0,
       `section plane did not cut the box (alpha ${wave.section.aCut}) — clip sign convention broke`);
     assert(wave.section.aFlip === 255, `section flip did not keep the other side (alpha ${wave.section.aFlip})`);
+    assert(wave.section.vizWhenOn, 'cross-section indicator plane missing while cut is on');
+    assert(!wave.section.vizWhenOff, 'cross-section indicator plane not disposed when cut turned off');
     assert(wave.bounce.animated,
       `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
     assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');
