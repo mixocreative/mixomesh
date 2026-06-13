@@ -328,9 +328,10 @@ Import path:
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
    **Resin-grey for shaderless geometry — ONE material, never overrides imports:**
    - SINGLE SOURCE = `scene.defaultMaterial`, greyed once in `SceneManager.init`
-     (matte, albedo **0.5** — 0.72 washes to near-white under the bright 3-light
-     studio + ACES + exposure; 0.5 reads as clear grey once lit). Tune the grey
-     THERE and both cases below follow — unity.
+     (albedo **0.4** + a SUBTLE satin sheen — small specular 0.10 / specularPower
+     48 — so it reads like cured resin, not flat matte or glossy plastic; lighter
+     greys wash to near-white under the bright studio + ACES). Tune it THERE and
+     both cases below follow — unity.
    - Shaderless FACES (submesh slots with no material) render with it
      automatically (Babylon's render-time fallback).
    - Shaderless OBJECTS (STL / missing — no material at all) are ASSIGNED that

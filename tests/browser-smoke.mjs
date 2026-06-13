@@ -497,7 +497,7 @@ async function main() {
       // Resin-grey default: material-less meshes render with scene.defaultMaterial,
       // set to matte medium-light grey at init.
       const dm = scene.defaultMaterial;
-      const dmGrey = !!dm && Math.abs((dm.diffuseColor?.r ?? 0) - 0.5) < 0.01;
+      const dmGrey = !!dm && Math.abs((dm.diffuseColor?.r ?? 0) - 0.4) < 0.01;
 
       // (6b2) UV-checker mode: a content material's base texture swaps to the
       // checker and restores.
@@ -621,7 +621,7 @@ async function main() {
     assert(stlDiag.found, 'STL mesh not found after import');
     assert(stlDiag.isDefault,
       'shaderless STL was not assigned the shared scene.defaultMaterial (unity broken)');
-    assert(stlDiag.color && stlDiag.color[0] === 0.5,
+    assert(stlDiag.color && stlDiag.color[0] === 0.4,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);

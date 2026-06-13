@@ -101,8 +101,11 @@ export async function init(canvas) {
   // (0.5, not lighter — the bright 3-light studio + ACES + exposure washes a
   // 0.72 grey to near-white; 0.5 reads as clear grey once lit).
   const _dm = _scene.defaultMaterial;
-  if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.5, 0.5, 0.5);
-  if (_dm?.specularColor) _dm.specularColor = new BABYLON.Color3(0, 0, 0);
+  if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.4, 0.4, 0.4);
+  // Subtle satin sheen — a small, broad specular reads like cured resin (not
+  // fully matte, not glossy plastic).
+  if (_dm?.specularColor) _dm.specularColor = new BABYLON.Color3(0.10, 0.10, 0.10);
+  if ('specularPower' in (_dm ?? {})) _dm.specularPower = 48;
 
   // Gentle ACES tone mapping — Fusion's clean, slightly punchy look. Applied
   // at material shading, so it bakes into the scene the selection-silhouette
