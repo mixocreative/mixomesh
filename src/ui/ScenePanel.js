@@ -58,7 +58,7 @@ const RENDER_DEFAULTS = {
   hdriEnabled: true,
   hdriPreset: 'studio',
   hdriIntensity: 0.6,
-  ssaoEnabled: true,
+  ssaoEnabled: false,
   ssaoStrength: 1,
 };
 

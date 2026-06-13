@@ -757,7 +757,7 @@ const initialState = {
               // SSAO contact darkening (scene/ViewEffects.js) — VIEWPORT-ONLY
               // post effect: RTT export paths skip the camera post chain by
               // design (same rule that keeps the silhouette out of renders).
-              ssaoEnabled: true, ssaoStrength: 1 /* 0..2 */ },
+              ssaoEnabled: false, ssaoStrength: 1 /* 0..2 — default OFF, heavy prePass */ },
     // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
     // deliberately NOT persisted. axis/offset are print-space (Z = up, mm);
     // flip keeps the other side. Cuts CONTENT meshes only (per-mesh
@@ -1151,16 +1151,26 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
   delegates to `EnvironmentRig.applyEnvironmentSettings`, the effects half
   (SSAO/section) to `ViewEffects.applyViewEffects`.
 - **SSAO (`scene/ViewEffects.js`, 2026-06-13):** `SSAO2RenderingPipeline`
-  attached to the nav camera while `render.ssaoEnabled` (default ON;
-  `ssaoStrength` 0..2 → `totalStrength`). Half-res AO, `radius` 0.009 BU
-  (~9 mm contact reach at the 300 mm working area), 12 samples. Lazily
-  constructed; disabling DISPOSES the pipeline. Construction is
-  try/catch-feature-detected — unsupported GPU/driver ⇒ stays off silently
+  attached to the nav camera while `render.ssaoEnabled` (**default OFF** —
+  see perf note; `ssaoStrength` 0..2 → `totalStrength`). Half-res AO,
+  `radius` 0.009 BU (~9 mm contact reach at the 300 mm working area), 12
+  samples. Lazily constructed; disabling DISPOSES the pipeline. Construction
+  is try/catch-feature-detected — unsupported GPU/driver ⇒ stays off silently
   (`isSsaoActive()` is the probe hook). **Viewport-only:** RTT export paths
   skip the camera post chain, which is also what keeps the selection
   silhouette out of renders — the silhouette post-process coexists with the
   pipeline (smoke + screenshots verified). `DefaultRenderingPipeline` remains
   deliberately unused.
+  ⚠ **Perf / why default OFF (2026-06-13):** SSAO2 enables a geometry
+  prePass that re-renders ALL scene geometry into MRT (color/normal/depth)
+  targets every frame. On a heavy import (the `claude.glb` repro: ~80k tris
+  + a 4096² base-colour texture) this pushed worst-frame from ~24 ms to
+  ~250–330 ms (measured in SwiftShader via `tests/tmp-import-repro.mjs`
+  pattern) — recurring stalls that read as a frozen import, and enough to
+  wedge a TDR-prone GPU/driver (this machine's Chrome 149). The custom
+  selection-mask RTT sets `noPrePassRenderer = true` so the prePass doesn't
+  ALSO double-render geometry into it, but the main-camera prePass cost is
+  inherent to SSAO2 — hence opt-in, not default.
 - **Bounce-in (`scene/ImportBounce.js`, 2026-06-13):** freshly instantiated
   meshes scale-pop into place (260 ms, 0.6→easeOutBack overshoot→1). Pure
   visual feel: the animation multiplies the mesh's own scaling and ends with

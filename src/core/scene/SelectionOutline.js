@@ -55,6 +55,12 @@ export function initSelectionOutline(scene, engine, camera) {
   _selMaskRTT.renderList   = [];
   _selMaskRTT.activeCamera = camera;
   _selMaskRTT.refreshRate  = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONEVERYFRAME;
+  // Keep SSAO's geometry prePass OFF this RTT. Without this the prePass
+  // renderer attaches a full MRT (color/normal/depth) pass to the mask
+  // target and re-renders all scene geometry into it every frame — on a
+  // heavy import (80k tris + 4096² texture) that doubled the per-frame GPU
+  // cost into ~240 ms stalls that read as a frozen import.
+  _selMaskRTT.noPrePassRenderer = true;
   scene.customRenderTargets.push(_selMaskRTT);
 
   if (!BABYLON.Effect.ShadersStore['mxOutlineFragmentShader']) {

@@ -51,7 +51,11 @@ const INITIAL_STATE = {
       hdriEnabled: true, hdriPreset: 'studio', hdriIntensity: 0.6,
       // SSAO contact darkening (scene/ViewEffects.js) — viewport-only post
       // effect (the RTT export paths skip the camera post chain by design).
-      ssaoEnabled: true, ssaoStrength: 1,
+      // DEFAULT OFF: SSAO2 runs a geometry prePass that re-renders all scene
+      // geometry every frame; on a heavy import (80k+ tris) that caused
+      // ~250-330 ms frame stalls that read as a frozen import (and could
+      // wedge a TDR-prone GPU/driver). Opt-in for capable machines.
+      ssaoEnabled: false, ssaoStrength: 1,
     },
     // Cross-section inspection plane (scene/ViewEffects.js). SESSION-ONLY —
     // deliberately not persisted (it's an inspection tool, not a scene look).
