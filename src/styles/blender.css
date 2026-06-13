@@ -157,22 +157,55 @@ input[type="range"] {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-/* 8. Sub-group labels inside long sections (Scene panel: Grade/Floor/Lights,
-   Still/Turntable) — muted, uppercase, hairline above. Flex so the leading
-   .sec-icon sits beside the label. */
+/* 8. Three-tier panel hierarchy made visually explicit (2026-06-13).
+   Tier 1 = top-level panel bar (.rp-section-header, filled bg-1 — unchanged).
+   Tier 2 = panel sub-section (.pp-section-header) — brighter + heavier, accent
+            disclosure triangle, and its BODY is indented under it with a left
+            guide rail so each section reads as a container.
+   Tier 3 = sub-group label (.pp-subhead) — dim, indented inside the section
+            body, hairline divider. */
+
+/* Tier 2 header: lift from text-2 → text-1, heavier, brighter on hover. */
+.pp-section-header {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.pp-section-header:hover { color: var(--text-0); }
+/* Disclosure triangle tinted accent so the section reads as a toggle. */
+.pp-section-header::before { border-top-color: var(--accent) !important; }
+
+/* Tier 2 body: indent every non-header child under the header and draw a
+   faint vertical guide rail at the indent so the body visibly belongs to the
+   section. Each child carries the rail (border-left); spacing between children
+   is PADDING not margin, so the rail stays continuous (a margin gap would
+   chop it into segments). Applies to Properties + Scene (shared .pp-section);
+   collapsed sections hide their body so the rail vanishes with it. */
+.pp-section > :not(.pp-section-header) {
+  margin-left: var(--sp-3);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--bg-4);
+}
+
+/* Tier 3 sub-group label — muted, uppercase, hairline above. Flex so the
+   leading .sec-icon sits beside the label. Spacing via padding (not margin)
+   to keep the section rail continuous. */
 .pp-subhead {
-  margin: var(--sp-4) 0 var(--sp-2);
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border-section);
+  margin: 0 0 var(--sp-2);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--bg-3);
   font-size: var(--fs-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-2);
+  font-weight: 600;
   user-select: none;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
 }
+/* First sub-group: no extra rule against the section-header underline, but
+   keep the rail's top padding so the rail isn't truncated. */
+.pp-subhead:first-of-type { border-top: none; }
 
 /* 8b. Section-header / subhead / tab leading icons (2026-06-13 icon pass).
    Every panel header (Properties / Shader / Scene / Print top-level + their
