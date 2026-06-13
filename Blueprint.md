@@ -328,8 +328,12 @@ Import path:
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
    **Resin-grey for shaderless geometry (never overrides imports):**
    - `_applyResinDefault()` runs AFTER `addAllToScene` (so geometry is bound) and
-     assigns a shared matte grey `StandardMaterial` (`_resinGrey`, 0.72, specular
-     0) ONLY to meshes with NO material — STL / missing / shaderless. Imported
+     assigns a shared matte grey `StandardMaterial` (`_resinGrey`, albedo **0.5**,
+     specular 0) ONLY to meshes with NO material — STL / missing / shaderless.
+     (0.5, not lighter: under the bright 3-light studio + ACES + exposure a 0.72
+     grey washes to near-white — 0.5 reads as a clear medium grey once lit. The
+     STL mesh provably gets this material; browser smoke imports a real ASCII STL
+     and asserts it.) Imported
      materials are NEVER touched, white or not (authored content is preserved).
    - Shaderless FACES (submesh slots with no material in a multi-material mesh)
      fall through to `scene.defaultMaterial`, which `SceneManager.init` greys to

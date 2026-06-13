@@ -497,7 +497,7 @@ async function main() {
       // Resin-grey default: material-less meshes render with scene.defaultMaterial,
       // set to matte medium-light grey at init.
       const dm = scene.defaultMaterial;
-      const dmGrey = !!dm && Math.abs((dm.diffuseColor?.r ?? 0) - 0.72) < 0.01;
+      const dmGrey = !!dm && Math.abs((dm.diffuseColor?.r ?? 0) - 0.5) < 0.01;
 
       // (6b2) UV-checker mode: a content material's base texture swaps to the
       // checker and restores.
@@ -591,6 +591,38 @@ async function main() {
     assert(importErr.hasMessage, 'import-error modal missing the error message');
     assert(importErr.hasDetails, 'import-error modal missing the technical details block');
     assert(importErr.closed, 'import-error modal did not close on Close');
+
+    // Resin-grey for shaderless STL: import a real ASCII STL (no material) and
+    // confirm the resulting mesh renders grey, not white.
+    const stlDiag = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const B = window.BABYLON;
+      const stl = [
+        'solid x','facet normal 0 0 1','outer loop',
+        'vertex 0 0 0','vertex 10 0 0','vertex 0 10 0',
+        'endloop','endfacet','endsolid x',''
+      ].join('\\n');
+      const blob = new Blob([stl], { type: 'model/stl' });
+      let meshIds = [], err = null;
+      try { meshIds = await al.AssetLoader.loadFromBlob(blob, 'diag.stl', new B.Vector3(0,0,0), {}); }
+      catch (e) { err = String(e); }
+      const scene = sm.SceneManager.getScene();
+      const mesh = scene.meshes.find(m => m.metadata?.meshId === meshIds[0]);
+      const mat = mesh?.material;
+      const c = mat?.diffuseColor ?? mat?.albedoColor ?? null;
+      return {
+        err, found: !!mesh,
+        matName: mat?.name ?? null, matClass: mat?.getClassName?.() ?? 'none',
+        color: c ? [+c.r.toFixed(2), +c.g.toFixed(2), +c.b.toFixed(2)] : null,
+      };
+    })()`);
+    assert(!stlDiag.err, `STL import threw: ${stlDiag.err}`);
+    assert(stlDiag.found, 'STL mesh not found after import');
+    assert(stlDiag.matName === 'mx-resin-grey',
+      `shaderless STL did not get the resin-grey material (got ${stlDiag.matName} / ${stlDiag.matClass})`);
+    assert(stlDiag.color && stlDiag.color[0] === 0.5,
+      `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

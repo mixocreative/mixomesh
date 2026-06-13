@@ -98,7 +98,7 @@ export async function init(canvas) {
   // scene default material — make it a matte medium-light grey so raw imports
   // look like grey/ED-resin prints instead of stark white.
   const _dm = _scene.defaultMaterial;
-  if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.72, 0.72, 0.72);
+  if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.5, 0.5, 0.5);
   if (_dm?.specularColor) _dm.specularColor = new BABYLON.Color3(0, 0, 0);
 
   // Gentle ACES tone mapping — Fusion's clean, slightly punchy look. Applied

@@ -254,8 +254,11 @@ function _resinGrey() {
   if (_resinGreyMat) return _resinGreyMat;
   const B = window.BABYLON;
   const m = new B.StandardMaterial('mx-resin-grey', SceneManager.getScene());
-  m.diffuseColor  = new B.Color3(0.72, 0.72, 0.72);
-  m.specularColor = new B.Color3(0, 0, 0);   // matte — no plastic hotspot
+  // 0.5 albedo, not 0.72 — under the bright 3-light studio rig + ACES + exposure
+  // a lighter grey washes out to near-white; 0.5 reads as a clear medium grey
+  // (ED/grey-resin look) once lit. Matte (no specular hotspot).
+  m.diffuseColor  = new B.Color3(0.5, 0.5, 0.5);
+  m.specularColor = new B.Color3(0, 0, 0);
   _resinGreyMat = m;
   return m;
 }
