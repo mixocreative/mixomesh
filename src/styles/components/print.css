@@ -232,6 +232,37 @@
   margin-bottom: var(--sp-2);
 }
 
+/* Import-failure detail modal */
+.modal-content.import-error { max-width: 460px; }
+.import-error-file {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  word-break: break-all;
+}
+.import-error-msg { color: var(--accent, #f59e0b); }
+.import-error-hint { color: var(--text-2, #9aa0a6); font-size: var(--fs-sm); }
+.import-error-details { font-size: var(--fs-sm); }
+.import-error-details summary {
+  cursor: pointer;
+  color: var(--text-2, #9aa0a6);
+  user-select: none;
+}
+.import-error-details pre {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3);
+  max-height: 180px;
+  overflow: auto;
+  background: var(--bg-1, #1c1c1f);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2, 6px);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-1);
+}
+
 .modal-actions {
   display: flex;
   gap: var(--sp-3);

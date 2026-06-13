@@ -12,6 +12,7 @@ import { ScenePanel } from '../ui/ScenePanel.js';
 import { PrintPanel } from '../ui/PrintPanel.js';
 import { ContextMenu } from '../ui/ContextMenu.js';
 import { Modal } from '../ui/Modal.js';
+import { ImportError } from '../ui/ImportError.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
 import { ViewportToggles } from '../ui/ViewportToggles.js';
 import { NavCube } from '../ui/NavCube.js';
@@ -64,6 +65,7 @@ async function bootstrap() {
   });
 
   Modal.init();
+  ImportError.init();     // registers the import-failure detail modal
   MeshValidator.init();   // validation-cache invalidation hooks (A6)
   Outliner.init();
   PropertiesPanel.init();

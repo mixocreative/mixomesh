@@ -218,6 +218,7 @@ src/
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
     ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b)
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
+    ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
     ViewportToggles.js     ← wireframe-edges + matte toggles docked under the NavCube
     ScenePanel.js          ← Scene workspace panel: grid / environment (incl. floor) / camera / Rendering output
@@ -2512,8 +2513,13 @@ Drop position:
 - Fallback to analytic intersection with the `y = 0` plane.
 - If the ray is parallel or behind the camera, use `BABYLON.Vector3.Zero()`.
 
-All async drop work runs through `safeAsync`. The module does not keep state
-and does not maintain its own extension table.
+All async **import** work runs through `safeImport` (`src/ui/ImportError.js`) —
+a `safeAsync` variant that, on failure, opens the `importError` detail modal
+(filename + plain-language hint + collapsible technical stack) instead of a
+transient toast, so a failed model/texture import is actionable. Both import
+entry points use it: `ViewportDrop` (OS drop + Session/folder drag) and
+`AssetPanel._activateCard` (double-click). The module does not keep state and
+does not maintain its own extension table.
 
 ### Context Menu (`src/ui/ContextMenu.js`)
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
@@ -2752,7 +2758,7 @@ Collapses non-essential segments below 1280px.
   toast then runs the handler. Used by validation toasts (B5 click-through).
 
 ### Modal (`src/ui/Modal.js`)
-Generic. Listens for `MODAL_OPEN`. Renders by id (`shaderMerge`, `dirtyConfirm`, `validationErrors`, etc.).
+Generic. Listens for `MODAL_OPEN`. Renders by id (`shaderMerge`, `dirtyConfirm`, `validationErrors`, `importError`, etc.).
 
 ### App Shell (`src/ui/AppShell.js`)
 Owns behaviour for the static shell declared in `index.html`: right-panel

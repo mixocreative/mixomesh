@@ -11,17 +11,18 @@
 // falls back to WebGL; this check then reports SKIP (not a failure) — the
 // WGSL path must be confirmed in live Chrome. Mirrors browser-smoke.mjs.
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
-import { createServer as createNetServer } from 'node:net';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  findBrowser, freePort, waitForHttp, waitForBrowserWs, openTarget,
+  Cdp, evaluate, waitFor, assert, removeTempDir, stopProcess,
+} from './cdp-harness.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
-const CDP_COMMAND_TIMEOUT_MS = 30000;
 
 async function main() {
   const browserPath = findBrowser();
@@ -221,6 +222,25 @@ async function main() {
         probe.transpCenterAlpha = tcx.getImageData(32, 32, 1, 1).data[3];
         probe.transpCornerAlpha = tcx.getImageData(1, 1, 1, 1).data[3];
         tbox.dispose();
+
+        // #1 — static-texture readback on WebGPU (the export fallback path:
+        // ExportTextures.textureToBlob → TextureReadback.textureToPngBlob when a
+        // texture has no captured source). The capture flush bug was RTT-only;
+        // confirm uploaded textures read back fine so export fidelity is safe.
+        const tr = await import('/src/core/assets/TextureReadback.js');
+        const dyn = new B.DynamicTexture('webgpu-readback', { width: 32, height: 32 }, scene, false);
+        const dctx = dyn.getContext();
+        dctx.fillStyle = '#ff0000'; dctx.fillRect(0, 0, 32, 32);
+        dctx.fillStyle = '#00ff00'; dctx.fillRect(0, 0, 16, 16);
+        dyn.update();
+        const texBlob = await tr.textureToPngBlob(dyn);
+        if (texBlob) {
+          const rbmp = await createImageBitmap(texBlob);
+          const rc = new OffscreenCanvas(32, 32); const rcx = rc.getContext('2d');
+          rcx.drawImage(rbmp, 0, 0);
+          probe.texReadbackDistinct = distinctOf(rcx.getImageData(0, 0, 32, 32).data);
+        } else { probe.texReadbackDistinct = 0; }
+        dyn.dispose();
       } catch (e) { probe.error = String(e); }
 
       return { isWebGPU: sm.SceneManager.isWebGPU(), maskInRT, frames,
@@ -249,6 +269,7 @@ async function main() {
     assert(p.transpCenterAlpha === 255, `WebGPU transparent PNG: box not opaque (alpha ${p.transpCenterAlpha})`);
     assert(p.transpCornerAlpha === 0, `WebGPU transparent PNG: sky not transparent (alpha ${p.transpCornerAlpha})`);
     assert(result.plainDistinct > 4, `WebGPU opaque PNG still empty (${result.plainDistinct})`);
+    assert(p.texReadbackDistinct > 1, `WebGPU static-texture readback empty (${p.texReadbackDistinct}) — export fallback would lose texture bytes`);
     await cdp.close();
     console.log('PASS WebGPU backend + WGSL outline + capture (video/PNG/transparent) all correct');
   } finally {
@@ -256,138 +277,6 @@ async function main() {
     await stopProcess(vite);
     removeTempDir(userDataDir);
   }
-}
-
-async function openTarget(port, url) {
-  const res = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
-  if (!res.ok) throw new Error(`Failed to open browser target: ${res.status} ${await res.text()}`);
-  return await res.json();
-}
-async function waitForHttp(url, timeoutMs, output) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try { if ((await fetch(url)).ok) return; } catch { /* starting */ }
-    await sleep(100);
-  }
-  throw new Error(`Timed out waiting for Vite app:\n${output.join('').slice(-2000)}`);
-}
-async function freePort() {
-  const server = createNetServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const port = server.address().port;
-  server.close();
-  await once(server, 'close');
-  return port;
-}
-function findBrowser() {
-  const local = process.env.LOCALAPPDATA;
-  const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
-  const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
-  const candidates = [
-    join(programFiles, 'Google/Chrome/Application/chrome.exe'),
-    join(programFilesX86, 'Google/Chrome/Application/chrome.exe'),
-    local ? join(local, 'Google/Chrome/Application/chrome.exe') : '',
-    join(programFiles, 'Microsoft/Edge/Application/msedge.exe'),
-    join(programFilesX86, 'Microsoft/Edge/Application/msedge.exe'),
-    local ? join(local, 'Microsoft/Edge/Application/msedge.exe') : '',
-  ];
-  const match = candidates.find(p => p && existsSync(p));
-  if (match) return match;
-  for (const cmd of ['google-chrome', 'chrome', 'chromium', 'msedge']) {
-    const r = resolveCommand(cmd);
-    if (r) return r;
-  }
-  return null;
-}
-function resolveCommand(command) {
-  const resolver = process.platform === 'win32' ? 'where.exe' : 'sh';
-  const args = process.platform === 'win32' ? [command] : ['-c', `command -v ${command}`];
-  const result = spawnSync(resolver, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  if (result.status !== 0) return null;
-  return result.stdout.split(/\r?\n/).map(l => l.trim()).find(Boolean) ?? null;
-}
-async function waitForBrowserWs(port, stderr) {
-  const url = `http://127.0.0.1:${port}/json/version`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) { const j = await res.json(); if (j.webSocketDebuggerUrl) return j.webSocketDebuggerUrl; }
-    } catch { /* starting */ }
-    await sleep(100);
-  }
-  throw new Error(`Timed out waiting for Chrome DevTools endpoint:\n${stderr.join('').slice(-2000)}`);
-}
-class Cdp {
-  static async connect(url) {
-    const ws = new WebSocket(url);
-    const cdp = new Cdp(ws);
-    await new Promise((res, rej) => {
-      ws.addEventListener('open', res, { once: true });
-      ws.addEventListener('error', rej, { once: true });
-    });
-    return cdp;
-  }
-  constructor(ws) {
-    this.ws = ws; this.nextId = 1; this.pending = new Map(); this.onEvent = null;
-    ws.addEventListener('message', (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve: res, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        if (msg.error) reject(new Error(msg.error.message)); else res(msg.result ?? {});
-      } else this.onEvent?.(msg);
-    });
-  }
-  send(method, params = {}) {
-    const id = this.nextId++;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((res, rej) => {
-      const timer = setTimeout(() => { this.pending.delete(id); rej(new Error(`CDP command timed out: ${method}`)); }, CDP_COMMAND_TIMEOUT_MS);
-      this.pending.set(id, { resolve: v => { clearTimeout(timer); res(v); }, reject: e => { clearTimeout(timer); rej(e); } });
-    });
-  }
-  async close() {
-    if (this.ws.readyState === WebSocket.CLOSED) return;
-    await new Promise(res => { this.ws.addEventListener('close', res, { once: true }); this.ws.close(); setTimeout(res, 1000); });
-  }
-}
-async function evaluate(cdp, expression) {
-  const result = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? 'Runtime.evaluate failed');
-  }
-  return result.result?.value;
-}
-async function waitFor(fn, timeoutMs, label) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try { if (await fn()) return; } catch { /* navigating */ }
-    await sleep(100);
-  }
-  throw new Error(`Timed out waiting for ${label}`);
-}
-function assert(value, message) { if (!value) throw new Error(message); }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-function removeTempDir(dir) {
-  for (let i = 0; i < 5; i++) {
-    try { rmSync(dir, { recursive: true, force: true }); return; }
-    catch (err) {
-      if (err?.code !== 'EBUSY' && err?.code !== 'ENOTEMPTY') throw err;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-    }
-  }
-}
-async function stopProcess(child) {
-  if (!child || child.exitCode != null) return;
-  if (process.platform === 'win32') {
-    try { const k = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); await Promise.race([once(k, 'exit'), sleep(3000)]); }
-    catch { try { child.kill(); } catch { /* gone */ } }
-  } else { try { child.kill('SIGTERM'); } catch { /* gone */ } }
-  if (child.exitCode == null) await Promise.race([once(child, 'exit'), sleep(3000)]);
-  child.stdout?.destroy();
-  child.stderr?.destroy();
 }
 
 try { await main(); }

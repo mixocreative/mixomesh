@@ -1,6 +1,7 @@
 import { AssetLoader } from '../core/AssetLoader.js';
 import { AssetPanel } from './AssetPanel.js';
-import { Toast, safeAsync } from './Toast.js';
+import { Toast } from './Toast.js';
+import { safeImport } from './ImportError.js';
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
@@ -69,8 +70,8 @@ function _handleDrop(e, position) {
 
   const panelPayload = dt.getData(DRAG_MIME);
   if (panelPayload) {
-    safeAsync(async () => {
-      const { mountKey, path, filename } = JSON.parse(panelPayload);
+    const { mountKey, path, filename } = JSON.parse(panelPayload);
+    safeImport(async () => {
       if (mountKey === SESSION_KEY) {
         // path IS the assetId; re-instantiate from existing container
         await AssetLoader.instantiateAsset(path, position);
@@ -81,7 +82,7 @@ function _handleDrop(e, position) {
       await AssetLoader.loadFromHandle(handle, position, {
         directoryHandleKey: mountKey, originalPath: path,
       });
-    });
+    }, filename ?? 'asset');
     return;
   }
 
@@ -131,14 +132,14 @@ function _handleDrop(e, position) {
   }
 
   for (const { file, handleP } of meshEntries) {
-    safeAsync(async () => {
+    safeImport(async () => {
       const h = await handleP;
       const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
       await AssetLoader.loadFromBlob(file, file.name, position, {
         ...(fileHandle ? { fileHandle } : {}),
         ...(siblingFiles.length ? { siblingFiles } : {}),
       });
-    });
+    }, file.name);
   }
 }
 

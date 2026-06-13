@@ -4,6 +4,7 @@ import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
 import { kvSet, kvGet, getHandle } from '../core/idb.js';
 import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
+import { safeImport } from './ImportError.js';
 import { icon } from '../core/Icons.js';
 import { SUPPORTED_EXTENSIONS, SUPPORTED_TEXTURE_EXTENSIONS, extOf } from '../core/assets/AssetTypes.js';
 import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
@@ -519,7 +520,8 @@ function _cardPayload(card) {
 
 function _activateCard(card) {
   const { mountKey, path, kind } = _cardPayload(card);
-  safeAsync(async () => {
+  const filename = card.dataset.filename ?? path ?? 'asset';
+  safeImport(async () => {
     if (mountKey === SESSION_KEY) {
       // path IS the assetId on session cards; re-instantiate the loaded
       // container at origin. Same code path as a SESSION_KEY viewport drop.
@@ -543,7 +545,7 @@ function _activateCard(card) {
         { directoryHandleKey: mountKey, originalPath: path },
       );
     }
-  });
+  }, filename);
 }
 
 function _findAssetForFile(file) {
