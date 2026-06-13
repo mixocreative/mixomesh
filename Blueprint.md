@@ -2705,7 +2705,11 @@ All of it writes `state.scene.render` (silent) and applies via
     output resolution. The RTT path skips the camera post chain — no
     selection silhouette and no SSAO in renders — while keeping tone
     mapping (material-level). Scene furniture (grid / axes / bed preview /
-    3D cursor) is hidden for the capture and restored; transparent mode
+    3D cursor / cross-section indicator) is hidden for the capture and
+    restored — `_hideFurniture` reads ACTUAL visibility, not proxy state: the
+    cursor is hidden via `SceneManager.isCursorVisible()` (NOT
+    `pivotMode==='cursor'`, since the N-panel Show toggle / open-panel can show
+    it without cursor-pivot, and that must still stay out of exports); transparent mode
     disables the background Layer + sets `clearColor` alpha 0
     (`SceneManager.setBackgroundEnabled`), and an ENABLED floor is swapped
     to a `ShadowOnlyMaterial` for the capture
