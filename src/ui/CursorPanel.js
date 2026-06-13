@@ -48,7 +48,7 @@ export function init() {
   _root.querySelector('[data-act="pivot-cursor"]')?.addEventListener('click', _togglePivotCursor);
 
   InputManager.register('Shift+N', 'global', toggle);
-  subscribe(EVENTS.CURSOR_CHANGED, _refreshInputs);
+  subscribe(EVENTS.CURSOR_CHANGED, () => { _refreshInputs(); _syncButtons(); });
   subscribe(EVENTS.SELECTION_CHANGED, _syncButtons);
   subscribe(EVENTS.PIVOT_MODE_CHANGED, _syncButtons);   // stay in sync with the toolbar's pivot group
 

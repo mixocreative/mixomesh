@@ -5,7 +5,8 @@
 // body-drag (ground-plane translate) that shares the same commit pipeline.
 // SceneManager re-exports the public functions so its surface is unchanged.
 
-import { getState, setState } from '../StateManager.js';
+import { getState, setState, dispatch } from '../StateManager.js';
+import { EVENTS } from '../events.js';
 
 const BABYLON = window.BABYLON;
 
@@ -87,6 +88,7 @@ export function setGizmoMode(mode) {
   if (mode === 'scale') setScaleLock(getState().ui?.scaleLocked !== false);
   if (getState().gizmo.mode !== mode) {
     setState(s => ({ ...s, gizmo: { ...s.gizmo, mode } }), { silent: true });
+    dispatch(EVENTS.GIZMO_CHANGED, { mode });
   }
 }
 
@@ -118,6 +120,7 @@ export function setGizmoSpace(space) {
   });
   if (getState().gizmo.space !== space) {
     setState(s => ({ ...s, gizmo: { ...s.gizmo, space } }), { silent: true });
+    dispatch(EVENTS.GIZMO_CHANGED, { space });
   }
   // Recompute pivot orientation if currently attached.
   if (_selectedMeshes.length) {

@@ -563,11 +563,22 @@ async function main() {
       const npPivotOff  = !document.querySelector('#n-panel [data-act="pivot-cursor"].np-on');
       const pivotSync = tbCursorOn && npPivotOn && tbCursorOff && npPivotOff;
 
+      // (11) Gizmo-space sync: toggling space (the backtick-key path) must
+      // update the toolbar World/Local button (GIZMO_CHANGED wiring).
+      const spaceBefore = st.getState().gizmo.space;
+      sm.SceneManager.setGizmoSpace(spaceBefore === 'world' ? 'local' : 'world');
+      await new Promise(r => requestAnimationFrame(r));
+      const tbSpaceLocal = !!document.querySelector('.vt-group[data-group="space"] .vt-btn.vt-on');
+      sm.SceneManager.setGizmoSpace('world');
+      await new Promise(r => requestAnimationFrame(r));
+      const tbSpaceWorld = !document.querySelector('.vt-group[data-group="space"] .vt-btn.vt-on');
+      const gizmoSpaceSync = tbSpaceLocal && tbSpaceWorld;
+
       secBox.dispose();
       bBox.dispose();
       return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
                outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey,
-               cursorBall, cursorRing, cursorStateSync, maskTwoTone, pivotSync };
+               cursorBall, cursorRing, cursorStateSync, maskTwoTone, pivotSync, gizmoSpaceSync };
     })()`);
     assert(wave.baseOn, 'Base Color mode did not set PBR unlit');
     assert(wave.baseOff, 'Base Color mode did not restore PBR unlit on exit');
@@ -584,6 +595,7 @@ async function main() {
     assert(wave.cursorStateSync, 'SceneManager.setCursor did not write through to state.scene.cursor3d');
     assert(wave.maskTwoTone, 'selection-outline mask is not two-channel (active R / selected G) — two-tone outline broken');
     assert(wave.pivotSync, 'pivot-mode not synced across toolbar + N-panel (PIVOT_MODE_CHANGED wiring broken)');
+    assert(wave.gizmoSpaceSync, 'gizmo space (World/Local) toolbar button not synced to setGizmoSpace (GIZMO_CHANGED wiring broken)');
     assert(wave.frameSrc.lenOk, `captureFrameRGBA wrong length: ${wave.frameSrc.len}`);
     assert(wave.frameSrc.distinct > 16,
       `offline frame source nearly uniform (${wave.frameSrc.distinct} colours) — manual RTT render broke`);

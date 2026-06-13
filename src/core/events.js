@@ -26,6 +26,7 @@ export const EVENTS = {
 
   // Transform
   TRANSFORM_COMMITTED:     'transform:committed',
+  GIZMO_CHANGED:           'transform:gizmoChanged',   // gizmo mode/space — keeps the toolbar in sync with hotkeys
 
   // Shaders
   SHADER_CREATED:          'shader:created',
