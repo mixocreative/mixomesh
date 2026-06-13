@@ -94,6 +94,13 @@ export async function init(canvas) {
   _scene.clearColor   = BABYLON.Color4.FromHexString(BG_GRADIENT_BOTTOM + 'ff');
   _scene.ambientColor = new BABYLON.Color3(1, 1, 1);
 
+  // Material-less meshes (STL with no shader, missing/ghost) render with the
+  // scene default material — make it a matte medium-light grey so raw imports
+  // look like grey/ED-resin prints instead of stark white.
+  const _dm = _scene.defaultMaterial;
+  if (_dm?.diffuseColor)  _dm.diffuseColor  = new BABYLON.Color3(0.72, 0.72, 0.72);
+  if (_dm?.specularColor) _dm.specularColor = new BABYLON.Color3(0, 0, 0);
+
   // Gentle ACES tone mapping — Fusion's clean, slightly punchy look. Applied
   // at material shading, so it bakes into the scene the selection-silhouette
   // post-process samples (no post-chain conflict).

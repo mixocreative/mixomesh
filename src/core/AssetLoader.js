@@ -249,7 +249,7 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
 // textured models are left alone. Sets the actual base colour (so it also
 // exports sensibly).
 function _applyResinDefault(container) {
-  const GREY = new (window.BABYLON.Color3)(0.62, 0.62, 0.62);
+  const GREY = new (window.BABYLON.Color3)(0.72, 0.72, 0.72);   // medium-light, resin-like
   const nearWhite = (c) => !c || (c.r > 0.85 && c.g > 0.85 && c.b > 0.85);
   for (const mesh of container.meshes ?? []) {
     const mat = mesh.material;

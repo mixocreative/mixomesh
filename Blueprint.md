@@ -327,10 +327,12 @@ Import path:
    `splitMultiMaterialMeshesInContainer()` before shader registration.
 3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
    Then `_applyResinDefault()` recolours UNTEXTURED + near-white materials to a
-   light-medium grey (0.62) so raw imports (STL/OBJ, default-white glTF) read
-   like grey/ED-resin prints instead of stark white; textured or
-   intentionally-coloured materials are left untouched. Sets the real base
-   colour, so it also exports grey.
+   medium-light grey (0.72) so raw imports read like grey/ED-resin prints instead
+   of stark white; textured or intentionally-coloured materials are untouched
+   (sets the real base colour, so it also exports grey). Meshes with NO material
+   at all (STL with no shader, missing/ghost) render with `scene.defaultMaterial`,
+   which `SceneManager.init` sets to the same matte medium-light grey — so the
+   resin look covers both the has-material-but-white and the no-material cases.
 4. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a
