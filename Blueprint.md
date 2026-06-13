@@ -188,7 +188,7 @@ src/
       BlobUrls.js          ← shared assetId → object-URL registry
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
-      SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process
+      SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)
       BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
@@ -237,6 +237,8 @@ tests/                     ← headless harness — Node-native, no build (§14b
                              rotation probe (mid-sweep capture ≈ baseline, camera-only ≠),
                              render-frame overlay + crosshair, and Scene-panel controls
   browser-video-check.mjs  ← HEADED full-size turntable check (`test:video`, manual)
+  browser-webgpu-check.mjs ← WebGPU backend + WGSL outline-shader check (`test:webgpu`;
+                             headless SKIPs — no adapter; `WEBGPU_HEADFUL=1` for real GPU)
   webcodecs-probe.mjs      ← headless VideoEncoder sanity probe (diagnostic, not in npm scripts)
   render-output.test.mjs   ← RenderMath: easing/format/frame-fit/filename contracts
   hooks.mjs                ← resolver hook: 'jszip' → stub, './idb.js' → stub
@@ -1088,12 +1090,30 @@ Shift+RMB            → place 3D cursor at hit point
 
 **File: `src/core/SceneManager.js`**
 
+### Render backend (WebGL default, WebGPU opt-in)
+`init()` is **async** — it calls `_createEngine()`, which prefers WebGPU only
+when opted in via `?engine=webgpu` and otherwise uses WebGL. The whole WebGPU
+attempt (support probe + `initAsync`) is raced against an 8 s timeout; any
+failure/timeout falls back to `new BABYLON.Engine` so boot never bricks.
+`SceneManager.isWebGPU()` reports the live backend; `main.ts` mirrors it to
+`window.__MX_ENGINE` for DevTools / the smoke harness.
+
+**Why WebGPU is opt-in, not default:** the backend renders fine and the one
+custom shader (the selection outline) has a WGSL twin that compiles and runs
+(verified by `npm run test:webgpu`, head-ful), BUT Babylon 9.6.2's offline
+render-target → `readPixels` path returns **empty** on WebGPU — and that path
+backs ALL capture (PNG / turntable video / project thumbnail). Defaulting to
+WebGPU would silently break export, which carries the Mimaki full-res LOCK. So
+WebGL stays the export-safe default until the capture path is fixed; flip the
+default in `_tryWebGPU` once it is.
+
 ### Public API
 ```js
-SceneManager.init(canvas)
+SceneManager.init(canvas)                     // async — see "Render backend" above
+SceneManager.isWebGPU()                       → boolean (false unless ?engine=webgpu and WebGPU came up)
 SceneManager.setTransformCommitHandler(fn)    // injected by src/app/main.ts to push TransformCommand on gizmo drag-end
 SceneManager.getScene()                       → BABYLON.Scene
-SceneManager.getEngine()                      → BABYLON.Engine
+SceneManager.getEngine()                      → BABYLON.Engine | WebGPUEngine
 
 // Camera
 SceneManager.setCameraPreset(preset)          // 'perspective'|'top'|'bottom'|'front'|'back'|'left'|'right' — animates + frames all + auto-reverts to perspective on pan

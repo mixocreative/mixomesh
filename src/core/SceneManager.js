@@ -74,13 +74,12 @@ const _printPreviewMaterialMap = new Map(); // materialId → { originalMetallic
 
 /**
  * Initialise Babylon engine, scene, camera, lights, and all overlays.
+ * Async because the WebGPU engine boots asynchronously (`initAsync`).
  * @param {HTMLCanvasElement} canvas
+ * @returns {Promise<void>}
  */
-export function init(canvas) {
-  _engine = new BABYLON.Engine(canvas, true, {
-    preserveDrawingBuffer: true,
-    stencil: true,
-  });
+export async function init(canvas) {
+  _engine = await _createEngine(canvas);
   // NOTE: device-pixel-ratio is handled by initAdaptiveResolution (capped +
   // dynamic), NOT the raw adaptToDeviceRatio — full DPR on a 2×/4K display is
   // 4× the fragments and tanks heavy 4096²/high-poly print scenes.
@@ -141,6 +140,60 @@ export function init(canvas) {
   const _resizeNextFrame = () => requestAnimationFrame(() => _engine?.resize());
   subscribe(EVENTS.WORKSPACE_CHANGED, _resizeNextFrame);
   subscribe(EVENTS.PANEL_COLLAPSED_CHANGED, _resizeNextFrame);
+}
+
+// ── Engine creation ──────────────────────────────────────
+
+// Prefer WebGPU — lower draw-call overhead, compute, and a far higher ceiling
+// on the heavy 4096²/high-poly print scenes this tool targets. Fall back to
+// WebGL on ANY failure (unsupported browser, init throw, lost adapter) so the
+// app never hard-stops. All capture is RTT-based (thumbnail / PNG / turntable),
+// so `preserveDrawingBuffer` is unnecessary on either engine.
+async function _createEngine(canvas) {
+  try {
+    // Race the WHOLE WebGPU attempt (support probe + device init) against a
+    // timeout — both `requestAdapter` and `initAsync` can hang forever on a
+    // present-but-stuck adapter (some headless / virtualised GPUs), which would
+    // brick boot. Timeout or throw → fall through to WebGL.
+    const engine = await _withTimeout(_tryWebGPU(canvas), 8000, 'WebGPU init');
+    if (engine) return engine;
+  } catch (err) {
+    console.warn('WebGPU engine init failed — falling back to WebGL:', err);
+  }
+  return new BABYLON.Engine(canvas, true, { stencil: true });
+}
+
+async function _tryWebGPU(canvas) {
+  // OPT-IN ONLY (`?engine=webgpu`). WebGPU renders fine, but Babylon 9.6.2's
+  // offline render-target → readPixels path (used by ALL capture: PNG / video /
+  // thumbnail) returns empty on the WebGPU backend, so it can't be the default
+  // without breaking export — the Mimaki full-res LOCK rides on capture. The
+  // engine + the WGSL selection-outline twin are wired and verified
+  // (`npm run test:webgpu` headful); flip the default once capture is fixed.
+  if (!_webgpuRequested()) return null;
+  if (!BABYLON.WebGPUEngine || !navigator.gpu) return null;
+  if (!(await BABYLON.WebGPUEngine.IsSupportedAsync)) return null;
+  const engine = new BABYLON.WebGPUEngine(canvas, { stencil: true, antialias: true });
+  await engine.initAsync();
+  return engine;
+}
+
+function _webgpuRequested() {
+  try {
+    return new URLSearchParams(location.search).get('engine') === 'webgpu';
+  } catch { return false; }
+}
+
+function _withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
+/** @returns {boolean} true when the live engine is the WebGPU backend. */
+export function isWebGPU() {
+  return !!_engine?.isWebGPU;
 }
 
 // ── Background ───────────────────────────────────────────
@@ -432,7 +485,7 @@ export function pickMeshIdAt(x, y) {
 }
 
 export const SceneManager = {
-  init, setTransformCommitHandler,
+  init, isWebGPU, setTransformCommitHandler,
   getScene, getEngine, getShadowGenerator, getCamera,
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,

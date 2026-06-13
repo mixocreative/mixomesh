@@ -52,7 +52,11 @@ async function bootstrap() {
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('Viewport canvas missing');
 
-  SceneManager.init(canvas);
+  await SceneManager.init(canvas);
+  // Diagnostic: which render backend won (WebGPU preferred, WebGL fallback).
+  // Read by the browser smoke and handy in live DevTools / the status bar.
+  (window as unknown as { __MX_ENGINE?: string }).__MX_ENGINE =
+    SceneManager.isWebGPU() ? 'webgpu' : 'webgl';
   InputManager.init(SceneManager.getScene());
 
   SceneManager.setTransformCommitHandler(({ prev, next, alreadyApplied }: TransformCommit) => {

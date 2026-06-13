@@ -68,7 +68,13 @@ export function initSelectionOutline(scene, engine, camera) {
   _selMaskRTT.noPrePassRenderer = true;
   scene.customRenderTargets.push(_selMaskRTT);
 
-  if (!BABYLON.Effect.ShadersStore['mxOutlineFragmentShader']) {
+  // One custom shader in the whole app. Ship both a GLSL (WebGL) and a WGSL
+  // (WebGPU) twin and pick by engine, so WebGPU needs NO glslang/twgsl CDN
+  // transpiler. Same logic in both: 16 angles × 4 radii = 64 taps, ring =
+  // dilated mask minus the silhouette so the glow sits only OUTSIDE the mesh.
+  // Mask .r carries intensity (1.0 active, 0.5 selected, 0 empty).
+  const isWGPU = !!engine?.isWebGPU;
+  if (!isWGPU && !BABYLON.Effect.ShadersStore['mxOutlineFragmentShader']) {
     BABYLON.Effect.ShadersStore['mxOutlineFragmentShader'] = `
       precision highp float;
       varying vec2 vUV;
@@ -81,13 +87,8 @@ export function initSelectionOutline(scene, engine, camera) {
 
       void main() {
         vec4 scene  = texture2D(textureSampler, vUV);
-        // Mask carries intensity in .r (1.0 = active, 0.5 = selected non-active,
-        // 0 = empty). The ring inherits this brightness so the active mesh
-        // glows stronger than the rest.
         float center = texture2D(maskSampler, vUV).r;
 
-        // Sample at multiple radii with inner-weighted falloff for a soft edge.
-        // 16 angles × 4 radii = 64 taps.
         float ring = 0.0;
         const float TAU = 6.2831853;
         for (int i = 0; i < 16; i++) {
@@ -101,19 +102,60 @@ export function initSelectionOutline(scene, engine, camera) {
           }
         }
 
-        // Subtract the silhouette so the ring exists only OUTSIDE the mesh.
         ring = max(0.0, ring - center);
         gl_FragColor = vec4(scene.rgb + outlineColor * ring * outlineIntensity, scene.a);
       }
     `;
   }
+  if (isWGPU && !BABYLON.ShaderStore.ShadersStoreWGSL['mxOutlineFragmentShader']) {
+    // Babylon WGSL conventions: varying via `input.vUV`, output via
+    // `fragmentOutputs.color`, uniforms accessed through the `uniforms` struct,
+    // and each sampler `X` pairs with a `XSampler` sampler object.
+    BABYLON.ShaderStore.ShadersStoreWGSL['mxOutlineFragmentShader'] = `
+      varying vUV: vec2f;
+      var textureSamplerSampler: sampler;
+      var textureSampler: texture_2d<f32>;
+      var maskSamplerSampler: sampler;
+      var maskSampler: texture_2d<f32>;
+      uniform outlineColor: vec3f;
+      uniform texelSize: vec2f;
+      uniform outlineRadiusPx: f32;
+      uniform outlineIntensity: f32;
 
-  _outlinePass = new BABYLON.PostProcess(
-    'mxOutline', 'mxOutline',
-    ['outlineColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
-    ['maskSampler'],
-    1.0, camera, BABYLON.Texture.BILINEAR_SAMPLINGMODE
-  );
+      @fragment
+      fn main(input: FragmentInputs) -> FragmentOutputs {
+        var scene: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+        var center: f32 = textureSample(maskSampler, maskSamplerSampler, input.vUV).r;
+
+        var ring: f32 = 0.0;
+        let TAU: f32 = 6.2831853;
+        for (var i: i32 = 0; i < 16; i = i + 1) {
+          let a: f32 = TAU * (f32(i) + 0.5) / 16.0;
+          let dir: vec2f = vec2f(cos(a), sin(a));
+          for (var j: i32 = 1; j <= 4; j = j + 1) {
+            let t: f32 = f32(j) / 4.0;
+            let w: f32 = 1.0 - t * 0.45;
+            let off: vec2f = dir * uniforms.outlineRadiusPx * t * uniforms.texelSize;
+            ring = max(ring, textureSample(maskSampler, maskSamplerSampler, input.vUV + off).r * w);
+          }
+        }
+
+        ring = max(0.0, ring - center);
+        fragmentOutputs.color = vec4f(scene.rgb + uniforms.outlineColor * ring * uniforms.outlineIntensity, scene.a);
+      }
+    `;
+  }
+
+  _outlinePass = new BABYLON.PostProcess('mxOutline', 'mxOutline', {
+    uniforms: ['outlineColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
+    samplers: ['maskSampler'],
+    size: 1.0,
+    camera,
+    samplingMode: BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+    engine,
+    reusable: false,
+    shaderLanguage: isWGPU ? BABYLON.ShaderLanguage.WGSL : BABYLON.ShaderLanguage.GLSL,
+  });
   _outlinePass.onApply = (eff) => {
     eff.setColor3('outlineColor', ACCENT_COLOR);
     eff.setFloat2('texelSize',

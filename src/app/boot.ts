@@ -37,6 +37,8 @@ import {
   RenderTargetTexture,
   Scene,
   SceneLoader,
+  ShaderLanguage,
+  ShaderStore,
   ShadowGenerator,
   SSAO2RenderingPipeline,
   StandardMaterial,
@@ -46,6 +48,7 @@ import {
   Vector3,
   VertexBuffer,
   VertexData,
+  WebGPUEngine,
 } from '@babylonjs/core';
 import { GridMaterial, ShadowOnlyMaterial } from '@babylonjs/materials';
 import { OBJExport, STLExport } from '@babylonjs/serializers';
@@ -96,6 +99,8 @@ window.BABYLON = {
   RenderTargetTexture,
   Scene,
   SceneLoader,
+  ShaderLanguage,
+  ShaderStore,
   ShadowGenerator,
   ShadowOnlyMaterial,
   SSAO2RenderingPipeline,
@@ -107,6 +112,7 @@ window.BABYLON = {
   Vector3,
   VertexBuffer,
   VertexData,
+  WebGPUEngine,
 };
 
 await import('./main');
