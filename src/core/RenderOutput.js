@@ -227,11 +227,15 @@ export async function capturePng({ width, height, transparent = false, pose = nu
     SceneManager.setFloorShadowOnly(true);
   }
   try {
+    // WebGL: Babylon's screenshot helper is correct (incl. transparent alpha
+    // coverage) and stays the proven default path. WebGPU: that helper returns
+    // an empty image (never submits the command buffer before readback), so use
+    // the manual render → flush → readPixels → encode path instead.
+    if (engine.isWebGPU) return await _capturePngWebGPU(scene, engine, cam, w, h, transparent);
     const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
       engine, cam, { width: w, height: h }, 'image/png'
     );
-    const blob = await (await fetch(dataUrl)).blob();
-    return blob;
+    return await (await fetch(dataUrl)).blob();
   } finally {
     if (transparent) {
       SceneManager.setFloorShadowOnly(false);
@@ -239,6 +243,36 @@ export async function capturePng({ width, height, transparent = false, pose = nu
     }
     restore();
     if (navPose) SceneManager.restoreCameraState(navPose);
+  }
+}
+
+// WebGPU PNG capture: manual one-frame render → flush (submit the command
+// buffer) → readPixels → encode. Mirrors the offline video frame renderer.
+// Orientation matches the displayed image (verified against the canvas
+// screenshot in test:webgpu). For transparent capture the RTT clears to alpha 0
+// and the caller has already disabled the backdrop layer / shadow-only floor.
+async function _capturePngWebGPU(scene, engine, cam, w, h, transparent) {
+  const texture = _createFrameTarget(scene, cam, w, h);
+  if (transparent) texture.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+  try {
+    await _waitReady(texture, cam);
+    _renderSceneToTarget(scene, engine, cam, texture, w, h);
+    const raw = new Uint8Array(w * h * 4);
+    await texture.readPixels(0, 0, raw, false);
+    const flipped = new Uint8Array(w * h * 4);
+    _flipRows(raw, flipped, w, h);
+    const img = new ImageData(new Uint8ClampedArray(flipped.buffer.slice(0)), w, h);
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const c = new OffscreenCanvas(w, h);
+      c.getContext('2d').putImageData(img, 0, 0);
+      return await c.convertToBlob({ type: 'image/png' });
+    }
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').putImageData(img, 0, 0);
+    return await new Promise(res => c.toBlob(res, 'image/png'));
+  } finally {
+    texture.dispose();
   }
 }
 
@@ -306,6 +340,10 @@ function _renderSceneToTarget(scene, engine, camera, texture, w, h) {
   camera.outputRenderTarget = texture;
   try {
     scene.render();
+    // WebGPU batches GPU commands and submits at frame boundaries, so a manual
+    // out-of-loop render leaves nothing for readPixels to read (returns empty).
+    // Flush submits the command buffer now. Harmless on WebGL (executes eagerly).
+    engine.flushFramebuffer?.();
   } finally {
     scene.activeCamera = oCam;
     scene.activeCameras = oCams;

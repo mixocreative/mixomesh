@@ -3,6 +3,7 @@ import {
   getState, setState, dispatch, subscribe, replaceState, freshState,
 } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
+import { capturePng } from './RenderOutput.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
 import { Selection } from './Selection.js';
@@ -547,11 +548,15 @@ function _arrToMap(arr) {
 
 async function _screenshot() {
   try {
-    const engine = SceneManager.getEngine();
-    const cam = SceneManager.getScene().activeCamera;
-    return await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
-      engine, cam, { width: 240, height: 160 }, 'image/png'
-    );
+    // Routed through RenderOutput.capturePng so it works on BOTH engines —
+    // CreateScreenshotUsingRenderTargetAsync returns empty on WebGPU.
+    const blob = await capturePng({ width: 240, height: 160 });
+    return await new Promise((res) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => res(null);
+      fr.readAsDataURL(blob);
+    });
   } catch { return null; }
 }
 

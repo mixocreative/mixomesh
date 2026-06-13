@@ -175,10 +175,59 @@ async function main() {
 
       sm.SceneManager.setActive(null);
       box.dispose();
+
+      // ── Orientation check (post-flush). captureFrameRGBA flips rows for
+      // WebGL's bottom-up readback; WebGPU may already be top-down. Compare its
+      // top/bottom luminance split against the canvas screenshot (ground-truth
+      // orientation — it IS the displayed image). Same sign ⇒ orientation OK.
+      const halfSplit = (data, w, h) => {
+        let top = 0, bot = 0; const half = (h / 2) | 0;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const lum = data[i] + data[i+1] + data[i+2];
+            if (y < half) top += lum; else bot += lum;
+          }
+        }
+        return (top - bot) / (w * half);   // >0 ⇒ top brighter
+      };
+      const nextFramesP = (n) => new Promise(res => {
+        let k = 0; const tick = () => (++k >= n ? res() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      });
+      const probe = {};
+      try {
+        const frame = await ro.captureFrameRGBA({ width: 64, height: 64 });   // now flushed
+        probe.frameDistinct = (() => { const s = new Set(); for (let i = 0; i < frame.length; i += 4) s.add((frame[i]<<16)|(frame[i+1]<<8)|frame[i+2]); return s.size; })();
+        probe.frameSplit = halfSplit(frame, 64, 64);
+        const url = await B.Tools.CreateScreenshotAsync(eng, cam, { width: 64, height: 64 });
+        const bmp = await createImageBitmap(await (await fetch(url)).blob());
+        const cc = new OffscreenCanvas(64, 64); const ccx = cc.getContext('2d');
+        ccx.drawImage(bmp, 0, 0);
+        probe.canvasSplit = halfSplit(ccx.getImageData(0, 0, 64, 64).data, 64, 64);
+        probe.orientationOK = Math.sign(probe.frameSplit) === Math.sign(probe.canvasSplit);
+
+        // Transparent PNG correctness on WebGPU: a centred box must be opaque
+        // (alpha 255) while a top corner stays sky (alpha 0). Catches the
+        // alpha-coverage problem that broke the naive manual path on WebGL.
+        const tbox = B.MeshBuilder.CreateBox('webgpu-transp', { size: 0.1 }, scene);
+        tbox.position.set(0, 0.06, 0); tbox.metadata = { meshId: 'webgpu-transp' };
+        cam.target.set(0, 0.06, 0); cam.alpha = Math.PI / 2; cam.beta = Math.PI / 2; cam.radius = 0.4;
+        await nextFramesP(2);
+        const tBlob = await ro.capturePng({ width: 64, height: 64, transparent: true });
+        const tbmp = await createImageBitmap(tBlob);
+        const tc = new OffscreenCanvas(64, 64); const tcx = tc.getContext('2d');
+        tcx.drawImage(tbmp, 0, 0);
+        probe.transpCenterAlpha = tcx.getImageData(32, 32, 1, 1).data[3];
+        probe.transpCornerAlpha = tcx.getImageData(1, 1, 1, 1).data[3];
+        tbox.dispose();
+      } catch (e) { probe.error = String(e); }
+
       return { isWebGPU: sm.SceneManager.isWebGPU(), maskInRT, frames,
-               rawDistinct, rawCenter, plainDistinct, outlineDistinct };
+               rawDistinct, rawCenter, plainDistinct, outlineDistinct, probe };
     })()`);
     console.log('  diag:', JSON.stringify(result));
+    console.log('  PROBE:', JSON.stringify(result.probe));
 
     // What WebGPU MUST deliver here: the backend boots, the one custom shader
     // (selection outline) compiles in WGSL with no shader/device error, and the
@@ -190,16 +239,18 @@ async function main() {
     assert(result.frames > 0, 'WebGPU engine rendered no frames');
     if (failures.length) throw new Error(`WebGPU check found runtime errors (likely WGSL compile):\n${failures.join('\n')}`);
 
-    // KNOWN BLOCKER (not a failure): Babylon 9.6.2's offline render-target →
-    // readPixels path returns empty on WebGPU, so capture is uniform. This is
-    // exactly why WebGPU is opt-in and WebGL stays the default for export.
-    if (result.rawDistinct <= 4) {
-      console.log('  NOTE: RTT capture empty on WebGPU (known Babylon 9.6.2 gap) — WebGPU stays opt-in, WebGL is the export default.');
-    } else {
-      console.log('  RTT capture produced real pixels on WebGPU — capture blocker may be resolved; revisit the default.');
-    }
+    // Capture correctness on WebGPU (the former blocker — fixed by flushing the
+    // command buffer before readPixels). All capture must work, since PNG /
+    // video / thumbnail ride this path.
+    const p = result.probe ?? {};
+    assert(!p.error, `WebGPU capture probe threw: ${p.error}`);
+    assert(p.frameDistinct > 4, `WebGPU video-frame capture empty (${p.frameDistinct}) — flush regressed`);
+    assert(p.orientationOK, 'WebGPU capture orientation does not match the displayed image');
+    assert(p.transpCenterAlpha === 255, `WebGPU transparent PNG: box not opaque (alpha ${p.transpCenterAlpha})`);
+    assert(p.transpCornerAlpha === 0, `WebGPU transparent PNG: sky not transparent (alpha ${p.transpCornerAlpha})`);
+    assert(result.plainDistinct > 4, `WebGPU opaque PNG still empty (${result.plainDistinct})`);
     await cdp.close();
-    console.log('PASS WebGPU backend + WGSL outline shader compile + render loop');
+    console.log('PASS WebGPU backend + WGSL outline + capture (video/PNG/transparent) all correct');
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);

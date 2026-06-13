@@ -1098,14 +1098,21 @@ failure/timeout falls back to `new BABYLON.Engine` so boot never bricks.
 `SceneManager.isWebGPU()` reports the live backend; `main.ts` mirrors it to
 `window.__MX_ENGINE` for DevTools / the smoke harness.
 
-**Why WebGPU is opt-in, not default:** the backend renders fine and the one
-custom shader (the selection outline) has a WGSL twin that compiles and runs
-(verified by `npm run test:webgpu`, head-ful), BUT Babylon 9.6.2's offline
-render-target → `readPixels` path returns **empty** on WebGPU — and that path
-backs ALL capture (PNG / turntable video / project thumbnail). Defaulting to
-WebGPU would silently break export, which carries the Mimaki full-res LOCK. So
-WebGL stays the export-safe default until the capture path is fixed; flip the
-default in `_tryWebGPU` once it is.
+**Why WebGPU is opt-in, not default:** it's fully functional — the one custom
+shader (the selection outline) has a WGSL twin that compiles, and ALL capture
+(PNG / turntable video / project thumbnail, opaque + transparent + orientation)
+is verified correct on a real adapter by `WEBGPU_HEADFUL=1 npm run test:webgpu`.
+The original blocker (offline render-target → `readPixels` returned **empty** on
+WebGPU) was the missing command-buffer flush — WebGPU batches GPU commands and
+submits at frame boundaries, so a manual out-of-loop render left nothing to read;
+`RenderOutput` now calls `engine.flushFramebuffer()` after the manual render, and
+`capturePng`/thumbnail use a manual render→flush→readback→encode path on WebGPU
+(WebGL keeps the proven `CreateScreenshotUsingRenderTargetAsync`). It stays
+opt-in only because it's been verified on a single GPU/driver so far — flipping
+the default to prefer WebGPU is now a safe one-liner in `_tryWebGPU`. The print
+export is engine-independent regardless (textures read stored source bytes,
+geometry reads mesh data — neither touches the GPU), so WebGPU never threatens
+the Mimaki LOCK.
 
 ### Public API
 ```js

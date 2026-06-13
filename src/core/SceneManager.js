@@ -164,12 +164,15 @@ async function _createEngine(canvas) {
 }
 
 async function _tryWebGPU(canvas) {
-  // OPT-IN ONLY (`?engine=webgpu`). WebGPU renders fine, but Babylon 9.6.2's
-  // offline render-target → readPixels path (used by ALL capture: PNG / video /
-  // thumbnail) returns empty on the WebGPU backend, so it can't be the default
-  // without breaking export — the Mimaki full-res LOCK rides on capture. The
-  // engine + the WGSL selection-outline twin are wired and verified
-  // (`npm run test:webgpu` headful); flip the default once capture is fixed.
+  // OPT-IN ONLY (`?engine=webgpu`). WebGPU is fully functional now — engine +
+  // WGSL selection-outline twin + ALL capture (PNG / video / thumbnail) verified
+  // correct on a real adapter (`WEBGPU_HEADFUL=1 npm run test:webgpu`); the old
+  // capture blocker (empty readback) was the missing command-buffer flush, fixed
+  // in RenderOutput. It stays opt-in only because it's been verified on a single
+  // GPU/driver so far — flipping the default to prefer WebGPU is now a safe
+  // one-liner once it's been exercised on more hardware. Note: the print export
+  // itself is engine-independent (textures read source bytes, geometry reads mesh
+  // data — neither touches the GPU), so WebGPU never threatens the Mimaki LOCK.
   if (!_webgpuRequested()) return null;
   if (!BABYLON.WebGPUEngine || !navigator.gpu) return null;
   if (!(await BABYLON.WebGPUEngine.IsSupportedAsync)) return null;
