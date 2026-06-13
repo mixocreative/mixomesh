@@ -6,7 +6,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { push, RescaleWorldCommand } from '../core/HistoryManager.js';
 import { Toast } from './Toast.js';
-import { icon } from '../core/Icons.js';
+import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
@@ -80,12 +80,18 @@ function _renderTabs() {
     bed: 'Bed',
     export: 'Export',
   };
+  const tabIcons = {
+    scale: 'Ruler',
+    validation: 'CheckCircle',
+    bed: 'Box',
+    export: 'Download',
+  };
 
   let html = '<div class="pp-tabs" role="tablist" aria-label="Print settings">';
   for (const tab of tabs) {
     const active = tab === _activeTab ? ' active' : '';
     const selected = tab === _activeTab ? 'true' : 'false';
-    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${escapeHtml(labels[tab])}</button>`;
+    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(tabIcons[tab])}${escapeHtml(labels[tab])}</button>`;
   }
   html += '</div>';
 

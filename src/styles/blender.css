@@ -158,7 +158,8 @@ input[type="range"] {
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* 8. Sub-group labels inside long sections (Scene panel: Grade/Floor/Lights,
-   Still/Turntable) — muted, uppercase, hairline above. */
+   Still/Turntable) — muted, uppercase, hairline above. Flex so the leading
+   .sec-icon sits beside the label. */
 .pp-subhead {
   margin: var(--sp-4) 0 var(--sp-2);
   padding-top: var(--sp-3);
@@ -168,7 +169,31 @@ input[type="range"] {
   text-transform: uppercase;
   color: var(--text-2);
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
+
+/* 8b. Section-header / subhead / tab leading icons (2026-06-13 icon pass).
+   Every panel header (Properties / Shader / Scene / Print top-level + their
+   sub-sections + Print tabs) carries a leading glyph via Icons.sectionIcon.
+   Headers are already flex with a gap, so the chip just slots in after the
+   collapse chevron, before the label. */
+.sec-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-2);
+  vertical-align: -2px;   /* baseline nudge for inline contexts (ShaderPanel span) */
+}
+.sec-icon svg { display: block; }
+.rp-section-header:hover .sec-icon,
+.pp-section-header:hover .sec-icon,
+.sp-section-header:hover .sec-icon { color: var(--text-1); }
+/* Segmented Print tabs: icon + label centred, icon tracks the active state. */
+.pp-tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.pp-tab.active .sec-icon { color: var(--text-0); }
 
 /* 9. Colour swatch inputs — match the --ctl pill language instead of the
    native chrome (Scene panel floor colour etc.). */

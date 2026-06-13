@@ -21,6 +21,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { register as registerShortcut } from '../core/InputManager.js';
+import { sectionIcon } from '../core/Icons.js';
 import {
   capturePng, recordTurntable, isRecording,
   previewTurntable, stopPreview, isPreviewing,
@@ -166,12 +167,23 @@ function _exitRenderView() {
   RenderFrame.hide();
 }
 
+const SECTION_ICONS = {
+  grid: 'Grid3x3', environment: 'Sun', camera: 'Camera',
+  section: 'Scissors', rendering: 'Clapperboard',
+};
+
 function _section(key, title, inner) {
   return `
     <section class="pp-section ${_collapsed[key] ? 'pp-collapsed' : ''}" data-sec="${key}">
-      <header class="pp-section-header">${title}</header>
+      <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${title}</header>
       ${inner}
     </section>`;
+}
+
+// Sub-group label with a leading icon (Scene panel only). Mirrors the
+// .pp-subhead markup so styling is unchanged; the icon sits inline.
+function _subhead(label, iconName) {
+  return `<div class="pp-subhead">${sectionIcon(iconName)}${label}</div>`;
 }
 
 function _render() {
@@ -212,7 +224,7 @@ function _render() {
           <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
         </select>
       </div>
-      <div class="pp-subhead">HDRI lighting</div>
+      ${_subhead('HDRI lighting', 'Globe')}
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="hdriEnabled" ${render.hdriEnabled ? 'checked' : ''}> HDRI</label>
       </div>
@@ -228,7 +240,7 @@ function _render() {
         <label>Intensity</label>
         <input type="number" step="0.1" min="0" max="4" data-render="hdriIntensity" value="${_fmt(render.hdriIntensity, 1)}">
       </div>` : ''}
-      <div class="pp-subhead">Grade</div>
+      ${_subhead('Grade', 'Contrast')}
       <div class="pp-row">
         <label>Exposure</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="exposure" value="${_fmt(render.exposure)}">
@@ -258,7 +270,7 @@ function _render() {
         <label>Vignette amt</label>
         <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
       </div>` : ''}
-      <div class="pp-subhead">Floor</div>
+      ${_subhead('Floor', 'FloorPlane')}
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="floorEnabled" ${render.floorEnabled ? 'checked' : ''}> Floor</label>
         ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">` : ''}
@@ -272,7 +284,7 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">Shadows are off — the floor won't catch any.</span>
       </div>` : ''}
-      <div class="pp-subhead">Lights</div>
+      ${_subhead('Lights', 'Lightbulb')}
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="shadowsEnabled" ${render.shadowsEnabled ? 'checked' : ''}> Shadows</label>
       </div>
@@ -293,7 +305,7 @@ function _render() {
         <label>Ambient</label>
         <input type="number" step="0.05" min="0" max="3" data-render="hemiIntensity" value="${_fmt(render.hemiIntensity)}">
       </div>
-      <div class="pp-subhead">Ambient occlusion</div>
+      ${_subhead('Ambient occlusion', 'Aperture')}
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" data-render-toggle="ssaoEnabled" ${render.ssaoEnabled ? 'checked' : ''}> SSAO contact shadows</label>
       </div>
@@ -347,7 +359,7 @@ function _render() {
       </div>` : ''}`;
 
   const renderingSec = `
-      <div class="pp-subhead">Still</div>
+      ${_subhead('Still', 'Image')}
       <div class="pp-row">
         <label>Resolution</label>
         <select data-ro-preset>
@@ -376,7 +388,7 @@ function _render() {
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-btn" data-action="export-png" title="Ctrl+Alt+E">Export PNG</button>
       </div>
-      <div class="pp-subhead">Turntable</div>
+      ${_subhead('Turntable', 'RotateCw')}
       <div class="pp-row">
         <label>Duration (s)</label>
         <input type="number" step="1" min="1" max="120" data-tt="durationS" value="${_fmt(tt.durationS, 0)}">

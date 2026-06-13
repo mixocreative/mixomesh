@@ -9,7 +9,7 @@ import {
   ShaderDeleteCommand, ShaderAssignCommand, ColorApplyCommand,
 } from '../core/HistoryManager.js';
 import { Toast, safeAsync } from './Toast.js';
-import { icon } from '../core/Icons.js';
+import { icon, sectionIcon } from '../core/Icons.js';
 import { AssetPanel } from './AssetPanel.js';
 import { Modal } from './Modal.js';
 import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js';
@@ -292,7 +292,7 @@ function _renderList(shaders) {
   return `
     <section class="sp-section" data-section="list">
       <header class="sp-section-header">
-        <span>Scene Shaders</span>
+        <span>${sectionIcon('Layers')}Scene Shaders</span>
         <button class="sp-icon-btn" id="sp-new" title="New shader">${icon('Plus', { width: 14, height: 14 })}</button>
       </header>
       <ul class="sp-list">${rows}</ul>
@@ -375,7 +375,7 @@ function _wireList() {
 function _renderEditorEmpty() {
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>Editor</span></header>
+      <header class="sp-section-header"><span>${sectionIcon('SlidersHorizontal')}Editor</span></header>
       <div class="sp-empty">Select a shader above to edit it.</div>
     </section>
   `;
@@ -389,7 +389,7 @@ function _renderEditor(sh) {
 
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>Editor</span></header>
+      <header class="sp-section-header"><span>${sectionIcon('SlidersHorizontal')}Editor</span></header>
 
       <div class="sp-row-form">
         <label>Name</label>
@@ -673,7 +673,7 @@ function _renderSwatches() {
   return `
     <section class="sp-section" data-section="swatches">
       <header class="sp-section-header">
-        <span>${icon('Palette', { width: 14, height: 14 })} Swatches</span>
+        <span>${sectionIcon('Swatches')}Swatches</span>
       </header>
       ${groupHtml}
       ${userHtml}

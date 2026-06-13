@@ -32,14 +32,14 @@ function _render() {
     <button class="vt-btn ${wireOn ? 'vt-on' : ''}" data-toggle="wireframeEdges"
             title="Wireframe edges — show edge outlines on models"
             aria-pressed="${wireOn ? 'true' : 'false'}">
-      ${icon('Grid3x3', { width: 14, height: 14 })}
+      ${icon('MeshTriangle', { width: 15, height: 15 })}
     </button>
     <input type="color" class="vp-wire-color ${wireOn ? '' : 'vp-hidden'}"
            value="${escapeAttr(wireColor)}" title="Wireframe edge color">
     <button class="vt-btn ${matteOn ? 'vt-on' : ''}" data-toggle="printPreview"
             title="Matte/flat preview — removes metallic for print-like shading"
             aria-pressed="${matteOn ? 'true' : 'false'}">
-      ${icon('SunDim', { width: 14, height: 14 })}
+      ${icon('Contrast', { width: 15, height: 15 })}
     </button>
   `;
   _wire();

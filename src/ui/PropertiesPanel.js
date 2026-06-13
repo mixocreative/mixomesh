@@ -136,7 +136,7 @@ function _renderObjectSection(obj, multi, total) {
   const nameDisabled = multi ? 'disabled' : '';
   return `
     <section class="pp-section" data-section="object">
-      <header class="pp-section-header">Object${multi ? ` <span class="pp-multi">(${total} selected)</span>` : ''}</header>
+      <header class="pp-section-header">${sectionIcon('Box')}Object${multi ? ` <span class="pp-multi">(${total} selected)</span>` : ''}</header>
       <div class="pp-row">
         <label>Name</label>
         <input type="text" id="pp-name" value="${_escape(nameVal)}" ${nameDisabled}>
@@ -204,7 +204,7 @@ function _renderTransformSection(mesh, multi) {
 
   return `
     <section class="pp-section" data-section="transform">
-      <header class="pp-section-header">Transform${copyBtn}</header>
+      <header class="pp-section-header">${sectionIcon('Move3D')}Transform${copyBtn}</header>
       <div class="pp-grid3">
         <label>Size (mm)</label>
         <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
@@ -439,7 +439,7 @@ function _renderSourceUnitSection(asset) {
     : '';
   return `
     <section class="pp-section" data-section="source-unit">
-      <header class="pp-section-header">Authored Scale ${warn}</header>
+      <header class="pp-section-header">${sectionIcon('Ruler')}Authored Scale ${warn}</header>
       <div class="pp-row">
         <label>Source Unit</label>
         <select id="pp-source-unit">${opts}</select>
@@ -503,7 +503,7 @@ function _renderShaderSection(obj) {
   if (!libShaders.length) {
     return `
       <section class="pp-section" data-section="shader">
-        <header class="pp-section-header">Shader</header>
+        <header class="pp-section-header">${sectionIcon('Palette')}Shader</header>
         <div class="pp-row pp-row-inline">
           <span class="pp-hint">No shaders in scene yet. Drop an asset, or create one in the Shader Library.</span>
         </div>
@@ -537,7 +537,7 @@ function _renderShaderSection(obj) {
   return `
     <section class="pp-section" data-section="shader">
       <header class="pp-section-header">
-        Shader${copyBtn}
+        ${sectionIcon('Palette')}Shader${copyBtn}
         <span class="pp-multi">${meshIds.length === 1 ? '' : `(${meshIds.length} meshes)`}</span>
       </header>
       <div class="pp-shader-list">${slotsHtml}</div>
@@ -754,7 +754,7 @@ function _renderUVOverrideSection(obj) {
   return `
     <section class="pp-section" data-section="uv-override">
       <header class="pp-section-header">
-        UV Override${copyBtn}
+        ${sectionIcon('Map')}UV Override${copyBtn}
         ${active ? '<span class="pp-multi">(active)</span>' : ''}
       </header>
       <div class="pp-grid3">
@@ -859,7 +859,7 @@ function _renderPrintPartSection(obj) {
   const isPrintPart = obj.isPrintPart ?? false;
   return `
     <section class="pp-section" data-section="print-part">
-      <header class="pp-section-header">Print Part</header>
+      <header class="pp-section-header">${sectionIcon('Printer')}Print Part</header>
       <div class="pp-row pp-row-inline">
         <label><input type="checkbox" id="pp-is-print-part" ${isPrintPart ? 'checked' : ''}> Export as print part</label>
       </div>
