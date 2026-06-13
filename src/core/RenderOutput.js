@@ -289,7 +289,10 @@ function _hideFurniture() {
       hidden.push(name);
     }
   }
-  const cursorWasVisible = s.selection?.pivotMode === 'cursor';
+  // Read ACTUAL cursor visibility, not pivotMode — the cursor can also be
+  // shown via the N-panel (Show toggle / panel open) without cursor-pivot, and
+  // that must still be hidden from exports.
+  const cursorWasVisible = !!SceneManager.isCursorVisible?.();
   if (cursorWasVisible) SceneManager.setCursorVisible(false);
   // The cross-section INDICATOR plane is viewport furniture — the geometric
   // cut still renders, but the striped overlay must not pollute exports.
