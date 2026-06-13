@@ -19,6 +19,24 @@ test('DEFAULTS is the editable config file verbatim', () => {
   assert.deepEqual(DEFAULTS, DS);
 });
 
+test('INITIAL_STATE is wired to default-settings.json (no hardcoded divergence)', () => {
+  // Locks the contract: editing default-settings.json must change the boot
+  // state. Catches a regression that reintroduces a literal in StateManager.
+  const s = freshState();
+  assert.deepEqual(s.scene.render, DS.render);
+  assert.deepEqual(s.scene.grid, DS.grid);
+  assert.deepEqual(s.print, DS.print);
+  assert.equal(s.selection.pivotMode, DS.pivotMode);
+  assert.equal(s.gizmo.space, DS.gizmo.space);
+  assert.deepEqual(s.gizmo.snap, DS.gizmo.snap);
+  // renderOut adds session-only pose:null on top of the config fields.
+  assert.deepEqual(s.scene.renderOut, { ...DS.renderOut, pose: null });
+  // overlays add session-only inspection toggles on top of the display prefs.
+  for (const k of Object.keys(DS.overlays)) {
+    assert.equal(s.scene.overlays[k], DS.overlays[k], `overlay ${k} should match config`);
+  }
+});
+
 test('pickSettings keeps only the persisted slices, drops content + pose', () => {
   const s = freshState();
   s.scene.objects = { a: { id: 'a' } };       // content — must be dropped
