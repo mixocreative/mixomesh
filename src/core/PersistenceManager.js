@@ -14,6 +14,7 @@ import {
   isApplying as historyIsApplying,
 } from './HistoryManager.js';
 import { Toast } from '../ui/Toast.js';
+import { t } from '../i18n/index.js';
 import {
   kvSet, kvGet, kvDelete, kvKeys,
   putFileHandle, getFileHandle,
@@ -537,7 +538,7 @@ async function _loadProject(doc) {
   if (unmatched.length) {
     dispatch(EVENTS.MODAL_OPEN, { id: 'unmatchedAssets', assets: unmatched });
   }
-  Toast.show(`Loaded ${getState().project.name}`, 'success', 3000);
+  Toast.show(t('toast.loaded', { name: getState().project.name }), 'success', 3000);
 }
 
 function _arrToMap(arr) {
@@ -593,7 +594,7 @@ export async function save() {
   dispatch(EVENTS.PROJECT_SAVED, {});
   await _pushRecent(getState().project.name, _fileHandle);
   await kvDelete(`${AUTOSAVE_PREFIX}${getState().project.name}`);
-  Toast.show('Project saved', 'success', 2000);
+  Toast.show(t('toast.projectSaved'), 'success', 2000);
   return true;
 }
 
@@ -656,7 +657,7 @@ export async function newProject() {
   dispatch(EVENTS.PROJECT_NEW, {});
   _dirty = false;
   dispatch(EVENTS.PROJECT_SAVED, {});
-  Toast.show('New project', 'info', 2000);
+  Toast.show(t('toast.newProject'), 'info', 2000);
 }
 
 /** @returns {Promise<Array>} recent project entries (most-recent first). */
@@ -672,9 +673,9 @@ export async function openRecent(rec) {
     if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
   const handle = await getFileHandle(rec.handleKey);
-  if (!handle) { Toast.show('Recent project handle lost', 'error', 4000); return; }
+  if (!handle) { Toast.show(t('toast.recentHandleLost'), 'error', 4000); return; }
   if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') {
-    Toast.show('Permission denied for that file', 'warning', 4000);
+    Toast.show(t('toast.filePermissionDenied'), 'warning', 4000);
     return;
   }
   const file = await handle.getFile();
@@ -722,7 +723,7 @@ export async function relinkAsset(assetId) {
   dispatch(EVENTS.ASSET_RELINKED, { assetId });
   dispatch(EVENTS.PROJECT_LOADED, {});   // cheap full re-render of Outliner etc.
   Selection.refresh();
-  Toast.show('Asset relinked', 'success', 3000);
+  Toast.show(t('toast.assetRelinked'), 'success', 3000);
 }
 
 // ── Autosave ─────────────────────────────────────────────
