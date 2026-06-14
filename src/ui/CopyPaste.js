@@ -16,6 +16,7 @@ import { InputManager } from '../core/InputManager.js';
 import { Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 // clipboard: { transform: {position,rotation,scaling}, has:{position,rotation,scaling}, sourceId }
 let _clip = null;
@@ -43,13 +44,13 @@ export function init() {
 
 function _copy() {
   const activeId = Selection.getActiveId();
-  if (!activeId) { Toast.show('Select an object to copy', 'info', 2000); return; }
+  if (!activeId) { Toast.show(t('toast.selectToCopy'), 'info', 2000); return; }
   const mesh = AssetLoader.getBabylonMesh(activeId);
   if (!mesh) return;
 
   // Copy chooser offers every aspect (the active always has a full transform).
   _openChooser(ASPECTS.map(a => a.key), (key) => {
-    const t = captureWorld(mesh);
+    const xform = captureWorld(mesh);
     const has = { position: false, rotation: false, scaling: false };
     if (key === 'object' || key === 'all') { has.position = has.rotation = has.scaling = true; }
     else if (key === 'loc-rot') { has.position = has.rotation = true; }
@@ -57,23 +58,23 @@ function _copy() {
     else if (key === 'rotation') has.rotation = true;
     else if (key === 'scale')    has.scaling  = true;
 
-    _clip = { transform: t, has, sourceId: key === 'object' ? activeId : null };
+    _clip = { transform: xform, has, sourceId: key === 'object' ? activeId : null };
     const label = ASPECTS.find(a => a.key === key)?.label ?? key;
-    Toast.show(`Copied: ${label}`, 'success', 1600);
+    Toast.show(t('toast.copied', { label }), 'success', 1600);
   });
 }
 
 // ── Paste ────────────────────────────────────────────────
 
 function _paste() {
-  if (!_clip) { Toast.show('Clipboard is empty', 'info', 2000); return; }
+  if (!_clip) { Toast.show(t('toast.clipboardEmpty'), 'info', 2000); return; }
 
   // Offer only aspects the clipboard can satisfy.
   const avail = ASPECTS.filter(a =>
     (a.object && _clip.sourceId) ||
     (a.needs && a.needs.every(f => _clip.has[f]))
   ).map(a => a.key);
-  if (!avail.length) { Toast.show('Nothing to paste', 'info', 2000); return; }
+  if (!avail.length) { Toast.show(t('toast.nothingToPaste'), 'info', 2000); return; }
 
   _openChooser(avail, (key) => {
     if (key === 'object') { _pasteObject(); return; }
@@ -83,13 +84,13 @@ function _paste() {
 
 function _pasteObject() {
   if (!_clip?.sourceId) return;
-  if (!getState().scene.objects[_clip.sourceId]) { Toast.show('Source object is gone', 'info', 2000); return; }
+  if (!getState().scene.objects[_clip.sourceId]) { Toast.show(t('toast.sourceGone'), 'info', 2000); return; }
   push(new DuplicateCommand([_clip.sourceId]));
 }
 
 function _pasteTransform(key) {
   const ids = Selection.getSelectedIds();
-  if (!ids.length) { Toast.show('Select target object(s)', 'info', 2000); return; }
+  if (!ids.length) { Toast.show(t('toast.selectTarget'), 'info', 2000); return; }
 
   const want = {
     position: key === 'all' || key === 'loc-rot' || key === 'location',
