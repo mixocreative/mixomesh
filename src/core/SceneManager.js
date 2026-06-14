@@ -271,12 +271,41 @@ export function setBackgroundEnabled(on) {
   }
 }
 
+// Lerp a hex toward black (k=0 → black, k=1 → hex). Used by the dark
+// intensity slider so the user can push dark mode toward pitch black.
+function _scaleHex(hex, k) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) * k;
+  const g = parseInt(h.slice(2, 4), 16) * k;
+  const b = parseInt(h.slice(4, 6), 16) * k;
+  const to2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${to2(r)}${to2(g)}${to2(b)}`;
+}
+// Lerp a hex toward white (k=0 → white, k=1 → hex). Light slider mirror.
+function _liftHex(hex, k) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const to2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${to2(r + (255 - r) * (1 - k))}${to2(g + (255 - g) * (1 - k))}${to2(b + (255 - b) * (1 - k))}`;
+}
+
 /** Repaint the gradient backdrop. @param {'light'|'dark'} mode */
 function _paintBackground(mode) {
   if (!_bgTexture) return;
   _bgMode = mode;
-  const top    = mode === 'dark' ? BG_DARK_TOP    : BG_GRADIENT_TOP;
-  const bottom = mode === 'dark' ? BG_DARK_BOTTOM : BG_GRADIENT_BOTTOM;
+  const render = getState().scene?.render ?? {};
+  const darkK  = Number.isFinite(render.darkIntensity)  ? Math.max(0, Math.min(1, render.darkIntensity))  : 1;
+  const lightK = Number.isFinite(render.lightIntensity) ? Math.max(0, Math.min(1, render.lightIntensity)) : 1;
+  let top, bottom;
+  if (mode === 'dark') {
+    top    = _scaleHex(BG_DARK_TOP,    darkK);
+    bottom = _scaleHex(BG_DARK_BOTTOM, darkK);
+  } else {
+    top    = _liftHex(BG_GRADIENT_TOP,    lightK);
+    bottom = _liftHex(BG_GRADIENT_BOTTOM, lightK);
+  }
   const ctx = _bgTexture.getContext();
   const g = ctx.createLinearGradient(0, 0, 0, 512);
   g.addColorStop(0, top);
@@ -579,8 +608,10 @@ export function applyRenderSettings(render = {}) {
   }
   if (typeof render.vignette === 'boolean') ip.vignetteEnabled = render.vignette;
   if (Number.isFinite(render.vignetteWeight)) ip.vignetteWeight = render.vignetteWeight;
-  if ((render.background === 'light' || render.background === 'dark') &&
-      render.background !== _bgMode) {
+  if (render.background === 'light' || render.background === 'dark') {
+    // Repaint when mode changes OR when an intensity slider moved — the
+    // gradient hex pair depends on both. _paintBackground reads the live
+    // intensities from state.
     _paintBackground(render.background);
   }
   // Lights / shadows / floor / HDRI — scene/EnvironmentRig.js (audit C1).

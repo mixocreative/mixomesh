@@ -6,6 +6,8 @@
     "shadowsEnabled": true,
     "shadowDarkness": 0.62,
     "background": "light",
+    "darkIntensity": 1.0,
+    "lightIntensity": 1.0,
     "keyIntensity": 0.70,
     "fillIntensity": 0.25,
     "hemiIntensity": 0.85,
