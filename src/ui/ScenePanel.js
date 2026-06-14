@@ -19,6 +19,7 @@
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { register as registerShortcut } from '../core/InputManager.js';
@@ -116,6 +117,19 @@ function _saveCollapsed() {
 
 let _collapsed = _loadCollapsed();
 let _bodyEl = null;
+let _root = null;
+
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
 // Render-view compose mode — session-only. navPose = where the user's free
 // navigation was when the toggle went on, restored on toggle off. While
 // active, every camera move auto-stores the render pose (debounced via the
@@ -125,8 +139,12 @@ const _rv = { active: false, navPose: null, camObs: null, camTimer: null };
 
 export function init() {
   _bodyEl = document.getElementById('rp-scene-body');
+  _root   = document.getElementById('rp-scene');
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
+  // Re-translate the static `.rp-title` in index.html + body-level keys on
+  // locale switch. _retranslate(_root) covers both in a single walk.
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
   subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _applySection(); _render(); });
   subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _applySection(); _render(); });
   // A section / all reset rewrote the settings — re-render to show the
@@ -187,6 +205,17 @@ const SECTION_ICONS = {
   section: 'Scissors', rendering: 'Clapperboard',
 };
 
+// Map a panel-internal section key to its i18n key (one source of truth — the
+// `section.*` namespace lives in src/i18n/locales/*.json). Order matches the
+// _bodyEl.innerHTML composition order in _render().
+const SECTION_I18N_KEYS = {
+  grid:        'section.grid',
+  environment: 'section.environment',
+  camera:      'section.camera',
+  section:     'section.cross-section',
+  rendering:   'section.rendering',
+};
+
 function _section(key, title, inner) {
   // Resettable sections get a ↺ button (reset that section to factory). The
   // Cross Section is session-only so it has no SettingsStore section → no
@@ -195,9 +224,13 @@ function _section(key, title, inner) {
   const resetBtn = SettingsStore.SECTION_KEYS.includes(key)
     ? `<button type="button" class="pp-sec-reset" data-reset-sec="${key}" title="Reset ${title} to defaults" aria-label="Reset ${title} to defaults">${sectionIcon('RotateCcw')}</button>`
     : '';
+  const i18nKey = SECTION_I18N_KEYS[key];
+  const titleSpan = i18nKey
+    ? `<span data-i18n-key="${i18nKey}">${title}</span>`
+    : title;
   return `
     <section class="pp-section ${_collapsed[key] ? 'pp-collapsed' : ''}" data-sec="${key}">
-      <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${title}${resetBtn}</header>
+      <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${titleSpan}${resetBtn}</header>
       ${inner}
     </section>`;
 }
@@ -492,6 +525,7 @@ function _render() {
     + _section('section', 'Cross Section', sectionSec)
     + _section('rendering', 'Rendering', renderingSec);
   _wire();
+  _retranslate(_root);
 }
 
 // renderOut accessor — state merged over defaults (turntable merged one level
