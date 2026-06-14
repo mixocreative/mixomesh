@@ -56,6 +56,8 @@
   "toast.operationFailed": "操作に失敗しました",
   "toast.errorTitle": "エラー",
   "toast.titleMessage": "{title}: {msg}",
+  "toast.mounted": "マウント: {name}",
+  "toast.folderPermissionDenied": "フォルダの権限が拒否されました",
   "import.error.title": "{filename} を読み込めませんでした",
   "empty.viewport": "ファイルをドロップまたは読み込み",
   "empty.session": "このセッションに素材はありません",

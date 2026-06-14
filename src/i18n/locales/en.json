@@ -56,6 +56,8 @@
   "toast.operationFailed": "Operation failed",
   "toast.errorTitle": "Error",
   "toast.titleMessage": "{title}: {msg}",
+  "toast.mounted": "Mounted: {name}",
+  "toast.folderPermissionDenied": "Folder permission denied",
   "import.error.title": "Couldn't import {filename}",
   "empty.viewport": "Drop a file or import to start",
   "empty.session": "No assets in this session",

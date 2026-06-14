@@ -142,7 +142,7 @@ async function _mountHandle(key, handle, announce) {
   _selectedKey  = key;
   _selectedPath = '';
   _setTab('library');
-  if (announce) Toast.show(`Mounted: ${handle.name}`, 'success', 3000);
+  if (announce) Toast.show(t('toast.mounted', { name: handle.name }), 'success', 3000);
 }
 
 /** Switch between Session and Library tabs. Drives `data-tab` on #ap-tree. */
@@ -200,7 +200,7 @@ export async function promptRemount() {
 
   await safeAsync(async () => {
     if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') {
-      Toast.show('Folder permission denied', 'warning', 4000);
+      Toast.show(t('toast.folderPermissionDenied'), 'warning', 4000);
       return;
     }
     await _mountHandle(rec.key, handle, true);

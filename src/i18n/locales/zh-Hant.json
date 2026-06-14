@@ -56,6 +56,8 @@
   "toast.operationFailed": "操作失敗",
   "toast.errorTitle": "錯誤",
   "toast.titleMessage": "{title}：{msg}",
+  "toast.mounted": "已掛載：{name}",
+  "toast.folderPermissionDenied": "資料夾權限被拒",
   "import.error.title": "無法匯入 {filename}",
   "empty.viewport": "拖入檔案或匯入以開始",
   "empty.session": "此工作集中沒有素材",
