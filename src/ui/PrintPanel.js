@@ -319,11 +319,11 @@ function _renderValidationTab() {
       try {
         const results = await MeshValidator.validateMesh(mesh);
         await MeshValidator.autoFix(mesh, results);
-        Toast.show(`✓ Fixed ${obj.name}`, 'success', 2000);
+        Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
         _render();
       } catch (err) {
         console.error('Auto-fix failed:', err);
-        Toast.show(`✗ Auto-fix failed: ${err.message}`, 'error', 0);
+        Toast.show(t('toast.autoFixFailed', { msg: err.message }), 'error', 0);
       }
     });
   });
@@ -401,7 +401,7 @@ function _renderExportTab() {
         Modal.open('validationErrors', { errors: err.validationErrors });
       } else {
         console.error(err);
-        Toast.show(`Error: ${err.message}`, 'error', 0);
+        Toast.show(t('toast.error', { msg: err.message }), 'error', 0);
       }
     } finally {
       ProgressOverlay.hide();
