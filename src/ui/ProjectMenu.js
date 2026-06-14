@@ -7,6 +7,7 @@ import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 let _recentWrap = null;
 
@@ -44,7 +45,7 @@ export function init() {
     if (act === 'recent') _toggleRecent();
     if (act === 'reset-settings') {
       SettingsStore.resetAll();
-      Toast.show('Settings reset to defaults', 'info', 2000);
+      Toast.show(t('toast.settingsReset'), 'info', 2000);
     }
   });
 

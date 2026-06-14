@@ -50,6 +50,7 @@
   "toast.fixed": "✓ 已修復 {name}",
   "toast.autoFixFailed": "✗ 自動修復失敗：{msg}",
   "toast.error": "錯誤：{msg}",
+  "toast.settingsReset": "已將設定重設為預設值",
   "import.error.title": "無法匯入 {filename}",
   "empty.viewport": "拖入檔案或匯入以開始",
   "empty.session": "此工作集中沒有素材",
