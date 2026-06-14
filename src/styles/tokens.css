@@ -45,17 +45,21 @@
   --success: #2e7d32;
   --info:    #1e3a5f;
 
-  /* Viewport HUD overlays — locked to dark-glass + bright text regardless
-     of panel theme. Used by .viewport-toolbar / .vp-toggles / .nav-cube /
-     .n-panel in components/viewport.css. Without these, panel tokens turn
-     HUD text dark-brown on dark-glass pills and the labels go invisible. */
-  --hud-bg:        rgba(19, 19, 22, 0.85);
-  --hud-bg-strong: rgba(35, 35, 41, 0.92);
-  --hud-text:      #e6e6e6;
+  /* Viewport HUD overlays — frosted-glass (glassmorphism). Sit on any 3D
+     scene background; saturation boost + low-opacity dark tint + thicker
+     blur keeps the panel readable while still showing the scene through.
+     Used by .viewport-toolbar / .vp-toggles / .nav-cube / .n-panel in
+     components/viewport.css. */
+  --hud-bg:        rgba(18, 18, 22, 0.35);
+  --hud-bg-strong: rgba(18, 18, 22, 0.55);
+  --hud-text:      #f0f0f2;
   --hud-text-hi:   #ffffff;
-  --hud-text-dim:  #a8a8a8;
-  --hud-border:    rgba(255, 255, 255, 0.18);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.10);
+  --hud-text-dim:  #b8b8be;
+  --hud-border:    rgba(255, 255, 255, 0.16);
+  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --hud-shadow:    0 8px 32px rgba(0, 0, 0, 0.28);
+  --hud-blur:      blur(18px) saturate(160%);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.12);
 
   /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
      axis chips (components/viewport.css). The Babylon side uses its own hexes
