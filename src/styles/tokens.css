@@ -53,24 +53,30 @@
      bottom inner dark (concave shadow under the chrome lip). Used by
      .viewport-toolbar / .vp-toggles / .nav-cube / .n-panel in
      components/viewport.css. */
-  --hud-tint:        rgba(40, 40, 50, 0.08);
-  --hud-tint-strong: rgba(40, 40, 50, 0.18);
+  /* Recipe per Josh Comeau + 2026 best-practice:
+     - blur 16px (12-24 is sweet spot; >30 looks smeared)
+     - saturate 140-180% (restores chroma lost to blur averaging)
+     - brightness ~90% (real frosted glass DARKENS; >100 looks washed/odd)
+     - tint 25-40% (too low = vague halo, too high = solid pill)
+     - thin white border + inset highlight = the GLASS EDGE
+     - drop shadow for floating depth */
+  --hud-tint:        rgba(20, 22, 28, 0.32);
+  --hud-tint-strong: rgba(20, 22, 28, 0.48);
   --hud-sheen:       linear-gradient(180deg,
-                       rgba(255, 255, 255, 0.16) 0%,
-                       rgba(255, 255, 255, 0.03) 55%,
-                       rgba(255, 255, 255, 0.00) 100%);
+                       rgba(255, 255, 255, 0.10) 0%,
+                       rgba(255, 255, 255, 0.00) 60%);
   --hud-bg:        var(--hud-sheen), var(--hud-tint);
   --hud-bg-strong: var(--hud-sheen), var(--hud-tint-strong);
-  --hud-text:      #ffffff;
+  --hud-text:      #f4f4f6;
   --hud-text-hi:   #ffffff;
-  --hud-text-dim:  rgba(255, 255, 255, 0.72);
-  --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --hud-border:    rgba(255, 255, 255, 0.28);
-  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.38);
-  --hud-shadow:    0 10px 36px rgba(0, 0, 0, 0.22),
-                   0 1px  2px  rgba(0, 0, 0, 0.14);
-  --hud-blur:      blur(26px) saturate(190%) brightness(118%);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.16);
+  --hud-text-dim:  rgba(255, 255, 255, 0.65);
+  --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --hud-border:    rgba(255, 255, 255, 0.22);
+  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --hud-shadow:    0 8px 24px rgba(0, 0, 0, 0.28),
+                   0 1px 2px  rgba(0, 0, 0, 0.18);
+  --hud-blur:      blur(16px) saturate(160%) brightness(92%);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.12);
 
   /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
      axis chips (components/viewport.css). The Babylon side uses its own hexes
