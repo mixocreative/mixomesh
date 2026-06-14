@@ -111,7 +111,7 @@ function _openTexturePicker(shaderId) {
   const lib = getState().scene.assetLibrary;
   const textures = Object.values(lib).filter(a => a.kind === 'texture');
   if (!textures.length) {
-    Toast.show('No textures loaded yet — drag an image into the Asset Panel first', 'info', 3000);
+    Toast.show(t('toast.noTexturesLoaded'), 'info', 3000);
     return;
   }
   dispatch(EVENTS.MODAL_OPEN, {
@@ -559,7 +559,7 @@ function _wireEditor(shaderId) {
       if (!raw) return;
       let payload; try { payload = JSON.parse(raw); } catch { return; }
       if (payload.kind !== 'texture') {
-        Toast.show('Only image files can be dropped here', 'warning', 3000);
+        Toast.show(t('toast.imageOnlyDrop'), 'warning', 3000);
         return;
       }
       e.preventDefault();
@@ -596,7 +596,7 @@ function _wireEditor(shaderId) {
 
   _bodyEl.querySelector('#sp-act-delete')?.addEventListener('click', () => {
     if (sh.linkedMeshIds.length > 0) {
-      Toast.show(`Reassign ${sh.linkedMeshIds.length} mesh${sh.linkedMeshIds.length === 1 ? '' : 'es'} first`, 'warning', 3000);
+      Toast.show(t('toast.reassignMeshesFirst', { n: sh.linkedMeshIds.length }), 'warning', 3000);
       return;
     }
     push(new ShaderDeleteCommand(shaderId));
@@ -714,7 +714,7 @@ function _wireSwatches() {
   _bodyEl.querySelectorAll('.sp-swatch').forEach(btn => {
     btn.addEventListener('click', () => {
       if (!_editingId) {
-        Toast.show('Select a shader first', 'info', 2000);
+        Toast.show(t('toast.selectShaderFirst'), 'info', 2000);
         return;
       }
       const hex = btn.dataset.hex;
@@ -726,7 +726,7 @@ function _wireSwatches() {
 
   _bodyEl.querySelector('#sp-add-swatch')?.addEventListener('click', () => {
     if (!_editingId) {
-      Toast.show('Select a shader first', 'info', 2000);
+      Toast.show(t('toast.selectShaderFirst'), 'info', 2000);
       return;
     }
     const sh = getState().scene.shaders[_editingId];
