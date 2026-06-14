@@ -165,3 +165,8 @@ test('factoryState resets every persisted slice but leaves content', () => {
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);
 });
+
+test('bg-controls: factory carries darkIntensity + lightIntensity at 1.0', () => {
+  assert.equal(DEFAULTS.render.darkIntensity, 1);
+  assert.equal(DEFAULTS.render.lightIntensity, 1);
+});

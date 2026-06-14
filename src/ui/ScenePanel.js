@@ -304,6 +304,14 @@ function _render() {
           <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
         </select>
       </div>
+      <div class="pp-row">
+        <label>Light level</label>
+        <input type="range" step="0.01" min="0" max="1" data-render="lightIntensity" value="${_fmt(render.lightIntensity, 2)}" title="0 = pure white, 1 = default">
+      </div>
+      <div class="pp-row">
+        <label>Dark level</label>
+        <input type="range" step="0.01" min="0" max="1" data-render="darkIntensity" value="${_fmt(render.darkIntensity, 2)}" title="0 = pure black, 1 = default">
+      </div>
       ${_subhead('HDRI lighting', 'Globe')}
       <div class="pp-row pp-row-inline">
         ${_toggle('data-render-toggle', 'hdriEnabled', 'HDRI', render.hdriEnabled)}
