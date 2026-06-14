@@ -304,14 +304,16 @@ function _render() {
           <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
         </select>
       </div>
+      ${render.background !== 'dark' ? `
       <div class="pp-row">
         <label>Light level</label>
         <input type="range" step="0.01" min="0" max="1" data-render="lightIntensity" value="${_fmt(render.lightIntensity, 2)}" title="0 = pure white, 1 = default">
-      </div>
+      </div>` : ''}
+      ${render.background === 'dark' ? `
       <div class="pp-row">
         <label>Dark level</label>
         <input type="range" step="0.01" min="0" max="1" data-render="darkIntensity" value="${_fmt(render.darkIntensity, 2)}" title="0 = pure black, 1 = default">
-      </div>
+      </div>` : ''}
       ${_subhead('HDRI lighting', 'Globe')}
       <div class="pp-row pp-row-inline">
         ${_toggle('data-render-toggle', 'hdriEnabled', 'HDRI', render.hdriEnabled)}
@@ -647,6 +649,8 @@ function _wire() {
     sel.addEventListener('change', () => {
       if (sel.dataset.renderSelect === 'hdriPreset') _hdriToastWanted = true;
       _setRender({ [sel.dataset.renderSelect]: sel.value });
+      // background switch swaps the visible intensity slider — re-render.
+      if (sel.dataset.renderSelect === 'background') _render();
     });
   });
 
