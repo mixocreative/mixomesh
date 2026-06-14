@@ -1,5 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
@@ -8,6 +9,18 @@ import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 let _root  = null;
 let _listEl = null;
 let _onContextMenu = null;
+
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
 
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
 
@@ -40,7 +53,7 @@ export function init() {
   _root = document.getElementById('outliner');
   _root.innerHTML = `
     <div class="ol-header">
-      <span class="ol-title">Outliner</span>
+      <span class="ol-title" data-i18n-key="panel.outliner.title">Outliner</span>
     </div>
     <div class="ol-list" id="ol-list" role="tree" aria-label="Scene objects"></div>
   `;
@@ -54,6 +67,10 @@ export function init() {
   _listEl.addEventListener('keydown', _onListKeyDown);
 
   for (const ev of _SUBSCRIBE) subscribe(ev, _render);
+  // Static `.ol-title` swaps language on locale change; the list body has no
+  // section.* labels in scope for v1.
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  _retranslate(_root);
   _render();
 }
 
