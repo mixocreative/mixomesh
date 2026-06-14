@@ -44,3 +44,17 @@
 .pm-asset-name { font-size: var(--fs-sm); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .ol-row.ol-unlinked .ol-icon { color: var(--accent); }
+
+/* Locale switcher — sits in the header, styled as a --ctl pill. */
+#locale-switcher-host { display: inline-flex; align-items: center; margin-left: var(--sp-3); }
+#locale-switcher {
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+#locale-switcher:hover { background: var(--ctl-bg-hover); color: var(--text-0); }

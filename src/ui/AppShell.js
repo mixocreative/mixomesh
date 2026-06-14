@@ -1,4 +1,7 @@
 import { icon } from '../core/Icons.js';
+import { LocaleSwitcher } from './LocaleSwitcher.js';
+import { subscribe } from '../core/StateManager.js';
+import { EVENTS } from '../core/events.js';
 
 const MIN_SECTION_PX = 80;
 const _saved = { olWidth: 260, rpWidth: 300, apHeight: 220 };
@@ -7,6 +10,9 @@ const _saved = { olWidth: 260, rpWidth: 300, apHeight: 220 };
 export function init() {
   _wireRightPanelSections();
   _wireOuterPanels();
+  const host = document.getElementById('locale-switcher-host');
+  LocaleSwitcher.mount(host);
+  subscribe(EVENTS.LOCALE_CHANGED, () => LocaleSwitcher.refresh(host));
   clearBootStatus();
 }
 
