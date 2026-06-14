@@ -1,5 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, setState, getState } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SOURCE_UNIT_FACTORS } from '../core/ImportNormalizer.js';
@@ -34,6 +35,18 @@ let _bodyEl = null;
 // on page reload (intentional for Phase 4 — persistence lands in Phase 6).
 const _collapsedSections = new Set();
 
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────
 
 /** Initialise the Properties panel. Must be called once after DOM is ready. */
@@ -64,7 +77,12 @@ export function init() {
     EVENTS.WORKSPACE_CHANGED,    // empty-state hint is workspace-specific
   ];
   for (const ev of events) subscribe(ev, _render);
+  // Re-translate panel title (in index.html) + any body-level [data-i18n-key]
+  // when the user switches language. _retranslate(_root) covers both the
+  // static header span (in index.html) and the rendered body in one walk.
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
   Modal.register('shader-picker', _shaderPickerRenderer);
+  _retranslate(_root);
   _render();
 }
 
@@ -111,6 +129,7 @@ function _render() {
   _wireUVOverrideSection(obj);
   _wirePrintPartSection(obj);
   _applyAndWireSectionCollapse();
+  _retranslate(_bodyEl);
 }
 
 function _applyAndWireSectionCollapse() {
@@ -207,7 +226,7 @@ function _renderTransformSection(mesh, multi) {
 
   return `
     <section class="pp-section" data-section="transform">
-      <header class="pp-section-header">${sectionIcon('Move')}Transform${copyBtn}</header>
+      <header class="pp-section-header">${sectionIcon('Move')}<span data-i18n-key="section.transform">Transform</span>${copyBtn}</header>
       <div class="pp-grid3">
         <label>Size (mm)</label>
         <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
@@ -506,7 +525,7 @@ function _renderShaderSection(obj) {
   if (!libShaders.length) {
     return `
       <section class="pp-section" data-section="shader">
-        <header class="pp-section-header">${sectionIcon('Brush')}Shader</header>
+        <header class="pp-section-header">${sectionIcon('Brush')}<span data-i18n-key="section.shader">Shader</span></header>
         <div class="pp-row pp-row-inline">
           <span class="pp-hint">No shaders in scene yet. Drop an asset, or create one in the Shader Library.</span>
         </div>
@@ -540,7 +559,7 @@ function _renderShaderSection(obj) {
   return `
     <section class="pp-section" data-section="shader">
       <header class="pp-section-header">
-        ${sectionIcon('Brush')}Shader${copyBtn}
+        ${sectionIcon('Brush')}<span data-i18n-key="section.shader">Shader</span>${copyBtn}
         <span class="pp-multi">${meshIds.length === 1 ? '' : `(${meshIds.length} meshes)`}</span>
       </header>
       <div class="pp-shader-list">${slotsHtml}</div>
