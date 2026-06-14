@@ -155,9 +155,9 @@ export function init() {
   // silent.
   subscribe(EVENTS.HDRI_STATUS, ({ status, preset }) => {
     if (status === 'error') {
-      Toast.show(`HDRI "${preset}" failed to load`, 'error', 4000);
+      Toast.show(t('toast.hdriFailed', { preset }), 'error', 4000);
     } else if (_hdriToastWanted) {
-      Toast.show(`HDRI "${preset}" ready`, 'success', 2000);
+      Toast.show(t('toast.hdriReady', { preset }), 'success', 2000);
     }
     _hdriToastWanted = false;
   });
@@ -807,16 +807,16 @@ function _wireRendering() {
         onProgress: (f) => { btn.textContent = `Rendering… ${Math.round(f * 100)}% — Esc cancels`; },
       });
       if (!result) {
-        Toast.show('Turntable recording cancelled', 'info', 2500);
+        Toast.show(t('toast.turntableCancelled'), 'info', 2500);
       } else {
         await triggerDownload(result.blob,
           turntableVideoName(getState().project.name, tt.durationS, result.ext),
           { mime: result.mime, ext: result.ext, description: 'Turntable video' });
-        Toast.show(`Turntable exported (${tt.durationS}s ${result.ext.toUpperCase()})`, 'success', 3500);
+        Toast.show(t('toast.turntableExported', { secs: tt.durationS, ext: result.ext.toUpperCase() }), 'success', 3500);
       }
     } catch (err) {
       console.error('Turntable recording failed:', err);
-      Toast.show('Turntable recording failed — see console', 'error', 5000);
+      Toast.show(t('toast.turntableFailed'), 'error', 5000);
     } finally {
       btn.textContent = 'Export video';
       _setBusy(false);
@@ -848,10 +848,10 @@ async function _exportPng() {
     const blob = await capturePng({ ...ro, pose: ro.pose ?? null });
     await triggerDownload(blob, renderPngName(getState().project.name, ro),
       { mime: 'image/png', ext: 'png', description: 'PNG image' });
-    Toast.show(`PNG rendered (${ro.width} × ${ro.height})`, 'success', 3000);
+    Toast.show(t('toast.pngRendered', { width: ro.width, height: ro.height }), 'success', 3000);
   } catch (err) {
     console.error('PNG render failed:', err);
-    Toast.show('PNG render failed — see console', 'error', 5000);
+    Toast.show(t('toast.pngFailed'), 'error', 5000);
   } finally {
     if (btn) btn.textContent = 'Export PNG';
     _setBusy(false);
