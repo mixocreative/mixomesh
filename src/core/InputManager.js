@@ -6,6 +6,7 @@ import { getState, dispatch } from './StateManager.js';
 import { EVENTS } from './events.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
+import { t } from '../i18n/index.js';
 
 const BABYLON = window.BABYLON;
 const PointerEventTypes = BABYLON.PointerEventTypes;
@@ -301,7 +302,7 @@ function _placeCursorAtPick() {
 function _enterModal(op) {
   const selected = Selection.getSelectedResolved();
   if (!selected.length) {
-    Toast.show('Nothing selected', 'info', 2000);
+    Toast.show(t('toast.nothingSelected'), 'info', 2000);
     return;
   }
   // Detach gizmo pivot so meshes are in their canonical parents during the op
