@@ -1,5 +1,6 @@
 import { getState } from './StateManager.js';
 import { Toast } from '../ui/Toast.js';
+import { t } from '../i18n/index.js';
 import { MeshValidator } from './MeshValidator.js';
 import { AssetLoader } from './AssetLoader.js';
 import {
@@ -306,7 +307,7 @@ async function _runExport(formatKey, options = {}) {
 
   if (fmt.needsCSG) {
     ctx.csgReady = await _ensureCSG2();
-    if (!ctx.csgReady) Toast.show('CSG2 unavailable — watertight re-bake skipped', 'warning', 4000);
+    if (!ctx.csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
   }
 
   const clones = [];
@@ -350,10 +351,10 @@ async function _runExport(formatKey, options = {}) {
 
     await packageAndDownload(out, fmt.label, progress);
     progress(1, 'Done');
-    Toast.show(`✓ Exported ${out.filename ?? fmt.label}`, 'success', 3000);
+    Toast.show(t('toast.exportedOk', { filename: out.filename ?? fmt.label }), 'success', 3000);
     if (ctx.csgSkipped.length) {
       const n = ctx.csgSkipped.length;
-      Toast.show(`${n} part${n === 1 ? '' : 's'} not watertight — re-bake skipped; slicer will auto-repair`, 'info', 5000);
+      Toast.show(t('toast.partsNotWatertight', { n }), 'info', 5000);
     }
   } catch (err) {
     if (!err.validationErrors) console.error(`${fmt.label} export failed:`, err);
