@@ -13,7 +13,8 @@
     "test:browser": "node tests/browser-smoke.mjs",
     "test:export": "node tests/browser-export-smoke.mjs",
     "test:video": "node tests/browser-video-check.mjs",
-    "test:webgpu": "node tests/browser-webgpu-check.mjs"
+    "test:webgpu": "node tests/browser-webgpu-check.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "9.6.2",
