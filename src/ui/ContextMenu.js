@@ -8,6 +8,7 @@ import { PersistenceManager } from '../core/PersistenceManager.js';
 import { safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 let _root = null;
 let _isOpen = false;
@@ -96,10 +97,10 @@ export function close() {
 function _buildItems(info) {
   if (info.targetKind === 'collection' && info.targetId) {
     return [
-      { label: 'Select Members',     shortcut: '',  action: 'col-select', iconName: 'Box',      cls: '' },
-      { label: 'Rename Collection…', shortcut: '',  action: 'col-rename', iconName: 'Edit3',    cls: '' },
+      { label: t('context.selectMembers'),     shortcut: '',  action: 'col-select', iconName: 'Box',      cls: '' },
+      { label: t('context.renameCollection'), shortcut: '',  action: 'col-rename', iconName: 'Edit3',    cls: '' },
       'sep',
-      { label: 'Delete Collection',  shortcut: '',  action: 'col-delete', iconName: 'Trash2',   cls: 'cm-danger' },
+      { label: t('context.deleteCollection'),  shortcut: '',  action: 'col-delete', iconName: 'Trash2',   cls: 'cm-danger' },
     ];
   }
 
@@ -116,27 +117,28 @@ function _buildItems(info) {
 
   return [
     ...(ghostId ? [
-      { label: objs[ghostId].isGhost ? 'Relink Asset…' : 'Relink to live file…',
+      { label: objs[ghostId].isGhost ? t('context.relinkAsset') : t('context.relinkLiveFile'),
         shortcut: '', action: 'relink', iconName: 'Link', cls: '' },
       'sep',
     ] : []),
-    { label: 'Focus',           shortcut: 'F',           action: 'frame',   iconName: 'Focus',      cls: enabled(hasSelection) },
+    { label: t('context.focus'),           shortcut: 'F',           action: 'frame',   iconName: 'Focus',      cls: enabled(hasSelection) },
     'sep',
-    { label: 'Toggle Hidden',   shortcut: 'H',           action: 'hide',    iconName: 'EyeOff',     cls: enabled(hasSelection) },
-    { label: 'Toggle Lock',     shortcut: '',            action: 'lock',    iconName: 'Lock',       cls: enabled(hasSelection) },
-    { label: 'Rename…',         shortcut: 'F2',          action: 'rename',  iconName: 'Edit3',      cls: enabled(hasSelection) },
-    { label: 'Duplicate',       shortcut: 'Shift+D',     action: 'duplicate', iconName: 'Copy',     cls: enabled(hasSelection) },
+    { label: t('context.toggleHidden'),   shortcut: 'H',           action: 'hide',    iconName: 'EyeOff',     cls: enabled(hasSelection) },
+    { label: t('context.toggleLock'),     shortcut: '',            action: 'lock',    iconName: 'Lock',       cls: enabled(hasSelection) },
+    { label: t('context.rename'),         shortcut: 'F2',          action: 'rename',  iconName: 'Edit3',      cls: enabled(hasSelection) },
+    { label: t('context.duplicate'),       shortcut: 'Shift+D',     action: 'duplicate', iconName: 'Copy',     cls: enabled(hasSelection) },
     'sep',
-    { label: 'Group',           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
-    { label: 'Ungroup',         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
+    { label: t('context.group'),           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
+    { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
     'sep',
-    { label: 'Selection → Cursor', shortcut: '',         action: 'sel-to-cursor', iconName: 'Crosshair', cls: enabled(hasSelection) },
-    { label: 'Cursor → Selection', shortcut: '',         action: 'cursor-to-sel', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    { label: t('context.selectionToCursor'), shortcut: '',         action: 'sel-to-cursor', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    { label: t('context.cursorToSelection'), shortcut: '',         action: 'cursor-to-sel', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    { label: t('context.cursorToWorldOrigin'), shortcut: '',      action: 'cursor-to-origin', iconName: 'Crosshair', cls: '' },
     'sep',
-    { label: 'Smart Replace',   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
-    { label: 'Transform Swab',  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
+    { label: t('context.smartReplace'),   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
+    { label: t('context.transformSwab'),  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
     'sep',
-    { label: 'Delete',          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
+    { label: t('context.delete'),          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
 }
 
@@ -165,6 +167,7 @@ function _runAction(action, info) {
   if (action === 'swab')       _transformSwab();
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
+  if (action === 'cursor-to-origin') CursorTools.cursorToWorldOrigin();
   if (action === 'relink')     _relink(info.targetId);
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
   if (action === 'col-rename') _renameCollection(info.targetId);

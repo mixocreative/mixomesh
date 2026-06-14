@@ -3,9 +3,10 @@
 /* Universal text-shadow inside HUD containers — labels stay legible even when
    the glass goes lighter (e.g. user pulls darkIntensity low against bright bg).
    Cheap on perf; modern browsers only paint shadows on text glyphs. */
-.viewport-toolbar, .vp-toggles, .nav-cube, .n-panel {
+.viewport-toolbar, .vp-toggles, .nav-cube {
   text-shadow: var(--hud-text-shadow);
 }
+.n-panel { text-shadow: none; }
 
 /* ── Viewport toolbar (Fusion 360 style) ─────────────────── */
 .viewport-toolbar {
@@ -149,7 +150,8 @@
   -webkit-backdrop-filter: var(--hud-blur);
   color: var(--hud-text);
   text-shadow: var(--hud-text-shadow);
-  border: 1px solid var(--hud-border);
+  /* Solid dark edge — reads as a CAD cube outline, not a fading glass lip. */
+  border: 1px solid var(--text-2);
   box-shadow: var(--hud-highlight);
   backface-visibility: hidden;
   transition: background var(--dur-fast), color var(--dur-fast);
@@ -178,7 +180,7 @@
   backdrop-filter: var(--hud-blur);
   -webkit-backdrop-filter: var(--hud-blur);
   color: var(--hud-text);
-  border: 1px solid var(--hud-border);
+  border: none;
   border-radius: 50%;
   font-size: 13px;
   line-height: 1;
@@ -213,24 +215,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-2);
-  color: var(--text-1);
-  border: 1px solid var(--border);
+  background: var(--text-1);
+  color: var(--bg-2);
+  border: 1px solid var(--text-1);
   border-right: none;
   border-radius: var(--r-md) 0 0 var(--r-md);
   cursor: pointer;
   text-shadow: none;
 }
-.np-tab:hover { background: var(--bg-3); color: var(--text-0); }
+.np-tab:hover { background: var(--text-0); color: var(--bg-3); }
 .np-body {
   width: 210px;
   padding: var(--sp-3);
-  background: var(--hud-bg-strong);
-  backdrop-filter: var(--hud-blur);
-  -webkit-backdrop-filter: var(--hud-blur);
-  border: 1px solid var(--hud-border);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-right: none;
   border-radius: var(--r-md) 0 0 var(--r-md);
-  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  box-shadow: var(--hud-shadow);
 }
 .np-header {
   display: flex;
@@ -238,12 +239,12 @@
   gap: var(--sp-2);
   font-size: var(--fs-sm);
   font-weight: 600;
-  color: var(--hud-text-hi);
+  color: var(--text-0);
   margin-bottom: var(--sp-3);
 }
 .np-section { margin-bottom: var(--sp-3); }
 .np-section:last-child { margin-bottom: 0; }
-.np-row-label { font-size: var(--fs-xs); color: var(--hud-text-dim); margin-bottom: var(--sp-2); }
+.np-row-label { font-size: var(--fs-xs); color: var(--text-2); margin-bottom: var(--sp-2); }
 .np-field {
   display: flex;
   align-items: center;
@@ -255,7 +256,7 @@
   font-size: var(--fs-xs);
   font-weight: 700;
   text-align: center;
-  color: var(--hud-text);
+  color: var(--text-1);
 }
 .np-axis-x { color: var(--axis-x); }
 .np-axis-y { color: var(--axis-y); }
@@ -266,42 +267,45 @@
   height: 24px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--hud-text-hi);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--hud-border);
+  color: var(--text-0);
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
   border-radius: var(--r-sm);
 }
+.np-field input:hover { background: var(--ctl-bg-hover); }
+.np-field input:focus { outline: none; border-color: var(--border-focus); }
 .np-check {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--hud-text);
+  color: var(--text-1);
   cursor: pointer;
   margin-bottom: 4px;
 }
 .np-check input { accent-color: var(--accent); }
-.np-actions { display: flex; flex-direction: column; gap: 4px; }
 .np-btn {
   width: 100%;
   height: 26px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--hud-text);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--hud-border);
+  color: var(--text-1);
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
   border-radius: var(--r-sm);
   cursor: pointer;
   text-align: left;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
-.np-btn:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
-.np-btn.np-on {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+.np-btn:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
+.np-btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
-
+.np-btn:disabled:hover {
+  background: var(--ctl-bg);
+  color: var(--text-disabled);
+}
 /* ── Box (marquee) selection ─────────────────────────────── */
 /* Drawn over the canvas during a left-drag across empty space. pointer-events
    stay off so it never intercepts the pointer stream driving the drag. */

@@ -18,6 +18,8 @@
   --accent:    #3e2c1e;
   --accent-hi: #5c4633;
   --accent-fg: #fbf6ec;
+  --accent-vibrant: #e4c094;
+
 
   /* Secondary "active" cue — bengara red-orange. Required because brown-on-
      washi is low-contrast for selection state; pairing the stone border with
@@ -60,23 +62,37 @@
      - tint 25-40% (too low = vague halo, too high = solid pill)
      - thin white border + inset highlight = the GLASS EDGE
      - drop shadow for floating depth */
-  --hud-tint:        rgba(20, 22, 28, 0.45);
-  --hud-tint-strong: rgba(20, 22, 28, 0.60);
+  /* Fake-glass recipe — backdrop-filter does NOT paint over the WebGL canvas
+     in Chromium for this scene, so real blur is unavailable. We rebuild the
+     glass look with a multi-stop sheen + soft tint + bright top highlight
+     instead. Translucent enough to read as glass, opaque enough to define
+     the panel without depending on backdrop sampling. */
+  --hud-tint:        rgba(245, 247, 252, 0.38);
+  --hud-tint-strong: rgba(245, 247, 252, 0.55);
   --hud-sheen:       linear-gradient(180deg,
-                       rgba(255, 255, 255, 0.10) 0%,
-                       rgba(255, 255, 255, 0.00) 60%);
-  --hud-bg:        var(--hud-sheen), var(--hud-tint);
-  --hud-bg-strong: var(--hud-sheen), var(--hud-tint-strong);
-  --hud-text:      #f4f4f6;
-  --hud-text-hi:   #ffffff;
-  --hud-text-dim:  rgba(255, 255, 255, 0.65);
-  --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --hud-border:    rgba(255, 255, 255, 0.22);
-  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  --hud-shadow:    0 8px 24px rgba(0, 0, 0, 0.28),
-                   0 1px 2px  rgba(0, 0, 0, 0.18);
-  --hud-blur:      blur(16px) saturate(160%) brightness(92%);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.12);
+                       rgba(255, 255, 255, 0.55) 0%,
+                       rgba(255, 255, 255, 0.18) 45%,
+                       rgba(255, 255, 255, 0.06) 100%);
+  /* SVG fractalNoise grain — gives the glass surface a frosted micro-texture
+     so the panel reads as glass even when backdrop has no detail to blur.
+     Apple/macOS Big Sur "Vibrancy" uses the same trick. */
+  --hud-noise:     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --hud-bg:        var(--hud-sheen), var(--hud-noise), var(--hud-tint);
+  --hud-bg-strong: var(--hud-sheen), var(--hud-noise), var(--hud-tint-strong);
+  --hud-text:      #1a1d24;
+  --hud-text-hi:   #0a0c12;
+  --hud-text-dim:  rgba(26, 29, 36, 0.72);
+  --hud-text-shadow: 0 1px 1px rgba(255, 255, 255, 0.55),
+                     0 0 2px rgba(255, 255, 255, 0.35);
+  --hud-border:    rgba(255, 255, 255, 0.45);
+  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55),
+                   inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+  --hud-shadow:    0 8px 24px rgba(0, 0, 0, 0.24),
+                   0 1px 2px  rgba(0, 0, 0, 0.16);
+  /* backdrop-filter unsupported over WebGL canvas in this build — set to
+     `none` so HUD rules that reference it no-op without removal. */
+  --hud-blur:      none;
+  --hud-hover-bg:  rgba(255, 255, 255, 0.14);
 
   /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
      axis chips (components/viewport.css). The Babylon side uses its own hexes

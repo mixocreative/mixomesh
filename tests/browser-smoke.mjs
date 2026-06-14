@@ -138,7 +138,15 @@ async function main() {
         wsAttr: document.body.dataset.workspace,
         wsButtons: document.querySelectorAll('.ws-switcher .ws-btn').length,
         wsActive: document.querySelector('.ws-switcher .ws-btn.active')?.dataset.ws,
-        nPanel: !!document.querySelector('#n-panel .np-body') && !!document.querySelector('#n-panel input[data-axis="x"]'),
+        nPanel: {
+          mounted: !!document.querySelector('#n-panel .np-body')
+            && !!document.querySelector('#n-panel input[data-axis="x"]'),
+          noSnapActions: [
+            'selection-to-cursor',
+            'cursor-to-selection',
+            'cursor-to-origin',
+          ].every(a => !document.querySelector('#n-panel [data-act="' + a + '"]')),
+        },
         before,
         collapsed,
         restored: firstToggle?.getAttribute('aria-expanded'),
@@ -163,11 +171,31 @@ async function main() {
     assert(snapshot.wsAttr === 'layout', `body[data-workspace] should default to layout, got ${snapshot.wsAttr}`);
     assert(snapshot.wsButtons === 4, 'workspace switcher pill missing its four buttons (Layout/Shade/Scene/Print)');
     assert(snapshot.wsActive === 'layout', 'Layout pill button should be active by default');
-    assert(snapshot.nPanel, '3D-cursor N-panel (with XYZ inputs) not mounted into the viewport');
+    assert(snapshot.nPanel.mounted, '3D-cursor N-panel (with XYZ inputs) not mounted into the viewport');
+    assert(snapshot.nPanel.noSnapActions, '3D-cursor N-panel should not contain cursor snap action buttons');
     assert(snapshot.before === 'true' && snapshot.collapsed === 'false' && snapshot.restored === 'true',
       'right-panel toggle did not update aria-expanded');
     assert(snapshot.splitBefore !== snapshot.splitAfter,
       'right splitter keyboard resize did not change aria-valuenow');
+
+    const cursorMenu = await evaluate(cdp, `(async () => {
+      const cm = await import('/src/ui/ContextMenu.js');
+      cm.open({ x: 24, y: 24, source: 'viewport' });
+      await new Promise(r => requestAnimationFrame(r));
+      const worldOrigin = document.querySelector('.context-menu [data-action="cursor-to-origin"]');
+      const selectionToCursor = document.querySelector('.context-menu [data-action="sel-to-cursor"]');
+      const cursorToSelection = document.querySelector('.context-menu [data-action="cursor-to-sel"]');
+      const out = {
+        worldOrigin: !!worldOrigin && !worldOrigin.classList.contains('cm-disabled'),
+        selectionToCursor: !!selectionToCursor,
+        cursorToSelection: !!cursorToSelection,
+      };
+      cm.close();
+      return out;
+    })()`);
+    assert(cursorMenu.worldOrigin, 'context menu missing enabled Cursor → World Origin action');
+    assert(cursorMenu.selectionToCursor && cursorMenu.cursorToSelection,
+      'context menu missing selection cursor snap actions');
 
     // Scene ▸ Rendering: UI present, render-view frame overlay toggles, and
     // capturePng produces a real PNG (transparent variant has alpha 0 on an
@@ -556,11 +584,11 @@ async function main() {
       sel.Selection.setPivotMode('cursor');
       await new Promise(r => requestAnimationFrame(r));
       const tbCursorOn = !!document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
-      const npPivotOn  = !!document.querySelector('#n-panel [data-act="pivot-cursor"].np-on');
+      const npPivotOn  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === true;
       sel.Selection.setPivotMode('median');
       await new Promise(r => requestAnimationFrame(r));
       const tbCursorOff = !document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
-      const npPivotOff  = !document.querySelector('#n-panel [data-act="pivot-cursor"].np-on');
+      const npPivotOff  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === false;
       const pivotSync = tbCursorOn && npPivotOn && tbCursorOff && npPivotOff;
 
       // (11) Gizmo-space sync: toggling space (the backtick-key path) must

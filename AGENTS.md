@@ -84,9 +84,11 @@ behaviours. Treat it that way:
 - Legacy root runtime removed: `core/`, `ui/`, `config/`, `styles/`,
   `main.js`, `index.vite.html`, and `scripts/serve.mjs`.
 - Verification baseline: bare `npm run typecheck`, `npm run build`,
-  `npm run test`, and `npm run test:browser` pass with 112 headless tests.
-- Historical build notes live only in `BLUEPRINT.md §15`; there is no active
-  handoff file.
+  `npm run test`, `npm run test:browser`, and `npm run test:export` pass.
+  Do not hard-code total test counts in instructions; counts drift as coverage
+  changes.
+- Historical build notes live in `BUILDLOG.md`; `BLUEPRINT.md §15` keeps the
+  current baseline, locked decisions, and accepted scope cuts.
 
 ## Coding conventions
 - ES modules. Named exports preferred.

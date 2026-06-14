@@ -244,6 +244,7 @@ input[type="range"] {
   color: var(--text-1);
   background: var(--bg-2);
   border: 1px solid var(--bg-4);
+  border-color: var(--accent);
   border-radius: var(--radius, 4px);
   cursor: pointer;
   user-select: none;
@@ -258,12 +259,12 @@ input[type="range"] {
   flex-shrink: 0;
 }
 .pp-toggle.pp-toggle-on {
-  color: var(--text-0);
+  color: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
+  background: var(--text-0);
 }
 .pp-toggle.pp-toggle-on .pp-toggle-dot {
-  background: var(--accent);
+  background: var(--accent-vibrant);
   box-shadow: 0 0 4px var(--accent);
 }
 

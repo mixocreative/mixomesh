@@ -468,71 +468,122 @@ If a file grows past 1.5× target, split by responsibility. Smaller files → fa
 
 **File: `src/styles/tokens.css`**
 
-Single dark theme. Pro-tool aesthetic. No theme switcher in v1.
+Single theme. Pro-tool aesthetic. No theme switcher in v1.
 
-**Blender-inspired pass (2026-06-12):** surfaces went neutral gray (blue cast
-removed), controls became light-gray inset pills (lighter than the panel,
-dark seam border, hover lighten / press darken), property labels right-align,
-section headers are sentence case, tab strips are segmented controls. The
-component-level overrides live in `src/styles/blender.css`, loaded LAST in
-index.html; the tokens below are the current values.
+**Washi pass (2026-06-14):** the original Blender-style dark theme was retuned
+to a warm off-white "washi paper" palette. Surfaces are a 5-step cream ladder
+(`--bg-0..4`), text is "sumi" warm-black, the primary accent is a quiet stone
+brown (`--accent: #3e2c1e`) paired with a bengara red-orange "active" cue
+(`--active: #a23a2a`) because brown-on-washi is too low-contrast for
+selection state on its own. A vibrant accent (`--accent-vibrant: #e4c094`) is
+reserved for high-energy moments (selection silhouette, charts) where the
+stone brown reads too quiet. Borders use kasumi cloud tones, control fields
+sit slightly inset against the panel.
+
+**Blender-inspired pass (2026-06-12, pre-washi):** introduced the fixed-
+assignment elevation ladder, inset-pill control language, right-aligned
+property labels, sentence-case section headers, and segmented-control tab
+strips. The component-level overrides live in `src/styles/blender.css`,
+loaded LAST in index.html; the tokens below are the current (washi) values.
 
 ```css
 :root {
-  /* Surfaces — FIXED-ASSIGNMENT elevation ladder. The ladder isn't a free
-     palette; each rung has a documented role so the parent-child panel
-     hierarchy reads at a glance (PART 13b). Don't reuse a rung at the
-     wrong level — that's what blends the hierarchy. */
-  --bg-0: #111111;          /* viewport / app background */
-  --bg-1: #1d1d1d;          /* top-level panel surface (Outliner, Properties, Shader, Asset, Print) */
-  --bg-2: #252525;          /* section surface inside a panel (.pp-section, .sp-section, .ap-card) */
-  --bg-3: #2f2f2f;          /* control surface — inputs, default buttons, selected rows */
-  --bg-4: #3b3b3b;          /* hover / pressed elevation on top of --bg-3 */
+  /* Washi surfaces — warm off-white paper, slight cream undertone. The
+     5-step ramp keeps the same fixed-assignment elevation roles as the
+     original dark theme so components reading --bg-0..4 stay correct. */
+  --bg-0: #efe7d8;          /* viewport / app background */
+  --bg-1: #f3ecdf;          /* top-level panel surface (Outliner, Properties, Shader, Asset, Print) */
+  --bg-2: #f7f1e5;          /* section surface inside a panel (.pp-section, .sp-section, .ap-card) */
+  --bg-3: #fbf6ec;          /* control surface — inputs, default buttons, selected rows */
+  --bg-4: #fffaf0;          /* hover / pressed elevation on top of --bg-3 */
 
-  /* Blender separates surfaces with darker SEAMS (inset look), not lighter
-     outlines; -strong stays lighter for chips/handles needing an outline. */
-  --border:         #161616;
-  --border-strong:  #404040;
-  --border-section: #181818;
-  --border-focus:  #f59e0b;
-  --ring-focus:    rgba(245, 158, 11, 0.35);  /* 2px box-shadow ring on input :focus — keyboard a11y */
+  /* Sumi text — never pure black, slightly warm. */
+  --text-0: #1a1612;        /* primary */
+  --text-1: #4a3f33;        /* secondary */
+  --text-2: #7a6a58;        /* tertiary, hints */
+  --text-disabled: #a99e8c;
 
-  /* Controls — Blender fields sit LIGHTER than their panel (inset pill). */
-  --ctl-bg:        #383838;
-  --ctl-bg-hover:  #434343;
-  --ctl-bg-active: #2c2c2c;
-  --ctl-border:    #202020;
+  /* Dark stone accent — quiet wabi-sabi brown. Paired with --accent-vibrant
+     for high-energy moments (selection silhouette, charts) where stone is
+     too quiet against washi. */
+  --accent:          #3e2c1e;
+  --accent-hi:       #5c4633;
+  --accent-fg:       #fbf6ec;
+  --accent-vibrant:  #e4c094;
+
+  /* Secondary "active" cue — bengara red-orange. Required because brown-on-
+     washi is low-contrast for selection state; pairing the stone border with
+     a bengara left-edge + faint bg tint restores the readable affordance. */
+  --active:    #a23a2a;
+  --active-bg: rgba(162, 58, 42, 0.10);
+
+  /* Hairlines — kasumi cloud tones, softer than 1px solid. */
+  --border:         #d4c9b3;
+  --border-strong:  #b8a98c;
+  --border-section: #c9bda2;
+  --border-focus:   var(--active);
+  --ring-focus:     rgba(162, 58, 42, 0.28);  /* 2px box-shadow ring on input :focus — keyboard a11y */
+
+  /* Control language — fields sit slightly inset against the panel. */
+  --ctl-bg:        #fbf6ec;
+  --ctl-bg-hover:  #fffaf0;
+  --ctl-bg-active: #e9dfc8;
+  --ctl-border:    #c9bda2;
   --ctl-h: 22px;
 
-  /* Text */
-  --text-0: #e8e8e8;        /* primary */
-  --text-1: #a8a8a8;        /* secondary */
-  --text-2: #8c8c8c;        /* tertiary, hints */
-  --text-disabled: #5e5e5e;
+  /* Status — retuned for light bg readability. */
+  --danger:  #c0392b;
+  --warning: #b8860b;
+  --success: #2e7d32;
+  --info:    #1e3a5f;
 
-  /* Accent — yellow-orange (amber); locked Phase 3, user confirmed */
-  --accent:    #f59e0b;
-  --accent-hi: #fbbf24;
-  --accent-fg: #1a1108;
+  /* Viewport HUD overlays — fake-glass recipe. backdrop-filter does NOT
+     paint over the WebGL canvas in Chromium for this scene, so real blur
+     is unavailable. The look is rebuilt with a multi-stop sheen + soft
+     tint + bright top highlight; --hud-blur stays as a token set to `none`
+     so HUD rules can keep referencing it without removal. SVG fractalNoise
+     grain (macOS Vibrancy trick) adds a frosted micro-texture so the panel
+     reads as glass even when nothing is behind it to blur. */
+  --hud-tint:        rgba(245, 247, 252, 0.38);
+  --hud-tint-strong: rgba(245, 247, 252, 0.55);
+  --hud-sheen:       linear-gradient(180deg,
+                       rgba(255, 255, 255, 0.55) 0%,
+                       rgba(255, 255, 255, 0.18) 45%,
+                       rgba(255, 255, 255, 0.06) 100%);
+  --hud-noise:       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --hud-bg:          var(--hud-sheen), var(--hud-noise), var(--hud-tint);
+  --hud-bg-strong:   var(--hud-sheen), var(--hud-noise), var(--hud-tint-strong);
+  --hud-text:        #1a1d24;
+  --hud-text-hi:     #0a0c12;
+  --hud-text-dim:    rgba(26, 29, 36, 0.72);
+  --hud-text-shadow: 0 1px 1px rgba(255, 255, 255, 0.55),
+                     0 0 2px rgba(255, 255, 255, 0.35);
+  --hud-border:      rgba(255, 255, 255, 0.45);
+  --hud-highlight:   inset 0 1px 0 rgba(255, 255, 255, 0.55),
+                     inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+  --hud-shadow:      0 8px 24px rgba(0, 0, 0, 0.24),
+                     0 1px 2px  rgba(0, 0, 0, 0.16);
+  --hud-blur:        none;        /* backdrop-filter unsupported over WebGL canvas */
+  --hud-hover-bg:    rgba(255, 255, 255, 0.14);
 
-  --border-focus: #f59e0b;
-
-  /* Status — warning uses yellow-400 to stay distinct from amber accent */
-  --danger:  #ef4444;
-  --warning: #facc15;
-  --success: #22c55e;
-  --info:    #3b82f6;
+  /* X/Y/Z axis colours — standard CAD/Blender convention. Paired by hand
+     with the Babylon-side gizmo hexes in src/core/scene/SceneConstants.js. */
+  --axis-x: #e0584f;
+  --axis-y: #6fb04a;
+  --axis-z: #4a86d6;
 
   /* Typography */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "Yuji Syuku", "Shippori Mincho", serif;
+  --font-sans:    system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+                  "Yu Gothic UI", "Noto Sans CJK TC", sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;            /* default UI size */
   --fs-lg: 15px;
   --fs-xl: 18px;
 
-  /* Spacing — compact pro-tool scale */
+  /* Spacing — compact pro-tool scale (unchanged from Blender baseline). */
   --sp-1: 2px;
   --sp-2: 4px;
   --sp-3: 6px;
@@ -541,19 +592,19 @@ index.html; the tokens below are the current values.
   --sp-6: 16px;
   --sp-7: 24px;
 
-  /* Radii */
-  --r-sm: 3px;
-  --r-md: 5px;
+  /* Radii (unchanged). */
+  --r-sm: 4px;
+  --r-md: 6px;
   --r-lg: 8px;
 
-  /* Motion */
+  /* Motion (unchanged). */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 120ms;
   --dur-med:  200ms;
 
-  /* Shadows */
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.45);
+  /* Shadows — lifted off light bg, warmer brown tone, less heavy than dark theme. */
+  --shadow-md: 0 4px 12px rgba(62, 44, 30, 0.18);
+  --shadow-lg: 0 12px 32px rgba(62, 44, 30, 0.28);
 }
 
 html, body {
@@ -1238,14 +1289,14 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 - **Selection silhouette (`scene/SelectionOutline.js`):** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive override material, then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `colour × ring` to the scene. By construction the ring exists only outside the mesh. **Two-tone (2026-06-14):** the mask is TWO-CHANNEL — the ACTIVE object writes emissive `(1,0,0)` (carries in R), the other SELECTED objects write `(0,1,0)` (carries in G). The shader dilates both channels and tints R→`OUTLINE_ACTIVE_HEX` (`#c2410c`, darker orange), G→`OUTLINE_SELECTED_HEX` (`#f59e0b`, amber), active drawn over selected where rings overlap — so the active object reads apart from the rest of the selection. A single intensity channel couldn't carry which-is-which without a threshold that misfires on the dilation fringe; the GLSL **and** WGSL twins both consume `activeColor`/`selectedColor`. Dials in `scene/SceneConstants.js`: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `OUTLINE_ACTIVE_HEX`, `OUTLINE_SELECTED_HEX`. **Gated (perf 2026-06-13):** the mask RTT and the 64-tap fullscreen pass are DETACHED whenever the selection is empty (`_setOutlineEnabled`) — they were running every frame for zero benefit, a real cost at 4K over heavy scenes; re-attached on the first selection. Browser smoke pins detach-when-empty / attach-when-selected.
 - **Wireframe edges (`scene/EdgeOverlay.js`):** `SceneManager.setOverlay('wireframeEdges', on)` builds a per-mesh CLONE sharing the source geometry, drawn with a wireframe emissive `StandardMaterial` (`zOffset −1`) over the textured base — `enableEdgesRendering` at any epsilon only showed sharp creases (field report). Clones carry `metadata.edgeOverlay` so they never pick, cast, or register. `setWireframeEdgeColor(hex)` live-updates the shared material.
 - **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot that parents the selected meshes at `pivotMode` (`median`, `active`, or `cursor` — the pivot session reads the cursor via `getCursorPosition`; `individual` still falls through to `median`).
-- **Multi-control state sync rule (2026-06-14):** any state with MORE THAN ONE UI control or entry point MUST dispatch an event on change — a silent `setState` only stays consistent when a single owner re-reads it. Concretely: `Selection.setPivotMode` → `PIVOT_MODE_CHANGED` (toolbar pivot group ↔ N-panel "Use Cursor as Pivot"); `PivotSession.setGizmoMode`/`setGizmoSpace` → `GIZMO_CHANGED` (toolbar World/Local button ↔ the `` ` ``/`~` space-toggle hotkey + G/R/S); `Cursor3D.setCursor` → `CURSOR_CHANGED` (N-panel XYZ inputs + Show/Hide button ↔ Shift+RMB placement + snap ops). `ViewportToolbar` subscribes `PIVOT_MODE_CHANGED` + `GIZMO_CHANGED`; `CursorPanel` subscribes `CURSOR_CHANGED` + `PIVOT_MODE_CHANGED`. Overlays need no such event because each overlay has exactly ONE control surface (shading-mode/wireframe/inverted = `ViewportToggles`, grid/axes = `ScenePanel`, bedPreview = `PrintPanel`); `followMode` is toolbar-only. Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
+- **Multi-control state sync rule (2026-06-14):** any state with MORE THAN ONE UI control or entry point MUST dispatch an event on change — a silent `setState` only stays consistent when a single owner re-reads it. Concretely: `Selection.setPivotMode` → `PIVOT_MODE_CHANGED` (toolbar pivot group ↔ N-panel "Use Cursor as Pivot"); `PivotSession.setGizmoMode`/`setGizmoSpace` → `GIZMO_CHANGED` (toolbar World/Local button ↔ the `` ` ``/`~` space-toggle hotkey + G/R/S); `Cursor3D.setCursor` → `CURSOR_CHANGED` (N-panel XYZ inputs + Show/Hide button ↔ Shift+RMB placement + context-menu snap ops). `ViewportToolbar` subscribes `PIVOT_MODE_CHANGED` + `GIZMO_CHANGED`; `CursorPanel` subscribes `CURSOR_CHANGED` + `PIVOT_MODE_CHANGED`. Overlays need no such event because each overlay has exactly ONE control surface (shading-mode/wireframe/inverted = `ViewportToggles`, grid/axes = `ScenePanel`, bedPreview = `PrintPanel`); `followMode` is toolbar-only. Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
 - **Bed (grid):** ground plane footprint = the printer bed XY (`state.print.bedDimensions.x` × `.y`, mm → BU; default Mimaki 3DUJ-553 508 × 508 mm), rectangular. Lines drawn with `BABYLON.GridMaterial`, styled from `state.scene.grid` (`cellMM` minor cell size, `subdivisions` minor cells per major line; default 10 mm / 10). `SceneManager.rebuildBed()` resizes the floor when bed dimensions change (called from Print ▸ Bed); `SceneManager.setGrid({cellMM,subdivisions})` re-skins the lines (called from Properties ▸ Scene). The single flat `FRONT` tag sits at the `+Z` bed edge and scales with `min(width,depth)`. Old v3.1 saves with a scalar `scene.gridSize` are ignored; `scene.grid` falls back to the 10/10 default.
 - **Bed FRONT tag:** a single `MeshBuilder.CreatePlane` mesh with `DynamicTexture` text `FRONT`, laid **flat on the bed** (`rotation = (π/2, π, 0)`, no billboard) hugging the +Z edge, 4 mm above the bed, textured face up with glyphs readable from the front-elevated camera (verified live; `rotation.x = -π/2` mirrors the text, `+π/2` alone is upside-down). Drawn in the muted grid-line colour (`rgba(97,97,117,0.55)` ≈ grid `Color3 0.38,0.38,0.46`) so it reads as part of the bed, not a UI accent. Only FRONT is shown — once the front edge is known the rest is implied; the old four upright billboarded tags (FRONT/BACK/LEFT/RIGHT) were dropped as visual noise. Size scales with bed extent (`max(0.03, extent * 0.10)` × 0.32 ratio). Rebuilt by `_rebuildGroundMesh` whenever bed extent changes. Visibility tracks `state.scene.overlays.grid` (toggled together with ground plane).
 - **Bed preview:** `MeshBuilder.CreateBox` sized to bed dims, semi-transparent material, wireframe outline overlay.
 - **3D cursor (`scene/Cursor3D.js`, 2026-06-14):** the original yellow translucent ball (a fixed world anchor) PLUS a Blender-style crosshair + dashed ring that billboard to the camera and hold a roughly constant on-screen size (scaled per-frame by `camera.radius × SCREEN_K`, ring/crosshair drawn in `renderingGroupId 1` so they're never occluded). Shown for `pivotMode === 'cursor'` or while the N-panel is open. `setCursor` writes `state.scene.cursor3d` (silent — placing the cursor doesn't dirty the project, same rule as selection) and fires `CURSOR_CHANGED`; `PersistenceManager` restores it on load via `setCursorFromState`.
-  - **N-panel (`ui/CursorPanel.js`):** a slide-out sidebar docked to the viewport's right edge (clipped by `#viewport { overflow:hidden }`, so the closed body hides and only a 26 px tab peeks), toggled by **Shift+N** (plain N is the docked right-panel toggle). Holds a 3D-Cursor tab: live two-way XYZ inputs in mm (`× MM_PER_BU`), the snap buttons, and a "Use Cursor as Pivot" toggle.
-  - **Snap ops (`core/CursorTools.js`):** `selectionToCursor()` rigid-translates the whole selection so its median lands on the cursor (one undoable `TransformCommand`); `cursorToSelection()` moves the cursor to the selection median; `cursorToWorldOrigin()` resets it to (0,0,0). Cursor moves are NOT in the undo stack (Blender-parity — the cursor is a tool, not scene content).
+  - **N-panel (`ui/CursorPanel.js`):** a slide-out sidebar docked to the viewport's right edge (clipped by `#viewport { overflow:hidden }`, so the closed body hides and only a 26 px tab peeks), toggled by **Shift+N** (plain N is the docked right-panel toggle). Holds a 3D-Cursor tab: live two-way XYZ inputs in mm (`× MM_PER_BU`), a "Show 3D cursor" checkbox, and a "Use Cursor as Pivot" checkbox. It does not contain cursor snap buttons. Visible labels and the tab tooltip use `cursor.*` i18n keys and update on `LOCALE_CHANGED`.
+  - **Snap ops (`core/CursorTools.js`):** `selectionToCursor()` rigid-translates the whole selection so its median lands on the cursor (one undoable `TransformCommand`); `cursorToSelection()` moves the cursor to the selection median; `cursorToWorldOrigin()` resets it to (0,0,0). All snap ops are exposed from the context menu, not the N-panel. Cursor moves are NOT in the undo stack (Blender-parity — the cursor is a tool, not scene content).
 - **Copy / Paste with aspect chooser (`ui/CopyPaste.js`, 2026-06-14):** Ctrl+C opens a popup menu (Object / Location / Rotation / Scale / Location+Rotation / All) and stores the ACTIVE object's chosen data in an in-app clipboard; Ctrl+V opens a menu filtered to what the clipboard holds and applies it to every selected object as one undoable `TransformCommand` ("Object" duplicates the source via `DuplicateCommand`). Multi-select "copy active → others" falls out for free (select N, Ctrl+C All, Ctrl+V All). Complements the always-on Properties `↧` copy-from-active buttons.
 - **Camera Follow Modes:** `state.scene.camera.followMode` ∈ `{'free','followActive','worldOrigin'}`. A `scene.onBeforeRenderObservable` hook (`_applyFollowTarget`) overrides `_camera.target` every frame in non-free modes — `worldOrigin` pins it to `(0,0,0)`; `followActive` reads the active object id via `state.selection.activeId`, finds the Babylon mesh through `_scene.meshes.find(m => m.metadata?.meshId === activeId)`, and pins target to its hierarchy bbox centre. Pan input is effectively disabled in non-free modes — to regain pan, switch back to `'free'`.
 - **Default pose + first-asset auto-frame:** Initial `state.scene.camera` puts the camera ~30 cm above origin looking down 45° from the front-right quadrant. With an empty scene this is the user's "neutral tabletop" pose. On the **first** `ASSET_INSTANTIATED` event of a session (or after `PROJECT_NEW`), SceneManager debounces 50 ms and calls `frameAll()` so all submeshes of a multi-mesh import (e.g. 5-node glTF) frame as a union, not one-by-one. A `_initiallyFramed` latch is then set to `true` so subsequent drops do not re-frame — the user is past initial orientation. `PROJECT_LOADED` also sets the latch (saved camera state wins). `PROJECT_NEW` resets it.
@@ -2582,7 +2633,7 @@ entry points use it: `ViewportDrop` (OS drop + Session/folder drag) and
 does not maintain its own extension table.
 
 ### Context Menu (`src/ui/ContextMenu.js`)
-Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.).
+Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.). Cursor actions include selection-dependent `Selection → Cursor` and `Cursor → Selection`, plus always-enabled `Cursor → World Origin` for the global cursor reset. All visible menu labels use `context.*` i18n keys so the menu renders in the active locale each time it opens.
 
 ### Print Panel (`src/ui/PrintPanel.js`)
 Tabs: Scale / Validation / Bed / Export (Thickness + Orientation future).
@@ -3235,16 +3286,15 @@ guard for local UI changes.
 
 ## PART 15 — BUILD HISTORY AND CURRENT VERIFICATION STATUS
 
-This section is the compressed build history for the canonical v4.0 blueprint.
-Detailed behaviour contracts live in the module sections above; this section
-records what landed and the current verification baseline.
+This section records the current product baseline and points to the append-only
+build history. Detailed behaviour contracts live in the module sections above.
 
 ### Current Product Baseline
 
 - **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export printer-driven packages.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
 - **Secondary targets:** Bambu / Prusa / Orca-style filament printers use 3MF `<colorgroup>` with one solid colour per part.
-- **Verification baseline:** 112/112 headless tests, Vite production build, and Vite browser smoke are green after the 2026-06-08 Vite-only cleanup. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
+- **Verification baseline:** run `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:browser`, and `npm run test:export`. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
 
 ### Build history
 
