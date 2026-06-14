@@ -1,3 +1,17 @@
+/* HUD-local tokens — viewport overlays read crisp on ANY scene bg, so they're
+   locked to dark-glass + bright text regardless of the panel theme. Without
+   this, washi-light panel tokens turn HUD text dark-brown on dark-glass pills
+   and the labels go invisible. */
+.viewport-toolbar, .vp-toggles, .nav-cube, .n-panel {
+  --hud-bg:        rgba(19, 19, 22, 0.85);
+  --hud-bg-strong: rgba(35, 35, 41, 0.92);
+  --hud-text:      #e6e6e6;
+  --hud-text-hi:   #ffffff;
+  --hud-text-dim:  #a8a8a8;
+  --hud-border:    rgba(255, 255, 255, 0.18);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.10);
+}
+
 /* ── Viewport toolbar (Fusion 360 style) ─────────────────── */
 .viewport-toolbar {
   position: absolute;
@@ -8,9 +22,9 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  background: rgba(19, 19, 22, 0.85);
+  background: var(--hud-bg);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hud-border);
   border-radius: 999px;
   box-shadow: var(--shadow-lg);
   z-index: 10;
@@ -24,7 +38,7 @@
 .vt-sep {
   width: 1px;
   height: 18px;
-  background: var(--border-strong);
+  background: var(--hud-border);
   margin: 0 var(--sp-2);
 }
 .vt-btn {
@@ -36,13 +50,13 @@
   height: 28px;
   padding: 0 var(--sp-2);
   background: transparent;
-  color: var(--text-1);
+  color: var(--hud-text);
   border: 1px solid transparent;
   border-radius: var(--r-md);
   cursor: pointer;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
-.vt-btn:hover { background: var(--bg-2); color: var(--text-0); }
+.vt-btn:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
 .vt-btn.vt-on {
   background: var(--accent);
   color: var(--accent-fg);
@@ -63,11 +77,11 @@
   z-index: 10;
 }
 .vp-toggles .vt-btn {
-  background: rgba(19, 19, 22, 0.85);
+  background: var(--hud-bg);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hud-border);
 }
-.vp-toggles .vt-btn:hover { background: var(--bg-3); color: var(--text-0); }
+.vp-toggles .vt-btn:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
 .vp-toggles .vt-btn.vt-on {
   background: var(--accent);
   color: var(--accent-fg);
@@ -79,19 +93,19 @@
   height: 26px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--text-1);
-  background: rgba(19, 19, 22, 0.85);
+  color: var(--hud-text);
+  background: var(--hud-bg);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hud-border);
   border-radius: var(--r-sm);
   cursor: pointer;
 }
-.vp-toggles .vt-mode:hover { color: var(--text-0); }
+.vp-toggles .vt-mode:hover { color: var(--hud-text-hi); }
 .vp-wire-color {
   width: 28px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hud-border);
   border-radius: var(--r-sm);
   background: transparent;
   cursor: pointer;
@@ -129,9 +143,9 @@
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  background: rgba(35, 35, 41, 0.92);
-  color: var(--text-1);
-  border: 1px solid var(--border-strong);
+  background: var(--hud-bg-strong);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-border);
   backface-visibility: hidden;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
@@ -155,9 +169,9 @@
   transform: translateX(-50%);
   width: 22px;
   height: 22px;
-  background: rgba(19, 19, 22, 0.85);
-  color: var(--text-1);
-  border: 1px solid var(--border-strong);
+  background: var(--hud-bg);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-border);
   border-radius: 50%;
   font-size: 13px;
   line-height: 1;
@@ -188,10 +202,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(19, 19, 22, 0.85);
+  background: var(--hud-bg);
   backdrop-filter: blur(8px);
-  color: var(--text-1);
-  border: 1px solid var(--border-strong);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-border);
   border-right: none;
   border-radius: var(--r-md) 0 0 var(--r-md);
   cursor: pointer;
@@ -202,7 +216,7 @@
   padding: var(--sp-3);
   background: rgba(19, 19, 22, 0.9);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hud-border);
   border-radius: var(--r-md) 0 0 var(--r-md);
   box-shadow: var(--shadow-lg);
 }
@@ -212,12 +226,12 @@
   gap: var(--sp-2);
   font-size: var(--fs-sm);
   font-weight: 600;
-  color: var(--text-0);
+  color: var(--hud-text-hi);
   margin-bottom: var(--sp-3);
 }
 .np-section { margin-bottom: var(--sp-3); }
 .np-section:last-child { margin-bottom: 0; }
-.np-row-label { font-size: var(--fs-xs); color: var(--text-2, var(--text-1)); margin-bottom: var(--sp-2); }
+.np-row-label { font-size: var(--fs-xs); color: var(--hud-text-dim); margin-bottom: var(--sp-2); }
 .np-field {
   display: flex;
   align-items: center;
@@ -229,7 +243,7 @@
   font-size: var(--fs-xs);
   font-weight: 700;
   text-align: center;
-  color: var(--text-1);
+  color: var(--hud-text);
 }
 .np-axis-x { color: #e0584f; }
 .np-axis-y { color: #6fb04a; }
@@ -240,26 +254,36 @@
   height: 24px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--text-0);
-  background: var(--bg-2);
-  border: 1px solid var(--border-strong);
+  color: var(--hud-text-hi);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--hud-border);
   border-radius: var(--r-sm);
 }
+.np-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--hud-text);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.np-check input { accent-color: var(--accent); }
 .np-actions { display: flex; flex-direction: column; gap: 4px; }
 .np-btn {
   width: 100%;
   height: 26px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--text-1);
-  background: var(--bg-2);
-  border: 1px solid var(--border-strong);
+  color: var(--hud-text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--hud-border);
   border-radius: var(--r-sm);
   cursor: pointer;
   text-align: left;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
-.np-btn:hover { background: var(--bg-3); color: var(--text-0); }
+.np-btn:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
 .np-btn.np-on {
   background: var(--accent);
   color: var(--accent-fg);
