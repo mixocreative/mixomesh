@@ -45,21 +45,32 @@
   --success: #2e7d32;
   --info:    #1e3a5f;
 
-  /* Viewport HUD overlays — frosted-glass (glassmorphism). Sit on any 3D
-     scene background; saturation boost + low-opacity dark tint + thicker
-     blur keeps the panel readable while still showing the scene through.
-     Used by .viewport-toolbar / .vp-toggles / .nav-cube / .n-panel in
+  /* Viewport HUD overlays — chromed-glass (polished, iOS-26-ish). Base tint
+     is a vertical sheen (white top → dark bottom) layered over a low-opacity
+     dark tint; combined with strong blur + saturation, this gives the panel
+     a convex polished-glass look on any 3D scene background. The shadow
+     stack is: outer drop (depth) + top inner highlight (specular edge) +
+     bottom inner dark (concave shadow under the chrome lip). Used by
+     .viewport-toolbar / .vp-toggles / .nav-cube / .n-panel in
      components/viewport.css. */
-  --hud-bg:        rgba(18, 18, 22, 0.35);
-  --hud-bg-strong: rgba(18, 18, 22, 0.55);
-  --hud-text:      #f0f0f2;
+  --hud-tint:      rgba(18, 18, 22, 0.28);
+  --hud-tint-strong: rgba(18, 18, 22, 0.48);
+  --hud-sheen:     linear-gradient(180deg,
+                     rgba(255, 255, 255, 0.18) 0%,
+                     rgba(255, 255, 255, 0.04) 45%,
+                     rgba(0,   0,   0,   0.12) 100%);
+  --hud-bg:        var(--hud-sheen), var(--hud-tint);
+  --hud-bg-strong: var(--hud-sheen), var(--hud-tint-strong);
+  --hud-text:      #f4f4f6;
   --hud-text-hi:   #ffffff;
-  --hud-text-dim:  #b8b8be;
-  --hud-border:    rgba(255, 255, 255, 0.16);
-  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  --hud-shadow:    0 8px 32px rgba(0, 0, 0, 0.28);
-  --hud-blur:      blur(18px) saturate(160%);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.12);
+  --hud-text-dim:  #c0c0c6;
+  --hud-border:    rgba(255, 255, 255, 0.22);
+  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.35),
+                   inset 0 -1px 0 rgba(0,   0,   0,   0.30);
+  --hud-shadow:    0 10px 36px rgba(0, 0, 0, 0.34),
+                   0 1px  2px  rgba(0, 0, 0, 0.20);
+  --hud-blur:      blur(20px) saturate(200%) brightness(108%);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.14);
 
   /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
      axis chips (components/viewport.css). The Babylon side uses its own hexes
