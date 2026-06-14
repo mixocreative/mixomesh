@@ -8,6 +8,12 @@ import {
   BG_DARK_BOTTOM,
   TONE_CONTRAST,
   TONE_EXPOSURE,
+  OUTLINE_ACTIVE_HEX,
+  OUTLINE_SELECTED_HEX,
+  OUTLINE_ACTIVE_LIGHT_HEX,
+  OUTLINE_SELECTED_LIGHT_HEX,
+  CURSOR_HEX,
+  CURSOR_LIGHT_HEX,
 } from './scene/SceneConstants.js';
 import {
   initEnvironmentRig, applyEnvironmentSettings, ensureShadowCasters,
@@ -20,8 +26,8 @@ import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
 } from './scene/EdgeOverlay.js';
 import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
-import { initSelectionOutline, setActive, setSelected } from './scene/SelectionOutline.js';
-import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState } from './scene/Cursor3D.js';
+import { initSelectionOutline, setActive, setSelected, setOutlineColors } from './scene/SelectionOutline.js';
+import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState, setCursorColor } from './scene/Cursor3D.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
   setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
@@ -280,6 +286,15 @@ function _paintBackground(mode) {
   _bgTexture.update();
   // Fallback solid (pre-layer frames + screenshot edges) tracks the bottom.
   _scene.clearColor = BABYLON.Color4.FromHexString(bottom + 'ff');
+  // Selection outline + 3D cursor flip to darker tones on light bg so they
+  // stay readable; amber-on-light washes out at the dilation fringe.
+  if (mode === 'light') {
+    setOutlineColors(OUTLINE_ACTIVE_LIGHT_HEX, OUTLINE_SELECTED_LIGHT_HEX);
+    setCursorColor(CURSOR_LIGHT_HEX);
+  } else {
+    setOutlineColors(OUTLINE_ACTIVE_HEX, OUTLINE_SELECTED_HEX);
+    setCursorColor(CURSOR_HEX);
+  }
 }
 
 // ── Grid / bed ───────────────────────────────────────────
