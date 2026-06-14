@@ -1,5 +1,6 @@
 import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
+import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand } from '../core/HistoryManager.js';
@@ -129,6 +130,9 @@ function _buildItems(info) {
     { label: 'Group',           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
     { label: 'Ungroup',         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
     'sep',
+    { label: 'Selection → Cursor', shortcut: '',         action: 'sel-to-cursor', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    { label: 'Cursor → Selection', shortcut: '',         action: 'cursor-to-sel', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    'sep',
     { label: 'Smart Replace',   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
     { label: 'Transform Swab',  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
     'sep',
@@ -159,6 +163,8 @@ function _runAction(action, info) {
   if (action === 'delete')     _delete();
   if (action === 'replace')    _smartReplace();
   if (action === 'swab')       _transformSwab();
+  if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
+  if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
   if (action === 'relink')     _relink(info.targetId);
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
   if (action === 'col-rename') _renameCollection(info.targetId);

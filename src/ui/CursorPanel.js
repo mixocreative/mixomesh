@@ -41,11 +41,9 @@ export function init() {
     _inputs[axis].addEventListener('keydown', (e) => { if (e.key === 'Enter') _commitFromInputs(); });
   }
 
-  _root.querySelector('[data-act="sel-to-cursor"]')?.addEventListener('click', () => CursorTools.selectionToCursor());
-  _root.querySelector('[data-act="cursor-to-sel"]')?.addEventListener('click', () => CursorTools.cursorToSelection());
   _root.querySelector('[data-act="cursor-to-origin"]')?.addEventListener('click', () => CursorTools.cursorToWorldOrigin());
-  _root.querySelector('[data-act="show-cursor"]')?.addEventListener('click', _toggleShowCursor);
-  _root.querySelector('[data-act="pivot-cursor"]')?.addEventListener('click', _togglePivotCursor);
+  _root.querySelector('[data-act="show-cursor"]')?.addEventListener('change', _toggleShowCursor);
+  _root.querySelector('[data-act="pivot-cursor"]')?.addEventListener('change', _togglePivotCursor);
 
   InputManager.register('Shift+N', 'global', toggle);
   subscribe(EVENTS.CURSOR_CHANGED, () => { _refreshInputs(); _syncButtons(); });
@@ -70,13 +68,11 @@ function _markup() {
           </label>`).join('')}
       </div>
       <div class="np-section np-actions">
-        <button class="np-btn" data-act="sel-to-cursor">Selection → Cursor</button>
-        <button class="np-btn" data-act="cursor-to-sel">Cursor → Selection</button>
         <button class="np-btn" data-act="cursor-to-origin">Cursor → World Origin</button>
       </div>
       <div class="np-section">
-        <button class="np-btn np-toggle" data-act="show-cursor">Show 3D Cursor</button>
-        <button class="np-btn np-toggle" data-act="pivot-cursor">Use Cursor as Pivot</button>
+        <label class="np-check"><input type="checkbox" data-act="show-cursor"> Show 3D cursor</label>
+        <label class="np-check"><input type="checkbox" data-act="pivot-cursor"> Use cursor as pivot</label>
       </div>
     </div>
   `;
@@ -95,8 +91,8 @@ export function toggle() {
   _syncButtons();
 }
 
-function _toggleShowCursor() {
-  SceneManager.setCursorVisible(!SceneManager.isCursorVisible());
+function _toggleShowCursor(e) {
+  SceneManager.setCursorVisible(!!e.target.checked);
   _syncButtons();
 }
 
@@ -121,25 +117,16 @@ function _refreshInputs() {
   if (active !== _inputs.z) _inputs.z.value = (c.z * MM_PER_BU).toFixed(1);
 }
 
-function _togglePivotCursor() {
-  const isCursor = getState().selection.pivotMode === 'cursor';
-  Selection.setPivotMode(isCursor ? 'median' : 'cursor');
+function _togglePivotCursor(e) {
+  Selection.setPivotMode(e.target.checked ? 'cursor' : 'median');
   _syncButtons();
 }
 
 function _syncButtons() {
-  const pivotBtn = _root?.querySelector('[data-act="pivot-cursor"]');
-  if (pivotBtn) {
-    const on = getState().selection.pivotMode === 'cursor';
-    pivotBtn.classList.toggle('np-on', on);
-    pivotBtn.textContent = on ? 'Cursor Pivot: On' : 'Use Cursor as Pivot';
-  }
-  const showBtn = _root?.querySelector('[data-act="show-cursor"]');
-  if (showBtn) {
-    const vis = SceneManager.isCursorVisible();
-    showBtn.classList.toggle('np-on', vis);
-    showBtn.textContent = vis ? 'Hide 3D Cursor' : 'Show 3D Cursor';
-  }
+  const pivotCb = _root?.querySelector('[data-act="pivot-cursor"]');
+  if (pivotCb) pivotCb.checked = getState().selection.pivotMode === 'cursor';
+  const showCb = _root?.querySelector('[data-act="show-cursor"]');
+  if (showCb) showCb.checked = SceneManager.isCursorVisible();
 }
 
 export const CursorPanel = { init, toggle };
