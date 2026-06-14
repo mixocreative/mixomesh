@@ -1,5 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState, dispatch } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { ShaderLibrary, DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
@@ -20,18 +21,35 @@ const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
 const SESSION_KEY     = '__session__';   // mirrors ui/AssetPanel.js
 
 let _bodyEl       = null;
+let _root         = null;
 let _editingId    = null;     // shaderId currently in the inline editor
 // Section keys the user has collapsed inside the panel. Preserved across
 // renders this session; not persisted (Phase 6 work).
 const _collapsedSections = new Set();
+
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
 
 // ── Init ─────────────────────────────────────────────────
 
 /** Initialise the Shader panel. Must be called once after DOM is ready. */
 export function init() {
   _bodyEl = document.getElementById('rp-shaders-body');
+  _root   = document.getElementById('rp-shaders');
   if (!_bodyEl) return;
   _bodyEl.classList.add('sp-body');
+  // Static `.rp-title` (in index.html) + any body-level [data-i18n-key] swap
+  // languages together via _retranslate(_root).
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
 
   // Re-render whenever anything shader-shaped changes.
   const events = [
@@ -264,6 +282,7 @@ function _render() {
   if (_editingId) _wireEditor(_editingId);
   _wireSwatches();
   _applyAndWireSectionCollapse();
+  _retranslate(_root);
 }
 
 function _applyAndWireSectionCollapse() {
