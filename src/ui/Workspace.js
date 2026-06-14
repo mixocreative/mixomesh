@@ -12,6 +12,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, dispatch, getState, setState } from '../core/StateManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { icon } from '../core/Icons.js';
+import { t } from '../i18n/index.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
 // v2: panelCollapsed went tri-state (absent = defer to workspace default).
@@ -99,6 +100,8 @@ export function init() {
 
   _renderPill();
   _applyDom();
+
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_pillEl));
 
   InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
   InputManager.register('Ctrl+Shift+@', 'global', () => setWorkspace('shade'));
@@ -258,7 +261,9 @@ function _renderPill() {
     btn.type = 'button';
     btn.className = 'ws-btn';
     btn.dataset.ws = name;
-    btn.innerHTML = `${icon(def.icon, { width: 13, height: 13 })}<span>${def.label}</span>`;
+    btn.innerHTML = `${icon(def.icon, { width: 13, height: 13 })}` +
+                    `<span class="ws-tab-primary" data-i18n-key="workspace.${name}">${t(`workspace.${name}`)}</span>` +
+                    `<span class="ws-tab-sub" data-i18n-key="workspace.${name}.sub">${t(`workspace.${name}.sub`)}</span>`;
     btn.title = `${def.label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
     btn.setAttribute('role', 'tab');
     btn.addEventListener('click', () => setWorkspace(name));
@@ -274,6 +279,16 @@ function _syncPill(workspace) {
     b.classList.toggle('active', active);
     b.setAttribute('aria-selected', active ? 'true' : 'false');
   });
+}
+
+// Re-translate any descendant with a data-i18n-key — called on LOCALE_CHANGED.
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
 }
 
 export const Workspace = { init, setWorkspace, togglePanel, maxViewport };

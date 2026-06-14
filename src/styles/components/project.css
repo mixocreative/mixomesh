@@ -58,3 +58,6 @@
   cursor: pointer;
 }
 #locale-switcher:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
+
+/* Workspace tab sub-label — hidden in PR1; PR3 enables the furigana view. */
+.ws-tab-sub { display: none; }
