@@ -26,6 +26,7 @@ import { Workspace } from '../ui/Workspace.js';
 import { NumberScrub } from '../ui/NumberScrub.js';
 import { CursorPanel } from '../ui/CursorPanel.js';
 import { CopyPaste } from '../ui/CopyPaste.js';
+import * as i18n from '../i18n/index.js';
 
 type TransformCommit = {
   prev: unknown;
@@ -44,6 +45,7 @@ if (!('showDirectoryPicker' in window)) {
 }
 
 async function bootstrap() {
+  i18n.init();    // detect locale, set _locale, apply <html lang>, fire LOCALE_CHANGED
   Toast.init();
   StatusBar.init();
 
