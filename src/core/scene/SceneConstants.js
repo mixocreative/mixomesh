@@ -1,3 +1,16 @@
+// ── JS-side colour constants ────────────────────────────────────────────
+// Babylon-runtime colours used by the 3D scene (gradient bg, outline shader,
+// 3D cursor). CSS-side tokens for UI panels + HUD live in src/styles/tokens.css.
+//
+// Overlap with CSS:
+//   ACCENT_HEX (here, amber) ≠ CSS --accent (stone brown).
+//   The viewport selection theme stays amber on dark bg by design; the panel
+//   accent is stone-brown for the wafu palette. Intentional divergence.
+//   The X/Y/Z axis hexes used here (CAD convention) pair with CSS
+//   --axis-x / --axis-y / --axis-z in tokens.css — keep both in sync by hand.
+//
+// Pure JS constants only; do NOT import anything from src/styles/.
+
 export const ACCENT_HEX = '#f59e0b';
 // Dark stone variant for selection outline + 3D cursor when the viewport bg
 // is LIGHT (warm amber-on-light reads as washed-out). Auto-flipped by

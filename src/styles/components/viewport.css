@@ -1,16 +1,4 @@
-/* HUD-local tokens — viewport overlays read crisp on ANY scene bg, so they're
-   locked to dark-glass + bright text regardless of the panel theme. Without
-   this, washi-light panel tokens turn HUD text dark-brown on dark-glass pills
-   and the labels go invisible. */
-.viewport-toolbar, .vp-toggles, .nav-cube, .n-panel {
-  --hud-bg:        rgba(19, 19, 22, 0.85);
-  --hud-bg-strong: rgba(35, 35, 41, 0.92);
-  --hud-text:      #e6e6e6;
-  --hud-text-hi:   #ffffff;
-  --hud-text-dim:  #a8a8a8;
-  --hud-border:    rgba(255, 255, 255, 0.18);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.10);
-}
+/* HUD overlay tokens (--hud-*) live in tokens.css — single CSS color source. */
 
 /* ── Viewport toolbar (Fusion 360 style) ─────────────────── */
 .viewport-toolbar {
@@ -25,7 +13,7 @@
   background: var(--hud-bg);
   backdrop-filter: blur(8px);
   border: 1px solid var(--hud-border);
-  border-radius: 999px;
+  border-radius: 9px;
   box-shadow: var(--shadow-lg);
   z-index: 10;
   pointer-events: auto;
@@ -245,9 +233,9 @@
   text-align: center;
   color: var(--hud-text);
 }
-.np-axis-x { color: #e0584f; }
-.np-axis-y { color: #6fb04a; }
-.np-axis-z { color: #4a86d6; }
+.np-axis-x { color: var(--axis-x); }
+.np-axis-y { color: var(--axis-y); }
+.np-axis-z { color: var(--axis-z); }
 .np-field input {
   flex: 1;
   min-width: 0;

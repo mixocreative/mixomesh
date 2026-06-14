@@ -45,6 +45,26 @@
   --success: #2e7d32;
   --info:    #1e3a5f;
 
+  /* Viewport HUD overlays — locked to dark-glass + bright text regardless
+     of panel theme. Used by .viewport-toolbar / .vp-toggles / .nav-cube /
+     .n-panel in components/viewport.css. Without these, panel tokens turn
+     HUD text dark-brown on dark-glass pills and the labels go invisible. */
+  --hud-bg:        rgba(19, 19, 22, 0.85);
+  --hud-bg-strong: rgba(35, 35, 41, 0.92);
+  --hud-text:      #e6e6e6;
+  --hud-text-hi:   #ffffff;
+  --hud-text-dim:  #a8a8a8;
+  --hud-border:    rgba(255, 255, 255, 0.18);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.10);
+
+  /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
+     axis chips (components/viewport.css). The Babylon side uses its own hexes
+     for the axis gizmo (src/core/scene/SceneConstants.js or gizmo modules);
+     keep the two paired by hand. */
+  --axis-x: #e0584f;
+  --axis-y: #6fb04a;
+  --axis-z: #4a86d6;
+
   /* Typography */
   --font-display: "Yuji Syuku", "Shippori Mincho", serif;
   --font-sans:    system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
