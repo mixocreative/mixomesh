@@ -24,6 +24,9 @@ let _camera = null;
 // Module-scope so setOutlineColors() can mutate live (auto-flip on bg switch).
 let _activeColor   = null;
 let _selectedColor = null;
+// 1 = additive glow (works on dark bg); 0 = alpha-blend (works on light bg —
+// additive of any color on near-white clamps to white = invisible).
+let _lightMode = 0;
 let _outlineActive = false;        // pass + mask RTT gated on a non-empty selection
 let _selMaskRTT          = null;   // RenderTargetTexture
 let _selMaskMatActive    = null;   // override for active mesh — full intensity
@@ -92,6 +95,7 @@ export function initSelectionOutline(scene, engine, camera) {
       uniform vec2 texelSize;
       uniform float outlineRadiusPx;
       uniform float outlineIntensity;
+      uniform float lightMode;   // 1 = alpha-blend (light bg), 0 = additive (dark bg)
 
       void main() {
         vec4 scene  = texture2D(textureSampler, vUV);
@@ -111,9 +115,19 @@ export function initSelectionOutline(scene, engine, camera) {
         }
 
         ring = max(vec2(0.0), ring - center);
-        // Active drawn over selected where rings overlap.
-        vec3 add = selectedColor * ring.g * (1.0 - ring.r) + activeColor * ring.r;
-        gl_FragColor = vec4(scene.rgb + add * outlineIntensity, scene.a);
+        float ringR = ring.r;
+        float ringS = ring.g * (1.0 - ringR);
+        vec3 add = activeColor * ringR + selectedColor * ringS;
+        if (lightMode > 0.5) {
+          // Alpha-blend dark outline OVER light scene — visible because we
+          // REPLACE toward outline color, not add (additive would saturate).
+          float a = clamp((ringR + ringS) * outlineIntensity, 0.0, 1.0);
+          float w = max(ringR + ringS, 0.0001);
+          vec3 col = add / w;
+          gl_FragColor = vec4(mix(scene.rgb, col, a), scene.a);
+        } else {
+          gl_FragColor = vec4(scene.rgb + add * outlineIntensity, scene.a);
+        }
       }
     `;
   }
@@ -132,6 +146,7 @@ export function initSelectionOutline(scene, engine, camera) {
       uniform texelSize: vec2f;
       uniform outlineRadiusPx: f32;
       uniform outlineIntensity: f32;
+      uniform lightMode: f32;
 
       @fragment
       fn main(input: FragmentInputs) -> FragmentOutputs {
@@ -152,14 +167,23 @@ export function initSelectionOutline(scene, engine, camera) {
         }
 
         ring = max(vec2f(0.0), ring - center);
-        let add: vec3f = uniforms.selectedColor * ring.g * (1.0 - ring.r) + uniforms.activeColor * ring.r;
-        fragmentOutputs.color = vec4f(scene.rgb + add * uniforms.outlineIntensity, scene.a);
+        let ringR: f32 = ring.r;
+        let ringS: f32 = ring.g * (1.0 - ringR);
+        let add: vec3f = uniforms.activeColor * ringR + uniforms.selectedColor * ringS;
+        if (uniforms.lightMode > 0.5) {
+          let a: f32 = clamp((ringR + ringS) * uniforms.outlineIntensity, 0.0, 1.0);
+          let w: f32 = max(ringR + ringS, 0.0001);
+          let col: vec3f = add / w;
+          fragmentOutputs.color = vec4f(mix(scene.rgb, col, a), scene.a);
+        } else {
+          fragmentOutputs.color = vec4f(scene.rgb + add * uniforms.outlineIntensity, scene.a);
+        }
       }
     `;
   }
 
   _outlinePass = new BABYLON.PostProcess('mxOutline', 'mxOutline', {
-    uniforms: ['activeColor', 'selectedColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity'],
+    uniforms: ['activeColor', 'selectedColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity', 'lightMode'],
     samplers: ['maskSampler'],
     size: 1.0,
     camera,
@@ -176,6 +200,7 @@ export function initSelectionOutline(scene, engine, camera) {
       1 / _engine.getRenderHeight());
     eff.setFloat('outlineRadiusPx',  OUTLINE_RADIUS_PX);
     eff.setFloat('outlineIntensity', OUTLINE_INTENSITY);
+    eff.setFloat('lightMode',        _lightMode);
     eff.setTexture('maskSampler', _selMaskRTT);
   };
 
@@ -236,6 +261,11 @@ export function setOutlineColors(activeHex, selectedHex) {
   if (!_activeColor || !_selectedColor) return;
   _activeColor   = BABYLON.Color3.FromHexString(activeHex);
   _selectedColor = BABYLON.Color3.FromHexString(selectedHex);
+}
+
+/** Flip the outline composite mode. 1 = alpha-blend (light bg), 0 = additive (dark bg). */
+export function setOutlineLightMode(on) {
+  _lightMode = on ? 1 : 0;
 }
 
 /**

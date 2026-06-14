@@ -26,7 +26,7 @@ import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
 } from './scene/EdgeOverlay.js';
 import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
-import { initSelectionOutline, setActive, setSelected, setOutlineColors } from './scene/SelectionOutline.js';
+import { initSelectionOutline, setActive, setSelected, setOutlineColors, setOutlineLightMode } from './scene/SelectionOutline.js';
 import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState, setCursorColor } from './scene/Cursor3D.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
@@ -316,12 +316,16 @@ function _paintBackground(mode) {
   // Fallback solid (pre-layer frames + screenshot edges) tracks the bottom.
   _scene.clearColor = BABYLON.Color4.FromHexString(bottom + 'ff');
   // Selection outline + 3D cursor flip to darker tones on light bg so they
-  // stay readable; amber-on-light washes out at the dilation fringe.
+  // stay readable; the outline shader also flips from additive (glow) to
+  // alpha-blend (solid replace) — additive of any color on near-white scene
+  // saturates to white = invisible.
   if (mode === 'light') {
     setOutlineColors(OUTLINE_ACTIVE_LIGHT_HEX, OUTLINE_SELECTED_LIGHT_HEX);
+    setOutlineLightMode(true);
     setCursorColor(CURSOR_LIGHT_HEX);
   } else {
     setOutlineColors(OUTLINE_ACTIVE_HEX, OUTLINE_SELECTED_HEX);
+    setOutlineLightMode(false);
     setCursorColor(CURSOR_HEX);
   }
 }

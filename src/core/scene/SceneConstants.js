@@ -16,8 +16,8 @@ export const CURSOR_DIAMETER = 0.003;
 // 3D-cursor ring/crosshair tint — the app accent amber (matches selection theme).
 export const CURSOR_HEX = '#f59e0b';
 
-export const BG_GRADIENT_TOP = '#e7ebef';
-export const BG_GRADIENT_BOTTOM = '#9aa4af';
+export const BG_GRADIENT_TOP = '#fcf9f3';
+export const BG_GRADIENT_BOTTOM = '#f3ecdf';
 // Dark viewport variant (Scene ▸ Render background toggle) — Blender-ish
 // neutral grays, kept lighter than the UI panels so silhouettes still read.
 export const BG_DARK_TOP = '#3c4046';
