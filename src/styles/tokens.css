@@ -1,56 +1,62 @@
 :root {
-  /* Surfaces — Blender-style neutral grays (no blue cast), slightly lifted
-     so panels read as surfaces, not voids. Viewport gradient is unaffected
-     (Babylon-side, scene/SceneConstants.js). */
-  --bg-0: #111111;
-  --bg-1: #1d1d1d;
-  --bg-2: #252525;
-  --bg-3: #2f2f2f;
-  --bg-4: #3b3b3b;
+  /* Washi surfaces — warm off-white paper, slight cream undertone. The
+     panel hierarchy stays a 5-step ramp so existing components that read
+     --bg-0..4 keep their relative layering. */
+  --bg-0: #efe7d8;
+  --bg-1: #f3ecdf;
+  --bg-2: #f7f1e5;
+  --bg-3: #fbf6ec;
+  --bg-4: #fffaf0;
 
-  /* Blender separates surfaces with darker seams (inset look), not lighter
-     outlines. -strong stays lighter for chips/handles that need an outline. */
-  --border:         #161616;
-  --border-strong:  #404040;
-  --border-section: #181818;
-  --border-focus:  #f59e0b;
-  --ring-focus:    rgba(245, 158, 11, 0.35);
+  /* Sumi text — never pure black, slightly warm. */
+  --text-0: #1a1612;
+  --text-1: #4a3f33;
+  --text-2: #7a6a58;
+  --text-disabled: #a99e8c;
 
-  /* Controls — Blender fields sit LIGHTER than their panel (inset pill). */
-  --ctl-bg:        #383838;
-  --ctl-bg-hover:  #434343;
-  --ctl-bg-active: #2c2c2c;
-  --ctl-border:    #202020;
+  /* Dark stone accent — quiet wabi-sabi brown. */
+  --accent:    #3e2c1e;
+  --accent-hi: #5c4633;
+  --accent-fg: #fbf6ec;
+
+  /* Secondary "active" cue — bengara red-orange. Required because brown-on-
+     washi is low-contrast for selection state; pairing the stone border with
+     a bengara left-edge + faint bg tint restores the readable affordance. */
+  --active:    #a23a2a;
+  --active-bg: rgba(162, 58, 42, 0.10);
+
+  /* Hairlines — kasumi cloud tones, softer than 1px solid. */
+  --border:         #d4c9b3;
+  --border-strong:  #b8a98c;
+  --border-section: #c9bda2;
+  --border-focus:   var(--active);
+  --ring-focus:     rgba(162, 58, 42, 0.28);
+
+  /* Control language — fields sit slightly inset against the panel. */
+  --ctl-bg:        #fbf6ec;
+  --ctl-bg-hover:  #fffaf0;
+  --ctl-bg-active: #e9dfc8;
+  --ctl-border:    #c9bda2;
   --ctl-h: 22px;
 
-  /* Text */
-  --text-0: #e8e8e8;
-  --text-1: #a8a8a8;
-  --text-2: #8c8c8c;
-  --text-disabled: #5e5e5e;
-
-  /* Accent — yellow-orange (amber) */
-  --accent:    #f59e0b;
-  --accent-hi: #fbbf24;
-  --accent-fg: #1a1108;
-
-  /* Status — warning shifted to a clean yellow so it stays visually
-     distinct from the amber accent. */
-  --danger:  #ef4444;
-  --warning: #facc15;
-  --success: #22c55e;
-  --info:    #3b82f6;
+  /* Status — retuned for light bg readability. */
+  --danger:  #c0392b;
+  --warning: #b8860b;
+  --success: #2e7d32;
+  --info:    #1e3a5f;
 
   /* Typography */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "Yuji Syuku", "Shippori Mincho", serif;
+  --font-sans:    system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+                  "Yu Gothic UI", "Noto Sans CJK TC", sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;
   --fs-lg: 15px;
   --fs-xl: 18px;
 
-  /* Spacing */
+  /* Spacing — unchanged from Blender baseline. */
   --sp-1: 2px;
   --sp-2: 4px;
   --sp-3: 6px;
@@ -59,19 +65,19 @@
   --sp-6: 16px;
   --sp-7: 24px;
 
-  /* Radii — Blender rounds controls at ~4 px */
+  /* Radii — unchanged. */
   --r-sm: 4px;
   --r-md: 6px;
   --r-lg: 8px;
 
-  /* Motion */
+  /* Motion — unchanged. */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 120ms;
   --dur-med:  200ms;
 
-  /* Shadows */
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.45);
+  /* Shadows — lifted off light bg, less heavy than dark theme. */
+  --shadow-md: 0 4px 12px rgba(62, 44, 30, 0.18);
+  --shadow-lg: 0 12px 32px rgba(62, 44, 30, 0.28);
 }
 
 html, body {
