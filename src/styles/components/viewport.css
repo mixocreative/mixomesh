@@ -204,23 +204,24 @@
 }
 .n-panel.open { transform: translateX(0); }
 .n-panel > * { pointer-events: auto; }
+/* Matches workspace tab strip (--bg-2 panel surface) so the pull-handle
+   reads as a UI tab, not a HUD glass pill — Shift+N opens it into the
+   3D-cursor panel that DOES use HUD glass. */
 .np-tab {
   width: 26px;
   height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--hud-bg);
-  backdrop-filter: var(--hud-blur);
-  -webkit-backdrop-filter: var(--hud-blur);
-  color: var(--hud-text);
-  border: 1px solid var(--hud-border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
   border-right: none;
   border-radius: var(--r-md) 0 0 var(--r-md);
-  box-shadow: var(--hud-highlight), var(--hud-shadow);
   cursor: pointer;
+  text-shadow: none;
 }
-.np-tab:hover { color: var(--accent); }
+.np-tab:hover { background: var(--bg-3); color: var(--text-0); }
 .np-body {
   width: 210px;
   padding: var(--sp-3);
