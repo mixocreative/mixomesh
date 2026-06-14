@@ -81,6 +81,9 @@ export const EVENTS = {
   // the Scene + Print panels re-render to the restored values.
   SETTINGS_RESET:          'settings:reset',
 
+  // i18n
+  LOCALE_CHANGED:          'i18n:localeChanged',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
