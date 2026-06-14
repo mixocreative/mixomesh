@@ -14,6 +14,7 @@
 import { Toast, dismiss } from './Toast.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Surface a failure to the user. `modal` routes opaque/heavy operations
@@ -22,15 +23,16 @@ import { ProgressOverlay } from './ProgressOverlay.js';
  * @param {unknown} err
  * @param {{ title?: string, modal?: boolean, filename?: string }} [opts]
  */
-export function reportError(err, { title = 'Something went wrong', modal = false, filename } = {}) {
-  const message = err?.message ? String(err.message) : String(err ?? 'Unknown error');
-  console.error(`${title}:`, err);
+export function reportError(err, { title, modal = false, filename } = {}) {
+  const resolvedTitle = title ?? t('toast.somethingWentWrong');
+  const message = err?.message ? String(err.message) : String(err ?? t('toast.unknownError'));
+  console.error(`${resolvedTitle}:`, err);
   if (modal) {
     const detail = err?.stack ? String(err.stack) : err?.cause ? String(err.cause) : '';
-    Modal.open('importError', { filename: filename ?? title, message, detail });
+    Modal.open('importError', { filename: filename ?? resolvedTitle, message, detail });
     return;
   }
-  Toast.show(`${title}: ${message}`, 'error', 0);
+  Toast.show(t('toast.titleMessage', { title: resolvedTitle, msg: message }), 'error', 0);
 }
 
 /**
@@ -41,12 +43,13 @@ export function reportError(err, { title = 'Something went wrong', modal = false
  * @returns {Promise<T|undefined>}
  * @template T
  */
-export async function guard(fn, { title = 'Operation failed', modal = false, filename, loadingToastId } = {}) {
+export async function guard(fn, { title, modal = false, filename, loadingToastId } = {}) {
+  const resolvedTitle = title ?? t('toast.operationFailed');
   try {
     return await fn();
   } catch (err) {
     if (loadingToastId) dismiss(loadingToastId);
-    reportError(err, { title, modal, filename });
+    reportError(err, { title: resolvedTitle, modal, filename });
     return undefined;
   }
 }
@@ -85,7 +88,7 @@ export async function runTask(label, fn, { overlay = false } = {}) {
  * @param {string} [loadingToastId]
  */
 export function safeAsync(fn, loadingToastId) {
-  return guard(fn, { title: 'Error', loadingToastId });
+  return guard(fn, { title: t('toast.errorTitle'), loadingToastId });
 }
 
 export const Status = { reportError, guard, runTask, safeAsync };
