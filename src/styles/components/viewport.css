@@ -1,5 +1,12 @@
 /* HUD overlay tokens (--hud-*) live in tokens.css — single CSS color source. */
 
+/* Universal text-shadow inside HUD containers — labels stay legible even when
+   the glass goes lighter (e.g. user pulls darkIntensity low against bright bg).
+   Cheap on perf; modern browsers only paint shadows on text glyphs. */
+.viewport-toolbar, .vp-toggles, .nav-cube, .n-panel {
+  text-shadow: var(--hud-text-shadow);
+}
+
 /* ── Viewport toolbar (Fusion 360 style) ─────────────────── */
 .viewport-toolbar {
   position: absolute;
