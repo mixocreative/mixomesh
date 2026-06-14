@@ -11,6 +11,7 @@ import { ShaderLibrary } from './ShaderLibrary.js';
 import { MeshValidator } from './MeshValidator.js';
 import { Toast } from '../ui/Toast.js';
 import { ProgressOverlay } from '../ui/ProgressOverlay.js';
+import { t } from '../i18n/index.js';
 import { putHandle, getHandle } from './idb.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
@@ -747,16 +748,16 @@ function _queueValidation(meshId) {
   if (!mesh) return;
   const name = mesh.name || 'mesh';
   if (!MeshValidator.shouldAutoValidate(mesh)) {
-    Toast.show(`${name}: skipped auto-validate (>100k verts)`, 'info', 4000);
+    Toast.show(t('toast.validateSkipped', { name }), 'info', 4000);
     return;
   }
-  const toastId = Toast.show(`Validating ${name}…`, 'loading');
+  const toastId = Toast.show(t('toast.validating', { name }), 'loading');
   Promise.resolve().then(async () => {
     try {
       const results = await MeshValidator.validateMesh(mesh);
       Toast.dismiss(toastId);
       if (!results.length) {
-        Toast.show(`✓ ${name}`, 'success', 3000);
+        Toast.show(t('toast.validateOk', { name }), 'success', 3000);
         return;
       }
       const errs  = results.filter(r => r.severity === 'error').length;
@@ -766,10 +767,12 @@ function _queueValidation(meshId) {
       // core→ui→core import cycle).
       const onClick = () => dispatch(EVENTS.VALIDATION_FOCUS_REQUESTED, { meshId });
       if (errs > 0) {
-        const w = warns ? `, ${warns} warning${warns === 1 ? '' : 's'}` : '';
-        Toast.show(`✗ ${name}: ${errs} error${errs === 1 ? '' : 's'}${w}`, 'error', 0, { onClick });
+        const msg = warns
+          ? t('toast.validateErrorsWithWarnings', { name, errs, warns })
+          : t('toast.validateErrors', { name, errs });
+        Toast.show(msg, 'error', 0, { onClick });
       } else {
-        Toast.show(`⚠ ${name}: ${warns} warning${warns === 1 ? '' : 's'}`, 'warning', 0, { onClick });
+        Toast.show(t('toast.validateWarnings', { name, warns }), 'warning', 0, { onClick });
       }
     } catch (err) {
       Toast.dismiss(toastId);
