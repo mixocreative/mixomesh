@@ -1,5 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
@@ -22,12 +23,30 @@ import { exportFactor } from '../core/print/PrintScale.js';
 export const PRINTERS = printersData;
 
 let _bodyEl = null;
+let _root   = null;
 let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'export'
+
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
 
 export function init() {
   _bodyEl = document.getElementById('rp-print-body');
+  _root   = document.getElementById('rp-print');
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
+  // Re-translate the static `.rp-title` in index.html + any body-level keys
+  // on locale switch. The Print panel's body uses tabbed sub-content with no
+  // section.* headers in scope for v1 — keys live in the static header today.
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
 
   // Re-render on state changes. (EVENTS.OBJECT_ADDED never existed — the
   // import signal is ASSET_INSTANTIATED; review M11.)
