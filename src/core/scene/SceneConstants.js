@@ -1,4 +1,10 @@
 export const ACCENT_HEX = '#f59e0b';
+// Dark stone variant for selection outline + 3D cursor when the viewport bg
+// is LIGHT (warm amber-on-light reads as washed-out). Auto-flipped by
+// SceneManager.applyRenderSettings based on render.background.
+export const OUTLINE_ACTIVE_LIGHT_HEX   = '#5c1f08';   // deep burnt amber
+export const OUTLINE_SELECTED_LIGHT_HEX = '#8a3c0a';   // medium amber-brown
+export const CURSOR_LIGHT_HEX           = '#5c1f08';
 
 export const DEFAULT_GRID_CELL_MM = 10;
 export const DEFAULT_GRID_SUBDIV = 10;

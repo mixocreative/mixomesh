@@ -21,6 +21,9 @@ const BABYLON = window.BABYLON;
 let _engine = null;
 let _scene  = null;
 let _camera = null;
+// Module-scope so setOutlineColors() can mutate live (auto-flip on bg switch).
+let _activeColor   = null;
+let _selectedColor = null;
 let _outlineActive = false;        // pass + mask RTT gated on a non-empty selection
 let _selMaskRTT          = null;   // RenderTargetTexture
 let _selMaskMatActive    = null;   // override for active mesh — full intensity
@@ -38,8 +41,8 @@ export function initSelectionOutline(scene, engine, camera) {
   _engine = engine;
   _scene  = scene;
   _camera = camera;
-  const ACTIVE_COLOR   = BABYLON.Color3.FromHexString(OUTLINE_ACTIVE_HEX);
-  const SELECTED_COLOR = BABYLON.Color3.FromHexString(OUTLINE_SELECTED_HEX);
+  _activeColor   = BABYLON.Color3.FromHexString(OUTLINE_ACTIVE_HEX);
+  _selectedColor = BABYLON.Color3.FromHexString(OUTLINE_SELECTED_HEX);
 
   // Two-channel mask so the outline pass can tint the ACTIVE object (mask .r)
   // a darker orange and the other SELECTED objects (mask .g) the accent amber —
@@ -166,8 +169,8 @@ export function initSelectionOutline(scene, engine, camera) {
     shaderLanguage: isWGPU ? BABYLON.ShaderLanguage.WGSL : BABYLON.ShaderLanguage.GLSL,
   });
   _outlinePass.onApply = (eff) => {
-    eff.setColor3('activeColor', ACTIVE_COLOR);
-    eff.setColor3('selectedColor', SELECTED_COLOR);
+    eff.setColor3('activeColor', _activeColor);
+    eff.setColor3('selectedColor', _selectedColor);
     eff.setFloat2('texelSize',
       1 / _engine.getRenderWidth(),
       1 / _engine.getRenderHeight());
@@ -221,6 +224,18 @@ function _setMaskMeshes(entries) {
     try { _selMaskRTT.setMaterialForRendering(mesh, mat); } catch { /* ignore */ }
     _maskMeshes.add(mesh);
   }
+}
+
+/**
+ * Live-swap the two outline tints. Called when render.background flips so the
+ * outline reads against either washi-light or stone-dark gradients.
+ * @param {string} activeHex
+ * @param {string} selectedHex
+ */
+export function setOutlineColors(activeHex, selectedHex) {
+  if (!_activeColor || !_selectedColor) return;
+  _activeColor   = BABYLON.Color3.FromHexString(activeHex);
+  _selectedColor = BABYLON.Color3.FromHexString(selectedHex);
 }
 
 /**

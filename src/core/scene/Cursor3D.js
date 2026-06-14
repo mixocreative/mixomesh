@@ -113,6 +113,14 @@ export function setCursorVisible(on) {
   _root?.setEnabled(!!on);
 }
 
+/** Live-swap the ring + crosshair tint (called when bg flips). */
+export function setCursorColor(hex) {
+  if (!_ring || !_cross) return;
+  const c = BABYLON.Color3.FromHexString(hex);
+  _ring.color  = c;
+  _cross.color = c;
+}
+
 /** @returns {boolean} */
 export function isCursorVisible() {
   return !!_root?.isEnabled();
