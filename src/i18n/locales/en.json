@@ -15,6 +15,7 @@
   "panel.scene.title": "Scene",
   "panel.print.title": "Print",
   "panel.shader.title": "Shader",
+  "panel.shaderLibrary.title": "Shader Library",
   "panel.outliner.title": "Outliner",
   "panel.assets.title": "Assets",
   "panel.session.title": "Session",
