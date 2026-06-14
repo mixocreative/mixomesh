@@ -40,6 +40,7 @@
   padding: 0 var(--sp-2);
   background: transparent;
   color: var(--hud-text);
+  text-shadow: var(--hud-text-shadow);
   border: 1px solid transparent;
   border-radius: var(--r-md);
   cursor: pointer;
@@ -140,6 +141,7 @@
   backdrop-filter: var(--hud-blur);
   -webkit-backdrop-filter: var(--hud-blur);
   color: var(--hud-text);
+  text-shadow: var(--hud-text-shadow);
   border: 1px solid var(--hud-border);
   box-shadow: var(--hud-highlight);
   backface-visibility: hidden;

@@ -53,24 +53,24 @@
      bottom inner dark (concave shadow under the chrome lip). Used by
      .viewport-toolbar / .vp-toggles / .nav-cube / .n-panel in
      components/viewport.css. */
-  --hud-tint:        rgba(40, 40, 50, 0.16);
-  --hud-tint-strong: rgba(40, 40, 50, 0.30);
+  --hud-tint:        rgba(40, 40, 50, 0.08);
+  --hud-tint-strong: rgba(40, 40, 50, 0.18);
   --hud-sheen:       linear-gradient(180deg,
-                       rgba(255, 255, 255, 0.20) 0%,
-                       rgba(255, 255, 255, 0.05) 50%,
-                       rgba(0,   0,   0,   0.06) 100%);
+                       rgba(255, 255, 255, 0.16) 0%,
+                       rgba(255, 255, 255, 0.03) 55%,
+                       rgba(255, 255, 255, 0.00) 100%);
   --hud-bg:        var(--hud-sheen), var(--hud-tint);
   --hud-bg-strong: var(--hud-sheen), var(--hud-tint-strong);
-  --hud-text:      #f4f4f6;
+  --hud-text:      #ffffff;
   --hud-text-hi:   #ffffff;
-  --hud-text-dim:  #c0c0c6;
-  --hud-border:    rgba(255, 255, 255, 0.22);
-  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.35),
-                   inset 0 -1px 0 rgba(0,   0,   0,   0.30);
-  --hud-shadow:    0 10px 36px rgba(0, 0, 0, 0.34),
-                   0 1px  2px  rgba(0, 0, 0, 0.20);
-  --hud-blur:      blur(22px) saturate(180%) brightness(115%);
-  --hud-hover-bg:  rgba(255, 255, 255, 0.14);
+  --hud-text-dim:  rgba(255, 255, 255, 0.72);
+  --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --hud-border:    rgba(255, 255, 255, 0.28);
+  --hud-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  --hud-shadow:    0 10px 36px rgba(0, 0, 0, 0.22),
+                   0 1px  2px  rgba(0, 0, 0, 0.14);
+  --hud-blur:      blur(26px) saturate(190%) brightness(118%);
+  --hud-hover-bg:  rgba(255, 255, 255, 0.16);
 
   /* X/Y/Z axis colours — standard CAD/Blender convention. Used by the N-panel
      axis chips (components/viewport.css). The Babylon side uses its own hexes
