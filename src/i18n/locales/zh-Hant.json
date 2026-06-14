@@ -81,6 +81,7 @@
   "toast.turntableFailed": "轉盤錄製失敗 — 請查看主控台",
   "toast.pngRendered": "已算繪 PNG ({width} × {height})",
   "toast.pngFailed": "PNG 算繪失敗 — 請查看主控台",
+  "toast.nothingSelected": "未選擇任何物件",
   "import.error.title": "無法匯入 {filename}",
   "empty.viewport": "拖入檔案或匯入以開始",
   "empty.session": "此工作集中沒有素材",

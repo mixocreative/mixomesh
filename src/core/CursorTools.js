@@ -10,6 +10,7 @@ import { Selection } from './Selection.js';
 import { push, TransformCommand } from './HistoryManager.js';
 import { captureWorld } from './commands/support.js';
 import { Toast } from '../ui/Toast.js';
+import { t } from '../i18n/index.js';
 
 const BABYLON = window.BABYLON;
 
@@ -31,7 +32,7 @@ function _selectionMedian() {
  */
 export function selectionToCursor() {
   const resolved = Selection.getSelectedResolved();
-  if (!resolved.length) { Toast.show('Nothing selected', 'info', 2000); return; }
+  if (!resolved.length) { Toast.show(t('toast.nothingSelected'), 'info', 2000); return; }
   const median = _selectionMedian();
   const cursor = SceneManager.getCursor();
   const dx = cursor.x - median.x, dy = cursor.y - median.y, dz = cursor.z - median.z;
@@ -53,7 +54,7 @@ export function selectionToCursor() {
 /** Move the cursor to the selection median (shows it for feedback). */
 export function cursorToSelection() {
   const median = _selectionMedian();
-  if (!median) { Toast.show('Nothing selected', 'info', 2000); return; }
+  if (!median) { Toast.show(t('toast.nothingSelected'), 'info', 2000); return; }
   SceneManager.setCursor(median);
   SceneManager.setCursorVisible(true);
 }

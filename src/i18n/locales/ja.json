@@ -81,6 +81,7 @@
   "toast.turntableFailed": "ターンテーブル録画に失敗しました — コンソールを確認",
   "toast.pngRendered": "PNG を出力しました ({width} × {height})",
   "toast.pngFailed": "PNG レンダリングに失敗しました — コンソールを確認",
+  "toast.nothingSelected": "何も選択されていません",
   "import.error.title": "{filename} を読み込めませんでした",
   "empty.viewport": "ファイルをドロップまたは読み込み",
   "empty.session": "このセッションに素材はありません",
