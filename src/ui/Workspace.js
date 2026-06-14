@@ -261,9 +261,19 @@ function _renderPill() {
     btn.type = 'button';
     btn.className = 'ws-btn';
     btn.dataset.ws = name;
-    btn.innerHTML = `${icon(def.icon, { width: 13, height: 13 })}` +
-                    `<span class="ws-tab-primary" data-i18n-key="workspace.${name}">${t(`workspace.${name}`)}</span>` +
-                    `<span class="ws-tab-sub" data-i18n-key="workspace.${name}.sub">${t(`workspace.${name}.sub`)}</span>`;
+    btn.innerHTML = icon(def.icon, { width: 13, height: 13 });
+
+    const primary = document.createElement('span');
+    primary.className = 'ws-tab-primary';
+    primary.dataset.i18nKey = `workspace.${name}`;
+    primary.textContent = t(`workspace.${name}`);
+
+    const sub = document.createElement('span');
+    sub.className = 'ws-tab-sub';
+    sub.dataset.i18nKey = `workspace.${name}.sub`;
+    sub.textContent = t(`workspace.${name}.sub`);
+
+    btn.append(primary, sub);
     btn.title = `${def.label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
     btn.setAttribute('role', 'tab');
     btn.addEventListener('click', () => setWorkspace(name));
