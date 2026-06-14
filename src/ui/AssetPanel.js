@@ -1,5 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, dispatch } from '../core/StateManager.js';
+import { t } from '../i18n/index.js';
 import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
 import { kvSet, kvGet, getHandle } from '../core/idb.js';
 import { Modal } from './Modal.js';
@@ -18,6 +19,18 @@ const SUPPORTED   = new Set([...MESH_EXT, ...TEXTURE_EXT]);
 const DRAG_MIME   = 'application/x-mixomesh-asset';
 
 const SESSION_KEY = '__session__';
+
+// Walk every element under `root` that carries data-i18n-key and rewrite its
+// textContent through t(). MUST use textContent — translations are plain text,
+// never HTML (translator-safety rule from spec §Security).
+function _retranslate(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (!key) continue;
+    el.textContent = t(key);
+  }
+}
 
 let _root          = null;
 let _listEl        = null;          // #ap-tree-list (mount branches; library tab)
@@ -48,7 +61,7 @@ export function init() {
     <div class="ap-tree" id="ap-tree" data-tab="session">
       <div class="ap-tree-header">
         <div class="ap-tabs" role="tablist" aria-label="Asset source">
-          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" title="Assets used in this project">Session</button>
+          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" title="Assets used in this project"><span data-i18n-key="panel.session.title">Session</span></button>
           <button class="ap-tab" type="button" role="tab" aria-selected="false" data-tab="library" title="A mounted folder you can pull assets from across projects">Asset Library</button>
         </div>
         <button class="ap-btn" id="ap-mount-btn" type="button" title="Mount a directory">
@@ -93,6 +106,9 @@ export function init() {
   subscribe(EVENTS.ASSET_REGISTERED,   () => _renderGrid());
   subscribe(EVENTS.ASSET_REMOVED,      () => _renderGrid());
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
+  // Header is built once and survives re-renders — only retranslate it on
+  // locale switch; the grid body has no section.* labels in scope for v1.
+  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
 
   Modal.register('remountFolder', ({ data, close }) => {
     const el = document.createElement('div');
@@ -113,6 +129,7 @@ export function init() {
 
   _renderTreeList();
   _renderGrid();
+  _retranslate(_root);
 }
 
 const LAST_MOUNT_KEY = 'last_mount_dir';
