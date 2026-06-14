@@ -45,6 +45,8 @@
   "toast.exported": "已匯出 {filename}",
   "toast.saved": "已儲存",
   "toast.reset": "已重設為預設值",
+  "toast.dropSkipped": "已略過 {name}：不支援 ({ext})",
+  "toast.dropNeedsMesh": "請將模型檔與其 .mtl/材質一起拖入（或掛載資料夾）",
   "import.error.title": "無法匯入 {filename}",
   "empty.viewport": "拖入檔案或匯入以開始",
   "empty.session": "此工作集中沒有素材",

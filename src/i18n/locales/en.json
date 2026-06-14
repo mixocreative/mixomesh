@@ -45,6 +45,8 @@
   "toast.exported": "Exported {filename}",
   "toast.saved": "Saved",
   "toast.reset": "Reset to defaults",
+  "toast.dropSkipped": "Skipped {name}: unsupported ({ext})",
+  "toast.dropNeedsMesh": "Drop the model file together with its .mtl/textures (or mount the folder).",
   "import.error.title": "Couldn't import {filename}",
   "empty.viewport": "Drop a file or import to start",
   "empty.session": "No assets in this session",

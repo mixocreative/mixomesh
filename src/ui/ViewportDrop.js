@@ -2,6 +2,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { AssetPanel } from './AssetPanel.js';
 import { Toast } from './Toast.js';
 import { safeImport } from './ImportError.js';
+import { t } from '../i18n/index.js';
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
@@ -121,12 +122,12 @@ function _handleDrop(e, position) {
     } else if (ext === '.mtl' || AssetLoader.isTextureExt(ext)) {
       siblingFiles.push(file);
     } else {
-      Toast.show(`Skipped ${file.name}: unsupported (${ext || 'no ext'})`, 'warning', 4000);
+      Toast.show(t('toast.dropSkipped', { name: file.name, ext: ext || 'no ext' }), 'warning', 4000);
     }
   }
   if (!meshEntries.length) {
     if (siblingFiles.length) {
-      Toast.show('Drop the model file together with its .mtl/textures (or mount the folder).', 'info', 5000);
+      Toast.show(t('toast.dropNeedsMesh'), 'info', 5000);
     }
     return;
   }
