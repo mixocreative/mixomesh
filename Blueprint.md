@@ -23,10 +23,10 @@ Extension OR OBJ+MTL+PNG. Continuous-tone textures are preserved end-to-end
 OrcaSlicer/PrusaSlicer ecosystem). They consume 3MF with `<colorgroup>` +
 per-object `pindex` for filament-zone assignment, one solid color per part.
 
-Per-printer behavior is **data-driven** via `src/config/printers.json` (single
-source of truth: format, color mode, texture limits, bed dimensions,
-axis/winding/unit, prep pipeline). Adding a printer = adding a JSON row,
-not editing code.
+Per-printer reference data is **data-driven** via `src/config/printers.json`
+(single source of truth for display name, vendor, build area / bed dimensions,
+and advisory format/color metadata). Export format selection is deliberately
+button-driven in the UI: OBJ, 3MF, and STL remain explicit user choices.
 
 ---
 
@@ -38,10 +38,10 @@ not editing code.
 - **All state mutations go through `StateManager.dispatch()`.**
 - **All reversible actions push a Command to `HistoryManager`.**
 - **All inter-module communication uses typed events from `events.js`.**
-- **Export is printer-driven, not format-driven.** Target printer (from
-  `src/config/printers.json`) declares format + color mode + prep steps.
-  Mimaki target preserves textures; filament target collapses to solid
-  per-part color. Never collapse textures for a Mimaki target.
+- **Export format is button-driven.** The Export panel's OBJ / 3MF / STL
+  buttons choose the pipeline explicitly. Printer profile selection is a
+  build-area reference for bed preview, dimension checks, labels, and scale
+  context; it must not hide, switch, or block an export format button.
 - **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
   `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
   stamping `sourceGroupId` on each SceneObject so validator + exporter can
@@ -392,14 +392,14 @@ Save/load path:
    state.
 
 Export path:
-1. `PrintPanel` reads the selected printer profile and invokes one of
-   `PrintManager.exportOBJ/exportSTL/exportThreeMF`.
+1. `PrintPanel` exposes explicit OBJ / 3MF / STL export buttons and invokes
+   `PrintManager.exportOBJ/exportSTL/exportThreeMF` from the clicked button.
 2. `PrintManager._runExport` collects printable meshes, validates the source
-   scene, clones meshes with unique geometry, builds a plan from printer +
-   scene/print scale, runs ordered prep steps on clones, validates the prepared
-   clones, serializes, packages, and downloads.
-3. Export never mutates live scene meshes. Mimaki texture profiles keep UVs and
-   textures; filament profiles collapse to solid per-part color.
+   scene, clones meshes with unique geometry, builds a plan from scene/print
+   scale and current bed reference, runs ordered prep steps on clones, validates
+   the prepared clones, serializes, packages, and downloads.
+3. Export never mutates live scene meshes. Format buttons choose the requested
+   file type; printer profile selection is a build-area/reference setting.
 
 #### Typed Contract Modules (type-only — NO runtime twins)
 
@@ -955,7 +955,7 @@ const initialState = {
     targetPrinterId: 'mimaki-3duj-553',
     bedDimensions: { x: 508, y: 508, z: 305 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
-    objBakeSolidTextures: true,
+    objBakeSolidTextures: false,
   },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
@@ -1982,7 +1982,7 @@ Every field persisted. Restored exactly.
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": {"x":508,"y":508,"z":305},
     "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05,
-    "objBakeSolidTextures": true
+    "objBakeSolidTextures": false
   },
   "assetLibrary":  [ /* AssetEntry without container or blobUrl */ ],
   "collections":   [ /* CollectionEntry[] — outliner display buckets */ ],
@@ -2149,14 +2149,13 @@ regardless of save mode.
 ### OBJ solid-colour PNG synthesis
 
 Mimaki UV-inkjet slicers are texture-first: a shader with a flat diffuse
-colour and no map gets ignored or interpreted as plain white. To keep
-OBJ+MTL exports usable on the primary printer target, **OBJ export
-synthesises a 4×4 RGBA PNG per unique solid-colour material** and injects a
-`map_Kd` line into the MTL pointing at it. Tiled sampling makes 4×4
-sufficient — every texel is the same colour, so any UV (or none) resolves
-to the same pixel. Concept-only fallback: this is OBJ-specific; 3MF
-Materials Extension already preserves real textures and falls back to
-`<m:colorgroup>` for solid materials.
+colour and no map may be ignored or interpreted as plain white by some OBJ
+consumers. OBJ export therefore offers an **opt-in** fallback that synthesises
+a 4×4 RGBA PNG per unique solid-colour material and injects a `map_Kd` line
+into the MTL pointing at it. Tiled sampling makes 4×4 sufficient — every texel
+is the same colour, so any UV (or none) resolves to the same pixel. Concept-only
+fallback: this is OBJ-specific; 3MF Materials Extension preserves real textures
+and falls back to `<m:colorgroup>` for solid materials.
 
 Filenames + dedup:
 - Per-material hex key `RRGGBBAA` where `A = round(material.alpha × 255)`.
@@ -2167,17 +2166,15 @@ Filenames + dedup:
 Transparency:
 - The α byte lives **in the PNG** (modern slicers, Mimaki especially, read
   this).
-- MTL `d` (dissolve) is left at whatever Babylon's `OBJExport.MTL` emits
-  — i.e. it carries `material.alpha` already — so legacy slicers that
-  only read MTL opacity still get the right value. The two channels match
-  by construction; multiplying both is a slicer edge case rare enough to
-  accept.
+- MTL `d` (dissolve) is generated by Mixomesh from `material.alpha`, so legacy
+  slicers that only read MTL opacity still get the right value. The PNG alpha
+  and MTL dissolve channels match by construction.
 
 Toggle:
-- `state.print.objBakeSolidTextures` (default **true**). Persisted in
+- `state.print.objBakeSolidTextures` (default **false**). Persisted in
   `state.print` like every other print option; survives save/load via
   `PersistenceManager`'s shallow-merge — old saves without the key auto-
-  default to `true` on load.
+  default to `false` on load.
 - Surfaced as the **"Bake solid colors to texture (OBJ, Mimaki-friendly)"**
   checkbox on the Export tab. Toggling dispatches a silent `setState` (no
   history entry — it's an export option, not a scene mutation).
@@ -2188,13 +2185,13 @@ Toggle:
 Code seams:
 - `PrintManager._synthesizeSolidShaderTextures(meshList)` — returns
   `{ blobByName, filenameByMaterialName }`. Skips materials with a real
-  diffuse/albedo/base texture (the existing `_collectTextureBlobs` path
-  owns those).
+  diffuse/albedo/base texture (the `collectTextureExportData` path owns those).
 - `PrintManager._solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas.
-- `PrintManager._injectMapKd(mtlString, filenameByMaterialName)` —
-  post-processes the MTL string emitted by `BABYLON.OBJExport.MTL`,
-  splitting on `^newmtl\s+` to locate each block and appending the
-  `map_Kd` line. No-op when the map is empty.
+- `PrintManager._buildOBJMtl(meshEntries, filenameByMaterialName)` generates
+  MTL blocks using Mixomesh material ids/names, diffuse/albedo/base colour,
+  alpha, and optional `map_Kd` lines. Mixomesh does not call
+  `BABYLON.OBJExport.MTL` because Babylon's MTL helper accepts one mesh, emits
+  `newmtl mat1`, and can mismatch OBJ `usemtl <material.id>`.
 - All three are called from `_serializeOBJ` only; STL and 3MF are
   unaffected.
 > **Phase 6 — structured export pipeline.** All three entry points are thin
@@ -2336,12 +2333,18 @@ export const SCALE_PRESETS = scalePresetData;
 Each entry: `{ category, label, ratio }`. `ratio: null` marks the free-form
 **Custom** row (user types any `M:N`).
 
-### Printer Profiles (`src/config/printers.json`) — single source of truth
+### Printer Profiles (`src/config/printers.json`) — build-area reference
 
-Per-printer behavior (format, color mode, texture limits, bed dimensions,
-axis/winding, prep pipeline) is data-driven. `src/config/printers.json` is the
-**only** place to add/edit a printer. Replaces the earlier
-`src/config/bed-presets.json` (deleted) — bed dims live inline per row.
+Per-printer reference data is data-driven. `src/config/printers.json` is the
+**only** place to add/edit printer display metadata and build-area dimensions.
+Replaces the earlier `src/config/bed-presets.json` (deleted) — bed dims live
+inline per row.
+
+Export format is **not** selected by the printer profile. The Export panel's
+OBJ / 3MF / STL buttons are the user-facing source of truth for the requested
+file type. Printer rows may carry `format`, `color`, `texture`, `axis`, `unit`,
+and `prep` fields as descriptive/recommendation metadata, but selecting a
+printer must not hide, switch, or block an explicit export button.
 
 Schema (one entry per printer, keyed by id):
 ```js
@@ -2384,14 +2387,16 @@ Current profile ids:
 
 Consumers:
 - `PrintPanel.js` reads `state.print.targetPrinterId` → looks up row → drives
-  format/color UX, bed-size readout, and the export call.
+  printer labels, advisory format/color text, and bed-size readout. Export
+  calls still come from the explicit OBJ / 3MF / STL buttons.
 - `SceneManager.js` reads the same row's `bed` for the floor/bed preview
   geometry (replaces the old `bedPresets` lookup).
-- `PrintManager._serialize3MF` resolves the current printer row and chooses
-  Materials Extension for `format: '3mf-materials-ext'`; all other 3MF rows
-  use colorgroup. OBJ/STL calls use their explicit public entry points.
+- `PrintManager` entry points remain explicit by requested format:
+  `exportOBJ`, `exportThreeMF`, and `exportSTL`. 3MF sub-flavor is chosen by
+  export content: textured meshes with UVs use Materials Extension; solid-only
+  exports use colorgroup. Build-area printer selection does not switch flavor.
 - `src/core/print/ExportPlanner.js` reads printer id + scene/print scale to
-  produce filename suffixes, export scale, profile texture helpers, and the
+  produce filename suffixes, export scale, profile labels/helpers, and the
   request shape tested by `tests/export-planner.test.mjs`.
 
 Default seeded entry: `mimaki-3duj-553`. State default
@@ -2417,15 +2422,41 @@ Current implementation:
 3. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weld`,
    `optimizeIndices`, `createNormals`.
 4. `_serializeOBJ(ctx)` calls `BABYLON.OBJExport.OBJ(meshes, true,
-   mtlName, true)` and `BABYLON.OBJExport.MTL(meshes)`.
-5. Real diffuse/albedo/base textures are encoded as PNG blobs under
-   `textures/`.
-6. If `state.print.objBakeSolidTextures` is true, solid-color materials also
+   baseName, true)` for geometry and rewrites the emitted `mtllib` to exactly
+   match the paired `.mtl` entry.
+5. Mixomesh generates the MTL file so `newmtl` names match OBJ `usemtl`
+   material ids and PBR/albedo materials do not depend on Babylon
+   StandardMaterial-only fields.
+6. Real diffuse/albedo/base textures are encoded as PNG blobs under
+   `textures/` from `collectTextureExportData`; user-loaded and restored
+   textures resolve by `texture.metadata.mixoAssetId` so export prefers the
+   captured full-resolution source instead of a capped GPU copy.
+7. If `state.print.objBakeSolidTextures` is true, solid-color materials also
    get synthetic 4×4 PNGs and matching `map_Kd` MTL lines.
-7. Output is always an outer `.zip`. Combined mode contains one OBJ, one MTL,
+8. Output is always an outer `.zip`. Combined mode contains one OBJ, one MTL,
    and texture entries. Individual mode contains per-mesh OBJ/MTL entries plus
    shared texture entries.
-8. Live scene meshes are never scaled or rewritten.
+9. Live scene meshes are never scaled or rewritten.
+
+### 3MF Export
+
+`exportThreeMF()` is selected by the explicit **3MF** export button. The
+printer dropdown does not choose the 3MF sub-flavor.
+
+Current implementation:
+1. `_runExport('3mf', options)` collects print parts and clones each mesh.
+2. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
+   `optimizeIndices`, `csgSolidOnly`, `createNormals`.
+3. `_serialize3MF(ctx)` inspects the prepared export clones:
+   - if any mesh has a diffuse/albedo/base texture and UVs, it calls
+     `buildMaterialsExtEntries()` so real image textures and UVs are preserved;
+   - if the export is solid-only, it calls `buildColorGroupEntries()` for the
+     lean filament-style `<m:colorgroup>` package.
+4. Mixed exports use Materials Extension for textured meshes and colorgroup
+   resources for solid meshes inside the same package.
+5. Texture blobs resolve through `ExportTextures.getAssetIdForTexture()`;
+   tagged user/restored textures use `texture.metadata.mixoAssetId` so captured
+   full-resolution sources win over viewport-capped GPU copies.
 
 ### STL Export (Geometry-only fallback)
 **Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
@@ -3237,15 +3268,16 @@ export async function resolve(specifier, context, nextResolve) {
 ### Test files
 | File | Count | Covers |
 |---|---:|---|
-| `tests/export.test.mjs` | 47 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
+| `tests/export.test.mjs` | 50 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
 | `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, export scale, texture-preserving vs solid-colour profile helpers |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |
 | `tests/scale.test.mjs` | 8 | ScaleMath: ratio parser/formatter, Authored→Scene normalization, Scene→Print export scale, scene-scale rebake factor, v3.1 field compatibility |
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
-| `tests/state-shape.test.mjs` | 10 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = true`, persistence migration shallow-merge handles missing keys |
-| `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: layout per printer profile, texture dedup, UV round-trip via pseudo-loader regex, Bambu fallback to colorgroup |
+| `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
+| `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
+| `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: content-driven textured vs solid-only flavor, texture dedup, UV round-trip via pseudo-loader regex, printer dropdown does not switch flavor |
 | `tests/validator-group.test.mjs` | 5 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam |
 | `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |
 
@@ -3309,7 +3341,7 @@ build history. Detailed behaviour contracts live in the module sections above.
 
 ### Current Product Baseline
 
-- **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export printer-driven packages.
+- **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export via the explicit OBJ / 3MF / STL format buttons.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
 - **Secondary targets:** Bambu / Prusa / Orca-style filament printers use 3MF `<colorgroup>` with one solid colour per part.
 - **Verification baseline:** run `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:browser`, and `npm run test:export`. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.

@@ -37,6 +37,9 @@ export async function textureToBlob(texture, assetId = null) {
  * to the texture's own name for container-owned instances.
  */
 export function getAssetIdForTexture(texture) {
+  const taggedId = texture?.metadata?.mixoAssetId;
+  if (typeof taggedId === 'string' && taggedId) return taggedId;
+
   const state = getState();
   for (const [assetId, asset] of Object.entries(state.scene.assetLibrary)) {
     if (asset.kind === 'texture' && asset.babylonTextureName
@@ -47,12 +50,36 @@ export function getAssetIdForTexture(texture) {
   return texture.name || texture.uniqueId?.toString();
 }
 
+function _textureAssetEntry(assetId) {
+  if (!assetId) return null;
+  return getState().scene.assetLibrary?.[assetId] ?? null;
+}
+
+function _stripImageExtension(value) {
+  return String(value || 'texture').replace(/\.[^./\\]+$/, '') || 'texture';
+}
+
+export function textureExportFilename(texture, assetId, usedNames = new Set()) {
+  const asset = _textureAssetEntry(assetId);
+  const sourceName = asset?.filename || asset?.name || texture?.name || assetId || 'texture';
+  const base = sanitizeTextureName(_stripImageExtension(sourceName)) || 'texture';
+  let filename = `${base}.png`;
+  let counter = 0;
+  while (usedNames.has(filename)) {
+    counter++;
+    filename = `${base}_${counter}.png`;
+  }
+  usedNames.add(filename);
+  return filename;
+}
+
 /**
  * Extract all unique diffuse/albedo/base textures from a list of meshes and
  * convert to PNG blobs. Returns Map<filename, blob> for `textures/` entries.
  */
-export async function collectTextureBlobs(meshes) {
+export async function collectTextureExportData(meshes) {
   const textureMap = new Map(); // assetId → { name, blob }
+  const textureFilenameByMaterialName = new Map();
 
   for (const mesh of meshes) {
     const mat = mesh.material;
@@ -69,7 +96,7 @@ export async function collectTextureBlobs(meshes) {
       if (!assetId || textureMap.has(assetId)) continue;
       try {
         const blob = await textureToBlob(tex, assetId);
-        textureMap.set(assetId, { name: tex.name || assetId, blob });
+        textureMap.set(assetId, { texture: tex, blob });
       } catch (err) {
         console.error(`Failed to export texture ${tex.name}:`, err);
       }
@@ -77,19 +104,29 @@ export async function collectTextureBlobs(meshes) {
   }
 
   // Build result map with deduped filenames.
-  const result = new Map();
+  const blobByFilename = new Map();
   const usedNames = new Set();
-  for (const [, { name, blob }] of textureMap) {
-    let filename = `${name}.png`;
-    let counter = 0;
-    while (usedNames.has(filename)) {
-      counter++;
-      filename = `${name}_${counter}.png`;
-    }
-    usedNames.add(filename);
-    result.set(filename, blob);
+  const filenameByAssetId = new Map();
+  for (const [assetId, { texture, blob }] of textureMap) {
+    const filename = textureExportFilename(texture, assetId, usedNames);
+    filenameByAssetId.set(assetId, filename);
+    blobByFilename.set(filename, blob);
   }
-  return result;
+  for (const mesh of meshes) {
+    const mat = mesh.material;
+    if (!mat) continue;
+    const tex = mat.diffuseTexture || mat.albedoTexture || mat.baseTexture;
+    if (!tex) continue;
+    const filename = filenameByAssetId.get(getAssetIdForTexture(tex));
+    const matName = mat.id || mat.name || mesh.name;
+    if (filename && matName) textureFilenameByMaterialName.set(String(matName), filename);
+  }
+  return { blobByFilename, textureFilenameByMaterialName };
+}
+
+export async function collectTextureBlobs(meshes) {
+  const { blobByFilename } = await collectTextureExportData(meshes);
+  return blobByFilename;
 }
 
 export function sanitizeTextureName(name) {
@@ -123,11 +160,7 @@ export async function collectMimakiTextures(meshList, BABYLON) {
     const assetId = getAssetIdForTexture(tex);
     let path = pathByAssetId.get(assetId);
     if (!path) {
-      const base = sanitizeTextureName(tex.name || assetId);
-      let filename = `${base}.png`;
-      let counter = 0;
-      while (usedNames.has(filename)) { counter++; filename = `${base}_${counter}.png`; }
-      usedNames.add(filename);
+      const filename = textureExportFilename(tex, assetId, usedNames);
       path = `3D/Textures/${filename}`;
       try {
         const blob = await textureToBlob(tex, assetId);

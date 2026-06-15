@@ -10,11 +10,10 @@ import {
   perMeshBaseName as _perMeshBaseName,
   getExportedDimensions,
 } from './print/PrintScale.js';
-import { getPrinterProfile as _getPrinterProfile } from './print/PrinterProfiles.js';
 import { createPrepSteps } from './print/PrintPrep.js';
 import { createFormats } from './print/PrintFormats.js';
 import { packageAndDownload } from './print/PrintPackaging.js';
-import { collectTextureBlobs, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
+import { collectTextureExportData, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './print/ThreeMFWriter.js';
 
 const BABYLON = window.BABYLON;
@@ -73,7 +72,7 @@ function _collectPrintMeshes(selectedOnly) {
  *   filenameByMaterialName  – Map<materialName, 'solid_RRGGBBAA.png'>
  *                             (drives the MTL post-process)
  *
- * Toggle: `state.print.objBakeSolidTextures` (default ON). Disabling skips
+ * Toggle: `state.print.objBakeSolidTextures` (default OFF). Disabling skips
  * this synthesis entirely — the OBJ ships as classic vertex-coloured
  * material with no texture references.
  */
@@ -92,7 +91,7 @@ async function _synthesizeSolidShaderTextures(meshList) {
     const a = _clamp255(mat.alpha ?? 1);
     const hex = `${_hex2(r)}${_hex2(g)}${_hex2(b)}${_hex2(a)}`;
     const filename = `solid_${hex}.png`;
-    const matName = mat.name || mat.id || mesh.name;
+    const matName = _objMaterialName(mesh);
     if (matName) filenameByMaterialName.set(matName, filename);
     if (!blobByName.has(filename)) {
       try { blobByName.set(filename, await _solidColorBlob(r, g, b, a)); }
@@ -127,24 +126,66 @@ async function _solidColorBlob(r, g, b, a) {
   });
 }
 
-/**
- * Post-process the MTL string emitted by Babylon's OBJExport: for every
- * `newmtl <name>` block whose material is in `filenameByMaterialName`, append
- * `map_Kd textures/<filename>`. Block boundaries are detected by a regex
- * split on the `newmtl` keyword so we don't depend on Babylon's internal MTL
- * shape. Untouched if the map is empty (synthesis off, or every material has
- * a real texture).
- */
-function _injectMapKd(mtlString, filenameByMaterialName) {
-  if (!filenameByMaterialName.size) return mtlString;
-  const blocks = String(mtlString).split(/(?=^newmtl\s+)/m);
-  return blocks.map(block => {
-    const m = block.match(/^newmtl\s+(\S+)/);
-    if (!m) return block;
-    const filename = filenameByMaterialName.get(m[1]);
-    if (!filename) return block;
-    return block.replace(/\s*$/, '') + `\nmap_Kd textures/${filename}\n`;
-  }).join('');
+function _objMaterialName(mesh) {
+  const mat = mesh?.material;
+  return String(mat?.id || mat?.name || mesh?.name || 'material');
+}
+
+function _mtlColor(mat) {
+  return mat?.diffuseColor || mat?.albedoColor || mat?.baseColor || { r: 0.8, g: 0.8, b: 0.8 };
+}
+
+function _mtlLineColor(prefix, color) {
+  const r = Number(color?.r ?? 0).toFixed(4);
+  const g = Number(color?.g ?? 0).toFixed(4);
+  const b = Number(color?.b ?? 0).toFixed(4);
+  return `${prefix} ${r} ${g} ${b}`;
+}
+
+function _buildOBJMtl(meshEntries, filenameByMaterialName) {
+  const blocks = [];
+  const seen = new Set();
+  for (const { mesh } of meshEntries) {
+    const mat = mesh.material || {};
+    const matName = _objMaterialName(mesh);
+    if (seen.has(matName)) continue;
+    seen.add(matName);
+    const color = _mtlColor(mat);
+    const alpha = Math.max(0, Math.min(1, Number(mat.alpha ?? 1)));
+    const lines = [
+      `newmtl ${matName}`,
+      `Ns ${Number(mat.specularPower ?? 64).toFixed(4)}`,
+      'Ni 1.5000',
+      `d ${alpha.toFixed(4)}`,
+      `Tr ${(1 - alpha).toFixed(4)}`,
+      'illum 2',
+      _mtlLineColor('Ka', mat.ambientColor || { r: 0, g: 0, b: 0 }),
+      _mtlLineColor('Kd', color),
+      _mtlLineColor('Ks', mat.specularColor || { r: 0, g: 0, b: 0 }),
+      _mtlLineColor('Ke', mat.emissiveColor || { r: 0, g: 0, b: 0 }),
+    ];
+    const map = filenameByMaterialName.get(matName);
+    if (map) lines.push(`map_Kd textures/${map}`);
+    blocks.push(lines.join('\n'));
+  }
+  return `${blocks.join('\n\n')}\n`;
+}
+
+function _rewriteObjMtllib(objString, base) {
+  const desired = `mtllib ${base}.mtl`;
+  const text = String(objString);
+  if (/^mtllib\s+.+$/m.test(text)) return text.replace(/^mtllib\s+.+$/m, desired);
+  return `${desired}\n${text}`;
+}
+
+function _hasTextured3MFContent(meshList) {
+  return meshList.some(({ mesh }) => {
+    const mat = mesh.material;
+    const tex = mat?.diffuseTexture || mat?.albedoTexture || mat?.baseTexture;
+    if (!tex) return false;
+    const uvs = mesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
+    return !!uvs && uvs.length > 0;
+  });
 }
 
 // ── Export ───────────────────────────────────────────────
@@ -368,29 +409,36 @@ async function _runExport(formatKey, options = {}) {
 
 async function _serializeOBJ(ctx) {
   const meshes = ctx.meshes.map(e => e.mesh);
-  const textureBlobs = await collectTextureBlobs(meshes);
+  const {
+    blobByFilename: textureBlobs,
+    textureFilenameByMaterialName,
+  } = await collectTextureExportData(meshes);
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
   // so Mimaki UV-inkjet (texture-first) slicers receive an image even when
-  // the artist set a flat diffuse colour with no map. Toggle is on by default,
-  // off via the Export-tab checkbox.
+  // the artist set a flat diffuse colour with no map. Toggle is off by default;
+  // enabling it in the Export tab opts into synthesis.
   const bakeSolids = !!getState().print?.objBakeSolidTextures;
   const synth = bakeSolids
     ? await _synthesizeSolidShaderTextures(ctx.meshes)
     : { blobByName: new Map(), filenameByMaterialName: new Map() };
+  const filenameByMaterialName = new Map([
+    ...textureFilenameByMaterialName,
+    ...synth.filenameByMaterialName,
+  ]);
 
   const entries = [];
   if (ctx.individually) {
     for (const { mesh, name } of ctx.meshes) {
       const base = _perMeshBaseName(ctx, name);
-      const mtl = BABYLON.OBJExport.MTL([mesh]);
-      entries.push({ path: `${base}.obj`, data: BABYLON.OBJExport.OBJ([mesh], true, `${base}.mtl`, true) });
-      entries.push({ path: `${base}.mtl`, data: _injectMapKd(mtl, synth.filenameByMaterialName) });
+      const objData = BABYLON.OBJExport.OBJ([mesh], true, base, true);
+      entries.push({ path: `${base}.obj`, data: _rewriteObjMtllib(objData, base) });
+      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl([{ mesh, name }], filenameByMaterialName) });
     }
   } else {
     const base = _exportBaseName(ctx);
-    const mtl = BABYLON.OBJExport.MTL(meshes);
-    entries.push({ path: `${base}.obj`, data: BABYLON.OBJExport.OBJ(meshes, true, `${base}.mtl`, true) });
-    entries.push({ path: `${base}.mtl`, data: _injectMapKd(mtl, synth.filenameByMaterialName) });
+    const objData = BABYLON.OBJExport.OBJ(meshes, true, base, true);
+    entries.push({ path: `${base}.obj`, data: _rewriteObjMtllib(objData, base) });
+    entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(ctx.meshes, filenameByMaterialName) });
   }
   for (const [filename, blob] of textureBlobs) entries.push({ path: `textures/${filename}`, data: blob });
   for (const [filename, blob] of synth.blobByName) entries.push({ path: `textures/${filename}`, data: blob });
@@ -417,8 +465,8 @@ function _serializeSTL(ctx) {
 }
 
 /**
- * The 3MF entry serializer is printer-profile driven. The printer's
- * `format` field in `config/printers.json` picks the sub-pipeline:
+ * The 3MF entry serializer is content-driven. The Export panel chooses 3MF;
+ * texture presence chooses the sub-pipeline:
  *
  *   3mf-materials-ext → Mimaki UV-inkjet: per-vertex UVs + embedded PNG
  *                       textures via the Materials Extension. Continuous-
@@ -426,12 +474,11 @@ function _serializeSTL(ctx) {
  *   3mf-colorgroup    → Filament multi-colour (Bambu/Prusa/Orca): solid
  *                       diffuse colour per object via <m:colorgroup>.
  *
- * Default is Mimaki (project goal). Unknown formats fall back to colorgroup
- * — never silently change the file shape.
+ * Solid-only scenes emit lean colorgroup packages. Printer profile selection
+ * is only a build-area/reference choice and must not switch 3MF flavour.
  */
 async function _serialize3MF(ctx) {
-  const profile = _getPrinterProfile();
-  if (profile?.format === '3mf-materials-ext') return _serialize3MFMaterialsExt(ctx);
+  if (_hasTextured3MFContent(ctx.meshes)) return _serialize3MFMaterialsExt(ctx);
   return _serialize3MFColorGroup(ctx);
 }
 

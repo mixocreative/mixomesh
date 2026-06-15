@@ -153,7 +153,7 @@ async function test(name, fn) {
   catch (err) { out.push(`FAIL  ${name}\n      ${err.stack || err.message}`); failed++; }
 }
 
-// ── Profile dispatch ─────────────────────────────────────
+// ── Content-driven 3MF flavour ────────────────────────────
 
 await test('default Mimaki target + textured mesh → Materials Extension layout', async () => {
   const positions = [0,0,0, 1,0,0, 0,1,0];
@@ -192,29 +192,28 @@ await test('default Mimaki target + textured mesh → Materials Extension layout
   assert.ok(!/<m:colorgroup/.test(model), 'no colorgroup when every mesh is textured');
 });
 
-await test('Bambu target → colorgroup layout (filament path, no textures)', async () => {
+await test('Bambu target + textured mesh → Materials Extension layout (printer does not choose format)', async () => {
+  const positions = [0,0,0, 1,0,0, 0,1,0];
+  const indices   = [0,1,2];
+  const uvs       = [0.1,0.2, 0.3,0.4, 0.5,0.6];
   setScene({
-    objects:  { m: obj('m') },
-    registry: { m: solidMesh('m', { color: { r: 1, g: 0, b: 0 } }) },
+    objects:  { p: obj('p') },
+    registry: { p: texMesh('p', { positions, indices, uvs }) },
     targetPrinterId: 'bambu-x1c',
   });
   await PrintManager.exportThreeMF();
 
   const files = zipInstances.at(-1).files;
-  assert.equal(files['[Content_Types].xml'].includes('png'), false,
-    'no png content-type on filament path');
-  assert.equal(files['3D/_rels/3dmodel.model.rels'], undefined, 'no per-part rels');
+  assert.match(files['[Content_Types].xml'], /Extension="png" ContentType="image\/png"/);
+  assert.ok(files['3D/Textures/paint.png'], 'PNG texture entry present');
+  assert.ok(files['3D/_rels/3dmodel.model.rels'], 'per-part rels present');
   const model = files['3D/3dmodel.model'];
-  assert.match(model, /<m:colorgroup id="1">/);
-  assert.match(model, /<m:color color="#FF0000FF"\/>/);
-  assert.match(model, /<object id="2" type="model" pid="1" pindex="0">/);
-  assert.ok(!/<m:texture2d/.test(model), 'no texture2d resources on filament path');
+  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
+  assert.match(model, /<object id="3" type="model" pid="2">/);
+  assert.ok(!/<m:colorgroup/.test(model), 'no colorgroup when every mesh is textured');
 });
 
-await test('Mimaki target + solid mesh (no diffuseTexture) → degrades to colorgroup', async () => {
-  // A Mimaki user's scene may contain solid-coloured parts (e.g. a base).
-  // The writer still emits a valid 3MF: no texture2d resources for it, just
-  // a colorgroup entry alongside any textured siblings.
+await test('solid-only 3MF uses colorgroup regardless of printer target', async () => {
   setScene({
     objects:  { m: obj('m') },
     registry: { m: solidMesh('m', { color: { r: 0, g: 1, b: 0 } }) },
@@ -222,8 +221,8 @@ await test('Mimaki target + solid mesh (no diffuseTexture) → degrades to color
   });
   await PrintManager.exportThreeMF();
   const files = zipInstances.at(-1).files;
-  // Still emit textured content-type (Mimaki dispatch), but no textures land.
-  assert.match(files['[Content_Types].xml'], /Extension="png"/);
+  assert.equal(files['[Content_Types].xml'].includes('png'), false,
+    'no png content-type on solid-only colorgroup path');
   assert.equal(files['3D/_rels/3dmodel.model.rels'], undefined,
     'no rels file when no textures landed');
   const model = files['3D/3dmodel.model'];

@@ -328,7 +328,7 @@ function _renderValidationTab() {
 // ── Export Tab ────────────────────────────────────────────
 
 function _renderExportTab() {
-  const bakeSolids = getState().print?.objBakeSolidTextures ?? true;
+  const bakeSolids = getState().print?.objBakeSolidTextures ?? false;
 
   let html = '<div class="pp-tab-content">';
 

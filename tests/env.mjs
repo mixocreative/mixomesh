@@ -81,18 +81,20 @@ const real = {
     FromEulerVector: () => ({ x: 0, y: 0, z: 0, w: 1 }),
   }),
   OBJExport: {
-    OBJ: (meshes, ...rest) => { calls.objExportOBJ.push({ count: meshes.length, rest }); return 'OBJ-DATA'; },
-    // Realistic per-material block so PrintManager._injectMapKd (which splits
-    // the MTL string on `newmtl <name>`) can locate each material and decorate
-    // it with `map_Kd textures/solid_*.png`. Production Babylon emits one
-    // block per unique material; the stub matches that shape using whichever
-    // identifier (.name / .id / mesh.name) the synthesis function also reads.
-    MTL: (meshes) => {
-      calls.objExportMTL.push({ count: meshes.length });
-      return meshes.map(m => {
-        const matName = m.material?.name || m.material?.id || m.name;
-        return `newmtl ${matName}\nKd 1 1 1\n`;
-      }).join('');
+    OBJ: (meshes, ...rest) => {
+      calls.objExportOBJ.push({ count: meshes.length, rest });
+      const matlib = rest[1] || 'mat';
+      const body = meshes.map(m => `usemtl ${m.material?.id || m.material?.name || m.name}`).join('\n');
+      return `mtllib ${matlib}.mtl\n${body}\nOBJ-DATA`;
+    },
+    // Matches the production Babylon serializer's public shape where MTL takes
+    // one mesh, not an array. Export code should not call this for multi-mesh
+    // MTL because Babylon emits `newmtl mat1`, which cannot match OBJ `usemtl`
+    // for arbitrary app material ids.
+    MTL: (mesh) => {
+      if (Array.isArray(mesh)) throw new Error('OBJExport.MTL expects a single mesh');
+      calls.objExportMTL.push({ count: 1 });
+      return `newmtl mat1\nKd 1 1 1\n`;
     },
   },
   STLExport: {

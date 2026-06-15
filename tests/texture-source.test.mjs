@@ -10,7 +10,8 @@ const {
   setTextureSource, getTextureSource, hasTextureSource,
   clearTextureSource, clearTextureSources,
 } = await import('../src/core/assets/TextureSource.js');
-const { textureToBlob } = await import('../src/core/print/ExportTextures.js');
+const { setState } = await import('../src/core/StateManager.js');
+const { textureToBlob, collectTextureBlobs, getAssetIdForTexture } = await import('../src/core/print/ExportTextures.js');
 
 let passed = 0, failed = 0;
 const out = [];
@@ -65,6 +66,38 @@ await test('export prefers the captured source over GPU readback', async () => {
   };
   const blob = await textureToBlob(trap, 'tex_export');
   assert.equal(blob, full, 'must return the exact full-res source blob');
+});
+
+await test('user-loaded texture export resolves by tagged asset id and real filename', async () => {
+  clearTextureSources();
+  const full = blobOf('USER-FULLRES-SOURCE');
+  setTextureSource('tex_user', full, 4096, 4096);
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      assetLibrary: {
+        tex_user: {
+          id: 'tex_user',
+          kind: 'texture',
+          name: 'paint',
+          filename: 'paint.png',
+          originalPath: 'paint.png',
+        },
+      },
+    },
+  }), { silent: true });
+
+  const tex = {
+    name: 'blob:https://app/live-texture',
+    metadata: { mixoAssetId: 'tex_user' },
+    getSize: () => { throw new Error('GPU readback must not run for user texture source'); },
+    readPixels: () => { throw new Error('GPU readback must not run for user texture source'); },
+  };
+  assert.equal(getAssetIdForTexture(tex), 'tex_user');
+
+  const blobs = await collectTextureBlobs([{ material: { diffuseTexture: tex } }]);
+  assert.equal(blobs.get('paint.png'), full);
 });
 
 await test('export falls back to GPU readback when no source captured', async () => {

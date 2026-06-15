@@ -5,6 +5,7 @@
 //   • targetPrinterId  = 'mimaki-3duj-553'  (most popular UV-inkjet installed base)
 //   • bedDimensions    = 508 × 508 × 305 mm (3DUJ-553 spec)
 //   • overlays.printPreview = true          (matte preview ON by default)
+//   • objBakeSolidTextures = false          (solid-to-PNG is opt-in)
 // And the migrate path must:
 //   • silently drop the legacy v3.0 scene.gridSize scalar
 //   • silently ignore legacy print.bedPreset (no crash, defaults stand)
@@ -42,6 +43,11 @@ await test('freshState: bedDimensions defaults to 508 × 508 × 305 mm', () => {
 await test('freshState: overlays.printPreview defaults to true (matte preview ON)', () => {
   const s = freshState();
   assert.equal(s.scene.overlays.printPreview, true);
+});
+
+await test('freshState: OBJ solid-color PNG baking defaults to false', () => {
+  const s = freshState();
+  assert.equal(s.print.objBakeSolidTextures, false);
 });
 
 await test('freshState: legacy fields are absent (no bedPreset, no gridSize)', () => {

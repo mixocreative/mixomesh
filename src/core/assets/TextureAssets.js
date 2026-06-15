@@ -22,6 +22,11 @@ const _textures = new Map();    // assetId → BABYLON.BaseTexture
 let _idCounter = 0;
 const _newId = () => `tex_${Date.now().toString(36)}_${++_idCounter}`;
 
+function _tagTextureAsset(texture, assetId) {
+  if (!texture || !assetId) return;
+  texture.metadata = { ...(texture.metadata || {}), mixoAssetId: assetId };
+}
+
 function _scheduleIdle(fn) {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 2000 });
   else setTimeout(fn, 50);
@@ -81,6 +86,7 @@ export async function loadTextureFromBlob(blob, filename, opts = {}) {
       (msg, err) => reject(err ?? new Error(String(msg))),
     );
   });
+  _tagTextureAsset(texture, assetId);
   _textures.set(assetId, texture);
 
   const entry = {
@@ -91,6 +97,7 @@ export async function loadTextureFromBlob(blob, filename, opts = {}) {
     extension: ext,
     kind: 'texture',
     directoryHandleKey: opts.directoryHandleKey ?? null,
+    babylonTextureName: typeof texture.name === 'string' ? texture.name : null,
     thumbnailDataUrl: blobUrl,   // the image itself doubles as the panel thumbnail
   };
   setState(s => ({
@@ -134,6 +141,7 @@ export function registerImportedTexture(texture, ctx = {}) {
   if (dupId) return dupId;
 
   const assetId = _newId();
+  _tagTextureAsset(texture, assetId);
   _textures.set(assetId, texture);
 
   // texture.url is unreliable for glTF-embedded images — the loader sets it to
@@ -248,6 +256,7 @@ function _awaitTextureReady(texture) {
  */
 export function bindRestoredTexture(assetId, texture) {
   if (!assetId || !texture) return;
+  _tagTextureAsset(texture, assetId);
   _textures.set(assetId, texture);
 }
 
@@ -270,6 +279,7 @@ export async function restoreTexture(entry, blob) {
       (msg, err) => reject(err ?? new Error(String(msg))),
     );
   });
+  _tagTextureAsset(texture, entry.id);
   _textures.set(entry.id, texture);
   setState(s => ({
     ...s,

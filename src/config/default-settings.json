@@ -44,7 +44,7 @@
     "minWallThickness": 1.2,
     "printMode": "fdm",
     "chordTolerance": 0.05,
-    "objBakeSolidTextures": true
+    "objBakeSolidTextures": false
   },
   "gizmo": { "space": "world", "snap": { "translate": 1.0, "rotate": 15, "scale": 0.1 } },
   "pivotMode": "active"

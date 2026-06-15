@@ -151,7 +151,11 @@ await test('OBJ: valid mesh → auto-fix runs on a clone, exports, downloads', a
   assert.equal(_registry.m1.__optimized, undefined, 'live scene mesh untouched');
   assert.equal(_registry.m1.__worldBaked, undefined, 'live scene geometry untouched');
   assert.equal(calls.objExportOBJ.length, 1);
-  assert.equal(calls.objExportMTL.length, 1);
+  assert.equal(calls.objExportMTL.length, 0, 'PrintManager owns MTL generation, not Babylon OBJExport.MTL');
+  const files = zipInstances.at(-1).files;
+  assert.match(files['Test_r1to1.obj'], /^mtllib Test_r1to1\.mtl/m);
+  assert.match(files['Test_r1to1.obj'], /^usemtl mat-m1/m);
+  assert.match(files['Test_r1to1.mtl'], /^newmtl mat-m1/m);
   assert.equal(calls.downloads.length, 1);
 });
 
@@ -185,8 +189,27 @@ await test('OBJ: mesh with no material → gets fallback, still exports', async 
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   assert.equal(calls.objExportOBJ.length, 1);
-  assert.equal(calls.objExportMTL.length, 1);
+  assert.equal(calls.objExportMTL.length, 0);
   assert.ok(_clones[0].material, 'fallback material assigned to clone');
+});
+
+await test('OBJ: generated MTL supports PBR/albedo materials without Babylon StandardMaterial fields', async () => {
+  const m = mesh('m1');
+  m.material = {
+    id: 'pbr-mat',
+    name: 'PBR Mat',
+    albedoColor: { r: 0.25, g: 0.5, b: 0.75 },
+    alpha: 0.6,
+  };
+  const origClone = m.clone;
+  m.clone = (n) => { const c = origClone.call(m, n); c.material = m.material; return c; };
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  const mtl = zipInstances.at(-1).files['Test_r1to1.mtl'];
+  assert.match(mtl, /^newmtl pbr-mat/m);
+  assert.match(mtl, /^Kd 0\.2500 0\.5000 0\.7500/m);
+  assert.match(mtl, /^d 0\.6000/m);
 });
 
 await test('OBJ: warnings only → still exports', async () => {
@@ -420,12 +443,9 @@ await test('3MF: error surviving auto-fix → blocks with list, no download', as
 });
 
 await test('3MF colorgroup: individually → one inner 3MF zip per mesh in outer zip', async () => {
-  // Default printer target = Mimaki materials-ext; force the colorgroup path
-  // by overriding `state.print.targetPrinterId` to a filament printer entry.
   setScene({ objects: { m1: obj('m1'), m2: obj('m2') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }),
                 m2: mesh('m2', { color: { r: 0, g: 0, b: 1 } }) } });
-  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'bambu-x1c' } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportThreeMF({ individually: true });
   // 2 inner zips (one per mesh) + 1 outer zip
@@ -445,8 +465,6 @@ await test('3MF colorgroup: individually → one inner 3MF zip per mesh in outer
 });
 
 await test('3MF materials-ext: individually → per-mesh 3MF carries only its own texture', async () => {
-  // Reset to Mimaki materials-ext target.
-  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'mimaki-3duj-553' } }), { silent: true });
   const tex = { name: 'paint', getBaseSize: () => ({ width: 2, height: 2 }), readPixels: () => new Uint8Array(16) };
   const mt1 = mesh('mt1');
   mt1.material = { id: 'mat1', diffuseColor: { r: 1, g: 1, b: 1 }, diffuseTexture: tex };
@@ -504,17 +522,15 @@ await test('filename: combined STL → `${project}${suffix}.stl` (single-blob pa
   assert.equal(calls.downloads.at(-1), 'Test_r12to35.stl');
 });
 
-await test('filename: combined 3MF colorgroup → `${project}${suffix}.3mf`', async () => {
+await test('filename: combined 3MF solid-only → `${project}${suffix}.3mf`', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) },
     workingRatio: 1, targetRatio: 144 });
-  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'bambu-x1c' } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportThreeMF();
   assert.equal(calls.downloads.at(-1), 'Test_r1to144.3mf');
 });
 
-await test('filename: combined 3MF materials-ext → `${project}${suffix}.3mf`', async () => {
-  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'mimaki-3duj-553' } }), { silent: true });
+await test('filename: combined 3MF default ratio → `${project}${suffix}.3mf`', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) },
     workingRatio: 1, targetRatio: 1 });
   MeshValidator.validateMesh = valOK;
@@ -533,8 +549,8 @@ await test('filename: individually OBJ → outer zip + per-mesh entries carry pr
   assert.ok(outer['Test_m2_r1to144.obj']);
   assert.ok(outer['Test_m2_r1to144.mtl']);
   // mtllib reference inside the OBJ payload must match the matching .mtl file
-  const objCall = calls.objExportOBJ[0];
-  assert.equal(objCall.rest[1], 'Test_m1_r1to144.mtl', 'OBJ mtllib points at per-mesh MTL');
+  assert.match(outer['Test_m1_r1to144.obj'], /^mtllib Test_m1_r1to144\.mtl/m,
+    'OBJ mtllib points at per-mesh MTL');
   assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip');
 });
 
@@ -543,12 +559,24 @@ await test('filename: individually OBJ → outer zip + per-mesh entries carry pr
 // Mimaki UV-inkjet slicers are texture-first. When a shader is a flat diffuse
 // colour with no map, OBJ export synthesises a 4×4 RGBA PNG per unique
 // `${RRGGBBAA}` (alpha = material.alpha) and injects `map_Kd` into the MTL.
-// Toggle: `state.print.objBakeSolidTextures` (default ON), exposed as a
+// Toggle: `state.print.objBakeSolidTextures` (default OFF), exposed as a
 // checkbox on the Export tab.
 
-await test('OBJ synthesis: solid mesh → PNG in zip + map_Kd in MTL', async () => {
+await test('OBJ synthesis: default off → no PNG, no map_Kd', async () => {
   setScene({ objects: { m1: obj('m1') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  assert.ok(!Object.keys(files).some(k => k.startsWith('textures/solid_')),
+    'no synthesised PNG by default');
+  assert.ok(!/map_Kd/.test(files['Test_r1to1.mtl']), 'no map_Kd injected by default');
+});
+
+await test('OBJ synthesis: explicit toggle on → PNG in zip + map_Kd in MTL', async () => {
+  setScene({ objects: { m1: obj('m1') },
+    registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const files = zipInstances.at(-1).files;
@@ -556,7 +584,7 @@ await test('OBJ synthesis: solid mesh → PNG in zip + map_Kd in MTL', async () 
   assert.match(files['Test_r1to1.mtl'], /map_Kd textures\/solid_FF0000FF\.png/);
 });
 
-await test('OBJ synthesis: toggle off → no PNG, no map_Kd', async () => {
+await test('OBJ synthesis: toggle off override → no PNG, no map_Kd', async () => {
   setScene({ objects: { m1: obj('m1') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
   StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: false } }), { silent: true });
@@ -568,7 +596,7 @@ await test('OBJ synthesis: toggle off → no PNG, no map_Kd', async () => {
       'no synthesised PNG when toggle off');
     assert.ok(!/map_Kd/.test(files['Test_r1to1.mtl']), 'no map_Kd injected');
   } finally {
-    StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
+    StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: false } }), { silent: true });
   }
 });
 
@@ -580,6 +608,7 @@ await test('OBJ synthesis: two meshes same colour → ONE PNG (dedup by RRGGBBAA
       m2: mesh('m2', { color: { r: 1, g: 0, b: 0 } }),
     },
   });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const files = zipInstances.at(-1).files;
@@ -596,6 +625,7 @@ await test('OBJ synthesis: distinct colours → distinct PNGs', async () => {
       m2: mesh('m2', { color: { r: 0, g: 0, b: 1 } }),
     },
   });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const files = zipInstances.at(-1).files;
@@ -609,6 +639,7 @@ await test('OBJ synthesis: opacity flows into α byte of filename', async () => 
   const origClone = m.clone;
   m.clone = (n) => { const c = origClone.call(m, n); c.material = m.material; return c; };
   setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const files = zipInstances.at(-1).files;
@@ -624,6 +655,7 @@ await test('OBJ synthesis: textured shader is NOT synthesised (real PNG path own
   const origClone = m.clone;
   m.clone = (n) => { const c = origClone.call(m, n); c.material = m.material; return c; };
   setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const files = zipInstances.at(-1).files;
@@ -641,6 +673,7 @@ await test('OBJ synthesis: individually → each per-mesh MTL gets its own map_K
       m2: mesh('m2', { color: { r: 0, g: 1, b: 0 } }),
     },
   });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ({ individually: true });
   const files = zipInstances.at(-1).files;

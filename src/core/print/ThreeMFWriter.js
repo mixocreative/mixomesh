@@ -1,9 +1,9 @@
 // 3MF package writers (split from PrintManager.js — review L29).
-// Two pipelines, dispatched by printer profile:
-//   buildColorGroupEntries    → filament (Bambu/Prusa/Orca): solid colour per
-//                               object via <m:colorgroup>.
-//   buildMaterialsExtEntries  → Mimaki UV-inkjet: per-vertex UVs + embedded
-//                               PNG textures via the Materials Extension.
+// Two package shapes, chosen by export content in PrintManager:
+//   buildColorGroupEntries    → solid-only: one colour per object via
+//                               <m:colorgroup>.
+//   buildMaterialsExtEntries  → textured: per-vertex UVs + embedded PNG
+//                               textures via the Materials Extension.
 // The `.3mf` loader (core/ThreeMFLoader.js) is the exact INVERSE of these
 // writers — if either changes shape, mirror the other.
 
