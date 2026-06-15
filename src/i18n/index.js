@@ -40,6 +40,34 @@ export function t(key, params) {
 }
 
 /**
+ * Apply data-i18n-* attributes under `root`.
+ * Translations are always plain text/attributes; callers must not pass HTML.
+ */
+export function applyTranslations(root) {
+  if (!root) return;
+  if (root.dataset?.i18nKey) root.textContent = t(root.dataset.i18nKey);
+  if (root.dataset?.i18nTitle) root.setAttribute('title', t(root.dataset.i18nTitle));
+  if (root.dataset?.i18nAriaLabel) root.setAttribute('aria-label', t(root.dataset.i18nAriaLabel));
+  if (root.dataset?.i18nPlaceholder) root.setAttribute('placeholder', t(root.dataset.i18nPlaceholder));
+  for (const el of root.querySelectorAll('[data-i18n-key]')) {
+    const key = el.dataset.i18nKey;
+    if (key) el.textContent = t(key);
+  }
+  for (const el of root.querySelectorAll('[data-i18n-title]')) {
+    const key = el.dataset.i18nTitle;
+    if (key) el.setAttribute('title', t(key));
+  }
+  for (const el of root.querySelectorAll('[data-i18n-aria-label]')) {
+    const key = el.dataset.i18nAriaLabel;
+    if (key) el.setAttribute('aria-label', t(key));
+  }
+  for (const el of root.querySelectorAll('[data-i18n-placeholder]')) {
+    const key = el.dataset.i18nPlaceholder;
+    if (key) el.setAttribute('placeholder', t(key));
+  }
+}
+
+/**
  * Set the active locale, persist to localStorage, flip <html lang>, fire
  * LOCALE_CHANGED. Unknown codes silently fall back to 'en'.
  */

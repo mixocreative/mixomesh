@@ -1,4 +1,7 @@
 import { SceneManager } from '../core/SceneManager.js';
+import { EVENTS } from '../core/events.js';
+import { subscribe } from '../core/StateManager.js';
+import { applyTranslations } from '../i18n/index.js';
 
 /**
  * Fusion 360-style nav cube anchored top-left of the viewport.
@@ -22,14 +25,14 @@ export function init() {
   if (!_root) return;
   _root.innerHTML = `
     <div class="nc-cube" id="nc-cube">
-      <div class="nc-face nc-front"  data-preset="front"  role="button" tabindex="0">FRONT</div>
-      <div class="nc-face nc-back"   data-preset="back"   role="button" tabindex="0">BACK</div>
-      <div class="nc-face nc-left"   data-preset="left"   role="button" tabindex="0">LEFT</div>
-      <div class="nc-face nc-right"  data-preset="right"  role="button" tabindex="0">RIGHT</div>
-      <div class="nc-face nc-top"    data-preset="top"    role="button" tabindex="0">TOP</div>
-      <div class="nc-face nc-bottom" data-preset="bottom" role="button" tabindex="0">BOTTOM</div>
+      <div class="nc-face nc-front"  data-preset="front"  role="button" tabindex="0" data-i18n-key="nav.front">FRONT</div>
+      <div class="nc-face nc-back"   data-preset="back"   role="button" tabindex="0" data-i18n-key="nav.back">BACK</div>
+      <div class="nc-face nc-left"   data-preset="left"   role="button" tabindex="0" data-i18n-key="nav.left">LEFT</div>
+      <div class="nc-face nc-right"  data-preset="right"  role="button" tabindex="0" data-i18n-key="nav.right">RIGHT</div>
+      <div class="nc-face nc-top"    data-preset="top"    role="button" tabindex="0" data-i18n-key="nav.top">TOP</div>
+      <div class="nc-face nc-bottom" data-preset="bottom" role="button" tabindex="0" data-i18n-key="nav.bottom">BOTTOM</div>
     </div>
-    <button class="nc-home" id="nc-home" title="Reset perspective view">⌂</button>
+    <button class="nc-home" id="nc-home" data-i18n-title="nav.homeTitle">⌂</button>
   `;
   _cube = document.getElementById('nc-cube');
 
@@ -37,6 +40,8 @@ export function init() {
   _wireDragOrbit();
   _wireHome();
   _wireCameraSync();
+  subscribe(EVENTS.LOCALE_CHANGED, () => applyTranslations(_root));
+  applyTranslations(_root);
 }
 
 function _wireFaceClicks() {

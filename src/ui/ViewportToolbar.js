@@ -4,6 +4,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { Selection } from '../core/Selection.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Floating Fusion 360-style toolbar anchored bottom-centre of the viewport.
@@ -18,22 +19,22 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 let _root = null;
 
 const GIZMO_MODES = [
-  { id: 'translate', label: 'Move',   iconName: 'Move3D' },
-  { id: 'rotate',    label: 'Rotate', iconName: 'RotateCcw' },
-  { id: 'scale',     label: 'Scale',  iconName: 'Scale3D' },
+  { id: 'translate', labelKey: 'toolbar.gizmo.move',   iconName: 'Move3D' },
+  { id: 'rotate',    labelKey: 'toolbar.gizmo.rotate', iconName: 'RotateCcw' },
+  { id: 'scale',     labelKey: 'toolbar.gizmo.scale',  iconName: 'Scale3D' },
 ];
 
 const PIVOT_MODES = [
-  { id: 'active', label: 'Active',       iconName: 'CircleDot' },
-  { id: 'median', label: 'Median',       iconName: 'Box' },
-  { id: 'cursor', label: 'Cursor',       iconName: 'Crosshair' },
-  { id: 'world',  label: 'World Origin', iconName: 'Circle' },
+  { id: 'active', labelKey: 'toolbar.pivot.active', iconName: 'CircleDot' },
+  { id: 'median', labelKey: 'toolbar.pivot.median', iconName: 'Box' },
+  { id: 'cursor', labelKey: 'toolbar.pivot.cursor', iconName: 'Crosshair' },
+  { id: 'world',  labelKey: 'toolbar.pivot.world',  iconName: 'Circle' },
 ];
 
 const FOLLOW_MODES = [
-  { id: 'free',         label: 'Free Camera',          iconName: 'Orbit' },
-  { id: 'followActive', label: 'Follow Active',        iconName: 'Eye' },
-  { id: 'worldOrigin',  label: 'Look At World Origin', iconName: 'LocateFixed' },
+  { id: 'free',         labelKey: 'toolbar.follow.free',        iconName: 'Orbit' },
+  { id: 'followActive', labelKey: 'toolbar.follow.active',      iconName: 'Eye' },
+  { id: 'worldOrigin',  labelKey: 'toolbar.follow.worldOrigin', iconName: 'LocateFixed' },
 ];
 
 export function init() {
@@ -47,6 +48,7 @@ export function init() {
     EVENTS.GIZMO_CHANGED,
     EVENTS.CAMERA_PRESET_CHANGED,
     EVENTS.PROJECT_LOADED,
+    EVENTS.LOCALE_CHANGED,
   ]) subscribe(ev, _render);
 }
 
@@ -68,9 +70,9 @@ function _render() {
     </div>
     <div class="vt-sep"></div>
     <div class="vt-group" data-group="space">
-      <button class="vt-btn ${gizmoSpace === 'local' ? 'vt-on' : ''}" data-kind="space" title="Toggle gizmo orientation (World -> Local)" aria-pressed="${gizmoSpace === 'local' ? 'true' : 'false'}">
+      <button class="vt-btn ${gizmoSpace === 'local' ? 'vt-on' : ''}" data-kind="space" title="${escapeAttr(t('toolbar.space.title'))}" aria-pressed="${gizmoSpace === 'local' ? 'true' : 'false'}">
         ${icon('RotateCw', { width: 14, height: 14 })}
-        <span class="vt-label">${escapeHtml(gizmoSpace === 'local' ? 'Local' : 'World')}</span>
+        <span class="vt-label">${escapeHtml(t(gizmoSpace === 'local' ? 'toolbar.space.local' : 'toolbar.space.world'))}</span>
       </button>
     </div>
     <div class="vt-sep"></div>
@@ -83,7 +85,7 @@ function _render() {
 
 function _btn(mode, active, kind) {
   return `
-    <button class="vt-btn ${active ? 'vt-on' : ''}" data-kind="${escapeAttr(kind)}" data-mode="${escapeAttr(mode.id)}" title="${escapeAttr(mode.label)}" aria-pressed="${active ? 'true' : 'false'}">
+    <button class="vt-btn ${active ? 'vt-on' : ''}" data-kind="${escapeAttr(kind)}" data-mode="${escapeAttr(mode.id)}" title="${escapeAttr(t(mode.labelKey))}" aria-pressed="${active ? 'true' : 'false'}">
       ${icon(mode.iconName, { width: 14, height: 14 })}
     </button>
   `;

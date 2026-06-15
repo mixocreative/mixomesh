@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
@@ -14,12 +14,7 @@ let _onContextMenu = null;
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
@@ -55,7 +50,7 @@ export function init() {
     <div class="ol-header">
       <span class="ol-title" data-i18n-key="panel.outliner.title">Outliner</span>
     </div>
-    <div class="ol-list" id="ol-list" role="tree" aria-label="Scene objects"></div>
+    <div class="ol-list" id="ol-list" role="tree" data-i18n-aria-label="outliner.sceneObjects"></div>
   `;
   _listEl = _root.querySelector('#ol-list');
   _listEl.addEventListener('click', _onListClick);
@@ -123,7 +118,7 @@ function _render() {
   for (const o of uncolObjs)   parts.push(_renderObjectRow(o, 0));
 
   if (!parts.length) {
-    _listEl.innerHTML = `<div class="ol-empty">Drop a 3D file on the viewport to begin.</div>`;
+    _listEl.innerHTML = `<div class="ol-empty">${_escape(t('outliner.empty'))}</div>`;
     return;
   }
 
@@ -176,7 +171,7 @@ function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allOb
          style="padding-left:0px">
       ${twirl}
       <span class="ol-icon">${icon(iconName, { width: 14, height: 14 })}</span>
-      <span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${count} item${count === 1 ? '' : 's'}">${count}</span>
+      <span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
@@ -198,7 +193,7 @@ function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth, mixe
     id: group.id,
     kind: 'group',
     name: group.name,
-    nameSuffix: mixed ? '<span class="ol-mixed-badge">Mixed</span>' : '',
+    nameSuffix: mixed ? `<span class="ol-mixed-badge">${_escape(t('outliner.mixed'))}</span>` : '',
     visible: true,
     locked: false,
     depth,
@@ -241,7 +236,7 @@ function _validationBadge(meshId) {
   const hasErr = e.results.some(r => r.severity === 'error');
   const name = hasErr ? 'CircleAlert' : 'AlertTriangle';
   const cls = `ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}`;
-  const title = escapeAttr(`${e.stale ? '(stale) ' : ''}${e.results[0]?.message ?? 'validation issue'}`);
+  const title = escapeAttr(`${e.stale ? `${t('outliner.stalePrefix')} ` : ''}${e.results[0]?.message ?? t('outliner.validationIssue')}`);
   return `<span class="${cls}" title="${title}">${icon(name, { width: 11, height: 11 })}</span>`;
 }
 
@@ -254,7 +249,7 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
   const lockedCls = locked ? 'ol-locked' : '';
   const hiddenCls = !visible ? 'ol-hidden' : '';
   const printBtn = kind === 'object'
-    ? `<button class="ol-icon-btn ol-print ${isPrintPart ? 'ol-print-on' : ''}" type="button" data-action="print" title="${isPrintPart ? 'Remove from print' : 'Mark as print part'}">${icon('Printer', { width: 13, height: 13 })}</button>`
+    ? `<button class="ol-icon-btn ol-print ${isPrintPart ? 'ol-print-on' : ''}" type="button" data-action="print" title="${escapeAttr(t(isPrintPart ? 'outliner.removeFromPrint' : 'outliner.markPrintPart'))}">${icon('Printer', { width: 13, height: 13 })}</button>`
     : `<span class="ol-icon-btn ol-print ol-print-placeholder"></span>`;
   return `
     <div class="ol-row ${ghostCls} ${lockedCls} ${hiddenCls}"
@@ -269,8 +264,8 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
       ${twirl}
       <span class="ol-icon">${icon(iconName, { width: 14, height: 14 })}</span>
       <span class="ol-name" data-name>${_escape(name)}</span>${nameSuffix}
-      <button class="ol-icon-btn ol-vis"  type="button" data-action="vis"  title="${visible ? 'Hide' : 'Show'}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
-      <button class="ol-icon-btn ol-lock" type="button" data-action="lock" title="${locked ? 'Unlock' : 'Lock'}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
+      <button class="ol-icon-btn ol-vis"  type="button" data-action="vis"  title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
+      <button class="ol-icon-btn ol-lock" type="button" data-action="lock" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
       ${printBtn}
     </div>
   `;

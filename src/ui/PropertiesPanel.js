@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, setState, getState } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SOURCE_UNIT_FACTORS } from '../core/ImportNormalizer.js';
@@ -21,12 +21,12 @@ const BABYLON = window.BABYLON;
 
 // SOURCE_UNIT_FACTORS imported from ImportNormalizer.js — single source of
 // truth for the import-normalization seam (no more hand-synced duplicate).
-const SOURCE_UNIT_LABELS = {
-  meters:      'Metres (m)',
-  centimeters: 'Centimetres (cm)',
-  millimeters: 'Millimetres (mm)',
-  inches:      'Inches (in)',
-  feet:        'Feet (ft)',
+const SOURCE_UNIT_LABEL_KEYS = {
+  meters:      'unit.meters',
+  centimeters: 'unit.centimeters',
+  millimeters: 'unit.millimeters',
+  inches:      'unit.inches',
+  feet:        'unit.feet',
 };
 
 let _root = null;
@@ -39,12 +39,7 @@ const _collapsedSections = new Set();
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 // ── Init ─────────────────────────────────────────────────
@@ -100,10 +95,10 @@ function _render() {
     const hasObjects = Object.keys(objects).length > 0;
     const ws = document.body.dataset.workspace ?? 'layout';
     const hint = !hasObjects
-      ? 'Drop a .glb / .obj / .stl / .3mf into the viewport,<br>or drag one in from the Asset panel.'
+      ? _escape(t('properties.empty.noObjects'))
       : ws === 'shade'
-        ? 'Select an object to edit its shader.'
-        : 'Click a mesh to edit its properties.';
+        ? _escape(t('properties.empty.selectShaderObject'))
+        : _escape(t('properties.empty.selectMesh'));
     _bodyEl.innerHTML = `<div class="pp-empty">${hint}</div>`;
     return;
   }
@@ -155,14 +150,14 @@ function _renderObjectSection(obj, multi, total) {
   const nameDisabled = multi ? 'disabled' : '';
   return `
     <section class="pp-section" data-section="object">
-      <header class="pp-section-header">${sectionIcon('Shapes')}Object${multi ? ` <span class="pp-multi">(${total} selected)</span>` : ''}</header>
+      <header class="pp-section-header">${sectionIcon('Shapes')}${_escape(t('properties.object'))}${multi ? ` <span class="pp-multi">${_escape(t('properties.selectedCount', { n: total }))}</span>` : ''}</header>
       <div class="pp-row">
-        <label>Name</label>
+        <label>${_escape(t('properties.name'))}</label>
         <input type="text" id="pp-name" value="${_escape(nameVal)}" ${nameDisabled}>
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-toggle${visible ? ' pp-toggle-on' : ''}" id="pp-visible" aria-pressed="${visible ? 'true' : 'false'}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })} Visible</button>
-        <button type="button" class="pp-toggle${locked ? ' pp-toggle-on' : ''}" id="pp-locked" aria-pressed="${locked ? 'true' : 'false'}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })} Locked</button>
+        <button type="button" class="pp-toggle${visible ? ' pp-toggle-on' : ''}" id="pp-visible" aria-pressed="${visible ? 'true' : 'false'}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })} ${_escape(t('properties.visible'))}</button>
+        <button type="button" class="pp-toggle${locked ? ' pp-toggle-on' : ''}" id="pp-locked" aria-pressed="${locked ? 'true' : 'false'}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })} ${_escape(t('properties.locked'))}</button>
       </div>
     </section>
   `;
@@ -200,11 +195,11 @@ function _wireObjectSection(obj) {
 
 function _renderTransformSection(mesh, multi) {
   if (!mesh) return '';
-  const t = _readTransform(mesh);
+  const xform = _readTransform(mesh);
   // mm and deg view for the user.
-  const posMM = { x: t.position.x * 1000, y: t.position.y * 1000, z: t.position.z * 1000 };
-  const rotDeg = _quatToEulerDeg(t.rotation);
-  const sc = t.scaling;
+  const posMM = { x: xform.position.x * 1000, y: xform.position.y * 1000, z: xform.position.z * 1000 };
+  const rotDeg = _quatToEulerDeg(xform.rotation);
+  const sc = xform.scaling;
   const dis = multi ? 'disabled' : '';
 
   // Print-space size from world AABB. The number to compare against the real
@@ -221,28 +216,28 @@ function _renderTransformSection(mesh, multi) {
   // ↧ Copy-from-active: only meaningful when the selection has >1 mesh and a
   // single active mesh exists. Hidden otherwise.
   const copyBtn = multi
-    ? `<button class="pp-copy-btn" data-copy="transform" title="Copy active's position / rotation / scale to other selected meshes">↧</button>`
+    ? `<button class="pp-copy-btn" data-copy="transform" title="${escapeAttr(t('properties.copyTransformTitle'))}">↧</button>`
     : '';
 
   return `
     <section class="pp-section" data-section="transform">
       <header class="pp-section-header">${sectionIcon('Move')}<span data-i18n-key="section.transform">Transform</span>${copyBtn}</header>
       <div class="pp-grid3">
-        <label>Size (mm)</label>
+        <label>${_escape(t('properties.sizeMm'))}</label>
         <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
         <input type="number" step="0.1" min="0.001" data-size-axis="y" value="${sizeMM ? _fmt(sizeMM.y) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
         <input type="number" step="0.1" min="0.001" data-size-axis="z" value="${sizeMM ? _fmt(sizeMM.z) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
       </div>
       <div class="pp-grid3">
-        <label>Pos (mm)</label>
+        <label>${_escape(t('properties.posMm'))}</label>
         <input type="number" step="0.1" data-xform="position" data-axis="x" value="${_fmt(posMM.x)}" ${dis}>
         <input type="number" step="0.1" data-xform="position" data-axis="y" value="${_fmt(posMM.y)}" ${dis}>
         <input type="number" step="0.1" data-xform="position" data-axis="z" value="${_fmt(posMM.z)}" ${dis}>
       </div>
       <div class="pp-grid3">
         <label>
-          Rot (°)
-          <button class="pp-apply-btn" data-apply="rotation" ${applyDis} title="Bake current rotation into vertices; reset to 0,0,0">Apply</button>
+          ${_escape(t('properties.rotDeg'))}
+          <button class="pp-apply-btn" data-apply="rotation" ${applyDis} title="${escapeAttr(t('properties.applyRotationTitle'))}">${_escape(t('btn.apply'))}</button>
         </label>
         <input type="number" step="0.1" data-xform="rotation" data-axis="x" value="${_fmt(rotDeg.x)}" ${dis}>
         <input type="number" step="0.1" data-xform="rotation" data-axis="y" value="${_fmt(rotDeg.y)}" ${dis}>
@@ -250,16 +245,16 @@ function _renderTransformSection(mesh, multi) {
       </div>
       <div class="pp-grid3 pp-scale-row ${lockedCls}">
         <label>
-          Scale
-          <button class="pp-apply-btn" data-apply="scale" ${applyDis} title="Bake current scale into vertices; reset to 1,1,1">Apply</button>
+          ${_escape(t('properties.scale'))}
+          <button class="pp-apply-btn" data-apply="scale" ${applyDis} title="${escapeAttr(t('properties.applyScaleTitle'))}">${_escape(t('btn.apply'))}</button>
         </label>
         <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}>
       </div>
       <div class="pp-row pp-row-inline">
-        <button class="pp-icon-btn pp-scale-lock" data-action="scaleLock" title="${scaleLocked ? 'Unlock per-axis scale' : 'Lock proportional scale'}">${icon(lockIcon, { width: 13, height: 13 })}</button>
-        <span class="pp-hint">${scaleLocked ? 'Scale locked — edits mirror across XYZ' : 'Scale unlocked — per-axis edits'}</span>
+        <button class="pp-icon-btn pp-scale-lock" data-action="scaleLock" title="${escapeAttr(t(scaleLocked ? 'properties.unlockScaleTitle' : 'properties.lockScaleTitle'))}">${icon(lockIcon, { width: 13, height: 13 })}</button>
+        <span class="pp-hint">${_escape(t(scaleLocked ? 'properties.scaleLockedHint' : 'properties.scaleUnlockedHint'))}</span>
       </div>
     </section>
   `;
@@ -453,22 +448,22 @@ function _commitTransformInput(meshId, input) {
 
 function _renderSourceUnitSection(asset) {
   const authoredScale = authoredScaleFromAsset(asset);
-  const opts = Object.entries(SOURCE_UNIT_LABELS).map(([k, label]) =>
-    `<option value="${k}" ${k === asset.sourceUnit ? 'selected' : ''}>${label}</option>`
+  const opts = Object.entries(SOURCE_UNIT_LABEL_KEYS).map(([k, labelKey]) =>
+    `<option value="${k}" ${k === asset.sourceUnit ? 'selected' : ''}>${_escape(t(labelKey))}</option>`
   ).join('');
   const warn = asset.unitConfirmed === false
-    ? `<span class="pp-warn" title="Source unit unconfirmed — review the imported size">${icon('AlertTriangle', { width: 12, height: 12 })}</span>`
+    ? `<span class="pp-warn" title="${escapeAttr(t('properties.sourceUnitUnconfirmed'))}">${icon('AlertTriangle', { width: 12, height: 12 })}</span>`
     : '';
   return `
     <section class="pp-section" data-section="source-unit">
-      <header class="pp-section-header">${sectionIcon('Ruler')}Authored Scale ${warn}</header>
+      <header class="pp-section-header">${sectionIcon('Ruler')}${_escape(t('properties.authoredScale'))} ${warn}</header>
       <div class="pp-row">
-        <label>Source Unit</label>
+        <label>${_escape(t('properties.sourceUnit'))}</label>
         <select id="pp-source-unit">${opts}</select>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Authored at ${_escape(formatScaleRatio(authoredScale.authoredRatio))}</span>
-        <button class="pp-btn" id="pp-confirm-unit" ${asset.unitConfirmed ? 'disabled' : ''}>Confirm</button>
+        <span class="pp-hint">${_escape(t('properties.authoredAt', { ratio: formatScaleRatio(authoredScale.authoredRatio) }))}</span>
+        <button class="pp-btn" id="pp-confirm-unit" ${asset.unitConfirmed ? 'disabled' : ''}>${_escape(t('properties.confirm'))}</button>
       </div>
     </section>
   `;
@@ -527,7 +522,7 @@ function _renderShaderSection(obj) {
       <section class="pp-section" data-section="shader">
         <header class="pp-section-header">${sectionIcon('Brush')}<span data-i18n-key="section.shader">Shader</span></header>
         <div class="pp-row pp-row-inline">
-          <span class="pp-hint">No shaders in scene yet. Drop an asset, or create one in the Shader Library.</span>
+          <span class="pp-hint">${_escape(t('properties.noShaders'))}</span>
         </div>
       </section>
     `;
@@ -553,7 +548,7 @@ function _renderShaderSection(obj) {
   const activeObj = activeId ? getState().scene.objects[activeId] : null;
   const canCopy = meshIds.length > 1 && activeObj?.shaderId;
   const copyBtn = canCopy
-    ? `<button class="pp-copy-btn" data-copy="shader" title="Copy active's shader binding to other selected meshes">↧</button>`
+    ? `<button class="pp-copy-btn" data-copy="shader" title="${escapeAttr(t('properties.copyShaderTitle'))}">↧</button>`
     : '';
 
   return `
@@ -592,9 +587,9 @@ function _renderShaderSlot(bucket /*, libShaders */) {
            data-bucket-shader=""
            data-bucket-meshes="${escapeAttr(bucket.meshIds.join(','))}">
         <span class="pp-shader-chip pp-shader-chip-empty">${icon('AlertTriangle', { width: 12, height: 12 })}</span>
-        <span class="pp-shader-name">No shader</span>
+        <span class="pp-shader-name">${_escape(t('properties.noShader'))}</span>
         <span class="pp-shader-meshcount">${bucket.meshIds.length}</span>
-        <button class="pp-slot-action" data-slot-assign type="button" title="Assign a shader from the library">Assign…</button>
+        <button class="pp-slot-action" data-slot-assign type="button" title="${escapeAttr(t('properties.assignShaderTitle'))}">${_escape(t('properties.assign'))}</button>
       </div>
     `;
   }
@@ -607,13 +602,13 @@ function _renderShaderSlot(bucket /*, libShaders */) {
          data-bucket-shader="${escapeAttr(sh.id)}"
          data-bucket-meshes="${escapeAttr(bucket.meshIds.join(','))}">
       <button class="pp-slot-info" type="button" data-slot-focus="${escapeAttr(sh.id)}"
-              title="${escapeAttr(`Open ${sh.name} in the Shader Library`)}">
+              title="${escapeAttr(t('properties.openShaderTitle', { name: sh.name }))}">
         ${renderShaderPreview(sh, 18)}
         <span class="pp-shader-name">${_escape(sh.name)}</span>
-        <span class="pp-shader-meshcount" title="${bucket.meshIds.length} mesh${bucket.meshIds.length === 1 ? '' : 'es'} in selection">${bucket.meshIds.length}</span>
+        <span class="pp-shader-meshcount" title="${escapeAttr(t('properties.meshCountInSelection', { n: bucket.meshIds.length }))}">${bucket.meshIds.length}</span>
       </button>
-      <button class="pp-slot-action pp-slot-icon" data-slot-dup="${escapeAttr(sh.id)}" type="button" title="Duplicate in place">${icon('Copy', { width: 13, height: 13 })}</button>
-      <button class="pp-slot-action" data-slot-replace="${escapeAttr(sh.id)}" type="button" title="Replace with another shader (opens picker)">Replace…</button>
+      <button class="pp-slot-action pp-slot-icon" data-slot-dup="${escapeAttr(sh.id)}" type="button" title="${escapeAttr(t('properties.duplicateInPlace'))}">${icon('Copy', { width: 13, height: 13 })}</button>
+      <button class="pp-slot-action" data-slot-replace="${escapeAttr(sh.id)}" type="button" title="${escapeAttr(t('properties.replaceShaderTitle'))}">${_escape(t('properties.replace'))}</button>
     </div>
   `;
 }
@@ -653,7 +648,7 @@ function _wireShaderSection() {
       if (!targets.length) return;
       Modal.open('shader-picker', {
         excludeShaderId: sourceId,
-        title: 'Replace shader',
+        title: t('properties.replaceShader'),
         onClose: (nextId) => {
           if (!nextId || nextId === sourceId) return;
           push(new ShaderAssignCommand(targets, nextId));
@@ -670,7 +665,7 @@ function _wireShaderSection() {
       if (!targets.length) return;
       Modal.open('shader-picker', {
         excludeShaderId: null,
-        title: 'Assign shader',
+        title: t('properties.assignShader'),
         onClose: (nextId) => {
           if (!nextId) return;
           push(new ShaderAssignCommand(targets, nextId));
@@ -710,7 +705,7 @@ function _copyShaderFromActive() {
 // state.scene.shaders. Closes with the picked shader id (or null on cancel).
 function _shaderPickerRenderer({ data, close }) {
   const excludeId = data?.excludeShaderId ?? null;
-  const title = data?.title ?? 'Pick shader';
+  const title = data?.title ?? t('properties.pickShader');
   const root = document.createElement('div');
   root.className = 'modal-shader-picker';
   let query = '';
@@ -725,10 +720,10 @@ function _shaderPickerRenderer({ data, close }) {
     root.innerHTML = `
       <header class="modal-header">
         <h3>${_escape(title)}</h3>
-        <button class="modal-close" data-action="cancel" type="button" aria-label="Close">×</button>
+        <button class="modal-close" data-action="cancel" type="button" aria-label="${escapeAttr(t('btn.close'))}">×</button>
       </header>
       <div class="modal-shader-picker-search">
-        <input type="search" placeholder="Search shaders…" value="${escapeAttr(query)}" autocomplete="off">
+        <input type="search" placeholder="${escapeAttr(t('properties.searchShaders'))}" value="${escapeAttr(query)}" autocomplete="off">
       </div>
       <div class="modal-shader-picker-grid">
         ${filtered.length ? filtered.map(s => `
@@ -736,10 +731,10 @@ function _shaderPickerRenderer({ data, close }) {
             ${renderShaderPreview(s, 72)}
             <span class="modal-shader-tile-name">${_escape(s.name)}</span>
           </button>
-        `).join('') : '<div class="modal-empty">No shaders match.</div>'}
+        `).join('') : `<div class="modal-empty">${_escape(t('properties.noShadersMatch'))}</div>`}
       </div>
       <footer class="modal-footer">
-        <button class="modal-btn" data-action="cancel" type="button">Cancel</button>
+        <button class="modal-btn" data-action="cancel" type="button">${_escape(t('btn.cancel'))}</button>
       </footer>
     `;
 
@@ -771,33 +766,33 @@ function _renderUVOverrideSection(obj) {
   // "clear" if it has none) propagates to every other selected mesh.
   const multi = Selection.getSelectedIds().length > 1;
   const copyBtn = multi
-    ? `<button class="pp-copy-btn" data-copy="uv-override" title="Copy active's UV override to other selected meshes (or clear them if active has none)">↧</button>`
+    ? `<button class="pp-copy-btn" data-copy="uv-override" title="${escapeAttr(t('properties.copyUvTitle'))}">↧</button>`
     : '';
   return `
     <section class="pp-section" data-section="uv-override">
       <header class="pp-section-header">
-        ${sectionIcon('Map')}UV Override${copyBtn}
-        ${active ? '<span class="pp-multi">(active)</span>' : ''}
+        ${sectionIcon('Map')}${_escape(t('properties.uvOverride'))}${copyBtn}
+        ${active ? `<span class="pp-multi">${_escape(t('properties.active'))}</span>` : ''}
       </header>
       <div class="pp-grid3">
-        <label>Offset</label>
+        <label>${_escape(t('properties.offset'))}</label>
         <input type="number" step="0.01" id="pp-uv-ox" value="${_fmt(uv.offsetX, 3)}">
         <input type="number" step="0.01" id="pp-uv-oy" value="${_fmt(uv.offsetY, 3)}">
-        <span class="pp-readout-thin">U / V</span>
+        <span class="pp-readout-thin">${_escape(t('properties.uvAxes'))}</span>
       </div>
       <div class="pp-grid3">
-        <label>Scale</label>
+        <label>${_escape(t('properties.scale'))}</label>
         <input type="number" step="0.05" id="pp-uv-sx" value="${_fmt(uv.scaleX, 3)}">
         <input type="number" step="0.05" id="pp-uv-sy" value="${_fmt(uv.scaleY, 3)}">
-        <span class="pp-readout-thin">U / V</span>
+        <span class="pp-readout-thin">${_escape(t('properties.uvAxes'))}</span>
       </div>
       <div class="pp-row">
-        <label>Rotation</label>
+        <label>${_escape(t('properties.rotation'))}</label>
         <input type="number" step="0.05" id="pp-uv-rot" value="${_fmt(uv.rotation, 3)}">
       </div>
       <div class="pp-row-inline">
-        <span class="pp-hint">${active ? 'Per-mesh override of the shader\'s UV base.' : 'No override — using shader UV base.'}</span>
-        <button class="pp-btn" id="pp-uv-reset" ${active ? '' : 'disabled'}>Reset to Default</button>
+        <span class="pp-hint">${_escape(t(active ? 'properties.uvActiveHint' : 'properties.uvNoOverrideHint'))}</span>
+        <button class="pp-btn" id="pp-uv-reset" ${active ? '' : 'disabled'}>${_escape(t('properties.resetDefault'))}</button>
       </div>
     </section>
   `;
@@ -881,9 +876,9 @@ function _renderPrintPartSection(obj) {
   const isPrintPart = obj.isPrintPart ?? false;
   return `
     <section class="pp-section" data-section="print-part">
-      <header class="pp-section-header">${sectionIcon('Tag')}Print Part</header>
+      <header class="pp-section-header">${sectionIcon('Tag')}${_escape(t('properties.printPart'))}</header>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-toggle${isPrintPart ? ' pp-toggle-on' : ''}" id="pp-is-print-part" aria-pressed="${isPrintPart ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>Export as print part</button>
+        <button type="button" class="pp-toggle${isPrintPart ? ' pp-toggle-on' : ''}" id="pp-is-print-part" aria-pressed="${isPrintPart ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>${_escape(t('properties.exportPrintPart'))}</button>
       </div>
     </section>
   `;

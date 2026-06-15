@@ -10,7 +10,7 @@ import { subscribe, getState } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { icon } from '../core/Icons.js';
 import { MM_PER_BU } from '../core/scene/SceneConstants.js';
-import { t } from '../i18n/index.js';
+import { applyTranslations } from '../i18n/index.js';
 
 let _root = null;
 let _open = false;
@@ -23,6 +23,7 @@ export function init() {
   _root = document.createElement('aside');
   _root.id = 'n-panel';
   _root.className = 'n-panel';
+  _root.dataset.i18nAriaLabel = 'cursor.panelTitle';
   _root.innerHTML = _markup();
   host.appendChild(_root);
 
@@ -55,7 +56,7 @@ export function init() {
 
 function _markup() {
   return `
-    <button class="np-tab">${icon('Crosshair', { width: 15, height: 15 })}</button>
+    <button class="np-tab" data-i18n-title="cursor.panelTitleWithShortcut" data-i18n-aria-label="cursor.panelTitle">${icon('Crosshair', { width: 15, height: 15 })}</button>
     <div class="np-body">
       <header class="np-header">${icon('Crosshair', { width: 13, height: 13 })}<span data-i18n-key="cursor.panelTitle">3D Cursor</span></header>
       <div class="np-section">
@@ -75,14 +76,7 @@ function _markup() {
 }
 
 function _retranslate(root) {
-  if (!root) return;
-  root.setAttribute('aria-label', t('cursor.panelTitle'));
-  root.querySelector('.np-tab')?.setAttribute('title', t('cursor.panelTitleWithShortcut'));
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 export function toggle() {

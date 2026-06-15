@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
@@ -30,12 +30,7 @@ let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'export'
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 export function init() {
@@ -96,11 +91,11 @@ function _renderTabs() {
   // toggles under the NavCube (ui/ViewportToggles.js) so they're reachable
   // from every workspace — no Preview tab.
   const tabs = ['scale', 'validation', 'bed', 'export'];
-  const labels = {
-    scale: 'Scale',
-    validation: 'Validation',
-    bed: 'Bed',
-    export: 'Export',
+  const labelKeys = {
+    scale: 'print.tab.scale',
+    validation: 'print.tab.validation',
+    bed: 'print.tab.bed',
+    export: 'print.tab.export',
   };
   const tabIcons = {
     scale: 'Percent',
@@ -109,15 +104,15 @@ function _renderTabs() {
     export: 'FileDown',
   };
 
-  let html = '<div class="pp-tabs" role="tablist" aria-label="Print settings">';
+  let html = `<div class="pp-tabs" role="tablist" aria-label="${escapeAttr(t('print.settingsAria'))}">`;
   for (const tab of tabs) {
     const active = tab === _activeTab ? ' active' : '';
     const selected = tab === _activeTab ? 'true' : 'false';
-    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(tabIcons[tab])}${escapeHtml(labels[tab])}</button>`;
+    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(tabIcons[tab])}${escapeHtml(t(labelKeys[tab]))}</button>`;
   }
   // ↺ resets the whole print settings slice (scale / bed / export) — they
   // share one state slice, so one button covers all three settings tabs.
-  html += `<button class="pp-tab-reset" data-act="reset-print" title="Reset print settings to defaults" aria-label="Reset print settings to defaults">${sectionIcon('RotateCcw')}</button>`;
+  html += `<button class="pp-tab-reset" data-act="reset-print" title="${escapeAttr(t('print.resetTitle'))}" aria-label="${escapeAttr(t('print.resetTitle'))}">${sectionIcon('RotateCcw')}</button>`;
   html += '</div>';
 
   const el = document.createElement('div');
@@ -143,10 +138,10 @@ function _renderScaleTab() {
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
 
-  html += '<label>Scene Scale</label>';
+  html += `<label>${escapeHtml(t('print.sceneScale'))}</label>`;
   html += '<div class="pp-ratio-select">';
   html += '<select data-field="workingRatio" class="pp-preset-select">';
-  html += '<option value="">Custom…</option>';
+  html += `<option value="">${escapeHtml(t('print.custom'))}</option>`;
   for (const preset of SCALE_PRESETS) {
     if (preset.ratio !== null) {
       const selected = workingRatio === preset.ratio ? ' selected' : '';
@@ -156,12 +151,12 @@ function _renderScaleTab() {
   html += '</select>';
   html += `<input type="text" class="pp-ratio-input" data-field="workingRatio" value="${escapeAttr(formatScaleRatio(workingRatio))}" placeholder="1:1">`;
   html += '</div>';
-  html += '<p class="pp-help">How MIXOMESH interprets and edits the scene. Changing this rebakes existing objects and is undoable.</p>';
+  html += `<p class="pp-help">${escapeHtml(t('print.sceneScaleHelp'))}</p>`;
 
-  html += '<label>Print Scale</label>';
+  html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
   html += '<div class="pp-ratio-select">';
   html += '<select data-field="targetRatio" class="pp-preset-select">';
-  html += '<option value="">Custom…</option>';
+  html += `<option value="">${escapeHtml(t('print.custom'))}</option>`;
   for (const preset of SCALE_PRESETS) {
     if (preset.ratio !== null) {
       const selected = targetRatio === preset.ratio ? ' selected' : '';
@@ -171,13 +166,13 @@ function _renderScaleTab() {
   html += '</select>';
   html += `<input type="text" class="pp-ratio-input" data-field="targetRatio" value="${escapeAttr(formatScaleRatio(targetRatio))}" placeholder="1:35">`;
   html += '</div>';
-  html += '<p class="pp-help">Final real-world export scale. Changing this updates preview and bed fit without changing scene geometry.</p>';
+  html += `<p class="pp-help">${escapeHtml(t('print.printScaleHelp'))}</p>`;
 
   html += '</div>';
 
   // Export factor display — single source of truth in PrintScale (review L28).
   const factor = exportFactor();
-  html += `<div class="pp-info"><strong>Print export scale:</strong> ${factor.toFixed(2)} (scene BU → exported mm)</div>`;
+  html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
   // Example dimensions
   const selected = getState().selection.selectedIds;
@@ -186,7 +181,7 @@ function _renderScaleTab() {
     if (firstMesh) {
       const dims = PrintManager.getExportedDimensions(selected[0]);
       if (dims) {
-        html += `<div class="pp-info"><strong>Example (active):</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
+        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
       }
     }
   }
@@ -257,11 +252,11 @@ function _renderValidationTab() {
 
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
-  html += `<button class="pp-export-btn" id="pp-validate-all">${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} Validate All</button>`;
+  html += `<button class="pp-export-btn" id="pp-validate-all">${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.validateAll'))}</button>`;
   html += '</div>';
 
   if (!rows.length) {
-    html += '<p class="pp-empty">No print parts to validate.</p>';
+    html += `<p class="pp-empty">${escapeHtml(t('print.noPrintParts'))}</p>`;
   } else {
     for (const { meshId, obj, entry } of rows) {
       const results = entry?.results ?? null;
@@ -269,7 +264,7 @@ function _renderValidationTab() {
       const hasWarnings = !hasErrors && !!results?.some(r => r.severity === 'warning');
       const icon_name = !results ? 'Circle' : hasErrors ? 'AlertCircle' : hasWarnings ? 'AlertTriangle' : 'Check';
       const icon_class = !results ? 'pending' : hasErrors ? 'error' : hasWarnings ? 'warning' : 'success';
-      const staleBadge = entry?.stale ? ' <span class="pp-stale" title="Changed since last validation">stale</span>' : '';
+      const staleBadge = entry?.stale ? ` <span class="pp-stale" title="${escapeAttr(t('print.staleTitle'))}">${escapeHtml(t('print.stale'))}</span>` : '';
 
       html += `<div class="pp-mesh-validation ${icon_class}">`;
       html += `<div class="pp-mesh-header">`;
@@ -278,7 +273,7 @@ function _renderValidationTab() {
       html += `</div>`;
 
       if (!results) {
-        html += '<p class="pp-hint">Not validated yet.</p>';
+        html += `<p class="pp-hint">${escapeHtml(t('print.notValidated'))}</p>`;
       } else if (results.length > 0) {
         html += '<ul class="pp-result-list">';
         for (const result of results) {
@@ -286,7 +281,7 @@ function _renderValidationTab() {
           html += `<li class="pp-result ${escapeAttr(result.severity)}">`;
           html += `<span>${escapeHtml(result.message)}</span>`;
           if (canFix) {
-            html += `<button class="pp-autofix-btn" data-mesh-id="${escapeAttr(meshId)}" data-result-type="${escapeAttr(result.type)}">Auto-Fix</button>`;
+            html += `<button class="pp-autofix-btn" data-mesh-id="${escapeAttr(meshId)}" data-result-type="${escapeAttr(result.type)}">${escapeHtml(t('print.autoFix'))}</button>`;
           }
           html += '</li>';
         }
@@ -339,38 +334,38 @@ function _renderExportTab() {
   let html = '<div class="pp-tab-content">';
 
   html += '<div class="pp-field-group">';
-  html += '<label>Export Options</label>';
+  html += `<label>${escapeHtml(t('print.exportOptions'))}</label>`;
 
   html += '<div class="pp-checkbox">';
   html += '<input type="checkbox" id="pp-selected-only" data-option="selectedOnly">';
-  html += '<label for="pp-selected-only">Selected only</label>';
+  html += `<label for="pp-selected-only">${escapeHtml(t('print.selectedOnly'))}</label>`;
   html += '</div>';
 
   html += '<div class="pp-checkbox">';
   html += '<input type="checkbox" id="pp-individually" data-option="individually">';
-  html += '<label for="pp-individually">Each individually (separate files)</label>';
+  html += `<label for="pp-individually">${escapeHtml(t('print.eachIndividually'))}</label>`;
   html += '</div>';
 
   html += '<div class="pp-checkbox">';
   html += `<input type="checkbox" id="pp-bake-solid" ${bakeSolids ? 'checked' : ''}>`;
-  html += '<label for="pp-bake-solid">Bake solid colors to texture (OBJ, Mimaki-friendly)</label>';
+  html += `<label for="pp-bake-solid">${escapeHtml(t('print.bakeSolids'))}</label>`;
   html += '</div>';
 
   html += '</div>';
 
   html += '<div class="pp-field-group">';
-  html += '<label>Format</label>';
+  html += `<label>${escapeHtml(t('print.format'))}</label>`;
 
   html += `<button class="pp-export-btn pp-export-obj" data-format="obj">`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export OBJ + MTL`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportObj'))}`;
   html += `</button>`;
 
   html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf">`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export 3MF (color)`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.export3mf'))}`;
   html += `</button>`;
 
   html += `<button class="pp-export-btn pp-export-stl" data-format="stl">`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} Export STL`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportStl'))}`;
   html += `</button>`;
 
   html += '</div>';
@@ -393,7 +388,7 @@ function _renderExportTab() {
   // the default is "export anyway".
   const runExport = async (fn, opts) => {
     if (_printPartsHaveWarnings() && !(await _confirmExportWithWarnings())) return;
-    ProgressOverlay.show('Exporting…');
+    ProgressOverlay.show(t('progress.exporting'));
     try {
       await fn({ ...opts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
     } catch (err) {
@@ -445,7 +440,7 @@ function _renderBedTab() {
   let html = '<div class="pp-tab-content">';
 
   html += '<div class="pp-field-group">';
-  html += '<label>Target Printer</label>';
+  html += `<label>${escapeHtml(t('print.targetPrinter'))}</label>`;
   html += '<select id="pp-printer-select" class="pp-preset-select">';
   for (const [id, p] of Object.entries(PRINTERS)) {
     const sel = id === printerId ? ' selected' : '';
@@ -461,7 +456,7 @@ function _renderBedTab() {
   html += '</div>';
 
   html += '<div class="pp-field-group">';
-  html += '<label>Build Volume (mm)</label>';
+  html += `<label>${escapeHtml(t('print.buildVolume'))}</label>`;
   html += '<div class="pp-xyz-row">';
   for (const axis of ['x', 'y', 'z']) {
     html += `<label class="pp-xyz">${axis.toUpperCase()}`;
@@ -472,8 +467,8 @@ function _renderBedTab() {
 
   html += '<div class="pp-field-group">';
   // Viewport visibility = toggle button (checkbox→toggle audit 2026-06-13).
-  html += `<button type="button" class="pp-toggle${showVolume ? ' pp-toggle-on' : ''}" id="pp-bed-show" aria-pressed="${showVolume ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>Show bed volume in viewport</button>`;
-  html += '<div class="pp-info">Models exceeding the bed are flagged in Validation.</div>';
+  html += `<button type="button" class="pp-toggle${showVolume ? ' pp-toggle-on' : ''}" id="pp-bed-show" aria-pressed="${showVolume ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(t('print.showBedVolume'))}</button>`;
+  html += `<div class="pp-info">${escapeHtml(t('print.bedValidationInfo'))}</div>`;
   html += '</div>';
 
   html += '</div>';
@@ -580,12 +575,11 @@ function _renderExportWarningsModal({ close }) {
   const el = document.createElement('div');
   el.innerHTML = `
     <div class="modal-content">
-      <h3>Validation warnings</h3>
-      <p>Some print parts have validation warnings (see Print ▸ Validation).
-         Slicers usually auto-repair these. Export anyway?</p>
+      <h3>${escapeHtml(t('print.validationWarnings'))}</h3>
+      <p>${escapeHtml(t('print.validationWarningsBody'))}</p>
       <div class="modal-actions">
-        <button class="btn" data-action="cancel">Cancel</button>
-        <button class="btn btn-primary" data-action="export">Export anyway</button>
+        <button class="btn" data-action="cancel">${escapeHtml(t('btn.cancel'))}</button>
+        <button class="btn btn-primary" data-action="export">${escapeHtml(t('print.exportAnyway'))}</button>
       </div>
     </div>
   `;
@@ -600,15 +594,15 @@ function _renderValidationErrorsModal({ data, close }) {
   const errors = data?.errors ?? [];
 
   let html = '<div class="modal-content">';
-  html += '<h3>Validation Errors</h3>';
-  html += '<p>Cannot export while errors are present. Fix them first:</p>';
+  html += `<h3>${escapeHtml(t('print.validationErrors'))}</h3>`;
+  html += `<p>${escapeHtml(t('print.validationErrorsBody'))}</p>`;
   html += '<ul>';
   for (const { meshName, message } of errors) {
     html += `<li><strong>${escapeHtml(meshName)}:</strong> ${escapeHtml(message)}</li>`;
   }
   html += '</ul>';
   html += '<div class="modal-actions">';
-  html += '<button class="btn btn-primary" data-action="close">OK</button>';
+  html += `<button class="btn btn-primary" data-action="close">${escapeHtml(t('btn.ok'))}</button>`;
   html += '</div>';
   html += '</div>';
 

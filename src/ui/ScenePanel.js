@@ -19,7 +19,7 @@
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { register as registerShortcut } from '../core/InputManager.js';
@@ -33,6 +33,7 @@ import { renderPngName, turntableVideoName, clampDimension } from '../core/rende
 import { RenderFrame } from './RenderFrame.js';
 import { Toast } from './Toast.js';
 import { triggerDownload } from '../core/print/Download.js';
+import { escapeHtml, escapeAttr } from './renderSafe.js';
 import {
   TONE_EXPOSURE, TONE_CONTRAST, SHADOW_DARKNESS,
   KEY_INTENSITY, FILL_INTENSITY, HEMI_INTENSITY,
@@ -69,19 +70,19 @@ const RENDER_DEFAULTS = {
 
 // Viewport texture-cap options (assets/TextureCap.js). 0 = full res.
 const TEXCAP_PRESETS = [
-  { px: 0,    label: 'Off (full res)' },
-  { px: 4096, label: '4096 px' },
-  { px: 2048, label: '2048 px' },
-  { px: 1024, label: '1024 px' },
+  { px: 0,    labelKey: 'scene.textureCap.off' },
+  { px: 4096, labelKey: 'scene.textureCap.4096' },
+  { px: 2048, labelKey: 'scene.textureCap.2048' },
+  { px: 1024, labelKey: 'scene.textureCap.1024' },
 ];
 
 // Session-only inspection tool — never persisted (StateManager comment).
 const SECTION_DEFAULTS = { enabled: false, axis: 'z', offsetMM: 0, flip: false };
 
 const HDRI_PRESETS = [
-  { id: 'studio',  label: 'Studio' },
-  { id: 'neutral', label: 'Neutral' },
-  { id: 'outdoor', label: 'Outdoor' },
+  { id: 'studio',  labelKey: 'scene.hdri.studio' },
+  { id: 'neutral', labelKey: 'scene.hdri.neutral' },
+  { id: 'outdoor', labelKey: 'scene.hdri.outdoor' },
 ];
 
 const RENDEROUT_DEFAULTS = {
@@ -90,10 +91,10 @@ const RENDEROUT_DEFAULTS = {
 };
 
 const RESOLUTION_PRESETS = [
-  { label: '1080p — 1920 × 1080', w: 1920, h: 1080 },
-  { label: '4K — 3840 × 2160',    w: 3840, h: 2160 },
-  { label: 'Square — 2048 × 2048', w: 2048, h: 2048 },
-  { label: 'Portrait — 1080 × 1920', w: 1080, h: 1920 },
+  { labelKey: 'scene.resolution.1080p', w: 1920, h: 1080 },
+  { labelKey: 'scene.resolution.4k',    w: 3840, h: 2160 },
+  { labelKey: 'scene.resolution.square', w: 2048, h: 2048 },
+  { labelKey: 'scene.resolution.portrait', w: 1080, h: 1920 },
 ];
 
 // Per-user section collapse (localStorage, NEVER in .mixo — same per-user
@@ -119,16 +120,14 @@ let _collapsed = _loadCollapsed();
 let _bodyEl = null;
 let _root = null;
 
+const _txt = (key, params) => escapeHtml(t(key, params));
+const _attr = (key, params) => escapeAttr(t(key, params));
+
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 // Render-view compose mode — session-only. navPose = where the user's free
 // navigation was when the toggle went on, restored on toggle off. While
@@ -221,10 +220,12 @@ function _section(key, title, inner) {
   // Cross Section is session-only so it has no SettingsStore section → no
   // button. The button must stopPropagation in _wire (the header also toggles
   // collapse).
-  const resetBtn = SettingsStore.SECTION_KEYS.includes(key)
-    ? `<button type="button" class="pp-sec-reset" data-reset-sec="${key}" title="Reset ${title} to defaults" aria-label="Reset ${title} to defaults">${sectionIcon('RotateCcw')}</button>`
-    : '';
   const i18nKey = SECTION_I18N_KEYS[key];
+  const sectionLabel = i18nKey ? t(i18nKey) : title;
+  const resetTitle = t('scene.resetSectionTitle', { section: sectionLabel });
+  const resetBtn = SettingsStore.SECTION_KEYS.includes(key)
+    ? `<button type="button" class="pp-sec-reset" data-reset-sec="${key}" title="${escapeAttr(resetTitle)}" aria-label="${escapeAttr(resetTitle)}">${sectionIcon('RotateCcw')}</button>`
+    : '';
   // Build the data-i18n-key attribute via string concat so the i18n:check
   // regex doesn't false-match the literal `${i18nKey}` template placeholder.
   const i18nAttr = i18nKey ? ' data-i18n-key' + '="' + i18nKey + '"' : '';
@@ -254,7 +255,7 @@ function _subhead(label, iconName) {
 function _toggle(dataAttr, key, label, on) {
   return `<button type="button" class="pp-toggle${on ? ' pp-toggle-on' : ''}" `
     + `${dataAttr}="${key}" aria-pressed="${on ? 'true' : 'false'}">`
-    + `<span class="pp-toggle-dot" aria-hidden="true"></span>${label}</button>`;
+    + `<span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(label)}</button>`;
 }
 // New value to APPLY when an element fires: a button toggles its aria-pressed,
 // a checkbox reports its post-change `checked`.
@@ -279,160 +280,160 @@ function _render() {
 
   const gridSec = `
       <div class="pp-row">
-        <label>Grid cell (mm)</label>
+        <label>${_txt('scene.gridCellMm')}</label>
         <input type="number" step="1" min="0.1" data-grid="cellMM" value="${_fmt(grid.cellMM)}">
       </div>
       <div class="pp-row">
-        <label>Subdivisions</label>
+        <label>${_txt('scene.subdivisions')}</label>
         <input type="number" step="1" min="1" data-grid="subdivisions" value="${_fmt(grid.subdivisions, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-overlay', 'grid', 'Grid', overlays.grid)}
-        ${_toggle('data-overlay', 'axes', 'Axes', overlays.axes)}
+        ${_toggle('data-overlay', 'grid', t('scene.gridToggle'), overlays.grid)}
+        ${_toggle('data-overlay', 'axes', t('scene.axesToggle'), overlays.axes)}
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Bed ${_fmt(bed.x)} × ${_fmt(bed.y)} mm — set in Print ▸ Bed.</span>
+        <span class="pp-hint">${_txt('scene.gridBedHint', { x: _fmt(bed.x), y: _fmt(bed.y) })}</span>
       </div>`;
 
   // Dependent rows render only while their toggle is ON (UX audit P1 —
   // dead-looking controls). The toggles re-render the panel on change.
   const envSec = `
       <div class="pp-row">
-        <label>Background</label>
+        <label>${_txt('scene.background')}</label>
         <select data-render-select="background">
-          <option value="light" ${render.background !== 'dark' ? 'selected' : ''}>Light</option>
-          <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>Dark</option>
+          <option value="light" ${render.background !== 'dark' ? 'selected' : ''}>${_txt('scene.background.light')}</option>
+          <option value="dark" ${render.background === 'dark' ? 'selected' : ''}>${_txt('scene.background.dark')}</option>
         </select>
       </div>
       ${render.background !== 'dark' ? `
       <div class="pp-row">
-        <label>Light level</label>
-        <input type="range" step="0.01" min="0" max="1" data-render="lightIntensity" value="${_fmt(render.lightIntensity, 2)}" title="0 = pure white, 1 = default">
+        <label>${_txt('scene.lightLevel')}</label>
+        <input type="range" step="0.01" min="0" max="1" data-render="lightIntensity" value="${_fmt(render.lightIntensity, 2)}" title="${_attr('scene.lightLevelTitle')}">
       </div>` : ''}
       ${render.background === 'dark' ? `
       <div class="pp-row">
-        <label>Dark level</label>
-        <input type="range" step="0.01" min="0" max="1" data-render="darkIntensity" value="${_fmt(render.darkIntensity, 2)}" title="0 = pure black, 1 = default">
+        <label>${_txt('scene.darkLevel')}</label>
+        <input type="range" step="0.01" min="0" max="1" data-render="darkIntensity" value="${_fmt(render.darkIntensity, 2)}" title="${_attr('scene.darkLevelTitle')}">
       </div>` : ''}
-      ${_subhead('HDRI lighting', 'Globe')}
+      ${_subhead(_txt('scene.hdriLighting'), 'Globe')}
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'hdriEnabled', 'HDRI', render.hdriEnabled)}
+        ${_toggle('data-render-toggle', 'hdriEnabled', t('scene.hdriToggle'), render.hdriEnabled)}
       </div>
       ${render.hdriEnabled ? `
       <div class="pp-row">
-        <label>Preset</label>
+        <label>${_txt('scene.preset')}</label>
         <select data-render-select="hdriPreset">
           ${HDRI_PRESETS.map(p =>
-            `<option value="${p.id}" ${render.hdriPreset === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
+            `<option value="${p.id}" ${render.hdriPreset === p.id ? 'selected' : ''}>${_txt(p.labelKey)}</option>`).join('')}
         </select>
       </div>
       <div class="pp-row">
-        <label>Intensity</label>
+        <label>${_txt('scene.intensity')}</label>
         <input type="number" step="0.1" min="0" max="4" data-render="hdriIntensity" value="${_fmt(render.hdriIntensity, 1)}">
       </div>` : ''}
-      ${_subhead('Grade', 'Wand2')}
+      ${_subhead(_txt('scene.grade'), 'Wand2')}
       <div class="pp-row">
-        <label>Exposure</label>
+        <label>${_txt('scene.exposure')}</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="exposure" value="${_fmt(render.exposure)}">
       </div>
       <div class="pp-row">
-        <label>Contrast</label>
+        <label>${_txt('scene.contrast')}</label>
         <input type="number" step="0.05" min="0.1" max="4" data-render="contrast" value="${_fmt(render.contrast)}">
       </div>
       <div class="pp-row">
-        <label>Tone map</label>
+        <label>${_txt('scene.toneMap')}</label>
         <select data-render-select="toneMapping">
-          <option value="aces" ${render.toneMapping === 'aces' ? 'selected' : ''}>ACES (filmic)</option>
-          <option value="neutral" ${render.toneMapping === 'neutral' ? 'selected' : ''}>Neutral (KHR)</option>
-          <option value="standard" ${render.toneMapping === 'standard' ? 'selected' : ''}>Standard</option>
-          <option value="off" ${render.toneMapping === 'off' ? 'selected' : ''}>Off (linear)</option>
+          <option value="aces" ${render.toneMapping === 'aces' ? 'selected' : ''}>${_txt('scene.tone.aces')}</option>
+          <option value="neutral" ${render.toneMapping === 'neutral' ? 'selected' : ''}>${_txt('scene.tone.neutral')}</option>
+          <option value="standard" ${render.toneMapping === 'standard' ? 'selected' : ''}>${_txt('scene.tone.standard')}</option>
+          <option value="off" ${render.toneMapping === 'off' ? 'selected' : ''}>${_txt('scene.tone.off')}</option>
         </select>
       </div>
       <div class="pp-row">
-        <label>Saturation</label>
+        <label>${_txt('scene.saturation')}</label>
         <input type="number" step="5" min="-100" max="100" data-render="saturation" value="${_fmt(render.saturation, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'vignette', 'Vignette', render.vignette)}
+        ${_toggle('data-render-toggle', 'vignette', t('scene.vignette'), render.vignette)}
       </div>
       ${render.vignette ? `
       <div class="pp-row">
-        <label>Vignette amt</label>
+        <label>${_txt('scene.vignetteAmount')}</label>
         <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
       </div>` : ''}
-      ${_subhead('Floor', 'FloorPlane')}
+      ${_subhead(_txt('scene.floor'), 'FloorPlane')}
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'floorEnabled', 'Floor', render.floorEnabled)}
-        ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="Floor colour">` : ''}
+        ${_toggle('data-render-toggle', 'floorEnabled', t('scene.floor'), render.floorEnabled)}
+        ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="${_attr('scene.floorColor')}">` : ''}
       </div>
       ${render.floorEnabled ? `
       <div class="pp-row">
-        <label>Floor Z (mm)</label>
+        <label>${_txt('scene.floorZMm')}</label>
         <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
       </div>
       <div class="pp-row">
-        <label title="0 = auto (4× the largest bed dimension)">Diameter (mm)</label>
-        <input type="number" step="10" min="0" data-render="floorDiameterMM" value="${_fmt(render.floorDiameterMM, 0)}" placeholder="auto">
+        <label title="${_attr('scene.floorDiameterTitle')}">${_txt('scene.diameterMm')}</label>
+        <input type="number" step="10" min="0" data-render="floorDiameterMM" value="${_fmt(render.floorDiameterMM, 0)}" placeholder="${_attr('scene.auto')}">
       </div>` : ''}
       ${render.floorEnabled && !render.shadowsEnabled ? `
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Shadows are off — the floor won't catch any.</span>
+        <span class="pp-hint">${_txt('scene.shadowsOffHint')}</span>
       </div>` : ''}
-      ${_subhead('Lights', 'Lightbulb')}
+      ${_subhead(_txt('scene.lights'), 'Lightbulb')}
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'shadowsEnabled', 'Shadows', render.shadowsEnabled)}
+        ${_toggle('data-render-toggle', 'shadowsEnabled', t('scene.shadows'), render.shadowsEnabled)}
       </div>
       ${render.shadowsEnabled ? `
       <div class="pp-row">
-        <label>Shadow dark</label>
+        <label>${_txt('scene.shadowDark')}</label>
         <input type="number" step="0.05" min="0" max="1" data-render="shadowDarkness" value="${_fmt(render.shadowDarkness)}">
       </div>` : ''}
       <div class="pp-row">
-        <label>Key light</label>
+        <label>${_txt('scene.keyLight')}</label>
         <input type="number" step="0.05" min="0" max="3" data-render="keyIntensity" value="${_fmt(render.keyIntensity)}">
       </div>
       <div class="pp-row">
-        <label>Fill light</label>
+        <label>${_txt('scene.fillLight')}</label>
         <input type="number" step="0.05" min="0" max="3" data-render="fillIntensity" value="${_fmt(render.fillIntensity)}">
       </div>
       <div class="pp-row">
-        <label>Ambient</label>
+        <label>${_txt('scene.ambient')}</label>
         <input type="number" step="0.05" min="0" max="3" data-render="hemiIntensity" value="${_fmt(render.hemiIntensity)}">
       </div>
-      ${_subhead('Ambient occlusion', 'Aperture')}
+      ${_subhead(_txt('scene.ambientOcclusion'), 'Aperture')}
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'ssaoEnabled', 'SSAO contact shadows', render.ssaoEnabled)}
+        ${_toggle('data-render-toggle', 'ssaoEnabled', t('scene.ssaoContactShadows'), render.ssaoEnabled)}
       </div>
       ${render.ssaoEnabled ? `
       <div class="pp-row">
-        <label>AO strength</label>
+        <label>${_txt('scene.aoStrength')}</label>
         <input type="number" step="0.1" min="0" max="2" data-render="ssaoStrength" value="${_fmt(render.ssaoStrength, 1)}">
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Viewport shading only — not in PNG/video exports.</span>
+        <span class="pp-hint">${_txt('scene.viewportOnlyHint')}</span>
       </div>` : ''}
-      ${_subhead('Performance', 'Gauge')}
+      ${_subhead(_txt('scene.performance'), 'Gauge')}
       <div class="pp-row">
-        <label>Texture cap</label>
+        <label>${_txt('scene.textureCap')}</label>
         <select data-texcap>
           ${TEXCAP_PRESETS.map(p =>
-            `<option value="${p.px}" ${(render.textureCapPx || 0) === p.px ? 'selected' : ''}>${p.label}</option>`).join('')}
+            `<option value="${p.px}" ${(render.textureCapPx || 0) === p.px ? 'selected' : ''}>${_txt(p.labelKey)}</option>`).join('')}
         </select>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Caps GPU texture size to save VRAM on heavy scenes. Exports stay full-res.</span>
+        <span class="pp-hint">${_txt('scene.textureCapHint')}</span>
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="render-reset">Reset environment</button>
+        <button type="button" class="pp-btn" data-action="render-reset">${_txt('scene.resetEnvironment')}</button>
       </div>`;
 
   const camSec = `
       <div class="pp-row">
-        <label>FOV (deg)</label>
+        <label>${_txt('scene.fovDeg')}</label>
         <input type="number" step="1" min="5" max="140" data-render="fovDeg" value="${_fmt(render.fovDeg, 1)}">
       </div>
       <div class="pp-row">
-        <label>Near clip (mm)</label>
+        <label>${_txt('scene.nearClipMm')}</label>
         <input type="number" step="0.5" min="0.1" max="100" data-render="clipNearMM" value="${_fmt(render.clipNearMM, 1)}">
       </div>`;
 
@@ -446,89 +447,89 @@ function _render() {
   const sVal = Math.max(sext.minMM, Math.min(sext.maxMM, section.offsetMM));
   const sectionSec = `
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-sect-toggle', 'enabled', 'Cut view', section.enabled)}
+        ${_toggle('data-sect-toggle', 'enabled', t('scene.cutView'), section.enabled)}
       </div>
       ${section.enabled ? `
       <div class="pp-row">
-        <label>Axis</label>
+        <label>${_txt('scene.axis')}</label>
         <select data-sect-select="axis">
           <option value="x" ${section.axis === 'x' ? 'selected' : ''}>X</option>
           <option value="y" ${section.axis === 'y' ? 'selected' : ''}>Y</option>
-          <option value="z" ${section.axis !== 'x' && section.axis !== 'y' ? 'selected' : ''}>Z (height)</option>
+          <option value="z" ${section.axis !== 'x' && section.axis !== 'y' ? 'selected' : ''}>${_txt('scene.axisZHeight')}</option>
         </select>
       </div>
       <div class="pp-row">
-        <label>Offset (mm)</label>
+        <label>${_txt('scene.offsetMm')}</label>
         <input type="range" data-sect-range="offsetMM"
           min="${_fmt(sext.minMM, 1)}" max="${_fmt(sext.maxMM, 1)}" step="${sStep}"
           value="${_fmt(sVal, 1)}">
         <output class="pp-range-out" data-sect-out>${_fmt(sVal, 1)}</output>
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-sect-toggle="flip" ${section.flip ? 'checked' : ''}> Flip side</label>
+        <label><input type="checkbox" data-sect-toggle="flip" ${section.flip ? 'checked' : ''}> ${_txt('scene.flipSide')}</label>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">Models only — grid and floor stay. Shows in exports; shadows stay uncut.</span>
+        <span class="pp-hint">${_txt('scene.cutViewHint')}</span>
       </div>` : ''}`;
 
   const renderingSec = `
-      ${_subhead('Still', 'ImageDown')}
+      ${_subhead(_txt('scene.still'), 'ImageDown')}
       <div class="pp-row">
-        <label>Resolution</label>
+        <label>${_txt('scene.resolution')}</label>
         <select data-ro-preset>
           ${RESOLUTION_PRESETS.map((p, i) =>
-            `<option value="${i}" ${i === presetIdx ? 'selected' : ''}>${p.label}</option>`).join('')}
-          <option value="custom" ${presetIdx === -1 ? 'selected' : ''}>Custom</option>
+            `<option value="${i}" ${i === presetIdx ? 'selected' : ''}>${_txt(p.labelKey)}</option>`).join('')}
+          <option value="custom" ${presetIdx === -1 ? 'selected' : ''}>${_txt('scene.custom')}</option>
         </select>
       </div>
       <div class="pp-row">
-        <label>Width px</label>
+        <label>${_txt('scene.widthPx')}</label>
         <input type="number" step="1" min="16" max="8192" data-ro="width" value="${_fmt(ro.width, 0)}">
       </div>
       <div class="pp-row">
-        <label>Height px</label>
+        <label>${_txt('scene.heightPx')}</label>
         <input type="number" step="1" min="16" max="8192" data-ro="height" value="${_fmt(ro.height, 0)}">
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-ro-toggle="transparent" ${ro.transparent ? 'checked' : ''}> Transparent background (PNG)</label>
+        <label><input type="checkbox" data-ro-toggle="transparent" ${ro.transparent ? 'checked' : ''}> ${_txt('scene.transparentPng')}</label>
       </div>
       <div class="pp-row pp-row-inline">
-        ${_toggle('data-action', 'render-view', 'Render view', _rv.active)}
+        ${_toggle('data-action', 'render-view', t('scene.renderView'), _rv.active)}
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">While on, the camera position is remembered automatically.${ro.pose ? ' Exports shoot from the remembered view.' : ''}</span>
+        <span class="pp-hint">${_txt(ro.pose ? 'scene.renderViewHintWithPose' : 'scene.renderViewHint')}</span>
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="export-png" title="Ctrl+Alt+E">Export PNG</button>
+        <button type="button" class="pp-btn" data-action="export-png" title="${_attr('scene.exportPngShortcut')}">${_txt('scene.exportPng')}</button>
       </div>
-      ${_subhead('Turntable', 'Disc3')}
+      ${_subhead(_txt('scene.turntable'), 'Disc3')}
       <div class="pp-row">
-        <label>Duration (s)</label>
+        <label>${_txt('scene.durationS')}</label>
         <input type="number" step="1" min="1" max="120" data-tt="durationS" value="${_fmt(tt.durationS, 0)}">
       </div>
       <div class="pp-row">
-        <label>FPS</label>
+        <label>${_txt('scene.fps')}</label>
         <select data-tt-select="fps">
           <option value="30" ${tt.fps !== 60 ? 'selected' : ''}>30</option>
           <option value="60" ${tt.fps === 60 ? 'selected' : ''}>60</option>
         </select>
       </div>
       <div class="pp-row">
-        <label>Direction</label>
+        <label>${_txt('scene.direction')}</label>
         <select data-tt-select="direction">
-          <option value="left" ${tt.direction !== 'right' ? 'selected' : ''}>Left</option>
-          <option value="right" ${tt.direction === 'right' ? 'selected' : ''}>Right</option>
+          <option value="left" ${tt.direction !== 'right' ? 'selected' : ''}>${_txt('scene.left')}</option>
+          <option value="right" ${tt.direction === 'right' ? 'selected' : ''}>${_txt('scene.right')}</option>
         </select>
       </div>
       <div class="pp-row pp-row-inline">
-        <label><input type="checkbox" data-tt-toggle="ease" ${tt.ease ? 'checked' : ''}> Ease in / out</label>
+        <label><input type="checkbox" data-tt-toggle="ease" ${tt.ease ? 'checked' : ''}> ${_txt('scene.easeInOut')}</label>
       </div>
       <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="preview-turntable">${isPreviewing() ? 'Stop preview' : 'Preview'}</button>
-        <button type="button" class="pp-btn" data-action="export-video">Export video</button>
+        <button type="button" class="pp-btn" data-action="preview-turntable">${_txt(isPreviewing() ? 'scene.stopPreview' : 'scene.preview')}</button>
+        <button type="button" class="pp-btn" data-action="export-video">${_txt('scene.exportVideo')}</button>
       </div>
       <div class="pp-row pp-row-inline">
-        <span class="pp-hint">One full 360° at the resolution above.</span>
+        <span class="pp-hint">${_txt('scene.turntableHint')}</span>
       </div>`;
 
   _bodyEl.innerHTML =
@@ -791,12 +792,12 @@ function _wireRendering() {
     if (isPreviewing()) { stopPreview(); return; }
     if (isRecording() || _busy) return;
     const tt = _ro().turntable;
-    btn.textContent = 'Stop preview';
+    btn.textContent = t('scene.stopPreview');
     _setBusy(true, { keepPreview: true });   // changing settings mid-sweep does nothing (U2)
     try {
       await previewTurntable(tt);
     } finally {
-      btn.textContent = 'Preview';
+      btn.textContent = t('scene.preview');
       _setBusy(false);
     }
   });
@@ -816,21 +817,21 @@ function _wireRendering() {
         width: ro.width,
         height: ro.height,
         pose: ro.pose ?? null,
-        onProgress: (f) => { btn.textContent = `Rendering… ${Math.round(f * 100)}% — Esc cancels`; },
+        onProgress: (f) => { btn.textContent = t('scene.renderingProgressEsc', { pct: Math.round(f * 100) }); },
       });
       if (!result) {
         Toast.show(t('toast.turntableCancelled'), 'info', 2500);
       } else {
         await triggerDownload(result.blob,
           turntableVideoName(getState().project.name, tt.durationS, result.ext),
-          { mime: result.mime, ext: result.ext, description: 'Turntable video' });
+          { mime: result.mime, ext: result.ext, description: t('scene.turntableVideo') });
         Toast.show(t('toast.turntableExported', { secs: tt.durationS, ext: result.ext.toUpperCase() }), 'success', 3500);
       }
     } catch (err) {
       console.error('Turntable recording failed:', err);
       Toast.show(t('toast.turntableFailed'), 'error', 5000);
     } finally {
-      btn.textContent = 'Export video';
+      btn.textContent = t('scene.exportVideo');
       _setBusy(false);
     }
   });
@@ -855,17 +856,17 @@ async function _exportPng() {
   const btn = _bodyEl?.querySelector('[data-action="export-png"]');
   const ro = _ro();
   _setBusy(true);
-  if (btn) btn.textContent = 'Rendering…';
+  if (btn) btn.textContent = t('scene.rendering');
   try {
     const blob = await capturePng({ ...ro, pose: ro.pose ?? null });
     await triggerDownload(blob, renderPngName(getState().project.name, ro),
-      { mime: 'image/png', ext: 'png', description: 'PNG image' });
+      { mime: 'image/png', ext: 'png', description: t('scene.pngImage') });
     Toast.show(t('toast.pngRendered', { width: ro.width, height: ro.height }), 'success', 3000);
   } catch (err) {
     console.error('PNG render failed:', err);
     Toast.show(t('toast.pngFailed'), 'error', 5000);
   } finally {
-    if (btn) btn.textContent = 'Export PNG';
+    if (btn) btn.textContent = t('scene.exportPng');
     _setBusy(false);
   }
 }

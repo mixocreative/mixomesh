@@ -105,6 +105,24 @@ Runtime contract:
 - `src/` owns application code and data: app bootstrap, core managers, UI,
   config JSON, styles, typed contracts, import pipeline, and export pipeline.
 
+### 0.2a UI i18n Contract
+
+All authored visible UI copy lives in `src/i18n/locales/{en,ja,zh-Hant}.json`.
+UI modules render copy through `t(key)` or `applyTranslations(root)` from
+`src/i18n/index.js`; `applyTranslations` owns the static DOM convention:
+`data-i18n-key` for textContent plus `data-i18n-title`,
+`data-i18n-aria-label`, and `data-i18n-placeholder` for attributes. Dynamic
+render helpers may wrap `t()` (for example `_txt()` / `_attr()`) but must still
+escape before inserting into HTML strings. User/project data (object names,
+shader names, printer profile display names, filenames) is not translated.
+
+Locale switches dispatch `LOCALE_CHANGED`; components with persistent static
+DOM call `applyTranslations`, while components that generate dynamic labels
+re-render or update their text on that event. `npm run i18n:check` is part of
+the verification gate: it checks literal `t()` / wrapper calls, `data-i18n-*`
+attributes, `labelKey` constants, EN key coverage, JA/zh-Hant gaps, and
+hardcoded visible English text inside `src/ui` markup strings.
+
 ### 0.3 File Layout
 ```
 index.html                 ← Vite app shell

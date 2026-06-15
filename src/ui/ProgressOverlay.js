@@ -1,6 +1,8 @@
 // Full-screen blocking progress overlay. While an export runs the UI is
 // darkened and pointer-locked so the user can't mutate the scene mid-pipeline.
 
+import { t } from '../i18n/index.js';
+
 let _root = null;
 let _bar = null;
 let _pct = null;
@@ -14,7 +16,7 @@ function _ensure() {
   _root.className = 'progress-overlay hidden';
   _root.innerHTML = `
     <div class="po-panel" role="status" aria-live="polite">
-      <div class="po-title">Working…</div>
+      <div class="po-title"></div>
       <div class="po-track"><div class="po-bar"></div></div>
       <div class="po-row"><span class="po-pct">0%</span><span class="po-msg"></span></div>
     </div>`;
@@ -30,10 +32,10 @@ function _ensure() {
 }
 
 /** Show the overlay. @param {string} title */
-export function show(title = 'Working…') {
+export function show(title = t('progress.working')) {
   _ensure();
   _title.textContent = title;
-  update(0, 'Starting…');
+  update(0, t('progress.starting'));
   _root.classList.remove('hidden');
 }
 

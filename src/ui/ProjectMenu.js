@@ -7,7 +7,7 @@ import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 
 let _recentWrap = null;
 
@@ -21,17 +21,18 @@ export function init() {
   const bar = document.createElement('div');
   bar.className = 'pm-bar';
   bar.innerHTML = `
-    <button class="pm-btn" data-act="new"    title="New project (Ctrl+N)">${icon('FilePlus',   { width: 15, height: 15 })}</button>
-    <button class="pm-btn" data-act="open"   title="Open project (Ctrl+O)">${icon('FolderOpen', { width: 15, height: 15 })}</button>
-    <button class="pm-btn" data-act="save"   title="Save (Ctrl+S)">${icon('Save',         { width: 15, height: 15 })}</button>
-    <button class="pm-btn" data-act="saveas" title="Save As (Ctrl+Shift+S)">${icon('FilePenLine', { width: 15, height: 15 })}</button>
+    <button class="pm-btn" data-act="new"    data-i18n-title="project.newTitle">${icon('FilePlus',   { width: 15, height: 15 })}</button>
+    <button class="pm-btn" data-act="open"   data-i18n-title="project.openTitle">${icon('FolderOpen', { width: 15, height: 15 })}</button>
+    <button class="pm-btn" data-act="save"   data-i18n-title="project.saveTitle">${icon('Save',         { width: 15, height: 15 })}</button>
+    <button class="pm-btn" data-act="saveas" data-i18n-title="project.saveAsTitle">${icon('FilePenLine', { width: 15, height: 15 })}</button>
     <div class="pm-recent">
-      <button class="pm-btn" data-act="recent" title="Recent projects">${icon('Clock', { width: 15, height: 15 })}</button>
+      <button class="pm-btn" data-act="recent" data-i18n-title="project.recentTitle">${icon('Clock', { width: 15, height: 15 })}</button>
       <div class="pm-recent-list hidden"></div>
     </div>
-    <button class="pm-btn pm-btn-reset" data-act="reset-settings" title="Reset all settings to defaults">${icon('RotateCcw', { width: 15, height: 15 })}</button>
+    <button class="pm-btn pm-btn-reset" data-act="reset-settings" data-i18n-title="project.resetSettingsTitle">${icon('RotateCcw', { width: 15, height: 15 })}</button>
   `;
   header.appendChild(bar);
+  applyTranslations(bar);
   _recentWrap = bar.querySelector('.pm-recent-list');
 
   bar.addEventListener('click', (e) => {
@@ -64,13 +65,15 @@ export function init() {
   subscribe(EVENTS.PROJECT_SAVED,   refresh);
   subscribe(EVENTS.PROJECT_NEW,     refresh);
   subscribe(EVENTS.PROJECT_RENAMED, refresh);
+  subscribe(EVENTS.LOCALE_CHANGED, () => { applyTranslations(bar); _refreshName(); });
   _refreshName();
 }
 
 function _refreshName() {
   const el = document.getElementById('project-name');
   if (!el || el.dataset.editing === '1') return;   // don't clobber an open editor
-  el.textContent = getState().project.name || 'Untitled';
+  el.textContent = getState().project.name || t('project.untitled');
+  el.title = t('project.renameTitle');
 }
 
 /**
@@ -82,12 +85,12 @@ function _refreshName() {
 function _wireProjectNameEditor() {
   const el = document.getElementById('project-name');
   if (!el) return;
-  el.title = 'Click to rename project';
+  el.title = t('project.renameTitle');
   el.tabIndex = 0;
 
   const open = () => {
     if (el.dataset.editing === '1') return;
-    const current = getState().project.name || 'Untitled';
+    const current = getState().project.name || t('project.untitled');
     el.dataset.editing = '1';
     el.textContent = '';
     const input = document.createElement('input');
@@ -104,7 +107,7 @@ function _wireProjectNameEditor() {
       if (done) return; done = true;
       const next = input.value.trim();
       el.dataset.editing = '';
-      el.textContent = getState().project.name || 'Untitled';
+      el.textContent = getState().project.name || t('project.untitled');
       if (next && next !== current) {
         HistoryManager.push(new RenameProjectCommand(current, next));
       }
@@ -112,7 +115,7 @@ function _wireProjectNameEditor() {
     const cancel = () => {
       if (done) return; done = true;
       el.dataset.editing = '';
-      el.textContent = getState().project.name || 'Untitled';
+      el.textContent = getState().project.name || t('project.untitled');
     };
 
     input.addEventListener('keydown', (e) => {
@@ -137,7 +140,7 @@ async function _toggleRecent() {
   }
   const list = await PersistenceManager.getRecentProjects();
   if (!list.length) {
-    _recentWrap.innerHTML = `<div class="pm-recent-empty">No recent projects</div>`;
+    _recentWrap.innerHTML = `<div class="pm-recent-empty">${_esc(t('project.noRecent'))}</div>`;
   } else {
     _recentWrap.innerHTML = list.map((r, i) => {
       const thumbSrc = safeImageSrc(r.thumbnailDataUrl);
@@ -170,12 +173,12 @@ function _registerModals() {
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">Unsaved changes</h2>
-      <p class="pm-modal-body">This project has unsaved changes. Save before continuing?</p>
+      <h2 class="pm-modal-title">${_esc(t('project.unsavedTitle'))}</h2>
+      <p class="pm-modal-body">${_esc(t('project.unsavedBody'))}</p>
       <div class="pm-modal-actions">
-        <button class="btn" data-r="cancel">Cancel</button>
-        <button class="btn btn-danger" data-r="discard">Discard</button>
-        <button class="btn btn-primary" data-r="save">Save</button>
+        <button class="btn" data-r="cancel">${_esc(t('btn.cancel'))}</button>
+        <button class="btn btn-danger" data-r="discard">${_esc(t('project.discard'))}</button>
+        <button class="btn btn-primary" data-r="save">${_esc(t('btn.save'))}</button>
       </div>`;
     el.querySelectorAll('[data-r]').forEach(b =>
       b.addEventListener('click', () => close(b.dataset.r)));
@@ -183,15 +186,15 @@ function _registerModals() {
   });
 
   Modal.register('recoverAutosave', ({ data, close }) => {
-    const when = data?.savedAt ? new Date(data.savedAt).toLocaleString() : 'unknown time';
+    const when = data?.savedAt ? new Date(data.savedAt).toLocaleString() : t('project.unknownTime');
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">Recover autosave?</h2>
-      <p class="pm-modal-body">An autosave from <strong>${_esc(when)}</strong> was found. Recover it?</p>
+      <h2 class="pm-modal-title">${_esc(t('project.recoverTitle'))}</h2>
+      <p class="pm-modal-body">${_esc(t('project.recoverBodyBefore'))} <strong>${_esc(when)}</strong> ${_esc(t('project.recoverBodyAfter'))}</p>
       <div class="pm-modal-actions">
-        <button class="btn" data-r="discard">Discard</button>
-        <button class="btn btn-primary" data-r="recover">Recover</button>
+        <button class="btn" data-r="discard">${_esc(t('project.discard'))}</button>
+        <button class="btn btn-primary" data-r="recover">${_esc(t('project.recover'))}</button>
       </div>`;
     el.querySelectorAll('[data-r]').forEach(b =>
       b.addEventListener('click', () => close(b.dataset.r)));
@@ -203,20 +206,17 @@ function _registerModals() {
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">Linked assets fell back to snapshot</h2>
-      <p class="pm-modal-body">${assets.length} linked asset${assets.length === 1 ? '' : 's'}
-        couldn't be found on disk and ${assets.length === 1 ? 'was' : 'were'} restored
-        from the saved snapshot. The project is still complete — relink below to
-        reconnect to a live file.</p>
+      <h2 class="pm-modal-title">${_esc(t('project.unmatchedAssetsTitle'))}</h2>
+      <p class="pm-modal-body">${_esc(t('project.unmatchedAssetsBody', { n: assets.length }))}</p>
       <div class="pm-asset-list">
         ${assets.map(a => `
           <div class="pm-asset-row" data-id="${escapeAttr(a.id)}">
             <span class="pm-asset-name">${_esc(a.filename || a.name)}</span>
-            <button class="btn btn-sm" data-relink="${escapeAttr(a.id)}">Relink…</button>
+            <button class="btn btn-sm" data-relink="${escapeAttr(a.id)}">${_esc(t('project.relink'))}</button>
           </div>`).join('')}
       </div>
       <div class="pm-modal-actions">
-        <button class="btn btn-primary" data-r="ok">Close</button>
+        <button class="btn btn-primary" data-r="ok">${_esc(t('btn.close'))}</button>
       </div>`;
     el.querySelector('[data-r="ok"]').addEventListener('click', () => close('ok'));
     el.querySelectorAll('[data-relink]').forEach(b =>

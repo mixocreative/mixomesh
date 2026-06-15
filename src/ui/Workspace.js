@@ -12,7 +12,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, dispatch, getState, setState } from '../core/StateManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { icon } from '../core/Icons.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
 // v2: panelCollapsed went tri-state (absent = defer to workspace default).
@@ -254,7 +254,7 @@ function _renderPill() {
   _pillEl = document.createElement('div');
   _pillEl.className = 'ws-switcher';
   _pillEl.setAttribute('role', 'tablist');
-  _pillEl.setAttribute('aria-label', 'Workspace');
+  _pillEl.dataset.i18nAriaLabel = 'workspace.switcher.aria';
   for (const name of WORKSPACES) {
     const def = WORKSPACE_DEFAULTS[name];
     const btn = document.createElement('button');
@@ -274,12 +274,13 @@ function _renderPill() {
     sub.textContent = t(`workspace.${name}.sub`);
 
     btn.append(primary, sub);
-    btn.title = `${def.label} workspace (Ctrl+Shift+${WORKSPACES.indexOf(name) + 1})`;
+    btn.title = _workspaceTitle(name);
     btn.setAttribute('role', 'tab');
     btn.addEventListener('click', () => setWorkspace(name));
     _pillEl.appendChild(btn);
   }
   header.appendChild(_pillEl);
+  _retranslate(_pillEl);
 }
 
 function _syncPill(workspace) {
@@ -291,14 +292,19 @@ function _syncPill(workspace) {
   });
 }
 
+function _workspaceTitle(name) {
+  return t('workspace.switcher.title', {
+    name: t(`workspace.${name}`),
+    n: WORKSPACES.indexOf(name) + 1,
+  });
+}
+
 // Re-translate any descendant with a data-i18n-key — called on LOCALE_CHANGED.
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
+  root?.querySelectorAll('.ws-btn').forEach(btn => {
+    btn.title = _workspaceTitle(btn.dataset.ws);
+  });
 }
 
 export const Workspace = { init, setWorkspace, togglePanel, maxViewport };

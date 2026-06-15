@@ -3,22 +3,24 @@ import { subscribe } from '../core/StateManager.js';
 import { getUndoLabel, getRedoLabel } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 let _elLeft   = null;
 let _elCenter = null;
 let _elRight  = null;
 let _isDirty  = false;
+let _leftDefault = true;
 
 function _updateRight() {
   const undoLabel = getUndoLabel();
   const redoLabel = getRedoLabel();
 
   const undoPart = undoLabel
-    ? `<span class="sb-label">Undo: <span>${escapeHtml(undoLabel)}</span></span>`
-    : `<span class="sb-label" style="color:var(--text-2)">Undo: —</span>`;
+    ? `<span class="sb-label">${escapeHtml(t('status.undo'))}: <span>${escapeHtml(undoLabel)}</span></span>`
+    : `<span class="sb-label" style="color:var(--text-2)">${escapeHtml(t('status.undo'))}: ${escapeHtml(t('status.noneDash'))}</span>`;
 
   const redoPart = redoLabel
-    ? `<span class="sb-label">Redo: <span>${escapeHtml(redoLabel)}</span></span>`
+    ? `<span class="sb-label">${escapeHtml(t('status.redo'))}: <span>${escapeHtml(redoLabel)}</span></span>`
     : '';
 
   const saveClass = _isDirty ? 'dirty' : 'saved';
@@ -58,13 +60,17 @@ export function init() {
   _elCenter = document.getElementById('sb-center');
   _elRight  = document.getElementById('sb-right');
 
-  _elLeft.textContent = 'MMB: Orbit · Scroll: Zoom · G/R/S: Transform';
+  _elLeft.textContent = t('status.defaultHint');
 
   subscribe(EVENTS.HISTORY_PUSHED, _onHistoryChange);
   subscribe(EVENTS.HISTORY_UNDONE, _onHistoryChange);
   subscribe(EVENTS.HISTORY_REDONE, _onHistoryChange);
   subscribe(EVENTS.PROJECT_DIRTY,  _onDirty);
   subscribe(EVENTS.PROJECT_SAVED,  _onSaved);
+  subscribe(EVENTS.LOCALE_CHANGED, () => {
+    if (_leftDefault) _elLeft.textContent = t('status.defaultHint');
+    _updateRight();
+  });
 
   _updateRight();
 }
@@ -76,7 +82,10 @@ export function setCenter(text) {
 
 /** Update the left segment with current operation hint. */
 export function setHint(text) {
-  if (_elLeft) _elLeft.textContent = text;
+  if (_elLeft) {
+    _leftDefault = !text;
+    _elLeft.textContent = text || t('status.defaultHint');
+  }
 }
 
 export const StatusBar = { init, setCenter, setHint };

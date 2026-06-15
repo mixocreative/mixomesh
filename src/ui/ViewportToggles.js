@@ -11,6 +11,7 @@ import { subscribe, getState, setState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { icon } from '../core/Icons.js';
 import { escapeAttr } from './renderSafe.js';
+import { t } from '../i18n/index.js';
 
 let _root = null;
 
@@ -21,6 +22,7 @@ export function init() {
   // Overlays arrive restored on load (spec load step 12) and reset on new.
   subscribe(EVENTS.PROJECT_LOADED, _render);
   subscribe(EVENTS.PROJECT_NEW, _render);
+  subscribe(EVENTS.LOCALE_CHANGED, _render);
 }
 
 function _render() {
@@ -35,21 +37,21 @@ function _render() {
     : 'shaded';
 
   _root.innerHTML = `
-    <select class="vt-mode" data-mode title="Display mode (shading)">
-      <option value="shaded" ${mode === 'shaded' ? 'selected' : ''}>Shaded</option>
-      <option value="matte"  ${mode === 'matte'  ? 'selected' : ''}>Matte</option>
-      <option value="base"   ${mode === 'base'   ? 'selected' : ''}>Base Color</option>
-      <option value="uv"     ${mode === 'uv'     ? 'selected' : ''}>UV Checker</option>
+    <select class="vt-mode" data-mode title="${escapeAttr(t('viewport.displayModeTitle'))}">
+      <option value="shaded" ${mode === 'shaded' ? 'selected' : ''}>${t('viewport.mode.shaded')}</option>
+      <option value="matte"  ${mode === 'matte'  ? 'selected' : ''}>${t('viewport.mode.matte')}</option>
+      <option value="base"   ${mode === 'base'   ? 'selected' : ''}>${t('viewport.mode.baseColor')}</option>
+      <option value="uv"     ${mode === 'uv'     ? 'selected' : ''}>${t('viewport.mode.uvChecker')}</option>
     </select>
     <button class="vt-btn ${wireOn ? 'vt-on' : ''}" data-toggle="wireframeEdges"
-            title="Wireframe edges — show edge outlines on models"
+            title="${escapeAttr(t('viewport.wireframeEdgesTitle'))}"
             aria-pressed="${wireOn ? 'true' : 'false'}">
       ${icon('MeshTriangle', { width: 15, height: 15 })}
     </button>
     <input type="color" class="vp-wire-color ${wireOn ? '' : 'vp-hidden'}"
-           value="${escapeAttr(wireColor)}" title="Wireframe edge color">
+           value="${escapeAttr(wireColor)}" title="${escapeAttr(t('viewport.wireframeEdgeColorTitle'))}">
     <button class="vt-btn ${invOn ? 'vt-on' : ''}" data-toggle="invertedFaces"
-            title="Inverted / back-face check — red where back faces show (holes or flipped faces)"
+            title="${escapeAttr(t('viewport.invertedFacesTitle'))}"
             aria-pressed="${invOn ? 'true' : 'false'}">
       ${icon('AlertTriangle', { width: 15, height: 15 })}
     </button>

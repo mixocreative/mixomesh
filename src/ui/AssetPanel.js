@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, dispatch } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
 import { kvSet, kvGet, getHandle } from '../core/idb.js';
 import { Modal } from './Modal.js';
@@ -24,12 +24,7 @@ const SESSION_KEY = '__session__';
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 let _root          = null;
@@ -60,25 +55,25 @@ export function init() {
   _root.innerHTML = `
     <div class="ap-tree" id="ap-tree" data-tab="session">
       <div class="ap-tree-header">
-        <div class="ap-tabs" role="tablist" aria-label="Asset source">
-          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" title="Assets used in this project"><span data-i18n-key="panel.session.title">Session</span></button>
-          <button class="ap-tab" type="button" role="tab" aria-selected="false" data-tab="library" title="A mounted folder you can pull assets from across projects">Asset Library</button>
+        <div class="ap-tabs" role="tablist" data-i18n-aria-label="asset.source">
+          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" data-i18n-title="asset.sessionTitle"><span data-i18n-key="panel.session.title">Session</span></button>
+          <button class="ap-tab" type="button" role="tab" aria-selected="false" data-tab="library" data-i18n-title="asset.libraryTitle"><span data-i18n-key="panel.library.title">Library</span></button>
         </div>
-        <button class="ap-btn" id="ap-mount-btn" type="button" title="Mount a directory">
+        <button class="ap-btn" id="ap-mount-btn" type="button" data-i18n-title="asset.mountDirectoryTitle">
           ${icon('Upload', { width: 14, height: 14 })}
-          <span>Mount</span>
+          <span data-i18n-key="asset.mount">Mount</span>
         </button>
       </div>
-      <ul class="ap-tree-list" id="ap-tree-list" role="tree" aria-label="Mounted asset folders"></ul>
+      <ul class="ap-tree-list" id="ap-tree-list" role="tree" data-i18n-aria-label="asset.mountedFolders"></ul>
     </div>
     <div class="ap-divider"></div>
     <div class="ap-grid" id="ap-grid">
       <div class="ap-grid-controls" role="search">
-        <input class="ap-search" id="ap-search" type="search" placeholder="Filter assets" autocomplete="off" aria-label="Filter assets">
-        <select class="ap-kind-filter" id="ap-kind-filter" aria-label="Asset type filter">
-          <option value="all">All</option>
-          <option value="mesh">Meshes</option>
-          <option value="texture">Textures</option>
+        <input class="ap-search" id="ap-search" type="search" data-i18n-placeholder="asset.filter" autocomplete="off" data-i18n-aria-label="asset.filter">
+        <select class="ap-kind-filter" id="ap-kind-filter" data-i18n-aria-label="asset.typeFilter">
+          <option value="all" data-i18n-key="asset.filter.all">All</option>
+          <option value="mesh" data-i18n-key="asset.filter.meshes">Meshes</option>
+          <option value="texture" data-i18n-key="asset.filter.textures">Textures</option>
         </select>
       </div>
       <div class="ap-grid-summary" id="ap-grid-summary" aria-live="polite"></div>
@@ -108,19 +103,18 @@ export function init() {
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
   // Header is built once and survives re-renders — only retranslate it on
   // locale switch; the grid body has no section.* labels in scope for v1.
-  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  subscribe(EVENTS.LOCALE_CHANGED, () => { _retranslate(_root); _renderGrid(); });
 
   Modal.register('remountFolder', ({ data, close }) => {
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">Re-mount asset folder?</h2>
-      <p class="pm-modal-body">Last session's asset folder
-        <strong>${_escape(data?.name || '')}</strong> is available. Re-mount it so
-        saved projects relink to live files?</p>
+      <h2 class="pm-modal-title">${_escape(t('asset.remountTitle'))}</h2>
+      <p class="pm-modal-body">${_escape(t('asset.remountBodyBefore'))}
+        <strong>${_escape(data?.name || '')}</strong> ${_escape(t('asset.remountBodyAfter'))}</p>
       <div class="pm-modal-actions">
-        <button class="btn" data-r="skip">Skip</button>
-        <button class="btn btn-primary" data-r="mount">Mount</button>
+        <button class="btn" data-r="skip">${_escape(t('asset.skip'))}</button>
+        <button class="btn btn-primary" data-r="mount">${_escape(t('asset.mount'))}</button>
       </div>`;
     el.querySelectorAll('[data-r]').forEach(b =>
       b.addEventListener('click', () => close(b.dataset.r)));
@@ -327,8 +321,7 @@ function _renderGrid() {
     _gridSummaryEl.textContent = '';
     _gridBodyEl.innerHTML = `
       <div class="ap-empty">
-        No folder mounted. Click <strong>Mount</strong> to pick one — its files
-        become draggable across projects.
+        ${_escape(t('asset.empty.noFolder'))}
       </div>`;
     return;
   } else {
@@ -342,17 +335,21 @@ function _renderGrid() {
   const total = files.length;
   const filtered = _filterFiles(files);
   _gridSummaryEl.textContent = total
-    ? `${filtered.length} of ${total} ${_plural(total, 'asset')}`
+    ? t('asset.summary', {
+      filtered: filtered.length,
+      total,
+      noun: t(total === 1 ? 'asset.assetSingular' : 'asset.assetPlural'),
+    })
     : '';
 
   if (!filtered.length) {
     _gridBodyEl.innerHTML = `
       <div class="ap-empty">
         ${total
-          ? 'No assets match the current filter.'
+          ? _escape(t('asset.empty.noMatch'))
           : _activeTab === 'session'
-          ? 'Drop a 3D file (.glb / .gltf / .obj / .stl / .3mf) onto the viewport, or mount a directory.'
-          : 'No supported files in this folder.'}
+          ? _escape(t('asset.empty.session'))
+          : _escape(t('asset.empty.noSupported'))}
       </div>`;
     return;
   }
@@ -405,9 +402,9 @@ function _renderCard(file) {
   let badges = `<span class="ac-ext">${file.ext.slice(1).toUpperCase()}</span>`;
   if (kind === 'mesh' && asset) {
     const authoredScale = authoredScaleFromAsset(asset);
-    badges += `<span class="ac-ratio" title="Authored Scale">${_escape(formatScaleRatio(authoredScale.authoredRatio))}</span>`;
+    badges += `<span class="ac-ratio" title="${escapeAttr(t('asset.authoredScaleTitle'))}">${_escape(formatScaleRatio(authoredScale.authoredRatio))}</span>`;
     if (asset.unitConfirmed === false) {
-      badges += `<span class="ac-unit-badge" title="Source unit unconfirmed: ${escapeAttr(asset.sourceUnit)}">${icon('AlertTriangle', { width: 11, height: 11 })}${_escape(_unitShort(asset.sourceUnit))}</span>`;
+      badges += `<span class="ac-unit-badge" title="${escapeAttr(t('asset.sourceUnitUnconfirmed', { unit: asset.sourceUnit }))}">${icon('AlertTriangle', { width: 11, height: 11 })}${_escape(_unitShort(asset.sourceUnit))}</span>`;
     }
   }
   // Liveness badge — only meaningful on the Session tab (Library cards are
@@ -415,14 +412,18 @@ function _renderCard(file) {
   if (isSession && asset) {
     const linked = !!(asset.directoryHandleKey || asset.fileHandleKey);
     badges += linked
-      ? `<span class="ac-link is-linked" title="Linked to a file on disk — saves stay in sync if the source changes">Linked</span>`
-      : `<span class="ac-link is-snapshot" title="Saved as a frozen snapshot — no on-disk source to track">Snapshot</span>`;
+      ? `<span class="ac-link is-linked" title="${escapeAttr(t('asset.linkedTitle'))}">${_escape(t('asset.linked'))}</span>`
+      : `<span class="ac-link is-snapshot" title="${escapeAttr(t('asset.snapshotTitle'))}">${_escape(t('asset.snapshot'))}</span>`;
   }
 
   const deleteBtn = isSession && asset
-    ? `<button class="ac-delete" type="button" data-asset-id="${escapeAttr(asset.id)}" title="Remove asset" aria-label="Remove ${escapeAttr(file.name)}">×</button>`
+    ? `<button class="ac-delete" type="button" data-asset-id="${escapeAttr(asset.id)}" title="${escapeAttr(t('asset.remove'))}" aria-label="${escapeAttr(t('asset.removeNamed', { name: file.name }))}">×</button>`
     : '';
-  const label = `${file.name}, ${kind}, ${isSession ? 'session asset' : 'library asset'}`;
+  const label = t('asset.cardLabel', {
+    name: file.name,
+    kind: t(`asset.kind.${kind}`),
+    source: t(isSession ? 'asset.source.session' : 'asset.source.library'),
+  });
 
   return `
     <div class="asset-card"

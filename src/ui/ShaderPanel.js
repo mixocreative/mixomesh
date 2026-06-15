@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState, dispatch } from '../core/StateManager.js';
-import { t } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { ShaderLibrary, DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
@@ -31,12 +31,7 @@ const _collapsedSections = new Set();
 // textContent through t(). MUST use textContent — translations are plain text,
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
-  if (!root) return;
-  for (const el of root.querySelectorAll('[data-i18n-key]')) {
-    const key = el.dataset.i18nKey;
-    if (!key) continue;
-    el.textContent = t(key);
-  }
+  applyTranslations(root);
 }
 
 // ── Init ─────────────────────────────────────────────────
@@ -140,16 +135,16 @@ function _renderTexturePickModal({ data, close }) {
   root.innerHTML = `
     <header class="modal-header">
       ${icon('Image', { width: 18, height: 18 })}
-      <span>Pick texture</span>
+      <span>${_escape(t('shader.pickTexture'))}</span>
     </header>
     <div class="modal-body">
-      <p>Choose any texture already loaded in the scene library.</p>
+      <p>${_escape(t('shader.pickTextureBody'))}</p>
       <div class="tp-grid">
         ${data.textures.map(t => _renderTexturePickCard(t, current === t.id)).join('')}
       </div>
     </div>
     <div class="modal-footer">
-      <button class="modal-btn" data-tp-cancel>Cancel</button>
+      <button class="modal-btn" data-tp-cancel>${_escape(t('btn.cancel'))}</button>
     </div>
   `;
 
@@ -190,20 +185,19 @@ function _renderMergeModal({ data, close }) {
   root.innerHTML = `
     <header class="modal-header">
       ${icon('AlertTriangle', { width: 18, height: 18 })}
-      <span>Shader name conflicts</span>
+      <span>${_escape(t('shader.conflictsTitle'))}</span>
     </header>
     <div class="modal-body">
       <p>
-        ${conflicts.length} material${conflicts.length === 1 ? '' : 's'} in this asset
-        share names with shaders already in the scene. Choose how to resolve each:
+        ${_escape(t('shader.conflictsBody', { n: conflicts.length }))}
       </p>
       <div class="mm-apply-all">
-        <label>Apply to all:
+        <label>${_escape(t('shader.applyToAll'))}
           <select id="mm-apply-all">
-            <option value="">— choose —</option>
-            <option value="useExisting">Use existing</option>
-            <option value="rename" selected>Rename</option>
-            <option value="replace">Replace</option>
+            <option value="">${_escape(t('shader.choose'))}</option>
+            <option value="useExisting">${_escape(t('shader.useExisting'))}</option>
+            <option value="rename" selected>${_escape(t('shader.rename'))}</option>
+            <option value="replace">${_escape(t('shader.replace'))}</option>
           </select>
         </label>
       </div>
@@ -212,8 +206,8 @@ function _renderMergeModal({ data, close }) {
       </ul>
     </div>
     <div class="modal-footer">
-      <button class="modal-btn" data-mm-cancel>Cancel</button>
-      <button class="modal-btn modal-btn-primary" data-mm-confirm>Apply</button>
+      <button class="modal-btn" data-mm-cancel>${_escape(t('btn.cancel'))}</button>
+      <button class="modal-btn modal-btn-primary" data-mm-confirm>${_escape(t('btn.apply'))}</button>
     </div>
   `;
 
@@ -250,9 +244,9 @@ function _renderConflictRow(c) {
     <li class="mm-row" data-name="${escapeAttr(c.name)}">
       <div class="mm-row-name">${_escape(c.name)}</div>
       <div class="mm-row-opts">
-        <label><input type="radio" name="mm-${id}" value="useExisting"> Use existing</label>
-        <label><input type="radio" name="mm-${id}" value="rename" checked> Rename</label>
-        <label><input type="radio" name="mm-${id}" value="replace"> Replace</label>
+        <label><input type="radio" name="mm-${id}" value="useExisting"> ${_escape(t('shader.useExisting'))}</label>
+        <label><input type="radio" name="mm-${id}" value="rename" checked> ${_escape(t('shader.rename'))}</label>
+        <label><input type="radio" name="mm-${id}" value="replace"> ${_escape(t('shader.replace'))}</label>
       </div>
     </li>
   `;
@@ -306,13 +300,13 @@ function _applyAndWireSectionCollapse() {
 function _renderList(shaders) {
   const rows = shaders.length
     ? shaders.map(s => _renderListRow(s)).join('')
-    : '<div class="sp-empty">No shaders. Click + to create one.</div>';
+    : `<div class="sp-empty">${_escape(t('shader.emptyList'))}</div>`;
 
   return `
     <section class="sp-section" data-section="list">
       <header class="sp-section-header">
-        <span>${sectionIcon('Layers')}Scene Shaders</span>
-        <button class="sp-icon-btn" id="sp-new" title="New shader">${icon('Plus', { width: 14, height: 14 })}</button>
+        <span>${sectionIcon('Layers')}${_escape(t('shader.sceneShaders'))}</span>
+        <button class="sp-icon-btn" id="sp-new" title="${escapeAttr(t('shader.newShader'))}">${icon('Plus', { width: 14, height: 14 })}</button>
       </header>
       <ul class="sp-list">${rows}</ul>
     </section>
@@ -325,8 +319,8 @@ function _renderListRow(sh) {
     <li class="sp-row ${selected}" data-shader-id="${escapeAttr(sh.id)}" tabindex="0" role="option" aria-selected="${sh.id === _editingId ? 'true' : 'false'}" draggable="true">
       ${renderShaderPreview(sh, 18)}
       <span class="sp-row-name" title="${escapeAttr(sh.name)}">${_escape(sh.name)}</span>
-      <span class="sp-row-count" title="Meshes using this shader">${sh.linkedMeshIds.length}</span>
-      <button class="sp-row-act" data-sp-dup="${escapeAttr(sh.id)}" title="Duplicate this shader">${icon('Copy', { width: 12, height: 12 })}</button>
+      <span class="sp-row-count" title="${escapeAttr(t('shader.meshesUsingTitle'))}">${sh.linkedMeshIds.length}</span>
+      <button class="sp-row-act" data-sp-dup="${escapeAttr(sh.id)}" title="${escapeAttr(t('shader.duplicateThis'))}">${icon('Copy', { width: 12, height: 12 })}</button>
     </li>
   `;
 }
@@ -394,8 +388,8 @@ function _wireList() {
 function _renderEditorEmpty() {
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>${sectionIcon('Edit3')}Editor</span></header>
-      <div class="sp-empty">Select a shader above to edit it.</div>
+      <header class="sp-section-header"><span>${sectionIcon('Edit3')}${_escape(t('shader.editor'))}</span></header>
+      <div class="sp-empty">${_escape(t('shader.selectToEdit'))}</div>
     </section>
   `;
 }
@@ -408,24 +402,24 @@ function _renderEditor(sh) {
 
   return `
     <section class="sp-section" data-section="editor">
-      <header class="sp-section-header"><span>${sectionIcon('Edit3')}Editor</span></header>
+      <header class="sp-section-header"><span>${sectionIcon('Edit3')}${_escape(t('shader.editor'))}</span></header>
 
       <div class="sp-row-form">
-        <label>Name</label>
+        <label>${_escape(t('properties.name'))}</label>
         <input type="text" id="sp-edit-name" value="${escapeAttr(sh.name)}">
       </div>
 
       <div class="sp-row-form">
-        <label>Type</label>
+        <label>${_escape(t('shader.type'))}</label>
         <select id="sp-edit-type">
-          <option value="standard" ${sh.type === 'standard' ? 'selected' : ''}>Standard</option>
-          <option value="pbr"      ${sh.type === 'pbr'      ? 'selected' : ''}>PBR</option>
-          <option value="unlit"    ${sh.type === 'unlit'    ? 'selected' : ''}>Unlit</option>
+          <option value="standard" ${sh.type === 'standard' ? 'selected' : ''}>${_escape(t('shader.type.standard'))}</option>
+          <option value="pbr"      ${sh.type === 'pbr'      ? 'selected' : ''}>${_escape(t('shader.type.pbr'))}</option>
+          <option value="unlit"    ${sh.type === 'unlit'    ? 'selected' : ''}>${_escape(t('shader.type.unlit'))}</option>
         </select>
       </div>
 
       <div class="sp-row-form">
-        <label>Color</label>
+        <label>${_escape(t('shader.color'))}</label>
         <div class="sp-color-line">
           <input type="color" id="sp-edit-color" value="${escapeAttr(_safeHex(sh.diffuseColor))}">
           <input type="text"  id="sp-edit-color-hex" value="${escapeAttr(_safeHex(sh.diffuseColor))}" spellcheck="false">
@@ -433,45 +427,45 @@ function _renderEditor(sh) {
       </div>
 
       <div class="sp-row-form">
-        <label>Texture</label>
+        <label>${_escape(t('shader.texture'))}</label>
         <div class="sp-tex-drop" id="sp-edit-tex" data-shader-id="${escapeAttr(sh.id)}">
           ${_renderTextureSlot(sh)}
         </div>
       </div>
 
       <div class="sp-row-form sp-slider-row">
-        <label>Opacity</label>
+        <label>${_escape(t('shader.opacity'))}</label>
         <input type="range" min="0" max="100" value="${opPct}" id="sp-edit-opacity">
         <span class="sp-readout">${opPct}%</span>
       </div>
 
       ${isPBR ? `
       <div class="sp-row-form sp-slider-row">
-        <label>Roughness</label>
+        <label>${_escape(t('shader.roughness'))}</label>
         <input type="range" min="0" max="100" value="${Math.round((sh.roughness ?? 0.5) * 100)}" id="sp-edit-rough">
         <span class="sp-readout">${Math.round((sh.roughness ?? 0.5) * 100)}%</span>
       </div>
       <div class="sp-row-form sp-slider-row">
-        <label>Metallic</label>
+        <label>${_escape(t('shader.metallic'))}</label>
         <input type="range" min="0" max="100" value="${Math.round((sh.metallic ?? 0) * 100)}" id="sp-edit-metal">
         <span class="sp-readout">${Math.round((sh.metallic ?? 0) * 100)}%</span>
       </div>
       ` : ''}
 
       <div class="sp-uv-grid">
-        <span class="sp-uv-label">UV base</span>
-        <span class="sp-uv-cell"><label>U off</label><input type="number" step="0.01" id="sp-uv-ox" value="${_fmt(sh.uvBase.offsetX, 3)}"></span>
-        <span class="sp-uv-cell"><label>V off</label><input type="number" step="0.01" id="sp-uv-oy" value="${_fmt(sh.uvBase.offsetY, 3)}"></span>
-        <span class="sp-uv-cell"><label>U scale</label><input type="number" step="0.1" id="sp-uv-sx" value="${_fmt(sh.uvBase.scaleX, 3)}"></span>
-        <span class="sp-uv-cell"><label>V scale</label><input type="number" step="0.1" id="sp-uv-sy" value="${_fmt(sh.uvBase.scaleY, 3)}"></span>
-        <span class="sp-uv-cell"><label>Rot (rad)</label><input type="number" step="0.1" id="sp-uv-rot" value="${_fmt(sh.uvBase.rotation, 3)}"></span>
+        <span class="sp-uv-label">${_escape(t('shader.uvBase'))}</span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.uOff'))}</label><input type="number" step="0.01" id="sp-uv-ox" value="${_fmt(sh.uvBase.offsetX, 3)}"></span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.vOff'))}</label><input type="number" step="0.01" id="sp-uv-oy" value="${_fmt(sh.uvBase.offsetY, 3)}"></span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.uScale'))}</label><input type="number" step="0.1" id="sp-uv-sx" value="${_fmt(sh.uvBase.scaleX, 3)}"></span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.vScale'))}</label><input type="number" step="0.1" id="sp-uv-sy" value="${_fmt(sh.uvBase.scaleY, 3)}"></span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.rotRad'))}</label><input type="number" step="0.1" id="sp-uv-rot" value="${_fmt(sh.uvBase.rotation, 3)}"></span>
       </div>
 
       <div class="sp-actions">
-        <button class="sp-btn" id="sp-act-duplicate">${icon('Copy',  { width: 12, height: 12 })}<span>Duplicate</span></button>
-        <button class="sp-btn" id="sp-act-assign" ${selCount ? '' : 'disabled'}>${icon('Link', { width: 12, height: 12 })}<span>Assign (${selCount})</span></button>
-        <button class="sp-btn" id="sp-act-select" ${linked ? '' : 'disabled'}>${icon('Focus', { width: 12, height: 12 })}<span>Select linked</span></button>
-        <button class="sp-btn sp-btn-danger" id="sp-act-delete" ${linked ? 'disabled' : ''} title="${escapeAttr(linked ? `Refuses while ${linked} mesh${linked === 1 ? '' : 'es'} use this shader` : 'Delete shader')}">${icon('Trash2', { width: 12, height: 12 })}<span>Delete</span></button>
+        <button class="sp-btn" id="sp-act-duplicate">${icon('Copy',  { width: 12, height: 12 })}<span>${_escape(t('context.duplicate'))}</span></button>
+        <button class="sp-btn" id="sp-act-assign" ${selCount ? '' : 'disabled'}>${icon('Link', { width: 12, height: 12 })}<span>${_escape(t('shader.assignCount', { n: selCount }))}</span></button>
+        <button class="sp-btn" id="sp-act-select" ${linked ? '' : 'disabled'}>${icon('Focus', { width: 12, height: 12 })}<span>${_escape(t('shader.selectLinked'))}</span></button>
+        <button class="sp-btn sp-btn-danger" id="sp-act-delete" ${linked ? 'disabled' : ''} title="${escapeAttr(linked ? t('shader.refuseDeleteTitle', { n: linked }) : t('shader.deleteTitle'))}">${icon('Trash2', { width: 12, height: 12 })}<span>${_escape(t('context.delete'))}</span></button>
       </div>
     </section>
   `;
@@ -482,22 +476,22 @@ function _renderTextureSlot(sh) {
     return `
       <span class="sp-tex-empty">
         ${icon('Image', { width: 14, height: 14 })}
-        <span>Drop image here</span>
-        <button class="sp-tex-pick" id="sp-tex-pick" type="button" title="Pick from loaded textures">Pick…</button>
+        <span>${_escape(t('shader.dropImageHere'))}</span>
+        <button class="sp-tex-pick" id="sp-tex-pick" type="button" title="${escapeAttr(t('shader.pickLoadedTextures'))}">${_escape(t('shader.pick'))}</button>
       </span>
     `;
   }
   const asset = getState().scene.assetLibrary[sh.diffuseTextureAssetId];
   if (!asset) {
-    return `<span class="sp-tex-empty">${icon('AlertTriangle', { width: 14, height: 14 })}<span>Missing</span></span>`;
+    return `<span class="sp-tex-empty">${icon('AlertTriangle', { width: 14, height: 14 })}<span>${_escape(t('shader.missing'))}</span></span>`;
   }
   const thumbSrc = safeImageSrc(asset.thumbnailDataUrl);
   return `
     <span class="sp-tex-loaded" title="${escapeAttr(asset.filename)}">
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : `<span class="sp-tex-thumb-empty">${icon('Image', { width: 14, height: 14 })}</span>`}
       <span class="sp-tex-name">${_escape(asset.name)}</span>
-      <button class="sp-tex-pick" id="sp-tex-pick" type="button" title="Pick another texture">Swap…</button>
-      <button class="sp-tex-clear" id="sp-tex-clear" title="Remove texture">×</button>
+      <button class="sp-tex-pick" id="sp-tex-pick" type="button" title="${escapeAttr(t('shader.pickAnotherTexture'))}">${_escape(t('shader.swap'))}</button>
+      <button class="sp-tex-clear" id="sp-tex-clear" title="${escapeAttr(t('shader.removeTexture'))}">×</button>
     </span>
   `;
 }
@@ -679,12 +673,12 @@ function _renderSwatches() {
 
   const userHtml = `
     <div class="sp-swatch-group">
-      <header class="sp-swatch-cat">User
-        <button class="sp-icon-btn" id="sp-add-swatch" title="Save current color as swatch">${icon('Plus', { width: 12, height: 12 })}</button>
+      <header class="sp-swatch-cat">${_escape(t('shader.userSwatches'))}
+        <button class="sp-icon-btn" id="sp-add-swatch" title="${escapeAttr(t('shader.saveColorSwatch'))}">${icon('Plus', { width: 12, height: 12 })}</button>
       </header>
       <div class="sp-swatch-grid">
         ${userSwatches.map(_renderSwatchChip).join('')}
-        ${userSwatches.length === 0 ? '<span class="sp-swatch-hint">Click + to save the active shader\'s color.</span>' : ''}
+        ${userSwatches.length === 0 ? `<span class="sp-swatch-hint">${_escape(t('shader.swatchHint'))}</span>` : ''}
       </div>
     </div>
   `;
@@ -692,7 +686,7 @@ function _renderSwatches() {
   return `
     <section class="sp-section" data-section="swatches">
       <header class="sp-section-header">
-        <span>${sectionIcon('Swatches')}Swatches</span>
+        <span>${sectionIcon('Swatches')}${_escape(t('shader.swatches'))}</span>
       </header>
       ${groupHtml}
       ${userHtml}
