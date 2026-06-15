@@ -73,12 +73,14 @@ function makeMesh(name, parent = null) {
 }
 
 function makeLibraryContainer() {
-  const root = makeNode('__root__', null, { mixomeshImportMode: 'library' });
-  const cola = makeNode('Cola', root);
-  const juice = makeNode('Juice', root);
+  const root = makeNode('__root__');
+  const library = makeNode('BeverageLibrary', root, { library: 1 });
+  const cola = makeNode('Cola', library);
+  const juice = makeNode('Juice', library);
+  const helper = makeNode('ReferenceScaleCube', root);
   return {
-    meshes: [makeMesh('ColaMesh', cola), makeMesh('JuiceMesh', juice)],
-    transformNodes: [root, cola, juice],
+    meshes: [makeMesh('ColaMesh', cola), makeMesh('JuiceMesh', juice), makeMesh('HelperMesh', helper)],
+    transformNodes: [root, library, cola, juice, helper],
     materials: [],
     textures: [],
     addAllToScene() { this.added = true; },

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 
 const {
   extractModelRatio,
-  getImportMode,
   isLibraryImport,
   findLibraryItemRoots,
 } = await import('../src/core/import/ImportMetadata.js');
@@ -37,25 +36,27 @@ await test('extractModelRatio reads Blender glTF extras with existing ratio keys
   assert.equal(extractModelRatio(container), 72);
 });
 
-await test('getImportMode reads flat Blender custom-property marker', () => {
+await test('isLibraryImport reads the Blender library=1 custom property', () => {
   const container = {
     meshes: [],
-    transformNodes: [extras({ mixomeshImportMode: 'library' })],
+    transformNodes: [extras({ library: 1 })],
   };
-  assert.equal(getImportMode(container), 'library');
   assert.equal(isLibraryImport(container), true);
 });
 
-await test('getImportMode reads structured mixomesh extras marker', () => {
+await test('isLibraryImport ignores non-enabled library values', () => {
   const container = {
     meshes: [],
-    transformNodes: [extras({ mixomesh: { importMode: 'library' } })],
+    transformNodes: [
+      extras({ library: 0 }),
+      extras({ library: 'library' }),
+    ],
   };
-  assert.equal(getImportMode(container), 'library');
+  assert.equal(isLibraryImport(container), false);
 });
 
 await test('findLibraryItemRoots splits by first real top-level Blender object', () => {
-  const root = { name: '__root__', parent: null, ...extras({ mixomeshImportMode: 'library' }) };
+  const root = { name: '__root__', parent: null, ...extras({ library: 1 }) };
   const cola = { name: 'Cola', parent: root, metadata: {} };
   const juice = { name: 'Juice', parent: root, metadata: {} };
   const colaMesh = geomMesh('cola_mesh', cola);
@@ -64,6 +65,25 @@ await test('findLibraryItemRoots splits by first real top-level Blender object',
   const roots = findLibraryItemRoots({
     transformNodes: [root, cola, juice],
     meshes: [colaMesh, juiceMesh],
+  });
+
+  assert.deepEqual(roots.map(r => r.name), ['Cola', 'Juice']);
+  assert.deepEqual(roots.map(r => r.path), ['Cola', 'Juice']);
+});
+
+await test('findLibraryItemRoots scopes items to a marked Blender Empty', () => {
+  const sceneRoot = { name: '__root__', parent: null, metadata: {} };
+  const library = { name: 'BeverageLibrary', parent: sceneRoot, ...extras({ library: 1 }) };
+  const cola = { name: 'Cola', parent: library, metadata: {} };
+  const juice = { name: 'Juice', parent: library, metadata: {} };
+  const helper = { name: 'ReferenceScaleCube', parent: sceneRoot, metadata: {} };
+  const colaMesh = geomMesh('cola_mesh', cola);
+  const juiceMesh = geomMesh('juice_mesh', juice);
+  const helperMesh = geomMesh('helper_mesh', helper);
+
+  const roots = findLibraryItemRoots({
+    transformNodes: [sceneRoot, library, cola, juice, helper],
+    meshes: [colaMesh, juiceMesh, helperMesh],
   });
 
   assert.deepEqual(roots.map(r => r.name), ['Cola', 'Juice']);

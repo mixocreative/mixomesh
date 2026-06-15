@@ -1,7 +1,5 @@
 import { parseScaleRatioText } from '../scale/ScaleMath.js';
 
-const LIBRARY_MODE = 'library';
-
 function _metadataNodes(container) {
   return [...(container?.meshes ?? []), ...(container?.transformNodes ?? [])];
 }
@@ -23,19 +21,11 @@ function _extraValue(extras, wantedKey) {
   return undefined;
 }
 
-function _mixomeshBag(extras) {
-  const direct = _extraValue(extras, 'mixomesh');
-  if (direct && typeof direct === 'object') return direct;
-  return null;
-}
-
-function _nodeImportMode(node) {
+function _isLibraryMarkerNode(node) {
   const extras = _extras(node);
-  if (!extras) return null;
-  const flat = _extraValue(extras, 'mixomeshImportMode');
-  const nested = _extraValue(_mixomeshBag(extras), 'importMode');
-  const value = flat ?? nested;
-  return value == null ? null : String(value).trim().toLowerCase();
+  if (!extras) return false;
+  const value = _extraValue(extras, 'library');
+  return value === 1 || value === true || String(value ?? '').trim() === '1';
 }
 
 function _isGeometryMesh(mesh) {
@@ -47,7 +37,11 @@ function _isSyntheticRoot(node) {
 }
 
 function _isLibraryBoundary(node) {
-  return _isSyntheticRoot(node) || _nodeImportMode(node) === LIBRARY_MODE;
+  return _isSyntheticRoot(node) || _isLibraryMarkerNode(node);
+}
+
+function _libraryMarkerNodes(container) {
+  return _metadataNodes(container).filter(node => _isLibraryMarkerNode(node));
 }
 
 function _libraryRootForMesh(mesh) {
@@ -56,6 +50,47 @@ function _libraryRootForMesh(mesh) {
     current = current.parent;
   }
   return current;
+}
+
+function _directChildUnderBoundary(node, boundary) {
+  if (node === boundary) return node;
+  let current = node;
+  let child = null;
+  while (current && current !== boundary) {
+    child = current;
+    current = current.parent;
+  }
+  return current === boundary ? child : null;
+}
+
+function _nodePathFromBoundary(node, boundary) {
+  if (node === boundary) return String(node?.name || 'Object');
+  const parts = [];
+  let current = node;
+  while (current && current !== boundary) {
+    parts.push(String(current.name || 'Object'));
+    current = current.parent;
+  }
+  return current === boundary ? parts.reverse().join('/') : nodeLibraryPath(node);
+}
+
+function _collectRootsFromBoundaries(container, boundaries) {
+  const out = [];
+  const seen = new Set();
+  for (const boundary of boundaries) {
+    for (const mesh of container?.meshes ?? []) {
+      if (!_isGeometryMesh(mesh)) continue;
+      const root = _directChildUnderBoundary(mesh, boundary);
+      if (!root || seen.has(root)) continue;
+      seen.add(root);
+      out.push({
+        node: root,
+        name: String(root.name || mesh.name || 'Object'),
+        path: _nodePathFromBoundary(root, boundary),
+      });
+    }
+  }
+  return out;
 }
 
 export function extractModelRatio(container) {
@@ -70,16 +105,8 @@ export function extractModelRatio(container) {
   return null;
 }
 
-export function getImportMode(container) {
-  for (const node of _metadataNodes(container)) {
-    const mode = _nodeImportMode(node);
-    if (mode) return mode;
-  }
-  return null;
-}
-
 export function isLibraryImport(container) {
-  return getImportMode(container) === LIBRARY_MODE;
+  return _libraryMarkerNodes(container).length > 0;
 }
 
 export function nodeLibraryPath(node) {
@@ -103,6 +130,9 @@ export function isNodeWithinRoot(node, root) {
 }
 
 export function findLibraryItemRoots(container) {
+  const markers = _libraryMarkerNodes(container);
+  if (markers.length) return _collectRootsFromBoundaries(container, markers);
+
   const out = [];
   const seen = new Set();
   for (const mesh of container?.meshes ?? []) {

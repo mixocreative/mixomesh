@@ -350,11 +350,10 @@ Import path:
 2. `AssetLoader.loadFromBlob/loadFromHandle` validates the extension via
    `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and reads glTF
    custom properties through `src/core/import/ImportMetadata.js`.
-3. If a GLB/glTF has `mixomeshImportMode = "library"` (or structured
-   `mixomesh.importMode = "library"`) in glTF `extras`, the loader registers
-   each top-level Blender object as a separate Asset Panel entry and returns
-   without adding anything to the scene. If library splitting fails, the same
-   file falls back to normal GLB import.
+3. If a GLB/glTF has `library = 1` in glTF node `extras`, the loader registers
+   each direct child of the marked object that contains geometry as a separate
+   Asset Panel entry and returns without adding anything to the scene. If
+   library splitting fails, the same file falls back to normal GLB import.
 4. Normal scene imports call `splitMultiMaterialMeshesInContainer()` before
    shader registration.
 5. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
@@ -1626,15 +1625,18 @@ function applyImportScaling(container, factor, dropPos) {
 **Blender custom property convention.** In Blender, add a custom property on the object or the scene named `ratio`, type String, value `"1/72"` (or `"1:72"`, or `"72"`). The glTF exporter emits this to the node `extras` bag, which Babylon's loader exposes at `mesh.metadata.gltf.extras`. Without the property, `modelRatio` defaults to `1` (i.e. authored at 1:1, full real-world size).
 
 **GLB library convention.** To make a GLB behave as a reusable object pack
-instead of an immediate scene import, add a Blender custom property named
-`mixomeshImportMode` with value `"library"` to a root Empty/object and export
-with custom properties enabled. The loader also accepts structured
-`mixomesh.importMode = "library"` when a producer writes nested glTF extras.
-Each top-level child object below that marker becomes a separate Asset Panel
-entry (`libraryItem.rootName/rootPath`). Nothing is added to the viewport until
-the user double-clicks or drags one of those child assets. If the marker exists
-but no usable object roots can be resolved, import falls back to the normal GLB
-scene path.
+instead of an immediate scene import, add one Blender Empty/object as the
+library container, set custom property `library` to `1`, and export with custom
+properties enabled. Collections may still organize the file, but collection
+names/properties are not part of the import contract. The marker is object-level
+only; Scene custom properties are not used for library mode because they do not
+define an object boundary and may be omitted from selected-object export flows.
+Each direct child object below the marked container that contains geometry
+becomes a separate Asset Panel entry (`libraryItem.rootName/rootPath`). Geometry
+outside the marked container is ignored for library splitting. Nothing is added
+to the viewport until the user double-clicks or drags one of those child assets.
+If the marker exists but no usable object roots can be resolved, import falls
+back to the normal GLB scene path.
 
 **External (non-Blender) glTF files** that follow the spec's meters convention will import 1000× too small at the mm default. The user can then override `sourceUnit` to `'meters'` in the Properties Panel (Phase 3), and the loader re-applies the scaling.
 

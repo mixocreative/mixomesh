@@ -95,19 +95,41 @@ beverage.glb
 If imported normally, that pack would enter the scene as one file drop. That is
 not ideal when the file is meant to be a reusable object library.
 
-To mark a GLB as a library, add this Blender custom property to a root Empty or
-root object and export with custom properties enabled:
+To mark a GLB as a library, add one Empty/object as the library container.
+Collections are fine for Blender organization, but MIXOMESH does not depend on
+collection names or collection custom properties. Put this custom property on
+the container object and export with custom properties enabled:
 
 ```text
-mixomeshImportMode = library
+library = 1
+```
+
+Recommended Blender hierarchy:
+
+```text
+Beverage Collection
+  MIXOMESH_LIBRARY        <- Empty with library = 1
+    Cola                  <- Asset Panel entry
+      ColaBottleMesh
+      ColaLabelMesh
+    Juice                 <- Asset Panel entry
+      JuiceBottleMesh
 ```
 
 When MIXOMESH sees this marker:
 
 1. It reads the GLB but does not add it to the scene.
-2. It finds each top-level child object below the marker.
+2. It finds each direct child object below the marker that contains geometry.
 3. It registers each child as its own Asset Panel entry.
 4. Dragging or double-clicking one child asset imports only that object.
+
+Geometry outside the marked container is ignored for library splitting. This
+lets modelers keep scale helpers, references, or other collection contents in
+the Blender file without turning them into asset entries.
+
+Do not put `library = 1` on the Blender Scene or Collection for library mode.
+Library mode needs an object boundary, and selected-object GLB exports are safest
+when the selected export includes the marker Empty and its child asset groups.
 
 If library splitting fails, MIXOMESH falls back to normal GLB import so the
 file is still usable.
@@ -151,7 +173,10 @@ STL export:
   together.
 - Use STL only for geometry-only workflows.
 - Use `ratio` custom properties for authored scale.
-- Use `mixomeshImportMode = library` for object-pack GLBs that should fill the
-  Asset Panel instead of the scene.
+- Use `library = 1` for object-pack GLBs that should fill the
+  Asset Panel instead of the scene. Put the marker on one Empty/object and make
+  direct children under it the intended asset entries.
+- Collections are safe for organization, but parent hierarchy is the import
+  contract.
 - Use export buttons to choose output format. Do not expect the printer profile
   to switch formats.
