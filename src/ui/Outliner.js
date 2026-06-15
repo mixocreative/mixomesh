@@ -2,7 +2,8 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
+import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
+import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 
@@ -98,6 +99,7 @@ function _render() {
   const objsByCol = new Map();
   const uncolObjs = [];
   for (const o of Object.values(objects)) {
+    if (!shouldDisplayObject(o)) continue;
     if (o.parentId) continue;
     const c = o.collectionId;
     if (!c || !collections[c]) { uncolObjs.push(o); continue; }
@@ -141,6 +143,7 @@ function _computeGroupCollections(allGroups, allObjects) {
       const cur = stack.pop();
       for (const id of cur.childIds ?? []) {
         const obj = allObjects[id];
+        if (obj && !shouldDisplayObject(obj)) continue;
         if (obj?.collectionId) colls.add(obj.collectionId);
         else if (obj)          colls.add('__none__');
       }
@@ -186,7 +189,7 @@ function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allOb
 
 function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth, mixed = false) {
   const isCollapsed = !!collapsed[group.id];
-  const children = (group.childIds ?? []).map(id => allObjects[id]).filter(Boolean);
+  const children = (group.childIds ?? []).map(id => allObjects[id]).filter(shouldDisplayObject);
   const subgroups = Object.values(allGroups).filter(g => g.parentId === group.id);
 
   let html = _renderRow({
@@ -289,19 +292,34 @@ function _readShaderDrop(e) {
 function _toggleVisibility(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
-  push(new VisibilityCommand([meshId], { [meshId]: !!obj.visible }, !obj.visible));
+  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
+  const prev = Object.fromEntries(ids.map(id => [id, !!getState().scene.objects[id]?.visible]));
+  push(new VisibilityCommand(ids, prev, !obj.visible));
 }
 
 function _toggleLock(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
-  push(new LockCommand([meshId], { [meshId]: !!obj.locked }, !obj.locked));
+  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
+  const prev = Object.fromEntries(ids.map(id => [id, !!getState().scene.objects[id]?.locked]));
+  push(new LockCommand(ids, prev, !obj.locked));
 }
 
 function _togglePrintPart(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
-  push(new PrintPartCommand(meshId, !!obj.isPrintPart, !obj.isPrintPart));
+  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
+  beginPrintPartBatch(ids, !obj.isPrintPart);
+}
+
+function beginPrintPartBatch(ids, next) {
+  beginBatch('Print Part');
+  for (const id of ids) {
+    const obj = getState().scene.objects[id];
+    if (!obj) continue;
+    push(new PrintPartCommand(id, !!obj.isPrintPart, next));
+  }
+  endBatch();
 }
 
 function _toggleCollapsed(id) {
@@ -391,7 +409,7 @@ function _onListDrop(e) {
   const id = row.dataset.id;
   const obj = getState().scene.objects[id];
   if (!obj || obj.shaderId === shaderId) return;
-  push(new ShaderAssignCommand([id], shaderId));
+  push(new ShaderAssignCommand(logicalObjectPartIds(id, getState().scene.objects), shaderId));
 }
 
 function _onListKeyDown(e) {
@@ -434,7 +452,7 @@ function _selectGroup(groupId) {
   while (stack.length) {
     const cur = stack.pop();
     for (const id of cur.childIds ?? []) {
-      if (objects[id]) ids.push(id);
+      if (objects[id] && shouldDisplayObject(objects[id])) ids.push(id);
     }
     for (const sg of Object.values(groups)) if (sg.parentId === cur.id) stack.push(sg);
   }
@@ -444,7 +462,7 @@ function _selectGroup(groupId) {
 function _selectCollection(collectionId) {
   // Selecting a collection selects every mesh tagged with it.
   const { objects } = getState().scene;
-  const ids = Object.values(objects).filter(o => o.collectionId === collectionId).map(o => o.id);
+  const ids = Object.values(objects).filter(o => o.collectionId === collectionId && shouldDisplayObject(o)).map(o => o.id);
   if (ids.length) Selection.set(ids, ids[ids.length - 1]);
 }
 

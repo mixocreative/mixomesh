@@ -57,7 +57,7 @@ export function buildColorGroupEntries(meshList) {
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
 export async function buildMaterialsExtEntries(meshList) {
-  const { blobByPath, pathByMesh } = await collectMimakiTextures(meshList, BABYLON);
+  const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON);
   const modelXml = _buildMaterialsExtModel(meshList, pathByMesh);
   const entries = [
     { path: '[Content_Types].xml', data: CONTENT_TYPES_TEXTURED },
@@ -69,6 +69,19 @@ export async function buildMaterialsExtEntries(meshList) {
     for (const [path, blob] of blobByPath) entries.push({ path, data: blob });
   }
   return entries;
+}
+
+function _normaliseUnits(list) {
+  return (list ?? []).map(entry => {
+    if (Array.isArray(entry?.meshes)) {
+      return { name: entry.name, meshes: entry.meshes };
+    }
+    return { name: entry?.name, meshes: [entry] };
+  }).filter(unit => unit.meshes.length);
+}
+
+function _flattenEntries(list) {
+  return _normaliseUnits(list).flatMap(unit => unit.meshes);
 }
 
 /**
@@ -83,36 +96,27 @@ export async function buildMaterialsExtEntries(meshList) {
  * origin so it lands on the slicer bed. `unit="millimeter"` is literal.
  */
 function _buildColorGroupModel(list) {
+  const units = _normaliseUnits(list);
+  const flat = _flattenEntries(units);
   const colors = [];
   const colorIndex = new Map();
-  for (const { mesh } of list) {
+  for (const { mesh } of flat) {
     const hex = _materialHex(mesh);
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
   }
 
-  const { converted, cx, cy, cz } = _convertVertices(list);
+  const { converted, cx, cy, cz } = _convertVertices(flat);
 
   const objs = [];
   const items = [];
   let objId = 2;                                  // id 1 = colorgroup
-  for (const { mesh } of list) {
-    const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) { objId++; continue; }
-
-    let v = '';
-    for (let i = 0; i < pos.length; i += 3) {
-      v += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
-    let t = '';
-    for (let i = 0; i < idx.length; i += 3) {
-      const [b, c] = THREEMF_REVERSE_WINDING ? [idx[i + 2], idx[i + 1]] : [idx[i + 1], idx[i + 2]];
-      t += `<triangle v1="${idx[i]}" v2="${b}" v3="${c}"/>`;
-    }
-    const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+  for (const unit of units) {
+    const built = _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex);
+    if (!built) { objId++; continue; }
+    const { vertices, triangles, objectAttrs } = built;
     objs.push(
-      `<object id="${objId}" type="model" pid="1" pindex="${pidx}">` +
-      `<mesh><vertices>${v}</vertices><triangles>${t}</triangles></mesh></object>`
+      `<object id="${objId}" type="model"${objectAttrs}>` +
+      `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
     );
     // Geometry is fully baked into the vertices (flattenWorld → absolute,
     // origin-centred). The build item therefore carries an EXPLICIT identity
@@ -128,7 +132,38 @@ function _buildColorGroupModel(list) {
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
 <resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${objs.join('')}</resources>
 <build>${items.join('')}</build>
-</model>`;
+  </model>`;
+}
+
+function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex) {
+  const single = unit.meshes.length === 1;
+  let vertices = '';
+  let triangles = '';
+  let vertexOffset = 0;
+  let objectAttrs = '';
+
+  for (const { mesh } of unit.meshes) {
+    const pos = converted.get(mesh);
+    const idx = mesh.getIndices();
+    if (!pos || !idx || idx.length === 0) continue;
+    for (let i = 0; i < pos.length; i += 3) {
+      vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
+    }
+    const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+    if (single) objectAttrs = ` pid="1" pindex="${pidx}"`;
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i] + vertexOffset;
+      const [b, c] = THREEMF_REVERSE_WINDING
+        ? [idx[i + 2] + vertexOffset, idx[i + 1] + vertexOffset]
+        : [idx[i + 1] + vertexOffset, idx[i + 2] + vertexOffset];
+      triangles += single
+        ? `<triangle v1="${a}" v2="${b}" v3="${c}"/>`
+        : `<triangle v1="${a}" v2="${b}" v3="${c}" pid="1" p1="${pidx}" p2="${pidx}" p3="${pidx}"/>`;
+    }
+    vertexOffset += pos.length / 3;
+  }
+
+  return triangles ? { vertices, triangles, objectAttrs } : null;
 }
 
 // Pass: rotate every mesh's vertices into 3MF space and find the union
@@ -183,17 +218,19 @@ function _convertVertices(list) {
  * PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
  */
 function _buildMaterialsExtModel(list, pathByMesh) {
+  const units = _normaliseUnits(list);
+  const flat = _flattenEntries(units);
   // Pass 1: assign resource ids, gather distinct solid colours.
   let nextId = 1;
   const tex2dIdByPath = new Map();
   for (const p of new Set([...pathByMesh.values()])) tex2dIdByPath.set(p, nextId++);
 
   const tex2dGroupIdByMesh = new Map();
-  for (const { mesh } of list) if (pathByMesh.has(mesh)) tex2dGroupIdByMesh.set(mesh, nextId++);
+  for (const { mesh } of flat) if (pathByMesh.has(mesh)) tex2dGroupIdByMesh.set(mesh, nextId++);
 
   const colors = [];
   const colorIndex = new Map();
-  for (const { mesh } of list) {
+  for (const { mesh } of flat) {
     if (pathByMesh.has(mesh)) continue;
     const hex = _materialHex(mesh);
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
@@ -201,7 +238,7 @@ function _buildMaterialsExtModel(list, pathByMesh) {
   const colorGroupId = colors.length ? nextId++ : null;
 
   // Pass 2: rotate vertices into 3MF space and find union bounds.
-  const { converted, cx, cy, cz } = _convertVertices(list);
+  const { converted, cx, cy, cz } = _convertVertices(flat);
 
   // Resources — texture2d.
   const tex2dXml = [...tex2dIdByPath.entries()]
@@ -210,7 +247,7 @@ function _buildMaterialsExtModel(list, pathByMesh) {
 
   // Resources — texture2dgroup (one per textured mesh, coord per vertex).
   const tex2dGroupXmls = [];
-  for (const { mesh } of list) {
+  for (const { mesh } of flat) {
     const groupId = tex2dGroupIdByMesh.get(mesh);
     if (!groupId) continue;
     const texPath = pathByMesh.get(mesh);
@@ -232,38 +269,16 @@ function _buildMaterialsExtModel(list, pathByMesh) {
   const objs = [];
   const items = [];
   let objId = nextId;
-  for (const { mesh } of list) {
-    const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) { objId++; continue; }
-
-    let v = '';
-    for (let i = 0; i < pos.length; i += 3) {
-      v += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
-    let t = '';
-    const isTextured = tex2dGroupIdByMesh.has(mesh);
-    for (let i = 0; i < idx.length; i += 3) {
-      const a = idx[i];
-      const [b, c] = THREEMF_REVERSE_WINDING ? [idx[i + 2], idx[i + 1]] : [idx[i + 1], idx[i + 2]];
-      // Textured: per-triangle p1/p2/p3 mirror v1/v2/v3 because we emit one
-      // tex2coord per vertex in vertex order. The loader inverts this 1:1.
-      t += isTextured
-        ? `<triangle v1="${a}" v2="${b}" v3="${c}" p1="${a}" p2="${b}" p3="${c}"/>`
-        : `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
-    }
-    let pidAttrs;
-    if (isTextured) {
-      pidAttrs = ` pid="${tex2dGroupIdByMesh.get(mesh)}"`;
-    } else if (colorGroupId != null) {
-      const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
-      pidAttrs = ` pid="${colorGroupId}" pindex="${pidx}"`;
-    } else {
-      pidAttrs = '';
-    }
+  for (const unit of units) {
+    const built = _buildUnitMaterialsMeshXml(
+      unit, converted, cx, cy, cz,
+      tex2dGroupIdByMesh, colorGroupId, colorIndex
+    );
+    if (!built) { objId++; continue; }
+    const { vertices, triangles, objectAttrs } = built;
     objs.push(
-      `<object id="${objId}" type="model"${pidAttrs}>` +
-      `<mesh><vertices>${v}</vertices><triangles>${t}</triangles></mesh></object>`
+      `<object id="${objId}" type="model"${objectAttrs}>` +
+      `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
     );
     items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
     objId++;
@@ -274,6 +289,51 @@ function _buildMaterialsExtModel(list, pathByMesh) {
 <resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
 <build>${items.join('')}</build>
 </model>`;
+}
+
+function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByMesh, colorGroupId, colorIndex) {
+  const single = unit.meshes.length === 1;
+  let vertices = '';
+  let triangles = '';
+  let vertexOffset = 0;
+  let objectAttrs = '';
+
+  for (const { mesh } of unit.meshes) {
+    const pos = converted.get(mesh);
+    const idx = mesh.getIndices();
+    if (!pos || !idx || idx.length === 0) continue;
+    for (let i = 0; i < pos.length; i += 3) {
+      vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
+    }
+    const texGroupId = tex2dGroupIdByMesh.get(mesh);
+    const solidPidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+    if (single) {
+      if (texGroupId) objectAttrs = ` pid="${texGroupId}"`;
+      else if (colorGroupId != null) objectAttrs = ` pid="${colorGroupId}" pindex="${solidPidx}"`;
+    }
+    for (let i = 0; i < idx.length; i += 3) {
+      const localA = idx[i];
+      const localB = THREEMF_REVERSE_WINDING ? idx[i + 2] : idx[i + 1];
+      const localC = THREEMF_REVERSE_WINDING ? idx[i + 1] : idx[i + 2];
+      const a = localA + vertexOffset;
+      const b = localB + vertexOffset;
+      const c = localC + vertexOffset;
+      if (single) {
+        triangles += texGroupId
+          ? `<triangle v1="${a}" v2="${b}" v3="${c}" p1="${localA}" p2="${localB}" p3="${localC}"/>`
+          : `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
+      } else if (texGroupId) {
+        triangles += `<triangle v1="${a}" v2="${b}" v3="${c}" pid="${texGroupId}" p1="${localA}" p2="${localB}" p3="${localC}"/>`;
+      } else if (colorGroupId != null) {
+        triangles += `<triangle v1="${a}" v2="${b}" v3="${c}" pid="${colorGroupId}" p1="${solidPidx}" p2="${solidPidx}" p3="${solidPidx}"/>`;
+      } else {
+        triangles += `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
+      }
+    }
+    vertexOffset += pos.length / 3;
+  }
+
+  return triangles ? { vertices, triangles, objectAttrs } : null;
 }
 
 /** Per-part rels file. One Relationship per unique texture path. */

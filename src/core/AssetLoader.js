@@ -23,6 +23,7 @@ import {
   isLibraryImport,
   isNodeWithinRoot,
 } from './import/ImportMetadata.js';
+import { buildImportHierarchy } from './import/ImportHierarchy.js';
 import {
   SUPPORTED_EXTENSIONS,
   extOf as _extOf,
@@ -328,6 +329,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     });
 
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
+    const hierarchy = buildImportHierarchy(container, _newId, _uniqueHierarchyName);
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
@@ -363,7 +365,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     _registerAssetEntry(entry);
 
     const collectionId = _createCollectionFromFilename(filename, assetId);
-    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
+    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy);
 
     ProgressOverlay.update(0.98, `${filename} ready`);
 
@@ -412,13 +414,14 @@ export async function instantiateAsset(assetId, position) {
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
+    const hierarchy = buildImportHierarchy(container, _newId, _uniqueHierarchyName);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
     bakeImportTransform(container, importScaleFactor(sourceUnit, asset.modelRatio), position);
 
     const collectionId = _createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
-    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
+    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy);
     for (const meshId of meshIds) _queueValidation(meshId);
     return meshIds;
   } finally {
@@ -510,7 +513,19 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   };
   setState(s => ({
     ...s,
-    scene: { ...s.scene, objects: { ...s.scene.objects, [newId]: newObj } },
+    scene: {
+      ...s.scene,
+      objects: { ...s.scene.objects, [newId]: newObj },
+      groups: newObj.parentId && s.scene.groups[newObj.parentId]
+        ? {
+            ...s.scene.groups,
+            [newObj.parentId]: {
+              ...s.scene.groups[newObj.parentId],
+              childIds: [...new Set([...(s.scene.groups[newObj.parentId].childIds ?? []), newId])],
+            },
+          }
+        : s.scene.groups,
+    },
   }), { silent: true });
 
   if (sourceObj.shaderId) ShaderLibrary.linkMesh(sourceObj.shaderId, newId);
@@ -536,8 +551,7 @@ export function restoreCloneToScene(meshId, savedObj, mesh) {
  * `name → at most one object` holds across the whole scene. Per-object
  * export filenames (`${project}_${name}_r{w}to{t}.${ext}`) depend on this.
  */
-function _uniqueObjectName(baseName) {
-  const objects = getState().scene.objects;
+function _uniqueObjectName(baseName, objects = getState().scene.objects) {
   const taken = new Set(Object.values(objects).map(o => o.name));
   if (!taken.has(baseName)) return baseName;
   const m = baseName.match(/^(.*)\.(\d{3,})$/);
@@ -547,6 +561,30 @@ function _uniqueObjectName(baseName) {
     if (!taken.has(candidate)) return candidate;
   }
   return `${baseName}.dup`;
+}
+
+function _uniqueHierarchyName(baseName) {
+  const state = getState();
+  const taken = new Set([
+    ...Object.values(state.scene.objects).map(o => o.name),
+    ...Object.values(state.scene.groups).map(g => g.name),
+  ]);
+  if (!taken.has(baseName)) return baseName;
+  const m = baseName.match(/^(.*)\.(\d{3,})$/);
+  const stem = m ? m[1] : baseName;
+  for (let i = 1; i < 999; i++) {
+    const candidate = `${stem}.${String(i).padStart(3, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${baseName}.dup`;
+}
+
+function _logicalDisplayName(mesh) {
+  const partSuffix = /__part\d+$/.exec(String(mesh?.name ?? ''));
+  const sourceName = mesh?.metadata?.sourceMeshName ?? mesh?.metadata?.gltf?.extras?.name;
+  if (sourceName) return String(sourceName);
+  if (partSuffix) return String(mesh.name).slice(0, -partSuffix[0].length) || 'mesh';
+  return String(mesh?.name || 'mesh');
 }
 
 function _nextDupName(baseName) {
@@ -721,8 +759,17 @@ function _scheduleIdle(fn) {
   else setTimeout(fn, 50);
 }
 
-function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId) {
+function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy = null) {
   const meshIds = [];
+  const instantiatedEvents = [];
+  const objectsToAdd = {};
+  const groupsToAdd = {};
+  const groups = hierarchy?.groups ?? {};
+  for (const [id, group] of Object.entries(groups)) {
+    groupsToAdd[id] = { ...group, childIds: [] };
+  }
+  const logicalLeadBySourceGroup = new Map();
+
   for (const mesh of container.meshes) {
     if (!mesh.geometry || (mesh.getTotalVertices?.() ?? 0) === 0) continue;
     const meshId = _newId('mesh');
@@ -730,30 +777,56 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
     _meshRegistry.set(meshId, mesh);
 
     const shaderId = mesh.material ? byMaterial.get(mesh.material) : null;
+    const sourceGroupId = mesh.metadata?.sourceGroupId ?? null;
+    let logicalObjectId = null;
+    let isInternalPart = false;
+    if (sourceGroupId) {
+      logicalObjectId = logicalLeadBySourceGroup.get(sourceGroupId) ?? null;
+      if (!logicalObjectId) {
+        logicalObjectId = meshId;
+        logicalLeadBySourceGroup.set(sourceGroupId, meshId);
+      } else {
+        isInternalPart = true;
+      }
+    }
+    const parentId = hierarchy?.groupIdForMesh?.(mesh) ?? null;
+    const displayName = isInternalPart
+      ? _uniqueObjectName(mesh.name || 'mesh', { ...getState().scene.objects, ...objectsToAdd })
+      : _uniqueObjectName(_logicalDisplayName(mesh), { ...getState().scene.objects, ...objectsToAdd });
 
     const sceneObject = {
       id: meshId,
-      name: _uniqueObjectName(mesh.name || 'mesh'),
+      name: displayName,
       assetId,
       collectionId: collectionId ?? null,
-      parentId: null,
+      parentId,
       shaderId: shaderId ?? null,
       visible: mesh.isVisible !== false,
       locked: false,
       isGhost: false,
       isPrintPart: true,
-      sourceGroupId: mesh.metadata?.sourceGroupId ?? null,
+      sourceGroupId,
+      logicalObjectId,
+      isInternalPart,
     };
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: sceneObject } },
-    }), { silent: true });
+    objectsToAdd[meshId] = sceneObject;
+    if (parentId && groupsToAdd[parentId]) groupsToAdd[parentId].childIds.push(meshId);
 
     if (shaderId) ShaderLibrary.linkMesh(shaderId, meshId);
 
     meshIds.push(meshId);
-    dispatch(EVENTS.ASSET_INSTANTIATED, { assetId, meshId, meshName: mesh.name });
+    instantiatedEvents.push({ assetId, meshId, meshName: mesh.name });
   }
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      groups: { ...s.scene.groups, ...groupsToAdd },
+      objects: { ...s.scene.objects, ...objectsToAdd },
+    },
+  }), { silent: true });
+  for (const groupId of Object.keys(groupsToAdd)) dispatch(EVENTS.GROUP_CREATED, { groupId });
+  for (const ev of instantiatedEvents) dispatch(EVENTS.ASSET_INSTANTIATED, ev);
   return meshIds;
 }
 

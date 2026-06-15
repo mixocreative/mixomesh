@@ -55,6 +55,8 @@ export type ScenePartEntry = {
   assetId: string;
   collectionId: string;
   sourceGroupId?: string;
+  logicalObjectId?: string;
+  isInternalPart?: boolean;
   shaderId?: string;
   printable: boolean;
   visible: boolean;

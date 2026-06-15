@@ -12,6 +12,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { getState } from '../core/StateManager.js';
 import { push, TransformCommand, DuplicateCommand } from '../core/HistoryManager.js';
 import { captureWorld } from '../core/commands/support.js';
+import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
 import { InputManager } from '../core/InputManager.js';
 import { Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
@@ -89,7 +90,7 @@ function _pasteObject() {
 }
 
 function _pasteTransform(key) {
-  const ids = Selection.getSelectedIds();
+  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), getState().scene.objects);
   if (!ids.length) { Toast.show(t('toast.selectTarget'), 'info', 2000); return; }
 
   const want = {

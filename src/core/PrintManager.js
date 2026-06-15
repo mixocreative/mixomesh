@@ -15,6 +15,7 @@ import { createFormats } from './print/PrintFormats.js';
 import { packageAndDownload } from './print/PrintPackaging.js';
 import { collectTextureExportData, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './print/ThreeMFWriter.js';
+import { logicalObjectLeadIds, logicalObjectPartIds } from './LogicalObjects.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -30,24 +31,44 @@ export { SCALE_PRESETS, getExportedDimensions };
 function _collectPrintMeshes(selectedOnly) {
   const state = getState();
   const objects = state.scene.objects;
+  const selected = new Set(state.selection.selectedIds);
   const result = [];
 
-  for (const [meshId, obj] of Object.entries(objects)) {
-    if (obj.isGhost || !obj.isPrintPart) continue;
+  for (const leadId of logicalObjectLeadIds(objects)) {
+    const leadObj = objects[leadId];
+    if (!leadObj || leadObj.isGhost || !leadObj.isPrintPart) continue;
+    if (selectedOnly && !selected.has(leadId)) continue;
 
-    const mesh = AssetLoader.getBabylonMesh(meshId);
-    if (!mesh) continue;
+    const parts = [];
+    for (const meshId of logicalObjectPartIds(leadId, objects)) {
+      const obj = objects[meshId];
+      if (!obj || obj.isGhost || !obj.isPrintPart) continue;
+      const mesh = AssetLoader.getBabylonMesh(meshId);
+      if (!mesh) continue;
+      if (!mesh.getTotalVertices?.() || mesh.getTotalVertices() === 0) continue;
+      parts.push({ meshId, mesh, obj });
+    }
 
-    // Skip empty nodes (no geometry / zero vertices)
-    if (!mesh.getTotalVertices?.() || mesh.getTotalVertices() === 0) continue;
-
-    // If selectedOnly, check if in selection
-    if (selectedOnly && !state.selection.selectedIds.includes(meshId)) continue;
-
-    result.push({ meshId, mesh, obj });
+    if (parts.length) result.push({ logicalId: leadId, name: leadObj.name, obj: leadObj, parts });
   }
 
   return result;
+}
+
+function _flattenPrintUnits(units) {
+  return units.flatMap(unit => unit.parts.map(part => ({ ...part, logicalId: unit.logicalId, logicalName: unit.name })));
+}
+
+function _groupCloneEntries(entries) {
+  const byId = new Map();
+  for (const entry of entries) {
+    const id = entry.logicalId ?? entry.meshId;
+    if (!byId.has(id)) {
+      byId.set(id, { logicalId: id, name: entry.logicalName ?? entry.name, meshes: [] });
+    }
+    byId.get(id).meshes.push(entry);
+  }
+  return [...byId.values()];
 }
 
 // ── Texture Export ───────────────────────────────────────
@@ -332,7 +353,8 @@ async function _runExport(formatKey, options = {}) {
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
 
   progress(0.02, 'Collecting meshes…');
-  const printMeshes = _collectPrintMeshes(!!options.selectedOnly);
+  const printUnits = _collectPrintMeshes(!!options.selectedOnly);
+  const printMeshes = _flattenPrintUnits(printUnits);
   if (printMeshes.length === 0) throw new Error('No printable meshes to export.');
 
   const state  = getState();
@@ -342,6 +364,7 @@ async function _runExport(formatKey, options = {}) {
     projectName: state.project.name || 'Untitled',
     individually: !!options.individually,
     meshes: [],
+    units: [],
     csgReady: false,
     csgSkipped: [],
   };
@@ -357,7 +380,7 @@ async function _runExport(formatKey, options = {}) {
   try {
     const N = printMeshes.length;
     for (let i = 0; i < N; i++) {
-      const { meshId, mesh } = printMeshes[i];
+      const { meshId, mesh, logicalId, logicalName } = printMeshes[i];
       // Keep the parent so the clone's world matrix includes group/ancestor
       // transforms; `flattenWorld` then bakes that full world (+ mm scale)
       // into the vertices.
@@ -378,10 +401,11 @@ async function _runExport(formatKey, options = {}) {
         try { step(clone, ctx); }
         catch (e) { console.error(`Prep "${stepKey}" failed for ${clone.name}:`, e); }
       }
-      clones.push({ meshId, mesh: clone, name: mesh.name || `mesh_${meshId}` });
+      clones.push({ meshId, logicalId, mesh: clone, name: mesh.name || `mesh_${meshId}`, logicalName: logicalName || mesh.name || `mesh_${meshId}` });
       progress(0.05 + 0.45 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
     }
     ctx.meshes = clones;
+    ctx.units = _groupCloneEntries(clones);
 
     const remaining = await _validateExportMeshes(
       clones, (d, t) => progress(0.5 + 0.3 * (d / t), `Validating ${d}/${t}…`));
@@ -428,11 +452,12 @@ async function _serializeOBJ(ctx) {
 
   const entries = [];
   if (ctx.individually) {
-    for (const { mesh, name } of ctx.meshes) {
-      const base = _perMeshBaseName(ctx, name);
-      const objData = BABYLON.OBJExport.OBJ([mesh], true, base, true);
+    for (const unit of ctx.units) {
+      const meshesForUnit = unit.meshes.map(e => e.mesh);
+      const base = _perMeshBaseName(ctx, unit.name);
+      const objData = BABYLON.OBJExport.OBJ(meshesForUnit, true, base, true);
       entries.push({ path: `${base}.obj`, data: _rewriteObjMtllib(objData, base) });
-      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl([{ mesh, name }], filenameByMaterialName) });
+      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, filenameByMaterialName) });
     }
   } else {
     const base = _exportBaseName(ctx);
@@ -449,9 +474,9 @@ function _serializeSTL(ctx) {
   const meshes = ctx.meshes.map(e => e.mesh);
   if (ctx.individually) {
     const entries = [];
-    for (const { mesh, name } of ctx.meshes) {
-      const base = _perMeshBaseName(ctx, name);
-      const data = BABYLON.STLExport.CreateSTL([mesh], false, base, true, false, false, false);
+    for (const unit of ctx.units) {
+      const base = _perMeshBaseName(ctx, unit.name);
+      const data = BABYLON.STLExport.CreateSTL(unit.meshes.map(e => e.mesh), false, base, true, false, false, false);
       entries.push({ path: `${base}.stl`, data });
     }
     return { kind: 'zip', mime: 'application/zip', filename: `${_exportBaseName(ctx)}.zip`, entries };
@@ -491,12 +516,12 @@ async function _serialize3MF(ctx) {
 async function _wrapIndividual3MF(ctx, entriesForMesh) {
   const { default: JSZip } = await import('jszip');
   const entries = [];
-  for (const e of ctx.meshes) {
-    const inner = await entriesForMesh([e]);
+  for (const unit of ctx.units) {
+    const inner = await entriesForMesh([unit]);
     const innerZip = new JSZip();
     for (const x of inner) innerZip.file(x.path, x.data);
     const data = await innerZip.generateAsync({ type: 'uint8array', mimeType: 'model/3mf' });
-    entries.push({ path: `${_perMeshBaseName(ctx, e.name)}.3mf`, data });
+    entries.push({ path: `${_perMeshBaseName(ctx, unit.name)}.3mf`, data });
   }
   return { kind: 'zip', mime: 'application/zip', filename: `${_exportBaseName(ctx)}.zip`, entries };
 }
@@ -507,7 +532,7 @@ async function _serialize3MFColorGroup(ctx) {
   }
   return {
     kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`,
-    entries: buildColorGroupEntries(ctx.meshes),
+    entries: buildColorGroupEntries(ctx.units),
   };
 }
 
@@ -515,7 +540,7 @@ async function _serialize3MFMaterialsExt(ctx) {
   if (ctx.individually) {
     return _wrapIndividual3MF(ctx, list => buildMaterialsExtEntries(list));
   }
-  const entries = await buildMaterialsExtEntries(ctx.meshes);
+  const entries = await buildMaterialsExtEntries(ctx.units);
   return { kind: 'zip', mime: 'model/3mf', filename: `${_exportBaseName(ctx)}.3mf`, entries };
 }
 

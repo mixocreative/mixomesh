@@ -164,6 +164,8 @@ function _serialiseSceneObjects() {
       isGhost: !!o.isGhost, isUnlinked: !!o.isUnlinked,
       isPrintPart: o.isPrintPart !== false,
       sourceGroupId: o.sourceGroupId ?? null,
+      logicalObjectId: o.logicalObjectId ?? null,
+      isInternalPart: !!o.isInternalPart,
       containerMeshIndex,
       transform: mesh ? _decompose(mesh) : (o._savedTransform ?? null),
     };
@@ -506,6 +508,8 @@ async function _loadProject(doc) {
       isGhost: ghost, isUnlinked: unlinked && !ghost,
       isPrintPart: o.isPrintPart !== false,
       sourceGroupId: o.sourceGroupId ?? null,
+      logicalObjectId: o.logicalObjectId ?? null,
+      isInternalPart: !!o.isInternalPart,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       _savedTransform: o.transform ?? null,
     };

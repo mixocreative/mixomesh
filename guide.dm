@@ -17,6 +17,29 @@ Normal mesh imports create both an asset and one or more scene objects.
 Library GLBs are different: a marked GLB can create many Asset Panel entries
 without placing anything into the scene.
 
+## Blender GLB Hierarchy
+
+For current Blender GLB export, enable:
+
+```python
+bpy.ops.export_scene.gltf(
+    filepath="model.glb",
+    export_format="GLB",
+    export_hierarchy_full_collections=True,
+    export_hierarchy_flatten_objs=False,
+    export_extras=True,
+)
+```
+
+`export_hierarchy_full_collections=True` turns Blender Collections into empty
+glTF nodes. MIXOMESH treats those nodes the same way it treats manual Blender
+Empty parents: they become Outliner folders. Nested collection/empty hierarchy
+becomes nested folders.
+
+If that option is off, collection folders are not guaranteed to exist in the
+GLB. The model still imports, but MIXOMESH can only use whatever parent/empty
+nodes are actually present in the file.
+
 ## How Files Are Read
 
 MIXOMESH reads model files through Babylon's `SceneLoader` where possible.
@@ -73,6 +96,12 @@ On import:
   exported.
 - Multi-material meshes are split into one mesh per material. This is required
   because MIXOMESH enforces one mesh = one shader.
+- The split is internal. In the Outliner, the Blender object still appears as
+  one object. Properties shows all shader/material slots from its internal
+  parts, and moving/selecting it moves all internal parts together.
+- Hide, lock, delete, duplicate, group, and transform commands also work on the
+  whole Blender object. A duplicate becomes its own object; it does not stay tied
+  to the original object's internal shader parts.
 - STL or material-less geometry receives the shared resin-gray default material.
 
 Texture quality rule:
@@ -152,6 +181,16 @@ The Export panel buttons choose the file type:
 - If the scene is solid-color only, MIXOMESH writes 3MF color groups for
   per-object color.
 
+When a Blender object was internally split by material, export groups those
+internal parts back into one logical print object:
+
+- OBJ individual mode writes one OBJ/MTL pair per Blender object.
+- 3MF writes one `<object>` and one build item per Blender object. If that
+  object has multiple shaders, triangle-level material attributes preserve the
+  material boundaries.
+- STL individual mode writes one STL per Blender object. STL has no color, so
+  only geometry is preserved.
+
 OBJ export:
 
 - Preserves real image textures when present.
@@ -176,7 +215,8 @@ STL export:
 - Use `library = 1` for object-pack GLBs that should fill the
   Asset Panel instead of the scene. Put the marker on one Empty/object and make
   direct children under it the intended asset entries.
-- Collections are safe for organization, but parent hierarchy is the import
-  contract.
+- For Blender GLB exports, enable Full Collection Hierarchy if you want
+  Collections to arrive as MIXOMESH folders. Manual Empty parents are still the
+  safest fallback because they are explicit scene nodes.
 - Use export buttons to choose output format. Do not expect the printer profile
   to switch formats.

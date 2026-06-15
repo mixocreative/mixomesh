@@ -89,6 +89,21 @@ function makeLibraryContainer() {
   };
 }
 
+function makeHierarchyContainer() {
+  const root = makeNode('__root__');
+  const beverages = makeNode('Beverages', root);
+  const mug = makeNode('Mug', beverages);
+  return {
+    meshes: [makeMesh('Body', mug), makeMesh('Handle', mug)],
+    transformNodes: [root, beverages, mug],
+    materials: [],
+    textures: [],
+    addAllToScene() { this.added = true; },
+    removeAllFromScene() {},
+    dispose() { this.disposed = true; },
+  };
+}
+
 let passed = 0, failed = 0;
 const out = [];
 async function test(name, fn) {
@@ -130,6 +145,26 @@ await test('double-clicking a library child instantiates only that child object'
   const obj = state.scene.objects[meshIds[0]];
   assert.equal(obj.assetId, cola.id);
   assert.match(obj.name, /ColaMesh/);
+});
+
+await test('normal GLB import preserves empty node hierarchy as outliner groups', async () => {
+  const container = makeHierarchyContainer();
+  B.SceneLoader = { LoadAssetContainerAsync: async () => container };
+
+  const meshIds = await AssetLoader.loadFromBlob(new Blob(['glb']), 'beverage.glb');
+
+  assert.equal(meshIds.length, 2);
+  const state = StateManager.getState();
+  const groups = Object.values(state.scene.groups);
+  const beverages = groups.find(g => g.name === 'Beverages');
+  const mug = groups.find(g => g.name === 'Mug');
+  assert.ok(beverages, 'top-level empty node becomes a group');
+  assert.ok(mug, 'nested empty node becomes a group');
+  assert.equal(mug.parentId, beverages.id, 'nested empty hierarchy is preserved');
+  assert.deepEqual(
+    Object.values(state.scene.objects).map(o => [o.name, o.parentId]).sort(),
+    [['Body', mug.id], ['Handle', mug.id]],
+  );
 });
 
 console.log('\n' + out.join('\n'));

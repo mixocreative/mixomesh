@@ -8,6 +8,7 @@ import { SceneManager } from '../SceneManager.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
+import { canonicalObjectId, logicalObjectCommandIds } from '../LogicalObjects.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteTransform, findGroupNode,
   findNodeForId, captureWorld, patchSceneObject, removeSceneObject,
@@ -15,6 +16,15 @@ import {
 } from './support.js';
 
 const BABYLON = window.BABYLON;
+let _duplicateGroupSerial = 0;
+
+function _expandedCommandIds(ids) {
+  return logicalObjectCommandIds(ids, getState().scene.objects);
+}
+
+function _newDuplicateSourceGroupId() {
+  return `dup_${Date.now().toString(36)}_${++_duplicateGroupSerial}`;
+}
 
 /** Set isVisible on a set of meshes. `prev` is meshId → bool; `next` is bool. */
 export class VisibilityCommand {
@@ -161,15 +171,16 @@ function _setCollectionName(collectionId, name) {
  */
 export class DeleteCommand {
   constructor(meshIds) {
+    const requestedCount = meshIds.length;
     this._snapshots = [];
     const objects = getState().scene.objects;
-    for (const id of meshIds) {
+    for (const id of _expandedCommandIds(meshIds)) {
       const obj  = objects[id];
       const mesh = AssetLoader.getBabylonMesh(id);
       if (!obj || !mesh) continue;
       this._snapshots.push({ id, obj: { ...obj }, mesh, prevParent: null });
     }
-    this.label = this._snapshots.length === 1 ? 'Delete' : `Delete (${this._snapshots.length})`;
+    this.label = requestedCount === 1 ? 'Delete' : `Delete (${requestedCount})`;
   }
   execute() {
     withDetachedPivot(() => {
@@ -203,7 +214,7 @@ export class DeleteCommand {
  */
 export class GroupCommand {
   constructor(meshIds, groupName = 'Group') {
-    this._ids       = meshIds.slice();
+    this._ids       = _expandedCommandIds(meshIds);
     this._groupId   = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     this._groupName = groupName;
     this._prevParents = {};
@@ -359,10 +370,11 @@ const DUP_OFFSET_BU = 0.01;   // 10 mm of print, irrespective of workingRatio
 
 export class DuplicateCommand {
   constructor(sourceIds) {
-    this._sourceIds = sourceIds.slice();
+    const requestedCount = sourceIds.length;
+    this._sourceIds = _expandedCommandIds(sourceIds);
     this._instances = [];       // [{ id, mesh, obj }]
     this._executed  = false;
-    this.label = this._sourceIds.length === 1 ? 'Duplicate' : `Duplicate (${this._sourceIds.length})`;
+    this.label = requestedCount === 1 ? 'Duplicate' : `Duplicate (${requestedCount})`;
   }
   execute() {
     if (this._executed) {
@@ -382,14 +394,21 @@ export class DuplicateCommand {
 
     withDetachedPivot(() => {
       const newIds = [];
+      const sourceObjects = getState().scene.objects;
+      const cloneIdBySourceId = new Map();
       for (const sourceId of this._sourceIds) {
         const newId = AssetLoader.cloneMeshAsNewObject(sourceId, { x: DUP_OFFSET_BU, y: 0, z: 0 });
         if (!newId) continue;
+        cloneIdBySourceId.set(sourceId, newId);
         const mesh = AssetLoader.getBabylonMesh(newId);
         const obj  = getState().scene.objects[newId];
         if (!mesh || !obj) continue;
         this._instances.push({ id: newId, mesh, obj });
         newIds.push(newId);
+      }
+      _remapDuplicateLogicalObjects(this._sourceIds, cloneIdBySourceId, sourceObjects);
+      for (const inst of this._instances) {
+        inst.obj = getState().scene.objects[inst.id] ?? inst.obj;
       }
       Selection.set(newIds, newIds[newIds.length - 1] ?? null);
     });
@@ -405,6 +424,56 @@ export class DuplicateCommand {
       }
     });
   }
+}
+
+function _remapDuplicateLogicalObjects(sourceIds, cloneIdBySourceId, sourceObjects) {
+  const groupIdByOldGroup = new Map();
+  const leadCloneByOldLead = new Map();
+
+  for (const sourceId of sourceIds) {
+    const newId = cloneIdBySourceId.get(sourceId);
+    if (!newId) continue;
+    const oldLead = canonicalObjectId(sourceId, sourceObjects);
+    if (oldLead === sourceId) leadCloneByOldLead.set(oldLead, newId);
+  }
+  for (const sourceId of sourceIds) {
+    const newId = cloneIdBySourceId.get(sourceId);
+    if (!newId) continue;
+    const oldLead = canonicalObjectId(sourceId, sourceObjects);
+    if (!leadCloneByOldLead.has(oldLead)) leadCloneByOldLead.set(oldLead, newId);
+  }
+
+  setState(state => {
+    const objects = { ...state.scene.objects };
+    for (const sourceId of sourceIds) {
+      const newId = cloneIdBySourceId.get(sourceId);
+      const sourceObj = sourceObjects[sourceId];
+      const cloneObj = objects[newId];
+      if (!newId || !sourceObj || !cloneObj) continue;
+
+      let sourceGroupId = null;
+      let logicalObjectId = null;
+      if (sourceObj.sourceGroupId) {
+        if (!groupIdByOldGroup.has(sourceObj.sourceGroupId)) {
+          groupIdByOldGroup.set(sourceObj.sourceGroupId, _newDuplicateSourceGroupId());
+        }
+        sourceGroupId = groupIdByOldGroup.get(sourceObj.sourceGroupId);
+        logicalObjectId = leadCloneByOldLead.get(canonicalObjectId(sourceId, sourceObjects)) ?? newId;
+      }
+      objects[newId] = {
+        ...cloneObj,
+        sourceGroupId,
+        logicalObjectId,
+        isInternalPart: !!sourceObj.isInternalPart,
+      };
+
+      const mesh = AssetLoader.getBabylonMesh(newId);
+      if (mesh) {
+        mesh.metadata = { ...(mesh.metadata ?? {}), sourceGroupId };
+      }
+    }
+    return { ...state, scene: { ...state.scene, objects } };
+  }, SILENT);
 }
 
 /** Toggle isPrintPart on a mesh for export. */

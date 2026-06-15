@@ -16,6 +16,7 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText } from '../core/scale/ScaleMath.js';
 import { exportFactor } from '../core/print/PrintScale.js';
+import { shouldDisplayObject } from '../core/LogicalObjects.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
 // reference dimensions only. Export format is chosen by the buttons below.
@@ -242,6 +243,7 @@ function _renderValidationTab() {
   const seenGroups = new Set();
   for (const [meshId, obj] of Object.entries(state.scene.objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
+    if (!shouldDisplayObject(obj)) continue;
     if (obj.sourceGroupId) {
       if (seenGroups.has(obj.sourceGroupId)) continue;
       seenGroups.add(obj.sourceGroupId);

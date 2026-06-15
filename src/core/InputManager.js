@@ -4,6 +4,7 @@ import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
 import { getState, dispatch } from './StateManager.js';
 import { EVENTS } from './events.js';
+import { logicalObjectCommandIds } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
@@ -202,7 +203,7 @@ function _onSelectionPointerDown(info) {
 
   // Promote the picked mesh to active without disturbing an existing multi-
   // selection. If the click landed outside the current selection, single-select.
-  if (!Selection.getSelectedIds().includes(id)) {
+  if (!Selection.contains(id)) {
     Selection.set([id], id);
   } else if (Selection.getActiveId() !== id) {
     Selection.setActive(id);
@@ -271,7 +272,7 @@ function _pickHorizontalPlaneAtPointer(y) {
 function _onContextMenuRMB(info) {
   const ev = info.event;
   const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
-  if (id && !Selection.getSelectedIds().includes(id)) {
+  if (id && !Selection.contains(id)) {
     Selection.set([id], id);
   }
   if (_onContextMenu) {
@@ -682,10 +683,10 @@ function _frameSelection() {
 }
 
 function _hideSelected() {
-  const ids = Selection.getSelectedIds();
+  const objects = getState().scene.objects;
+  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
   if (!ids.length) return;
   const prev = {};
-  const objects = getState().scene.objects;
   for (const id of ids) prev[id] = !!objects[id]?.visible;
   // Toggle: if all visible → hide; if any hidden → show all.
   const anyVisible = ids.some(id => objects[id]?.visible);
@@ -702,9 +703,9 @@ function _unhideAll() {
 }
 
 function _lockToggleSelected() {
-  const ids = Selection.getSelectedIds();
-  if (!ids.length) return;
   const objects = getState().scene.objects;
+  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
+  if (!ids.length) return;
   const prev = {};
   for (const id of ids) prev[id] = !!objects[id]?.locked;
   const anyUnlocked = ids.some(id => !objects[id]?.locked);

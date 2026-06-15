@@ -118,7 +118,12 @@ function _makeBabylonChildMesh(spec) {
   } else if (sourceMesh.rotation?.clone) {
     child.rotation = sourceMesh.rotation.clone();
   }
-  child.metadata = { ...(sourceMesh.metadata ?? {}), sourceGroupId: groupId };
+  child.metadata = {
+    ...(sourceMesh.metadata ?? {}),
+    sourceGroupId: groupId,
+    sourceMeshName: sourceMesh.name || 'mesh',
+    splitPartIndex: spec.partIndex,
+  };
   return child;
 }
 

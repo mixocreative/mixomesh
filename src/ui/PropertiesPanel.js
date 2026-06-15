@@ -15,6 +15,7 @@ import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
+import { logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 
 const BABYLON = window.BABYLON;
@@ -106,10 +107,11 @@ function _render() {
   const asset  = obj.assetId ? getState().scene.assetLibrary[obj.assetId] : null;
   const sel    = Selection.getSelectedIds();
   const multi  = sel.length > 1;
+  const resolved = Selection.getSelectedResolved();
 
   _bodyEl.innerHTML = `
     ${_renderObjectSection(obj, multi, sel.length)}
-    ${_renderTransformSection(mesh, multi)}
+    ${_renderTransformSection(mesh, multi, resolved)}
     ${asset ? _renderSourceUnitSection(asset) : ''}
     ${_renderShaderSection(obj)}
     ${_renderUVOverrideSection(obj)}
@@ -192,7 +194,7 @@ function _wireObjectSection(obj) {
 
 // ── Transform section ────────────────────────────────────
 
-function _renderTransformSection(mesh, multi) {
+function _renderTransformSection(mesh, multi, resolved = []) {
   if (!mesh) return '';
   const xform = _readTransform(mesh);
   // mm and deg view for the user.
@@ -203,8 +205,8 @@ function _renderTransformSection(mesh, multi) {
 
   // Print-space size from world AABB. The number to compare against the real
   // model spec on the box — "1:35 hull should be ~245 mm long".
-  const sizeBU = multi ? _aggregateWorldSize(Selection.getSelectedResolved().map(r => r.mesh))
-                       : _hierarchyWorldSize(mesh);
+  const sizeBU = (multi || resolved.length > 1) ? _aggregateWorldSize(resolved.map(r => r.mesh))
+                                                : _hierarchyWorldSize(mesh);
   const sizeMM = sizeBU ? { x: sizeBU.x * 1000, y: sizeBU.y * 1000, z: sizeBU.z * 1000 } : null;
 
   const scaleLocked = getState().ui?.scaleLocked !== false;
@@ -379,25 +381,34 @@ function _copyTransformFromActive() {
 function _commitSizeInput(meshId, input) {
   const mesh = AssetLoader.getBabylonMesh(meshId);
   if (!mesh) return;
+  const targetIds = _logicalTargetIds(meshId);
   const axis = input.dataset.sizeAxis;
   const newMM = parseFloat(input.value);
-  const sizeBU = _hierarchyWorldSize(mesh);
+  const sizeBU = targetIds.length > 1
+    ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
+    : _hierarchyWorldSize(mesh);
   const curMM = sizeBU ? sizeBU[axis] * 1000 : 0;
   if (!Number.isFinite(newMM) || newMM <= 0 || curMM <= 1e-6) { _render(); return; }
   const factor = newMM / curMM;
   if (Math.abs(factor - 1) < 1e-9) return;
 
-  const prev = _captureAbsolute(mesh);
-  const next = _captureAbsolute(mesh);
+  const prev = {};
+  const next = {};
   const locked = getState().ui?.scaleLocked !== false;
-  if (locked) {
-    next.scaling.x = prev.scaling.x * factor;
-    next.scaling.y = prev.scaling.y * factor;
-    next.scaling.z = prev.scaling.z * factor;
-  } else {
-    next.scaling[axis] = prev.scaling[axis] * factor;
+  for (const id of targetIds) {
+    const target = AssetLoader.getBabylonMesh(id);
+    if (!target) continue;
+    prev[id] = _captureAbsolute(target);
+    next[id] = _captureAbsolute(target);
+    if (locked) {
+      next[id].scaling.x = prev[id].scaling.x * factor;
+      next[id].scaling.y = prev[id].scaling.y * factor;
+      next[id].scaling.z = prev[id].scaling.z * factor;
+    } else {
+      next[id].scaling[axis] = prev[id].scaling[axis] * factor;
+    }
   }
-  push(new TransformCommand({ [meshId]: prev }, { [meshId]: next }));
+  push(new TransformCommand(prev, next));
   _render();
 }
 
@@ -405,42 +416,55 @@ function _commitTransformInput(meshId, input) {
   const mesh = AssetLoader.getBabylonMesh(meshId);
   if (!mesh) return;
 
-  const prev = _captureAbsolute(mesh);
-  const next = _captureAbsolute(mesh);  // start from current; we'll override one component
+  const targetIds = _logicalTargetIds(meshId);
+  const prev = {};
+  const next = {};
 
   const which = input.dataset.xform;
   const axis  = input.dataset.axis;
   const value = parseFloat(input.value);
   if (!Number.isFinite(value)) { _render(); return; }
 
-  if (which === 'position') {
-    next.position[axis] = value / 1000;   // mm → BU
-  } else if (which === 'rotation') {
-    const e = _quatToEulerDeg(next.rotation);
-    e[axis] = value;
-    const q = BABYLON.Quaternion.FromEulerAngles(
-      e.x * Math.PI / 180, e.y * Math.PI / 180, e.z * Math.PI / 180,
-    );
-    next.rotation = { x: q.x, y: q.y, z: q.z, w: q.w };
-  } else if (which === 'scaling') {
-    // Scale lock: edits on any axis mirror proportionally to the other two.
-    // The mirror is RATIO-based (newAxis / oldAxis), so the part keeps its
-    // current aspect ratio if the user has already biased it.
-    const locked = getState().ui?.scaleLocked !== false;
-    if (locked) {
-      const prevVal = prev.scaling[axis];
-      const ratio = (Number.isFinite(prevVal) && Math.abs(prevVal) > 1e-9) ? (value / prevVal) : 1;
-      next.scaling.x = prev.scaling.x * ratio;
-      next.scaling.y = prev.scaling.y * ratio;
-      next.scaling.z = prev.scaling.z * ratio;
-      next.scaling[axis] = value;             // exact match on edited axis
-    } else {
-      next.scaling[axis] = value;
+  for (const id of targetIds) {
+    const target = AssetLoader.getBabylonMesh(id);
+    if (!target) continue;
+    prev[id] = _captureAbsolute(target);
+    next[id] = _captureAbsolute(target);  // start from current; override one component
+    if (which === 'position') {
+      next[id].position[axis] = value / 1000;   // mm → BU
+    } else if (which === 'rotation') {
+      const e = _quatToEulerDeg(next[id].rotation);
+      e[axis] = value;
+      const q = BABYLON.Quaternion.FromEulerAngles(
+        e.x * Math.PI / 180, e.y * Math.PI / 180, e.z * Math.PI / 180,
+      );
+      next[id].rotation = { x: q.x, y: q.y, z: q.z, w: q.w };
+    } else if (which === 'scaling') {
+      const locked = getState().ui?.scaleLocked !== false;
+      if (locked) {
+        const prevVal = prev[id].scaling[axis];
+        const ratio = (Number.isFinite(prevVal) && Math.abs(prevVal) > 1e-9) ? (value / prevVal) : 1;
+        next[id].scaling.x = prev[id].scaling.x * ratio;
+        next[id].scaling.y = prev[id].scaling.y * ratio;
+        next[id].scaling.z = prev[id].scaling.z * ratio;
+        next[id].scaling[axis] = value;
+      } else {
+        next[id].scaling[axis] = value;
+      }
+    }
+    if (_eq(prev[id], next[id])) {
+      delete prev[id];
+      delete next[id];
     }
   }
-  if (_eq(prev, next)) return;
+  if (!Object.keys(next).length) return;
 
-  push(new TransformCommand({ [meshId]: prev }, { [meshId]: next }));
+  push(new TransformCommand(prev, next));
+}
+
+function _logicalTargetIds(meshId) {
+  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
+  return ids.length ? ids : [meshId];
 }
 
 // ── Authored Scale section ───────────────────────────────
@@ -528,8 +552,8 @@ function _renderShaderSection(obj) {
   }
 
   const activeId = Selection.getActiveId();
-  const selIds   = Selection.getSelectedIds();
-  const meshIds  = selIds.length ? selIds : [obj.id];
+  const selIds   = Selection.getSelectedResolved().map(r => r.id);
+  const meshIds  = selIds.length ? selIds : _logicalTargetIds(obj.id);
 
   // Buckets by shader, then re-ordered so the active mesh's bucket is first.
   const buckets = _collectShaderBuckets(meshIds);

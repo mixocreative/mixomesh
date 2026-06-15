@@ -5,6 +5,7 @@ import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand } from '../core/HistoryManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
 import { safeAsync } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
@@ -200,9 +201,9 @@ function _frame() {
 }
 
 function _toggleHide() {
-  const ids = Selection.getSelectedIds();
-  if (!ids.length) return;
   const objects = getState().scene.objects;
+  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
+  if (!ids.length) return;
   const prev = {};
   for (const id of ids) prev[id] = !!objects[id]?.visible;
   const anyVisible = ids.some(id => objects[id]?.visible);
@@ -210,9 +211,9 @@ function _toggleHide() {
 }
 
 function _toggleLock() {
-  const ids = Selection.getSelectedIds();
-  if (!ids.length) return;
   const objects = getState().scene.objects;
+  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
+  if (!ids.length) return;
   const prev = {};
   for (const id of ids) prev[id] = !!objects[id]?.locked;
   const anyUnlocked = ids.some(id => !objects[id]?.locked);

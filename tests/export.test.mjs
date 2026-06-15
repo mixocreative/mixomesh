@@ -247,6 +247,25 @@ await test('OBJ: all-meshes mode → single OBJ call with every mesh', async () 
   assert.equal(calls.objExportOBJ[0].count, 3);
 });
 
+await test('OBJ: split logical object exports once in individual mode', async () => {
+  setScene({
+    objects: {
+      partA: obj('partA', { name: 'Mug', sourceGroupId: 'sg_mug', logicalObjectId: 'partA' }),
+      partB: obj('partB', { name: 'Mug__part1', sourceGroupId: 'sg_mug', logicalObjectId: 'partA', isInternalPart: true }),
+    },
+    registry: { partA: mesh('Mug'), partB: mesh('Mug__part1') },
+  });
+  MeshValidator.validateMesh = valOK;
+
+  await PrintManager.exportOBJ({ individually: true });
+
+  assert.equal(calls.objExportOBJ.length, 1, 'one OBJ entry for the logical Blender object');
+  assert.equal(calls.objExportOBJ[0].count, 2, 'entry contains every internal material split');
+  const files = zipInstances.at(-1).files;
+  assert.ok(files['Test_Mug_r1to1.obj'], 'per-object OBJ uses the visible object name');
+  assert.ok(!files['Test_Mug__part1_r1to1.obj'], 'internal split name must not leak as its own OBJ');
+});
+
 await test('export aborts when a mesh cannot be cloned — live mesh untouched (M10)', async () => {
   const m = mesh('m1');
   m.clone = () => null;                       // simulate Babylon clone failure
@@ -410,6 +429,28 @@ await test('3MF: distinct colours → one colorgroup entry each', async () => {
   assert.match(model, /pindex="1"/);
   assert.match(model, /objectid="2"/);
   assert.match(model, /objectid="3"/);
+});
+
+await test('3MF: split logical object writes one build item with per-triangle colours', async () => {
+  setScene({
+    objects: {
+      partA: obj('partA', { name: 'Mug', sourceGroupId: 'sg_mug', logicalObjectId: 'partA' }),
+      partB: obj('partB', { name: 'Mug__part1', sourceGroupId: 'sg_mug', logicalObjectId: 'partA', isInternalPart: true }),
+    },
+    registry: {
+      partA: mesh('Mug', { color: { r: 1, g: 0, b: 0 } }),
+      partB: mesh('Mug__part1', { color: { r: 0, g: 0, b: 1 } }),
+    },
+  });
+  MeshValidator.validateMesh = valOK;
+
+  await PrintManager.exportThreeMF();
+
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  assert.equal((model.match(/<object id="/g) ?? []).length, 1, 'one 3MF object for the logical Blender object');
+  assert.equal((model.match(/<item objectid="/g) ?? []).length, 1, 'one build item for the logical Blender object');
+  assert.match(model, /<triangle[^>]+pid="1"[^>]+p1="0"[^>]+p2="0"[^>]+p3="0"/);
+  assert.match(model, /<triangle[^>]+pid="1"[^>]+p1="1"[^>]+p2="1"[^>]+p3="1"/);
 });
 
 await test('3MF: no-material mesh → fallback colour, still valid package', async () => {

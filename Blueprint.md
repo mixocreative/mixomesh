@@ -44,8 +44,9 @@ only). Export format selection is deliberately button-driven in the UI: OBJ,
   context; it must not hide, switch, or block an export format button.
 - **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
   `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
-  stamping `sourceGroupId` on each SceneObject so validator + exporter can
-  re-union the part.
+  stamping `sourceGroupId` on each SceneObject. One sibling is the visible
+  logical object; the rest are internal parts used by shader/export code.
+  Validator + exporter re-union the siblings by logical object.
 - **Validation runs at import time, non-blocking.** Re-runs blocking before
   export. Topology checks are **group-aware**: meshes with a `sourceGroupId`
   are validated as the welded union of all siblings (positions only, no
@@ -355,7 +356,15 @@ Import path:
    Asset Panel entry and returns without adding anything to the scene. If
    library splitting fails, the same file falls back to normal GLB import.
 4. Normal scene imports call `splitMultiMaterialMeshesInContainer()` before
-   shader registration.
+   shader registration. If the GLB scene graph contains meshless transform
+   nodes with geometry descendants (Blender Collections exported with "Full
+   Collection Hierarchy", or manual Empty parents), `ImportHierarchy` captures
+   those nodes as Outliner folders before import-transform baking flattens the
+   Babylon graph.
+   Blender modeler/export rule:
+   `export_hierarchy_full_collections=True`,
+   `export_hierarchy_flatten_objs=False`, and `export_extras=True` when custom
+   properties such as `ratio` or `library = 1` are needed.
 5. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
    **Resin-grey for shaderless geometry — ONE material, never overrides imports:**
    - SINGLE SOURCE = `scene.defaultMaterial`, greyed once in `SceneManager.init`
@@ -377,7 +386,10 @@ Import path:
 6. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a
-   `SceneObject`.
+   `SceneObject`. Split siblings remain in state, but only the lead sibling is
+   rendered as the user-facing object; internal siblings are selected,
+   transformed, hidden/locked, duplicated/deleted, grouped, validated, and
+   exported through the lead.
 7. `AssetLoader` generates an idle thumbnail and queues non-blocking
    validation.
 
@@ -1481,8 +1493,22 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                //   Group-aware validator + exporter use this
                                //   to re-union part topology. See §0.1 +
                                //   §9 group-aware validation.
+  logicalObjectId,             // lead meshId for an imported logical object
+                               //   with internal material-split siblings.
+                               //   Null for ordinary single-mesh objects.
+  isInternalPart,              // true for hidden split siblings. They remain
+                               //   in state for shader binding/export, but
+                               //   Outliner/selection store the lead id.
 }
 ```
+
+Selection stores only visible logical-object lead ids. Any command that changes
+the object lifecycle or transform surface (`DeleteCommand`, `DuplicateCommand`,
+`GroupCommand`, hide/lock toggles, copy/paste transform, Properties transforms,
+and export collection) expands those leads to every internal material-split part
+before mutating state or Babylon meshes. A duplicated split object receives a
+fresh `sourceGroupId` and its own lead `logicalObjectId`; it must never point
+back to the original logical object.
 
 **Name uniqueness invariant.** `name` must be unique across the union of
 `state.scene.objects` and `state.scene.groups`. Two sites enforce it:
@@ -2425,7 +2451,9 @@ This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as we
 **Use `BABYLON.OBJExport.OBJ()`.** Do not write a custom OBJ serializer.
 
 Current implementation:
-1. `_runExport('obj', options)` collects print parts and clones each mesh.
+1. `_runExport('obj', options)` collects logical print units. A unit may contain
+   one mesh or several internal material-split meshes from one Blender object.
+   Every mesh clone still gets its own prep/validation pass.
 2. Each clone gets `makeGeometryUnique()` before prep.
 3. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weld`,
    `optimizeIndices`, `createNormals`.
@@ -2442,8 +2470,8 @@ Current implementation:
 7. If `state.print.objBakeSolidTextures` is true, solid-color materials also
    get synthetic 4×4 PNGs and matching `map_Kd` MTL lines.
 8. Output is always an outer `.zip`. Combined mode contains one OBJ, one MTL,
-   and texture entries. Individual mode contains per-mesh OBJ/MTL entries plus
-   shared texture entries.
+   and texture entries. Individual mode contains one OBJ/MTL pair per logical
+   object, not per internal material split, plus shared texture entries.
 9. Live scene meshes are never scaled or rewritten.
 
 ### 3MF Export
@@ -2452,7 +2480,8 @@ Current implementation:
 printer dropdown does not choose the 3MF sub-flavor.
 
 Current implementation:
-1. `_runExport('3mf', options)` collects print parts and clones each mesh.
+1. `_runExport('3mf', options)` collects logical print units and clones every
+   mesh inside each unit.
 2. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
    `optimizeIndices`, `csgSolidOnly`, `createNormals`.
 3. `_serialize3MF(ctx)` inspects the prepared export clones:
@@ -2465,20 +2494,25 @@ Current implementation:
 5. Texture blobs resolve through `ExportTextures.getAssetIdForTexture()`;
    tagged user/restored textures use `texture.metadata.mixoAssetId` so captured
    full-resolution sources win over viewport-capped GPU copies.
+6. A multi-material logical object writes as one 3MF `<object>` / build item.
+   The writer concatenates the internal mesh vertex buffers and writes
+   per-triangle material attributes (`pid` + `p1/p2/p3`) so shader boundaries
+   survive without exposing split siblings as separate printer objects.
 
 ### STL Export (Geometry-only fallback)
 **Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
 carry shader, texture, or per-part color metadata.
 
 Current implementation:
-1. `_runExport('stl', options)` clones print parts and makes geometry unique.
+1. `_runExport('stl', options)` clones logical print units and makes every
+   clone geometry unique.
 2. Format prep runs: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
    `createNormals`.
 3. CSG2 is attempted only when available. Non-watertight parts skip CSG and
    report an informational toast; validation still gates hard errors.
 4. `_serializeSTL(ctx)` calls Babylon STL serialization on prepared clones.
 5. Combined mode emits one `.stl`; individual mode emits an outer `.zip` with
-   one STL per mesh.
+   one STL per logical object.
 6. STL remains a fallback for non-color printer targets, not a Mimaki
    texture-preserving output.
 
@@ -3276,19 +3310,20 @@ export async function resolve(specifier, context, nextResolve) {
 ### Test files
 | File | Count | Covers |
 |---|---:|---|
-| `tests/export.test.mjs` | 50 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
+| `tests/export.test.mjs` | 52 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); logical-object grouping for internal material splits; OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-object 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
 | `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, build-area profile metadata, export scale |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |
-| `tests/import-metadata.test.mjs` | 4 | ImportMetadata: Blender glTF `extras` ratio parsing, flat/structured Mixomesh import-mode marker, library item root detection |
-| `tests/library-import.test.mjs` | 2 | AssetLoader GLB library mode: marked pack registers one AssetEntry per top-level object without SceneObjects; child asset instantiates only its own object |
+| `tests/import-metadata.test.mjs` | 5 | ImportMetadata: Blender glTF `extras` ratio parsing, `library = 1` marker detection, library item root detection |
+| `tests/library-import.test.mjs` | 3 | AssetLoader GLB library mode: marked pack registers one AssetEntry per top-level object without SceneObjects; child asset instantiates only its own object; normal GLB empty hierarchy imports as Outliner groups |
+| `tests/logical-objects.test.mjs` | 3 | Selection canonicalizes an internal split pick to the visible logical object while resolving all internal meshes for manipulation; delete removes every internal split part; duplicate creates an independent logical split object |
 | `tests/scale.test.mjs` | 8 | ScaleMath: ratio parser/formatter, Authored→Scene normalization, Scene→Print export scale, scene-scale rebake factor, v3.1 field compatibility |
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
 | `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: content-driven textured vs solid-only flavor, texture dedup, UV round-trip via pseudo-loader regex, printer dropdown does not switch flavor |
-| `tests/validator-group.test.mjs` | 5 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam |
+| `tests/validator-group.test.mjs` | 6 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam; validate-all dedupes split groups |
 | `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |
 
 The table is NOT exhaustive — `npm test` runs every `tests/*.test.mjs`
