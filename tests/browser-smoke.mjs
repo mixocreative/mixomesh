@@ -178,6 +178,50 @@ async function main() {
     assert(snapshot.splitBefore !== snapshot.splitAfter,
       'right splitter keyboard resize did not change aria-valuenow');
 
+    const localeSwitch = await evaluate(cdp, `(async () => {
+      const { setLocale } = await import('/src/i18n/index.js');
+      const { dispatch } = await import('/src/core/StateManager.js');
+      const { EVENTS } = await import('/src/core/events.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      setLocale('en');
+      dispatch(EVENTS.SETTINGS_RESET, { section: 'print' });
+      dispatch(EVENTS.WORKSPACE_CHANGED, { workspace: 'layout' });
+      await frame();
+      const before = {
+        printTabs: [...document.querySelectorAll('#rp-print-body .pp-tab')]
+          .map(el => el.textContent.trim()),
+        propertiesEmpty: document.querySelector('#rp-properties-body .pp-empty')?.textContent.trim() ?? '',
+      };
+      setLocale('zh-Hant');
+      await frame();
+      const after = {
+        lang: document.documentElement.lang,
+        printTabs: [...document.querySelectorAll('#rp-print-body .pp-tab')]
+          .map(el => el.textContent.trim()),
+        propertiesEmpty: document.querySelector('#rp-properties-body .pp-empty')?.textContent.trim() ?? '',
+        shaderEmpty: [...document.querySelectorAll('#rp-shaders-body .sp-empty')]
+          .map(el => el.textContent.trim()),
+        sceneLabels: [...document.querySelectorAll('#rp-scene-body label')]
+          .map(el => el.textContent.trim()),
+        outlinerEmpty: document.querySelector('#ol-list .ol-empty')?.textContent.trim() ?? '',
+      };
+      setLocale('en');
+      await frame();
+      return { before, after };
+    })()`);
+    assert(localeSwitch.after.lang === 'zh-Hant', 'locale switch did not update <html lang>');
+    assert(localeSwitch.before.printTabs.includes('Scale'), 'locale regression setup missing English Print tab text');
+    assert(localeSwitch.after.printTabs.includes('比例'),
+      `locale switch did not refresh generated Print tab text: ${localeSwitch.after.printTabs.join(', ')}`);
+    assert(localeSwitch.after.propertiesEmpty.includes('拖到視窗'),
+      `locale switch did not refresh generated Properties empty text: ${localeSwitch.after.propertiesEmpty}`);
+    assert(localeSwitch.after.shaderEmpty.some(text => text.includes('選取上方著色器')),
+      `locale switch did not refresh generated Shader empty text: ${localeSwitch.after.shaderEmpty.join(', ')}`);
+    assert(localeSwitch.after.sceneLabels.includes('背景'),
+      `locale switch did not refresh generated Scene labels: ${localeSwitch.after.sceneLabels.join(', ')}`);
+    assert(localeSwitch.after.outlinerEmpty.includes('拖到視窗'),
+      `locale switch did not refresh generated Outliner empty text: ${localeSwitch.after.outlinerEmpty}`);
+
     const cursorMenu = await evaluate(cdp, `(async () => {
       const cm = await import('/src/ui/ContextMenu.js');
       cm.open({ x: 24, y: 24, source: 'viewport' });

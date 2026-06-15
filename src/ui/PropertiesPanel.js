@@ -72,10 +72,9 @@ export function init() {
     EVENTS.WORKSPACE_CHANGED,    // empty-state hint is workspace-specific
   ];
   for (const ev of events) subscribe(ev, _render);
-  // Re-translate panel title (in index.html) + any body-level [data-i18n-key]
-  // when the user switches language. _retranslate(_root) covers both the
-  // static header span (in index.html) and the rendered body in one walk.
-  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  // Locale changes must rebuild body markup generated from t(), then refresh
+  // static header/body data-i18n attributes in one root walk.
+  subscribe(EVENTS.LOCALE_CHANGED, () => { _render(); _retranslate(_root); });
   Modal.register('shader-picker', _shaderPickerRenderer);
   _retranslate(_root);
   _render();

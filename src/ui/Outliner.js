@@ -62,9 +62,9 @@ export function init() {
   _listEl.addEventListener('keydown', _onListKeyDown);
 
   for (const ev of _SUBSCRIBE) subscribe(ev, _render);
-  // Static `.ol-title` swaps language on locale change; the list body has no
-  // section.* labels in scope for v1.
-  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  // Locale changes must rebuild row markup generated from t(), then refresh
+  // static title/list data-i18n attributes in one root walk.
+  subscribe(EVENTS.LOCALE_CHANGED, () => { _render(); _retranslate(_root); });
   _retranslate(_root);
   _render();
 }

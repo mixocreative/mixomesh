@@ -42,9 +42,9 @@ export function init() {
   _root   = document.getElementById('rp-shaders');
   if (!_bodyEl) return;
   _bodyEl.classList.add('sp-body');
-  // Static `.rp-title` (in index.html) + any body-level [data-i18n-key] swap
-  // languages together via _retranslate(_root).
-  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  // Locale changes must rebuild body markup generated from t(); _render()
+  // also refreshes the static header/body data-i18n attributes.
+  subscribe(EVENTS.LOCALE_CHANGED, _render);
 
   // Re-render whenever anything shader-shaped changes.
   const events = [

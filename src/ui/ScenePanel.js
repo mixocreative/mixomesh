@@ -141,9 +141,9 @@ export function init() {
   _root   = document.getElementById('rp-scene');
   if (!_bodyEl) return;
   _bodyEl.classList.add('pp-body');
-  // Re-translate the static `.rp-title` in index.html + body-level keys on
-  // locale switch. _retranslate(_root) covers both in a single walk.
-  subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_root));
+  // Locale changes must rebuild body markup generated from t(); _render()
+  // also refreshes the static header/body data-i18n attributes.
+  subscribe(EVENTS.LOCALE_CHANGED, _render);
   subscribe(EVENTS.PROJECT_LOADED, () => { _exitRenderView(); _applySection(); _render(); });
   subscribe(EVENTS.PROJECT_NEW,    () => { _exitRenderView(); _applySection(); _render(); });
   // A section / all reset rewrote the settings — re-render to show the
