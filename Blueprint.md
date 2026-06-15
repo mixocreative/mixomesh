@@ -25,8 +25,8 @@ per-object `pindex` for filament-zone assignment, one solid color per part.
 
 Per-printer reference data is **data-driven** via `src/config/printers.json`
 (single source of truth for display name, vendor, build area / bed dimensions,
-and advisory format/color metadata). Export format selection is deliberately
-button-driven in the UI: OBJ, 3MF, and STL remain explicit user choices.
+only). Export format selection is deliberately button-driven in the UI: OBJ,
+3MF, and STL remain explicit user choices.
 
 ---
 
@@ -182,6 +182,8 @@ src/
     BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
     SettingsStore.js       ← per-user PANEL settings: localStorage persist + seed + per-section/all reset (§ Settings persistence)
     AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
+    import/
+      ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
@@ -346,9 +348,16 @@ Import path:
 1. `AssetPanel` or `ViewportDrop` obtains a `File`, `Blob`, or
    File System Access handle.
 2. `AssetLoader.loadFromBlob/loadFromHandle` validates the extension via
-   `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and calls
-   `splitMultiMaterialMeshesInContainer()` before shader registration.
-3. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
+   `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and reads glTF
+   custom properties through `src/core/import/ImportMetadata.js`.
+3. If a GLB/glTF has `mixomeshImportMode = "library"` (or structured
+   `mixomesh.importMode = "library"`) in glTF `extras`, the loader registers
+   each top-level Blender object as a separate Asset Panel entry and returns
+   without adding anything to the scene. If library splitting fails, the same
+   file falls back to normal GLB import.
+4. Normal scene imports call `splitMultiMaterialMeshesInContainer()` before
+   shader registration.
+5. `ShaderLibrary.registerFromContainer()` creates or merges shader entries.
    **Resin-grey for shaderless geometry — ONE material, never overrides imports:**
    - SINGLE SOURCE = `scene.defaultMaterial`, greyed once in `SceneManager.init`
      (albedo **0.4** + a SUBTLE satin sheen — small specular 0.10 / specularPower
@@ -366,11 +375,11 @@ Import path:
      `scene.defaultMaterial` at 0.5. (Earlier bugs: a `getTotalVertices()` guard
      returned 0 on container meshes pre-`addAllToScene` → STL skipped; and the
      old 0.72 washed white — both fixed.)
-4. `AssetLoader` adds the container to the scene, bakes source unit and
+6. `AssetLoader` adds the container to the scene, bakes source unit and
    authored ratio into scene scale, persists an `AssetEntry`, creates a
    display-only `CollectionEntry`, and registers each geometry mesh as a
    `SceneObject`.
-5. `AssetLoader` generates an idle thumbnail and queues non-blocking
+7. `AssetLoader` generates an idle thumbnail and queues non-blocking
    validation.
 
 Edit path:
@@ -1420,6 +1429,7 @@ AssetLoader.restoreContainer(assetId, blob, ext)      → Promise<BABYLON.Abstra
 AssetLoader.bindRestoredMesh(meshId, mesh, assetId, sourceUnit?) → void
 AssetLoader.restoreTexture(entry, blob)               → Promise<assetId>
 AssetLoader.registerAssetEntry(entry)                 → void
+AssetLoader.cacheAssetBlob(assetId, blob)             → void  // library asset restore without scene load
 AssetLoader.resetAll()                                → void
 AssetLoader.getBabylonTexture(assetId)                → BABYLON.Texture | null
 AssetLoader.getBabylonMesh(meshId)                    → BABYLON.AbstractMesh | null
@@ -1432,7 +1442,7 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
 ### AssetEntry
 ```js
 {
-  id, name, filename, originalPath, extension,
+  id, name, displayName, filename, originalPath, extension,
   kind,                        // 'mesh' | 'texture' — new in Phase 4
   isImported,                  // boolean — true if texture from glTF, false if user-loaded
   sourceUnit,                  // 'meters'|'centimeters'|'millimeters'|'inches'|'feet' — default 'millimeters' (mesh only)
@@ -1446,6 +1456,7 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
   blobUrl,                     // module-local Map, not in state
   thumbnailDataUrl,
   contentHash,                 // sha256 of source file bytes (set at import; reused at save)
+  libraryItem,                 // null or { sourceFilename, rootName, rootPath } for GLB library children
   sourceFileHash,              // texture identity scope — §10b (texture entries)
   sourceAssetId,               // owning mesh asset for imported textures — §10b
   babylonTextureName,          // loader-minted texture.name for reload rebind — §10b
@@ -1534,18 +1545,28 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    ratio — same inherent behaviour as re-importing an exported OBJ/STL).
    Component-only assemblies (no `<mesh>`) are unsupported — we never export
    those (one `<object>`+`<mesh>` per part).
-4. Register all materials → ShaderLibrary.registerFromContainer (merge strategy).
-5. Store AssetContainer in module-local Map<assetId, container>.
-6. addAllToScene() for the container.
-7. Resolve modelRatio: read glTF "ratio" extra (Blender custom property);
+4. Read import metadata via `src/core/import/ImportMetadata.js`. It scans
+   Babylon's `node.metadata.gltf.extras` on meshes and transform nodes with
+   normalized key matching.
+5. If import mode is library, derive item roots from the first real top-level
+   object below Babylon `__root__` or the marker empty. Register one mesh
+   AssetEntry per root with `libraryItem`; do not call `addAllToScene()` and do
+   not create SceneObjects. Project restore caches the source blob for
+   library-only assets without loading geometry into the viewport.
+6. For normal scene import or library-child instantiation, split MultiMaterial
+   meshes, then register all materials → ShaderLibrary.registerFromContainer
+   (merge strategy).
+7. Store AssetContainer in module-local Map<assetId, container>.
+8. addAllToScene() for the container.
+9. Resolve modelRatio: read glTF "ratio" extra (Blender custom property);
    parse '1/N', '1:N', or bare 'N' as denominator N. Default 1 when absent.
-8. Apply import scaling — see "Import Scale Model" below. Drop offset on top.
-9. Register AssetEntry (sourceUnit='millimeters', unitConfirmed=true, modelRatio).
-10. Create SceneObject entries for each visible mesh.
-11. Generate thumbnail via Tools.CreateScreenshotUsingRenderTargetAsync (async).
-12. If vertexCount <= 100_000 → queue MeshValidator.validateMesh; else skip
+10. Apply import scaling — see "Import Scale Model" below. Drop offset on top.
+11. Register AssetEntry (sourceUnit='millimeters', unitConfirmed=true, modelRatio).
+12. Create SceneObject entries for each visible mesh.
+13. Generate thumbnail via Tools.CreateScreenshotUsingRenderTargetAsync (async).
+14. If vertexCount <= 100_000 → queue MeshValidator.validateMesh; else skip
     auto-validate with toast.
-13. Dispatch EVENTS.ASSET_INSTANTIATED for each mesh.
+15. Dispatch EVENTS.ASSET_INSTANTIATED for each mesh.
 ```
 
 ### Import Scale Model
@@ -1604,6 +1625,17 @@ function applyImportScaling(container, factor, dropPos) {
 
 **Blender custom property convention.** In Blender, add a custom property on the object or the scene named `ratio`, type String, value `"1/72"` (or `"1:72"`, or `"72"`). The glTF exporter emits this to the node `extras` bag, which Babylon's loader exposes at `mesh.metadata.gltf.extras`. Without the property, `modelRatio` defaults to `1` (i.e. authored at 1:1, full real-world size).
 
+**GLB library convention.** To make a GLB behave as a reusable object pack
+instead of an immediate scene import, add a Blender custom property named
+`mixomeshImportMode` with value `"library"` to a root Empty/object and export
+with custom properties enabled. The loader also accepts structured
+`mixomesh.importMode = "library"` when a producer writes nested glTF extras.
+Each top-level child object below that marker becomes a separate Asset Panel
+entry (`libraryItem.rootName/rootPath`). Nothing is added to the viewport until
+the user double-clicks or drags one of those child assets. If the marker exists
+but no usable object roots can be resolved, import falls back to the normal GLB
+scene path.
+
 **External (non-Blender) glTF files** that follow the spec's meters convention will import 1000× too small at the mm default. The user can then override `sourceUnit` to `'meters'` in the Properties Panel (Phase 3), and the loader re-applies the scaling.
 
 Export-time rescaling from `workingRatio` to `targetRatio` happens in `PrintManager` — see §12.
@@ -1656,7 +1688,7 @@ Asset entries tagged with `kind: 'texture'` and `isImported: true` prevent `rele
 User-loaded textures (via drag/drop or load-from-file) use blob URLs directly; no readback needed.
 
 ### Session Re-instantiation
-`instantiateAsset(assetId, position)` re-loads the asset from the cached blob URL (stored in a module-local `Map<assetId, objectURL>` set on first load). Each call goes through the full load path — fresh `AssetContainer`, new mesh registration, independent SceneObject entries — so re-dragged copies appear as separate items in the Outliner and are independently selectable.
+`instantiateAsset(assetId, position)` re-loads the asset from the cached blob URL (stored in a module-local `Map<assetId, objectURL>` set on first load). Each call goes through the full load path — fresh `AssetContainer`, new mesh registration, independent SceneObject entries — so re-dragged copies appear as separate items in the Outliner and are independently selectable. For `AssetEntry.libraryItem`, the reloaded GLB is filtered to that one root object before material registration and scene insertion.
 
 Session assets dragged from the Asset Panel carry `mountKey === '__session__'`; `ViewportDrop` detects this and calls `instantiateAsset(path, position)` rather than attempting to retrieve a `FileSystemFileHandle` (which session assets don't have).
 
@@ -2098,7 +2130,7 @@ The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create 
 ```js
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
-PrintManager.exportThreeMF(options)           → Promise<void>  // printer-selected 3MF mode
+PrintManager.exportThreeMF(options)           → Promise<void>  // content-selected 3MF sub-flavor
 PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
 PrintManager.SCALE_PRESETS                    → scale-presets.json passthrough
 
@@ -2236,11 +2268,6 @@ under `src/core/print/` keep reusable policy out of the large file:
   - `exportBaseName(projectName, sceneScale, printScale)`,
     `perMeshBaseName(projectName, meshName, sceneScale, printScale)`, and
     `safeFilenameStem(value)` implement the filename contract.
-  - `profilePreservesTextures(profile)` is true only when color mode is
-    `texture-uv` and `prep` includes both `preserveUVs` and
-    `preserveTextures`.
-  - `profileUsesSolidPartColors(profile)` is true for `solid-per-part` or
-    `collapseToSolidColor`.
 - `PrintPrep.js`
   - `createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg })` returns the
     callable prep registry used by `PrintManager`.
@@ -2342,9 +2369,8 @@ inline per row.
 
 Export format is **not** selected by the printer profile. The Export panel's
 OBJ / 3MF / STL buttons are the user-facing source of truth for the requested
-file type. Printer rows may carry `format`, `color`, `texture`, `axis`, `unit`,
-and `prep` fields as descriptive/recommendation metadata, but selecting a
-printer must not hide, switch, or block an explicit export button.
+file type. Printer rows carry only display/vendor/build-area reference data.
+Selecting a printer must not hide, switch, or block an explicit export button.
 
 Schema (one entry per printer, keyed by id):
 ```js
@@ -2352,43 +2378,23 @@ Schema (one entry per printer, keyed by id):
   "<id>": {
     displayName: string,                          // shown in UI dropdowns
     vendor: string,
-    format: '3mf-materials-ext' | '3mf-colorgroup' | 'obj+mtl' | 'stl',
-    color: {
-      mode: 'texture-uv' | 'solid-per-part' | 'none',
-      colorSpace?: 'sRGB'
-    },
-    texture: null | { maxSize: number, encoding: 'png' },
-    bed: { x: number|null, y: number|null, z: number|null },  // mm; null falls back to Mimaki default helper
-    axis: { up: 'Y' | 'Z', winding: 'cw' | 'ccw' },
-    unit: 'millimeter',
-    prep: ExportPrepStep[]
+    bed: { x: number|null, y: number|null, z: number|null }  // mm; null falls back to Mimaki default helper
   }
 }
 ```
 
-`ExportPrepStep` is locked by `src/core/printers/PrinterProfile.ts`:
-`fallbackMaterial`, `flattenWorld`, `preserveUVs`, `preserveTextures`,
-`collapseToSolidColor`, `synthesizeSolidColorPNG`, `weld`, `repairWinding`.
-Runtime format prep in `src/core/print/PrintFormats.js` also uses internal
-steps that do not appear in `printers.json`: `optimizeIndices`,
-`createNormals`, `csg`, `weldSolidOnly`, and `csgSolidOnly`.
-
 Current profile ids:
-- `mimaki-3duj-553`: default, `3mf-materials-ext`, `texture-uv`, 4096 PNG,
-  `508 × 508 × 305` mm, Z-up, CCW.
-- `mimaki-3duj-2207`: `3mf-materials-ext`, `texture-uv`, 2048 PNG,
-  `203 × 203 × 76` mm.
-- `bambu-x1c`, `bambu-a1`, `bambu-a1-mini`, `prusa-mk4`: `3mf-colorgroup`,
-  `solid-per-part`, no texture.
-- `elegoo-saturn-4-ultra`: `stl`, `none`, no texture.
-- `generic-obj-mtl-png`: `obj+mtl`, `texture-uv`, Y-up, solid-color PNG
-  synthesis allowed.
-- `custom`: `obj+mtl`, `solid-per-part`, null bed dimensions.
+- `mimaki-3duj-553`: default, `508 × 508 × 305` mm.
+- `mimaki-3duj-2207`: `203 × 203 × 76` mm.
+- `bambu-x1c`, `bambu-a1`, `bambu-a1-mini`, `prusa-mk4`: filament printer bed references.
+- `elegoo-saturn-4-ultra`: resin printer bed reference.
+- `generic-obj-mtl-png`: generic `300 × 300 × 400` mm reference.
+- `custom`: null bed dimensions; user types XYZ manually.
 
 Consumers:
 - `PrintPanel.js` reads `state.print.targetPrinterId` → looks up row → drives
-  printer labels, advisory format/color text, and bed-size readout. Export
-  calls still come from the explicit OBJ / 3MF / STL buttons.
+  printer labels and bed-size readout. Export calls still come from the
+  explicit OBJ / 3MF / STL buttons.
 - `SceneManager.js` reads the same row's `bed` for the floor/bed preview
   geometry (replaces the old `bedPresets` lookup).
 - `PrintManager` entry points remain explicit by requested format:
@@ -2396,8 +2402,8 @@ Consumers:
   export content: textured meshes with UVs use Materials Extension; solid-only
   exports use colorgroup. Build-area printer selection does not switch flavor.
 - `src/core/print/ExportPlanner.js` reads printer id + scene/print scale to
-  produce filename suffixes, export scale, profile labels/helpers, and the
-  request shape tested by `tests/export-planner.test.mjs`.
+  produce filename suffixes, export scale, build-area profile metadata, and
+  the request shape tested by `tests/export-planner.test.mjs`.
 
 Default seeded entry: `mimaki-3duj-553`. State default
 `state.print.targetPrinterId === 'mimaki-3duj-553'`. Each printer's `bed`
@@ -3269,10 +3275,12 @@ export async function resolve(specifier, context, nextResolve) {
 | File | Count | Covers |
 |---|---:|---|
 | `tests/export.test.mjs` | 50 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-mesh 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
-| `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, export scale, texture-preserving vs solid-colour profile helpers |
+| `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, build-area profile metadata, export scale |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |
+| `tests/import-metadata.test.mjs` | 4 | ImportMetadata: Blender glTF `extras` ratio parsing, flat/structured Mixomesh import-mode marker, library item root detection |
+| `tests/library-import.test.mjs` | 2 | AssetLoader GLB library mode: marked pack registers one AssetEntry per top-level object without SceneObjects; child asset instantiates only its own object |
 | `tests/scale.test.mjs` | 8 | ScaleMath: ratio parser/formatter, Authored→Scene normalization, Scene→Print export scale, scene-scale rebake factor, v3.1 field compatibility |
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |

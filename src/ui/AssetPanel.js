@@ -379,7 +379,7 @@ function _plural(count, word) {
 function _sessionFiles() {
   const library = getState().scene.assetLibrary;
   return Object.values(library).map(a => ({
-    name: a.filename,
+    name: a.displayName ?? a.filename,
     path: a.id,
     ext: a.extension,
     kind: a.kind ?? 'mesh',

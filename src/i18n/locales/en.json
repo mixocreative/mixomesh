@@ -129,6 +129,7 @@
   "print.export3mf": "Export 3MF (color)",
   "print.exportStl": "Export STL",
   "print.targetPrinter": "Target Printer",
+  "print.buildAreaReference": "build-area reference only",
   "print.buildVolume": "Build Volume (mm)",
   "print.showBedVolume": "Show bed volume in viewport",
   "print.bedValidationInfo": "Models exceeding the bed are flagged in Validation.",

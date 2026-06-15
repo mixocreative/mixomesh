@@ -2,100 +2,46 @@
   "mimaki-3duj-553": {
     "displayName": "Mimaki 3DUJ-553",
     "vendor": "Mimaki",
-    "format": "3mf-materials-ext",
-    "color": { "mode": "texture-uv", "colorSpace": "sRGB" },
-    "texture": { "maxSize": 4096, "encoding": "png" },
-    "bed": { "x": 508, "y": 508, "z": 305 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "preserveUVs", "preserveTextures"]
+    "bed": { "x": 508, "y": 508, "z": 305 }
   },
   "mimaki-3duj-2207": {
     "displayName": "Mimaki 3DUJ-2207",
     "vendor": "Mimaki",
-    "format": "3mf-materials-ext",
-    "color": { "mode": "texture-uv", "colorSpace": "sRGB" },
-    "texture": { "maxSize": 2048, "encoding": "png" },
-    "bed": { "x": 203, "y": 203, "z": 76 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "preserveUVs", "preserveTextures"]
+    "bed": { "x": 203, "y": 203, "z": 76 }
   },
   "bambu-x1c": {
     "displayName": "Bambu Lab X1 Carbon",
     "vendor": "Bambu Lab",
-    "format": "3mf-colorgroup",
-    "color": { "mode": "solid-per-part" },
-    "texture": null,
-    "bed": { "x": 256, "y": 256, "z": 256 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "collapseToSolidColor"]
+    "bed": { "x": 256, "y": 256, "z": 256 }
   },
   "bambu-a1": {
     "displayName": "Bambu Lab A1",
     "vendor": "Bambu Lab",
-    "format": "3mf-colorgroup",
-    "color": { "mode": "solid-per-part" },
-    "texture": null,
-    "bed": { "x": 256, "y": 256, "z": 256 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "collapseToSolidColor"]
+    "bed": { "x": 256, "y": 256, "z": 256 }
   },
   "bambu-a1-mini": {
     "displayName": "Bambu Lab A1 mini",
     "vendor": "Bambu Lab",
-    "format": "3mf-colorgroup",
-    "color": { "mode": "solid-per-part" },
-    "texture": null,
-    "bed": { "x": 180, "y": 180, "z": 180 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "collapseToSolidColor"]
+    "bed": { "x": 180, "y": 180, "z": 180 }
   },
   "prusa-mk4": {
     "displayName": "Prusa MK4 / MK3S+",
     "vendor": "Prusa Research",
-    "format": "3mf-colorgroup",
-    "color": { "mode": "solid-per-part" },
-    "texture": null,
-    "bed": { "x": 250, "y": 210, "z": 220 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "collapseToSolidColor"]
+    "bed": { "x": 250, "y": 210, "z": 220 }
   },
   "elegoo-saturn-4-ultra": {
     "displayName": "Elegoo Saturn 4 Ultra",
     "vendor": "Elegoo",
-    "format": "stl",
-    "color": { "mode": "none" },
-    "texture": null,
-    "bed": { "x": 218.88, "y": 122.88, "z": 220 },
-    "axis": { "up": "Z", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld"]
+    "bed": { "x": 218.88, "y": 122.88, "z": 220 }
   },
   "generic-obj-mtl-png": {
     "displayName": "Generic OBJ + MTL + textures",
     "vendor": "Generic",
-    "format": "obj+mtl",
-    "color": { "mode": "texture-uv", "colorSpace": "sRGB" },
-    "texture": { "maxSize": 4096, "encoding": "png" },
-    "bed": { "x": 300, "y": 300, "z": 400 },
-    "axis": { "up": "Y", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld", "preserveUVs", "preserveTextures", "synthesizeSolidColorPNG"]
+    "bed": { "x": 300, "y": 300, "z": 400 }
   },
   "custom": {
     "displayName": "Custom",
     "vendor": "—",
-    "format": "obj+mtl",
-    "color": { "mode": "solid-per-part" },
-    "texture": null,
-    "bed": { "x": null, "y": null, "z": null },
-    "axis": { "up": "Y", "winding": "ccw" },
-    "unit": "millimeter",
-    "prep": ["fallbackMaterial", "flattenWorld"]
+    "bed": { "x": null, "y": null, "z": null }
   }
 }

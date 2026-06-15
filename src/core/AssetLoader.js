@@ -17,12 +17,18 @@ import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from './ImportNormalizer.js';
 import {
+  extractModelRatio,
+  findLibraryItemRoots,
+  findLibraryRootByItem,
+  isLibraryImport,
+  isNodeWithinRoot,
+} from './import/ImportMetadata.js';
+import {
   SUPPORTED_EXTENSIONS,
   extOf as _extOf,
   isMeshExt,
   isTextureExt,
 } from './assets/AssetTypes.js';
-import { parseScaleRatioText } from './scale/ScaleMath.js';
 import { setBlobUrl, getBlobUrl, revokeBlobUrl, revokeAllBlobUrls } from './assets/BlobUrls.js';
 import { isWorkerImportSupported, loadObjContainerViaWorker } from './WorkerImport.js';
 import {
@@ -291,8 +297,25 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
   try {
     const container = await _loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
-    _containers.set(assetId, container);
     ProgressOverlay.update(0.8, `Materials for ${filename}…`);
+
+    const sourceUnit = DEFAULT_SOURCE_UNIT;
+    const modelRatio = extractModelRatio(container) ?? 1;
+
+    if (await _tryRegisterLibraryImport({
+      container, blob, filename, ext, opts,
+      initialAssetId: assetId,
+      initialBlobUrl: blobUrl,
+      sourceFileHash,
+      sourceUnit,
+      modelRatio,
+    })) {
+      ProgressOverlay.update(0.98, `${filename} added to assets`);
+      try { container.dispose?.(); } catch { /* not scene-owned */ }
+      return [];
+    }
+
+    _containers.set(assetId, container);
 
     // One-mesh-one-shader invariant: any MultiMaterial mesh splits into
     // N single-material siblings, each stamped with a shared sourceGroupId.
@@ -312,8 +335,6 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // custom property if present (Blender custom prop), else 1:1. The result is
     // that 1 BU in the scene == 1 m at the scene's working ratio (its print size).
     // Export-time rescaling from working → target ratio happens in PrintManager.
-    const sourceUnit  = DEFAULT_SOURCE_UNIT;
-    const modelRatio  = _extractModelRatio(container) ?? 1;
     bakeImportTransform(container, importScaleFactor(sourceUnit, modelRatio), position);
 
     // OS drag-drop has no directory handle, but Chrome's
@@ -322,12 +343,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // PersistenceManager between dir-scan and the embedded snapshot). Without
     // this a dragged file is a permanent frozen snapshot. Best-effort: idb may
     // refuse the structured clone — the embedded copy still guarantees reopen.
-    let fileHandleKey = opts.fileHandleKey ?? null;
-    if (!fileHandleKey && opts.fileHandle && !opts.directoryHandleKey) {
-      fileHandleKey = `fh_${assetId}`;
-      try { await putHandle(fileHandleKey, opts.fileHandle); }
-      catch { fileHandleKey = null; }
-    }
+    const fileHandleKey = await _fileHandleKeyFor(assetId, opts);
 
     const entry = {
       id: assetId,
@@ -344,11 +360,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       contentHash: sourceFileHash,
       thumbnailDataUrl: null,
     };
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: entry } },
-    }), { silent: true });
-    dispatch(EVENTS.ASSET_REGISTERED, { assetId, entry });
+    _registerAssetEntry(entry);
 
     const collectionId = _createCollectionFromFilename(filename, assetId);
     const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
@@ -394,7 +406,9 @@ export async function instantiateAsset(assetId, position) {
     const container = await _loadContainer(
       blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings
     );
+    if (asset.libraryItem) _filterContainerToLibraryItem(container, asset.libraryItem);
     splitMultiMaterialMeshesInContainer(container);
+    _containers.set(assetId, container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
@@ -403,7 +417,7 @@ export async function instantiateAsset(assetId, position) {
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
     bakeImportTransform(container, importScaleFactor(sourceUnit, asset.modelRatio), position);
 
-    const collectionId = _createCollectionFromFilename(asset.filename, assetId);
+    const collectionId = _createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
     const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId);
     for (const meshId of meshIds) _queueValidation(meshId);
     return meshIds;
@@ -549,6 +563,136 @@ function _nextDupName(baseName) {
   return `${baseName}.dup`;
 }
 
+async function _fileHandleKeyFor(assetId, opts = {}) {
+  let fileHandleKey = opts.fileHandleKey ?? null;
+  if (!fileHandleKey && opts.fileHandle && !opts.directoryHandleKey) {
+    fileHandleKey = `fh_${assetId}`;
+    try { await putHandle(fileHandleKey, opts.fileHandle); }
+    catch { fileHandleKey = null; }
+  }
+  return fileHandleKey;
+}
+
+function _stripExtension(filename) {
+  return String(filename || 'asset').replace(/\.[^.]+$/, '');
+}
+
+function _safePartName(value) {
+  return String(value || 'Object').trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'Object';
+}
+
+function _registerAssetEntry(entry) {
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: entry } },
+  }), { silent: true });
+  dispatch(EVENTS.ASSET_REGISTERED, { assetId: entry.id, entry });
+}
+
+async function _tryRegisterLibraryImport({
+  container, blob, filename, ext, opts, initialAssetId, initialBlobUrl,
+  sourceFileHash, sourceUnit, modelRatio,
+}) {
+  if ((ext !== '.glb' && ext !== '.gltf') || !isLibraryImport(container)) return false;
+
+  const createdIds = [];
+  try {
+    const roots = findLibraryItemRoots(container);
+    if (!roots.length) throw new Error('No geometry-bearing library objects found.');
+
+    const sourceStem = _stripExtension(filename);
+    const entries = [];
+    for (let i = 0; i < roots.length; i++) {
+      const root = roots[i];
+      const assetId = i === 0 ? initialAssetId : _newId('asset');
+      const assetBlobUrl = i === 0 ? initialBlobUrl : URL.createObjectURL(blob);
+      setBlobUrl(assetId, assetBlobUrl);
+      createdIds.push(assetId);
+
+      const fileHandleKey = await _fileHandleKeyFor(assetId, opts);
+      const partName = _safePartName(root.name);
+      entries.push({
+        id: assetId,
+        name: partName,
+        displayName: `${sourceStem} / ${partName}`,
+        filename: `${sourceStem}__${partName}${ext}`,
+        originalPath: opts.originalPath ?? filename,
+        extension: ext,
+        kind: 'mesh',
+        sourceUnit,
+        unitConfirmed: true,
+        modelRatio,
+        directoryHandleKey: opts.directoryHandleKey ?? null,
+        fileHandleKey,
+        contentHash: sourceFileHash,
+        thumbnailDataUrl: null,
+        libraryItem: {
+          sourceFilename: filename,
+          rootName: root.name,
+          rootPath: root.path,
+        },
+      });
+    }
+
+    setState(s => {
+      const next = { ...s.scene.assetLibrary };
+      for (const entry of entries) next[entry.id] = entry;
+      return { ...s, scene: { ...s.scene, assetLibrary: next } };
+    }, { silent: true });
+    for (const entry of entries) dispatch(EVENTS.ASSET_REGISTERED, { assetId: entry.id, entry });
+    return true;
+  } catch (err) {
+    console.warn(`${filename}: library import failed, falling back to normal GLB import:`, err);
+    for (const id of createdIds) {
+      if (id !== initialAssetId) revokeBlobUrl(id);
+    }
+    return false;
+  }
+}
+
+function _filterContainerToLibraryItem(container, libraryItem) {
+  const root = findLibraryRootByItem(container, libraryItem);
+  if (!root) {
+    throw new Error(`Library object not found: ${libraryItem?.rootPath ?? libraryItem?.rootName ?? 'unknown'}`);
+  }
+
+  const allMeshes = container.meshes ?? [];
+  const allTransforms = container.transformNodes ?? [];
+  const keepMeshes = allMeshes.filter(mesh =>
+    mesh === root.node || isNodeWithinRoot(mesh, root.node));
+  if (!keepMeshes.some(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0)) {
+    throw new Error(`Library object has no geometry: ${root.path || root.name}`);
+  }
+
+  const keepTransforms = new Set();
+  let ancestor = root.node;
+  while (ancestor) {
+    if (allTransforms.includes(ancestor)) keepTransforms.add(ancestor);
+    ancestor = ancestor.parent;
+  }
+  for (const t of allTransforms) {
+    if (isNodeWithinRoot(t, root.node)) keepTransforms.add(t);
+  }
+
+  for (const mesh of allMeshes) {
+    if (!keepMeshes.includes(mesh)) {
+      try { mesh.dispose?.(); } catch { /* not scene-owned */ }
+    }
+  }
+  for (const node of allTransforms) {
+    if (!keepTransforms.has(node)) {
+      try { node.dispose?.(); } catch { /* not scene-owned */ }
+    }
+  }
+
+  const usedMaterials = new Set(keepMeshes.map(m => m.material).filter(Boolean));
+  container.meshes = keepMeshes;
+  container.transformNodes = allTransforms.filter(t => keepTransforms.has(t));
+  if (Array.isArray(container.materials) && usedMaterials.size) {
+    container.materials = container.materials.filter(mat => usedMaterials.has(mat));
+  }
+}
+
 /** @param {string} key */
 export function getDirectoryHandle(key) {
   return _dirHandles.get(key) ?? null;
@@ -575,24 +719,6 @@ export { splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer };
 function _scheduleIdle(fn) {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 2000 });
   else setTimeout(fn, 50);
-}
-
-/**
- * Look for a Blender custom property called "ratio" inside the glTF "extras"
- * bag on any node in the container. Accepts '1/72', '1:72', '72', or '2:1'.
- * Returns the authored ratio denominator value, or null when absent/malformed.
- */
-function _extractModelRatio(container) {
-  const nodes = [...container.meshes, ...container.transformNodes];
-  for (const node of nodes) {
-    const extras = node.metadata?.gltf?.extras;
-    if (!extras) continue;
-    const raw = extras.ratio ?? extras.Ratio;
-    if (raw == null) continue;
-    const parsed = parseScaleRatioText(raw);
-    if (parsed) return parsed;
-  }
-  return null;
 }
 
 function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId) {
@@ -842,6 +968,7 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   } finally {
     restoreUrls();
   }
+  if (opts.libraryItem) _filterContainerToLibraryItem(container, opts.libraryItem);
   // Same split as the live import path — restored containers must match the
   // mesh-per-material shape the saved sceneObjects were minted under, so
   // containerMeshIndex lookups line up. Split is deterministic in subMesh order.
@@ -867,11 +994,15 @@ export function bindRestoredMesh(meshId, mesh, assetId, sourceUnit = DEFAULT_SOU
  * at.
  */
 export function registerAssetEntry(entry) {
-  setState(s => ({
-    ...s,
-    scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: entry } },
-  }), { silent: true });
-  dispatch(EVENTS.ASSET_REGISTERED, { assetId: entry.id, entry });
+  _registerAssetEntry(entry);
+}
+
+/**
+ * Cache mesh asset bytes without loading geometry into the scene. Library GLB
+ * assets use this on project restore when they have no SceneObjects yet.
+ */
+export function cacheAssetBlob(assetId, blob) {
+  setBlobUrl(assetId, URL.createObjectURL(blob));
 }
 
 /**
@@ -909,6 +1040,6 @@ export const AssetLoader = {
   cloneMeshAsNewObject, restoreCloneToScene,
   getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh,
   bindRestoredTexture,
-  restoreTexture, registerAssetEntry, resetAll,
+  restoreTexture, registerAssetEntry, cacheAssetBlob, resetAll,
   bakeImportTransform, importScaleFactor,
 };

@@ -17,8 +17,8 @@ import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText } from '../core/scale/ScaleMath.js';
 import { exportFactor } from '../core/print/PrintScale.js';
 
-// Printer profiles maintained in `config/printers.json` (single source of
-// truth — also drives export pipeline + color mode + texture handling).
+// Printer profiles maintained in `config/printers.json`; they seed build-area
+// reference dimensions only. Export format is chosen by the buttons below.
 // `custom` entry has all-null bed dims; user types XYZ manually.
 export const PRINTERS = printersData;
 
@@ -448,9 +448,7 @@ function _renderBedTab() {
   html += '</select>';
   const cur = PRINTERS[printerId];
   if (cur) {
-    const fmt = cur.format;
-    const colorMode = cur.color?.mode;
-    html += `<div class="pp-info">${escapeHtml(cur.vendor)} · ${escapeHtml(fmt)} · ${escapeHtml(colorMode)}</div>`;
+    html += `<div class="pp-info">${escapeHtml(cur.vendor)} · ${escapeHtml(t('print.buildAreaReference'))}</div>`;
   }
   html += '</div>';
 

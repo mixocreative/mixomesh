@@ -8,8 +8,6 @@ const {
   buildExportPlan,
   exportBaseName,
   perMeshBaseName,
-  profilePreservesTextures,
-  profileUsesSolidPartColors,
   safeFilenameStem,
   scaleFilenameSuffix,
 } = await import('../src/core/print/ExportPlanner.js');
@@ -56,21 +54,14 @@ await test('buildExportPlan resolves printer profile and export scale', () => {
   assert.equal(plan.meshes.length, 1);
 });
 
-await test('profile helpers distinguish Mimaki texture and filament solid-color flows', () => {
+await test('buildExportPlan carries printer only as build-area reference metadata', () => {
   const mimaki = buildExportPlan({
     printerId: 'mimaki-3duj-553',
     sceneScale: { sceneRatio: 1 },
     printScale: { printRatio: 1 },
   }).request.printer;
-  const bambu = buildExportPlan({
-    printerId: 'bambu-x1c',
-    sceneScale: { sceneRatio: 1 },
-    printScale: { printRatio: 1 },
-  }).request.printer;
-  assert.equal(profilePreservesTextures(mimaki), true);
-  assert.equal(profileUsesSolidPartColors(mimaki), false);
-  assert.equal(profilePreservesTextures(bambu), false);
-  assert.equal(profileUsesSolidPartColors(bambu), true);
+  assert.equal(mimaki.displayName, 'Mimaki 3DUJ-553');
+  assert.deepEqual(mimaki.bed, { x: 508, y: 508, z: 305 });
 });
 
 console.log('\n' + out.join('\n'));

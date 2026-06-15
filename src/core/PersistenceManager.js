@@ -105,6 +105,7 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
   for (const a of Object.values(lib)) {
     const base = {
       id: a.id, name: a.name, filename: a.filename,
+      displayName: a.displayName ?? null,
       originalPath: a.originalPath ?? null, extension: a.extension,
       kind: a.kind ?? 'mesh', sourceUnit: a.sourceUnit ?? 'millimeters',
       unitConfirmed: a.unitConfirmed !== false, modelRatio: a.modelRatio ?? 1,
@@ -115,6 +116,7 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
       sourceFileHash: a.sourceFileHash ?? null,
       sourceAssetId: a.sourceAssetId ?? null,
       babylonTextureName: a.babylonTextureName ?? null,
+      libraryItem: a.libraryItem ?? null,
       thumbnailDataUrl: typeof a.thumbnailDataUrl === 'string'
         && a.thumbnailDataUrl.startsWith('data:') ? a.thumbnailDataUrl : null,
       fileData: null, contentHash: null,
@@ -416,6 +418,10 @@ async function _loadProject(doc) {
 
   const assetRes = new Map();   // assetId → { status, geom? }
   const unmatched = [];
+  const sceneObjectCountByAsset = new Map();
+  for (const o of data.sceneObjects || []) {
+    sceneObjectCountByAsset.set(o.assetId, (sceneObjectCountByAsset.get(o.assetId) ?? 0) + 1);
+  }
   for (const a of data.assetLibrary || []) {
     if (a.kind === 'texture' && a.isImported) {
       AssetLoader.registerAssetEntry(_stripFileData(a));
@@ -430,6 +436,11 @@ async function _loadProject(doc) {
     }
     AssetLoader.registerAssetEntry(_stripFileData(a));
     if (!r) { assetRes.set(a.id, { status: 'ghost' }); continue; }
+    if (a.libraryItem && !sceneObjectCountByAsset.get(a.id)) {
+      AssetLoader.cacheAssetBlob(a.id, r.blob);
+      assetRes.set(a.id, { status: r.live ? 'live' : 'static' });
+      continue;
+    }
     try {
       // OBJ: hand the live directory over so mtllib/texture siblings rebind
       // (permission was just granted in _resolveAssetBlob's tier-1 attempt).
@@ -440,7 +451,9 @@ async function _loadProject(doc) {
           if (dirHandle) restoreOpts = { dirHandle, originalPath: a.originalPath };
         } catch { /* no live dir — OBJ restores with default material */ }
       }
-      const geom = await AssetLoader.restoreContainer(a.id, r.blob, a.extension, restoreOpts);
+      const geom = await AssetLoader.restoreContainer(
+        a.id, r.blob, a.extension, { ...restoreOpts, libraryItem: a.libraryItem ?? null }
+      );
       const status = r.live ? 'live' : 'static';
       assetRes.set(a.id, { status, geom });
       // §10b reload rebind: re-register this container's imported textures

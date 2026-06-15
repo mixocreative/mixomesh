@@ -129,6 +129,7 @@
   "print.export3mf": "匯出 3MF（彩色）",
   "print.exportStl": "匯出 STL",
   "print.targetPrinter": "目標印表機",
+  "print.buildAreaReference": "僅作列印範圍參考",
   "print.buildVolume": "列印體積 (mm)",
   "print.showBedVolume": "在視窗顯示載台體積",
   "print.bedValidationInfo": "超出載台的模型會在驗證中標記。",

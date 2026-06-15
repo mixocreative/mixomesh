@@ -129,6 +129,7 @@
   "print.export3mf": "3MF（カラー）を書き出し",
   "print.exportStl": "STL を書き出し",
   "print.targetPrinter": "対象プリンタ",
+  "print.buildAreaReference": "造形領域の参照のみ",
   "print.buildVolume": "造形領域 (mm)",
   "print.showBedVolume": "ビューポートにベッド容量を表示",
   "print.bedValidationInfo": "ベッドを超えるモデルは検証で警告されます。",

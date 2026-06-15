@@ -14,11 +14,9 @@ async function test(name, fn) {
   catch (err) { out.push(`FAIL  ${name}\n      ${err.stack || err.message}`); failed++; }
 }
 
-await test('default printer profile is Mimaki 3DUJ-553 textured Materials Extension', () => {
+await test('default printer profile is Mimaki 3DUJ-553 bed reference', () => {
   const profile = getPrinterProfile();
   assert.equal(profile.displayName, 'Mimaki 3DUJ-553');
-  assert.equal(profile.format, '3mf-materials-ext');
-  assert.equal(profile.color.mode, 'texture-uv');
   assert.deepEqual(profile.bed, { x: 508, y: 508, z: 305 });
 });
 
@@ -26,15 +24,14 @@ await test('target printer selection resolves filament profile', () => {
   setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'bambu-x1c' } }), { silent: true });
   const profile = getPrinterProfile();
   assert.equal(profile.displayName, 'Bambu Lab X1 Carbon');
-  assert.equal(profile.format, '3mf-colorgroup');
-  assert.equal(profile.color.mode, 'solid-per-part');
+  assert.deepEqual(profile.bed, { x: 256, y: 256, z: 256 });
 });
 
 await test('unknown target printer falls back to Mimaki default', () => {
   setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'unknown-printer' } }), { silent: true });
   const profile = getPrinterProfile();
   assert.equal(profile.displayName, 'Mimaki 3DUJ-553');
-  assert.equal(profile.format, '3mf-materials-ext');
+  assert.deepEqual(profile.bed, { x: 508, y: 508, z: 305 });
 });
 
 console.log('\n' + out.join('\n'));

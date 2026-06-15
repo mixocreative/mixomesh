@@ -159,6 +159,52 @@ async function main() {
     assert(near(tl[0], 0) && near(tl[1], 0) && near(tl[2], 255),
       `top-left texel should be BLUE, got rgba(${[...tl]})`);
 
+    // OBJ export smoke: same real imported scene, real PrintManager path,
+    // save picker stubbed to capture the zip. This pins the browser/runtime
+    // packaging shape: OBJ + matching MTL + embedded texture file.
+    const objExport = await evaluate(cdp, `(async () => {
+      try {
+        let captured = null, suggested = null;
+        window.showSaveFilePicker = async (opts) => {
+          suggested = opts?.suggestedName ?? null;
+          return { createWritable: async () => ({
+            write: async (data) => { captured = data; },
+            close: async () => {},
+          }) };
+        };
+        const { PrintManager } = await import('/src/core/PrintManager.js');
+        await PrintManager.exportOBJ({});
+        if (!captured) return { error: 'OBJ export captured no bytes' };
+        const buf = new Uint8Array(
+          captured.arrayBuffer ? await captured.arrayBuffer() : captured);
+        let bin = '';
+        const CHUNK = 0x8000;
+        for (let i = 0; i < buf.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+        }
+        return { suggested, b64: btoa(bin) };
+      } catch (err) {
+        return { error: String(err?.stack ?? err) };
+      }
+    })()`);
+    if (objExport?.error) throw new Error(`OBJ export failed: ${objExport.error}`);
+    assert(/_r1to1\.zip$/.test(objExport.suggested ?? ''),
+      `OBJ suggested filename should end _r1to1.zip, got ${objExport.suggested}`);
+    const objZip = await JSZip.loadAsync(Buffer.from(objExport.b64, 'base64'));
+    const objEntries = Object.keys(objZip.files);
+    const objName = objEntries.find(p => /\.obj$/.test(p));
+    const mtlName = objEntries.find(p => /\.mtl$/.test(p));
+    const objTexEntries = objEntries.filter(p => /^textures\/.+\.png$/.test(p));
+    assert(objName, 'OBJ package missing .obj');
+    assert(mtlName, 'OBJ package missing .mtl');
+    assert(objTexEntries.length >= 1, 'OBJ package missing texture PNG');
+    const objText = await objZip.file(objName).async('text');
+    const mtlText = await objZip.file(mtlName).async('text');
+    assert(new RegExp(`^mtllib ${escapeRegExp(mtlName)}$`, 'm').test(objText),
+      `OBJ mtllib does not reference ${mtlName}`);
+    assert(/^newmtl /m.test(mtlText), 'MTL missing newmtl block');
+    assert(/^map_Kd textures\/.+\.png$/m.test(mtlText), 'MTL missing map_Kd texture reference');
+
     // Re-import round-trip (A2 follow-up): the exported 3MF loads back through
     // the real `.3mf` SceneLoader plugin with its texture bound.
     const rt = await evaluate(cdp, `(async () => {
@@ -232,7 +278,7 @@ async function main() {
 
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
-    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, round-trip OK, OBJ worker OK)`);
+    console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, OBJ export OK, round-trip OK, OBJ worker OK)`);
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);
@@ -439,6 +485,7 @@ async function waitFor(fn, timeoutMs, label) {
 
 function assert(value, message) { if (!value) throw new Error(message); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function removeTempDir(dir) {
   for (let i = 0; i < 5; i++) {

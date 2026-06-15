@@ -31,18 +31,6 @@ export function perMeshBaseName(projectName, meshName, sceneScale, printScale) {
   return `${safeFilenameStem(projectName || 'Untitled')}_${safeFilenameStem(meshName || 'Part')}${scaleFilenameSuffix(sceneScale, printScale)}`;
 }
 
-export function profilePreservesTextures(profile) {
-  return profile?.color?.mode === 'texture-uv'
-    && Array.isArray(profile.prep)
-    && profile.prep.includes('preserveUVs')
-    && profile.prep.includes('preserveTextures');
-}
-
-export function profileUsesSolidPartColors(profile) {
-  return profile?.color?.mode === 'solid-per-part'
-    || (Array.isArray(profile?.prep) && profile.prep.includes('collapseToSolidColor'));
-}
-
 export function safeFilenameStem(value) {
   const cleaned = String(value ?? '').trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
   return cleaned || 'Untitled';
