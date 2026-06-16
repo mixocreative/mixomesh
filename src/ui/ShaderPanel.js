@@ -2,6 +2,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState, dispatch } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
+import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { ShaderLibrary, DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
 import {
@@ -577,7 +578,9 @@ function _wireEditor(shaderId) {
   });
 
   _bodyEl.querySelector('#sp-act-assign')?.addEventListener('click', () => {
-    const ids = Selection.getSelectedIds();
+    // Expand to every part of each selected logical object — otherwise a
+    // multi-primitive / split object re-shades only its lead part.
+    const ids = logicalObjectCommandIds(Selection.getSelectedIds(), getState().scene.objects);
     if (!ids.length) return;
     push(new ShaderAssignCommand(ids, shaderId));
   });

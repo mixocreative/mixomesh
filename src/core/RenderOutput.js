@@ -219,6 +219,7 @@ export async function capturePng({ width, height, transparent = false, pose = nu
 
   const navPose = pose ? SceneManager.saveCameraState() : null;
   if (pose) SceneManager.restoreCameraState(pose);
+  SceneManager.suspendFollow(true);   // don't let follow-mode overwrite the capture pose's target
   const restore = _hideFurniture();
   if (transparent) {
     SceneManager.setBackgroundEnabled(false);
@@ -242,6 +243,7 @@ export async function capturePng({ width, height, transparent = false, pose = nu
       SceneManager.setBackgroundEnabled(true);
     }
     restore();
+    SceneManager.suspendFollow(false);
     if (navPose) SceneManager.restoreCameraState(navPose);
   }
 }
@@ -508,6 +510,7 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
   const canvas = engine.getRenderingCanvas();
   canvas.style.pointerEvents = 'none';   // camera is scripted during the sweep
   const restoreFurniture = _hideFurniture();   // presentation render — no grid/axes
+  SceneManager.suspendFollow(true);   // the sweep scripts camera.target — follow must not fight it
   const rig = _sweepRig();
   const sign = direction === 'right' ? -1 : 1;
   const usPerFrame = 1_000_000 / fps;
@@ -553,6 +556,7 @@ async function _recordOffline({ durationS = 8, fps = 30, direction = 'left', eas
     window.removeEventListener('keydown', onKey, true);
     canvas.style.pointerEvents = '';
     rig.restore(skipCameraRestore);
+    SceneManager.suspendFollow(false);
     restoreFurniture();
     _abortRecord = null;
     _recording = false;

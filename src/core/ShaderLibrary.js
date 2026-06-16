@@ -102,7 +102,16 @@ function _buildEntryFromMaterial(material, importCtx = {}) {
     type,
     diffuseColor,
     diffuseTextureAssetId,
-    uvBase: { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 },
+    // Harvest the imported texture's UV transform (KHR_texture_transform-style)
+    // so a non-identity offset/scale/rotation survives import + .mixo round-trip
+    // instead of being reset to identity.
+    uvBase: importedTex ? {
+      offsetX:  Number.isFinite(importedTex.uOffset) ? importedTex.uOffset : 0,
+      offsetY:  Number.isFinite(importedTex.vOffset) ? importedTex.vOffset : 0,
+      scaleX:   Number.isFinite(importedTex.uScale)  ? importedTex.uScale  : 1,
+      scaleY:   Number.isFinite(importedTex.vScale)  ? importedTex.vScale  : 1,
+      rotation: Number.isFinite(importedTex.wAng)    ? importedTex.wAng    : 0,
+    } : { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 },
     opacity, roughness, metallic,
     linkedMeshIds: [],
   };
@@ -123,6 +132,9 @@ function _applyEntryToMaterial(mat, entry) {
     if ('metallic'    in mat) mat.metallic    = entry.metallic;
   } else {
     mat.diffuseColor = _hexToColor3(entry.diffuseColor);
+    // Unlit (disableLighting) shows emissiveColor, not diffuseColor — drive it
+    // from the chosen colour so the viewport + exported Ke aren't stuck white.
+    if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = _hexToColor3(entry.diffuseColor);
   }
   mat.alpha = entry.opacity;
   // hasAlpha is set when a texture wants alpha; for plain opacity we rely on alpha.
@@ -147,6 +159,7 @@ function _setMaterialField(mat, field, value, type) {
         if ('baseColor'   in mat) mat.baseColor   = c;
       } else {
         mat.diffuseColor = c;
+        if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = c;
       }
       return;
     }

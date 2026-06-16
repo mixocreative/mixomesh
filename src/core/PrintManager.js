@@ -10,7 +10,6 @@ import {
   perMeshBaseName as _perMeshBaseName,
   getExportedDimensions,
   setExportTargetOverride,
-  resolveExportTargets,
 } from './print/PrintScale.js';
 import { createPrepSteps } from './print/PrintPrep.js';
 import { createFormats } from './print/PrintFormats.js';
@@ -18,7 +17,7 @@ import { packageAndDownload } from './print/PrintPackaging.js';
 import { collectTextureExportData, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './print/ThreeMFWriter.js';
 import { logicalObjectLeadIds, logicalObjectPartIds } from './LogicalObjects.js';
-import { objectRatio } from './scale/ScaleMath.js';
+import { objectRatio, exportRatiosFromState } from './scale/ScaleMath.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -362,9 +361,16 @@ async function _runExport(formatKey, options = {}) {
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
 
   // Per-object ratio redesign: export the scene ONCE PER target ratio in
-  // `print.exportRatios` (each at the active object's ratio → that target,
-  // producing its own scaled file). A single-entry list is the common case.
-  const targets = resolveExportTargets(getState());
+  // `print.exportRatios`, producing a scaled file each. An EMPTY list = "as
+  // shown": target = the export REFERENCE ratio (active print unit, else first
+  // unit) so the factor is exactly 1000 — using the reference (not the raw
+  // selection-active ratio) keeps "as shown" correct even when the active
+  // object is excluded from the export set.
+  const state0 = getState();
+  const explicit = exportRatiosFromState(state0);
+  const targets = explicit.length
+    ? explicit
+    : [_exportReferenceRatio(_collectPrintMeshes(!!options.selectedOnly), state0)];
   for (let ti = 0; ti < targets.length; ti++) {
     setExportTargetOverride(targets[ti]);
     try {

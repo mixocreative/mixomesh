@@ -320,6 +320,21 @@ function _enterModal(op) {
   }
   center.scaleInPlace(1 / selected.length);
 
+  // Honor the pivot mode (the gizmo does — PivotSession._computePivotPosition);
+  // the keyboard G/R/S modal previously always pivoted about the median.
+  const pivotMode = getState().selection?.pivotMode ?? 'median';
+  let pivot = center;
+  if (pivotMode === 'world') {
+    pivot = new BABYLON.Vector3(0, 0, 0);
+  } else if (pivotMode === 'cursor') {
+    const c = SceneManager.getCursor?.();
+    if (c) pivot = new BABYLON.Vector3(c.x, c.y, c.z);
+  } else if (pivotMode === 'active') {
+    const a = selected.find(s => s.id === Selection.getActiveId());
+    if (a) { a.mesh.computeWorldMatrix(true); pivot = a.mesh.getAbsolutePosition().clone(); }
+  }
+  // 'median' / 'individual' keep the centroid (matches the gizmo's fallback).
+
   _modal = {
     op,
     axis: null,
@@ -327,7 +342,7 @@ function _enterModal(op) {
     typed: '',
     snap: false,
     snapshots,
-    pivot: center,
+    pivot,
     meshIds: selected.map(s => s.id),
     startX: _scene.pointerX,
     startY: _scene.pointerY,

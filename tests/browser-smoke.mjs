@@ -982,18 +982,18 @@ async function main() {
       const savedAfterSection = JSON.parse(localStorage.getItem(KEY))?.settings?.render?.exposure;
 
       // (4) dirty again, then resetAll → key cleared + state factory. A scene
-      // is loaded (the diag STL). Post per-object-ratio redesign there are NO
-      // scene-protected print fields (scale is per-object content), so every
-      // print setting resets — exportRatios and minWallThickness both restore.
+      // is loaded. exportRatios is per-project CONTENT (not a setting) so it must
+      // be PRESERVED through a settings reset; a real print setting
+      // (minWallThickness) resets to factory.
       sm.setState(s => ({ ...s, print: { ...s.print, exportRatios: [9, 35], minWallThickness: 9 } }), { silent: true });
       ss.save();
       const sceneLoaded = Object.keys(sm.getState().scene.objects).length > 0;
       ss.resetAll();
       const keyCleared = localStorage.getItem(KEY) === null;
-      const ratioReset = JSON.stringify(sm.getState().print.exportRatios) === JSON.stringify(DS.print.exportRatios);
+      const ratioPreserved = JSON.stringify(sm.getState().print.exportRatios) === JSON.stringify([9, 35]);
       const wallReset = sm.getState().print.minWallThickness === DS.print.minWallThickness;
 
-      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioReset, wallReset, dsExposure: DS.render.exposure };
+      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioPreserved, wallReset, dsExposure: DS.render.exposure };
     })()`);
     assert(settings.logoOk, 'header logo (#app-logo) missing or not rendered');
     assert(settings.savedExposure === 1.77, 'edited setting was not persisted to localStorage');
@@ -1002,7 +1002,7 @@ async function main() {
     assert(settings.savedAfterSection === settings.dsExposure, 'resetSection did not re-persist the restored value');
     assert(settings.keyCleared, 'resetAll did not clear the settings localStorage key');
     assert(settings.sceneLoaded, 'expected a loaded scene (diag STL) for the reset check');
-    assert(settings.ratioReset, 'resetAll did not reset exportRatios (no scene-protected print fields anymore)');
+    assert(settings.ratioPreserved, 'resetAll wrongly reset exportRatios — it is per-project content, not a setting');
     assert(settings.wallReset, 'resetAll did not reset a print field');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);

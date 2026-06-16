@@ -115,6 +115,28 @@ await test('duplicate command creates an independent logical split object', () =
   assert.deepEqual(Selection.getSelectedIds(), [lead.id]);
 });
 
+await test('duplicate keeps a glTF multi-primitive logical object linked (logicalObjectId, no sourceGroupId)', () => {
+  // The audit-found regression: parts grouped only by logicalObjectId (no
+  // sourceGroupId) lost their link on duplicate → N unlinked objects.
+  seedLogicalObject({
+    lead: { sourceGroupId: null, logicalObjectId: 'partA' },
+    part: { sourceGroupId: null, logicalObjectId: 'partA', isInternalPart: true },
+  });
+
+  new DuplicateCommand(['partA']).execute();
+
+  const state = StateManager.getState();
+  const clones = Object.values(state.scene.objects).filter(o => !['partA', 'partB'].includes(o.id));
+  assert.equal(clones.length, 2, 'both primitives cloned');
+  const lead = clones.find(o => !o.isInternalPart);
+  const internal = clones.find(o => o.isInternalPart);
+  assert.ok(lead && internal, 'clone has a lead + internal part');
+  assert.equal(lead.logicalObjectId, lead.id, 'clone lead links to itself');
+  assert.equal(internal.logicalObjectId, lead.id, 'clone part links to clone lead (was null before fix → split)');
+  assert.equal(lead.sourceGroupId, null, 'no sourceGroupId minted for a multi-primitive object');
+  assert.equal(internal.sourceGroupId, null);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

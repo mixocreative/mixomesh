@@ -35,7 +35,10 @@ const SCHEMA = [
   { key: 'renderOut', path: ['scene', 'renderOut'], fields: ['width', 'height', 'transparent', 'turntable'] },
   { key: 'grid',      path: ['scene', 'grid'],      fields: null },
   { key: 'overlays',  path: ['scene', 'overlays'],  fields: ['grid', 'axes', 'printPreview'] },
-  { key: 'print',     path: ['print'],              fields: null },
+  // `exportRatios` is per-PROJECT content (persisted in the .mixo, restored on
+  // load) — NOT a per-user setting. Narrow to genuine printer prefs so it is
+  // neither written to localStorage nor reset across projects.
+  { key: 'print',     path: ['print'],              fields: ['targetPrinterId', 'bedDimensions', 'minWallThickness', 'printMode', 'chordTolerance', 'objBakeSolidTextures'] },
   { key: 'gizmo',     path: ['gizmo'],              fields: ['space', 'snap'] },
   { key: 'pivotMode', path: ['selection', 'pivotMode'], scalar: true },
 ];

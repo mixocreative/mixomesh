@@ -178,15 +178,14 @@ function _renderScaleTab() {
   const factor = exportFactor();
   html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
-  // Example dimensions
-  const selected = getState().selection.selectedIds;
-  if (selected.length > 0) {
-    const firstMesh = getState().scene.objects[selected[0]];
-    if (firstMesh) {
-      const dims = PrintManager.getExportedDimensions(selected[0]);
-      if (dims) {
-        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
-      }
+  // Example dimensions — show the ACTIVE object so the queried mesh and the
+  // export factor's reference ratio (also the active object) agree. (Using
+  // selected[0] under a mixed-ratio multi-select scaled the wrong mesh.)
+  const exampleId = state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
+  if (exampleId && state.scene.objects[exampleId]) {
+    const dims = PrintManager.getExportedDimensions(exampleId);
+    if (dims) {
+      html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
     }
   }
 

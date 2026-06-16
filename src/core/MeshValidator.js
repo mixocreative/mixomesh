@@ -213,13 +213,22 @@ export async function validateGroup(sourceGroupId) {
 
 const SILENT = { silent: true };
 
-function _cacheResults(meshIds, results) {
+// Monotonic invalidation counter per meshId. Bumped on every edit event so an
+// async validateMesh can detect that the geometry changed WHILE its worker pass
+// was in flight, and refuse to cache the now-stale result as fresh.
+const _seq = new Map();
+function _bumpSeq(meshIds) {
+  for (const id of [].concat(meshIds)) if (id) _seq.set(id, (_seq.get(id) ?? 0) + 1);
+}
+function _seqOf(id) { return _seq.get(id) ?? 0; }
+
+function _cacheResults(meshIds, results, stale = false) {
   const ids = [].concat(meshIds).filter(Boolean);
   if (!ids.length) return;
   setState(s => {
     const v = { ...s.scene.validation };
     const validatedAt = Date.now();
-    for (const id of ids) v[id] = { results, validatedAt, stale: false };
+    for (const id of ids) v[id] = { results, validatedAt, stale };
     return { ...s, scene: { ...s.scene, validation: v } };
   }, SILENT);
 }
@@ -254,8 +263,8 @@ export function invalidateAll() {
 
 /** Wire cache invalidation. Call once at boot (and in headless tests). */
 export function init() {
-  subscribe(EVENTS.TRANSFORM_COMMITTED, (p) => _markStale(p?.meshIds ?? []));
-  subscribe(EVENTS.OBJECT_UPDATED, (p) => _markStale(p?.meshId ? [p.meshId] : []));
+  subscribe(EVENTS.TRANSFORM_COMMITTED, (p) => { const ids = p?.meshIds ?? []; _bumpSeq(ids); _markStale(ids); });
+  subscribe(EVENTS.OBJECT_UPDATED, (p) => { const ids = p?.meshId ? [p.meshId] : []; _bumpSeq(ids); _markStale(ids); });
   subscribe(EVENTS.OBJECT_REMOVED, (p) => { if (p?.id) _dropEntry(p.id); });
   subscribe(EVENTS.PROJECT_NEW, _clearCache);
   subscribe(EVENTS.PROJECT_LOADED, _clearCache);
@@ -279,6 +288,9 @@ export async function validateMesh(mesh) {
   // registration) — Babylon mesh.name is unrelated and collides across imports.
   const objects = getState().scene.objects;
   const selfId  = mesh.metadata?.meshId ?? null;
+  // Snapshot the invalidation counter; if it changes during the async topology
+  // pass (user edited the mesh mid-validation), the cached result is stale.
+  const startSeq = _seqOf(selfId);
   // The logical object's live, non-ghost parts. >1 ⇒ a multi-part object
   // (MultiMaterial split OR glTF multi-primitive): validate the WELDED UNION so
   // the seams between parts aren't reported as holes and a real hole across the
@@ -344,13 +356,16 @@ export async function validateMesh(mesh) {
   const meshId = selfId;
   const isLive = !!meshId && AssetLoader.getBabylonMesh(meshId) === mesh;
   if (isLive) {
+    // If an edit invalidated this mesh while the worker ran, cache as stale so
+    // the Outliner/Print badge doesn't show "valid" for changed geometry.
+    const stale = _seqOf(meshId) !== startSeq;
     if (isLogicalGroup) {
       // Group-scoped topology results attach to every logical part so each
       // sibling's Outliner/Properties badge reflects the whole-object verdict.
       const siblingIds = partIds.filter(id => id !== meshId);
-      if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'));
+      if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'), stale);
     }
-    _cacheResults([meshId], results);
+    _cacheResults([meshId], results, stale);
   }
 
   dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, meshId: isLive ? meshId : null, results });

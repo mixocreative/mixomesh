@@ -14,6 +14,7 @@ import {
   REVERT_DELTA_SQ,
   REVERT_ANGLE_DELTA,
 } from './SceneConstants.js';
+import { logicalObjectPartIds } from '../LogicalObjects.js';
 
 const BABYLON = window.BABYLON;
 
@@ -40,6 +41,18 @@ let _initialFrameTimer = null;
 let _cachedPreset     = 'perspective';
 let _cachedFollowMode = 'free';
 let _cachedActiveId   = null;
+let _cachedActivePartIds = [];   // active object's logical parts (event-cached, not per-frame)
+let _followSuspended = false;    // set by RenderOutput during offline render/capture
+
+/** Suspend the per-frame follow-target hook (offline render drives target itself). */
+export function suspendFollow(on) { _followSuspended = !!on; }
+
+// Cache the active id + its logical part ids together so the per-frame
+// follow-target hook never calls getState()/logicalObjectPartIds.
+function _setCachedActive(id) {
+  _cachedActiveId = id;
+  _cachedActivePartIds = id ? logicalObjectPartIds(id, getState().scene.objects) : [];
+}
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -64,10 +77,10 @@ export function initCameraRig(scene, canvas) {
     const st = getState();
     _cachedPreset     = st.scene.camera?.preset ?? 'perspective';
     _cachedFollowMode = st.scene.camera?.followMode ?? 'free';
-    _cachedActiveId   = st.selection?.activeId ?? null;
+    _setCachedActive(st.selection?.activeId ?? null);
   });
-  subscribe(EVENTS.SELECTION_CHANGED, ({ activeId } = {}) => { _cachedActiveId = activeId ?? null; });
-  subscribe(EVENTS.ACTIVE_OBJECT_CHANGED, ({ activeId } = {}) => { _cachedActiveId = activeId ?? null; });
+  subscribe(EVENTS.SELECTION_CHANGED, ({ activeId } = {}) => _setCachedActive(activeId ?? null));
+  subscribe(EVENTS.ACTIVE_OBJECT_CHANGED, ({ activeId } = {}) => _setCachedActive(activeId ?? null));
 
   // Auto-frame on the very first scene content of a session/project. Subsequent
   // drops do not retrigger — the user is past initial orientation by then.
@@ -499,22 +512,27 @@ function _applyFollowTarget() {
   // doesn't trigger _syncOrtho otherwise, so the view would feel "frozen".
   if (_camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) _syncOrtho();
 
+  // While an offline render/pose-capture drives the camera target itself
+  // (RenderOutput), suspend follow so it doesn't clobber camera.target every
+  // frame (which reframed turntable exports vs the live preview).
+  if (_followSuspended) return;
   if (_cachedFollowMode === 'free') return;
   if (_cachedFollowMode === 'worldOrigin') {
     _camera.target.set(0, 0, 0);
     return;
   }
-  // followActive: track active object hierarchy bbox centre.
-  const activeId = _cachedActiveId;
-  if (!activeId) return;
-  const mesh = _scene?.meshes?.find(m => m.metadata?.meshId === activeId) ?? null;
-  if (!mesh) return;
-  let center;
-  try {
-    const hb = mesh.getHierarchyBoundingVectors(true);
-    center = BABYLON.Vector3.Center(hb.min, hb.max);
-  } catch {
-    center = mesh.getAbsolutePosition?.().clone() ?? new BABYLON.Vector3(0, 0, 0);
+  // followActive: track the UNION bbox centre of the active object's parts
+  // (multi-primitive / split objects have several part meshes).
+  if (!_cachedActiveId) return;
+  const idSet = new Set(_cachedActivePartIds.length ? _cachedActivePartIds : [_cachedActiveId]);
+  let min = null, max = null;
+  for (const m of (_scene?.meshes ?? [])) {
+    if (!idSet.has(m.metadata?.meshId)) continue;
+    try {
+      const hb = m.getHierarchyBoundingVectors(true);
+      min = min ? BABYLON.Vector3.Minimize(min, hb.min) : hb.min;
+      max = max ? BABYLON.Vector3.Maximize(max, hb.max) : hb.max;
+    } catch { /* skip un-bounded mesh */ }
   }
-  _camera.target.copyFrom(center);
+  if (min && max) _camera.target.copyFrom(BABYLON.Vector3.Center(min, max));
 }

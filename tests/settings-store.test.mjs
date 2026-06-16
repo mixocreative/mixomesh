@@ -125,33 +125,37 @@ test('applySectionToState(grid) resets grid + grid/axes overlays only', () => {
   assert.equal(out.scene.overlays.printPreview, false);   // untouched
 });
 
-test('print settings reset fully even under a loaded scene (per-object ratio is content, not a setting)', () => {
-  // Post per-object-ratio redesign (2026-06-16): scale lives on objects, so
-  // there is nothing scene-protected in print — a reset restores every print
-  // setting regardless of whether a scene is loaded.
+test('print reset restores printer SETTINGS but leaves exportRatios (per-project content) untouched', () => {
+  // exportRatios is .mixo content, not a per-user setting — it is excluded from
+  // the print SCHEMA allow-list, so a settings reset must NOT touch it.
   const s = freshState();
   s.scene.objects = { m: { id: 'm' } };       // scene loaded
   s.print.exportRatios = [4, 35];
   s.print.minWallThickness = 9;
   const sec = applySectionToState(s, 'print');
-  assert.deepEqual(sec.print.exportRatios, DS.print.exportRatios, 'exportRatios resets under a loaded scene');
-  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'print field resets');
+  assert.deepEqual(sec.print.exportRatios, [4, 35], 'exportRatios is content — preserved through reset');
+  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'printer setting resets');
 
   const all = factoryState(s);
-  assert.deepEqual(all.print.exportRatios, DS.print.exportRatios);
+  assert.deepEqual(all.print.exportRatios, [4, 35], 'exportRatios preserved by factoryState');
   assert.equal(all.print.minWallThickness, DS.print.minWallThickness);
+});
+
+test('exportRatios is never persisted to localStorage (per-project content)', () => {
+  const s = freshState();
+  s.print.exportRatios = [72, 144];
+  assert.equal('exportRatios' in pickSettings(s).print, false,
+    'exportRatios must not leak into per-user settings');
 });
 
 test('factoryState resets every persisted slice but leaves content', () => {
   const s = freshState();
   s.scene.render.exposure = 9;
-  s.print.exportRatios = [7];
   s.print.minWallThickness = 9;
   s.gizmo.snap.translate = 5;
   s.selection.pivotMode = 'world';
   const out = factoryState(s);
   assert.equal(out.scene.render.exposure, DS.render.exposure);
-  assert.deepEqual(out.print.exportRatios, DS.print.exportRatios);
   assert.equal(out.print.minWallThickness, DS.print.minWallThickness);
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);

@@ -35,7 +35,7 @@ import {
 import {
   initCameraRig, getCamera, applyCameraOptics,
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
-  saveCameraState, restoreCameraState, setFollowMode,
+  saveCameraState, restoreCameraState, setFollowMode, suspendFollow,
 } from './scene/CameraRig.js';
 import {
   initPivotSession, setTransformCommitHandler,
@@ -52,7 +52,7 @@ export { getShadowGenerator, invalidateShadows, setFloorShadowOnly, setSectionPl
 export { setWireframeEdgeColor };
 export {
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
-  saveCameraState, restoreCameraState, setFollowMode,
+  saveCameraState, restoreCameraState, setFollowMode, suspendFollow,
 };
 export {
   setTransformCommitHandler,
@@ -428,7 +428,7 @@ function _setPrintPreviewMode(enabled) {
   if (enabled) {
     // Store original metallic values and set all to 0
     for (const mesh of meshes) {
-      if (!mesh.material) continue;
+      if (!_isInspectableMesh(mesh)) continue;
 
       const mat = mesh.material;
       const matId = mat.uniqueId.toString();
@@ -472,8 +472,8 @@ function _setPrintPreviewMode(enabled) {
 function _setBaseColorMode(enabled) {
   if (enabled) {
     for (const mesh of _scene.meshes) {
+      if (!_isInspectableMesh(mesh)) continue;
       const mat = mesh.material;
-      if (!mat) continue;
       const matId = mat.uniqueId.toString();
       if (!_baseColorMaterialMap.has(matId)) {
         _baseColorMaterialMap.set(matId, {
@@ -536,6 +536,16 @@ function _isContentMesh(mesh) {
   let node = mesh;
   while (node) { if (node.metadata?.meshId) return true; node = node.parent; }
   return false;
+}
+
+// A material an inspection mode may safely mutate: a real content mesh, never
+// the cross-section cap / back-face viz clones or the grid/floor/bed/FRONT
+// furniture (mutating those captures wrong "originals" + bleeds the look).
+function _isInspectableMesh(mesh) {
+  return !!mesh?.material
+    && !mesh.metadata?.sectionPlaneViz
+    && !mesh.metadata?.backfaceViz
+    && _isContentMesh(mesh);
 }
 
 /**
@@ -662,7 +672,7 @@ export const SceneManager = {
   init, isWebGPU, setTransformCommitHandler,
   getScene, getEngine, getShadowGenerator, getCamera,
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
-  setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, attachToSelection,
+  setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,

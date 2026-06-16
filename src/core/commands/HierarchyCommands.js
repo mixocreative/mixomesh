@@ -453,11 +453,18 @@ function _remapDuplicateLogicalObjects(sourceIds, cloneIdBySourceId, sourceObjec
 
       let sourceGroupId = null;
       let logicalObjectId = null;
+      // Mint a fresh sourceGroupId only when the source actually had one
+      // (MultiMaterial split). But re-link logicalObjectId for BOTH cases —
+      // a glTF multi-primitive object has a logicalObjectId with NO
+      // sourceGroupId, and was previously left null here, splitting the
+      // duplicate into N unlinked objects.
       if (sourceObj.sourceGroupId) {
         if (!groupIdByOldGroup.has(sourceObj.sourceGroupId)) {
           groupIdByOldGroup.set(sourceObj.sourceGroupId, _newDuplicateSourceGroupId());
         }
         sourceGroupId = groupIdByOldGroup.get(sourceObj.sourceGroupId);
+      }
+      if (sourceObj.sourceGroupId || sourceObj.logicalObjectId) {
         logicalObjectId = leadCloneByOldLead.get(canonicalObjectId(sourceId, sourceObjects)) ?? newId;
       }
       objects[newId] = {

@@ -277,8 +277,12 @@ export function setOutlineLightMode(on) {
  * Outline the active (primary-selected) mesh. Clears all prior outlines.
  * @param {any|null} mesh
  */
-export function setActive(mesh) {
-  _activeForOutline   = mesh ?? null;
+export function setActive(meshOrList) {
+  // Accept a single mesh OR a list — a multi-primitive / split active object
+  // has several part meshes that should ALL get the bright active tint.
+  _activeForOutline   = Array.isArray(meshOrList)
+    ? meshOrList.filter(Boolean)
+    : (meshOrList ? [meshOrList] : []);
   _selectedForOutline = [];     // reset; setSelected adds the others after
   _refreshOutlineSet();
 }
@@ -289,15 +293,17 @@ export function setActive(mesh) {
  * @param {any[]} meshes
  */
 export function setSelected(meshes) {
-  _selectedForOutline = (meshes ?? []).filter(m => m !== _activeForOutline);
+  const active = new Set(_activeForOutline);
+  _selectedForOutline = (meshes ?? []).filter(m => m && !active.has(m));
   _refreshOutlineSet();
 }
 
 function _refreshOutlineSet() {
+  const active = new Set(_activeForOutline);
   const entries = [];
-  if (_activeForOutline) entries.push({ mesh: _activeForOutline, kind: 'active' });
+  for (const m of _activeForOutline) entries.push({ mesh: m, kind: 'active' });
   for (const m of _selectedForOutline) {
-    if (m !== _activeForOutline) entries.push({ mesh: m, kind: 'selected' });
+    if (!active.has(m)) entries.push({ mesh: m, kind: 'selected' });
   }
   _setMaskMeshes(entries);
   _setOutlineEnabled(entries.length > 0);

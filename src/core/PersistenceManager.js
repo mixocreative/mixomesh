@@ -770,6 +770,9 @@ export async function relinkAsset(assetId) {
   const geom = await AssetLoader.restoreContainer(assetId, file, ext);
 
   const objs = Object.values(getState().scene.objects).filter(o => o.assetId === assetId);
+  // Shared guard so two objects that alias one restored mesh don't double-bake
+  // the ratio scale (mirrors the _loadProject restore loop).
+  const _reBaked = new WeakSet();
   for (const o of objs) {
     const old = AssetLoader.getBabylonMesh(o.id);
     const t   = old ? _decompose(old) : (o._savedTransform ?? null);
@@ -778,7 +781,7 @@ export async function relinkAsset(assetId) {
     const mesh = geom[idx] || geom.find(m => m.name === o.name) || geom[0];
     if (!mesh) continue;
     AssetLoader.bindRestoredMesh(o.id, mesh, assetId, o.sourceUnit);
-    _applyPersistedRatioBake(mesh, getState().scene.assetLibrary[assetId], o.ratio);
+    _applyPersistedRatioBake(mesh, getState().scene.assetLibrary[assetId], o.ratio, _reBaked);
     _applyWorld(mesh, t);
     const vis = o.visible !== false;
     mesh.setEnabled(vis); mesh.isVisible = vis;

@@ -36,13 +36,18 @@ function _resolve(ids) {
 
 function _applyVisuals() {
   const { selectedIds, activeId, pivotMode } = getState().selection;
+  const objects = getState().scene.objects;
   const resolved = _resolve(selectedIds);
-  const activeEntry = activeId ? resolved.find(r => r.id === activeId) : null;
-  const others = resolved.filter(r => r.id !== activeId);
+  // The ACTIVE object may be multi-part (multi-primitive / split) — every one
+  // of its parts gets the active tint, not just the lead.
+  const activePartIds = activeId ? new Set(logicalObjectPartIds(activeId, objects)) : new Set();
+  const activeMeshes = resolved.filter(r => activePartIds.has(r.id)).map(r => r.mesh);
+  const others = resolved.filter(r => !activePartIds.has(r.id)).map(r => r.mesh);
+  const leadMesh = (activeId && resolved.find(r => r.id === activeId)?.mesh) || activeMeshes[0] || null;
 
-  SceneManager.setActive(activeEntry ? activeEntry.mesh : null);
-  SceneManager.setSelected(others.map(r => r.mesh));
-  SceneManager.attachToSelection(resolved.map(r => r.mesh), pivotMode, activeEntry?.mesh ?? null);
+  SceneManager.setActive(activeMeshes);
+  SceneManager.setSelected(others);
+  SceneManager.attachToSelection(resolved.map(r => r.mesh), pivotMode, leadMesh);
 }
 
 /**
