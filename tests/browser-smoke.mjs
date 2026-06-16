@@ -533,6 +533,18 @@ async function main() {
         landedExact: bBox.scaling.x === 2 && bBox.scaling.y === 2 && bBox.scaling.z === 2,
       };
 
+      // (3b) Bounce YIELD — a scale set DURING the pop must survive settle, not
+      // be clobbered back to orig (audit bounce-wrinkle fix). Deterministic: no
+      // render frame ticks between the dispatch and the settle.
+      const yBox = B.MeshBuilder.CreateBox('smoke-bounce-yield', { size: 0.05 }, scene);
+      yBox.metadata = { meshId: 'smoke-bounce-yield' };
+      yBox.scaling.set(1, 1, 1);
+      st.dispatch(ev.EVENTS.ASSET_INSTANTIATED, { meshId: 'smoke-bounce-yield' });   // pop starts, orig=1
+      yBox.scaling.set(4, 4, 4);                                                      // user scales mid-pop
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();         // must NOT restore orig
+      const bounceYield = { kept: yBox.scaling.x === 4 && yBox.scaling.y === 4 && yBox.scaling.z === 4 };
+      yBox.dispose();
+
       // (4) RENDERONCE shadows with a real caster (the bounce box is now a
       // registered caster): a transparent capture with the floor on must
       // contain SOFT shadow pixels (alpha strictly between 0 and 255 — the
@@ -663,7 +675,7 @@ async function main() {
 
       secBox.dispose();
       bBox.dispose();
-      return { frameSrc, section, bounce, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
+      return { frameSrc, section, bounce, bounceYield, shadows, ssaoOn, ssaoOffOk, recAborted, recIdle,
                outlineOffWhenEmpty, outlineOnWhenSelected, baseOn, baseOff, modeOpts, invOn, invOff, uvOn, uvOff, dmGrey,
                cursorBall, cursorRing, cursorStateSync, maskTwoTone, pivotSync, gizmoSpaceSync };
     })()`);
@@ -700,6 +712,7 @@ async function main() {
     assert(wave.bounce.animated,
       `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
     assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');
+    assert(wave.bounceYield.kept, 'bounce clobbered a scale set DURING the pop — should yield to it (wrinkle fix)');
     assert(wave.shadows.ok,
       `no soft shadow pixels with a caster + floor (${wave.shadows.soft}) — RENDERONCE shadow map stale or casters broken`);
     assert(wave.ssaoOffOk, 'SSAO pipeline still active after toggle off');

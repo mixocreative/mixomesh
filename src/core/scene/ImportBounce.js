@@ -7,6 +7,11 @@
 // otherwise serialize the pop factor). Project loads never fire
 // ASSET_INSTANTIATED (the restore path uses bindRestoredMesh), so bulk loads
 // don't bounce by construction; imports, drops, duplicates and primitives do.
+//
+// The pop owns mesh.scaling only until something else sets it: if a gizmo /
+// Properties / command changes the scaling mid-pop, the bounce YIELDS (stops
+// touching it) and settle leaves the new value — so a scale set during the
+// 260 ms window is never clobbered (audit bounce-wrinkle fix 2026-06-16).
 
 import { EVENTS } from '../events.js';
 import { subscribe } from '../StateManager.js';
@@ -14,9 +19,24 @@ import { subscribe } from '../StateManager.js';
 const DURATION_MS = 260;
 const START_SCALE = 0.6;
 
+const EPS = 1e-6;
+
 let _scene = null;
-const _active = new Map();   // uniqueId → { mesh, orig, start }
+const _active = new Map();   // uniqueId → { mesh, orig, start, lastApplied }
 let _observer = null;
+
+// True when the mesh's live scaling no longer matches what the pop last wrote —
+// i.e. a gizmo / Properties / command edit changed it. The bounce then YIELDS
+// (stops touching scaling) so a scale set DURING the pop is never clobbered.
+// Ratio rescale (RescaleObjectCommand) bakes into vertices + position, not node
+// scaling, so it does not trip this — the pop and the ratio stay orthogonal.
+function _scalingDiverged(mesh, applied) {
+  if (!applied) return false;
+  const s = mesh.scaling;
+  return Math.abs(s.x - applied.x) > EPS
+      || Math.abs(s.y - applied.y) > EPS
+      || Math.abs(s.z - applied.z) > EPS;
+}
 
 export function initImportBounce(scene) {
   _scene = scene;
@@ -36,7 +56,11 @@ export function initImportBounce(scene) {
  */
 export function settleImportBounce() {
   for (const [id, anim] of _active) {
-    if (!anim.mesh.isDisposed?.()) anim.mesh.scaling.copyFrom(anim.orig);
+    // Snap the pop to its resting scale — UNLESS something set the scaling
+    // during the pop, in which case leave the user's value (don't restore orig).
+    if (!anim.mesh.isDisposed?.() && !_scalingDiverged(anim.mesh, anim.lastApplied)) {
+      anim.mesh.scaling.copyFrom(anim.orig);
+    }
     _active.delete(id);
   }
   if (_observer && _scene) {
@@ -57,15 +81,22 @@ function _bounce(meshId) {
   if (!mesh) return;
   const existing = _active.get(mesh.uniqueId);
   // Restart cleanly if the same mesh bounces again before settling — orig
-  // must stay the true resting scale, not a mid-bounce sample.
+  // must stay the true resting scale, not a mid-bounce sample. lastApplied
+  // carries over (or seeds to orig) so a restart isn't seen as divergence.
   const orig = existing ? existing.orig : mesh.scaling.clone();
-  _active.set(mesh.uniqueId, { mesh, orig, start: performance.now() });
+  _active.set(mesh.uniqueId, {
+    mesh, orig,
+    start: performance.now(),
+    lastApplied: existing?.lastApplied ?? orig.clone(),
+  });
 
   if (!_observer) {
     _observer = _scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
       for (const [id, anim] of _active) {
         if (anim.mesh.isDisposed?.()) { _active.delete(id); continue; }
+        // Yield if anything else changed the scaling mid-pop — leave it be.
+        if (_scalingDiverged(anim.mesh, anim.lastApplied)) { _active.delete(id); continue; }
         const t = (now - anim.start) / DURATION_MS;
         if (t >= 1) {
           anim.mesh.scaling.copyFrom(anim.orig);   // exact landing — no drift
@@ -74,6 +105,7 @@ function _bounce(meshId) {
         }
         const f = START_SCALE + (1 - START_SCALE) * _easeOutBack(t);
         anim.mesh.scaling.copyFrom(anim.orig).scaleInPlace(f);
+        anim.lastApplied = anim.mesh.scaling.clone();
       }
       if (_active.size === 0) {
         _scene.onBeforeRenderObservable.remove(_observer);
