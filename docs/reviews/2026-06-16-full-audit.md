@@ -2,6 +2,13 @@
 
 ## Remediation status (2026-06-16)
 
+**Bonus fix (found via H1 round-trip smoke):** saving DURING an import/duplicate
+bounce-in animation serialized the transient pop scaling (the bounce multiplies
+live node scaling; `_serialiseSceneObjects` decomposes the world matrix). A
+duplicate saved mid-pop reloaded permanently shrunk (~0.68×, frame-timing
+dependent). Fix: `ImportBounce.settleImportBounce()` snaps all in-flight
+bounces to resting scale; `_buildDocument` calls it before capturing transforms.
+
 **Fixed + verified** (typecheck · 74 headless · build · i18n · browser + export smoke):
 R1 (dup multi-primitive relink — `_remapDuplicateLogicalObjects`, regression-tested),
 R2/R3 (exportRatios excluded from per-user settings SCHEMA + tests),
@@ -21,9 +28,11 @@ M8 (G/R/S modal honours pivotMode), M9 (printPreview/baseColor inspectable-mesh 
 - **M1 — autoFix edits lost on reload.** Persist a per-object "geometry edits"
   record (weld / normal-flip) and replay on load, or re-serialize the repaired
   geometry; until then flag autoFix as viewport/export-session only.
-- **M5 — SmartReplaceCommand drops multi-part objects.** Route through
-  `logicalObjectPartIds` (clone the full part set, replace each target as a unit)
-  or gate it off for multi-part objects.
+- **M5 — SmartReplaceCommand drops multi-part objects. GATED 2026-06-16.**
+  `_smartReplace` (ContextMenu.js) now refuses with a toast when the active
+  object or any target is a multi-part logical object (`logicalObjectPartIds > 1`),
+  preventing the data loss. Full multi-part replace (clone the whole part set,
+  replace each target as a unit) is the eventual fix; gated for now.
 - **M7 — autosave loose-drop → ghost.** Embed bytes in autosave for assets with
   no live-recovery tier (no dir/file handle).
 - **M10 — cross-section fill clone doesn't follow live moves.** Rebuild on

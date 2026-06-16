@@ -3,6 +3,7 @@ import {
   getState, setState, dispatch, subscribe, replaceState, freshState,
 } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
+import { settleImportBounce } from './scene/ImportBounce.js';
 import { capturePng } from './RenderOutput.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
@@ -202,6 +203,12 @@ function _serialiseGroups() {
 }
 
 async function _buildDocument(opts = {}) {
+  // Snap any in-flight import/duplicate bounce to its resting scale FIRST: the
+  // pop multiplies live node scaling, and _serialiseSceneObjects decomposes the
+  // world matrix — a save mid-bounce would otherwise bake the transient factor
+  // into the saved transform (duplicate reloaded permanently shrunk — audit
+  // dup-reload bug 2026-06-16).
+  settleImportBounce();
   const s = getState();
   return {
     version: SCHEMA_VERSION,

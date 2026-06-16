@@ -5,8 +5,8 @@ import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand } from '../core/HistoryManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
-import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
-import { safeAsync } from './Toast.js';
+import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
+import { safeAsync, Toast } from './Toast.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -179,6 +179,16 @@ function _smartReplace() {
   const ids = Selection.getSelectedIds();
   const activeId = Selection.getActiveId();
   if (ids.length < 2 || !activeId) return;
+  // SmartReplaceCommand clones only the lead mesh and replaces by lead only:
+  // multi-part logical objects (MultiMaterial split / glTF multi-primitive)
+  // would lose the active's sibling parts and orphan the targets' non-lead
+  // parts. Gate it off until the command routes through the logical layer.
+  const objects = getState().scene.objects;
+  const multiPart = ids.some(id => logicalObjectPartIds(id, objects).length > 1);
+  if (multiPart) {
+    Toast.show(t('toast.smartReplaceMultiPart'), 'warning', 4000);
+    return;
+  }
   push(new SmartReplaceCommand(ids, activeId));
 }
 

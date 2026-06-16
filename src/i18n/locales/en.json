@@ -420,6 +420,7 @@
   "toast.reset": "Reset to defaults",
   "toast.dropSkipped": "Skipped {name}: unsupported ({ext})",
   "toast.dropNeedsMesh": "Drop the model file together with its .mtl/textures (or mount the folder).",
+  "toast.smartReplaceMultiPart": "Smart Replace can't yet handle multi-shader objects — they'd lose their other parts.",
   "toast.fixed": "✓ Fixed {name}",
   "toast.autoFixFailed": "✗ Auto-fix failed: {msg}",
   "toast.error": "Error: {msg}",

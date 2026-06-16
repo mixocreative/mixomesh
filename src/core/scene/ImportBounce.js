@@ -1,10 +1,12 @@
 // Bounce-in import animation (audit feature wave 2026-06-13): freshly
 // instantiated meshes scale-pop into place (~260 ms, slight overshoot).
 // Pure visual feel — the animation multiplies the mesh's own scaling and
-// ends with an EXACT restore of the original vector, so state transforms
-// are never touched. Project loads never fire ASSET_INSTANTIATED (the
-// restore path uses bindRestoredMesh), so bulk loads don't bounce by
-// construction; imports, drops, duplicates and primitives do.
+// ends with an EXACT restore of the original vector. WHILE a bounce is in
+// flight the live scaling is transient, so persistence calls
+// settleImportBounce() before capturing transforms (a save mid-bounce would
+// otherwise serialize the pop factor). Project loads never fire
+// ASSET_INSTANTIATED (the restore path uses bindRestoredMesh), so bulk loads
+// don't bounce by construction; imports, drops, duplicates and primitives do.
 
 import { EVENTS } from '../events.js';
 import { subscribe } from '../StateManager.js';
@@ -22,6 +24,25 @@ export function initImportBounce(scene) {
   if (typeof matchMedia === 'function'
       && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   subscribe(EVENTS.ASSET_INSTANTIATED, ({ meshId }) => _bounce(meshId));
+}
+
+/**
+ * Snap every in-flight bounce to its true resting scale immediately and stop
+ * the animation. The pop multiplies the live node scaling, so a save captured
+ * mid-bounce would serialize that transient factor (a duplicate saved during
+ * its pop reloaded permanently shrunk — audit dup-reload bug 2026-06-16).
+ * Persistence calls this before capturing transforms so saved state always
+ * reflects resting scale.
+ */
+export function settleImportBounce() {
+  for (const [id, anim] of _active) {
+    if (!anim.mesh.isDisposed?.()) anim.mesh.scaling.copyFrom(anim.orig);
+    _active.delete(id);
+  }
+  if (_observer && _scene) {
+    _scene.onBeforeRenderObservable.remove(_observer);
+    _observer = null;
+  }
 }
 
 // easeOutBack — overshoots to ~1.10 then settles at exactly 1.
