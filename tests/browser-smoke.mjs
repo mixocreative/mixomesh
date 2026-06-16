@@ -1005,6 +1005,45 @@ async function main() {
     assert(settings.ratioPreserved, 'resetAll wrongly reset exportRatios — it is per-project content, not a setting');
     assert(settings.wallReset, 'resetAll did not reset a print field');
 
+    // ── Duplicate survives .mixo reload as a DISTINCT mesh (audit H1) ────
+    // Import, duplicate, give the copy a different ratio, round-trip. Before the
+    // fix both objects re-bound to one container mesh on reload and collapsed
+    // (one size). Now each gets its own restored geometry.
+    const dupRT = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const B = window.BABYLON;
+      const sizeOf = (mid) => { const m = sm.SceneManager.getScene().meshes.find(x=>x.metadata?.meshId===mid); if(!m) return null; const r=m.getHierarchyBoundingVectors(true); return +(r.max.x-r.min.x).toFixed(6); };
+      const stl = ['solid x','facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 20 0 0','vertex 0 20 0','endloop','endfacet','endsolid x',''].join('\\n');
+      const ids = await al.AssetLoader.loadFromBlob(new Blob([stl],{type:'model/stl'}),'dup.stl',new B.Vector3(0,0,0),{});
+      const src = ids[0];
+      await new Promise(r=>setTimeout(r,300));
+      const before = new Set(Object.keys(st.getState().scene.objects));
+      hm.push(new hm.DuplicateCommand([src]));
+      const dup = Object.keys(st.getState().scene.objects).find(k => !before.has(k));
+      if (!dup) return { err: 'no duplicate created' };
+      hm.push(new hm.RescaleObjectCommand([dup], 2));   // halve the copy only
+      const srcBefore = sizeOf(src), dupBefore = sizeOf(dup);
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      await pm.__test._loadProject(doc);
+      await new Promise(r=>setTimeout(r,400));
+      const scene = sm.SceneManager.getScene();
+      const mSrc = scene.meshes.find(x=>x.metadata?.meshId===src);
+      const mDup = scene.meshes.find(x=>x.metadata?.meshId===dup);
+      return { srcBefore, dupBefore, srcAfter: sizeOf(src), dupAfter: sizeOf(dup), distinct: !!mSrc && !!mDup && mSrc !== mDup };
+    })()`);
+    assert(!dupRT.err, `dup round-trip: ${dupRT.err}`);
+    {
+      const near = (a, b) => a != null && b != null && Math.abs(a - b) <= Math.max(1e-4, Math.abs(b) * 0.02);
+      assert(dupRT.distinct, 'duplicate collapsed onto the source mesh on reload (H1)');
+      assert(near(dupRT.dupBefore, dupRT.srcBefore / 2), `copy should be half: src ${dupRT.srcBefore} dup ${dupRT.dupBefore}`);
+      assert(near(dupRT.srcAfter, dupRT.srcBefore) && near(dupRT.dupAfter, dupRT.dupBefore),
+        `sizes must survive reload distinctly: src ${dupRT.srcBefore}->${dupRT.srcAfter}, dup ${dupRT.dupBefore}->${dupRT.dupAfter}`);
+    }
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

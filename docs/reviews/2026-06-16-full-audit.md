@@ -13,7 +13,7 @@ M4 (imported UV transform harvested), M6 (follow suspended during offline render
 M8 (G/R/S modal honours pivotMode), M9 (printPreview/baseColor inspectable-mesh guard).
 
 **Deferred — need careful design, not a rushed batch (risk of new bugs):**
-- **H1 (HIGH) — duplicated objects collapse on reload.** Correct fix = give each
+- **H1 (HIGH) — duplicated objects collapse on reload. FIXED 2026-06-16.** Correct fix = give each
   duplicate its own `assetId` + cache its baked bytes at clone time so it
   serializes independently. The clone-on-restore shortcut breaks
   `containerMeshIndex` on the next save and leaks the clone on reset — do it

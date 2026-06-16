@@ -53,6 +53,10 @@ const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isol
 // Module-local — never persisted in state.
 const _containers   = new Map();    // assetId → BABYLON.AssetContainer
 const _meshRegistry = new Map();    // meshId  → BABYLON.AbstractMesh
+// Meshes that exist OUTSIDE any asset container (duplicate clones, restore
+// de-dupe clones) — container disposal can't reach them, so resetAll disposes
+// these explicitly to avoid leaks.
+const _orphanMeshes = new Set();
 const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (session)
 
 let _idCounter = 0;
@@ -494,6 +498,7 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   // and would corrupt the source instance through the shared buffer. Give the
   // duplicate its own geometry. (Per-object ratio redesign 2026-06-16.)
   clone.makeGeometryUnique?.();
+  _orphanMeshes.add(clone);   // lives outside the container — track for disposal
 
   if (worldOffset) {
     clone.position.x += worldOffset.x ?? 0;
@@ -1122,11 +1127,29 @@ export function resetAll() {
   for (const c of _containers.values()) {
     try { c.removeAllFromScene(); c.dispose(); } catch { /* */ }
   }
+  for (const m of _orphanMeshes) { try { m.dispose(); } catch { /* */ } }
+  _orphanMeshes.clear();
   resetTextures();
   revokeAllBlobUrls();
   for (const id of [..._objSiblings.keys()]) _revokeObjSiblings(id);
   _containers.clear();
   _meshRegistry.clear();
+}
+
+/**
+ * Clone a restored container mesh for a SECOND+ SceneObject that resolves to the
+ * same (assetId, containerMeshIndex) — i.e. a duplicate saved with the source's
+ * indices. Each copy gets its OWN geometry so its per-object ratio + transform
+ * restore independently instead of all objects collapsing onto one mesh.
+ * Tracked in _orphanMeshes for disposal (it lives outside the container).
+ */
+export function cloneRestoredMesh(srcMesh, meshId, assetId, sourceUnit = DEFAULT_SOURCE_UNIT) {
+  const clone = srcMesh.clone?.(`${srcMesh.name}.restdup`, srcMesh.parent ?? null, /*doNotCloneChildren*/ true);
+  if (!clone) return srcMesh;
+  clone.makeGeometryUnique?.();
+  _orphanMeshes.add(clone);
+  bindRestoredMesh(meshId, clone, assetId, sourceUnit);
+  return clone;
 }
 
 export function removeAsset(assetId) {
@@ -1147,7 +1170,7 @@ export const AssetLoader = {
   isMeshExt, isTextureExt,
   releaseAsset, removeAsset, instantiateAsset, getContainer, getBabylonMesh, getDirectoryHandle,
   cloneMeshAsNewObject, restoreCloneToScene,
-  getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh,
+  getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh, cloneRestoredMesh,
   bindRestoredTexture,
   restoreTexture, registerAssetEntry, cacheAssetBlob, resetAll,
   bakeImportTransform, importScaleFactor,

@@ -519,6 +519,11 @@ async function _loadProject(doc) {
   const objMap = {};
   const assetById = _arrToMap(data.assetLibrary);
   const _reBaked = new WeakSet();
+  // Meshes already bound to a SceneObject this load. A duplicate was saved with
+  // the source's (assetId, containerMeshIndex), so the 2nd+ object resolving to
+  // the same container mesh must get its OWN clone — otherwise both collapse
+  // onto one mesh and only one ratio/transform survives.
+  const _claimed = new Set();
   for (const o of data.sceneObjects || []) {
     const res = assetRes.get(o.assetId);
     let mesh = null, ghost = false, unlinked = false;
@@ -533,7 +538,13 @@ async function _loadProject(doc) {
       ? o.ratio
       : ((Number.isFinite(data.print?.workingRatio) && data.print.workingRatio > 0) ? data.print.workingRatio : 1);
     if (mesh) {
-      AssetLoader.bindRestoredMesh(o.id, mesh, o.assetId, o.sourceUnit);
+      if (_claimed.has(mesh)) {
+        // Duplicate sharing a container mesh — give this object its own copy.
+        mesh = AssetLoader.cloneRestoredMesh(mesh, o.id, o.assetId, o.sourceUnit);
+      } else {
+        AssetLoader.bindRestoredMesh(o.id, mesh, o.assetId, o.sourceUnit);
+      }
+      _claimed.add(mesh);
       // restoreContainer already re-ran the import seed (unit + glTF flip +
       // winding) at ratio = modelRatio. Apply the per-object ratio DELTA here
       // (modelRatio / ratio) so size AND the per-object ratio survive reload —
