@@ -493,6 +493,21 @@ async function main() {
       const vizWhenOn = hasFill();
       const borderWhenOn = !!scene.getMeshByName('mx-section-border');
       const aCut = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
+      // M10: the back-face FILL clone must FOLLOW the source when it moves
+      // (it used to bake the world matrix once → detached from the cut on move).
+      let capFollows = false;
+      {
+        const cap = scene.meshes.find(m => m.name.startsWith('mx-section-cap-'));
+        if (cap) {
+          secBox.position.x += 0.2;            // move the source solid
+          secBox.computeWorldMatrix(true);
+          scene.render();                      // runs the clone's per-frame follow
+          cap.computeWorldMatrix(true);
+          capFollows = Math.abs(cap.getAbsolutePosition().x - secBox.getAbsolutePosition().x) < 1e-4;
+          secBox.position.x -= 0.2;            // restore
+          secBox.computeWorldMatrix(true);
+        }
+      }
       sm.SceneManager.setSectionPlane({ enabled: true, axis: 'z', offsetMM: 0, flip: true });
       const aFlip = await alphaAt(await ro.capturePng({ width: 64, height: 64, transparent: true }));
       sm.SceneManager.setSectionPlane({ enabled: false });
@@ -501,7 +516,7 @@ async function main() {
       // Offset-slider range = content extent along the axis (lowest..highest).
       const ext = sm.SceneManager.getSectionExtentMM('z');
       const extentOk = ext.hasContent && ext.maxMM > ext.minMM;
-      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff, borderWhenOn, borderWhenOff, extentOk };
+      const section = { aNoCut, aCut, aFlip, vizWhenOn, vizWhenOff, borderWhenOn, borderWhenOff, extentOk, capFollows };
 
       // (3) Bounce-in — ASSET_INSTANTIATED scale-pops the mesh and MUST land
       // exactly back on the original scaling (state transforms untouched).
@@ -681,6 +696,7 @@ async function main() {
     assert(wave.section.borderWhenOn, 'cut-plane border outline missing while cut is on');
     assert(!wave.section.borderWhenOff, 'cut-plane border outline not disposed when cut turned off');
     assert(wave.section.extentOk, 'getSectionExtentMM did not return a valid content extent for the offset slider');
+    assert(wave.section.capFollows, 'cross-section fill clone did not follow the source when it moved (M10)');
     assert(wave.bounce.animated,
       `bounce-in not animating (mid scale ${wave.bounce.midScale})`);
     assert(wave.bounce.landedExact, 'bounce-in did not restore the exact original scaling');

@@ -35,8 +35,12 @@ M8 (G/R/S modal honours pivotMode), M9 (printPreview/baseColor inspectable-mesh 
   replace each target as a unit) is the eventual fix; gated for now.
 - **M7 — autosave loose-drop → ghost.** Embed bytes in autosave for assets with
   no live-recovery tier (no dir/file handle).
-- **M10 — cross-section fill clone doesn't follow live moves.** Rebuild on
-  TRANSFORM_COMMITTED or attach under the source with a zeroed local transform.
+- **M10 — cross-section fill clone doesn't follow live moves. FIXED 2026-06-16.**
+  The fill clone now copies the source world matrix into its (unparented) TRS
+  every frame in its existing onBeforeRender, so it stays locked to the solid
+  through drags/gizmo/undo; `initViewEffects` also replays `_updateSectionViz`
+  on `TRANSFORM_COMMITTED` to rebuild the bounds-based border. Clone stays
+  parent=null (exclusion model intact). Browser-smoke `capFollows` guard.
 - All **LOW** findings below remain open (tracked here).
 
 ---

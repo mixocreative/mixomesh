@@ -14,7 +14,8 @@
 //   A semi-transparent striped indicator quad (Fusion-360 style) is drawn at
 //   the cut location so the user can see where/which-axis the cut is.
 
-import { getState } from '../StateManager.js';
+import { getState, subscribe } from '../StateManager.js';
+import { EVENTS } from '../events.js';
 import { ACCENT_HEX } from './SceneConstants.js';
 
 const BABYLON = window.BABYLON;
@@ -38,6 +39,16 @@ const SSAO_RADIUS_BU = 0.009;
 export function initViewEffects(scene, camera) {
   _scene  = scene;
   _camera = camera;
+  // Moving a model while the cut is active changes content bounds: rebuild the
+  // bounds-based border + reconcile the fill clones (M10). The fill clones also
+  // follow the source per-frame (see _ensureCapClone) so a live drag stays
+  // attached; this commit-time pass keeps the border and clone set in sync.
+  subscribe(EVENTS.TRANSFORM_COMMITTED, () => {
+    if (!_plane) return;
+    const wasVisible = isSectionVizVisible();
+    _updateSectionViz(_lastAxis, _lastOff);
+    if (!wasVisible) setSectionVizVisible(false);   // honour a hidden-during-capture state
+  });
 }
 
 /**
@@ -96,6 +107,7 @@ export function isSsaoActive() { return !!_ssao; }
 
 let _plane = null;                  // BABYLON.Plane | null (null = off)
 const _sectionIds = new Set();      // uniqueIds with clip observers attached
+let _lastAxis = 'z', _lastOff = 0;  // last applied cut, replayed on TRANSFORM_COMMITTED
 
 // Print-space → Babylon axis map (floor = printer bed XY, print Z is up).
 const AXIS_NORMALS = {
@@ -208,24 +220,31 @@ function _ensureCapMaterial() {
   return mat;
 }
 
+// Reusable scratch for the per-frame follow decompose (no per-frame allocation).
+const _capS = new BABYLON.Vector3(), _capR = new BABYLON.Quaternion(), _capP = new BABYLON.Vector3();
+
 // One shared-geometry clone per cut solid, rendering its back faces as the fill.
 function _ensureCapClone(mesh) {
   if (_capClones.has(mesh) || !mesh.geometry || mesh.metadata?.sectionPlaneViz) return;
   const clone = mesh.clone(`mx-section-cap-${mesh.uniqueId}`, null, true);
   if (!clone) return;
-  // Bake the source world transform (parent = null + no meshId → auto-excluded
-  // from clip/shadow/mask by the existing ancestor-walks). Static for the
-  // duration of the cut (inspection); rebuilt if the cut is re-applied.
-  const s = new BABYLON.Vector3(), r = new BABYLON.Quaternion(), p = new BABYLON.Vector3();
-  mesh.computeWorldMatrix(true).decompose(s, r, p);
+  // parent = null + no meshId → auto-excluded from clip/shadow/mask/export by
+  // the existing ancestor-walks. The clone FOLLOWS the source live each frame
+  // (M10): a static bake detached the fill from the cut as soon as the model
+  // moved. Copying the source world matrix into the (unparented) clone's TRS
+  // keeps the fill locked to the solid through drags, gizmo edits and undo.
   clone.parent = null;
-  clone.position.copyFrom(p);
-  clone.rotationQuaternion = r;
-  clone.scaling.copyFrom(s);
+  if (!clone.rotationQuaternion) clone.rotationQuaternion = new BABYLON.Quaternion();
   clone.material = _ensureCapMaterial();
   clone.isPickable = false;
   clone.metadata = { sectionPlaneViz: true };
-  clone.onBeforeRenderObservable.add(() => { if (_plane) _scene.clipPlane = _plane; });
+  clone.onBeforeRenderObservable.add(() => {
+    mesh.getWorldMatrix().decompose(_capS, _capR, _capP);
+    clone.position.copyFrom(_capP);
+    clone.rotationQuaternion.copyFrom(_capR);
+    clone.scaling.copyFrom(_capS);
+    if (_plane) _scene.clipPlane = _plane;
+  });
   clone.onAfterRenderObservable.add(() => { if (_scene.clipPlane) _scene.clipPlane = null; });
   _capClones.set(mesh, clone);
 }
@@ -244,6 +263,7 @@ function _refreshCapClones() {
 }
 
 function _updateSectionViz(axis, off) {
+  _lastAxis = axis; _lastOff = off;            // replayed on TRANSFORM_COMMITTED
   const b = _contentBounds();
   if (!b) { _disposeSectionViz(); return; }   // empty scene — nothing to show
 
