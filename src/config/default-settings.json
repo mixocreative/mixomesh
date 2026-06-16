@@ -37,8 +37,7 @@
   "grid": { "cellMM": 10, "subdivisions": 10 },
   "overlays": { "grid": true, "axes": true, "printPreview": true },
   "print": {
-    "workingRatio": 1,
-    "targetRatio": 1,
+    "exportRatios": [],
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": { "x": 508, "y": 508, "z": 305 },
     "minWallThickness": 1.2,

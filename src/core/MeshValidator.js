@@ -109,26 +109,9 @@ async function _topology(positions, indices) {
   };
 }
 
-/**
- * Compare the mesh's *exported* AABB against the configured bed dimensions.
- *
- * In-scene size is in metres at the scene's working ratio (1 BU = 1 m). The
- * bed constraint applies to the physical print, so we rescale by
- * (workingRatio / targetRatio) before converting to mm.
- */
-function _checkExceedsBed(mesh) {
-  const bb     = mesh.getBoundingInfo().boundingBox;
-  const size   = bb.maximumWorld.subtract(bb.minimumWorld);   // metres at workingRatio
-  const print  = getState().print;
-  const wr     = print.workingRatio > 0 ? print.workingRatio : 1;
-  const tr     = print.targetRatio  > 0 ? print.targetRatio  : 1;
-  const k      = 1000 * (wr / tr);                            // BU → mm at targetRatio
-  const sizeMM = { x: size.x * k, y: size.y * k, z: size.z * k };
-  const bed    = print.bedDimensions;
-  return sizeMM.x > bed.x || sizeMM.y > bed.y || sizeMM.z > bed.z
-    ? { sizeMM, bedMM: bed }
-    : null;
-}
+// Bed-overflow validation was removed in the per-object ratio redesign
+// (2026-06-16): with per-object ratios there is no single scene→bed scale, and
+// the user dropped the fit-check. Bed/grid/camera VISUALS stay (cosmetic).
 
 // ── Group-aware helpers (split-on-import) ───────
 
@@ -330,19 +313,6 @@ export async function validateMesh(mesh) {
         });
       }
     }
-  }
-
-  const overBed = _checkExceedsBed(mesh);
-  if (overBed) {
-    const { sizeMM, bedMM } = overBed;
-    results.push({
-      type: 'exceedsBed',
-      severity: 'warning',
-      count: 1,
-      autoFixAvailable: false,
-      fixed: false,
-      message: `Exceeds bed: ${sizeMM.x.toFixed(0)}×${sizeMM.y.toFixed(0)}×${sizeMM.z.toFixed(0)} mm vs ${bedMM.x}×${bedMM.y}×${bedMM.z} mm`,
-    });
   }
 
   // Cache (A6): only for the LIVE registered mesh — export clones carry the

@@ -6,7 +6,6 @@ import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
-import { push, RescaleWorldCommand } from '../core/HistoryManager.js';
 import { Toast } from './Toast.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
@@ -14,7 +13,7 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
-import { formatScaleRatio, parseScaleRatioText } from '../core/scale/ScaleMath.js';
+import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState, objectRatio } from '../core/scale/ScaleMath.js';
 import { exportFactor } from '../core/print/PrintScale.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 
@@ -48,6 +47,7 @@ export function init() {
   const events = [
     EVENTS.SELECTION_CHANGED,
     EVENTS.ASSET_INSTANTIATED,
+    EVENTS.OBJECT_UPDATED,
     EVENTS.OBJECT_REMOVED,
     EVENTS.OBJECT_RESTORED,
     EVENTS.VALIDATION_COMPLETE,   // cache updates from import auto-validate (A6)
@@ -133,44 +133,47 @@ function _renderTabs() {
 
 function _renderScaleTab() {
   const state = getState();
-  const { workingRatio, targetRatio } = state.print;
+  // Per-object ratio redesign (2026-06-16): scene scale is now PER OBJECT
+  // (Properties ▸ Transform ▸ Ratio). This tab manages the export TARGET ratios.
+  // An EMPTY list = "as shown" → print at the active object's ratio (the size
+  // in the viewport). Adding absolute ratios rescales relative to the object
+  // (e.g. 1:144 on a 1:72 object = half). One output file per entry.
+  const exportRatios = exportRatiosFromState(state);
+  const objs = state.scene.objects;
+  const activeId = state.selection.activeId ?? state.selection.selectedIds?.[0] ?? Object.keys(objs)[0] ?? null;
+  const activeR = objectRatio(activeId ? objs[activeId] : null);
 
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
 
-  html += `<label>${escapeHtml(t('print.sceneScale'))}</label>`;
-  html += '<div class="pp-ratio-select">';
-  html += '<select data-field="workingRatio" class="pp-preset-select">';
-  html += `<option value="">${escapeHtml(t('print.custom'))}</option>`;
-  for (const preset of SCALE_PRESETS) {
-    if (preset.ratio !== null) {
-      const selected = workingRatio === preset.ratio ? ' selected' : '';
-      html += `<option value="${escapeAttr(preset.ratio)}"${selected}>${escapeHtml(preset.label)}</option>`;
-    }
-  }
-  html += '</select>';
-  html += `<input type="text" class="pp-ratio-input" data-field="workingRatio" value="${escapeAttr(formatScaleRatio(workingRatio))}" placeholder="1:1">`;
-  html += '</div>';
-  html += `<p class="pp-help">${escapeHtml(t('print.sceneScaleHelp'))}</p>`;
-
   html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
+  html += '<div class="pp-ratio-list" data-export-ratios>';
+  if (exportRatios.length === 0) {
+    html += `<span class="pp-ratio-chip pp-ratio-asshown">${escapeHtml(t('print.asShown'))} (${escapeHtml(formatScaleRatio(activeR))})</span>`;
+  } else {
+    for (const r of exportRatios) {
+      html += `<span class="pp-ratio-chip">${escapeHtml(formatScaleRatio(r))} <button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
+    }
+  }
+  html += '</div>';
+
   html += '<div class="pp-ratio-select">';
-  html += '<select data-field="targetRatio" class="pp-preset-select">';
-  html += `<option value="">${escapeHtml(t('print.custom'))}</option>`;
+  html += '<select data-add-ratio-preset class="pp-preset-select">';
+  html += `<option value="">${escapeHtml(t('print.addRatio'))}</option>`;
   for (const preset of SCALE_PRESETS) {
     if (preset.ratio !== null) {
-      const selected = targetRatio === preset.ratio ? ' selected' : '';
-      html += `<option value="${escapeAttr(preset.ratio)}"${selected}>${escapeHtml(preset.label)}</option>`;
+      html += `<option value="${escapeAttr(preset.ratio)}">${escapeHtml(preset.label)}</option>`;
     }
   }
   html += '</select>';
-  html += `<input type="text" class="pp-ratio-input" data-field="targetRatio" value="${escapeAttr(formatScaleRatio(targetRatio))}" placeholder="1:35">`;
+  html += `<input type="text" class="pp-ratio-input" data-add-ratio-input placeholder="1:35">`;
   html += '</div>';
   html += `<p class="pp-help">${escapeHtml(t('print.printScaleHelp'))}</p>`;
 
   html += '</div>';
 
   // Export factor display — single source of truth in PrintScale (review L28).
+  // Reflects the active object's ratio → first target ratio.
   const factor = exportFactor();
   html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
@@ -191,38 +194,32 @@ function _renderScaleTab() {
   const el = document.createElement('div');
   el.innerHTML = html;
 
-  // Wire ratio inputs. workingRatio changes go through RescaleWorldCommand so
-  // every scene mesh is rebaked at the new BU↔metres mapping and the action
-  // is undoable. targetRatio is export-only metadata — direct setState is OK.
-  const applyRatio = (field, val) => {
-    if (field === 'workingRatio') {
-      const prev = getState().print.workingRatio;
-      if (val === prev) return;
-      push(new RescaleWorldCommand(prev, val));
-    } else {
-      setState(s => ({ ...s, print: { ...s.print, [field]: val } }));
-      MeshValidator.invalidateAll();   // exceedsBed depends on targetRatio (A6)
-    }
+  const addRatio = (val) => {
+    if (!(Number.isFinite(val) && val > 0)) return;
+    setState(s => {
+      const cur = exportRatiosFromState(s);
+      if (cur.includes(val)) return s;
+      return { ...s, print: { ...s.print, exportRatios: [...cur, val] } };
+    });
+    _render();
   };
 
-  el.querySelectorAll('.pp-preset-select').forEach(sel => {
-    sel.addEventListener('change', (e) => {
-      const field = e.target.dataset.field;
-      if (e.target.value) {
-        const val = parseInt(e.target.value, 10);
-        applyRatio(field, val);
-        el.querySelector(`.pp-ratio-input[data-field="${field}"]`).value = formatScaleRatio(val);
-      }
-    });
+  el.querySelector('[data-add-ratio-preset]')?.addEventListener('change', (e) => {
+    if (e.target.value) addRatio(parseFloat(e.target.value));
   });
-
-  el.querySelectorAll('.pp-ratio-input').forEach(inp => {
-    inp.addEventListener('change', (e) => {
-      const field = e.target.dataset.field;
-      const val = parseScaleRatioText(e.target.value);
-      if (!val) { e.target.value = formatScaleRatio(getState().print[field]); return; }
-      e.target.value = formatScaleRatio(val);
-      applyRatio(field, val);
+  el.querySelector('[data-add-ratio-input]')?.addEventListener('change', (e) => {
+    const val = parseScaleRatioText(e.target.value);
+    if (val) addRatio(val); else e.target.value = '';
+  });
+  el.querySelectorAll('[data-remove-ratio]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = parseFloat(btn.dataset.removeRatio);
+      setState(s => {
+        const cur = exportRatiosFromState(s).filter(r => r !== val);
+        // Empty ⇒ back to "as shown" (print at the active object's ratio).
+        return { ...s, print: { ...s.print, exportRatios: cur } };
+      });
+      _render();
     });
   });
 

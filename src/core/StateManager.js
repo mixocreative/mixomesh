@@ -63,7 +63,7 @@ const INITIAL_STATE = {
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: DS.pivotMode },
-  print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions } },
+  print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions }, exportRatios: [...(DS.print.exportRatios ?? [])] },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
     // Workspaces (PART 13b) — per-user preference, seeded from localStorage,

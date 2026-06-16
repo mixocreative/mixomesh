@@ -168,7 +168,7 @@ src/
     HistoryManager.js      ← undo/redo stack + façade re-exporting commands/*
     commands/
       support.js           ← shared command helpers (pivot detach, transforms, state patch)
-      TransformCommands.js ← Transform / BakeTransform / TransformSwab
+      TransformCommands.js ← Transform / TransformSwab
       HierarchyCommands.js ← Visibility/Lock/Rename*/Delete/Group/Ungroup/Duplicate/SmartReplace/PrintPart
       ShaderCommands.js    ← ShaderCreate/Assign/Update/Duplicate/Delete, UVOverride, ColorApply
       ScaleCommands.js     ← RescaleWorld + SourceUnit
@@ -1077,7 +1077,7 @@ Phase 4 implementations (Shader System):
 Phase 5 implementations:
 - `PrintPartCommand` — `{ meshId, prev, next }` — toggles `isPrintPart` boolean on a scene object, dispatches `OBJECT_UPDATED`.
 - `RescaleWorldCommand` — `{ prevRatio, nextRatio }` — re-bakes every registered mesh's vertex data by `prev/next`, scales every ancestor `TransformNode.position` (via WeakSet dedup), scales `state.scene.cursor3d`, updates `state.print.workingRatio`. Undo runs the inverse factor.
-- `BakeTransformCommand` — `{ meshId, kind: 'rotation' | 'scale' }` — bakes either the current rotation OR scaling into vertices and resets that component to identity. Position is left untouched. Snapshots pre-bake position + normal vertex buffers so undo restores exact bytes (no FP drift on repeated cycles).
+- `BakeTransformCommand` — REMOVED 2026-06-16. Baking a user rotation/scale into vertices + zeroing the node destroyed the editable, persisted Scale/Rotation properties and was lost on `.mixo` reload. User rotation/scale now always live on the node (`TransformCommand`), editable in Properties + saved via `_decompose`; export still flattens the world matrix so printed geometry is unchanged.
 
 Phase 6+ implementations:
 - `SmartReplaceCommand`, `TransformSwabCommand` — fully implemented (context
@@ -1595,6 +1595,13 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
 ```
 
 ### Import Scale Model
+
+> **⚠ SUPERSEDED (2026-06-16):** `workingRatio` is gone — scale is now a
+> **per-object `ratio`** (see *Per-Object Ratio Redesign* at the end of §12, the
+> LIVE behaviour). The import formula below is unchanged — only `R`'s scope moved
+> to the object (seeded `= modelRatio`). The `workingRatio`-based prose below is
+> historical; read it only for the unit/bake mechanics.
+
 We assume the **Blender default export workflow**: `Metric / unit-scale 0.001 / length mm`. Raw values in the file are interpreted as **millimetres of whatever-size the model was authored at**. STL and OBJ have no unit metadata; the same assumption applies.
 
 Four numbers drive the math:
@@ -2331,6 +2338,12 @@ generic reusable prep/packaging logic to the helper modules.
 
 ### Scale Math
 
+> **⚠ SUPERSEDED (2026-06-16):** export factor is now
+> `(activeObjectRatio / T) × 1000` with an "as shown" default (empty target list
+> ⇒ print displayed size) and a **list** of absolute export targets (one file
+> each). The global `(workingRatio / targetRatio)` prose below is historical —
+> see *Per-Object Ratio Redesign* below for the LIVE behaviour.
+
 The asset loader has already baked unit conversion and the working ratio into the mesh's in-scene transform (see §8 *Import Scale Model*). The Print Manager only has to rescale from the **working ratio** to the **target ratio** and convert metres → millimetres:
 
 #### Working-ratio re-bake (live)
@@ -2377,6 +2390,119 @@ Worked examples (all assuming `1 BU == 1 m` at the working ratio):
 | 1   | 0.5 | 2000 | 200 mm at 2:1   (export an oversized 2× fit-test copy) |
 
 `sourceUnit` and `modelRatio` are **not** referenced at export time — they were already consumed at import to position the mesh in scene-metres.
+
+### Per-Object Ratio Redesign (SHIPPED 2026-06-16)
+
+Full spec: `docs/superpowers/specs/2026-06-16-per-object-ratio-design.md`.
+Plan: `docs/superpowers/plans/2026-06-16-per-object-ratio.md`.
+BUILDLOG: "Per-object scale ratio" entries. **This subsection now describes the
+LIVE behaviour and supersedes the global `workingRatio` text earlier in §8/§12.**
+
+**Why.** Global `workingRatio` forced every object to one scale. Kitbashing
+mixes source models authored at different scales into one print. Scale is now
+**per-object** — each object remembers its own ratio (persisted, never lost),
+imports at the ratio its file suggests, resizes live, and exports at the size
+shown (or a chosen target).
+
+**Two numbers.** The per-object `ratio` *is* the old global `workingRatio`
+promoted to object scope; `modelRatio` is unchanged.
+
+| Number | Scope | Role | Seed |
+|---|---|---|---|
+| `modelRatio` | per-asset | authoring anchor (file→real) | glTF `extras.ratio`, else `1` |
+| `ratio` | **per-object** (`state.scene.objects[id]`) | display + print scale | `= modelRatio` at import |
+
+**Flow.**
+
+```
+glTF extras.ratio ─┬─► modelRatio (asset, fixed)
+                   └─► ratio      (object, seeded = modelRatio, mutable)
+
+IMPORT  : bake  unit × modelRatio / ratio  into vertices   (seed ratio==modelRatio ⇒ file as authored)
+DISPLAY : object shown at its own ratio; mixed ratios look correct automatically
+EDIT    : ratio R_old→R_new ⇒ rescale ×(R_old/R_new), bake, store ratio   [RescaleObjectCommand]
+EXPORT  : factor = (referenceRatio / T) × 1000
+          referenceRatio = _exportReferenceRatio(printUnits): the ACTIVE object's
+            ratio IF it's in the export set, else the FIRST printable unit's ratio
+            — threaded as ctx.referenceRatio through exportFactorFor(ctx) +
+            exportBaseName(ctx) so factor AND filename use the same reference
+          • DEFAULT "as shown": empty print.exportRatios ⇒ T = active object ratio
+            ⇒ factor 1000 ⇒ prints EXACTLY the size on screen (each object at its scale)
+          • a target T (e.g. 1:144 on a 1:72 object) rescales: 72/144 = 0.5×
+          • mixed selection scales uniformly by the reference ratio (WYSIWYG)
+          • print.exportRatios = LIST of absolute targets ⇒ one output file per T
+          • filename suffix _r{referenceRatio}to{T}
+PERSIST : object.ratio + print.exportRatios in .mixo
+MIGRATE : old global workingRatio → each object.ratio; targetRatio → exportRatios:[old]
+RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
+          bakeImportTransform as a fresh import (unit + glTF flip + winding, at
+          ratio=modelRatio seed); _loadProject bakes the per-object DELTA
+          (modelRatio/ratio) via _applyPersistedRatioBake → size + ratio + flip
+          all survive reload (byte-identical to a fresh import + saved placement)
+```
+
+`resolveExportTargets(state)` returns `exportRatios` if non-empty, else
+`[activeRatio(state)]` (the "as shown" default). `PrintScale.setExportTargetOverride`
+pins each target while `PrintManager._runExportForTarget` runs; `_runExport`
+loops the resolved targets. **Caveat:** the as-shown *target* uses the selection
+active ratio while the export *factor reference* uses `_exportReferenceRatio`
+(active print unit, else first unit) — identical in the common case (active
+object is printable), divergent only if the active object is excluded from the
+export set.
+
+**Audit fixes — all DONE:**
+
+- **Geometry sharing** — `cloneMeshAsNewObject` calls `makeGeometryUnique()` so a
+  per-object vertex bake can't corrupt the source through Babylon's shared
+  `Geometry`.
+- **Shared ancestors** — `RescaleObjectCommand` bakes only the object's own
+  geometry + own local position; never a shared group/collection parent.
+- **Logical objects** — the Properties Ratio dropdown expands the selection to
+  `logicalObjectPartIds` so a multi-mesh object scales as one unit.
+- **Bed validation removed** — `_checkExceedsBed` + `exceedsBed` + its invalidate
+  triggers deleted (bed/grid/camera *visuals* stay).
+- **3MF export-only for ratio** — re-importing a 3MF cannot recover per-object
+  ratio (geometry flattened); loader mirrors axis/unit only, `ratio = 1`.
+- **Legacy removal** — `state.print.workingRatio` / `targetRatio` deleted from
+  `default-settings.json` + state (only read in `.mixo` migration);
+  `RescaleWorldCommand` + `_applyWorldRescale` removed; `SettingsStore.SCENE_PROTECTED`
+  is now `{}` (scale is content, not a setting).
+- **Restore re-bake (audit #1)** — restore reloads RAW bytes, so `restoreContainer`
+  re-runs the SAME `bakeImportTransform` as a fresh import (unit + glTF RH→LH flip
+  + winding, at ratio = modelRatio seed) and `_loadProject` then bakes the
+  per-object ratio DELTA (`modelRatio/ratio`). Restore is byte-identical to a
+  fresh import + the saved placement. Guarded by TWO browser-smoke round-trips:
+  STL (per-object ratio size survives) and a minimal asymmetric glTF (restored
+  AABB == fresh import AABB, proving the RH→LH flip survives).
+
+**Scale round-trip — what survives .mixo save/reload (audited 2026-06-16):**
+
+The `.mixo` embeds the RAW original asset bytes; restore reloads them and
+replays only what is reconstructable from state. So a transform survives reload
+**iff** it lives on the node transform OR in a state field:
+
+| Scale operation | Stored as | Survives reload? |
+|---|---|---|
+| Position / Rotation / Scale / Size (mm) (`TransformCommand`) | node transform → saved `_decompose` | ✅ yes |
+| Ratio dropdown (`RescaleObjectCommand`) | baked, but the `ratio` number replays it | ✅ yes |
+| Source Unit change (`SourceUnitCommand`) | `asset.sourceUnit` → restore seed | ✅ yes |
+
+**RESOLVED 2026-06-16:** the former "Apply Scale / Apply Rotation"
+(`BakeTransformCommand`) baked a user transform into vertices and zeroed the
+node, leaving nothing in state to replay → lost on reload (probe: 20 mm → Apply
+2× → 40 mm → reload → 20 mm). It was **removed**. User rotation/scale now always
+live on the node (`TransformCommand`) — editable in Properties and saved via
+`_decompose` — so they survive reload. Export still flattens the world matrix, so
+printed geometry is unchanged. Guarded by the browser-smoke round-trip (sets a
+node scale + ratio, reloads, asserts both survive). Principle: **system
+transforms (import unit/flip, ratio) bake + replay on restore; user transforms
+stay on the node and are saved directly — never baked.**
+
+**KNOWN EDGE (low):** the "as shown" export *target* uses the selection-active
+ratio (`resolveExportTargets` → `activeRatio(state)`) while the export *factor
+reference* uses the print-set ratio (`_exportReferenceRatio`). They match when
+the active object is printable; they diverge only if the active object is
+excluded from the export set (then as-shown is not exactly factor 1000).
 
 ### Presets
 Maintained in **`src/config/scale-presets.json`** (edit the JSON, no code change).
@@ -2582,7 +2708,7 @@ handler is delegated and routes assignment through `ShaderAssignCommand`.
 ### Properties Panel (`src/ui/PropertiesPanel.js`)
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 1. **Object** — name, visible, locked
-2. **Transform** — Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand`. On multi-select, fields show `—` when values differ; editing applies delta. Read-only **Size (mm)** row at top derived from world AABB (so a wrong-unit import is visible). **Apply Rotation** and **Apply Scale** buttons next to their section labels bake the current rotation/scale into vertex data and reset that component to identity (`BakeTransformCommand`, undoable via vertex snapshot). **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`).
+2. **Transform** — per-object **Ratio** dropdown (scale ratio, `RescaleObjectCommand`), Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand` (node transform — never baked, so it stays editable + persists). On multi-select, fields show `—` when values differ; editing applies delta. Editable **Size (mm)** row derived from world AABB (so a wrong-unit import is visible). (The old "Apply Rotation/Scale" bake-to-vertices buttons were removed 2026-06-16 — they destroyed the editable, persisted transform and were lost on reload.) **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`).
 3. **Source Unit** — dropdown + `AlertTriangle` if unconfirmed + "Confirm" button.
 4. **Shader** (Phase 4, binding-only) — Lists distinct shaders bound to current selection as **slots**. Active mesh's shader appears first. Multi-selection across meshes with different shaders → one slot per shader. Per-slot UI: texture thumbnail chip or color preview, shader name, linked mesh-count badge, combined `<select>` with optgroup "Replace with → [list of all scene shaders]" + synthetic action "Duplicate in place". Click chip/name area → Library `focus(shaderId)`. **No color picker, sliders, or UV inputs here** — those live only in the Shader Library. Properties Shader is binding-only.
 5. **UV Override** — offset/scale/rotation inputs per-mesh; "Reset to Default" button. Mesh-specific UI.

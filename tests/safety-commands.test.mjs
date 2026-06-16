@@ -10,13 +10,14 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 console.error = () => {};
-const { SourceUnitCommand, ShaderDeleteCommand, ShaderDuplicateCommand } =
+const { SourceUnitCommand, RescaleObjectCommand, ShaderDeleteCommand, ShaderDuplicateCommand } =
   await import('../src/core/HistoryManager.js');
 const { ShaderLibrary } = await import('../src/core/ShaderLibrary.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { Selection } = await import('../src/core/Selection.js');
-const { setState, getState } = await import('../src/core/StateManager.js');
+const { EVENTS } = await import('../src/core/events.js');
+const { setState, getState, subscribe } = await import('../src/core/StateManager.js');
 
 // Pivot/selection stubs — _withDetachedPivot runs inside the command.
 SceneManager.attachToSelection = () => {};
@@ -68,6 +69,38 @@ await test('M12: source-unit change is undoable — parented position + entry ro
   assert.equal(a.sourceUnit, 'millimeters');
   assert.equal(a.unitConfirmed, true, 'undo restores the prior confirmation state');
   assert.ok(Math.abs(pos.x - 1) < 1e-9, `undo scales back, got ${pos.x}`);
+});
+
+await test('ratio command updates state before OBJECT_UPDATED listeners run', () => {
+  const pos = { x: 2, y: 0, z: 0, scaleInPlace(f) { this.x *= f; this.y *= f; this.z *= f; return this; } };
+  const m = {
+    name: 'r1', metadata: { meshId: 'r1' }, parent: null,
+    position: pos, geometry: true,
+    bakeTransformIntoVertices() { this.__bakes = (this.__bakes ?? 0) + 1; },
+    refreshBoundingInfo() {},
+  };
+  meshes.set('r1', m);
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      objects: { r1: { id: 'r1', name: 'r1', assetId: 'a9', ratio: 2, isGhost: false, isPrintPart: true } },
+    },
+  }), { silent: true });
+
+  const seen = [];
+  const off = subscribe(EVENTS.OBJECT_UPDATED, ({ meshId }) => {
+    if (meshId === 'r1') seen.push(getState().scene.objects.r1.ratio);
+  });
+  try {
+    const cmd = new RescaleObjectCommand(['r1'], 4);
+    cmd.execute();
+    cmd.undo();
+  } finally {
+    off();
+  }
+
+  assert.deepEqual(seen, [4, 2]);
 });
 
 // ── M14: shader id stability across undo/redo ────────────────────────────

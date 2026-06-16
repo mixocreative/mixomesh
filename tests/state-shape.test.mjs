@@ -84,9 +84,9 @@ await test('round-trip: doc carrying targetPrinterId lands in state.print after 
   const next = { ...s.print, ...(data.print || {}) };
   assert.equal(next.targetPrinterId, 'bambu-x1c');
   assert.deepEqual(next.bedDimensions, { x: 256, y: 256, z: 256 });
-  // Other defaults preserved (chordTolerance / workingRatio etc.).
-  assert.equal(next.workingRatio, 1);
-  assert.equal(next.targetRatio,  1);
+  // Other defaults preserved (chordTolerance / exportRatios etc.). Default
+  // exportRatios is EMPTY = "as shown" (resolves to the active object's ratio).
+  assert.deepEqual(next.exportRatios, []);
 });
 
 await test('round-trip: doc with NO print block keeps Mimaki default after merge', () => {
@@ -95,6 +95,20 @@ await test('round-trip: doc with NO print block keeps Mimaki default after merge
   const next = { ...s.print, ...(data.print || {}) };
   assert.equal(next.targetPrinterId, 'mimaki-3duj-553');
   assert.deepEqual(next.bedDimensions, { x: 508, y: 508, z: 305 });
+});
+
+await test('load migration: explicit empty exportRatios stays empty (as-shown)', () => {
+  assert.equal(typeof __test._resolveLoadedExportRatios, 'function');
+  assert.deepEqual(
+    __test._resolveLoadedExportRatios({ exportRatios: [], targetRatio: 144 }),
+    [],
+    'new saves use empty exportRatios for as-shown; legacy targetRatio must not override it',
+  );
+  assert.deepEqual(
+    __test._resolveLoadedExportRatios({ targetRatio: 144 }),
+    [144],
+    'legacy saves with only targetRatio still migrate to an explicit target',
+  );
 });
 
 await test('round-trip: overlays.printPreview survives load merge (default + explicit override)', () => {

@@ -39,70 +39,13 @@ export class TransformCommand {
   }
 }
 
-/**
- * Bake the current rotation or scaling of a mesh into its vertex data, then
- * reset the corresponding transform component to identity. Position is left
- * untouched. Mirrors Blender's "Apply Rotation / Apply Scale" command.
- *
- * Undo restores the pre-bake vertex positions and normals from a snapshot,
- * so floating-point error doesn't accumulate over many cycles.
- */
-export class BakeTransformCommand {
-  constructor(meshId, kind /* 'rotation' | 'scale' */) {
-    this._meshId = meshId;
-    this._kind = kind;
-    this._snapPositions = null;
-    this._snapNormals   = null;
-    this._snapRotation  = null;
-    this._snapQuaternion = null;
-    this._snapScaling   = null;
-    this.label = kind === 'rotation' ? 'Apply Rotation' : 'Apply Scale';
-  }
-  execute() {
-    const mesh = AssetLoader.getBabylonMesh(this._meshId);
-    if (!mesh || !mesh.geometry) return;
-    if (this._snapPositions === null) {
-      const pos = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
-      this._snapPositions = pos ? new Float32Array(pos) : null;
-      const norm = mesh.getVerticesData(BABYLON.VertexBuffer.NormalKind);
-      this._snapNormals = norm ? new Float32Array(norm) : null;
-      this._snapRotation = mesh.rotation.clone();
-      this._snapQuaternion = mesh.rotationQuaternion ? mesh.rotationQuaternion.clone() : null;
-      this._snapScaling = mesh.scaling.clone();
-    }
-
-    let mat;
-    if (this._kind === 'rotation') {
-      if (mesh.rotationQuaternion) {
-        mat = new BABYLON.Matrix();
-        mesh.rotationQuaternion.toRotationMatrix(mat);
-      } else {
-        mat = BABYLON.Matrix.RotationYawPitchRoll(mesh.rotation.y, mesh.rotation.x, mesh.rotation.z);
-      }
-      mesh.bakeTransformIntoVertices(mat);
-      mesh.rotation.set(0, 0, 0);
-      if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-    } else {
-      mat = BABYLON.Matrix.Scaling(mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
-      mesh.bakeTransformIntoVertices(mat);
-      mesh.scaling.set(1, 1, 1);
-    }
-    mesh.refreshBoundingInfo?.();
-    dispatch(EVENTS.OBJECT_UPDATED, { meshId: this._meshId });
-    markDirty();
-  }
-  undo() {
-    const mesh = AssetLoader.getBabylonMesh(this._meshId);
-    if (!mesh) return;
-    if (this._snapPositions) mesh.setVerticesData(BABYLON.VertexBuffer.PositionKind, this._snapPositions, /*updatable*/ false);
-    if (this._snapNormals)   mesh.setVerticesData(BABYLON.VertexBuffer.NormalKind,   this._snapNormals,   /*updatable*/ false);
-    if (this._snapRotation)  mesh.rotation.copyFrom(this._snapRotation);
-    if (this._snapQuaternion) mesh.rotationQuaternion = this._snapQuaternion.clone();
-    if (this._snapScaling)   mesh.scaling.copyFrom(this._snapScaling);
-    mesh.refreshBoundingInfo?.();
-    dispatch(EVENTS.OBJECT_UPDATED, { meshId: this._meshId });
-  }
-}
+// BakeTransformCommand (Blender-style "Apply Rotation / Apply Scale") was
+// REMOVED 2026-06-16: baking a user transform into vertices + zeroing the node
+// destroyed the editable, persisted Scale/Rotation properties and was lost on
+// .mixo reload (the .mixo stores raw bytes + the node transform, not the baked
+// vertices). User rotation/scale now ALWAYS live on the node — editable in
+// Properties and saved via _decompose. Export still flattens the world matrix,
+// so the printed geometry is unaffected.
 
 /**
  * Snap every other selected object's transform to match the active object.

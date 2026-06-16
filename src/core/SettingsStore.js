@@ -79,12 +79,12 @@ function _narrow(obj, fields) {
   return out;
 }
 
-// Fields that must NOT be reset while a scene is loaded — they are tied to the
-// live geometry. workingRatio rebakes every mesh (BU↔mm mapping); targetRatio
-// drives export/preview scale + bed fit. Snapping them back to factory under a
-// loaded scene would silently rescale or mis-fit the user's content, so a reset
-// preserves them when objects exist. (On an empty scene / New, they reset.)
-const SCENE_PROTECTED = { print: ['workingRatio', 'targetRatio'] };
+// Fields that must NOT be reset while a scene is loaded because they are tied to
+// live geometry. Empty since the per-object ratio redesign (2026-06-16): scale
+// is now per-object (`state.scene.objects[id].ratio`), which is content — never
+// a persisted setting — so a settings reset can't touch it. The mechanism is
+// kept for any future geometry-tied setting.
+const SCENE_PROTECTED = {};
 function _sceneLoaded(state) {
   return Object.keys(state?.scene?.objects ?? {}).length > 0;
 }

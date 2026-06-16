@@ -365,7 +365,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     _registerAssetEntry(entry);
 
     const collectionId = _createCollectionFromFilename(filename, assetId);
-    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy);
+    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, modelRatio);
 
     ProgressOverlay.update(0.98, `${filename} ready`);
 
@@ -421,7 +421,7 @@ export async function instantiateAsset(assetId, position) {
     bakeImportTransform(container, importScaleFactor(sourceUnit, asset.modelRatio), position);
 
     const collectionId = _createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
-    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy);
+    const meshIds = _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1);
     for (const meshId of meshIds) _queueValidation(meshId);
     return meshIds;
   } finally {
@@ -489,6 +489,11 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   const newId = _newId('mesh');
   const clone = sourceMesh.clone(`${sourceMesh.name}.dup`, sourceMesh.parent ?? null, /*doNotCloneChildren*/ false);
   if (!clone) return null;
+  // Babylon's clone SHARES the source Geometry by reference. Per-object vertex
+  // bakes (RescaleObjectCommand, source-unit re-bake) rewrite geometry in place
+  // and would corrupt the source instance through the shared buffer. Give the
+  // duplicate its own geometry. (Per-object ratio redesign 2026-06-16.)
+  clone.makeGeometryUnique?.();
 
   if (worldOffset) {
     clone.position.x += worldOffset.x ?? 0;
@@ -759,7 +764,7 @@ function _scheduleIdle(fn) {
   else setTimeout(fn, 50);
 }
 
-function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy = null) {
+function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy = null, modelRatio = 1) {
   const meshIds = [];
   const instantiatedEvents = [];
   const objectsToAdd = {};
@@ -808,6 +813,10 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
       sourceGroupId,
       logicalObjectId,
       isInternalPart,
+      // Per-object scale ratio (2026-06-16): seeded from the asset's authoring
+      // ratio so a fresh import sits at its authored scale. Mutated live via
+      // RescaleObjectCommand; persisted per object in .mixo.
+      ratio: (Number.isFinite(modelRatio) && modelRatio > 0) ? modelRatio : 1,
     };
     objectsToAdd[meshId] = sceneObject;
     if (parentId && groupsToAdd[parentId]) groupsToAdd[parentId].childIds.push(meshId);
@@ -1048,6 +1057,14 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   splitMultiMaterialMeshesInContainer(container);
   _containers.set(assetId, container);
   container.addAllToScene();
+  // Run the SAME import normalization as a fresh load (units + glTF RH→LH flip +
+  // winding fix, baked into vertices, parent=null, scaling=1) so a restored
+  // mesh is byte-for-byte the shape a fresh import produces. The reloaded bytes
+  // are raw, and the saved node transform can't carry a reflection — without
+  // this glTF restores mirrored. The seed uses ratio = modelRatio (factor =
+  // sourceUnit only); PersistenceManager then bakes the per-object ratio delta.
+  const asset = getState().scene.assetLibrary[assetId];
+  bakeImportTransform(container, importScaleFactor(asset?.sourceUnit ?? DEFAULT_SOURCE_UNIT, asset?.modelRatio ?? 1));
   return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
 }
 

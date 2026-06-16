@@ -4,12 +4,10 @@
 // isolated from loading, scene wiring and export. The export-side twin is
 // PrintManager's `flattenWorld` PREP step.
 
-import { getState } from './StateManager.js';
 import {
   DEFAULT_SOURCE_UNIT,
   SOURCE_UNIT_FACTORS,
   computeSceneNormalizationScale,
-  sceneScaleFromState,
 } from './scale/ScaleMath.js';
 
 const BABYLON = window.BABYLON;
@@ -22,15 +20,17 @@ export { DEFAULT_SOURCE_UNIT, SOURCE_UNIT_FACTORS };
  * and project-restore paths feed this into {@link bakeImportTransform} so the
  * math can't drift between them.
  */
-export function importScaleFactor(sourceUnit, modelRatio) {
+export function importScaleFactor(sourceUnit, modelRatio, ratio = modelRatio) {
+  // Per-object ratio redesign (2026-06-16): the scene-scale term is the
+  // object's own `ratio`, seeded `= modelRatio` at import. With the seed the
+  // ratio cancels (authoredRatio / ratio === 1), so a fresh import lands at its
+  // authored size, normalized only by sourceUnit. Changing the object's ratio
+  // afterwards goes through RescaleObjectCommand; project restore feeds the
+  // saved per-object ratio here to reproduce the baked size.
   return computeSceneNormalizationScale(
     { sourceUnit, authoredRatio: modelRatio },
-    sceneScaleFromState(getState())
+    { sceneRatio: ratio }
   );
-}
-
-export function computeImportSceneNormalizationScale(authoredScale) {
-  return computeSceneNormalizationScale(authoredScale, sceneScaleFromState(getState()));
 }
 
 /**

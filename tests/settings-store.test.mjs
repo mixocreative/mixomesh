@@ -125,42 +125,33 @@ test('applySectionToState(grid) resets grid + grid/axes overlays only', () => {
   assert.equal(out.scene.overlays.printPreview, false);   // untouched
 });
 
-test('reset PRESERVES ratio fields when a scene is loaded (no silent rescale)', () => {
+test('print settings reset fully even under a loaded scene (per-object ratio is content, not a setting)', () => {
+  // Post per-object-ratio redesign (2026-06-16): scale lives on objects, so
+  // there is nothing scene-protected in print — a reset restores every print
+  // setting regardless of whether a scene is loaded.
   const s = freshState();
   s.scene.objects = { m: { id: 'm' } };       // scene loaded
-  s.print.workingRatio = 4;
-  s.print.targetRatio = 35;
-  s.print.minWallThickness = 9;               // non-ratio — should still reset
+  s.print.exportRatios = [4, 35];
+  s.print.minWallThickness = 9;
   const sec = applySectionToState(s, 'print');
-  assert.equal(sec.print.workingRatio, 4, 'workingRatio must survive reset under a loaded scene');
-  assert.equal(sec.print.targetRatio, 35, 'targetRatio must survive reset under a loaded scene');
-  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'non-ratio print field still resets');
+  assert.deepEqual(sec.print.exportRatios, DS.print.exportRatios, 'exportRatios resets under a loaded scene');
+  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'print field resets');
 
   const all = factoryState(s);
-  assert.equal(all.print.workingRatio, 4);
-  assert.equal(all.print.targetRatio, 35);
+  assert.deepEqual(all.print.exportRatios, DS.print.exportRatios);
   assert.equal(all.print.minWallThickness, DS.print.minWallThickness);
 });
 
-test('reset DOES reset ratios on an empty scene (New / no objects)', () => {
-  const s = freshState();                      // no objects
-  s.print.workingRatio = 4;
-  s.print.targetRatio = 35;
-  const out = applySectionToState(s, 'print');
-  assert.equal(out.print.workingRatio, DS.print.workingRatio);
-  assert.equal(out.print.targetRatio, DS.print.targetRatio);
-});
-
 test('factoryState resets every persisted slice but leaves content', () => {
-  const s = freshState();                       // empty scene → ratios reset too
+  const s = freshState();
   s.scene.render.exposure = 9;
-  s.print.workingRatio = 7;
+  s.print.exportRatios = [7];
   s.print.minWallThickness = 9;
   s.gizmo.snap.translate = 5;
   s.selection.pivotMode = 'world';
   const out = factoryState(s);
   assert.equal(out.scene.render.exposure, DS.render.exposure);
-  assert.equal(out.print.workingRatio, DS.print.workingRatio);   // no objects → resets
+  assert.deepEqual(out.print.exportRatios, DS.print.exportRatios);
   assert.equal(out.print.minWallThickness, DS.print.minWallThickness);
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);

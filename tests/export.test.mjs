@@ -70,12 +70,21 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null } = {}) {
 
 function setScene({ objects = {}, registry = {}, selectedIds = [], workingRatio = 1, targetRatio = 1 }) {
   _registry = registry;
+  // Per-object ratio redesign (2026-06-16): export "scene ratio" is the ACTIVE
+  // object's own `ratio`, and the print target is `print.exportRatios[0]`.
+  // Mirror the legacy global workingRatio onto each object so the export
+  // factor/suffix expectations hold under the new semantics.
+  const objectsWithRatio = {};
+  for (const [id, o] of Object.entries(objects)) {
+    objectsWithRatio[id] = { ratio: workingRatio, ...o };
+  }
+  const activeId = selectedIds[0] ?? Object.keys(objectsWithRatio)[0] ?? null;
   StateManager.setState(s => ({
     ...s,
     project: { ...s.project, name: 'Test' },
-    print: { ...s.print, workingRatio, targetRatio },
-    selection: { ...s.selection, selectedIds },
-    scene: { ...s.scene, objects },
+    print: { ...s.print, exportRatios: [targetRatio] },
+    selection: { ...s.selection, selectedIds, activeId },
+    scene: { ...s.scene, objects: objectsWithRatio },
   }), { silent: true });
 }
 
@@ -560,6 +569,8 @@ await test('filename: combined STL → `${project}${suffix}.stl` (single-blob pa
   assert.equal(calls.stlCreate.length, 1);
   assert.equal(calls.stlCreate[0].rest[0], false,
     'STL combined now goes through _triggerDownload (download=false)');
+  // Export reference = active object's ratio (12 here) → target 35:
+  // suffix _r{activeRatio}to{target}.
   assert.equal(calls.downloads.at(-1), 'Test_r12to35.stl');
 });
 
@@ -577,6 +588,50 @@ await test('filename: combined 3MF default ratio → `${project}${suffix}.3mf`',
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportThreeMF();
   assert.equal(calls.downloads.at(-1), 'Test_r1to1.3mf');
+});
+
+await test('as-shown: empty exportRatios prints at the active object ratio (displayed size)', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { size: [2, 2, 2] }) },
+    workingRatio: 72, targetRatio: 72 });
+  // Empty list ⇒ "as shown" ⇒ target = active object's ratio (72) ⇒ factor 1000.
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [] } }), { silent: true });
+  const d = PrintManager.getExportedDimensions('m1');
+  assert.ok(Math.abs(d.x - 2000) < 1e-6, `as-shown should be size×1000 (displayed mm), got ${d.x}`);
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  assert.equal(calls.downloads.at(-1), 'Test_r72to72.zip', `as-shown suffix should be _r72to72, got ${calls.downloads.at(-1)}`);
+});
+
+await test('batch: exportRatios list emits one file per target ratio', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') },
+    workingRatio: 72, targetRatio: 72 });
+  // Two export targets; active object ratio is 72.
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [72, 144] } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  assert.ok(calls.downloads.includes('Test_r72to72.zip'), `missing 1:72 file, got ${calls.downloads.join()}`);
+  assert.ok(calls.downloads.includes('Test_r72to144.zip'), `missing 1:144 file, got ${calls.downloads.join()}`);
+  assert.equal(calls.downloads.filter(f => f.endsWith('.zip')).length, 2, 'exactly two zip outputs');
+});
+
+await test('export ratio reference ignores active object when it is not exported', async () => {
+  setScene({
+    objects: {
+      helper: obj('helper', { ratio: 72, isPrintPart: false }),
+      m1: obj('m1', { ratio: 1 }),
+    },
+    registry: { helper: mesh('helper'), m1: mesh('m1') },
+    targetRatio: 144,
+  });
+  StateManager.setState(s => ({
+    ...s,
+    selection: { ...s.selection, selectedIds: ['m1'], activeId: 'helper' },
+    print: { ...s.print, exportRatios: [144] },
+  }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip',
+    'non-exported active helper must not choose the export scale');
 });
 
 await test('filename: individually OBJ → outer zip + per-mesh entries carry project prefix', async () => {

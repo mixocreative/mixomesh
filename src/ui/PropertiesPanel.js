@@ -9,12 +9,13 @@ import {
   push, beginBatch, endBatch,
   TransformCommand, VisibilityCommand, LockCommand, RenameCommand,
   ShaderAssignCommand, ShaderDuplicateCommand, UVOverrideCommand,
-  PrintPartCommand, BakeTransformCommand, SourceUnitCommand,
+  PrintPartCommand, SourceUnitCommand, RescaleObjectCommand,
 } from '../core/HistoryManager.js';
+import { SCALE_PRESETS } from '../core/print/PrintScale.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
 import { icon, sectionIcon } from '../core/Icons.js';
-import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
+import { authoredScaleFromAsset, formatScaleRatio, parseScaleRatioText, objectRatio } from '../core/scale/ScaleMath.js';
 import { logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 
@@ -70,6 +71,7 @@ export function init() {
     EVENTS.SHADER_DUPLICATED,
     EVENTS.COLOR_APPLIED,
     EVENTS.UV_OVERRIDE_CHANGED,
+    EVENTS.OBJECT_UPDATED,
     EVENTS.WORKSPACE_CHANGED,    // empty-state hint is workspace-specific
   ];
   for (const ev of events) subscribe(ev, _render);
@@ -212,7 +214,6 @@ function _renderTransformSection(mesh, multi, resolved = []) {
   const scaleLocked = getState().ui?.scaleLocked !== false;
   const lockedCls = scaleLocked ? 'pp-locked' : '';
   const lockIcon = scaleLocked ? 'Lock' : 'Unlock';
-  const applyDis = multi ? 'disabled' : '';
 
   // ↧ Copy-from-active: only meaningful when the selection has >1 mesh and a
   // single active mesh exists. Hidden otherwise.
@@ -223,6 +224,7 @@ function _renderTransformSection(mesh, multi, resolved = []) {
   return `
     <section class="pp-section" data-section="transform">
       <header class="pp-section-header">${sectionIcon('Move')}<span data-i18n-key="section.transform">Transform</span>${copyBtn}</header>
+      ${_renderRatioRow()}
       <div class="pp-grid3">
         <label>${_escape(t('properties.sizeMm'))}</label>
         <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
@@ -236,19 +238,13 @@ function _renderTransformSection(mesh, multi, resolved = []) {
         <input type="number" step="0.1" data-xform="position" data-axis="z" value="${_fmt(posMM.z)}" ${dis}>
       </div>
       <div class="pp-grid3">
-        <label>
-          ${_escape(t('properties.rotDeg'))}
-          <button class="pp-apply-btn" data-apply="rotation" ${applyDis} title="${escapeAttr(t('properties.applyRotationTitle'))}">${_escape(t('btn.apply'))}</button>
-        </label>
+        <label>${_escape(t('properties.rotDeg'))}</label>
         <input type="number" step="0.1" data-xform="rotation" data-axis="x" value="${_fmt(rotDeg.x)}" ${dis}>
         <input type="number" step="0.1" data-xform="rotation" data-axis="y" value="${_fmt(rotDeg.y)}" ${dis}>
         <input type="number" step="0.1" data-xform="rotation" data-axis="z" value="${_fmt(rotDeg.z)}" ${dis}>
       </div>
       <div class="pp-grid3 pp-scale-row ${lockedCls}">
-        <label>
-          ${_escape(t('properties.scale'))}
-          <button class="pp-apply-btn" data-apply="scale" ${applyDis} title="${escapeAttr(t('properties.applyScaleTitle'))}">${_escape(t('btn.apply'))}</button>
-        </label>
+        <label>${_escape(t('properties.scale'))}</label>
         <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}>
         <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}>
@@ -259,6 +255,54 @@ function _renderTransformSection(mesh, multi, resolved = []) {
       </div>
     </section>
   `;
+}
+
+// Per-object scale ratio control (2026-06-16). Shows the shared ratio across
+// the selection, or "—" when mixed. Applying drives RescaleObjectCommand over
+// every selected object expanded to its logical-object parts (finding E), as
+// one undoable step.
+function _renderRatioRow() {
+  const ids = Selection.getSelectedIds();
+  const objects = getState().scene.objects;
+  const ratios = ids.map(id => objectRatio(objects[id]));
+  const mixed = ratios.length > 1 && ratios.some(r => r !== ratios[0]);
+  const current = mixed ? null : (ratios[0] ?? 1);
+  const presetOpts = SCALE_PRESETS
+    .filter(p => p.ratio !== null)
+    .map(p => `<option value="${escapeAttr(p.ratio)}"${!mixed && current === p.ratio ? ' selected' : ''}>${_escape(p.label)}</option>`)
+    .join('');
+  return `
+    <div class="pp-row pp-ratio-row">
+      <label title="${escapeAttr(t('properties.objectRatioTitle'))}">${_escape(t('properties.objectRatio'))}</label>
+      <div class="pp-ratio-select">
+        <select data-ratio-preset class="pp-preset-select">
+          <option value="">${mixed ? '—' : _escape(t('print.custom'))}</option>
+          ${presetOpts}
+        </select>
+        <input type="text" data-ratio-input class="pp-ratio-input" value="${escapeAttr(mixed ? '' : formatScaleRatio(current))}" placeholder="${mixed ? '—' : '1:1'}">
+      </div>
+    </div>
+  `;
+}
+
+// Expand the current selection to all logical-object part ids, then apply the
+// new ratio as one undoable RescaleObjectCommand.
+function _applyObjectRatio(nextRatio) {
+  if (!(Number.isFinite(nextRatio) && nextRatio > 0)) return;
+  const objects = getState().scene.objects;
+  const targets = _ratioTargetIds(Selection.getSelectedIds(), objects);
+  if (!targets.length) return;
+  push(new RescaleObjectCommand(targets, nextRatio));
+  _render();
+}
+
+function _ratioTargetIds(selectedIds, objects) {
+  const ids = new Set();
+  for (const id of selectedIds ?? []) {
+    ids.add(id);
+    for (const partId of logicalObjectPartIds(id, objects)) ids.add(partId);
+  }
+  return [...ids].filter(id => objects?.[id]);
 }
 
 function _hierarchyWorldSize(mesh) {
@@ -299,6 +343,23 @@ function _aggregateWorldSize(meshes) {
 
 function _wireTransformSection(meshId) {
   if (!meshId) return;
+
+  const ratioSelect = _bodyEl.querySelector('[data-ratio-preset]');
+  const ratioInput  = _bodyEl.querySelector('[data-ratio-input]');
+  ratioSelect?.addEventListener('change', () => {
+    const val = parseFloat(ratioSelect.value);
+    if (Number.isFinite(val) && val > 0) _applyObjectRatio(val);
+  });
+  const commitRatioText = () => {
+    const parsed = parseScaleRatioText(ratioInput.value);
+    if (parsed) _applyObjectRatio(parsed); else _render();
+  };
+  ratioInput?.addEventListener('change', commitRatioText);
+  ratioInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); ratioInput.blur(); }
+    if (e.key === 'Escape') { _render(); }
+  });
+
   _bodyEl.querySelectorAll('[data-xform]').forEach(input => {
     if (input.disabled) return;
     input.addEventListener('change', () => _commitTransformInput(meshId, input));
@@ -317,14 +378,6 @@ function _wireTransformSection(meshId) {
     });
   });
 
-  _bodyEl.querySelectorAll('[data-apply]').forEach(btn => {
-    if (btn.disabled) return;
-    btn.addEventListener('click', () => {
-      const kind = btn.dataset.apply;            // 'rotation' | 'scale'
-      push(new BakeTransformCommand(meshId, kind));
-      _render();
-    });
-  });
 
   const lockBtn = _bodyEl.querySelector('[data-action="scaleLock"]');
   lockBtn?.addEventListener('click', () => {
@@ -960,3 +1013,7 @@ function _fmt(n, dp = 2) {
 }
 
 export const PropertiesPanel = { init };
+
+export const __test = {
+  ratioTargetIds: _ratioTargetIds,
+};

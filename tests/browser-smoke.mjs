@@ -747,6 +747,110 @@ async function main() {
     assert(stlDiag.color && stlDiag.color[0] === 0.4,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
+    // ── Per-object ratio survives .mixo save → load (audit #1) ───────────
+    // Import an STL, halve it via RescaleObjectCommand (ratio 1→2, baked into
+    // vertices), round-trip through the REAL _buildDocument/_loadProject, and
+    // assert the restored mesh size + stored ratio match the changed state —
+    // NOT the authored size. Restore reloads raw bytes, so this proves the
+    // per-object ratio is actually reproduced on load.
+    const ratioRT = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const B = window.BABYLON;
+      const sizeOf = (mid) => {
+        const scene = sm.SceneManager.getScene();
+        const mesh = scene.meshes.find(m => m.metadata?.meshId === mid);
+        if (!mesh) return null;
+        const r = mesh.getHierarchyBoundingVectors(true);
+        return +(r.max.x - r.min.x).toFixed(6);
+      };
+      const stl = ['solid x','facet normal 0 0 1','outer loop',
+        'vertex 0 0 0','vertex 20 0 0','vertex 0 20 0',
+        'endloop','endfacet','endsolid x',''].join('\\n');
+      const ids = await al.AssetLoader.loadFromBlob(new Blob([stl], { type: 'model/stl' }), 'rt.stl', new B.Vector3(0,0,0), {});
+      const id = ids[0];
+      await new Promise(r => setTimeout(r, 400));   // let import bounce settle (scaling→1)
+      const importedSize = sizeOf(id);
+      const importedRatio = st.getState().scene.objects[id].ratio;
+      hm.push(new hm.RescaleObjectCommand([id], 2));   // 1 → 2 ⇒ ×0.5 (baked)
+      const afterSize = sizeOf(id);
+      const afterRatio = st.getState().scene.objects[id].ratio;
+      // Also apply a NODE scale (Properties Scale field — never baked) so the
+      // round-trip proves both the baked ratio AND the node scale survive.
+      sm.SceneManager.getScene().meshes.find(m => m.metadata?.meshId === id)?.scaling.set(3,3,3);
+      const scaledSize = sizeOf(id);
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      await pm.__test._loadProject(doc);
+      await new Promise(r => setTimeout(r, 400));   // settle any restore animation
+      const restoredSize = sizeOf(id);
+      const restoredRatio = st.getState().scene.objects[id]?.ratio ?? null;
+      // Reset node scale so the ×3 mesh doesn't cover downstream tests' click points.
+      sm.SceneManager.getScene().meshes.find(m => m.metadata?.meshId === id)?.scaling.set(1,1,1);
+      return { importedSize, importedRatio, afterSize, afterRatio, scaledSize, restoredSize, restoredRatio };
+    })()`);
+    const near = (a, b) => a != null && b != null && Math.abs(a - b) <= Math.max(1e-4, Math.abs(b) * 0.02);
+    assert(ratioRT.importedRatio === 1, `STL seed ratio should be 1, got ${ratioRT.importedRatio}`);
+    assert(ratioRT.afterRatio === 2, `ratio change not stored, got ${ratioRT.afterRatio}`);
+    assert(near(ratioRT.afterSize, ratioRT.importedSize / 2),
+      `ratio 1->2 should halve size: imported ${ratioRT.importedSize}, after ${ratioRT.afterSize}`);
+    assert(near(ratioRT.scaledSize, ratioRT.afterSize * 3),
+      `node scale ×3 not applied: after=${ratioRT.afterSize} scaled=${ratioRT.scaledSize}`);
+    assert(ratioRT.restoredRatio === 2, `restored ratio lost: got ${ratioRT.restoredRatio}`);
+    assert(near(ratioRT.restoredSize, ratioRT.scaledSize),
+      `RESTORE LOST ratio bake or node scale: scaled=${ratioRT.scaledSize} restored=${ratioRT.restoredSize} (after=${ratioRT.afterSize})`);
+
+    // ── glTF RH→LH flip survives .mixo restore (audit follow-up) ─────────
+    // Import a minimal asymmetric glTF triangle (Babylon applies the RH→LH
+    // flip on load, baked into vertices). Round-trip and assert the restored
+    // world AABB == the fresh-import AABB — restore must re-run the SAME import
+    // normalization (flip + unit), not just a uniform scale.
+    const gltfRT = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const B = window.BABYLON;
+      const dv = new DataView(new ArrayBuffer(42));
+      [0,0,2, 8,0,0, 0,4,0].forEach((v,i) => dv.setFloat32(i*4, v, true));
+      [0,1,2].forEach((v,i) => dv.setUint16(36 + i*2, v, true));
+      let bin = ''; for (const b of new Uint8Array(dv.buffer)) bin += String.fromCharCode(b);
+      const gltf = {
+        asset:{version:"2.0"},
+        buffers:[{byteLength:42, uri:"data:application/octet-stream;base64,"+btoa(bin)}],
+        bufferViews:[{buffer:0,byteOffset:0,byteLength:36,target:34962},{buffer:0,byteOffset:36,byteLength:6,target:34963}],
+        accessors:[{bufferView:0,componentType:5126,count:3,type:"VEC3",min:[0,0,0],max:[8,4,2]},{bufferView:1,componentType:5123,count:3,type:"SCALAR"}],
+        meshes:[{primitives:[{attributes:{POSITION:0},indices:1,mode:4}]}],
+        nodes:[{mesh:0}], scenes:[{nodes:[0]}], scene:0
+      };
+      const blob = new Blob([JSON.stringify(gltf)], { type:'model/gltf+json' });
+      const aabb = (mid) => {
+        const mesh = sm.SceneManager.getScene().meshes.find(m => m.metadata?.meshId === mid);
+        if (!mesh) return null;
+        const r = mesh.getHierarchyBoundingVectors(true);
+        return { minx:+r.min.x.toFixed(5), maxx:+r.max.x.toFixed(5), minz:+r.min.z.toFixed(5), maxz:+r.max.z.toFixed(5) };
+      };
+      let ids=[], err=null;
+      try { ids = await al.AssetLoader.loadFromBlob(blob, 'flip.gltf', new B.Vector3(0,0,0), {}); } catch(e){ err=String(e); }
+      await new Promise(r => setTimeout(r, 400));
+      const fresh = ids[0] ? aabb(ids[0]) : null;
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      await pm.__test._loadProject(doc);
+      await new Promise(r => setTimeout(r, 400));
+      const restored = ids[0] ? aabb(ids[0]) : null;
+      return { err, fresh, restored };
+    })()`);
+    assert(!gltfRT.err, `glTF flip import threw: ${gltfRT.err}`);
+    assert(gltfRT.fresh && gltfRT.restored, 'glTF flip round-trip: mesh missing');
+    assert(gltfRT.fresh.maxx - gltfRT.fresh.minx > 1e-4, 'glTF fixture degenerate (no extent)');
+    {
+      const az = (a, b) => Math.abs(a - b) <= 5e-4;
+      const f = gltfRT.fresh, r = gltfRT.restored;
+      assert(az(f.minx, r.minx) && az(f.maxx, r.maxx) && az(f.minz, r.minz) && az(f.maxz, r.maxz),
+        `glTF restore AABB (incl RH→LH flip) != fresh import: fresh=${JSON.stringify(f)} restored=${JSON.stringify(r)}`);
+    }
+
     // ── Box (marquee) selection ──────────────────────────────────────────
     // Two complementary live checks against the origin STL mesh:
     //  (1) PROJECTION — frame the mesh, then run the module's real projector +
@@ -826,17 +930,18 @@ async function main() {
       const savedAfterSection = JSON.parse(localStorage.getItem(KEY))?.settings?.render?.exposure;
 
       // (4) dirty again, then resetAll → key cleared + state factory. A scene
-      // is loaded (the diag STL), so the ratio fields are PROTECTED: workingRatio
-      // must survive, a non-ratio print field (minWallThickness) must reset.
-      sm.setState(s => ({ ...s, print: { ...s.print, workingRatio: 9, minWallThickness: 9 } }), { silent: true });
+      // is loaded (the diag STL). Post per-object-ratio redesign there are NO
+      // scene-protected print fields (scale is per-object content), so every
+      // print setting resets — exportRatios and minWallThickness both restore.
+      sm.setState(s => ({ ...s, print: { ...s.print, exportRatios: [9, 35], minWallThickness: 9 } }), { silent: true });
       ss.save();
       const sceneLoaded = Object.keys(sm.getState().scene.objects).length > 0;
       ss.resetAll();
       const keyCleared = localStorage.getItem(KEY) === null;
-      const ratioPreserved = sm.getState().print.workingRatio === 9;
+      const ratioReset = JSON.stringify(sm.getState().print.exportRatios) === JSON.stringify(DS.print.exportRatios);
       const wallReset = sm.getState().print.minWallThickness === DS.print.minWallThickness;
 
-      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioPreserved, wallReset, dsExposure: DS.render.exposure };
+      return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioReset, wallReset, dsExposure: DS.render.exposure };
     })()`);
     assert(settings.logoOk, 'header logo (#app-logo) missing or not rendered');
     assert(settings.savedExposure === 1.77, 'edited setting was not persisted to localStorage');
@@ -844,9 +949,9 @@ async function main() {
     assert(settings.afterSection === settings.dsExposure, 'resetSection did not restore the factory value');
     assert(settings.savedAfterSection === settings.dsExposure, 'resetSection did not re-persist the restored value');
     assert(settings.keyCleared, 'resetAll did not clear the settings localStorage key');
-    assert(settings.sceneLoaded, 'expected a loaded scene (diag STL) for the ratio-guard check');
-    assert(settings.ratioPreserved, 'resetAll wrongly reset workingRatio under a loaded scene');
-    assert(settings.wallReset, 'resetAll did not reset a non-ratio print field');
+    assert(settings.sceneLoaded, 'expected a loaded scene (diag STL) for the reset check');
+    assert(settings.ratioReset, 'resetAll did not reset exportRatios (no scene-protected print fields anymore)');
+    assert(settings.wallReset, 'resetAll did not reset a print field');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

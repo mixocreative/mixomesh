@@ -5,10 +5,12 @@ import { MeshValidator } from './MeshValidator.js';
 import { AssetLoader } from './AssetLoader.js';
 import {
   SCALE_PRESETS,
-  exportFactor as _exportFactor,
+  exportFactorFor as _exportFactorFor,
   exportBaseName as _exportBaseName,
   perMeshBaseName as _perMeshBaseName,
   getExportedDimensions,
+  setExportTargetOverride,
+  resolveExportTargets,
 } from './print/PrintScale.js';
 import { createPrepSteps } from './print/PrintPrep.js';
 import { createFormats } from './print/PrintFormats.js';
@@ -16,6 +18,7 @@ import { packageAndDownload } from './print/PrintPackaging.js';
 import { collectTextureExportData, clamp255 as _clamp255, hex2 as _hex2 } from './print/ExportTextures.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './print/ThreeMFWriter.js';
 import { logicalObjectLeadIds, logicalObjectPartIds } from './LogicalObjects.js';
+import { objectRatio } from './scale/ScaleMath.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -69,6 +72,12 @@ function _groupCloneEntries(entries) {
     byId.get(id).meshes.push(entry);
   }
   return [...byId.values()];
+}
+
+function _exportReferenceRatio(units, state) {
+  const activeId = state.selection?.activeId ?? null;
+  const activeUnit = activeId ? units.find(unit => unit.logicalId === activeId) : null;
+  return objectRatio((activeUnit ?? units[0])?.obj ?? null);
 }
 
 // ── Texture Export ───────────────────────────────────────
@@ -352,15 +361,32 @@ async function _runExport(formatKey, options = {}) {
   if (!fmt) throw new Error(`Unknown export format: ${formatKey}`);
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
 
+  // Per-object ratio redesign: export the scene ONCE PER target ratio in
+  // `print.exportRatios` (each at the active object's ratio → that target,
+  // producing its own scaled file). A single-entry list is the common case.
+  const targets = resolveExportTargets(getState());
+  for (let ti = 0; ti < targets.length; ti++) {
+    setExportTargetOverride(targets[ti]);
+    try {
+      const span = (frac, msg) => progress((ti + Math.max(0, Math.min(1, frac))) / targets.length,
+        targets.length > 1 ? `[${ti + 1}/${targets.length}] ${msg}` : msg);
+      await _runExportForTarget(fmt, options, span);
+    } finally {
+      setExportTargetOverride(null);
+    }
+  }
+}
+
+async function _runExportForTarget(fmt, options, progress) {
   progress(0.02, 'Collecting meshes…');
   const printUnits = _collectPrintMeshes(!!options.selectedOnly);
   const printMeshes = _flattenPrintUnits(printUnits);
   if (printMeshes.length === 0) throw new Error('No printable meshes to export.');
 
   const state  = getState();
-  const factor = _exportFactor();
+  const referenceRatio = _exportReferenceRatio(printUnits, state);
   const ctx = {
-    state, factor, options,
+    state, referenceRatio, options,
     projectName: state.project.name || 'Untitled',
     individually: !!options.individually,
     meshes: [],
@@ -368,6 +394,7 @@ async function _runExport(formatKey, options = {}) {
     csgReady: false,
     csgSkipped: [],
   };
+  ctx.factor = _exportFactorFor(ctx);
 
   if (fmt.needsCSG) {
     ctx.csgReady = await _ensureCSG2();

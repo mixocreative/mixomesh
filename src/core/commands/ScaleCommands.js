@@ -1,9 +1,9 @@
 // Scale-domain commands (split from HistoryManager.js — review L29):
-// world rescale (working-ratio change) and per-asset source-unit re-bake.
+// per-object ratio rescale (RescaleObjectCommand) and per-asset source-unit
+// re-bake (SourceUnitCommand).
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
-import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { SOURCE_UNIT_FACTORS } from '../scale/ScaleMath.js';
 import { SILENT, withDetachedPivot } from './support.js';
@@ -76,27 +76,8 @@ function _applySourceUnit(assetId, fromUnit, toUnit, confirmed) {
   }, SILENT);
 }
 
-/**
- * Rebake the entire scene to a new working ratio.
- *
- * Every registered mesh's vertex data is scaled by `prev / next`; every
- * Babylon node on the ancestor chain has its local position scaled by the
- * same factor exactly once. Result: world transforms scale relative to the
- * world origin, mesh.scaling stays (1,1,1), and a mesh's Properties scale
- * still reads "1" after the change.
- *
- * Cursor3d position scales too. Overlays (grid, axes, gizmos, selection RTT)
- * are unaffected — they aren't on any registered mesh's ancestor chain.
- */
-export class RescaleWorldCommand {
-  constructor(prevRatio, nextRatio) {
-    this._prev = prevRatio;
-    this._next = nextRatio;
-    this.label = `Set scene scale ${_fmtRatioLabel(nextRatio)}`;
-  }
-  execute() { _applyWorldRescale(this._prev, this._next); markDirty(); }
-  undo()    { _applyWorldRescale(this._next, this._prev); }
-}
+// (The global RescaleWorldCommand was removed in the per-object ratio redesign,
+// 2026-06-16 — scene scale is now per-object via RescaleObjectCommand below.)
 
 // Format a ratio number as a display string for command labels. Mirrors the
 // PrintPanel formatter so an undo-stack entry reads "Set scene scale 2:1"
@@ -113,44 +94,70 @@ function _fmtRatioLabel(n) {
   return Math.abs(m - r) < 1e-6 ? `${r}:1` : `${(+m.toFixed(3)).toString()}:1`;
 }
 
-function _applyWorldRescale(fromRatio, toRatio) {
-  if (!Number.isFinite(fromRatio) || !Number.isFinite(toRatio) || fromRatio <= 0 || toRatio <= 0) return;
-  if (fromRatio === toRatio) return;
-  const factor = fromRatio / toRatio;
-  const scaleMat = BABYLON.Matrix.Scaling(factor, factor, factor);
-  const visited = new WeakSet();
-  const objects = getState().scene.objects;
-
-  for (const meshId of Object.keys(objects)) {
-    const mesh = AssetLoader.getBabylonMesh(meshId);
-    if (!mesh) continue;
-    if (mesh.geometry && typeof mesh.bakeTransformIntoVertices === 'function') {
-      mesh.bakeTransformIntoVertices(scaleMat);
-    }
-    let n = mesh;
-    while (n) {
-      if (visited.has(n)) break;
-      visited.add(n);
-      if (n.position && typeof n.position.scaleInPlace === 'function') {
-        n.position.scaleInPlace(factor);
-      }
-      n = n.parent ?? null;
-    }
-    mesh.refreshBoundingInfo?.();
-    dispatch(EVENTS.OBJECT_UPDATED, { meshId });
+/**
+ * Per-object scale ratio change (per-object ratio redesign, 2026-06-16).
+ *
+ * Rescales each given object by `prevRatio / nextRatio`, baked into that
+ * object's OWN geometry, scaling only its OWN local position — never a shared
+ * group/collection ancestor (finding D) — and stores the new `ratio`. The
+ * caller passes the full member set of a logical object so multi-mesh objects
+ * scale as one unit (finding E). Geometry is uniquified at duplication time
+ * (AssetLoader.cloneMeshAsNewObject), so the bake here can't alias siblings
+ * (finding C).
+ *
+ * Mirrors RescaleWorldCommand's vertex math, scoped to a selection instead of
+ * the whole scene. One undoable step for the whole batch.
+ */
+export class RescaleObjectCommand {
+  constructor(objectIds, nextRatio) {
+    this._ids = [...new Set(objectIds)];
+    this._next = _positiveRatio(nextRatio);
+    this._prevById = {};
+    const objects = getState().scene.objects;
+    for (const id of this._ids) this._prevById[id] = _positiveRatio(objects[id]?.ratio);
+    this.label = `Set ratio ${_fmtRatioLabel(this._next)}`;
   }
+  execute() {
+    for (const id of this._ids) _rescaleObject(id, this._prevById[id], this._next);
+    markDirty();
+  }
+  undo() {
+    for (const id of this._ids) _rescaleObject(id, this._next, this._prevById[id]);
+  }
+}
 
+function _positiveRatio(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function _rescaleObject(id, fromRatio, toRatio) {
+  const to = _positiveRatio(toRatio);
+  let updatedMesh = false;
+  if (_positiveRatio(fromRatio) !== to) {
+    const factor = _positiveRatio(fromRatio) / to;
+    const mesh = AssetLoader.getBabylonMesh(id);
+    if (mesh) {
+      if (mesh.geometry && typeof mesh.bakeTransformIntoVertices === 'function') {
+        mesh.bakeTransformIntoVertices(BABYLON.Matrix.Scaling(factor, factor, factor));
+      }
+      if (mesh.position && typeof mesh.position.scaleInPlace === 'function') {
+        mesh.position.scaleInPlace(factor);
+      }
+      mesh.refreshBoundingInfo?.();
+      updatedMesh = true;
+    }
+  }
   setState(s => {
-    const c = s.scene.cursor3d ?? { x: 0, y: 0, z: 0 };
+    const obj = s.scene.objects[id];
+    if (!obj) return s;
     return {
       ...s,
-      print: { ...s.print, workingRatio: toRatio },
-      scene: { ...s.scene, cursor3d: { x: c.x * factor, y: c.y * factor, z: c.z * factor } },
+      scene: {
+        ...s.scene,
+        objects: { ...s.scene.objects, [id]: { ...obj, ratio: to } },
+      },
     };
   }, SILENT);
-
-  // Keep the Babylon cursor sphere in sync with the scaled state cursor —
-  // state moved but the visual stayed put before (review M13).
-  const c = getState().scene.cursor3d;
-  SceneManager.setCursor?.(new BABYLON.Vector3(c.x, c.y, c.z));
+  if (updatedMesh) dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
 }

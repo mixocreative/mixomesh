@@ -92,6 +92,19 @@ function _applyWorld(node, t) {
   node.scaling.set(t.s[0], t.s[1], t.s[2]);
 }
 
+function _applyPersistedRatioBake(mesh, asset, ratio, rebaked = null) {
+  if (!mesh?.geometry) return;
+  if (rebaked?.has(mesh)) return;
+  const modelRatio = (Number.isFinite(asset?.modelRatio) && asset.modelRatio > 0) ? asset.modelRatio : 1;
+  const objRatio = (Number.isFinite(ratio) && ratio > 0) ? ratio : 1;
+  const delta = modelRatio / objRatio;
+  if (Number.isFinite(delta) && delta > 0 && Math.abs(delta - 1) > 1e-9) {
+    mesh.bakeTransformIntoVertices(BABYLON.Matrix.Scaling(delta, delta, delta));
+    mesh.refreshBoundingInfo?.();
+  }
+  rebaked?.add(mesh);
+}
+
 // ── Serialise ────────────────────────────────────────────
 
 function _stripFileData(a) {
@@ -167,6 +180,9 @@ function _serialiseSceneObjects() {
       logicalObjectId: o.logicalObjectId ?? null,
       isInternalPart: !!o.isInternalPart,
       containerMeshIndex,
+      // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
+      // ratio across save/reload, never lost.
+      ratio: (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1,
       transform: mesh ? _decompose(mesh) : (o._savedTransform ?? null),
     };
   });
@@ -373,15 +389,35 @@ function _migrate(doc) {
   return doc;
 }
 
+function _resolveLoadedExportRatios(loadedPrint = {}) {
+  if (Array.isArray(loadedPrint.exportRatios)) {
+    return loadedPrint.exportRatios.filter(r => Number.isFinite(r) && r > 0);
+  }
+  return (Number.isFinite(loadedPrint.targetRatio) && loadedPrint.targetRatio > 0)
+    ? [loadedPrint.targetRatio]
+    : [];
+}
+
+function _printWithoutLegacyScale(loadedPrint = {}) {
+  const { workingRatio, targetRatio, ...rest } = loadedPrint;
+  return rest;
+}
+
 async function _loadProject(doc) {
   const data = _migrate(doc);
   historyClear();
   _resetWorld();
 
+  // Per-object ratio redesign migration: ensure an `exportRatios` list. New
+  // saves carry it; pre-redesign saves carry only a single `targetRatio`.
+  const loadedPrint = data.print || {};
+  const exportRatios = _resolveLoadedExportRatios(loadedPrint);
+  const loadedPrintClean = _printWithoutLegacyScale(loadedPrint);
+
   setState(s => ({
     ...s,
     project: { ...s.project, name: data.project?.name || 'Untitled' },
-    print:   { ...s.print, ...(data.print || {}) },
+    print:   { ...s.print, ...loadedPrintClean, exportRatios },
     scene: {
       ...s.scene,
       camera:   { ...s.scene.camera, ...(data.sceneSettings?.camera || {}) },
@@ -481,6 +517,8 @@ async function _loadProject(doc) {
   for (const sh of data.shaders || []) ShaderLibrary.restoreShader(sh);
 
   const objMap = {};
+  const assetById = _arrToMap(data.assetLibrary);
+  const _reBaked = new WeakSet();
   for (const o of data.sceneObjects || []) {
     const res = assetRes.get(o.assetId);
     let mesh = null, ghost = false, unlinked = false;
@@ -489,8 +527,21 @@ async function _loadProject(doc) {
       mesh = res.geom[idx] || res.geom.find(m => m.name === o.name) || res.geom[0] || null;
       unlinked = res.status === 'static';
     }
+    // Per-object ratio. New saves carry `o.ratio`; MIGRATION of pre-redesign
+    // saves folds the old global `print.workingRatio` into each object.
+    const objRatio = (Number.isFinite(o.ratio) && o.ratio > 0)
+      ? o.ratio
+      : ((Number.isFinite(data.print?.workingRatio) && data.print.workingRatio > 0) ? data.print.workingRatio : 1);
     if (mesh) {
       AssetLoader.bindRestoredMesh(o.id, mesh, o.assetId, o.sourceUnit);
+      // restoreContainer already re-ran the import seed (unit + glTF flip +
+      // winding) at ratio = modelRatio. Apply the per-object ratio DELTA here
+      // (modelRatio / ratio) so size AND the per-object ratio survive reload —
+      // fresh + migrated saves alike. (Guarded by the browser-smoke ratio
+      // round-trip.) The saved node transform (position/rot/scale) is applied
+      // after; the flip lives in the vertices so it is unaffected.
+      const asset = assetById[o.assetId];
+      _applyPersistedRatioBake(mesh, asset, objRatio, _reBaked);
       _applyWorld(mesh, o.transform);
       const vis = o.visible !== false;
       mesh.setEnabled(vis);
@@ -511,6 +562,7 @@ async function _loadProject(doc) {
       logicalObjectId: o.logicalObjectId ?? null,
       isInternalPart: !!o.isInternalPart,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
+      ratio: objRatio,
       _savedTransform: o.transform ?? null,
     };
   }
@@ -726,6 +778,7 @@ export async function relinkAsset(assetId) {
     const mesh = geom[idx] || geom.find(m => m.name === o.name) || geom[0];
     if (!mesh) continue;
     AssetLoader.bindRestoredMesh(o.id, mesh, assetId, o.sourceUnit);
+    _applyPersistedRatioBake(mesh, getState().scene.assetLibrary[assetId], o.ratio);
     _applyWorld(mesh, t);
     const vis = o.visible !== false;
     mesh.setEnabled(vis); mesh.isVisible = vis;
@@ -864,5 +917,5 @@ export const PersistenceManager = {
 export const __test = {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
-  _arrToMap, _migrate, _buildDocument,
+  _arrToMap, _migrate, _resolveLoadedExportRatios, _buildDocument, _loadProject,
 };
