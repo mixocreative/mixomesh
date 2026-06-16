@@ -98,6 +98,35 @@ should be fixed first.
 ## LOW (reviewer-reported, not independently verified)
 Persistence: SceneObject `sourceUnit` never serialized (latent; geometry still correct); `_resolveAssetBlob` tier-1 doesn't hash-verify the path file (silent wrong-file restore); manual save re-base64s every asset on the main thread (heavy-scene stall). Import: `restoreContainer` leaks OBJ sibling URLs on throw; unique-name `.dup` fallback can collide (breaks export-filename uniqueness at 999+ same-stem). Validation: group cache fan-out can leave stale sibling entries; `_buildGroupUnion` 32-bit index overflow has no guard. Scale/export: ThreeMFLoader leaks unused texture blob URLs; 3MF re-import isn't a scale round-trip (documented); solid-PNG vs MTL `d` desync only for NaN alpha. Scene: selection mask renderList lacks a dispose observer. Render-output: `_waitReady` 2 s cap can spuriously fail heavy-asset capture; dead MediaRecorder-era `pickVideoFormat`/`turntableAlpha`. Camera: per-frame `angularSensibility` writes are dead (orbit uses a fixed constant). Shaders: per-import dedupe is O(M×S) twice; UV-override export relies on Babylon `Texture.clone()` copying `metadata.mixoAssetId` (full-res-lock risk if it doesn't). UI: Properties full-rebuild on every transform commit (incl. shader previews); `_printPartsHaveWarnings` dereferences `e.results` without optional chaining; ViewportToggles don't re-push overlay modes on PROJECT_LOADED; ratio no-op on parts without a live mesh. Input: BoxSelect allocates a Ray per mesh per pointermove. Selection: cursor visibility (`pivotMode==='cursor'`) not restored on load; copy-`Object` stale-lead reconciliation. Settings: bedDimensions can desync from targetPrinterId across New.
 
+## LOW triage verdicts (2026-06-16 — each verified against the code)
+**Fixed:** restoreContainer OBJ-URL leak on throw (#4, catch mirrors live import);
+`_printPartsHaveWarnings` optional-chains `e.results` (#18); dead MediaRecorder-era
+`turntableAlpha`/`pickVideoFormat` removed (#13); bedDimensions↔targetPrinterId drift
+pinned by a config-source-of-truth test (#24).
+
+**Not a bug / intentional (verified, left as-is):**
+- `_resolveAssetBlob` tier-1 path-trust is the **live-link** contract — it lets an
+  edit-in-place (re-export to the same path) flow through on reload; contentHash is
+  the tier-2 relink for *moved/renamed* files, not a tier-1 gate. Hash-gating tier-1
+  would break edit-in-place.
+- ViewportToggles don't re-push overlay modes on PROJECT_LOADED because `_loadProject`
+  already re-applies EVERY overlay via `setOverlay` (routes printPreview/baseColor/
+  uvChecker/wireframeEdges to their mode fns) after meshes are bound — central, not the panel's job.
+- `angularSensibility` writes are LIVE (radius-scaled orbit feel in `_applyFollowTarget`), not dead.
+- selection mask renderList is rebuilt every selection change (a mesh can't linger
+  disposed in normal flow); a per-add dispose observer would itself leak observers.
+- `_buildGroupUnion` Uint32 overflow needs >4 billion verts — physically unreachable.
+
+**Open (deferred — perf needs measurement, or genuinely minor edges):** manual-save
+main-thread base64 (#3, big-scene stall — needs a worker/streaming design); per-import
+shader dedupe O(M×S) (#15); Properties full-rebuild per transform commit (#17); BoxSelect
+per-mesh Ray alloc (#21); `_waitReady` 2 s cap on heavy capture; ThreeMFLoader unused
+blob-URL leak (#8); UV-override `Texture.clone` metadata copy (#16, full-res-lock — verify
+live); ratio no-op on a part with no live mesh (#20, ghost edge); cursor visibility on load
+(#22); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5); group-cache stale
+siblings (#6); SceneObject `sourceUnit` not serialized (#1, latent); 3MF re-import scale
+round-trip (#9, documented); solid-PNG/MTL `d` NaN-alpha desync (#10).
+
 ## Recurring themes
 1. **Logical-object completeness** — the multi-primitive grouping I added is now load-bearing across consumers; several (DuplicateCommand, SmartReplace, ShaderPanel assign, outline, follow-camera) weren't updated to expand parts. The expansion helper exists (`logicalObjectPartIds`/`logicalObjectCommandIds`) — these are "forgot to call it" sites.
 2. **Baked/live state not in saved state** — H1, M1, M3-restore, M4 are the same class we fixed for ratio: anything baked into vertices/materials that isn't reconstructable from saved fields is lost on reopen.

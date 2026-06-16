@@ -5,7 +5,8 @@ installEnv();
 console.error = () => {};
 
 const { setState } = await import('../src/core/StateManager.js');
-const { getPrinterProfile } = await import('../src/core/print/PrinterProfiles.js');
+const { getPrinterProfile, bedDimensionsForPrinter } = await import('../src/core/print/PrinterProfiles.js');
+const DS = (await import('../src/config/default-settings.json', { with: { type: 'json' } })).default;
 
 let passed = 0, failed = 0;
 const out = [];
@@ -25,6 +26,16 @@ await test('target printer selection resolves filament profile', () => {
   const profile = getPrinterProfile();
   assert.equal(profile.displayName, 'Bambu Lab X1 Carbon');
   assert.deepEqual(profile.bed, { x: 256, y: 256, z: 256 });
+});
+
+await test('#24: factory bedDimensions match the factory targetPrinterId (no config drift)', () => {
+  // bedDimensions + targetPrinterId are stored independently in
+  // default-settings.json and reset together on New — if an edit changes one
+  // but not the other they silently desync (the bed preview would lie about
+  // the selected printer). Pin the invariant at the config source of truth.
+  const expected = bedDimensionsForPrinter(DS.print.targetPrinterId);
+  assert.deepEqual(DS.print.bedDimensions, expected,
+    `default-settings bedDimensions ${JSON.stringify(DS.print.bedDimensions)} != bed of ${DS.print.targetPrinterId} ${JSON.stringify(expected)}`);
 });
 
 await test('unknown target printer falls back to Mimaki default', () => {
