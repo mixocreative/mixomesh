@@ -136,7 +136,12 @@ ghost edge); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5);
 group-cache stale siblings (#6, ungroup-only edge on a non-blocking badge; deletes
 already drop the entry); SceneObject `sourceUnit` not serialized (#1, latent —
 `asset.sourceUnit` is the authoritative serialized source); 3MF re-import scale
-round-trip (#9, documented); solid-PNG/MTL `d` NaN-alpha desync (#10).
+round-trip (#9, documented).
+
+Solid-PNG/MTL `d` NaN-alpha desync (#10) — **FIXED**: a shared `_safeAlpha01`
+treats a non-finite material alpha as opaque (1) in both the PNG α byte and the MTL
+`d`/`Tr` lines, so a NaN alpha can't emit a literal "NaN" or make the two disagree.
+Headless regression test added.
 
 Cursor visibility on load (#22) — **FIXED**: `_loadProject` now syncs
 `setCursorVisible(pivotMode === 'cursor')` after restoring selection.

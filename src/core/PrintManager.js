@@ -117,7 +117,7 @@ async function _synthesizeSolidShaderTextures(meshList) {
     if (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture) continue;
     const c = mat.diffuseColor || mat.albedoColor || mat.baseColor || { r: 0.8, g: 0.8, b: 0.8 };
     const r = _clamp255(c.r), g = _clamp255(c.g), b = _clamp255(c.b);
-    const a = _clamp255(mat.alpha ?? 1);
+    const a = _clamp255(_safeAlpha01(mat.alpha));
     const hex = `${_hex2(r)}${_hex2(g)}${_hex2(b)}${_hex2(a)}`;
     const filename = `solid_${hex}.png`;
     const matName = _objMaterialName(mesh);
@@ -155,6 +155,15 @@ async function _solidColorBlob(r, g, b, a) {
   });
 }
 
+// Alpha as a finite 0..1, treating null/undefined/NaN alike as fully opaque.
+// Used by BOTH the solid-PNG synthesis and the MTL `d`/`Tr` lines so a
+// non-finite material alpha can never make the PNG α byte and the MTL value
+// disagree (audit LOW #10 — a NaN alpha used to emit a literal "NaN").
+function _safeAlpha01(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
+}
+
 function _objMaterialName(mesh) {
   const mat = mesh?.material;
   return String(mat?.id || mat?.name || mesh?.name || 'material');
@@ -180,7 +189,7 @@ function _buildOBJMtl(meshEntries, filenameByMaterialName) {
     if (seen.has(matName)) continue;
     seen.add(matName);
     const color = _mtlColor(mat);
-    const alpha = Math.max(0, Math.min(1, Number(mat.alpha ?? 1)));
+    const alpha = _safeAlpha01(mat.alpha);
     const lines = [
       `newmtl ${matName}`,
       `Ns ${Number(mat.specularPower ?? 64).toFixed(4)}`,

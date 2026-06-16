@@ -744,6 +744,21 @@ await test('OBJ synthesis: opacity flows into α byte of filename', async () => 
   assert.match(files['Test_r1to1.mtl'], /map_Kd textures\/solid_FFFFFF80\.png/);
 });
 
+await test('OBJ synthesis: NaN alpha falls back to opaque in BOTH the PNG byte and MTL d (#10)', async () => {
+  const m = mesh('m1', { color: { r: 1, g: 1, b: 1 } });
+  m.material = { id: 'mat-m1', diffuseColor: { r: 1, g: 1, b: 1 }, alpha: NaN };
+  const origClone = m.clone;
+  m.clone = (n) => { const c = origClone.call(m, n); c.material = m.material; return c; };
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: true } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  assert.ok(files['textures/solid_FFFFFFFF.png'], 'NaN alpha → opaque FF byte, never "NaN"');
+  assert.match(files['Test_r1to1.mtl'], /\nd 1\.0000\n/, 'NaN alpha → d 1.0000, never "NaN"');
+  assert.doesNotMatch(files['Test_r1to1.mtl'], /NaN/, 'no literal NaN leaks into the MTL');
+});
+
 await test('OBJ synthesis: textured shader is NOT synthesised (real PNG path owns it)', async () => {
   const tex = { name: 'paint', getBaseSize: () => ({ width: 2, height: 2 }), readPixels: () => new Uint8Array(16) };
   const m = mesh('m1', { color: { r: 1, g: 0, b: 0 } });
