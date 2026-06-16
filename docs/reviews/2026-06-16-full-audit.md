@@ -132,8 +132,15 @@ over N meshes — not a per-frame cost; left as-is.
   case yields between assets; the residual is a single huge asset. The only real fix is a
   Web Worker offload (same total time, off the main thread) — an architectural, scoped
   change, justified by this data but not a blind patch.
-- #17 Properties full-rebuild per transform commit — DOM perf; needs a browser profile.
-- `_waitReady` 2 s cap on heavy capture — needs a heavy-asset repro to retune safely.
+- `_waitReady` 2 s cap on heavy capture — needs a heavy-asset repro to retune safely
+  (the one remaining item that genuinely can't be measured without real heavy assets).
+
+**#17 Properties full-rebuild per transform commit — VERIFIED non-issue.** The rebuild
+is subscribed to `TRANSFORM_COMMITTED`, which fires at drag-END / nudge (via
+`PivotSession._onGizmoDragEnd`), NOT per frame; and `renderShaderPreview` returns a cheap
+CSS swatch or a PRE-BAKED thumbnail data-URL (generated once at import via
+`_generateThumbnailFor`, never re-rendered). A once-per-commit `innerHTML` rebuild of cheap
+strings is the standard property-panel pattern — no per-frame or expensive work. Won't-fix.
 
 **#15 per-import shader dedupe O(M×S) — MEASURED, reclassified won't-fix.** A headless
 bench of the real signature scan: M=50/S=200 → 1.1 ms, M=200/S=500 → 13 ms, and only an
