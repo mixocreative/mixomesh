@@ -134,7 +134,12 @@ over N meshes — not a per-frame cost; left as-is.
   under sweep pressure: it sits on the persistence-critical / Mimaki-embed save path, where
   a worker-transfer or fallback-selection bug would risk **project-file corruption (HIGH)**
   to shave a sub-second freeze on an infrequent, deliberate action (LOW) — a bad trade for
-  a blind patch. Greenlight it as its own scoped task; the data + design are recorded here.
+  a blind patch. Routed as a scoped task chip (`task_563d7417`) with the data + design +
+  corruption-safety constraints. De-risked ahead of time: a STANDARD-base64 reference test
+  (`tests/persistence.test.mjs`) now pins `_b64FromBuf` output against canonical base64
+  across the len%3 ∈ {0,1,2} groupings + the 0x8000 chunk boundary, so the worker refactor
+  has a ready byte-identical guard (round-trip alone couldn't catch a self-consistent but
+  non-standard encoder).
 
 **#17 Properties full-rebuild per transform commit — VERIFIED non-issue.** The rebuild
 is subscribed to `TRANSFORM_COMMITTED`, which fires at drag-END / nudge (via

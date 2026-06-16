@@ -98,6 +98,27 @@ await test('base64: > 0x8000 crosses the String.fromCharCode chunk boundary inta
   eqBytes(round, src, 'byte mismatch across chunk boundary');
 });
 
+await test('base64: output is STANDARD base64 (matches a canonical reference, not just self-consistent)', () => {
+  // Round-trip alone can't catch an encoder that's self-consistent but emits
+  // non-standard base64 (e.g. wrong chunk alignment, swapped alphabet). Pin
+  // _b64FromBuf against Node's canonical Buffer base64 across byte patterns
+  // that exercise the 3-byte base64 grouping + padding (len % 3 ∈ {0,1,2}) and
+  // the 0x8000 String.fromCharCode chunking. This is also the byte-identical
+  // guard the deferred #3 worker-offload refactor must keep green.
+  const cases = [
+    Uint8Array.from({ length: 256 }, (_, i) => i),                 // full byte range
+    Uint8Array.from({ length: 255 }, (_, i) => (i * 7) & 0xff),    // len % 3 == 0
+    Uint8Array.from({ length: 256 }, (_, i) => (i * 7) & 0xff),    // len % 3 == 1
+    Uint8Array.from({ length: 257 }, (_, i) => (i * 7) & 0xff),    // len % 3 == 2
+    Uint8Array.from({ length: 0x8001 }, (_, i) => (i * 31 + 7) & 0xff), // crosses chunk
+  ];
+  for (const src of cases) {
+    const got = _b64FromBuf(src.buffer);
+    const ref = Buffer.from(src).toString('base64');
+    assert.equal(got, ref, `non-standard base64 for length ${src.length}`);
+  }
+});
+
 // ── sha256 / ext ─────────────────────────────────────────
 
 await test('sha256: known vectors (empty, "abc")', async () => {
