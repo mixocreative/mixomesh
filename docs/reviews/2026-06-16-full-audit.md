@@ -123,17 +123,18 @@ over N meshes — not a per-frame cost; left as-is.
   disposed in normal flow); a per-add dispose observer would itself leak observers.
 - `_buildGroupUnion` Uint32 overflow needs >4 billion verts — physically unreachable.
 
-**Deferred — perf, MEASURED 2026-06-16 (numbers drive the call):**
+**The ONE remaining open item — #3, measured, scoped, risk-gated:**
 - #3 manual-save main-thread base64 — **confirmed real**: a headless bench of the
   chunked-`fromCharCode`+`btoa` path measured 41 / 193 / 402 ms for a single 10 / 50 /
   100 MB asset (synchronous, blocks the main thread). BUT it only bites **manual save /
   explicit .mixo embed** — autosave already skips embedding (A9) — and
   `_serialiseAssetLibrary` already `await`s `getAssetBytes` per asset, so the *multi-asset*
   case yields between assets; the residual is a single huge asset. The only real fix is a
-  Web Worker offload (same total time, off the main thread) — an architectural, scoped
-  change, justified by this data but not a blind patch.
-- `_waitReady` 2 s cap on heavy capture — needs a heavy-asset repro to retune safely
-  (the one remaining item that genuinely can't be measured without real heavy assets).
+  Web Worker offload (same total time, off the main thread). It is deliberately NOT patched
+  under sweep pressure: it sits on the persistence-critical / Mimaki-embed save path, where
+  a worker-transfer or fallback-selection bug would risk **project-file corruption (HIGH)**
+  to shave a sub-second freeze on an infrequent, deliberate action (LOW) — a bad trade for
+  a blind patch. Greenlight it as its own scoped task; the data + design are recorded here.
 
 **#17 Properties full-rebuild per transform commit — VERIFIED non-issue.** The rebuild
 is subscribed to `TRANSFORM_COMMITTED`, which fires at drag-END / nudge (via

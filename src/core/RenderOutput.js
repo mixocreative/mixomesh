@@ -395,12 +395,21 @@ export async function captureFrameRGBA({ width = 256, height = 256 } = {}) {
   }
 }
 
+// Poll a REAL readiness signal (RTT ready + camera ready), not a blind sleep,
+// so a fast scene returns immediately. The ceiling only bounds a genuinely-stuck
+// capture: 2 s was too short for the heavy 4096²+/high-poly print scenes this
+// tool targets — their textures can still be uploading past 2 s — so a capture
+// would spuriously fail (audit LOW). 10 s covers heavy GPU uploads while still
+// erroring (rather than hanging) if readiness never arrives.
+const _READY_TIMEOUT_MS = 10000;
+const _READY_POLL_MS = 10;
 async function _waitReady(texture, camera) {
-  for (let i = 0; i < 200; i++) {
+  const tries = Math.ceil(_READY_TIMEOUT_MS / _READY_POLL_MS);
+  for (let i = 0; i < tries; i++) {
     if (texture.isReadyForRendering() && camera.isReady(true)) return;
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise(r => setTimeout(r, _READY_POLL_MS));
   }
-  throw new Error('Render target never became ready');
+  throw new Error(`Render target never became ready after ${_READY_TIMEOUT_MS / 1000}s`);
 }
 
 // ── Turntable video ──────────────────────────────────────
