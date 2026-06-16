@@ -123,15 +123,26 @@ over N meshes — not a per-frame cost; left as-is.
   disposed in normal flow); a per-add dispose observer would itself leak observers.
 - `_buildGroupUnion` Uint32 overflow needs >4 billion verts — physically unreachable.
 
-**Deferred — perf, needs a benchmark/fixture before a safe change (not blind):**
-- #3 manual-save main-thread base64 — big-scene stall; needs a worker/streaming design.
-- #15 per-import shader dedupe O(M×S) — refactor to an incremental `signature→id` Map is
-  behavior-sensitive (within/cross-import dedup ordering + the `replace`-branch signature
-  change). Attempted to pin it with a headless guard first, but the env's mock materials
-  don't satisfy `_detectType`'s `instanceof` checks (PBR variant classes absent), so a safe
-  guard needs a browser fixture or a dedicated benchmark — exploration reverted.
-- #17 Properties full-rebuild per transform commit — DOM perf; needs measurement.
+**Deferred — perf, MEASURED 2026-06-16 (numbers drive the call):**
+- #3 manual-save main-thread base64 — **confirmed real**: a headless bench of the
+  chunked-`fromCharCode`+`btoa` path measured 41 / 193 / 402 ms for a single 10 / 50 /
+  100 MB asset (synchronous, blocks the main thread). BUT it only bites **manual save /
+  explicit .mixo embed** — autosave already skips embedding (A9) — and
+  `_serialiseAssetLibrary` already `await`s `getAssetBytes` per asset, so the *multi-asset*
+  case yields between assets; the residual is a single huge asset. The only real fix is a
+  Web Worker offload (same total time, off the main thread) — an architectural, scoped
+  change, justified by this data but not a blind patch.
+- #17 Properties full-rebuild per transform commit — DOM perf; needs a browser profile.
 - `_waitReady` 2 s cap on heavy capture — needs a heavy-asset repro to retune safely.
+
+**#15 per-import shader dedupe O(M×S) — MEASURED, reclassified won't-fix.** A headless
+bench of the real signature scan: M=50/S=200 → 1.1 ms, M=200/S=500 → 13 ms, and only an
+*implausible* M=500/S=1000 simultaneous import → 78 ms (a one-time import cost, not
+per-frame). The incremental `signature→id` Map (map variants measured 0.2–1.1 ms) only
+matters at scales this hobbyist-print tool won't see, and the refactor is behavior-
+sensitive (within/cross-import dedup ordering + the `replace`-branch signature change)
+and can't even be guarded headlessly (env mock materials fail `_detectType`'s `instanceof`).
+Not worth the regression risk for a sub-15 ms realistic-scale cost.
 
 **Won't-fix — below the value/risk threshold (each verified, dispositioned):**
 - #5 `.dup` name collision — only at 999 objects sharing one stem (implausible here);
