@@ -145,6 +145,7 @@ async function _buildContainer(scene, zip, modelXml) {
 
   const container = new BABYLON.AssetContainer(scene);
   const flip = Z_UP_TO_Y_UP();
+  const usedTexIds = new Set();   // texture2d ids actually bound to a material
 
   // Build placements: prefer <build><item>; if absent, place every meshed
   // object at identity (a model with geometry but no build section).
@@ -222,6 +223,7 @@ async function _buildContainer(scene, zip, modelXml) {
         bt.name = `${mesh.name}__tex`;
         mat.diffuseTexture = bt;
         container.textures?.push?.(bt);
+        usedTexIds.add(tg.texId);
       } else {
         mat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
       }
@@ -240,6 +242,13 @@ async function _buildContainer(scene, zip, modelXml) {
     scene.removeMesh(mesh);
     scene.removeMaterial(mat);
     made++;
+  }
+
+  // Revoke blob URLs for texture2d parts that no built object referenced
+  // (audit LOW #8) — used textures keep their URL alive for the live Babylon
+  // texture; unused ones would otherwise leak for the page's lifetime.
+  for (const [tid, t] of textures) {
+    if (t.url && !usedTexIds.has(tid)) { try { URL.revokeObjectURL(t.url); } catch { /* */ } }
   }
 
   if (!made) throw new Error('3MF: no importable mesh objects (component-only assemblies are unsupported)');

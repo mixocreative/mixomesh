@@ -225,8 +225,16 @@ function _cloneMaterialWithTexture(base, name) {
   for (const slot of ['diffuseTexture', 'albedoTexture', 'baseTexture']) {
     const t = base[slot];
     if (t && typeof t.clone === 'function') {
-      try { clone[slot] = t.clone(); }
-      catch { /* clone() can throw on raw textures — leave the shared pointer */ }
+      try {
+        const ct = t.clone();
+        // Full-res-lock (audit LOW #16): export resolves the full-resolution
+        // source bytes via texture.metadata.mixoAssetId. Babylon's
+        // Texture.clone() does not reliably carry custom `metadata`, so copy it
+        // explicitly — without it a UV-override clone would fall back to GPU
+        // readback (downscaled), breaking Mimaki fidelity.
+        if (t.metadata && ct && !ct.metadata) ct.metadata = { ...t.metadata };
+        clone[slot] = ct;
+      } catch { /* clone() can throw on raw textures — leave the shared pointer */ }
     }
   }
   return clone;

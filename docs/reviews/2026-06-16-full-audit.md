@@ -102,7 +102,13 @@ Persistence: SceneObject `sourceUnit` never serialized (latent; geometry still c
 **Fixed:** restoreContainer OBJ-URL leak on throw (#4, catch mirrors live import);
 `_printPartsHaveWarnings` optional-chains `e.results` (#18); dead MediaRecorder-era
 `turntableAlpha`/`pickVideoFormat` removed (#13); bedDimensions↔targetPrinterId drift
-pinned by a config-source-of-truth test (#24).
+pinned by a config-source-of-truth test (#24); UV-override texture clone now copies
+`metadata` explicitly so `mixoAssetId` survives → full-res export source resolves
+(#16, Mimaki lock); ThreeMFLoader revokes blob URLs for unreferenced texture2d parts (#8).
+
+**`#21` premise wrong:** BoxSelect's `getForwardRay` allocation is per-mesh at the
+single `end()` resolve, not per pointermove (`update()` only redraws the div). One-shot
+over N meshes — not a per-frame cost; left as-is.
 
 **Not a bug / intentional (verified, left as-is):**
 - `_resolveAssetBlob` tier-1 path-trust is the **live-link** contract — it lets an
@@ -119,13 +125,12 @@ pinned by a config-source-of-truth test (#24).
 
 **Open (deferred — perf needs measurement, or genuinely minor edges):** manual-save
 main-thread base64 (#3, big-scene stall — needs a worker/streaming design); per-import
-shader dedupe O(M×S) (#15); Properties full-rebuild per transform commit (#17); BoxSelect
-per-mesh Ray alloc (#21); `_waitReady` 2 s cap on heavy capture; ThreeMFLoader unused
-blob-URL leak (#8); UV-override `Texture.clone` metadata copy (#16, full-res-lock — verify
-live); ratio no-op on a part with no live mesh (#20, ghost edge); cursor visibility on load
-(#22); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5); group-cache stale
-siblings (#6); SceneObject `sourceUnit` not serialized (#1, latent); 3MF re-import scale
-round-trip (#9, documented); solid-PNG/MTL `d` NaN-alpha desync (#10).
+shader dedupe O(M×S) (#15); Properties full-rebuild per transform commit (#17);
+`_waitReady` 2 s cap on heavy capture; ratio no-op on a part with no live mesh (#20,
+ghost edge); cursor visibility on load (#22); copy-`Object` stale-lead (#23); `.dup`
+name collision at 999+ (#5); group-cache stale siblings (#6); SceneObject `sourceUnit`
+not serialized (#1, latent); 3MF re-import scale round-trip (#9, documented);
+solid-PNG/MTL `d` NaN-alpha desync (#10).
 
 ## Recurring themes
 1. **Logical-object completeness** — the multi-primitive grouping I added is now load-bearing across consumers; several (DuplicateCommand, SmartReplace, ShaderPanel assign, outline, follow-camera) weren't updated to expand parts. The expansion helper exists (`logicalObjectPartIds`/`logicalObjectCommandIds`) — these are "forgot to call it" sites.
