@@ -113,6 +113,7 @@
   "print.printScaleHelp": "預設以各物件顯示的大小（各自比例）匯出。新增目標比例可額外匯出重新縮放的版本（例如 1:72 物件指定 1:144 即為一半）。每個項目一個檔案。",
   "print.asShown": "依顯示大小",
   "print.addRatio": "新增比例...",
+  "print.customRatioPlaceholder": "例如 1:35  (Enter)",
   "print.removeRatio": "移除此目標比例",
   "print.exportScaleLabel": "列印匯出比例：",
   "print.exportScaleUnit": "（場景 BU -> 匯出 mm）",

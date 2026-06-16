@@ -113,6 +113,7 @@
   "print.printScaleHelp": "既定では各オブジェクトを表示サイズ（各自の縮尺）で書き出します。ターゲット比を追加すると再スケールした版も書き出せます（例：1:72 のオブジェクトに 1:144 を指定すると半分）。項目ごとに1ファイル。",
   "print.asShown": "表示どおり",
   "print.addRatio": "比を追加...",
+  "print.customRatioPlaceholder": "例: 1:35  (Enter)",
   "print.removeRatio": "このターゲット比を削除",
   "print.exportScaleLabel": "プリント書き出しスケール:",
   "print.exportScaleUnit": "（シーン BU -> 書き出し mm）",

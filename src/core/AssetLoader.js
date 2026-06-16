@@ -773,7 +773,7 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
   for (const [id, group] of Object.entries(groups)) {
     groupsToAdd[id] = { ...group, childIds: [] };
   }
-  const logicalLeadBySourceGroup = new Map();
+  const logicalLeadByKey = new Map();
 
   for (const mesh of container.meshes) {
     if (!mesh.geometry || (mesh.getTotalVertices?.() ?? 0) === 0) continue;
@@ -783,18 +783,37 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
 
     const shaderId = mesh.material ? byMaterial.get(mesh.material) : null;
     const sourceGroupId = mesh.metadata?.sourceGroupId ?? null;
+    const parentId = hierarchy?.groupIdForMesh?.(mesh) ?? null;
+
+    // Logical-object key — group the parts of ONE printable object so the UI
+    // shows one entry and (critically) the validator welds them before the
+    // manifold check. Two cases, both watertight-as-a-whole but open along the
+    // seams between parts:
+    //   1. a MultiMaterial mesh split on import (shared `sourceGroupId`).
+    //   2. a glTF multi-primitive mesh — Babylon names the primitives
+    //      `<stem>_primitive<N>` and parents them under one node, so they share
+    //      a stem AND a parentId. (Most multi-shader models export this way.)
+    // Separate objects are distinct nodes with no `_primitive` name → never
+    // merged (verified against a 2-object glTF).
+    let logicalKey = null;
+    if (sourceGroupId) {
+      logicalKey = `sg:${sourceGroupId}`;
+    } else {
+      const prim = /^(.*)_primitive\d+$/.exec(mesh.name || '');
+      if (prim) logicalKey = `pp:${parentId ?? ''}:${prim[1]}`;
+    }
+
     let logicalObjectId = null;
     let isInternalPart = false;
-    if (sourceGroupId) {
-      logicalObjectId = logicalLeadBySourceGroup.get(sourceGroupId) ?? null;
+    if (logicalKey) {
+      logicalObjectId = logicalLeadByKey.get(logicalKey) ?? null;
       if (!logicalObjectId) {
         logicalObjectId = meshId;
-        logicalLeadBySourceGroup.set(sourceGroupId, meshId);
+        logicalLeadByKey.set(logicalKey, meshId);
       } else {
         isInternalPart = true;
       }
     }
-    const parentId = hierarchy?.groupIdForMesh?.(mesh) ?? null;
     const displayName = isInternalPart
       ? _uniqueObjectName(mesh.name || 'mesh', { ...getState().scene.objects, ...objectsToAdd })
       : _uniqueObjectName(_logicalDisplayName(mesh), { ...getState().scene.objects, ...objectsToAdd });

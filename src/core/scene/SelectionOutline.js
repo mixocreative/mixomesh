@@ -63,9 +63,14 @@ export function initSelectionOutline(scene, engine, camera) {
   _selMaskMatSelected.disableLighting = true;
   _selMaskMatSelected.backFaceCulling = false;
 
+  // Full-res + 4× MSAA so the silhouette edge is ANTI-ALIASED: the mask renders
+  // ONLY the selected meshes (not the whole scene), so full resolution is cheap,
+  // and MSAA gives sub-pixel edge coverage the outline pass inherits as a smooth
+  // ring instead of stair-stepped pixels.
   _selMaskRTT = new BABYLON.RenderTargetTexture(
-    'mx-sel-mask-rt', { ratio: 0.5 }, scene, false
+    'mx-sel-mask-rt', { ratio: 1.0 }, scene, false
   );
+  try { _selMaskRTT.samples = 4; } catch { /* MSAA RTT unsupported — falls back to 1 */ }
   _selMaskRTT.clearColor   = new BABYLON.Color4(0, 0, 0, 0);
   _selMaskRTT.renderList   = [];
   _selMaskRTT.activeCamera = camera;

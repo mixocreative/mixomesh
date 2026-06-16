@@ -47,11 +47,21 @@ only). Export format selection is deliberately button-driven in the UI: OBJ,
   stamping `sourceGroupId` on each SceneObject. One sibling is the visible
   logical object; the rest are internal parts used by shader/export code.
   Validator + exporter re-union the siblings by logical object.
+- **A multi-shader object is ONE logical object** regardless of how it arrives.
+  Two cases get the same `logicalObjectId` (`_registerInstantiatedMeshes`):
+  (1) a `BABYLON.MultiMaterial` split (shared `sourceGroupId`); (2) a glTF
+  **multi-primitive** mesh — Babylon names primitives `<stem>_primitive<N>` and
+  parents them under one node, so they share a stem + `parentId`. Most
+  multi-shader models export as case 2. **Separate objects are distinct nodes
+  with no `_primitive` name → never merged** (regression-tested with a 2-object
+  glTF). The lead part is the visible object; the rest are internal parts.
 - **Validation runs at import time, non-blocking.** Re-runs blocking before
-  export. Topology checks are **group-aware**: meshes with a `sourceGroupId`
-  are validated as the welded union of all siblings (positions only, no
-  data copy), not as individual shells. Integrity checks (zero verts,
-  missing registry) stay per-mesh.
+  export. Topology is **logical-object-aware**: a mesh whose
+  `logicalObjectPartIds` has >1 part is validated as the **welded union** of
+  those parts (positions only, no data copy), so seams between material parts
+  are not mistaken for holes and a real hole across the whole object IS caught.
+  Single-part objects validate directly. Integrity checks (zero verts, missing
+  registry) stay per-mesh.
 
 ### 0.2 Runtime
 
@@ -1493,12 +1503,19 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                //   Group-aware validator + exporter use this
                                //   to re-union part topology. See §0.1 +
                                //   §9 group-aware validation.
-  logicalObjectId,             // lead meshId for an imported logical object
-                               //   with internal material-split siblings.
-                               //   Null for ordinary single-mesh objects.
-  isInternalPart,              // true for hidden split siblings. They remain
-                               //   in state for shader binding/export, but
-                               //   Outliner/selection store the lead id.
+  logicalObjectId,             // lead meshId for a multi-part logical object.
+                               //   Set for BOTH a MultiMaterial split (shared
+                               //   sourceGroupId) AND a glTF multi-primitive
+                               //   mesh (parts named `<stem>_primitive<N>`
+                               //   sharing a stem + parentId). Null for ordinary
+                               //   single-mesh objects. logicalObjectPartIds()
+                               //   resolves the full part set; validation welds
+                               //   it. Separate objects (distinct nodes) never
+                               //   share one.
+  isInternalPart,              // true for hidden parts (split sibling or extra
+                               //   primitive). They remain in state for shader
+                               //   binding/export, but Outliner/selection store
+                               //   the lead id.
 }
 ```
 
@@ -1799,30 +1816,35 @@ MeshValidator.autoFix(babylonMesh, results)        → Promise<ValidationResult[
 MeshValidator.hasErrors(results)                   → boolean
 MeshValidator.hasWarnings(results)                 → boolean
 MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, ValidationResult[]>>
-MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // welded-union path
+MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // legacy sourceGroupId union (kept for API; validateMesh uses logical parts)
 ```
 
-### Group-aware topology checks
+### Logical-object-aware topology checks
 
-Split-on-import (§8 *Load Flow*) makes individual shells non-watertight by
-construction — a 6-face cube with 3 shaders becomes 3 meshes of 2 faces
-each, each with 6 boundary edges by definition. Per-shell topology checks
-lose all signal in this case.
+A multi-shader object makes individual parts non-watertight by construction —
+a 6-face cube with 3 shaders becomes 3 meshes of 2 faces each, each with
+boundary edges by definition, whether the parts came from a MultiMaterial split
+OR a glTF multi-primitive mesh (§8 *Load Flow* — both share a `logicalObjectId`).
+Per-part topology checks lose all signal in this case.
 
-**Rule:** when validating a mesh whose `SceneObject.sourceGroupId` is set,
-topology checks (`nonManifold`, `invertedNormals`) run on the **welded
-union of all siblings**, not on the individual mesh:
+**Rule:** `validateMesh` computes `logicalObjectPartIds(meshId)`. When >1 live
+part, topology (`nonManifold`) runs on the **welded union of those parts**, not
+the individual mesh:
 
-1. Collect every SceneObject sharing this `sourceGroupId`.
-2. Concatenate their position arrays. Index buffers shift by the running
-   vertex offset so concatenated indices remain valid.
-3. Weld concatenated positions by distance (existing weld used by §9
-   non-manifold check) — siblings share coplanar seams, so welding
-   stitches them back into one logical part. **No data copied back into
-   Babylon meshes**; the welded buffers exist only inside the validator.
-4. Run topology checks on the welded union. Result is attached to **every**
-   sibling's `ValidationResult[]` so the Outliner shows the warning on any
-   row of the group.
+1. Collect the logical object's live, non-ghost parts.
+2. Concatenate their world position arrays; index buffers shift by the running
+   vertex offset so concatenated indices stay valid.
+3. Weld concatenated positions by distance (the §9 non-manifold weld) — parts
+   share coplanar seams, so welding stitches them into one watertight surface.
+   **No data copied back into Babylon meshes**; the welded buffers live only in
+   the validator.
+4. Run topology on the welded union. The `scope:'group'` result attaches to
+   **every** part's `ValidationResult[]` so the Outliner shows it on any row.
+
+This is why a multi-shader model now reports the *object's* true watertightness
+(and stops crying false non-manifold at every material seam). Single-part
+objects validate directly. **Separate objects are never welded together** — only
+parts that share a `logicalObjectId` (split group or glTF primitive set).
 
 **Integrity checks** (zero-vertex mesh, missing registry entry, exceeds bed
 volume) stay per-mesh — they answer about the individual shell, not the

@@ -15,8 +15,10 @@ export const ACCENT_HEX = '#f59e0b';
 // Dark stone variant for selection outline + 3D cursor when the viewport bg
 // is LIGHT (warm amber-on-light reads as washed-out). Auto-flipped by
 // SceneManager.applyRenderSettings based on render.background.
-export const OUTLINE_ACTIVE_LIGHT_HEX   = '#5c1f08';   // deep burnt amber
-export const OUTLINE_SELECTED_LIGHT_HEX = '#8a3c0a';   // medium amber-brown
+// Yellowish-orange on the (default) light/cream bg — saturated enough to read
+// against cream; ACTIVE brighter than the deeper SELECTED.
+export const OUTLINE_ACTIVE_LIGHT_HEX   = '#f97316';   // vivid orange (active, brighter)
+export const OUTLINE_SELECTED_LIGHT_HEX = '#c2410c';   // deeper orange-700 (selected)
 export const CURSOR_LIGHT_HEX           = '#5c1f08';
 
 export const DEFAULT_GRID_CELL_MM = 10;
@@ -50,7 +52,8 @@ export const OUTLINE_RADIUS_PX = 4.5;
 export const OUTLINE_INTENSITY = 2.0;
 export const MASK_BRIGHTNESS_ACTIVE = 1.0;
 export const MASK_BRIGHTNESS_SELECTED = 0.5;
-// Two-tone selection outline: the ACTIVE object gets a deeper/darker orange so
-// it reads apart from the other (accent-amber) selected objects.
-export const OUTLINE_ACTIVE_HEX   = '#c2410c';   // orange-700 (darker)
-export const OUTLINE_SELECTED_HEX = ACCENT_HEX;  // amber accent
+// Two-tone selection outline (yellowish-orange family): the ACTIVE object gets
+// a BRIGHTER yellow-orange so it reads apart from the other (amber) selected
+// objects. (Dark-bg variants; light-bg pair above.)
+export const OUTLINE_ACTIVE_HEX   = '#fcc419';   // bright yellow-orange (active)
+export const OUTLINE_SELECTED_HEX = ACCENT_HEX;  // amber accent (selected, dimmer)

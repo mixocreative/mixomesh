@@ -85,6 +85,53 @@
 .pp-ratio-input:focus {
   border-color: var(--accent);
 }
+.pp-ratio-input[hidden] { display: none; }
+
+/* Export target ratios as pills */
+.pp-ratio-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.pp-ratio-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 2px 1px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-0);
+  line-height: 1.6;
+}
+.pp-ratio-pill.is-asshown {
+  padding: 1px 11px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.pp-ratio-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.pp-ratio-remove:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
 
 .pp-xyz-row {
   display: flex;

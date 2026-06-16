@@ -113,6 +113,7 @@
   "print.printScaleHelp": "Default prints each object at the size shown (its own Ratio). Add a target ratio to also export rescaled copies — e.g. 1:144 on a 1:72 object is half size. One file per entry.",
   "print.asShown": "As shown",
   "print.addRatio": "Add ratio...",
+  "print.customRatioPlaceholder": "e.g. 1:35  (Enter)",
   "print.removeRatio": "Remove this target ratio",
   "print.exportScaleLabel": "Print export scale:",
   "print.exportScaleUnit": "(scene BU -> exported mm)",

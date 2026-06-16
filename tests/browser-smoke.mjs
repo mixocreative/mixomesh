@@ -851,6 +851,58 @@ async function main() {
         `glTF restore AABB (incl RH→LH flip) != fresh import: fresh=${JSON.stringify(f)} restored=${JSON.stringify(r)}`);
     }
 
+    // ── Multi-shader object: weld parts for validation, don't merge objects ─
+    // (a) A CLOSED cube split into 2 material primitives: each half is open, but
+    //     the welded union must validate watertight (0 non-manifold) and present
+    //     as ONE logical object. (b) Two SEPARATE objects must stay two.
+    const splitVal = await evaluate(cdp, `(async () => {
+      const f32 = a => { const b=new ArrayBuffer(a.length*4),d=new DataView(b); a.forEach((v,i)=>d.setFloat32(i*4,v,true)); return new Uint8Array(b); };
+      const u16 = a => { const b=new ArrayBuffer(a.length*2),d=new DataView(b); a.forEach((v,i)=>d.setUint16(i*2,v,true)); return new Uint8Array(b); };
+      const cat = (...a)=>{let n=0;a.forEach(x=>n+=x.length);const r=new Uint8Array(n);let o=0;a.forEach(x=>{r.set(x,o);o+=x.length;});return r;};
+      const b64 = u8 => { let s=''; for(const b of u8) s+=String.fromCharCode(b); return btoa(s); };
+      const { AssetLoader } = await import('/src/core/AssetLoader.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const { MeshValidator } = await import('/src/core/MeshValidator.js');
+      const { logicalObjectPartIds, shouldDisplayObject } = await import('/src/core/LogicalObjects.js');
+      // (a) closed cube, 12 tris split 6/6 into two material primitives.
+      const V = [0,0,0,1,0,0,1,1,0,0,1,0,0,0,1,1,0,1,1,1,1,0,1,1];
+      const I = [0,1,2,0,2,3, 4,6,5,4,7,6, 0,4,5,0,5,1, 1,5,6,1,6,2, 2,6,7,2,7,3, 3,7,4,3,4,0];
+      const pos=f32(V), i0=u16(I.slice(0,18)), i1=u16(I.slice(18)), bin=cat(pos,i0,i1);
+      const cube = { asset:{version:'2.0'},
+        buffers:[{byteLength:bin.length,uri:'data:application/octet-stream;base64,'+b64(bin)}],
+        bufferViews:[{buffer:0,byteOffset:0,byteLength:pos.length,target:34962},{buffer:0,byteOffset:pos.length,byteLength:i0.length,target:34963},{buffer:0,byteOffset:pos.length+i0.length,byteLength:i1.length,target:34963}],
+        accessors:[{bufferView:0,componentType:5126,count:8,type:'VEC3',min:[0,0,0],max:[1,1,1]},{bufferView:1,componentType:5123,count:18,type:'SCALAR'},{bufferView:2,componentType:5123,count:18,type:'SCALAR'}],
+        materials:[{pbrMetallicRoughness:{baseColorFactor:[1,0,0,1]}},{pbrMetallicRoughness:{baseColorFactor:[0,0,1,1]}}],
+        meshes:[{primitives:[{attributes:{POSITION:0},indices:1,material:0},{attributes:{POSITION:0},indices:2,material:1}]}],
+        nodes:[{mesh:0,name:'Cube2Mat'}], scenes:[{nodes:[0]}], scene:0 };
+      const cubeIds = await AssetLoader.loadFromBlob(new Blob([JSON.stringify(cube)],{type:'model/gltf+json'}),'cube2.gltf');
+      let objs = getState().scene.objects;
+      const lead = cubeIds.find(id => shouldDisplayObject(objs[id])) ?? cubeIds[0];
+      const cubeParts = logicalObjectPartIds(lead, objs).length;
+      const cubeShown = cubeIds.filter(id => shouldDisplayObject(objs[id])).length;
+      const res = await MeshValidator.validateMesh(AssetLoader.getBabylonMesh(lead));
+      const nm = res.find(r => r.type === 'nonManifold');
+      // (b) two separate single-material objects.
+      const tpos=f32([0,0,0,1,0,0,0,1,0]), tidx=u16([0,1,2]), tbin=cat(tpos,tidx);
+      const two = { asset:{version:'2.0'},
+        buffers:[{byteLength:tbin.length,uri:'data:application/octet-stream;base64,'+b64(tbin)}],
+        bufferViews:[{buffer:0,byteOffset:0,byteLength:36,target:34962},{buffer:0,byteOffset:36,byteLength:6,target:34963}],
+        accessors:[{bufferView:0,componentType:5126,count:3,type:'VEC3',min:[0,0,0],max:[1,1,0]},{bufferView:1,componentType:5123,count:3,type:'SCALAR'}],
+        materials:[{pbrMetallicRoughness:{baseColorFactor:[1,0,0,1]}},{pbrMetallicRoughness:{baseColorFactor:[0,0,1,1]}}],
+        meshes:[{primitives:[{attributes:{POSITION:0},indices:1,material:0}]},{primitives:[{attributes:{POSITION:0},indices:1,material:1}]}],
+        nodes:[{mesh:0,name:'ObjA'},{mesh:1,name:'ObjB'}], scenes:[{nodes:[0,1]}], scene:0 };
+      const twoIds = await AssetLoader.loadFromBlob(new Blob([JSON.stringify(two)],{type:'model/gltf+json'}),'two.gltf');
+      objs = getState().scene.objects;
+      const twoShown = twoIds.filter(id => shouldDisplayObject(objs[id])).length;
+      const twoGrouped = logicalObjectPartIds(twoIds[0], objs).length;
+      return { cubeParts, cubeShown, cubeBad: nm ? nm.count : 0, twoShown, twoGrouped };
+    })()`);
+    assert(splitVal.cubeParts === 2, `multi-primitive object should group 2 parts, got ${splitVal.cubeParts}`);
+    assert(splitVal.cubeShown === 1, `multi-primitive object should present as ONE logical object, got ${splitVal.cubeShown}`);
+    assert(splitVal.cubeBad === 0, `welded union of a closed 2-material cube must be watertight (0 non-manifold), got ${splitVal.cubeBad}`);
+    assert(splitVal.twoShown === 2 && splitVal.twoGrouped === 1,
+      `two SEPARATE objects must NOT merge (shown=${splitVal.twoShown}, parts-of-first=${splitVal.twoGrouped})`);
+
     // ── Box (marquee) selection ──────────────────────────────────────────
     // Two complementary live checks against the origin STL mesh:
     //  (1) PROJECTION — frame the mesh, then run the module's real projector +

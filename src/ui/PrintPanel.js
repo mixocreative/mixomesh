@@ -149,24 +149,25 @@ function _renderScaleTab() {
   html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
   html += '<div class="pp-ratio-list" data-export-ratios>';
   if (exportRatios.length === 0) {
-    html += `<span class="pp-ratio-chip pp-ratio-asshown">${escapeHtml(t('print.asShown'))} (${escapeHtml(formatScaleRatio(activeR))})</span>`;
+    html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(activeR))}</span>`;
   } else {
     for (const r of exportRatios) {
-      html += `<span class="pp-ratio-chip">${escapeHtml(formatScaleRatio(r))} <button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
+      html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(formatScaleRatio(r))}</span><button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
     }
   }
   html += '</div>';
 
   html += '<div class="pp-ratio-select">';
-  html += '<select data-add-ratio-preset class="pp-preset-select">';
+  html += '<select data-add-ratio class="pp-preset-select">';
   html += `<option value="">${escapeHtml(t('print.addRatio'))}</option>`;
   for (const preset of SCALE_PRESETS) {
     if (preset.ratio !== null) {
       html += `<option value="${escapeAttr(preset.ratio)}">${escapeHtml(preset.label)}</option>`;
     }
   }
+  html += `<option value="custom">${escapeHtml(t('print.custom'))}</option>`;
   html += '</select>';
-  html += `<input type="text" class="pp-ratio-input" data-add-ratio-input placeholder="1:35">`;
+  html += `<input type="text" class="pp-ratio-input" data-add-ratio-input placeholder="${escapeAttr(t('print.customRatioPlaceholder'))}" hidden>`;
   html += '</div>';
   html += `<p class="pp-help">${escapeHtml(t('print.printScaleHelp'))}</p>`;
 
@@ -204,12 +205,27 @@ function _renderScaleTab() {
     _render();
   };
 
-  el.querySelector('[data-add-ratio-preset]')?.addEventListener('change', (e) => {
-    if (e.target.value) addRatio(parseFloat(e.target.value));
+  const addSel = el.querySelector('[data-add-ratio]');
+  const customInput = el.querySelector('[data-add-ratio-input]');
+  addSel?.addEventListener('change', (e) => {
+    const v = e.target.value;
+    if (v === 'custom') {
+      // Reveal the inline input; reset the select so re-picking Custom re-fires.
+      e.target.value = '';
+      if (customInput) { customInput.hidden = false; customInput.focus(); }
+    } else if (v) {
+      addRatio(parseFloat(v));          // preset → add directly (_render rebuilds)
+    }
   });
-  el.querySelector('[data-add-ratio-input]')?.addEventListener('change', (e) => {
-    const val = parseScaleRatioText(e.target.value);
-    if (val) addRatio(val); else e.target.value = '';
+  const commitCustom = () => {
+    const val = parseScaleRatioText(customInput.value);
+    if (val) addRatio(val);             // valid → add (_render rebuilds, input hides)
+    else { customInput.hidden = true; customInput.value = ''; }
+  };
+  customInput?.addEventListener('change', commitCustom);
+  customInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); commitCustom(); }
+    if (e.key === 'Escape') { customInput.hidden = true; customInput.value = ''; }
   });
   el.querySelectorAll('[data-remove-ratio]').forEach(btn => {
     btn.addEventListener('click', () => {

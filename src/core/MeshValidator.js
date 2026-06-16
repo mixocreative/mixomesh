@@ -1,6 +1,7 @@
 import { EVENTS } from './events.js';
 import { dispatch, getState, setState, subscribe } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
+import { logicalObjectPartIds } from './LogicalObjects.js';
 import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
 
 const BABYLON = window.BABYLON;
@@ -276,17 +277,40 @@ export async function validateMesh(mesh) {
   const results = [];
   // SceneObjects are keyed by minted meshId (stamped on mesh.metadata at
   // registration) — Babylon mesh.name is unrelated and collides across imports.
-  const sceneObj = getState().scene.objects?.[mesh.metadata?.meshId];
-  const groupId  = sceneObj?.sourceGroupId ?? null;
+  const objects = getState().scene.objects;
+  const selfId  = mesh.metadata?.meshId ?? null;
+  // The logical object's live, non-ghost parts. >1 ⇒ a multi-part object
+  // (MultiMaterial split OR glTF multi-primitive): validate the WELDED UNION so
+  // the seams between parts aren't reported as holes and a real hole across the
+  // whole object IS caught. Single-part ⇒ validate the mesh directly.
+  const partIds = selfId
+    ? logicalObjectPartIds(selfId, objects).filter(id =>
+        objects[id] && !objects[id].isGhost && AssetLoader.getBabylonMesh(id))
+    : [];
+  const isLogicalGroup = partIds.length > 1;
 
   const positions = _getPositions(mesh);
   const indices   = _getIndices(mesh);
 
   if (positions && indices && indices.length > 0) {
-    if (groupId) {
+    if (isLogicalGroup) {
       // Topology on the welded union; inverted-normals skipped on group scope.
-      const groupResults = await validateGroup(groupId);
-      results.push(...groupResults);
+      const siblings = partIds.map(id => ({ meshId: id, babylonMesh: AssetLoader.getBabylonMesh(id) }));
+      const { positions: up, indices: ui } = _buildGroupUnion(siblings);
+      if (up.length && ui.length) {
+        const { badEdgeCount } = await _topology(up, ui);
+        if (badEdgeCount > 0) {
+          results.push({
+            type: 'nonManifold',
+            severity: 'warning',
+            count: badEdgeCount,
+            autoFixAvailable: false,
+            fixed: false,
+            scope: 'group',
+            message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} across object (slicer-repairable)`,
+          });
+        }
+      }
     } else {
       const { badEdgeCount, inverted } = await _topology(positions, indices);
       if (badEdgeCount > 0) {
@@ -317,15 +341,13 @@ export async function validateMesh(mesh) {
 
   // Cache (A6): only for the LIVE registered mesh — export clones carry the
   // source meshId in metadata but must not overwrite live results.
-  const meshId = mesh.metadata?.meshId;
+  const meshId = selfId;
   const isLive = !!meshId && AssetLoader.getBabylonMesh(meshId) === mesh;
   if (isLive) {
-    if (groupId) {
-      // Group-scoped topology results attach to every sibling (Blueprint §9);
-      // per-mesh integrity results (bed bounds) stay on this mesh only.
-      const siblingIds = _collectGroupSiblings(groupId)
-        .map(s => s.meshId)
-        .filter(id => id !== meshId);
+    if (isLogicalGroup) {
+      // Group-scoped topology results attach to every logical part so each
+      // sibling's Outliner/Properties badge reflects the whole-object verdict.
+      const siblingIds = partIds.filter(id => id !== meshId);
       if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'));
     }
     _cacheResults([meshId], results);
