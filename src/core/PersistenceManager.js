@@ -637,6 +637,11 @@ async function _loadProject(doc) {
   const fm = getState().scene.camera.followMode;
   if (fm) SceneManager.setFollowMode(fm);
   Selection.set(getState().selection.selectedIds || [], getState().selection.activeId || null);
+  // Cursor visibility tracks pivotMode (set on every setPivotMode/interaction),
+  // but load restores only the cursor POSITION via setCursorFromState — sync
+  // visibility to the restored pivotMode so a 'cursor'-pivot project reopens
+  // with the 3D cursor showing (audit LOW #22).
+  SceneManager.setCursorVisible(getState().selection.pivotMode === 'cursor');
 
   _dirty = false;
   dispatch(EVENTS.PROJECT_SAVED, {});                        // project is clean post-load

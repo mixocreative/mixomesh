@@ -127,10 +127,14 @@ over N meshes — not a per-frame cost; left as-is.
 main-thread base64 (#3, big-scene stall — needs a worker/streaming design); per-import
 shader dedupe O(M×S) (#15); Properties full-rebuild per transform commit (#17);
 `_waitReady` 2 s cap on heavy capture; ratio no-op on a part with no live mesh (#20,
-ghost edge); cursor visibility on load (#22); copy-`Object` stale-lead (#23); `.dup`
-name collision at 999+ (#5); group-cache stale siblings (#6); SceneObject `sourceUnit`
-not serialized (#1, latent); 3MF re-import scale round-trip (#9, documented);
-solid-PNG/MTL `d` NaN-alpha desync (#10).
+ghost edge); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5);
+group-cache stale siblings (#6, ungroup-only edge on a non-blocking badge; deletes
+already drop the entry); SceneObject `sourceUnit` not serialized (#1, latent —
+`asset.sourceUnit` is the authoritative serialized source); 3MF re-import scale
+round-trip (#9, documented); solid-PNG/MTL `d` NaN-alpha desync (#10).
+
+Cursor visibility on load (#22) — **FIXED**: `_loadProject` now syncs
+`setCursorVisible(pivotMode === 'cursor')` after restoring selection.
 
 ## Recurring themes
 1. **Logical-object completeness** — the multi-primitive grouping I added is now load-bearing across consumers; several (DuplicateCommand, SmartReplace, ShaderPanel assign, outline, follow-camera) weren't updated to expand parts. The expansion helper exists (`logicalObjectPartIds`/`logicalObjectCommandIds`) — these are "forgot to call it" sites.
