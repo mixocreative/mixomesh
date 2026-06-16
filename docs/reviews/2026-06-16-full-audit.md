@@ -123,20 +123,28 @@ over N meshes — not a per-frame cost; left as-is.
   disposed in normal flow); a per-add dispose observer would itself leak observers.
 - `_buildGroupUnion` Uint32 overflow needs >4 billion verts — physically unreachable.
 
-**Open (deferred — perf needs measurement, or genuinely minor edges):** manual-save
-main-thread base64 (#3, big-scene stall — needs a worker/streaming design); per-import
-shader dedupe O(M×S) (#15 — refactor to an incremental `signature→id` Map is behavior-
-sensitive (within-import + cross-import dedup ordering, plus the `replace`-branch
-signature change); attempted to pin it with a headless guard first but the env's mock
-materials don't satisfy `_detectType`'s `instanceof` checks (PBR variant classes absent),
-so a safe guard needs a browser fixture or a dedicated benchmark — not a blind headless
-rewrite); Properties full-rebuild per transform commit (#17);
-`_waitReady` 2 s cap on heavy capture; ratio no-op on a part with no live mesh (#20,
-ghost edge); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5);
-group-cache stale siblings (#6, ungroup-only edge on a non-blocking badge; deletes
-already drop the entry); SceneObject `sourceUnit` not serialized (#1, latent —
-`asset.sourceUnit` is the authoritative serialized source); 3MF re-import scale
-round-trip (#9, documented).
+**Deferred — perf, needs a benchmark/fixture before a safe change (not blind):**
+- #3 manual-save main-thread base64 — big-scene stall; needs a worker/streaming design.
+- #15 per-import shader dedupe O(M×S) — refactor to an incremental `signature→id` Map is
+  behavior-sensitive (within/cross-import dedup ordering + the `replace`-branch signature
+  change). Attempted to pin it with a headless guard first, but the env's mock materials
+  don't satisfy `_detectType`'s `instanceof` checks (PBR variant classes absent), so a safe
+  guard needs a browser fixture or a dedicated benchmark — exploration reverted.
+- #17 Properties full-rebuild per transform commit — DOM perf; needs measurement.
+- `_waitReady` 2 s cap on heavy capture — needs a heavy-asset repro to retune safely.
+
+**Won't-fix — below the value/risk threshold (each verified, dispositioned):**
+- #5 `.dup` name collision — only at 999 objects sharing one stem (implausible here);
+  fixing means touching 6 name-generators for a scenario that won't occur.
+- #6 group-cache stale sibling — ungroup-only edge on a *non-blocking* badge; deletes
+  already `_dropEntry`, and the M2 seq machinery handles the real in-flight races.
+- #20 ratio no-op on a part with no live mesh — correct by design (a ghost has no geometry
+  to bake; the ratio is still recorded in state).
+- #23 copy-`Object` stale-lead — the deletion case is already guarded (`sourceGone` toast);
+  the residual is a narrow re-structure-after-copy edge.
+- #1 SceneObject `sourceUnit` not serialized — latent; `asset.sourceUnit` is the
+  authoritative serialized source the import seed actually uses.
+- #9 3MF re-import scale round-trip — documented limitation.
 
 Solid-PNG/MTL `d` NaN-alpha desync (#10) — **FIXED**: a shared `_safeAlpha01`
 treats a non-finite material alpha as opaque (1) in both the PNG α byte and the MTL
