@@ -147,14 +147,16 @@ CSS swatch or a PRE-BAKED thumbnail data-URL (generated once at import via
 `_generateThumbnailFor`, never re-rendered). A once-per-commit `innerHTML` rebuild of cheap
 strings is the standard property-panel pattern — no per-frame or expensive work. Won't-fix.
 
-**#15 per-import shader dedupe O(M×S) — MEASURED, reclassified won't-fix.** A headless
-bench of the real signature scan: M=50/S=200 → 1.1 ms, M=200/S=500 → 13 ms, and only an
-*implausible* M=500/S=1000 simultaneous import → 78 ms (a one-time import cost, not
-per-frame). The incremental `signature→id` Map (map variants measured 0.2–1.1 ms) only
-matters at scales this hobbyist-print tool won't see, and the refactor is behavior-
-sensitive (within/cross-import dedup ordering + the `replace`-branch signature change)
-and can't even be guarded headlessly (env mock materials fail `_detectType`'s `instanceof`).
-Not worth the regression risk for a sub-15 ms realistic-scale cost.
+**#15 per-import shader dedupe O(M×S) — FIXED 2026-06-16.** Measured first (signature scan
+1.1 ms @ M=50/S=200, 13 ms @ M=200/S=500, 78 ms @ M=500/S=1000), then refactored to an
+incremental `signature→id` Map: `_doRegister`/`_findNameConflicts` build one index
+(`_buildSignatureIndex`, first-id-per-signature = linear-scan first-match) and do O(1)
+lookups; the index is maintained as shaders are added (within-import dedupe) and on the
+`replace` branch (old→new signature). Also builds each material's entry ONCE per material
+(was twice). The behavior-sensitivity that blocked a headless guard (env mock materials
+fail `_detectType`'s `instanceof`) is now pinned by a REAL-Babylon browser-smoke guard:
+two identical materials in one import → one shader; a material identical to an existing
+shader → dedupes to it. Verified across 3 smoke runs.
 
 **Won't-fix — below the value/risk threshold (each verified, dispositioned):**
 - #5 `.dup` name collision — only at 999 objects sharing one stem (implausible here);

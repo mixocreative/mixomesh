@@ -810,7 +810,11 @@ async function main() {
         'endloop','endfacet','endsolid x',''].join('\\n');
       const ids = await al.AssetLoader.loadFromBlob(new Blob([stl], { type: 'model/stl' }), 'rt.stl', new B.Vector3(0,0,0), {});
       const id = ids[0];
-      await new Promise(r => setTimeout(r, 400));   // let import bounce settle (scaling→1)
+      // Deterministically settle the import bounce instead of racing a fixed
+      // wait: the bounce observer owns mesh.scaling for ~260ms and would clobber
+      // the ×3 node scale set below (the source of intermittent failures here).
+      await new Promise(r => setTimeout(r, 60));   // let instantiation + bounce register
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();
       const importedSize = sizeOf(id);
       const importedRatio = st.getState().scene.objects[id].ratio;
       hm.push(new hm.RescaleObjectCommand([id], 2));   // 1 → 2 ⇒ ×0.5 (baked)
@@ -1064,6 +1068,9 @@ async function main() {
       const dup = Object.keys(st.getState().scene.objects).find(k => !before.has(k));
       if (!dup) return { err: 'no duplicate created' };
       hm.push(new hm.RescaleObjectCommand([dup], 2));   // halve the copy only
+      // Settle the src + dup import bounce before measuring — the bounce owns
+      // node scaling for ~260ms and otherwise makes srcBefore/dupBefore flaky.
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();
       const srcBefore = sizeOf(src), dupBefore = sizeOf(dup);
       const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
       await pm.__test._loadProject(doc);
@@ -1114,6 +1121,47 @@ async function main() {
       'auto-fix types were not persisted to the .mixo doc (M1)');
     assert(fixRT.changed, 'normal-flip did not change the live winding (test setup)');
     assert(fixRT.replayed, 'auto-fix geometry edit did not replay on reload — fix vanished (M1)');
+
+    // ── Shader content-dedupe on import (audit #15 guard) ────────────────
+    // Pins registerFromContainer's auto-dedupe in REAL Babylon (headless mock
+    // materials don't satisfy _detectType). Guards the O(M+S) signature-index
+    // refactor: identical materials must still collapse to one shader, within a
+    // single import AND against an already-registered shader. Placed last so its
+    // material/shader churn can't perturb the bounce-timing of the round-trips.
+    const shDedup = await evaluate(cdp, `(async () => {
+      const { ShaderLibrary } = await import('/src/core/ShaderLibrary.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const { SceneManager } = await import('/src/core/SceneManager.js');
+      const B = window.BABYLON;
+      const scene = SceneManager.getScene();
+      const mk = (name, rgb) => { const m = new B.StandardMaterial(name, scene); m.diffuseColor = new B.Color3(rgb[0], rgb[1], rgb[2]); return m; };
+      const count = () => Object.keys(getState().scene.shaders).length;
+      const out = {};
+      // (1) two identical materials, DIFFERENT names, in ONE import → ONE shader
+      let before = count();
+      const a1 = mk('DedupWithinA', [0.13, 0.41, 0.77]);
+      const a2 = mk('DedupWithinB', [0.13, 0.41, 0.77]);
+      const mesh1 = { material: a1 }, mesh2 = { material: a2 };
+      const r1 = await ShaderLibrary.registerFromContainer({ materials: [a1, a2], meshes: [mesh1, mesh2] }, {});
+      out.withinAdded = count() - before;
+      out.withinIds = r1.shaderIds.length;
+      out.bothMeshesShare = mesh1.material === mesh2.material;
+      // (2) a material identical to an ALREADY-registered shader → dedups to it
+      const c1 = mk('DedupAcrossA', [0.2, 0.6, 0.9]);
+      const rc1 = await ShaderLibrary.registerFromContainer({ materials: [c1], meshes: [{ material: c1 }] }, {});
+      const c1Id = rc1.shaderIds[0];
+      before = count();
+      const c2 = mk('DedupAcrossB', [0.2, 0.6, 0.9]);   // same content, different name
+      const rc2 = await ShaderLibrary.registerFromContainer({ materials: [c2], meshes: [{ material: c2 }] }, {});
+      out.acrossAdded = count() - before;
+      out.acrossMappedToFirst = rc2.byMaterial.get(c2) === c1Id;
+      return out;
+    })()`);
+    assert(shDedup.withinAdded === 1 && shDedup.withinIds === 1,
+      `import dedupe: two identical materials should make ONE shader (added ${shDedup.withinAdded}, ids ${shDedup.withinIds})`);
+    assert(shDedup.bothMeshesShare, 'import dedupe: both meshes should end up on the one surviving material');
+    assert(shDedup.acrossAdded === 0 && shDedup.acrossMappedToFirst,
+      `import dedupe: a material identical to an existing shader must dedupe to it (added ${shDedup.acrossAdded}, mapped ${shDedup.acrossMappedToFirst})`);
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
