@@ -134,9 +134,11 @@ autosave skips embedding via A9). Fix: a Web Worker offload that keeps the save 
   (headless) or the worker errors — so no project-corruption risk on this critical path.
 - `_serialiseAssetLibrary` awaits `encodeBase64Async`; `_b64FromBuf` now delegates to the
   shared codec. Guards: STANDARD-base64 reference test + an async/sync byte-identity test
-  (`tests/persistence.test.mjs`), plus the browser smoke's `_buildDocument`→`_loadProject`
-  round-trips, which embed + decode bytes via the REAL worker in Chrome (would fail on any
-  byte mismatch). typecheck + 72 headless + build + browser smoke + export smoke green.
+  (`tests/persistence.test.mjs`, which hits the sync fallback headless), plus an EXPLICIT
+  browser-smoke pin that runs `encodeBase64Async` through the REAL Chrome worker across the
+  0x8000 chunk boundary and asserts it equals `_b64FromBuf` (and never detaches the source);
+  the existing `_buildDocument`→`_loadProject` round-trips also embed + decode via the real
+  worker. typecheck + 72 headless + build + browser smoke + export smoke green.
 
 **#17 Properties full-rebuild per transform commit — VERIFIED non-issue.** The rebuild
 is subscribed to `TRANSFORM_COMMITTED`, which fires at drag-END / nudge (via
