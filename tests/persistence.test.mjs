@@ -26,6 +26,7 @@ const {
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
   _arrToMap, _migrate,
 } = __test;
+const { encodeBase64Async } = await import('../src/core/Base64Worker.js');
 
 // ── Fake File System Access handles ──────────────────────
 
@@ -116,6 +117,19 @@ await test('base64: output is STANDARD base64 (matches a canonical reference, no
     const got = _b64FromBuf(src.buffer);
     const ref = Buffer.from(src).toString('base64');
     assert.equal(got, ref, `non-standard base64 for length ${src.length}`);
+  }
+});
+
+await test('base64: encodeBase64Async (save-path worker offload) is byte-identical to the sync codec', async () => {
+  // Headless has no Worker, so this exercises the sync FALLBACK — the same
+  // shared codec — which must equal `_b64FromBuf` exactly. The real worker path
+  // is covered end-to-end by the browser smoke's _buildDocument round-trips.
+  for (const len of [0, 1, 2, 3, 255, 256, 257, 0x8001]) {
+    const src = Uint8Array.from({ length: len }, (_, i) => (i * 31 + 7) & 0xff);
+    const viaWorker = await encodeBase64Async(src.buffer);
+    assert.equal(viaWorker, _b64FromBuf(src.buffer), `worker/sync mismatch at length ${len}`);
+    // And it survives the decode (no corruption introduced by the async path).
+    eqBytes(_bufFromB64(viaWorker), src, `round-trip mismatch at length ${len}`);
   }
 });
 

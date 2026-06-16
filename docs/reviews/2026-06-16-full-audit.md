@@ -123,23 +123,20 @@ over N meshes — not a per-frame cost; left as-is.
   disposed in normal flow); a per-add dispose observer would itself leak observers.
 - `_buildGroupUnion` Uint32 overflow needs >4 billion verts — physically unreachable.
 
-**The ONE remaining open item — #3, measured, scoped, risk-gated:**
-- #3 manual-save main-thread base64 — **confirmed real**: a headless bench of the
-  chunked-`fromCharCode`+`btoa` path measured 41 / 193 / 402 ms for a single 10 / 50 /
-  100 MB asset (synchronous, blocks the main thread). BUT it only bites **manual save /
-  explicit .mixo embed** — autosave already skips embedding (A9) — and
-  `_serialiseAssetLibrary` already `await`s `getAssetBytes` per asset, so the *multi-asset*
-  case yields between assets; the residual is a single huge asset. The only real fix is a
-  Web Worker offload (same total time, off the main thread). It is deliberately NOT patched
-  under sweep pressure: it sits on the persistence-critical / Mimaki-embed save path, where
-  a worker-transfer or fallback-selection bug would risk **project-file corruption (HIGH)**
-  to shave a sub-second freeze on an infrequent, deliberate action (LOW) — a bad trade for
-  a blind patch. Routed as a scoped task chip (`task_563d7417`) with the data + design +
-  corruption-safety constraints. De-risked ahead of time: a STANDARD-base64 reference test
-  (`tests/persistence.test.mjs`) now pins `_b64FromBuf` output against canonical base64
-  across the len%3 ∈ {0,1,2} groupings + the 0x8000 chunk boundary, so the worker refactor
-  has a ready byte-identical guard (round-trip alone couldn't catch a self-consistent but
-  non-standard encoder).
+**#3 manual-save main-thread base64 — FIXED 2026-06-16.** Measured first: a headless bench
+of the chunked-`fromCharCode`+`btoa` path showed 41 / 193 / 402 ms for a single 10 / 50 /
+100 MB asset, synchronous on the main thread (only on manual save / explicit .mixo embed —
+autosave skips embedding via A9). Fix: a Web Worker offload that keeps the save path safe:
+- One shared pure codec (`src/core/workers/base64Codec.js`) feeds BOTH the worker
+  (`Base64.worker.js`) and the sync fallback, so output is byte-identical by construction.
+- `Base64Worker.encodeBase64Async` COPIES the bytes and transfers the copy (the live buffer
+  is never detached), and falls back to the sync codec when `Worker` is unavailable
+  (headless) or the worker errors — so no project-corruption risk on this critical path.
+- `_serialiseAssetLibrary` awaits `encodeBase64Async`; `_b64FromBuf` now delegates to the
+  shared codec. Guards: STANDARD-base64 reference test + an async/sync byte-identity test
+  (`tests/persistence.test.mjs`), plus the browser smoke's `_buildDocument`→`_loadProject`
+  round-trips, which embed + decode bytes via the REAL worker in Chrome (would fail on any
+  byte mismatch). typecheck + 72 headless + build + browser smoke + export smoke green.
 
 **#17 Properties full-rebuild per transform commit — VERIFIED non-issue.** The rebuild
 is subscribed to `TRANSFORM_COMMITTED`, which fires at drag-END / nudge (via

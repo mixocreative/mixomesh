@@ -4,6 +4,8 @@ import {
 } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
 import { settleImportBounce } from './scene/ImportBounce.js';
+import { encodeBase64 } from './workers/base64Codec.js';
+import { encodeBase64Async } from './Base64Worker.js';
 import { capturePng } from './RenderOutput.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
@@ -47,14 +49,11 @@ const _ghostMeshes = new Set(); // wireframe placeholders for unresolved assets
 
 // ── Base64 / hashing ─────────────────────────────────────
 
+// Sync encode (shared codec, byte-identical to the worker path). Kept for any
+// synchronous caller + the byte-fidelity tests; manual save uses the off-thread
+// encodeBase64Async (audit #3) but falls back to this exact codec.
 function _b64FromBuf(buf) {
-  const bytes = new Uint8Array(buf);
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
+  return encodeBase64(buf);
 }
 
 function _bufFromB64(b64) {
@@ -154,7 +153,9 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
       try {
         const buf = await AssetLoader.getAssetBytes(a.id);
         if (buf) {
-          base.fileData    = _b64FromBuf(buf);
+          // Off-thread base64 so a large asset doesn't freeze the UI on save
+          // (audit #3); falls back to the identical sync codec without a Worker.
+          base.fileData    = await encodeBase64Async(buf);
           // Bytes are immutable per assetId — reuse the import-time hash
           // instead of re-hashing on every save (review M16).
           base.contentHash = a.contentHash ?? await _sha256Hex(buf);

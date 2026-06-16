@@ -763,6 +763,28 @@ async function main() {
     assert(stlDiag.color && stlDiag.color[0] === 0.4,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
+    // ── Base64 save-path worker: real-Worker output === sync codec (#3) ──
+    // Manual save embeds asset bytes via the off-thread encoder; a byte
+    // mismatch here would silently corrupt every embedded asset in the .mixo.
+    // Headless tests only ever hit the sync fallback (no Worker), so pin the
+    // REAL worker output against the synchronous codec across the 0x8000
+    // fromCharCode chunk boundary, and confirm the source is never detached.
+    const b64Worker = await evaluate(cdp, `(async () => {
+      const { encodeBase64Async, isBase64WorkerSupported } = await import('/src/core/Base64Worker.js');
+      const { __test } = await import('/src/core/PersistenceManager.js');
+      const out = { supported: isBase64WorkerSupported(), mismatches: [] };
+      for (const len of [0, 1, 2, 3, 255, 256, 257, 0x8000, 0x8001]) {
+        const src = Uint8Array.from({ length: len }, (_, i) => (i * 31 + 7) & 0xff);
+        const got = await encodeBase64Async(src.buffer);
+        if (got !== __test._b64FromBuf(src.buffer)) out.mismatches.push(len);
+        if (src.byteLength !== len) out.mismatches.push('detached@' + len);
+      }
+      return out;
+    })()`);
+    assert(b64Worker.supported, 'Base64 worker unsupported in Chrome — the save-path offload would never run');
+    assert(b64Worker.mismatches.length === 0,
+      `base64 worker diverged from the sync codec (or detached the source) at: ${b64Worker.mismatches.join(', ')}`);
+
     // ── Per-object ratio survives .mixo save → load (audit #1) ───────────
     // Import an STL, halve it via RescaleObjectCommand (ratio 1→2, baked into
     // vertices), round-trip through the REAL _buildDocument/_loadProject, and
