@@ -140,9 +140,16 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
     // passes skipEmbed (arch A9): re-encoding every asset to base64 each
     // 60s froze the main thread on big scenes; recovery resolves assets via
     // the live tiers (dir / hash-scan / file handle) using the kept hash.
-    if (skipEmbed) {
+    //
+    // EXCEPTION (M7): a LOOSE drag-drop has no dir/file handle, so its embedded
+    // bytes are the ONLY recovery path — autosave must embed it anyway or
+    // crash-recovery resolves it to a ghost. Container-owned textures still
+    // never carry standalone bytes (skipped either way).
+    const isContainerTexture = a.kind === 'texture' && a.isImported;
+    const hasLiveTier = !!a.directoryHandleKey || !!a.fileHandleKey;
+    if (skipEmbed && (hasLiveTier || isContainerTexture)) {
       base.contentHash = a.contentHash ?? null;
-    } else if (!(a.kind === 'texture' && a.isImported)) {
+    } else if (!isContainerTexture) {
       try {
         const buf = await AssetLoader.getAssetBytes(a.id);
         if (buf) {

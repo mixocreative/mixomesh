@@ -91,28 +91,42 @@ await test('saveAs → save: accepted picker → returns true', async () => {
   assert.equal(await PersistenceManager.saveAs(), true);
 });
 
-await test('A9: autosave documents skip byte embedding; explicit saves keep it', async () => {
+await test('A9/M7: autosave skips embedding for handle-backed assets, embeds handle-less loose drops', async () => {
   const { AssetLoader } = await import('../src/core/AssetLoader.js');
   AssetLoader.getAssetBytes = async () => new Uint8Array([1, 2, 3, 4]).buffer;
   AssetLoader.getBabylonMesh = () => null;
   setState(s => ({
     ...s,
-    scene: { ...s.scene, assetLibrary: { a1: {
-      id: 'a1', name: 'A', filename: 'a.glb', extension: '.glb', kind: 'mesh',
-      sourceUnit: 'millimeters', unitConfirmed: true, modelRatio: 1,
-      directoryHandleKey: null, fileHandleKey: null, contentHash: 'cafe01',
-    } } },
+    scene: { ...s.scene, assetLibrary: {
+      // Handle-backed: recovery can re-read the live file, so autosave skips bytes.
+      a1: {
+        id: 'a1', name: 'A', filename: 'a.glb', extension: '.glb', kind: 'mesh',
+        sourceUnit: 'millimeters', unitConfirmed: true, modelRatio: 1,
+        directoryHandleKey: null, fileHandleKey: 'fh:a', contentHash: 'cafe01',
+      },
+      // Loose drag-drop: NO handle, embedded bytes are the only recovery tier.
+      a2: {
+        id: 'a2', name: 'B', filename: 'b.glb', extension: '.glb', kind: 'mesh',
+        sourceUnit: 'millimeters', unitConfirmed: true, modelRatio: 1,
+        directoryHandleKey: null, fileHandleKey: null, contentHash: 'cafe02',
+      },
+    } },
   }), { silent: true });
 
   const full = await __test._buildDocument();
-  assert.ok(full.assetLibrary[0].fileData, 'explicit save embeds bytes');
-  assert.equal(full.assetLibrary[0].contentHash, 'cafe01', 'cached hash reused');
+  const fById = Object.fromEntries(full.assetLibrary.map(a => [a.id, a]));
+  assert.ok(fById.a1.fileData, 'explicit save embeds handle-backed asset');
+  assert.ok(fById.a2.fileData, 'explicit save embeds loose-drop asset');
+  assert.equal(fById.a1.contentHash, 'cafe01', 'cached hash reused');
 
   const auto = await __test._buildDocument({ skipEmbed: true });
-  assert.equal(auto.assetLibrary[0].fileData, null,
-    'autosave doc must not re-encode asset bytes every 60s (A9)');
-  assert.equal(auto.assetLibrary[0].contentHash, 'cafe01',
+  const aById = Object.fromEntries(auto.assetLibrary.map(a => [a.id, a]));
+  assert.equal(aById.a1.fileData, null,
+    'autosave must not re-encode a handle-backed asset every 60s (A9)');
+  assert.equal(aById.a1.contentHash, 'cafe01',
     'hash kept so tier-2 relink still works on recovery');
+  assert.ok(aById.a2.fileData,
+    'autosave MUST embed a handle-less loose drop or recovery ghosts it (M7)');
 });
 
 console.log('\n' + out.join('\n'));
