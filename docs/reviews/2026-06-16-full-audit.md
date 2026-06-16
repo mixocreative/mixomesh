@@ -125,7 +125,12 @@ over N meshes — not a per-frame cost; left as-is.
 
 **Open (deferred — perf needs measurement, or genuinely minor edges):** manual-save
 main-thread base64 (#3, big-scene stall — needs a worker/streaming design); per-import
-shader dedupe O(M×S) (#15); Properties full-rebuild per transform commit (#17);
+shader dedupe O(M×S) (#15 — refactor to an incremental `signature→id` Map is behavior-
+sensitive (within-import + cross-import dedup ordering, plus the `replace`-branch
+signature change); attempted to pin it with a headless guard first but the env's mock
+materials don't satisfy `_detectType`'s `instanceof` checks (PBR variant classes absent),
+so a safe guard needs a browser fixture or a dedicated benchmark — not a blind headless
+rewrite); Properties full-rebuild per transform commit (#17);
 `_waitReady` 2 s cap on heavy capture; ratio no-op on a part with no live mesh (#20,
 ghost edge); copy-`Object` stale-lead (#23); `.dup` name collision at 999+ (#5);
 group-cache stale siblings (#6, ungroup-only edge on a non-blocking badge; deletes
