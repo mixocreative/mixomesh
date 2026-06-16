@@ -327,6 +327,18 @@ function _renderValidationTab() {
       try {
         const results = await MeshValidator.validateMesh(mesh);
         await MeshValidator.autoFix(mesh, results);
+        // Record applied fixes so they survive .mixo reload (M1): the file
+        // keeps raw source bytes + ratio, so without this the restored mesh
+        // comes back with its original defects. Persistence replays them.
+        const applied = results.filter(r => r.fixed).map(r => r.type);
+        if (applied.length) {
+          setState(s => {
+            const o = s.scene.objects[meshId];
+            if (!o) return s;
+            const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
+            return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
+          }, { silent: true });
+        }
         Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
         _render();
       } catch (err) {

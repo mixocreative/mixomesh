@@ -378,34 +378,65 @@ export async function validateMesh(mesh) {
  * @param {ValidationResult[]} results
  * @returns {Promise<ValidationResult[]>} mutated results with fixed flags set
  */
+/**
+ * Apply ONE geometry fix by type to a live mesh. Shared by `autoFix` (the
+ * Print-tab button) and persistence replay so the on-load reproduction is
+ * bit-for-bit the same operation. Both fixes are scale-sensitive only via the
+ * absolute MERGE_DISTANCE, so callers must apply them AT the displayed scale
+ * (after the import seed + per-object ratio bake) for the weld to behave the
+ * same on reload as it did when first applied.
+ * @param {BABYLON.Mesh} mesh
+ * @param {'nonManifold'|'invertedNormals'} type
+ * @returns {boolean} true when the fix was applied
+ */
+export function applyGeometryFix(mesh, type) {
+  if (!mesh) return false;
+  if (type === 'nonManifold') {
+    if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
+      const vd = BABYLON.VertexData.ExtractFromMesh(mesh);
+      BABYLON.VertexData.MergeByDistance(vd, MERGE_DISTANCE);
+      vd.applyToMesh(mesh);
+    } else if (typeof mesh.mergeVerticesByDistance === 'function') {
+      mesh.mergeVerticesByDistance(MERGE_DISTANCE);
+    } else {
+      return false;
+    }
+    return true;
+  }
+  if (type === 'invertedNormals') {
+    const indices = mesh.getIndices();
+    if (!indices) return false;
+    const flipped = new Uint32Array(indices.length);
+    for (let i = 0; i < indices.length; i += 3) {
+      flipped[i]     = indices[i];
+      flipped[i + 1] = indices[i + 2];
+      flipped[i + 2] = indices[i + 1];
+    }
+    mesh.setIndices(flipped);
+    return true;
+  }
+  return false;
+}
+
 export async function autoFix(mesh, results) {
   for (const r of results) {
     if (!r.autoFixAvailable || r.fixed) continue;
-    if (r.type === 'nonManifold') {
-      if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
-        const vd = BABYLON.VertexData.ExtractFromMesh(mesh);
-        BABYLON.VertexData.MergeByDistance(vd, MERGE_DISTANCE);
-        vd.applyToMesh(mesh);
-      } else if (typeof mesh.mergeVerticesByDistance === 'function') {
-        mesh.mergeVerticesByDistance(MERGE_DISTANCE);
-      } else {
-        continue;
-      }
-      r.fixed = true;
-    } else if (r.type === 'invertedNormals') {
-      const indices = mesh.getIndices();
-      if (!indices) continue;
-      const flipped = new Uint32Array(indices.length);
-      for (let i = 0; i < indices.length; i += 3) {
-        flipped[i]     = indices[i];
-        flipped[i + 1] = indices[i + 2];
-        flipped[i + 2] = indices[i + 1];
-      }
-      mesh.setIndices(flipped);
-      r.fixed = true;
-    }
+    if (applyGeometryFix(mesh, r.type)) r.fixed = true;
   }
   return results;
+}
+
+/**
+ * Re-apply persisted geometry fixes after a reload (M1). The `.mixo` keeps raw
+ * source bytes + ratio, so the restored mesh comes back with its original
+ * defects; replaying the recorded fix types reproduces the repaired geometry.
+ * Must run AT the displayed scale (after the ratio bake) — see applyGeometryFix.
+ * @param {BABYLON.Mesh} mesh
+ * @param {string[]} types
+ */
+export function replayGeometryFixes(mesh, types) {
+  if (!mesh?.geometry || !Array.isArray(types)) return;
+  for (const type of types) applyGeometryFix(mesh, type);
 }
 
 /** @param {ValidationResult[]} results */
@@ -448,6 +479,7 @@ export function shouldAutoValidate(mesh) {
 
 export const MeshValidator = {
   init, invalidateAll,
-  validateMesh, validateGroup, autoFix, hasErrors, hasWarnings,
+  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes,
+  hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

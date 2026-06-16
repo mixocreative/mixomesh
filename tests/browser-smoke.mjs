@@ -1060,6 +1060,39 @@ async function main() {
         `sizes must survive reload distinctly: src ${dupRT.srcBefore}->${dupRT.srcAfter}, dup ${dupRT.dupBefore}->${dupRT.dupAfter}`);
     }
 
+    // ── Auto-fix geometry edits survive .mixo reload (audit M1) ─────────
+    // Apply a normal-flip fix to a live mesh + tag it, round-trip. Before the
+    // fix the edit lived only in live vertices (raw bytes reload undid it); now
+    // the applied fix types persist and replay on load.
+    const fixRT = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const mv = await import('/src/core/MeshValidator.js');
+      const B = window.BABYLON;
+      const idxOf = (mid) => { const m = sm.SceneManager.getScene().meshes.find(x=>x.metadata?.meshId===mid); return m ? Array.from(m.getIndices() || []) : null; };
+      const stl = ['solid x','facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 20 0 0','vertex 0 20 0','endloop','endfacet','endsolid x',''].join('\\n');
+      const ids = await al.AssetLoader.loadFromBlob(new Blob([stl],{type:'model/stl'}),'fix.stl',new B.Vector3(0,0,0),{});
+      const mid = ids[0];
+      await new Promise(r=>setTimeout(r,300));
+      const before = idxOf(mid);
+      const mesh = sm.SceneManager.getScene().meshes.find(x=>x.metadata?.meshId===mid);
+      mv.MeshValidator.applyGeometryFix(mesh, 'invertedNormals');     // flip live winding
+      const fixed = idxOf(mid);
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [mid]: { ...s.scene.objects[mid], geometryFixes: ['invertedNormals'] } } } }), { silent: true });
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      const persisted = (doc.sceneObjects.find(o=>o.id===mid)||{}).geometryFixes;
+      await pm.__test._loadProject(doc);
+      await new Promise(r=>setTimeout(r,400));
+      const after = idxOf(mid);
+      return { changed: JSON.stringify(before)!==JSON.stringify(fixed), persisted, replayed: JSON.stringify(after)===JSON.stringify(fixed) };
+    })()`);
+    assert(Array.isArray(fixRT.persisted) && fixRT.persisted.includes('invertedNormals'),
+      'auto-fix types were not persisted to the .mixo doc (M1)');
+    assert(fixRT.changed, 'normal-flip did not change the live winding (test setup)');
+    assert(fixRT.replayed, 'auto-fix geometry edit did not replay on reload — fix vanished (M1)');
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

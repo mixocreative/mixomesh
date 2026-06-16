@@ -7,6 +7,7 @@ import { settleImportBounce } from './scene/ImportBounce.js';
 import { capturePng } from './RenderOutput.js';
 import { AssetLoader } from './AssetLoader.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
+import { MeshValidator } from './MeshValidator.js';
 import { Selection } from './Selection.js';
 import { SettingsStore } from './SettingsStore.js';
 import {
@@ -191,6 +192,10 @@ function _serialiseSceneObjects() {
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
       ratio: (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1,
+      // Auto-fix geometry edits (weld / normal-flip) are baked into live
+      // vertices, not the raw source bytes — persist the applied fix types so
+      // they replay on reload (M1) instead of vanishing.
+      geometryFixes: Array.isArray(o.geometryFixes) && o.geometryFixes.length ? [...o.geometryFixes] : undefined,
       transform: mesh ? _decompose(mesh) : (o._savedTransform ?? null),
     };
   });
@@ -567,6 +572,13 @@ async function _loadProject(doc) {
       // after; the flip lives in the vertices so it is unaffected.
       const asset = assetById[o.assetId];
       _applyPersistedRatioBake(mesh, asset, objRatio, _reBaked);
+      // Replay persisted auto-fix edits at the displayed scale (after the ratio
+      // bake) so the weld's absolute MERGE_DISTANCE behaves as it did when the
+      // fix was first applied (M1). Each SceneObject owns a distinct mesh here
+      // (duplicates were cloned above), so this replays once per object.
+      if (Array.isArray(o.geometryFixes) && o.geometryFixes.length) {
+        MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
+      }
       _applyWorld(mesh, o.transform);
       const vis = o.visible !== false;
       mesh.setEnabled(vis);
@@ -588,6 +600,7 @@ async function _loadProject(doc) {
       isInternalPart: !!o.isInternalPart,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
+      ...(Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
       _savedTransform: o.transform ?? null,
     };
   }

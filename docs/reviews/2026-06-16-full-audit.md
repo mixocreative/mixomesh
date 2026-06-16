@@ -19,15 +19,20 @@ M2 (validation stale-flag race — invalidation seq), M3 (unlit shader emissive 
 M4 (imported UV transform harvested), M6 (follow suspended during offline render/capture),
 M8 (G/R/S modal honours pivotMode), M9 (printPreview/baseColor inspectable-mesh guard).
 
-**Deferred — need careful design, not a rushed batch (risk of new bugs):**
+**All HIGH + MEDIUM findings now resolved (2026-06-16).** The originally-deferred
+batch (H1, M1, M5, M7, M10) was worked one at a time with a verification gate per
+fix — see each entry below. Only the LOW findings remain open (tracked at the end).
+
 - **H1 (HIGH) — duplicated objects collapse on reload. FIXED 2026-06-16.** Correct fix = give each
   duplicate its own `assetId` + cache its baked bytes at clone time so it
   serializes independently. The clone-on-restore shortcut breaks
   `containerMeshIndex` on the next save and leaks the clone on reset — do it
   properly with a round-trip test.
-- **M1 — autoFix edits lost on reload.** Persist a per-object "geometry edits"
-  record (weld / normal-flip) and replay on load, or re-serialize the repaired
-  geometry; until then flag autoFix as viewport/export-session only.
+- **M1 — autoFix edits lost on reload. FIXED 2026-06-16.** The Print-tab
+  Auto-Fix button records applied fix types on the SceneObject (`geometryFixes`);
+  persistence serializes them and replays via `MeshValidator.replayGeometryFixes`
+  on load, AFTER the ratio bake so the weld's absolute MERGE_DISTANCE behaves the
+  same. Browser-smoke round-trip asserts a normal-flip survives reopen.
 - **M5 — SmartReplaceCommand drops multi-part objects. GATED 2026-06-16.**
   `_smartReplace` (ContextMenu.js) now refuses with a toast when the active
   object or any target is a multi-part logical object (`logicalObjectPartIds > 1`),
