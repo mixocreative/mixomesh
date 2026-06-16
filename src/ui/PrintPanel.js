@@ -581,7 +581,7 @@ function _printPartsHaveWarnings() {
   for (const [meshId, obj] of Object.entries(objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
     const e = validation?.[meshId];
-    if (e && !e.stale && e.results.some(r => r.severity === 'warning')) return true;
+    if (e && !e.stale && e.results?.some(r => r.severity === 'warning')) return true;
   }
   return false;
 }

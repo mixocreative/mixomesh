@@ -1071,6 +1071,13 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   let container;
   try {
     container = await _loadContainer(blobUrl, extension, scene, null, siblings);
+  } catch (err) {
+    // Mirror the live-import cleanup (audit LOW): a failed restore must not
+    // leak the source blob URL or the OBJ sibling URLs — the caller turns this
+    // asset into a ghost and never revokes them otherwise.
+    revokeBlobUrl(assetId);
+    _revokeObjSiblings(assetId);
+    throw err;
   } finally {
     restoreUrls();
   }

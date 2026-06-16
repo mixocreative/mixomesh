@@ -9,8 +9,8 @@ import { installEnv } from './env.mjs';
 installEnv();   // RenderMath → ExportPlanner → StateManager needs the DOM shims
 
 const {
-  clampDimension, turntableProgress, turntableAlpha,
-  pickVideoFormat, fitFrameRect, renderPngName, turntableVideoName,
+  clampDimension, turntableProgress,
+  fitFrameRect, renderPngName, turntableVideoName,
 } = await import('../src/core/render/RenderMath.js');
 
 test('clampDimension sanitises and bounds', () => {
@@ -35,25 +35,6 @@ test('turntableProgress linear vs eased', () => {
   // Clamped outside [0,1].
   assert.equal(turntableProgress(-1, false), 0);
   assert.equal(turntableProgress(2, false), 1);
-});
-
-test('turntableAlpha sweeps a full signed 360°', () => {
-  const a0 = 1.234;
-  assert.equal(turntableAlpha(a0, 0, { direction: 'left', ease: false }), a0);
-  assert.ok(Math.abs(turntableAlpha(a0, 1, { direction: 'left', ease: false }) - (a0 + 2 * Math.PI)) < 1e-12);
-  assert.ok(Math.abs(turntableAlpha(a0, 1, { direction: 'right', ease: false }) - (a0 - 2 * Math.PI)) < 1e-12);
-  // Quarter turn, linear, left.
-  assert.ok(Math.abs(turntableAlpha(0, 0.25, { direction: 'left', ease: false }) - Math.PI / 2) < 1e-12);
-});
-
-test('pickVideoFormat prefers mp4, falls back to webm, survives throwers', () => {
-  assert.deepEqual(pickVideoFormat(() => true),
-    { mime: 'video/mp4;codecs=avc3.42E01E', ext: 'mp4' });
-  assert.deepEqual(pickVideoFormat(m => m.startsWith('video/webm')),
-    { mime: 'video/webm;codecs=vp8', ext: 'webm' });
-  assert.deepEqual(pickVideoFormat(() => false), { mime: '', ext: 'webm' });
-  assert.deepEqual(pickVideoFormat(() => { throw new Error('nope'); }),
-    { mime: '', ext: 'webm' });
 });
 
 test('fitFrameRect aspect-fits and centres', () => {

@@ -22,39 +22,10 @@ export function turntableProgress(t, ease) {
   return ease ? 0.5 - Math.cos(Math.PI * x) / 2 : x;
 }
 
-/**
- * Camera alpha at time-fraction t of a full 360° turntable.
- * direction 'left' → model appears to spin to the viewer's left (camera alpha
- * increases); 'right' → the opposite.
- */
-export function turntableAlpha(startAlpha, t, { direction = 'left', ease = true } = {}) {
-  const sign = direction === 'right' ? -1 : 1;
-  return startAlpha + sign * 2 * Math.PI * turntableProgress(t, ease);
-}
-
-/**
- * Pick the best-supported MediaRecorder container. `isTypeSupported` is
- * injected so the choice is unit-testable without a browser.
- * @returns {{ mime: string, ext: string }}
- */
-export function pickVideoFormat(isTypeSupported) {
-  // avc3 (in-band parameter sets), NOT avc1: the canvas can resize during a
-  // recording (device-ratio adapt, panel drag) and Chromium's mp4 muxer
-  // rejects mid-stream description changes under avc1 — its own console
-  // error says "consider switching to avc3". vp8 ahead of vp9 for the WebM
-  // fallback: the realtime VP8 encoder is the battle-tested path.
-  const candidates = [
-    { mime: 'video/mp4;codecs=avc3.42E01E', ext: 'mp4' },
-    { mime: 'video/mp4',                    ext: 'mp4' },
-    { mime: 'video/webm;codecs=vp8',        ext: 'webm' },
-    { mime: 'video/webm;codecs=vp9',        ext: 'webm' },
-    { mime: 'video/webm',                   ext: 'webm' },
-  ];
-  for (const c of candidates) {
-    try { if (isTypeSupported(c.mime)) return c; } catch { /* keep looking */ }
-  }
-  return { mime: '', ext: 'webm' };   // let MediaRecorder pick its default
-}
+// (turntableAlpha + pickVideoFormat were MediaRecorder-era helpers, removed
+// 2026-06-16 audit-LOW cleanup. RenderOutput computes the camera delta inline
+// from turntableProgress, and video is WebCodecs-only since 2026-06-13 — no
+// MediaRecorder mime negotiation. Both were dead in production, test-only.)
 
 /**
  * Aspect-fit the output frame inside the viewport with a uniform margin —
