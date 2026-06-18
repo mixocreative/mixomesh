@@ -11,7 +11,7 @@ import {
   ShaderAssignCommand, ShaderDuplicateCommand, UVOverrideCommand,
   PrintPartCommand, SourceUnitCommand, RescaleObjectCommand,
 } from '../core/HistoryManager.js';
-import { SCALE_PRESETS } from '../core/print/PrintScale.js';
+import { SCALE_PRESETS } from '../core/PrintManager.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
 import { icon, sectionIcon } from '../core/Icons.js';

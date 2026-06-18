@@ -13,7 +13,7 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
-import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState, computePrintExportScale } from '../core/scale/ScaleMath.js';
+import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState } from '../core/scale/ScaleMath.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
@@ -137,10 +137,14 @@ function _renderScaleTab() {
   // An EMPTY list = "as shown" → print at the active printable reference ratio
   // (the size in the viewport). Adding absolute ratios rescales relative to
   // that reference (e.g. 1:144 on a 1:72 object = half). One output per entry.
+  //
+  // Everything export-shaped (reference, factor, dims) comes from ONE
+  // previewExportContext() call so the panel, the export pipeline, and the
+  // dimension helper cannot drift.
   const exportRatios = exportRatiosFromState(state);
-  const objs = state.scene.objects;
-  const exportRef = PrintManager.getExportReference();
-  const referenceR = exportRef.ratio;
+  const preview = PrintManager.previewExportContext();
+  const referenceR = preview?.referenceRatio ?? 1;
+  const referenceId = preview?.referenceUnit?.logicalId ?? null;
 
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
@@ -172,16 +176,15 @@ function _renderScaleTab() {
 
   html += '</div>';
 
-  // Reflects the same active-printable reference ratio used by PrintManager.
-  const targetR = exportRatios[0] ?? referenceR;
-  const factor = computePrintExportScale({ sceneRatio: referenceR }, { printRatio: targetR });
+  // Factor + dims come from the SAME preview context — single source of truth.
+  const factor = preview?.factor ?? 0;
   html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
   // Example dimensions — show the export reference object so the queried mesh
   // and export factor agree even when the active selection is not printable.
-  const exampleId = exportRef.logicalId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
-  if (exampleId && state.scene.objects[exampleId]) {
-    const dims = PrintManager.getExportedDimensions(exampleId);
+  const exampleId = referenceId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
+  if (preview && exampleId && state.scene.objects[exampleId]) {
+    const dims = PrintManager.getExportedDimensions(exampleId, preview);
     if (dims) {
       html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
     }

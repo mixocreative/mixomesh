@@ -60,9 +60,9 @@ export function objectScaleFromObject(obj) {
 }
 
 // The user's explicit export target ratios (denominators). New default is an
-// EMPTY list, meaning "as shown" (PrintScale resolves that to the active
-// object's ratio). Migrated pre-redesign saves surface their single
-// `targetRatio` as one entry.
+// EMPTY list, meaning "as shown" — PrintPipeline + ExportContext resolve that
+// to the active printable object's ratio. Migrated pre-redesign saves surface
+// their single `targetRatio` as one entry.
 export function exportRatiosFromState(state) {
   const list = state?.print?.exportRatios;
   if (Array.isArray(list) && list.length) return list.map(_positiveOrOne);
