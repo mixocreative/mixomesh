@@ -2276,8 +2276,8 @@ Toggle:
   `state.print` like every other print option; survives save/load via
   `PersistenceManager`'s shallow-merge — old saves without the key auto-
   default to `false` on load. The export path reads it via
-  `ctx.options.objBakeSolidTextures` (captured at ctx-build time by
-  `ExportContext.capturePrintPrefs`) so preview and actual export can
+  `ctx.prefs.objBakeSolidTextures` (captured at ctx-build time by
+  `ExportContext._capturePrefs`) so preview and actual export can
   never disagree if the user toggles mid-flight.
 - Surfaced as the **"Bake solid colors to texture (OBJ, Mimaki-friendly)"**
   checkbox on the Export tab. Toggling dispatches a silent `setState` (no

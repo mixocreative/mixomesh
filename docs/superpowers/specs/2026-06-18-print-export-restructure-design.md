@@ -3,7 +3,11 @@
 **Date:** 2026-06-18 (post-landing hardening 2026-06-19, two rounds).
 **Status:** SHIPPED 2026-06-18; hardened by max-effort code review 2026-06-19
 (round 1 closed 13 of 15 review findings; round 2 closed the 3 outlying
-"PLAUSIBLE" items; round 3 extracted shared `capturePrintPrefs` helper).
+"PLAUSIBLE" items; round 3 extracted a shared `capturePrintPrefs` helper —
+superseded by round 4; round 4 replaced `capturePrintPrefs` with the cleaner
+`ctx.prefs` field + closed 5 more findings (clone leak, multi-target CSG init,
+preview narrow try/catch, getExportedDimensions weak guard, multiple doc drifts);
+round 5 confirmed clean — loop terminates).
 **Supersedes parts of:** `2026-06-16-per-object-ratio-design.md` (AS-BUILT corrections to
 `PrintManager.js` / `PrintScale.js` / `PrintPrep.js` / `PrintPanel.js`).
 
