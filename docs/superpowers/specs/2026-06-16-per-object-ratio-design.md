@@ -4,9 +4,10 @@
 **Status:** IMPLEMENTED 2026-06-16. See BUILDLOG "Per-object scale ratio" entries
 + memory `per-object-ratio-redesign`. Notes below are the original design; the
 AS-BUILT corrections (marked inline in §3.6 and §4) are:
-- Export reference = the **active object's ratio**; **default = "as shown"**
-  (empty target list ⇒ print displayed size). The brief "scene-relative 1000/T"
-  idea was reverted — it dropped the object ratio.
+- Export reference = the **active printable object's ratio**, falling back to
+  the first printable unit when the active object is excluded; **default =
+  "as shown"** (empty target list ⇒ print displayed size). The brief
+  "scene-relative 1000/T" idea was reverted — it dropped the object ratio.
 - **Batch export** done (one file per target in the list).
 - **Legacy fully removed** (`workingRatio`/`targetRatio` only read in migration;
   `RescaleWorldCommand` deleted; `SCENE_PROTECTED` emptied).
@@ -101,22 +102,22 @@ and `exportBaseName(ctx)`/`perMeshBaseName(ctx)` so the factor AND the filename
 use the same reference across the whole batch.
 
 - **"As shown" (DEFAULT):** when `print.exportRatios` is empty, the target =
-  `activeRatio(state)` ⇒ factor `1000` ⇒ prints **exactly the size on screen**
-  (each object at its own displayed scale). No footgun where a 1:72 object prints
-  at real size.
+  `_exportReferenceRatio(printUnits, state)` ⇒ factor `1000` ⇒ prints **exactly
+  the size on screen** (each object at its own displayed scale). No footgun where
+  a 1:72 object prints at real size.
 - **A target `T`** rescales relative to the reference: 1:144 on a 1:72 reference
   ⇒ `72/144` = 0.5×.
-- Targets are a **list** of absolute ratios (`resolveExportTargets`); each
-  produces one output file. Filename suffix `_r{referenceRatio}to{T}`.
-- **Caveat:** the as-shown *target* uses the selection active ratio while the
-  *factor reference* uses `_exportReferenceRatio`; identical in the common case
-  (active object is printable), divergent only if the active object is excluded
-  from the export set.
+- Targets are a **list** of absolute ratios (`print.exportRatios`); each produces
+  one output file. Filename suffix `_r{referenceRatio}to{T}`.
+- The as-shown target, factor reference, filename suffix, Print panel preview,
+  and dimension helper all use `_exportReferenceRatio`; excluded helpers cannot
+  skew the exported scale.
 - **Single object** → `(referenceRatio / T) × 1000`.
-- **Same-ratio selection** → all share `ratio`; uniform `(ratio / T) × 1000`,
-  scaled about the **active object's origin**.
+- **Same-ratio selection** → all share `ratio`; uniform `(ratio / T)` about the
+  **active printable object's origin**, then `×1000` BU→mm.
 - **Mixed-ratio selection, exported as one** → **uniform** scale by the
-  **active object's** `(R_active / T) × 1000`, about the active object's origin.
+  **active printable object's** `(R_active / T)`, about that origin, then
+  `×1000` BU→mm.
   Because the factor is uniform, on-screen relative sizes and positions are
   preserved exactly ("as is"). Non-active objects' own `ratio` is **not** used
   for this combined factor — they were already displayed at their own size in

@@ -1,4 +1,6 @@
 export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
+  const BU_TO_MM = 1000;
+
   return {
     fallbackMaterial(mesh) {
       if (mesh.material) return;
@@ -10,7 +12,16 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
       mesh.computeWorldMatrix?.(true);
       const W = mesh.getWorldMatrix?.();
       if (!W) return;
-      const M = W.multiply(BABYLON.Matrix.Scaling(ctx.factor, ctx.factor, ctx.factor));
+      const ratioFactor = _positive(ctx.ratioFactor, _positive(ctx.factor, BU_TO_MM) / BU_TO_MM);
+      const unitFactor = _positive(ctx.unitFactor, BU_TO_MM);
+      const pivot = _validPivot(ctx.pivot);
+      const M = pivot
+        ? W
+          .multiply(BABYLON.Matrix.Translation(-pivot.x, -pivot.y, -pivot.z))
+          .multiply(BABYLON.Matrix.Scaling(ratioFactor, ratioFactor, ratioFactor))
+          .multiply(BABYLON.Matrix.Translation(pivot.x, pivot.y, pivot.z))
+          .multiply(BABYLON.Matrix.Scaling(unitFactor, unitFactor, unitFactor))
+        : W.multiply(BABYLON.Matrix.Scaling(ctx.factor, ctx.factor, ctx.factor));
       mesh.bakeTransformIntoVertices?.(M);
       mesh.setParent?.(null);
       mesh.position?.set?.(0, 0, 0);
@@ -26,4 +37,15 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
     csg(mesh, ctx) { tryCsg(mesh, ctx); },
     csgSolidOnly(mesh, ctx) { if (isSolidColor(mesh)) tryCsg(mesh, ctx); },
   };
+}
+
+function _positive(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function _validPivot(p) {
+  return p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)
+    ? p
+    : null;
 }

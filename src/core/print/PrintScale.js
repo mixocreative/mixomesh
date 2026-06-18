@@ -15,14 +15,10 @@ import {
 
 export const SCALE_PRESETS = scalePresetData;
 
-// Export scale (2026-06-16): the reference is the ACTIVE object's ratio, and
-// the print size = displayed size × (activeRatio / targetRatio) × 1000(BU→mm).
-//   • target === activeRatio  ⇒ factor 1000 ⇒ print EXACTLY what's shown ("as
-//     shown" — the DEFAULT when the user hasn't added explicit targets).
-//   • target 1:144 on a 1:72 object ⇒ 72/144 = 0.5× smaller than shown.
-// A mixed-ratio selection scales uniformly by the active object's ratio so the
-// on-screen arrangement is preserved (WYSIWYG). The `exportRatios` LIST holds
-// extra absolute targets; one output file per target.
+// Export scale (2026-06-16): real export calls pass ctx.referenceRatio from
+// PrintManager's active-printable reference unit. Standalone callers fall back
+// to the raw active object's ratio. Print size = displayed size ×
+// (referenceRatio / targetRatio) × 1000(BU→mm).
 function activeRatio(state) {
   const ids = state.selection?.selectedIds ?? [];
   const activeId = state.selection?.activeId ?? ids[0] ?? Object.keys(state.scene.objects)[0] ?? null;
@@ -36,9 +32,9 @@ function sceneScaleFor(state, ctx = null) {
   return { sceneRatio: ratio };
 }
 
-// Resolve the export TARGET ratios. An empty list ⇒ one "as shown" export at
-// the active object's ratio (factor 1000). Migration of pre-redesign saves
-// leaves a single targetRatio entry.
+// Resolve target ratios for standalone helpers. PrintManager resolves the
+// export path against the actual print set so excluded helpers do not skew
+// "as shown". Migration of pre-redesign saves leaves a single targetRatio entry.
 export function resolveExportTargets(state) {
   const list = exportRatiosFromState(state);
   return list.length ? list : [activeRatio(state)];

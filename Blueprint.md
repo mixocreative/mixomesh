@@ -2188,7 +2188,8 @@ The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create 
 PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
 PrintManager.exportSTL(options)               → Promise<void>
 PrintManager.exportThreeMF(options)           → Promise<void>  // content-selected 3MF sub-flavor
-PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at targetRatio
+PrintManager.getExportReference(options)      → {logicalId, ratio}  // active printable unit, else first printable unit
+PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at first export target, using export reference
 PrintManager.SCALE_PRESETS                    → scale-presets.json passthrough
 
 // options = { selectedOnly?:bool, individually?:bool, onProgress?:fn }
@@ -2448,10 +2449,11 @@ EXPORT  : factor = (referenceRatio / T) × 1000
             ratio IF it's in the export set, else the FIRST printable unit's ratio
             — threaded as ctx.referenceRatio through exportFactorFor(ctx) +
             exportBaseName(ctx) so factor AND filename use the same reference
-          • DEFAULT "as shown": empty print.exportRatios ⇒ T = active object ratio
+          • DEFAULT "as shown": empty print.exportRatios ⇒ T = referenceRatio
             ⇒ factor 1000 ⇒ prints EXACTLY the size on screen (each object at its scale)
           • a target T (e.g. 1:144 on a 1:72 object) rescales: 72/144 = 0.5×
           • mixed selection scales uniformly by the reference ratio (WYSIWYG)
+            about the reference unit origin, then converts BU→mm
           • print.exportRatios = LIST of absolute targets ⇒ one output file per T
           • filename suffix _r{referenceRatio}to{T}
 PERSIST : object.ratio + print.exportRatios in .mixo
@@ -2463,14 +2465,13 @@ RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
           all survive reload (byte-identical to a fresh import + saved placement)
 ```
 
-`resolveExportTargets(state)` returns `exportRatios` if non-empty, else
-`[activeRatio(state)]` (the "as shown" default). `PrintScale.setExportTargetOverride`
-pins each target while `PrintManager._runExportForTarget` runs; `_runExport`
-loops the resolved targets. **Caveat:** the as-shown *target* uses the selection
-active ratio while the export *factor reference* uses `_exportReferenceRatio`
-(active print unit, else first unit) — identical in the common case (active
-object is printable), divergent only if the active object is excluded from the
-export set.
+`PrintManager._runExport` resolves targets from `print.exportRatios`; when the
+list is empty, it uses `_exportReferenceRatio(printUnits)` so the default
+"as shown" export is exactly factor `1000` for the actual export set. The same
+reference unit drives filename suffixes, preview dimensions, and the export
+pivot. Target-ratio resizing uses `(referenceRatio / T)` about that reference
+unit origin, then the whole result converts BU→mm with `×1000`, so the reference
+origin stays at its as-shown millimetre coordinate.
 
 **Audit fixes — all DONE:**
 
@@ -2520,11 +2521,10 @@ node scale + ratio, reloads, asserts both survive). Principle: **system
 transforms (import unit/flip, ratio) bake + replay on restore; user transforms
 stay on the node and are saved directly — never baked.**
 
-**KNOWN EDGE (low):** the "as shown" export *target* uses the selection-active
-ratio (`resolveExportTargets` → `activeRatio(state)`) while the export *factor
-reference* uses the print-set ratio (`_exportReferenceRatio`). They match when
-the active object is printable; they diverge only if the active object is
-excluded from the export set (then as-shown is not exactly factor 1000).
+**RESOLVED 2026-06-17:** the former "as shown" target/reference split is gone
+from the export path. Export, filename suffixes, Print panel scale preview, and
+`PrintManager.getExportedDimensions` all use the active printable reference
+unit, falling back to the first printable unit if the active object is excluded.
 
 ### Presets
 Maintained in **`src/config/scale-presets.json`** (edit the JSON, no code change).

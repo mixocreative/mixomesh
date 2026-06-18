@@ -8,7 +8,6 @@ import {
   exportFactorFor as _exportFactorFor,
   exportBaseName as _exportBaseName,
   perMeshBaseName as _perMeshBaseName,
-  getExportedDimensions,
   setExportTargetOverride,
 } from './print/PrintScale.js';
 import { createPrepSteps } from './print/PrintPrep.js';
@@ -22,7 +21,9 @@ import { objectRatio, exportRatiosFromState } from './scale/ScaleMath.js';
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
-export { SCALE_PRESETS, getExportedDimensions };
+const BU_TO_MM = 1000;
+
+export { SCALE_PRESETS, getExportedDimensions, getExportReference };
 
 // ── Mesh Collection ──────────────────────────────────────
 
@@ -73,10 +74,78 @@ function _groupCloneEntries(entries) {
   return [...byId.values()];
 }
 
-function _exportReferenceRatio(units, state) {
+function _exportReferenceUnit(units, state) {
   const activeId = state.selection?.activeId ?? null;
   const activeUnit = activeId ? units.find(unit => unit.logicalId === activeId) : null;
-  return objectRatio((activeUnit ?? units[0])?.obj ?? null);
+  return activeUnit ?? units[0] ?? null;
+}
+
+function _exportReferenceRatio(units, state) {
+  return objectRatio(_exportReferenceUnit(units, state)?.obj ?? null);
+}
+
+function _meshWorldOrigin(mesh) {
+  if (!mesh) return null;
+  mesh.computeWorldMatrix?.(true);
+  const world = mesh.getWorldMatrix?.();
+  const t = world?.getTranslation?.();
+  if (t?.clone) return t.clone();
+  if (t && Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) {
+    return new BABYLON.Vector3(t.x, t.y, t.z);
+  }
+  const abs = mesh.absolutePosition;
+  if (abs?.clone) return abs.clone();
+  if (abs && Number.isFinite(abs.x) && Number.isFinite(abs.y) && Number.isFinite(abs.z)) {
+    return new BABYLON.Vector3(abs.x, abs.y, abs.z);
+  }
+  const pos = mesh.position;
+  if (pos?.clone) return pos.clone();
+  if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z)) {
+    return new BABYLON.Vector3(pos.x, pos.y, pos.z);
+  }
+  return BABYLON.Vector3.Zero();
+}
+
+function _exportReferencePivot(unit) {
+  const leadPart = unit?.parts?.find(part => part.meshId === unit.logicalId) ?? unit?.parts?.[0] ?? null;
+  return _meshWorldOrigin(leadPart?.mesh) ?? BABYLON.Vector3.Zero();
+}
+
+function _exportTargetRatioForReference(state, referenceRatio) {
+  const explicit = exportRatiosFromState(state);
+  return explicit.length ? explicit[0] : referenceRatio;
+}
+
+function _exportFactorForReference(state, referenceRatio) {
+  const targetRatio = _exportTargetRatioForReference(state, referenceRatio);
+  return (referenceRatio / targetRatio) * BU_TO_MM;
+}
+
+function getExportReference(options = {}) {
+  const state = getState();
+  const unit = _exportReferenceUnit(_collectPrintMeshes(!!options.selectedOnly), state);
+  return {
+    logicalId: unit?.logicalId ?? null,
+    ratio: objectRatio(unit?.obj ?? null),
+  };
+}
+
+function getExportedDimensions(meshId, options = {}) {
+  const state = getState();
+  const obj = state.scene.objects[meshId];
+  if (!obj) return null;
+  const mesh = AssetLoader.getBabylonMesh(meshId);
+  if (!mesh) return null;
+
+  const bb = mesh.getBoundingInfo().boundingBox;
+  const size = bb.maximumWorld.subtract(bb.minimumWorld);
+  const factor = _exportFactorForReference(state, getExportReference(options).ratio);
+
+  return {
+    x: size.x * factor,
+    y: size.y * factor,
+    z: size.z * factor,
+  };
 }
 
 // ── Texture Export ───────────────────────────────────────
@@ -399,17 +468,21 @@ async function _runExportForTarget(fmt, options, progress) {
   if (printMeshes.length === 0) throw new Error('No printable meshes to export.');
 
   const state  = getState();
-  const referenceRatio = _exportReferenceRatio(printUnits, state);
+  const referenceUnit = _exportReferenceUnit(printUnits, state);
+  const referenceRatio = objectRatio(referenceUnit?.obj ?? null);
   const ctx = {
-    state, referenceRatio, options,
+    state, referenceUnit, referenceRatio, options,
     projectName: state.project.name || 'Untitled',
     individually: !!options.individually,
+    pivot: _exportReferencePivot(referenceUnit),
     meshes: [],
     units: [],
     csgReady: false,
     csgSkipped: [],
   };
   ctx.factor = _exportFactorFor(ctx);
+  ctx.ratioFactor = ctx.factor / BU_TO_MM;
+  ctx.unitFactor = BU_TO_MM;
 
   if (fmt.needsCSG) {
     ctx.csgReady = await _ensureCSG2();
@@ -604,5 +677,6 @@ export const PrintManager = {
   exportSTL,
   exportThreeMF,
   getExportedDimensions,
+  getExportReference,
   SCALE_PRESETS,
 };

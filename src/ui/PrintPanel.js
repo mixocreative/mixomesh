@@ -13,8 +13,7 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
-import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState, objectRatio } from '../core/scale/ScaleMath.js';
-import { exportFactor } from '../core/print/PrintScale.js';
+import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState, computePrintExportScale } from '../core/scale/ScaleMath.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
@@ -135,13 +134,13 @@ function _renderScaleTab() {
   const state = getState();
   // Per-object ratio redesign (2026-06-16): scene scale is now PER OBJECT
   // (Properties ▸ Transform ▸ Ratio). This tab manages the export TARGET ratios.
-  // An EMPTY list = "as shown" → print at the active object's ratio (the size
-  // in the viewport). Adding absolute ratios rescales relative to the object
-  // (e.g. 1:144 on a 1:72 object = half). One output file per entry.
+  // An EMPTY list = "as shown" → print at the active printable reference ratio
+  // (the size in the viewport). Adding absolute ratios rescales relative to
+  // that reference (e.g. 1:144 on a 1:72 object = half). One output per entry.
   const exportRatios = exportRatiosFromState(state);
   const objs = state.scene.objects;
-  const activeId = state.selection.activeId ?? state.selection.selectedIds?.[0] ?? Object.keys(objs)[0] ?? null;
-  const activeR = objectRatio(activeId ? objs[activeId] : null);
+  const exportRef = PrintManager.getExportReference();
+  const referenceR = exportRef.ratio;
 
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
@@ -149,7 +148,7 @@ function _renderScaleTab() {
   html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
   html += '<div class="pp-ratio-list" data-export-ratios>';
   if (exportRatios.length === 0) {
-    html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(activeR))}</span>`;
+    html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(referenceR))}</span>`;
   } else {
     for (const r of exportRatios) {
       html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(formatScaleRatio(r))}</span><button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
@@ -173,15 +172,14 @@ function _renderScaleTab() {
 
   html += '</div>';
 
-  // Export factor display — single source of truth in PrintScale (review L28).
-  // Reflects the active object's ratio → first target ratio.
-  const factor = exportFactor();
+  // Reflects the same active-printable reference ratio used by PrintManager.
+  const targetR = exportRatios[0] ?? referenceR;
+  const factor = computePrintExportScale({ sceneRatio: referenceR }, { printRatio: targetR });
   html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
-  // Example dimensions — show the ACTIVE object so the queried mesh and the
-  // export factor's reference ratio (also the active object) agree. (Using
-  // selected[0] under a mixed-ratio multi-select scaled the wrong mesh.)
-  const exampleId = state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
+  // Example dimensions — show the export reference object so the queried mesh
+  // and export factor agree even when the active selection is not printable.
+  const exampleId = exportRef.logicalId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
   if (exampleId && state.scene.objects[exampleId]) {
     const dims = PrintManager.getExportedDimensions(exampleId);
     if (dims) {
@@ -231,7 +229,7 @@ function _renderScaleTab() {
       const val = parseFloat(btn.dataset.removeRatio);
       setState(s => {
         const cur = exportRatiosFromState(s).filter(r => r !== val);
-        // Empty ⇒ back to "as shown" (print at the active object's ratio).
+        // Empty ⇒ back to "as shown" (print at the export reference ratio).
         return { ...s, print: { ...s.print, exportRatios: cur } };
       });
       _render();

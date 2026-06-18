@@ -31,11 +31,11 @@ let _registry = {};
 let _clones = [];
 AssetLoader.getBabylonMesh = (id) => _registry[id] ?? null;
 
-function mesh(name, { verts = 100, size = [10, 20, 30], color = null } = {}) {
+function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [0, 0, 0] } = {}) {
   return {
     name,
     material: color ? { id: 'mat-' + name, diffuseColor: color } : { id: 'mat-' + name },
-    _verts: verts, _size: size, _color: color,
+    _verts: verts, _size: size, _color: color, _origin: origin,
     getTotalVertices() { return this._verts; },
     getVerticesData() { return new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]); },
     getIndices() { return [0, 1, 2]; },
@@ -49,8 +49,8 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null } = {}) {
     rotationQuaternion: null,
     getScene() { return {}; },
     computeWorldMatrix() {},
-    getWorldMatrix() { return { multiply() { return this; } }; },
-    bakeTransformIntoVertices() { this.__worldBaked = true; },
+    getWorldMatrix() { return window.BABYLON.Matrix.Translation(this._origin[0], this._origin[1], this._origin[2]); },
+    bakeTransformIntoVertices(M) { this.__worldBaked = true; this.__bakedMatrix = M; },
     setParent() {},
     optimizeIndices() { this.__optimized = true; },
     createNormals() { this.__normals = true; },
@@ -59,7 +59,7 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null } = {}) {
     refreshBoundingInfo() {},
     dispose() { this.__disposed = true; },
     clone(cloneName) {
-      const c = mesh(cloneName || (name + '__c'), { verts, size, color });
+      const c = mesh(cloneName || (name + '__c'), { verts, size, color, origin });
       c.material = this.material;
       c.__isClone = true;
       _clones.push(c);
@@ -628,10 +628,44 @@ await test('export ratio reference ignores active object when it is not exported
     selection: { ...s.selection, selectedIds: ['m1'], activeId: 'helper' },
     print: { ...s.print, exportRatios: [144] },
   }), { silent: true });
+  const dims = PrintManager.getExportedDimensions('m1');
+  assert.ok(Math.abs(dims.x - (10 * (1000 / 144))) < 1e-6,
+    `dimension preview should use printable reference ratio 1, got ${dims.x}`);
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip',
     'non-exported active helper must not choose the export scale');
+});
+
+await test('export target ratio scales around active printable object origin', async () => {
+  setScene({
+    objects: {
+      active: obj('active', { ratio: 72 }),
+      other: obj('other', { ratio: 1 }),
+    },
+    registry: {
+      active: mesh('active', { origin: [10, 0, 0] }),
+      other: mesh('other', { origin: [20, 0, 0] }),
+    },
+    selectedIds: ['active', 'other'],
+    targetRatio: 144,
+  });
+  StateManager.setState(s => ({
+    ...s,
+    selection: { ...s.selection, selectedIds: ['active', 'other'], activeId: 'active' },
+    print: { ...s.print, exportRatios: [144] },
+  }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+
+  const activeClone = _clones.find(c => c.name === 'active__export');
+  const otherClone = _clones.find(c => c.name === 'other__export');
+  assert.ok(activeClone?.__bakedMatrix, 'active clone was baked');
+  assert.ok(otherClone?.__bakedMatrix, 'other clone was baked');
+  assert.equal(activeClone.__bakedMatrix.tx, 10000,
+    'active origin stays at its as-shown millimetre coordinate');
+  assert.equal(otherClone.__bakedMatrix.tx, 15000,
+    'other origin scales proportionally around the active origin');
 });
 
 await test('filename: individually OBJ → outer zip + per-mesh entries carry project prefix', async () => {

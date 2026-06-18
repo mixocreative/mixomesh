@@ -27,23 +27,47 @@ function vec(x = 0, y = 0, z = 0) {
   };
 }
 
+function mat({ sx = 1, sy = 1, sz = 1, tx = 0, ty = 0, tz = 0, ops = [] } = {}) {
+  return {
+    __matrix: true,
+    sx, sy, sz, tx, ty, tz,
+    __ops: ops,
+    multiply(o = mat()) {
+      return mat({
+        sx: this.sx * o.sx,
+        sy: this.sy * o.sy,
+        sz: this.sz * o.sz,
+        tx: this.tx * o.sx + o.tx,
+        ty: this.ty * o.sy + o.ty,
+        tz: this.tz * o.sz + o.tz,
+        ops: [...this.__ops, ...(o.__ops ?? [])],
+      });
+    },
+    clone() { return mat({ sx: this.sx, sy: this.sy, sz: this.sz, tx: this.tx, ty: this.ty, tz: this.tz, ops: [...this.__ops] }); },
+    setTranslation(p) { this.tx = p.x; this.ty = p.y; this.tz = p.z; return this; },
+    getTranslation() { return vec(this.tx, this.ty, this.tz); },
+    determinant() { return this.sx * this.sy * this.sz; },
+  };
+}
+
 const real = {
   Vector3: Object.assign(function (x, y, z) { return vec(x, y, z); }, {
     Zero: () => vec(0, 0, 0),
     Minimize: (a, b) => vec(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z)),
     Maximize: (a, b) => vec(Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z)),
     Center:   (a, b) => vec((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2),
-    TransformCoordinates: (v) => vec(v.x, v.y, v.z),
+    TransformCoordinates: (v, m) => m?.__matrix
+      ? vec(v.x * m.sx + m.tx, v.y * m.sy + m.ty, v.z * m.sz + m.tz)
+      : vec(v.x, v.y, v.z),
     Cross: (a, b) => vec(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x),
   }),
   VertexBuffer: { PositionKind: 'position', UVKind: 'uv' },
   Ray: function (origin, dir, len) { this.origin = origin; this.dir = dir; this.len = len; },
-  // Matrices are opaque in tests (Vector3.TransformCoordinates is identity);
-  // only the call plumbing matters.
   Matrix: {
-    RotationX: () => ({ __m: 'Rx', multiply() { return this; } }),
-    Scaling:   () => ({ __m: 'S',  multiply() { return this; } }),
-    Identity:  () => ({ __m: 'I',  multiply() { return this; } }),
+    RotationX: () => mat({ ops: ['Rx'] }),
+    Scaling:   (x = 1, y = x, z = x) => mat({ sx: x, sy: y, sz: z, ops: [`S(${x},${y},${z})`] }),
+    Translation: (x = 0, y = 0, z = 0) => mat({ tx: x, ty: y, tz: z, ops: [`T(${x},${y},${z})`] }),
+    Identity:  () => mat({ ops: ['I'] }),
   },
   Color3: Object.assign(function (r, g, b) { return { r, g, b, scale: f => ({ r: r * f, g: g * f, b: b * f }) }; }, {
     // Parses real hex so shader tests can assert colour values.
