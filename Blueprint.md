@@ -1546,7 +1546,7 @@ back to the original logical object.
   the *final* (post-uniquify) name so Outliner / Properties never display
   the raw input.
 
-Why: per-mesh export filenames are `${projectName}_${name}${ratioSuffix}.${ext}`
+Why: per-mesh export filenames are `${projectName}_${name}_r{ref}to{target}.${ext}`
 (see §12 *Export filenames*). Two SceneObjects with the same name would
 silently overwrite each other inside the outer zip. The invariant turns a
 quiet data-loss footgun into a guaranteed visible suffix.
@@ -2324,9 +2324,9 @@ ctx and reads no global state.
   immutable references. `csgReady` is a build-time INPUT (caller awaits
   CSG2 init first) so the ctx is build-once for the whole target.
 - `PrintNaming.js`
-  - `ratioSuffix(ctx)` returns `_r{ref}to{target}`.
-  - `exportBaseName(ctx)` returns safe `${project}${suffix}`.
-  - `perMeshBaseName(ctx, meshName)` returns safe `${project}_${mesh}${suffix}`.
+  - `exportBaseName(ctx)` returns safe `${project}_r{ref}to{target}`.
+  - `perMeshBaseName(ctx, meshName)` returns safe `${project}_${mesh}_r{ref}to{target}`.
+  - The suffix is appended internally via `ExportPlanner.scaleFilenameSuffix`; no standalone `ratioSuffix` accessor (no caller ever needed one).
 - `PrintPipeline.js`
   - `exportOBJ`/`exportSTL`/`exportThreeMF` entry points.
   - `_runExport(formatKey, options)` loops `print.exportRatios`

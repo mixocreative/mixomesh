@@ -1,9 +1,10 @@
 /**
  * Export filename helpers.
  *
- * Every helper takes an ExportContext (see ExportContext.js). No getState()
- * reads, no module-level state. The ratio suffix is `_r{ref}to{target}`; for
- * "as shown" (target == reference) this is `_r1to1`-style.
+ * Both helpers take an ExportContext (see ExportContext.js). No getState()
+ * reads, no module-level state. The ratio suffix `_r{ref}to{target}` (e.g.
+ * `_r1to1` for "as shown") is appended INTERNALLY by ExportPlanner — callers
+ * never need it standalone, so there's no separate `ratioSuffix` accessor.
  *
  * Pure math + string formatting only — actual file naming policy.
  */
@@ -11,7 +12,6 @@
 import {
   exportBaseName as plannerExportBaseName,
   perMeshBaseName as plannerPerMeshBaseName,
-  scaleFilenameSuffix,
 } from './ExportPlanner.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
@@ -21,15 +21,6 @@ function _scales(ctx) {
     { sceneRatio: ctx.referenceRatio },
     { printRatio: ctx.targetRatio },
   ];
-}
-
-/**
- * `_r{ref}to{target}` filename suffix.
- * @param {ExportContext} ctx
- */
-export function ratioSuffix(ctx) {
-  const [scene, print] = _scales(ctx);
-  return scaleFilenameSuffix(scene, print);
 }
 
 /**

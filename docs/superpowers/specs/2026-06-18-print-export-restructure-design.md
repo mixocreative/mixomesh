@@ -110,7 +110,10 @@ src/core/print/
                         builder. Owns the BU_TO_MM constant. Returns a
                         frozen object. No mutable globals anywhere.
   PrintNaming.js     ⟵ RENAMED from PrintScale.js. Filename helpers ONLY
-                        (exportBaseName, perMeshBaseName, ratioSuffix).
+                        (exportBaseName + perMeshBaseName; suffix appended
+                        internally via ExportPlanner.scaleFilenameSuffix —
+                        a standalone ratioSuffix accessor was carried over
+                        from PrintScale but had no callers, dropped 2026-06-19).
                         Every helper takes a ctx argument — no getState()
                         reads, no module state.
   PrintPipeline.js   ⟵ NEW. _runExport, _runExportForTarget, mesh
