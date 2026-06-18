@@ -199,17 +199,20 @@ src/
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
     PersistenceManager.js
-    PrintManager.js        ← export orchestrator + OBJ/STL serializers, non-destructive
+    PrintManager.js        ← thin façade (56 lines) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
     print/
-      PrintScale.js        ← scale presets, export factor, ratio filenames, dimensions
-      PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
-      ExportPlanner.js     ← export request/profile/scale planning + filename stems
-      Download.js          ← save picker + anchor fallback
-      PrintPrep.js         ← reusable clone prep steps (flatten/weld/CSG/normals)
+      ExportContext.js     ← THE ONE typedef + builder; owns BU_TO_MM; previewExportContext + getExportedDimensions + getExportReference live here
+      PrintPipeline.js     ← export orchestrator + STL/3MF inline serializers; CSG/weld/validate; no module-level mutable state
+      ObjWriter.js         ← OBJ + MTL serializer + Mimaki solid-PNG synthesis (format-specific code, NOT in the orchestrator)
+      ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
+      PrintNaming.js       ← filename helpers (take ctx; no getState)
+      PrintPrep.js         ← reusable clone prep steps (THROW on missing ctx.pivot/ratioFactor/unitFactor)
       PrintFormats.js      ← format registry: labels, prep order, serializers
       PrintPackaging.js    ← zip/blob packaging + download dispatch
+      PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
+      ExportPlanner.js     ← pure filename math (consumed by PrintNaming)
       ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared)
-      ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
+      Download.js          ← save picker + anchor fallback
     printers/              ← PrinterProfile.ts (type-only printer JSON schema)
     scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
     assets/
@@ -424,10 +427,12 @@ Save/load path:
 Export path:
 1. `PrintPanel` exposes explicit OBJ / 3MF / STL export buttons and invokes
    `PrintManager.exportOBJ/exportSTL/exportThreeMF` from the clicked button.
-2. `PrintManager._runExport` collects printable meshes, validates the source
-   scene, clones meshes with unique geometry, builds a plan from scene/print
-   scale and current bed reference, runs ordered prep steps on clones, validates
-   the prepared clones, serializes, packages, and downloads.
+2. `PrintPipeline._runExport` collects printable meshes, awaits CSG2 init,
+   builds one `ExportContext` per target ratio (referenceRatio, targetRatio,
+   pivot, factors, projectName, all frozen), clones meshes with unique
+   geometry, runs ordered prep steps on clones, validates the prepared clones,
+   dispatches to the format serializer (ObjWriter / ThreeMFWriter / inline STL),
+   packages, and downloads.
 3. Export never mutates live scene meshes. Format buttons choose the requested
    file type; printer profile selection is a build-area/reference setting.
 
@@ -492,8 +497,8 @@ match what the specced responsibilities actually cost.
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
 | `MeshValidator.js` | < 460 (topology worker plumbing + group-union; pure topology lives in `workers/MeshValidate.worker.js`) |
 | `PersistenceManager.js` | < 800 |
-| `PrintManager.js` | < 500 (orchestrator + OBJ/STL; 3MF writers + texture collection split out) |
-| each `core/print/*.js` | < 350 |
+| `PrintManager.js` | < 80 (thin façade only — orchestrator/serializers/ctx all in `core/print/`) |
+| each `core/print/*.js` | < 350 (Pipeline ≈ 300 — STL + 3MF inline; ObjWriter ≈ 180; ExportContext ≈ 180) |
 | `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
 | Each `src/ui/*.js` | < 900 (PropertiesPanel/ShaderPanel are section stacks; split per-section when a panel exceeds this) |
 | `AppShell.js` | < 300 (shell controls + resize/collapse wiring) |
@@ -963,7 +968,7 @@ const initialState = {
     // viewport furniture — RenderOutput._hideFurniture hides them during capture.
     // The shadow-map pass renders depth directly, so shadows stay uncut (limit).
     // NOTE for a color-print tool: a REAL cut face for export/print is geometry,
-    // not visual — that is the CSG2 path (PrintManager._csgRebake already uses
+    // not visual — that is the CSG2 path (PrintPipeline._csgRebake already uses
     // CSG2); a future "apply cut" would intersect the solid with the half-space.
     section: { enabled: false, axis: 'z' /* |'x'|'y' */, offsetMM: 0, flip: false },
     // Render output (Scene ▸ Rendering — core/RenderOutput.js): PNG stills +
@@ -2181,16 +2186,23 @@ The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create 
 
 ## PART 12 — PRINT MANAGER
 
-**File: `src/core/PrintManager.js`**
+**File: `src/core/PrintManager.js`** (façade — 56 lines).
+
+The façade re-exports the API surface used by UI and tests. Both named
+exports AND the `PrintManager` namespace derive from one frozen `API`
+object so they cannot drift — adding a method touches one place. This
+structural rule closed a 🔴 crash in 2026-06-18 where a name was named-
+exported but missing from the namespace.
 
 ### Public API
 ```js
-PrintManager.exportOBJ(options)               → Promise<void>  // triggers download
-PrintManager.exportSTL(options)               → Promise<void>
-PrintManager.exportThreeMF(options)           → Promise<void>  // content-selected 3MF sub-flavor
-PrintManager.getExportReference(options)      → {logicalId, ratio}  // active printable unit, else first printable unit
-PrintManager.getExportedDimensions(meshId)    → {x,y,z} in mm at first export target, using export reference
-PrintManager.SCALE_PRESETS                    → scale-presets.json passthrough
+PrintManager.exportOBJ(options)                  → Promise<void>  // triggers download
+PrintManager.exportSTL(options)                  → Promise<void>
+PrintManager.exportThreeMF(options)              → Promise<void>  // content-selected 3MF sub-flavor
+PrintManager.previewExportContext(options)       → ExportContext|null  // UI preview entry — single source of truth
+PrintManager.getExportReference(options)         → {logicalId, ratio}  // active printable unit, else first printable unit
+PrintManager.getExportedDimensions(meshId, ctx?) → {x,y,z} in mm  // accepts a preview ctx to avoid rebuild
+PrintManager.SCALE_PRESETS                       → scale-presets.json passthrough
 
 // options = { selectedOnly?:bool, individually?:bool, onProgress?:fn }
 //   selectedOnly  — restrict to current selection (default: all isPrintPart meshes)
@@ -2198,10 +2210,9 @@ PrintManager.SCALE_PRESETS                    → scale-presets.json passthrough
 //                   (default: one combined file per format)
 ```
 
-`PrintManager` does not expose ratio setter functions in the Vite baseline.
-`PrintPanel` updates `state.print.targetRatio` directly for export-only scale
-changes and uses `HistoryManager.RescaleWorldCommand` for working-ratio rebake
-changes.
+`PrintManager` does not expose ratio setter functions. `PrintPanel` mutates
+`state.print.exportRatios` directly (per-object ratio redesign 2026-06-16).
+The old `state.print.targetRatio` is read only by `.mixo` migration.
 
 ### Export filenames
 
@@ -2272,43 +2283,59 @@ Toggle:
   injection. OBJ ships as classic vertex-coloured material — chosen
   explicitly when an FDM workflow or a downstream tool prefers it.
 
-Code seams:
-- `PrintManager._synthesizeSolidShaderTextures(meshList)` — returns
+Code seams (all in **`src/core/print/ObjWriter.js`** — extracted from
+PrintManager 2026-06-18 so the orchestrator no longer hosts format-specific code):
+- `serializeOBJ(ctx)` — the format entry point.
+- `_synthesizeSolidShaderTextures(meshList)` — returns
   `{ blobByName, filenameByMaterialName }`. Skips materials with a real
   diffuse/albedo/base texture (the `collectTextureExportData` path owns those).
-- `PrintManager._solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas.
-- `PrintManager._buildOBJMtl(meshEntries, filenameByMaterialName)` generates
-  MTL blocks using Mixomesh material ids/names, diffuse/albedo/base colour,
-  alpha, and optional `map_Kd` lines. Mixomesh does not call
-  `BABYLON.OBJExport.MTL` because Babylon's MTL helper accepts one mesh, emits
-  `newmtl mat1`, and can mismatch OBJ `usemtl <material.id>`.
-- All three are called from `_serializeOBJ` only; STL and 3MF are
-  unaffected.
-> **Phase 6 — structured export pipeline.** All three entry points are thin
-> wrappers over one orchestrator `_runExport(format, options)` driven by a
-> declarative `FORMATS` / `PREP_STEPS` registry: collect → clone (+
-> `makeGeometryUnique` so the shared-geometry clone can't corrupt the scene)
-> → ordered prep (`fallbackMaterial` / `flattenWorld` (world-matrix + mm scale
-> bake) / weld / optimizeIndices / createNormals / CSG2) → re-validate the
-> fixed clones → serialize → package. The live scene is never mutated.
-> Validation runs *after* prep; export only blocks on errors that survive the
-> auto-fix (`err.validationErrors`). `options.onProgress(frac,msg)` feeds the
-> blocking `src/ui/ProgressOverlay`. See §15 *Phase 6* for the full surface
-> (CSG2-needs-watertight, 3MF Z-up + baked viewer-invariant placement, etc.).
+- `_solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas.
+- `_buildOBJMtl(meshEntries, filenameByMaterialName)` generates MTL blocks
+  using Mixomesh material ids/names, diffuse/albedo/base colour, alpha, and
+  optional `map_Kd` lines. Mixomesh does not call `BABYLON.OBJExport.MTL`
+  because Babylon's MTL helper accepts one mesh, emits `newmtl mat1`, and
+  can mismatch OBJ `usemtl <material.id>`.
+- All three are private to `ObjWriter.js`; STL and 3MF are unaffected.
+> **Pipeline (Phase 6 + 2026-06-18 restructure).** All three entry points
+> are thin wrappers around `src/core/print/PrintPipeline.js::_runExport`.
+> Per target: build one `ExportContext` (frozen — see ExportContext.js),
+> collect → clone (+ `makeGeometryUnique` so the shared-geometry clone can't
+> corrupt the scene) → ordered prep (`fallbackMaterial` / `flattenWorld`
+> (W·T(-pivot)·S(ratio)·T(pivot)·S(BU→mm) bake) / weld / optimizeIndices /
+> createNormals / CSG2) → re-validate the fixed clones → serialize → package.
+> The live scene is never mutated. Validation runs *after* prep; export only
+> blocks on errors that survive the auto-fix (`err.validationErrors`).
+> `options.onProgress(frac,msg)` feeds the blocking `src/ui/ProgressOverlay`.
+> See §15 *Phase 6* for the full surface (CSG2-needs-watertight, 3MF Z-up +
+> baked viewer-invariant placement, etc.).
 
 ### Split Print Modules
 
-`PrintManager.js` stays the orchestrator and serializer owner. Helper modules
-under `src/core/print/` keep reusable policy out of the large file:
+Every concern owns ONE file. The orchestrator (`PrintPipeline`) never
+hosts format-specific code; format writers (`ObjWriter`, `ThreeMFWriter`)
+never reach into orchestration. Filename naming (`PrintNaming`) takes a
+ctx and reads no global state.
 
-- `PrintScale.js`
-  - imports `scale-presets.json` and exports `SCALE_PRESETS`.
-  - `exportFactor()` returns `(state.print.workingRatio / state.print.targetRatio) * 1000`.
-  - `ratioSuffix()` returns `_r{workingRatio}to{targetRatio}` using current state.
+- `ExportContext.js` — typedef + `buildExportContext({state, units, target,
+  options, csgReady})` + `previewExportContext(options)` +
+  `getExportReference(options)` + `getExportedDimensions(meshId, ctx?)`.
+  Owns `BU_TO_MM = 1000`. Returns a frozen object; the four list fields
+  (`csgSkipped`, `meshes`, `cloneGroups`) keep mutable contents but
+  immutable references. `csgReady` is a build-time INPUT (caller awaits
+  CSG2 init first) so the ctx is build-once for the whole target.
+- `PrintNaming.js`
+  - `ratioSuffix(ctx)` returns `_r{ref}to{target}`.
   - `exportBaseName(ctx)` returns safe `${project}${suffix}`.
   - `perMeshBaseName(ctx, meshName)` returns safe `${project}_${mesh}${suffix}`.
-  - `getExportedDimensions(meshId)` returns world AABB size in target mm.
-  - `scaleSummary()` returns display strings for UI.
+- `PrintPipeline.js`
+  - `exportOBJ`/`exportSTL`/`exportThreeMF` entry points.
+  - `_runExport(formatKey, options)` loops `print.exportRatios`
+    (`[null]` for "as shown"), builds one ctx per target. No mutable
+    module global, no `setExportTargetOverride` — target is a function
+    parameter.
+  - STL + 3MF inline serializers (`_serializeSTL`, `_serialize3MF` +
+    colorgroup / Materials-Ext variants).
+  - CSG2 init, weld, validation gate.
 - `PrinterProfiles.js`
   - imports `printers.json`.
   - exports `DEFAULT_PRINTER_ID = 'mimaki-3duj-553'`,
@@ -2356,8 +2383,10 @@ under `src/core/print/` keep reusable policy out of the large file:
     falls back to an anchor download for other picker failures.
 
 Keep these helpers small. If a new export target needs a new writer mode,
-add a serializer in `PrintManager`, add planner/type coverage, and add only
-generic reusable prep/packaging logic to the helper modules.
+add a serializer in `PrintPipeline.js` (STL/3MF inline) or extract it to a
+sibling like `ObjWriter.js` (when format-specific code grows >100 lines).
+Wire it into `PrintFormats.js`. Only generic reusable prep/packaging logic
+belongs in the helper modules.
 
 ### Scale Math
 
@@ -2444,16 +2473,18 @@ glTF extras.ratio ─┬─► modelRatio (asset, fixed)
 IMPORT  : bake  unit × modelRatio / ratio  into vertices   (seed ratio==modelRatio ⇒ file as authored)
 DISPLAY : object shown at its own ratio; mixed ratios look correct automatically
 EDIT    : ratio R_old→R_new ⇒ rescale ×(R_old/R_new), bake, store ratio   [RescaleObjectCommand]
-EXPORT  : factor = (referenceRatio / T) × 1000
-          referenceRatio = _exportReferenceRatio(printUnits): the ACTIVE object's
-            ratio IF it's in the export set, else the FIRST printable unit's ratio
-            — threaded as ctx.referenceRatio through exportFactorFor(ctx) +
-            exportBaseName(ctx) so factor AND filename use the same reference
+EXPORT  : ratioFactor = referenceRatio / T,   unitFactor = BU_TO_MM (1000),
+          factor      = ratioFactor * unitFactor
+          referenceRatio = (active printable unit, else first printable unit).ratio
+            — built into ctx.referenceRatio by ExportContext.buildExportContext;
+            consumed by PrintNaming.exportBaseName(ctx) + PrintPrep.flattenWorld(ctx)
+            + ObjWriter.serializeOBJ(ctx) + ThreeMFWriter so factor / filename / pivot
+            never diverge.
           • DEFAULT "as shown": empty print.exportRatios ⇒ T = referenceRatio
-            ⇒ factor 1000 ⇒ prints EXACTLY the size on screen (each object at its scale)
+            ⇒ ratioFactor 1 ⇒ factor 1000 ⇒ prints EXACTLY the size on screen
           • a target T (e.g. 1:144 on a 1:72 object) rescales: 72/144 = 0.5×
           • mixed selection scales uniformly by the reference ratio (WYSIWYG)
-            about the reference unit origin, then converts BU→mm
+            about ctx.pivot (the reference unit's world origin), then ×BU_TO_MM
           • print.exportRatios = LIST of absolute targets ⇒ one output file per T
           • filename suffix _r{referenceRatio}to{T}
 PERSIST : object.ratio + print.exportRatios in .mixo
@@ -2465,13 +2496,13 @@ RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
           all survive reload (byte-identical to a fresh import + saved placement)
 ```
 
-`PrintManager._runExport` resolves targets from `print.exportRatios`; when the
-list is empty, it uses `_exportReferenceRatio(printUnits)` so the default
-"as shown" export is exactly factor `1000` for the actual export set. The same
-reference unit drives filename suffixes, preview dimensions, and the export
-pivot. Target-ratio resizing uses `(referenceRatio / T)` about that reference
-unit origin, then the whole result converts BU→mm with `×1000`, so the reference
-origin stays at its as-shown millimetre coordinate.
+`PrintPipeline._runExport` resolves targets from `print.exportRatios` and
+loops `buildExportContext({state, units, target, options, csgReady})` once
+per target — no mutable module global, no `setExportTargetOverride`. Empty
+list ⇒ targets = `[null]` ⇒ `targetRatio = referenceRatio` ⇒ factor 1000
+"as shown". `PrintPanel.previewExportContext()` builds the SAME ctx shape
+so the panel preview and the real export are guaranteed to agree (same
+referenceRatio, same factor, same pivot, same filename).
 
 **Audit fixes — all DONE:**
 
@@ -2525,6 +2556,17 @@ stay on the node and are saved directly — never baked.**
 from the export path. Export, filename suffixes, Print panel scale preview, and
 `PrintManager.getExportedDimensions` all use the active printable reference
 unit, falling back to the first printable unit if the active object is excluded.
+
+**RESOLVED 2026-06-18 (structural restructure):** the three competing export-
+factor sources of truth (PrintManager inline, PrintScale adapter, PrintPanel
+calling ScaleMath directly) collapsed into ONE `ExportContext.buildExportContext`.
+The mutable module global `_targetOverride` is gone — target is a function
+parameter. `PrintPrep.flattenWorld` now throws on missing `pivot`/`ratioFactor`/
+`unitFactor` instead of falling back to world-origin scaling (silent wrong
+position). `PrintManager.js` shrank from 682 → 56 lines as a frozen-API façade so
+named exports and namespace cannot drift (closing a 🔴 crash class). `PrintPanel`
+imports only from `PrintManager` for export concerns. Spec:
+`docs/superpowers/specs/2026-06-18-print-export-restructure-design.md`.
 
 ### Presets
 Maintained in **`src/config/scale-presets.json`** (edit the JSON, no code change).
@@ -3165,7 +3207,7 @@ ProgressOverlay.update(frac, message?)      → void   // frac 0..1; clamps to 0
 ProgressOverlay.hide()                      → void
 ```
 
-`PrintManager._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
+`PrintPipeline._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
 
 ---
 
