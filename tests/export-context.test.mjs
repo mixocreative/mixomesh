@@ -16,6 +16,7 @@ const PrintManagerModule = await import('../src/core/PrintManager.js');
 const { PrintManager } = PrintManagerModule;
 const ExportContext = await import('../src/core/print/ExportContext.js');
 const { createPrepSteps } = await import('../src/core/print/PrintPrep.js');
+const { AssetLoader } = await import('../src/core/AssetLoader.js');
 
 // ── namespace ↔ named export parity ─────────────────────
 
@@ -265,4 +266,55 @@ await test('ctx.pivot is frozen + a plain {x,y,z} object', () => {
   assert.ok(Object.isFrozen(ctx.pivot), 'ctx.pivot should be frozen');
   assert.equal(ctx.pivot.x, 5);
   assert.throws(() => { ctx.pivot.x = 0; }, /Cannot assign/);
+});
+
+// ── Multi-target preview (2026-06-19 round 2) ───────────
+
+await test('buildExportContext: explicit target wins over null default', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE,
+    units: [unit('a', 72)],
+    target: 288,
+  });
+  assert.equal(ctx.targetRatio, 288);
+  assert.equal(ctx.ratioFactor, 72 / 288);
+});
+
+await test('buildExportContext: target=null means "as shown" (target = reference)', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE,
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.targetRatio, ctx.referenceRatio);
+  assert.equal(ctx.factor, 1000);
+});
+
+await test('getExportedDimensions: ctx.state is read when ctx is supplied (snapshot consistency)', () => {
+  // Stash the live state, then build a ctx whose state has a known object
+  // we can verify is read from the ctx, not from live getState().
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE,
+    units: [unit('a', 72)],
+    target: null,
+  });
+  // If the function looked up the mesh via getState() instead of ctx.state,
+  // it would miss the object that lives in FAKE_STATE. Stub the AssetLoader
+  // to return a mesh so the bbox path runs.
+  const stash = AssetLoader.getBabylonMesh;
+  AssetLoader.getBabylonMesh = () => ({
+    getBoundingInfo: () => ({
+      boundingBox: {
+        minimumWorld: { x: 0, y: 0, z: 0, subtract: () => ({ x: 1, y: 2, z: 3 }) },
+        maximumWorld: { subtract: (o) => ({ x: 1 - o.x, y: 2 - o.y, z: 3 - o.z }) },
+      },
+    }),
+  });
+  try {
+    const dims = ExportContext.getExportedDimensions('a', ctx);
+    assert.ok(dims, 'dims should resolve when ctx.state contains the obj');
+    assert.equal(dims.x, 1 * ctx.factor);
+  } finally {
+    AssetLoader.getBabylonMesh = stash;
+  }
 });

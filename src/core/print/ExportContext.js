@@ -146,7 +146,17 @@ export function collectPrintUnits(state, selectedOnly) {
  * current state and current export-ratio list. Returns null when there are
  * no printable units (caller should render a placeholder rather than crash).
  *
- * @param {{selectedOnly?:boolean, individually?:boolean}} [options]
+ * `target` defaults to the FIRST entry in `state.print.exportRatios` (or
+ * "as shown" when the list is empty). Callers showing per-target previews
+ * (e.g. multi-target Scale panel) can override with an explicit ratio or
+ * with `targetIndex: N` to pick the Nth entry of the list.
+ *
+ * @param {{
+ *   selectedOnly?:boolean,
+ *   individually?:boolean,
+ *   target?:number|null,
+ *   targetIndex?:number,
+ * }} [options]
  * @returns {ExportContext|null}
  */
 export function previewExportContext(options = {}) {
@@ -154,7 +164,14 @@ export function previewExportContext(options = {}) {
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) return null;
   const explicit = exportRatiosFromState(state);
-  const target = explicit.length ? explicit[0] : null;
+  let target;
+  if (options.target !== undefined) {
+    target = options.target;                                 // explicit override (incl. null = "as shown")
+  } else if (Number.isInteger(options.targetIndex) && options.targetIndex >= 0) {
+    target = explicit[options.targetIndex] ?? null;          // out-of-range falls back to "as shown"
+  } else {
+    target = explicit.length ? explicit[0] : null;
+  }
   // Mirror PrintPipeline._runExportForTarget: capture persisted print prefs
   // into the ctx options so preview and actual export read from the same
   // snapshot.
@@ -210,13 +227,17 @@ export function getExportedDimensions(meshId, ctx = null) {
       '(use previewExportContext() to build one). The legacy options-bag signature was removed 2026-06-19.'
     );
   }
-  const state = getState();
+  const useCtx = ctx ?? previewExportContext();
+  if (!useCtx) return null;
+  // When a ctx is supplied, look the object up in ITS state snapshot so the
+  // caller's "the ctx and the meshId came from the same render" assumption
+  // holds. Without a ctx, fall back to live state (used by callers that just
+  // want a one-shot dim read).
+  const state = useCtx.state ?? getState();
   const obj = state.scene.objects[meshId];
   if (!obj) return null;
   const mesh = AssetLoader.getBabylonMesh(meshId);
   if (!mesh) return null;
-  const useCtx = ctx ?? previewExportContext();
-  if (!useCtx) return null;
   const bb = mesh.getBoundingInfo().boundingBox;
   const size = bb.maximumWorld.subtract(bb.minimumWorld);
   const f = useCtx.factor;

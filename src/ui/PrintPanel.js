@@ -152,7 +152,12 @@ function _renderScaleTab() {
   html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
   html += '<div class="pp-ratio-list" data-export-ratios>';
   if (exportRatios.length === 0) {
-    html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(referenceR))}</span>`;
+    // Only show the "as shown · 1:R" pill when a real reference exists —
+    // showing it with referenceR=1 when there are no printable parts would
+    // claim a scale that isn't actually being used by anything.
+    if (preview) {
+      html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(referenceR))}</span>`;
+    }
   } else {
     for (const r of exportRatios) {
       html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(formatScaleRatio(r))}</span><button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
@@ -177,17 +182,23 @@ function _renderScaleTab() {
   html += '</div>';
 
   // Factor + dims come from the SAME preview context — single source of truth.
-  const factor = preview?.factor ?? 0;
-  html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
+  // When there are no printable parts, render an em-dash placeholder rather
+  // than "0.00" (which looks broken, not empty).
+  if (preview) {
+    html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${preview.factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
 
-  // Example dimensions — show the export reference object so the queried mesh
-  // and export factor agree even when the active selection is not printable.
-  const exampleId = referenceId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
-  if (preview && exampleId && state.scene.objects[exampleId]) {
-    const dims = PrintManager.getExportedDimensions(exampleId, preview);
-    if (dims) {
-      html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
+    // Example dimensions — show the export reference object so the queried mesh
+    // and export factor agree even when the active selection is not printable.
+    const exampleId = referenceId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
+    if (exampleId && state.scene.objects[exampleId]) {
+      const dims = PrintManager.getExportedDimensions(exampleId, preview);
+      if (dims) {
+        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
+      }
     }
+  } else {
+    html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> —</div>`;
+    html += `<p class="pp-empty">${escapeHtml(t('print.noPrintParts'))}</p>`;
   }
 
   html += '</div>';
