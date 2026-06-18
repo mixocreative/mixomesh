@@ -27,7 +27,9 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
       if (!(ctx.unitFactor > 0))   throw new Error('PrintPrep.flattenWorld: ctx.unitFactor must be positive');
       mesh.computeWorldMatrix?.(true);
       const W = mesh.getWorldMatrix?.();
-      if (!W) return;
+      // No silent fallback — a mesh without a world matrix would otherwise
+      // ship to the slicer at raw BU scale (1000× too small) with no warning.
+      if (!W) throw new Error(`PrintPrep.flattenWorld: mesh "${mesh?.name ?? '?'}" has no world matrix`);
       const { pivot: p, ratioFactor: r, unitFactor: u } = ctx;
       const M = W
         .multiply(BABYLON.Matrix.Translation(-p.x, -p.y, -p.z))

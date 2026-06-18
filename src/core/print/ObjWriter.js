@@ -7,7 +7,6 @@
  * line rewrite — lives here.
  */
 
-import { getState } from '../StateManager.js';
 import { collectTextureExportData, clamp255, hex2 } from './ExportTextures.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 
@@ -32,8 +31,10 @@ export async function serializeOBJ(ctx) {
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
   // so Mimaki UV-inkjet (texture-first) slicers receive an image even when
   // the artist set a flat diffuse colour with no map. Toggle is off by
-  // default; enabling in the Export tab opts into synthesis.
-  const bakeSolids = !!getState().print?.objBakeSolidTextures;
+  // default; enabling in the Export tab opts into synthesis. Read from the
+  // ctx — the orchestrator captured the flag at ctx-build time so preview
+  // and actual export cannot disagree if the user toggles mid-flight.
+  const bakeSolids = !!ctx.options?.objBakeSolidTextures;
   const synth = bakeSolids
     ? await _synthesizeSolidShaderTextures(ctx.meshes)
     : { blobByName: new Map(), filenameByMaterialName: new Map() };
@@ -123,14 +124,19 @@ async function _solidColorBlob(r, g, b, a) {
 }
 
 // Treat null/undefined/NaN alpha as fully opaque so PNG α and MTL d agree.
+// Number(null) === 0 (finite!), so a bare isFinite check would let null
+// become transparent — the explicit nullish guard runs FIRST.
 function _safeAlpha01(v) {
+  if (v == null) return 1;
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
 }
 
+// Use ?? not || so a legitimate-but-falsy mat.id (0, '') is not silently
+// replaced by mat.name / mesh.name and misaligned with the OBJ usemtl key.
 function _objMaterialName(mesh) {
   const mat = mesh?.material;
-  return String(mat?.id || mat?.name || mesh?.name || 'material');
+  return String(mat?.id ?? mat?.name ?? mesh?.name ?? 'material');
 }
 
 function _mtlColor(mat) {

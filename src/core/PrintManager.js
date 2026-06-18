@@ -34,6 +34,7 @@ const API = Object.freeze({
   getExportReference:   Ctx.getExportReference,
   getExportedDimensions: Ctx.getExportedDimensions,
   previewExportContext: Ctx.previewExportContext,
+  BU_TO_MM:             Ctx.BU_TO_MM,
   SCALE_PRESETS:        scalePresetData,
 });
 
@@ -44,6 +45,7 @@ export const {
   getExportReference,
   getExportedDimensions,
   previewExportContext,
+  BU_TO_MM,
   SCALE_PRESETS,
 } = API;
 

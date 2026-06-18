@@ -80,14 +80,22 @@ export function buildExportContext({ state, units, target = null, options = {}, 
   if (!(referenceRatio > 0)) throw new Error('buildExportContext: referenceRatio must be positive');
   if (!(targetRatio > 0))    throw new Error('buildExportContext: targetRatio must be positive');
   const ratioFactor = referenceRatio / targetRatio;
+  // Deep-freeze the nested objects a consumer might be tempted to mutate.
+  // units must stay live — its Babylon mesh handles are referenced after the
+  // ctx is built and Babylon mutates them itself. pivot is converted to a
+  // plain {x,y,z} before freezing so we don't freeze a Babylon Vector3 whose
+  // internal state Babylon may mutate.
+  const p = _referencePivot(referenceUnit);
+  const pivot = Object.freeze({ x: p.x, y: p.y, z: p.z });
+  const frozenOptions = Object.freeze({ ...options });
   return Object.freeze({
     state,
-    options,
+    options: frozenOptions,
     units,
     referenceUnit,
     referenceRatio,
     targetRatio,
-    pivot: _referencePivot(referenceUnit),
+    pivot,
     ratioFactor,
     unitFactor: BU_TO_MM,
     factor: ratioFactor * BU_TO_MM,
@@ -147,7 +155,22 @@ export function previewExportContext(options = {}) {
   if (!units.length) return null;
   const explicit = exportRatiosFromState(state);
   const target = explicit.length ? explicit[0] : null;
-  return buildExportContext({ state, units, target, options });
+  // Mirror PrintPipeline._runExportForTarget: capture persisted print prefs
+  // into the ctx options so preview and actual export read from the same
+  // snapshot.
+  const mergedOptions = {
+    objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
+    ...options,
+  };
+  // Crashing the Scale panel because one printable object has a bad ratio is
+  // worse than rendering "no preview" — degrade gracefully and let the user
+  // fix the value in Properties.
+  try {
+    return buildExportContext({ state, units, target, options: mergedOptions });
+  } catch (err) {
+    console.error('previewExportContext: buildExportContext failed:', err);
+    return null;
+  }
 }
 
 /**
@@ -178,6 +201,15 @@ export function getExportReference(options = {}) {
  *                                                 isn't present.
  */
 export function getExportedDimensions(meshId, ctx = null) {
+  // The 2nd arg used to be an `options` bag in the legacy signature. A truthy
+  // non-context object silently produced NaN dims. Detect the misuse and
+  // throw so the caller's mistake is loud, not a silent NaN.
+  if (ctx !== null && (typeof ctx !== 'object' || !Number.isFinite(ctx.factor))) {
+    throw new TypeError(
+      'getExportedDimensions: second argument must be an ExportContext ' +
+      '(use previewExportContext() to build one). The legacy options-bag signature was removed 2026-06-19.'
+    );
+  }
   const state = getState();
   const obj = state.scene.objects[meshId];
   if (!obj) return null;
@@ -202,11 +234,16 @@ function _selectReferenceUnit(units, state) {
 function _referencePivot(unit) {
   const leadPart = unit?.parts?.find(p => p.meshId === unit.logicalId) ?? unit?.parts?.[0] ?? null;
   const mesh = leadPart?.mesh;
-  if (!mesh) return BABYLON.Vector3.Zero();
+  // A reference unit with no live mesh is a contract violation — collectPrintUnits
+  // filters meshless parts out, so reaching here means something else broke.
+  if (!mesh) throw new Error('buildExportContext: reference unit has no live mesh');
   mesh.computeWorldMatrix?.(true);
   const t = mesh.getWorldMatrix?.()?.getTranslation?.();
-  if (t?.clone) return t.clone();
-  return BABYLON.Vector3.Zero();
+  // Silently anchoring scaling at world origin (the previous fallback) made
+  // every non-1:1 export shift mixed-ratio multi-selects to wrong positions.
+  // Throw explicitly so the orchestrator's caller sees the failure.
+  if (!t?.clone) throw new Error('buildExportContext: reference mesh produced no world translation');
+  return t.clone();
 }
 
 function _positiveOrNull(v) {

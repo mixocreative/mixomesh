@@ -2186,7 +2186,7 @@ The DB connection is opened lazily and memoised (`_dbPromise`). Upgrades create 
 
 ## PART 12 — PRINT MANAGER
 
-**File: `src/core/PrintManager.js`** (façade — 56 lines).
+**File: `src/core/PrintManager.js`** (façade — ~50 lines; treat the count as illustrative, the size budget is enforced in §file-size-budget).
 
 The façade re-exports the API surface used by UI and tests. Both named
 exports AND the `PrintManager` namespace derive from one frozen `API`

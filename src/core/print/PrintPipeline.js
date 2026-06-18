@@ -41,6 +41,9 @@ async function _ensureCSG2() {
     await _csgInitPromise;
     return true;
   } catch (err) {
+    // Clear the cached rejection so a later export can retry (transient
+    // WASM-fetch failures should not kill CSG for the page lifetime).
+    _csgInitPromise = null;
     console.error('CSG2 init failed:', err);
     return false;
   }
@@ -129,7 +132,15 @@ async function _validateExportMeshes(list, onStep) {
     const { mesh, name } = list[i];
     let results;
     try { results = await MeshValidator.validateMesh(mesh); }
-    catch (err) { console.error(`Validation failed for ${name}:`, err); continue; }
+    catch (err) {
+      // A validator throw must not silently pass — broken validation should
+      // block export, not let unknown geometry through the gate. Record as a
+      // hard error so the user sees the underlying message.
+      console.error(`Validation failed for ${name}:`, err);
+      errors.push({ meshName: name, message: `Validator crashed: ${err?.message ?? String(err)}` });
+      onStep?.(i + 1, list.length);
+      continue;
+    }
     for (const r of results || []) {
       if (r.severity === 'error') errors.push({ meshName: name, message: r.message });
     }
@@ -200,7 +211,15 @@ async function _runExportForTarget(fmt, target, options, progress) {
     if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
   }
 
-  const ctx = buildExportContext({ state, units, target, options, csgReady });
+  // Persisted print preferences captured into the ctx ONCE so consumers read
+  // a stable snapshot — toggling the option mid-export must not split the
+  // run (preview ctx ↔ actual export ctx would otherwise disagree).
+  const mergedOptions = {
+    objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
+    ...options,
+  };
+
+  const ctx = buildExportContext({ state, units, target, options: mergedOptions, csgReady });
 
   const clones = [];
   const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };
@@ -225,7 +244,14 @@ async function _runExportForTarget(fmt, target, options, progress) {
         const step = PREP_STEPS[stepKey];
         if (!step) continue;
         try { step(clone, ctx); }
-        catch (e) { console.error(`Prep "${stepKey}" failed for ${clone.name}:`, e); }
+        catch (e) {
+          // Contract violations from the prep layer (PrintPrep throws when its
+          // required ctx fields are missing) must NOT be swallowed — they
+          // signal a hardened invariant break and the export must abort. The
+          // surrounding finally{} disposes any clones already created.
+          if (e?.message?.startsWith('PrintPrep.')) throw e;
+          console.error(`Prep "${stepKey}" failed for ${clone.name}:`, e);
+        }
       }
       clones.push({
         meshId, logicalId, mesh: clone,
