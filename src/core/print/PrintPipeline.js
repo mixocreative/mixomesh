@@ -18,7 +18,7 @@ import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
-import { buildExportContext, collectPrintUnits } from './ExportContext.js';
+import { buildExportContext, collectPrintUnits, capturePrintPrefs } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
@@ -211,15 +211,13 @@ async function _runExportForTarget(fmt, target, options, progress) {
     if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
   }
 
-  // Persisted print preferences captured into the ctx ONCE so consumers read
-  // a stable snapshot — toggling the option mid-export must not split the
-  // run (preview ctx ↔ actual export ctx would otherwise disagree).
-  const mergedOptions = {
-    objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
-    ...options,
-  };
-
-  const ctx = buildExportContext({ state, units, target, options: mergedOptions, csgReady });
+  // Persisted print preferences captured into the ctx ONCE (shared helper so
+  // preview and actual export cannot drift) — toggling a pref mid-export must
+  // not split the run.
+  const ctx = buildExportContext({
+    state, units, target, csgReady,
+    options: capturePrintPrefs(state, options),
+  });
 
   const clones = [];
   const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };

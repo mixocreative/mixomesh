@@ -1,9 +1,57 @@
 # Print / Export Subsystem — Structural Restructure
 
-**Date:** 2026-06-18
-**Status:** APPROVED for implementation (user `/goal` 2026-06-18).
+**Date:** 2026-06-18 (post-landing hardening 2026-06-19, two rounds).
+**Status:** SHIPPED 2026-06-18; hardened by max-effort code review 2026-06-19
+(round 1 closed 13 of 15 review findings; round 2 closed the 3 outlying
+"PLAUSIBLE" items; round 3 extracted shared `capturePrintPrefs` helper).
 **Supersedes parts of:** `2026-06-16-per-object-ratio-design.md` (AS-BUILT corrections to
 `PrintManager.js` / `PrintScale.js` / `PrintPrep.js` / `PrintPanel.js`).
+
+### Post-landing changes (read before treating snippets below as canonical)
+
+The §3 snippets describe the AS-DESIGNED shape. AS-BUILT additions from the
+2026-06-19 hardening rounds:
+
+- `previewExportContext(options)` accepts `options.target` (explicit ratio
+  override, incl. `null` = "as shown") or `options.targetIndex` (Nth entry of
+  the export-ratios list) for multi-target preview support. Default
+  unchanged (first entry / as-shown).
+- `previewExportContext` wraps `buildExportContext` in try/catch and returns
+  `null` on throw — the Scale tab degrades to an empty-state placeholder
+  rather than crashing on a malformed object.
+- `ExportContext.capturePrintPrefs(state, options)` is the single source of
+  truth for which `state.print.*` keys ride on `ctx.options`. Both
+  `PrintPipeline._runExportForTarget` and `previewExportContext` call it so
+  preview and actual export cannot disagree if the user toggles
+  `objBakeSolidTextures` mid-flight.
+- `getExportedDimensions(meshId, ctx?)` reads `ctx.state` (the snapshot the
+  ctx was built from) when a ctx is supplied; falls back to live `getState()`
+  only when no ctx is passed.
+- `PrintPipeline._runExportForTarget` re-throws any `Error` whose message
+  starts with `PrintPrep.` so the per-step try/catch around prep does NOT
+  swallow PrintPrep's contract violations.
+- `_csgInitPromise` clears on rejection so a transient WASM-fetch failure
+  no longer permanently disables CSG2 for the page lifetime.
+- `_validateExportMeshes` records validator throws as hard errors so broken
+  validation blocks export instead of passing it.
+- `_referencePivot` throws on missing world translation (no silent
+  Vector3.Zero() fallback).
+- `_safeAlpha01(null)` returns 1 (opaque), not 0 (transparent — Number(null)
+  is finite, so the original isFinite guard let null through to 0).
+- `PrintNaming.exportBaseName/perMeshBaseName` `_requireCtx` —
+  symmetric strict-field contract with `PrintPrep.flattenWorld`.
+- `ctx.options` and `ctx.pivot` are deep-frozen (pivot is a plain `{x,y,z}`
+  to avoid freezing Babylon's Vector3 internals).
+- `BU_TO_MM` is re-exported through the `PrintManager` façade so tests do
+  not reach across into `ExportContext.js`.
+- Parity test walks BOTH directions — adding a method to the API without
+  the destructured re-export now fails the test.
+- `PrintPanel` Scale tab shows an em-dash + `print.noPrintParts` placeholder
+  when no printable parts exist (no more `0.00 mm/BU` + fake "as shown · 1:1"
+  pill).
+
+The §3 design snippets below remain canonical for INTENT; check the source
+files for the AS-BUILT details listed above.
 
 ## 1. Why this exists
 

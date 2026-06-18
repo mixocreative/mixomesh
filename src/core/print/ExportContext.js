@@ -33,6 +33,24 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 export const BU_TO_MM = 1000;
 
 /**
+ * Capture persisted print preferences into the per-export options bag so
+ * downstream consumers (ObjWriter etc.) read them from the ctx — not from
+ * live state — and preview + actual export read the same snapshot.
+ *
+ * Single source of truth for which `state.print.*` keys belong on the ctx;
+ * adding a new persisted print pref means adding ONE field here.
+ *
+ * @param {Object} state    StateManager snapshot.
+ * @param {Object} options  Caller options (may override the captured prefs).
+ */
+export function capturePrintPrefs(state, options = {}) {
+  return {
+    objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
+    ...options,
+  };
+}
+
+/**
  * @typedef {Object} ExportContext
  * @property {Object} state           StateManager snapshot at build time.
  * @property {Object} options         Caller options ({selectedOnly, individually, ...}).
@@ -172,18 +190,14 @@ export function previewExportContext(options = {}) {
   } else {
     target = explicit.length ? explicit[0] : null;
   }
-  // Mirror PrintPipeline._runExportForTarget: capture persisted print prefs
-  // into the ctx options so preview and actual export read from the same
-  // snapshot.
-  const mergedOptions = {
-    objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
-    ...options,
-  };
   // Crashing the Scale panel because one printable object has a bad ratio is
   // worse than rendering "no preview" — degrade gracefully and let the user
   // fix the value in Properties.
   try {
-    return buildExportContext({ state, units, target, options: mergedOptions });
+    return buildExportContext({
+      state, units, target,
+      options: capturePrintPrefs(state, options),
+    });
   } catch (err) {
     console.error('previewExportContext: buildExportContext failed:', err);
     return null;
