@@ -1900,8 +1900,8 @@ Consumers: PrintPanel Validation tab (cache + "Validate All" button — no
 re-validation per render), Outliner row status badges, export warning gate.
 
 ### Pre-Export Gate
-- Hard errors are caught INSIDE `_runExport` (post auto-fix) → block with
-  the error-list modal.
+- Hard errors are caught INSIDE `PrintPipeline._runExport` (post auto-fix)
+  → block with the error-list modal.
 - Cached non-stale warnings on print parts → PrintPanel confirms
   "Export anyway?" before invoking the export (default yes — display
   models are routinely non-watertight and slicers auto-repair).
@@ -2640,14 +2640,15 @@ This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as we
 
 **Use `BABYLON.OBJExport.OBJ()`.** Do not write a custom OBJ serializer.
 
-Current implementation:
+Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
+`print/ObjWriter.js`):
 1. `_runExport('obj', options)` collects logical print units. A unit may contain
    one mesh or several internal material-split meshes from one Blender object.
    Every mesh clone still gets its own prep/validation pass.
 2. Each clone gets `makeGeometryUnique()` before prep.
 3. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weld`,
    `optimizeIndices`, `createNormals`.
-4. `_serializeOBJ(ctx)` calls `BABYLON.OBJExport.OBJ(meshes, true,
+4. `ObjWriter.serializeOBJ(ctx)` calls `BABYLON.OBJExport.OBJ(meshes, true,
    baseName, true)` for geometry and rewrites the emitted `mtllib` to exactly
    match the paired `.mtl` entry.
 5. Mixomesh generates the MTL file so `newmtl` names match OBJ `usemtl`
@@ -2669,7 +2670,8 @@ Current implementation:
 `exportThreeMF()` is selected by the explicit **3MF** export button. The
 printer dropdown does not choose the 3MF sub-flavor.
 
-Current implementation:
+Current implementation (orchestrator + dispatcher: `print/PrintPipeline.js`;
+package writers: `print/ThreeMFWriter.js`):
 1. `_runExport('3mf', options)` collects logical print units and clones every
    mesh inside each unit.
 2. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
@@ -2693,7 +2695,7 @@ Current implementation:
 **Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
 carry shader, texture, or per-part color metadata.
 
-Current implementation:
+Current implementation (`print/PrintPipeline.js` — STL serializer inline):
 1. `_runExport('stl', options)` clones logical print units and makes every
    clone geometry unique.
 2. Format prep runs: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
