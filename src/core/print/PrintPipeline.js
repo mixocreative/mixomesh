@@ -18,7 +18,7 @@ import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
-import { buildExportContext, collectPrintUnits, capturePrintPrefs } from './ExportContext.js';
+import { buildExportContext, collectPrintUnits } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
@@ -181,6 +181,15 @@ async function _runExport(formatKey, options = {}) {
   if (!fmt) throw new Error(`Unknown export format: ${formatKey}`);
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
 
+  // CSG2 init runs ONCE for the whole batch (was once-per-target in the old
+  // shape, producing N identical "unavailable" toasts on failure). Result
+  // flows down to every target's ctx.
+  let csgReady = false;
+  if (fmt.needsCSG) {
+    csgReady = await _ensureCSG2();
+    if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
+  }
+
   // One file per target ratio in print.exportRatios. Empty list = "as shown"
   // (target = referenceRatio → factor 1000). Targets are passed into
   // buildExportContext directly — no mutable global, no setExportTargetOverride.
@@ -192,32 +201,22 @@ async function _runExport(formatKey, options = {}) {
       (ti + Math.max(0, Math.min(1, frac))) / targets.length,
       targets.length > 1 ? `[${ti + 1}/${targets.length}] ${msg}` : msg,
     );
-    await _runExportForTarget(fmt, targets[ti], options, span);
+    await _runExportForTarget(fmt, targets[ti], options, csgReady, span);
   }
 }
 
-async function _runExportForTarget(fmt, target, options, progress) {
+async function _runExportForTarget(fmt, target, options, csgReady, progress) {
   progress(0.02, 'Collecting meshes…');
   const state = getState();
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
   const printMeshes = _flattenPrintUnits(units);
 
-  // CSG2 init must complete before context build so ctx.csgReady is the truth
-  // for the whole pass — no mid-flight reassignment of frozen fields.
-  let csgReady = false;
-  if (fmt.needsCSG) {
-    csgReady = await _ensureCSG2();
-    if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
-  }
-
-  // Persisted print preferences captured into the ctx ONCE (shared helper so
-  // preview and actual export cannot drift) — toggling a pref mid-export must
-  // not split the run.
-  const ctx = buildExportContext({
-    state, units, target, csgReady,
-    options: capturePrintPrefs(state, options),
-  });
+  // ctx.options carries the caller's per-call request; ctx.prefs carries the
+  // snapshotted state.print.* values (set inside buildExportContext). The
+  // two stay separate so callers can't accidentally override a pref by
+  // spreading their own options bag.
+  const ctx = buildExportContext({ state, units, target, csgReady, options });
 
   const clones = [];
   const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };
@@ -238,6 +237,15 @@ async function _runExportForTarget(fmt, target, options, progress) {
       // CRITICAL: Babylon's clone shares geometry by reference. Without a
       // unique copy here, prep would corrupt the live scene mesh.
       clone.makeGeometryUnique?.();
+      // Track the clone IMMEDIATELY so the finally{} dispose loop catches it
+      // even if a prep step throws (re-thrown PrintPrep.* contract violations
+      // would otherwise leak the freshly-cloned Babylon mesh and its GPU
+      // buffers, since the old push-after-prep order skipped failed clones).
+      clones.push({
+        meshId, logicalId, mesh: clone,
+        name: mesh.name || `mesh_${meshId}`,
+        logicalName: logicalName || mesh.name || `mesh_${meshId}`,
+      });
       for (const stepKey of fmt.prep) {
         const step = PREP_STEPS[stepKey];
         if (!step) continue;
@@ -246,16 +254,11 @@ async function _runExportForTarget(fmt, target, options, progress) {
           // Contract violations from the prep layer (PrintPrep throws when its
           // required ctx fields are missing) must NOT be swallowed — they
           // signal a hardened invariant break and the export must abort. The
-          // surrounding finally{} disposes any clones already created.
+          // surrounding finally{} disposes the clone (already pushed above).
           if (e?.message?.startsWith('PrintPrep.')) throw e;
           console.error(`Prep "${stepKey}" failed for ${clone.name}:`, e);
         }
       }
-      clones.push({
-        meshId, logicalId, mesh: clone,
-        name: mesh.name || `mesh_${meshId}`,
-        logicalName: logicalName || mesh.name || `mesh_${meshId}`,
-      });
       progress(0.05 + 0.45 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
     }
     ctx.meshes.push(...clones);

@@ -34,7 +34,7 @@ export async function serializeOBJ(ctx) {
   // default; enabling in the Export tab opts into synthesis. Read from the
   // ctx — the orchestrator captured the flag at ctx-build time so preview
   // and actual export cannot disagree if the user toggles mid-flight.
-  const bakeSolids = !!ctx.options?.objBakeSolidTextures;
+  const bakeSolids = !!ctx.prefs?.objBakeSolidTextures;
   const synth = bakeSolids
     ? await _synthesizeSolidShaderTextures(ctx.meshes)
     : { blobByName: new Map(), filenameByMaterialName: new Map() };

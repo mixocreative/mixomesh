@@ -290,6 +290,38 @@ await test('buildExportContext: target=null means "as shown" (target = reference
   assert.equal(ctx.factor, 1000);
 });
 
+await test('getExportedDimensions rejects ctx missing state.scene', () => {
+  // Round-4 tightening: a stub ctx with only .factor is no longer accepted —
+  // the type guard now requires ctx.state.scene so the snapshot promise can't
+  // silently degrade into a live-getState fallback.
+  assert.throws(
+    () => ExportContext.getExportedDimensions('any-id', { factor: 1000 }),
+    /second argument must be an ExportContext/,
+  );
+});
+
+await test('buildExportContext: ctx.prefs snapshots state.print prefs (frozen)', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { objBakeSolidTextures: true } },
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.prefs.objBakeSolidTextures, true);
+  assert.ok(Object.isFrozen(ctx.prefs));
+  assert.throws(() => { ctx.prefs.objBakeSolidTextures = false; }, /Cannot assign/);
+});
+
+await test('ctx.prefs and ctx.options are SEPARATE — caller options cannot accidentally override prefs', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { objBakeSolidTextures: true } },
+    units: [unit('a', 72)],
+    target: null,
+    options: { objBakeSolidTextures: false },   // caller bag, should NOT shadow prefs
+  });
+  assert.equal(ctx.prefs.objBakeSolidTextures, true, 'prefs reflect state, untouched by caller');
+  assert.equal(ctx.options.objBakeSolidTextures, false, 'caller options preserved separately');
+});
+
 await test('getExportedDimensions: ctx.state is read when ctx is supplied (snapshot consistency)', () => {
   // Stash the live state, then build a ctx whose state has a known object
   // we can verify is read from the ctx, not from live getState().

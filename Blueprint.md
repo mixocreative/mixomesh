@@ -199,7 +199,7 @@ src/
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
     PersistenceManager.js
-    PrintManager.js        ← thin façade (56 lines) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
+    PrintManager.js        ← thin façade (~50 lines; size budget in §file-size-budget) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
     print/
       ExportContext.js     ← THE ONE typedef + builder; owns BU_TO_MM; previewExportContext + getExportedDimensions + getExportReference live here
       PrintPipeline.js     ← export orchestrator + STL/3MF inline serializers; CSG/weld/validate; no module-level mutable state
@@ -2566,7 +2566,7 @@ calling ScaleMath directly) collapsed into ONE `ExportContext.buildExportContext
 The mutable module global `_targetOverride` is gone — target is a function
 parameter. `PrintPrep.flattenWorld` now throws on missing `pivot`/`ratioFactor`/
 `unitFactor` instead of falling back to world-origin scaling (silent wrong
-position). `PrintManager.js` shrank from 682 → 56 lines as a frozen-API façade so
+position). `PrintManager.js` shrank from 682 → ~50 lines as a frozen-API façade so
 named exports and namespace cannot drift (closing a 🔴 crash class). `PrintPanel`
 imports only from `PrintManager` for export concerns. Spec:
 `docs/superpowers/specs/2026-06-18-print-export-restructure-design.md`.

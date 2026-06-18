@@ -33,21 +33,20 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 export const BU_TO_MM = 1000;
 
 /**
- * Capture persisted print preferences into the per-export options bag so
- * downstream consumers (ObjWriter etc.) read them from the ctx — not from
- * live state — and preview + actual export read the same snapshot.
+ * Capture persisted print preferences from state into a frozen `prefs` object
+ * attached to every ExportContext. ObjWriter and friends read prefs via
+ * `ctx.prefs.*`; caller options stay separate (`ctx.options.*`). This split
+ * removes the ambiguity of a merged options bag — `ctx.prefs` is always the
+ * snapshotted state, `ctx.options` is always the caller's per-call request.
  *
- * Single source of truth for which `state.print.*` keys belong on the ctx;
- * adding a new persisted print pref means adding ONE field here.
- *
- * @param {Object} state    StateManager snapshot.
- * @param {Object} options  Caller options (may override the captured prefs).
+ * Single source of truth for which `state.print.*` keys belong on the ctx —
+ * adding a new persisted print pref means adding ONE field here AND in the
+ * `ctx.prefs` typedef.
  */
-export function capturePrintPrefs(state, options = {}) {
-  return {
+function _capturePrefs(state) {
+  return Object.freeze({
     objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
-    ...options,
-  };
+  });
 }
 
 /**
@@ -68,6 +67,7 @@ export function capturePrintPrefs(state, options = {}) {
  * @property {string[]} csgSkipped    Mutated by pipeline.
  * @property {Array} meshes           Mutated by pipeline (clone entries).
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
+ * @property {{objBakeSolidTextures:boolean}} prefs  Snapshotted state.print prefs (frozen).
  */
 
 /**
@@ -123,6 +123,7 @@ export function buildExportContext({ state, units, target = null, options = {}, 
     csgSkipped: [],
     meshes: [],
     cloneGroups: [],
+    prefs: _capturePrefs(state),
   });
 }
 
@@ -178,28 +179,27 @@ export function collectPrintUnits(state, selectedOnly) {
  * @returns {ExportContext|null}
  */
 export function previewExportContext(options = {}) {
-  const state = getState();
-  const units = collectPrintUnits(state, !!options.selectedOnly);
-  if (!units.length) return null;
-  const explicit = exportRatiosFromState(state);
-  let target;
-  if (options.target !== undefined) {
-    target = options.target;                                 // explicit override (incl. null = "as shown")
-  } else if (Number.isInteger(options.targetIndex) && options.targetIndex >= 0) {
-    target = explicit[options.targetIndex] ?? null;          // out-of-range falls back to "as shown"
-  } else {
-    target = explicit.length ? explicit[0] : null;
-  }
-  // Crashing the Scale panel because one printable object has a bad ratio is
-  // worse than rendering "no preview" — degrade gracefully and let the user
-  // fix the value in Properties.
+  // Crashing the Scale panel because one printable object has a bad ratio
+  // (or a transient state shape during load/reset) is worse than rendering
+  // "no preview". The full body is wrapped so an upstream throw — from
+  // collectPrintUnits, exportRatiosFromState, or buildExportContext —
+  // degrades to null and the panel renders its empty-state placeholder.
   try {
-    return buildExportContext({
-      state, units, target,
-      options: capturePrintPrefs(state, options),
-    });
+    const state = getState();
+    const units = collectPrintUnits(state, !!options.selectedOnly);
+    if (!units.length) return null;
+    const explicit = exportRatiosFromState(state);
+    let target;
+    if (options.target !== undefined) {
+      target = options.target;                                 // explicit override (incl. null = "as shown")
+    } else if (Number.isInteger(options.targetIndex) && options.targetIndex >= 0) {
+      target = explicit[options.targetIndex] ?? null;          // out-of-range falls back to "as shown"
+    } else {
+      target = explicit.length ? explicit[0] : null;
+    }
+    return buildExportContext({ state, units, target, options });
   } catch (err) {
-    console.error('previewExportContext: buildExportContext failed:', err);
+    console.error('previewExportContext: ctx build failed:', err);
     return null;
   }
 }
@@ -234,8 +234,14 @@ export function getExportReference(options = {}) {
 export function getExportedDimensions(meshId, ctx = null) {
   // The 2nd arg used to be an `options` bag in the legacy signature. A truthy
   // non-context object silently produced NaN dims. Detect the misuse and
-  // throw so the caller's mistake is loud, not a silent NaN.
-  if (ctx !== null && (typeof ctx !== 'object' || !Number.isFinite(ctx.factor))) {
+  // throw so the caller's mistake is loud, not a silent NaN. Both `factor`
+  // (drives the math) and `state` (drives the snapshot lookup) are required
+  // on a real ExportContext; a hand-rolled stub missing either is a bug.
+  if (ctx !== null && (
+    typeof ctx !== 'object'
+    || !Number.isFinite(ctx.factor)
+    || !ctx.state?.scene
+  )) {
     throw new TypeError(
       'getExportedDimensions: second argument must be an ExportContext ' +
       '(use previewExportContext() to build one). The legacy options-bag signature was removed 2026-06-19.'
@@ -243,11 +249,10 @@ export function getExportedDimensions(meshId, ctx = null) {
   }
   const useCtx = ctx ?? previewExportContext();
   if (!useCtx) return null;
-  // When a ctx is supplied, look the object up in ITS state snapshot so the
-  // caller's "the ctx and the meshId came from the same render" assumption
-  // holds. Without a ctx, fall back to live state (used by callers that just
-  // want a one-shot dim read).
-  const state = useCtx.state ?? getState();
+  // With a ctx supplied, look up via ITS state snapshot so the caller's
+  // "ctx and meshId came from the same render" assumption holds. The type
+  // guard above ensures useCtx.state.scene exists when ctx is passed.
+  const state = useCtx.state;
   const obj = state.scene.objects[meshId];
   if (!obj) return null;
   const mesh = AssetLoader.getBabylonMesh(meshId);
