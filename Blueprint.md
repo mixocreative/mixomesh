@@ -3204,7 +3204,10 @@ through the UI rendering safety contract before becoming `<img src>`.
 Full-screen blocking overlay shown during exports. Single instance, mounted into
 the static `#progress-root` from `index.html` (or lazily created if an old shell
 is loaded). Captures and swallows `pointerdown / pointerup / click / wheel /
-keydown / contextmenu` so the user can't mutate the scene mid-pipeline.
+contextmenu` on the overlay root, and installs a document-level capture guard
+for `keydown / keyup / keypress`. Keyboard events target the focused element,
+not the overlay sibling, so the document guard is what blocks viewport
+shortcuts while export is running.
 
 ```js
 ProgressOverlay.show(title = 'Working…')   → void
@@ -3507,6 +3510,7 @@ export async function resolve(specifier, context, nextResolve) {
 |---|---:|---|
 | `tests/export.test.mjs` | 52 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); logical-object grouping for internal material splits; OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-object 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
 | `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, build-area profile metadata, export scale |
+| `tests/progress-overlay.test.mjs` | 2 | ProgressOverlay blocks document-level keyboard events while visible and releases them after hide |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |

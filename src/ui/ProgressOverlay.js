@@ -8,6 +8,13 @@ let _bar = null;
 let _pct = null;
 let _msg = null;
 let _title = null;
+let _visible = false;
+
+function _blockWhileVisible(e) {
+  if (!_visible) return;
+  e.stopPropagation();
+  e.preventDefault();
+}
 
 function _ensure() {
   if (_root) return;
@@ -22,8 +29,13 @@ function _ensure() {
     </div>`;
   // Swallow every interaction while visible (capture phase).
   for (const ev of ['pointerdown', 'pointerup', 'click', 'wheel', 'keydown', 'contextmenu']) {
-    _root.addEventListener(ev, (e) => { e.stopPropagation(); e.preventDefault(); }, true);
+    _root.addEventListener(ev, _blockWhileVisible, true);
   }
+  // Keyboard events target the focused element, not this overlay sibling. A
+  // document-level capture guard is what actually blocks viewport shortcuts.
+  document.addEventListener('keydown', _blockWhileVisible, true);
+  document.addEventListener('keyup', _blockWhileVisible, true);
+  document.addEventListener('keypress', _blockWhileVisible, true);
   if (!_root.parentElement) document.body.appendChild(_root);
   _bar   = _root.querySelector('.po-bar');
   _pct   = _root.querySelector('.po-pct');
@@ -36,6 +48,7 @@ export function show(title = t('progress.working')) {
   _ensure();
   _title.textContent = title;
   update(0, t('progress.starting'));
+  _visible = true;
   _root.classList.remove('hidden');
 }
 
@@ -52,6 +65,7 @@ export function update(frac, message) {
 }
 
 export function hide() {
+  _visible = false;
   if (_root) _root.classList.add('hidden');
 }
 
