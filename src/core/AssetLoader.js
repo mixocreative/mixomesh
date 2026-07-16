@@ -14,6 +14,7 @@ import { reportError } from '../ui/Status.js';
 import { ProgressOverlay } from '../ui/ProgressOverlay.js';
 import { t } from '../i18n/index.js';
 import { putHandle, getHandle } from './idb.js';
+import { sha256Hex } from './hash.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from './ImportNormalizer.js';
@@ -60,12 +61,6 @@ const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isol
 // Module-local — never persisted in state. Container/mesh/orphan registries
 // live in ./assets/MeshRegistry.js.
 const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (session)
-
-/** sha256 hex of an ArrayBuffer — texture-identity scope (§10b). */
-async function _sha256Hex(buf) {
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 // ── OBJ sibling resolution (field report: "obj fails to read mtl") ──────
 // OBJ loads from a blob URL, so the loader's relative `mtllib` / texture
@@ -284,7 +279,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   // §10b texture-identity scope: hash the source bytes once. Reused as the
   // AssetEntry contentHash so persistence doesn't re-hash at save time.
   let sourceFileHash = null;
-  try { sourceFileHash = await _sha256Hex(await blob.arrayBuffer()); }
+  try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
   catch { /* hash is an identity optimisation — import proceeds without it */ }
 
   // OBJ: resolve mtllib/texture references against drop-set or directory

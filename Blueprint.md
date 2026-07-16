@@ -245,6 +245,7 @@ src/
       VideoRecorder.js     ← offline WebCodecs encode → mp4 (mp4-muxer lazy), owns recording flag
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
+    hash.js                ← sha256Hex — shared §10b identity hash (AssetLoader + persistence)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
   ui/
     Outliner.js

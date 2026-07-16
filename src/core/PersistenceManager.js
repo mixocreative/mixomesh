@@ -24,6 +24,7 @@ import {
   kvSet, kvGet, kvDelete, kvKeys,
   putFileHandle, getFileHandle,
 } from './idb.js';
+import { sha256Hex } from './hash.js';
 
 const BABYLON = window.BABYLON;
 
@@ -62,11 +63,6 @@ function _bufFromB64(b64) {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
-}
-
-async function _sha256Hex(buf) {
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function _extOf(name) {
@@ -159,7 +155,7 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
           base.fileData    = await encodeBase64Async(buf);
           // Bytes are immutable per assetId — reuse the import-time hash
           // instead of re-hashing on every save (review M16).
-          base.contentHash = a.contentHash ?? await _sha256Hex(buf);
+          base.contentHash = a.contentHash ?? await sha256Hex(buf);
         }
       } catch (err) {
         // Surface loudly: a silent miss here writes an incomplete .mixo the
@@ -274,7 +270,7 @@ async function _scanDirForHash(dirHandle, hash, ext, budget = { n: 0 }) {
       try {
         const f   = await h.getFile();
         const buf = await f.arrayBuffer();
-        if (await _sha256Hex(buf) === hash) return f;
+        if (await sha256Hex(buf) === hash) return f;
       } catch { /* unreadable — skip */ }
     } else if (h.kind === 'directory') {
       const found = await _scanDirForHash(h, hash, ext, budget);
@@ -978,7 +974,7 @@ export const PersistenceManager = {
 // carry the milestone-critical invariants (byte-exact embed, asset-resolution
 // priority, migration). Not part of the public API — do not call from app code.
 export const __test = {
-  _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
+  _b64FromBuf, _bufFromB64, _sha256Hex: sha256Hex, _extOf,
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
   _arrToMap, _migrate, _resolveLoadedExportRatios, _buildDocument, _loadProject,
 };
