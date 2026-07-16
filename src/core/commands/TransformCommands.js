@@ -5,8 +5,6 @@ import { dispatch, markDirty } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { applyTransforms, captureWorld } from './support.js';
 
-const BABYLON = window.BABYLON;
-
 /**
  * Apply per-mesh absolute transforms. `prev` and `next` are objects keyed by
  * meshId with `{position, rotation:quat, scaling}` plain-object values.

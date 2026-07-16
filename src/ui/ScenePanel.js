@@ -116,7 +116,7 @@ function _saveCollapsed() {
   try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(_collapsed)); } catch { /* private mode */ }
 }
 
-let _collapsed = _loadCollapsed();
+const _collapsed = _loadCollapsed();
 let _bodyEl = null;
 let _root = null;
 

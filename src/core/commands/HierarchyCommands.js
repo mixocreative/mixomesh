@@ -234,7 +234,7 @@ export class GroupCommand {
       }
 
       // Median in world space
-      let center = new BABYLON.Vector3(0, 0, 0);
+      const center = new BABYLON.Vector3(0, 0, 0);
       meshes.forEach(m => center.addInPlace(m.getAbsolutePosition()));
       center.scaleInPlace(1 / meshes.length);
 
@@ -334,7 +334,7 @@ export class UngroupCommand {
     withDetachedPivot(() => {
       const meshes = this._snapshot.childIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
       if (!meshes.length) return;
-      let center = new BABYLON.Vector3(0, 0, 0);
+      const center = new BABYLON.Vector3(0, 0, 0);
       meshes.forEach(m => center.addInPlace(m.getAbsolutePosition()));
       center.scaleInPlace(1 / meshes.length);
 

@@ -151,7 +151,7 @@ function _buildGroupUnion(siblings) {
   }
   const positions = new Float32Array(totalVerts * 3);
   const indices   = new Uint32Array(totalIndices);
-  let pOff = 0, iOff = 0, vOff = 0;
+  let iOff = 0, vOff = 0;
   const tmp = new BABYLON.Vector3();
   for (const { babylonMesh } of siblings) {
     const pos = _getPositions(babylonMesh);
@@ -171,7 +171,6 @@ function _buildGroupUnion(siblings) {
     }
     vOff += vCount;
     iOff += idx.length;
-    pOff += vCount * 3;
   }
   return { positions, indices };
 }

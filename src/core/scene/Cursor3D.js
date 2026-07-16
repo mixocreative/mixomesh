@@ -11,8 +11,7 @@
 // selection) and fires CURSOR_CHANGED so the N-panel inputs track it.
 
 import { CURSOR_DIAMETER, CURSOR_HEX } from './SceneConstants.js';
-import { setState } from '../StateManager.js';
-import { dispatch } from '../StateManager.js';
+import { setState, dispatch } from '../StateManager.js';
 import { EVENTS } from '../events.js';
 
 const BABYLON = window.BABYLON;

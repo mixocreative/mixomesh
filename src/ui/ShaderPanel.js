@@ -4,7 +4,7 @@ import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
 import { AssetLoader } from '../core/AssetLoader.js';
-import { ShaderLibrary, DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
+import { DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
 import {
   push,
   ShaderCreateCommand, ShaderUpdateCommand, ShaderDuplicateCommand,

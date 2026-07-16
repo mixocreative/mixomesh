@@ -145,7 +145,7 @@ function _computePivotPosition(meshes, mode, activeMesh) {
     return _getCursorPosition ? _getCursorPosition() : BABYLON.Vector3.Zero();
   }
   // 'median' / 'individual' (treated as median for Phase 3)
-  let sum = new BABYLON.Vector3(0, 0, 0);
+  const sum = new BABYLON.Vector3(0, 0, 0);
   meshes.forEach(m => { sum.addInPlace(m.getAbsolutePosition()); });
   return sum.scaleInPlace(1 / meshes.length);
 }

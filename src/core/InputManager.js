@@ -311,7 +311,7 @@ function _enterModal(op) {
   SceneManager.attachToSelection([], 'median', null);
 
   const snapshots = {};
-  let center = new BABYLON.Vector3(0, 0, 0);
+  const center = new BABYLON.Vector3(0, 0, 0);
   for (const { id, mesh } of selected) {
     mesh.computeWorldMatrix(true);
     snapshots[id] = _snapshotMesh(mesh);
@@ -510,7 +510,7 @@ function _applyTranslate(dx, dy) {
   }
 }
 
-function _applyRotate(dx, dy) {
+function _applyRotate(dx, _dy) {
   const m = _modal;
   const typed = _typedAsRotateRad();
   const angle = typed != null
@@ -541,7 +541,7 @@ function _applyRotate(dx, dy) {
   }
 }
 
-function _applyScale(dx, dy) {
+function _applyScale(dx, _dy) {
   const m = _modal;
   const typed = _typedAsScaleFactor();
   let factor = typed != null ? typed : 1 + (dx * SCALE_PX_SENS);

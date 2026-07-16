@@ -83,8 +83,9 @@ behaviours. Treat it that way:
   and `src/app/main.ts`; app code/data live under `src/`.
 - Legacy root runtime removed: `core/`, `ui/`, `config/`, `styles/`,
   `main.js`, `index.vite.html`, and `scripts/serve.mjs`.
-- Verification baseline: bare `npm run typecheck`, `npm run build`,
-  `npm run test`, `npm run test:browser`, and `npm run test:export` pass.
+- Verification baseline: bare `npm run lint`, `npm run typecheck`,
+  `npm run build`, `npm run test`, `npm run test:browser`, and
+  `npm run test:export` pass.
   Do not hard-code total test counts in instructions; counts drift as coverage
   changes.
 - Historical build notes live in `BUILDLOG.md`; `BLUEPRINT.md §15` keeps the

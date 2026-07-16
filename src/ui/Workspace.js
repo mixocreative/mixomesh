@@ -80,7 +80,7 @@ export function parseStored(raw) {
 }
 
 let _widths = {};   // workspace → { outlinerWidth, rightWidth, assetHeight }
-let _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
+const _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
 let _pillEl = null;
 
 // ── Init ─────────────────────────────────────────────────

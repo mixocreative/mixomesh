@@ -20,9 +20,7 @@ import { ACCENT_HEX } from './SceneConstants.js';
 
 const BABYLON = window.BABYLON;
 
-// Accent as rgb() parts for canvas fills (the stripe texture).
 const _accent = BABYLON.Color3.FromHexString(ACCENT_HEX);
-const ACCENT_RGB = `${Math.round(_accent.r * 255)}, ${Math.round(_accent.g * 255)}, ${Math.round(_accent.b * 255)}`;
 
 let _scene  = null;
 let _camera = null;

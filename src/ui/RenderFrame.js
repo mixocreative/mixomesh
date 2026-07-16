@@ -8,7 +8,7 @@ import { fitFrameRect } from '../core/render/RenderMath.js';
 
 let _el = null;          // overlay div, lazily created inside #viewport
 let _label = null;
-let _aspect = { w: 1920, h: 1080 };
+const _aspect = { w: 1920, h: 1080 };
 let _active = false;
 let _ro = null;
 

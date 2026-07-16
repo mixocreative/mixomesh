@@ -9,7 +9,7 @@
 // just reads back the same attribute layout.
 
 import assert from 'node:assert/strict';
-import { installEnv, calls, resetCalls } from './env.mjs';
+import { installEnv, resetCalls } from './env.mjs';
 import { instances as zipInstances } from './jszip-stub.mjs';
 
 installEnv();
