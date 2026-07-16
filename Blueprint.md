@@ -224,6 +224,8 @@ src/
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
       BlobUrls.js          ← shared assetId → object-URL registry
       MeshRegistry.js      ← module-local container/mesh/orphan registries + id minting
+      DirMounts.js         ← mounted-directory handles: picker, idb persist, permission re-grant
+      ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)

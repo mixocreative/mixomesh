@@ -13,7 +13,7 @@ import { Toast } from '../ui/Toast.js';
 import { reportError } from '../ui/Status.js';
 import { ProgressOverlay } from '../ui/ProgressOverlay.js';
 import { t } from '../i18n/index.js';
-import { putHandle, getHandle } from './idb.js';
+import { putHandle } from './idb.js';
 import { sha256Hex } from './hash.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
@@ -39,6 +39,11 @@ import {
   getBabylonMesh, registerMesh, hasMesh, trackOrphan,
   getContainerGeomMeshes, bindRestoredMesh, resetRegistry,
 } from './assets/MeshRegistry.js';
+import { mountDirectory, restoreDirectory, getDirectoryHandle } from './assets/DirMounts.js';
+import {
+  collectObjSiblings, rememberObjSiblings, getObjSiblings,
+  installSiblingUrls, noteMissingMtl, revokeObjSiblings, revokeAllObjSiblings,
+} from './assets/ObjSiblings.js';
 import { isWorkerImportSupported, loadObjContainerViaWorker } from './WorkerImport.js';
 import {
   splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer,
@@ -57,20 +62,6 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 const THUMB_SIZE  = 128;
 const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isolation
-
-// Module-local — never persisted in state. Container/mesh/orphan registries
-// live in ./assets/MeshRegistry.js.
-const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (session)
-
-// ── OBJ sibling resolution (field report: "obj fails to read mtl") ──────
-// OBJ loads from a blob URL, so the loader's relative `mtllib` / texture
-// requests can't resolve. We map sibling filenames → object URLs (from a
-// multi-file drop or the file's mounted directory) and swap
-// BABYLON.Tools.PreprocessUrl for the duration of the load. The map is kept
-// per assetId so re-instantiation rebinds materials too.
-
-const _objSiblings = new Map();   // assetId → Map<lowercase filename, objectURL>
-const MAX_SIBLING_FILES = 64;
 
 // ── Import progress overlay (field request) ─────────────────────────────
 // Imports block the UI thread during parse; the overlay stops false clicks
@@ -99,85 +90,6 @@ function _importEnd() {
   if (_importDepth === 0) ProgressOverlay.hide();
 }
 
-async function _collectObjSiblings(opts) {
-  const map = new Map();
-  const add = async (name, fileOrHandle) => {
-    if (map.size >= MAX_SIBLING_FILES) return;
-    const ext = _extOf(name);
-    if (ext !== '.mtl' && !isTextureExt(ext)) return;
-    try {
-      const file = typeof fileOrHandle.getFile === 'function' ? await fileOrHandle.getFile() : fileOrHandle;
-      map.set(name.toLowerCase(), URL.createObjectURL(file));
-    } catch { /* unreadable sibling — material falls back */ }
-  };
-
-  if (Array.isArray(opts.siblingFiles)) {
-    for (const f of opts.siblingFiles) await add(f.name, f);
-  } else if ((opts.dirHandle || opts.directoryHandleKey) && opts.originalPath) {
-    // Project restore passes the idb-resolved handle directly (the session
-    // mount map only fills after an explicit remount).
-    const root = opts.dirHandle ?? _dirHandles.get(opts.directoryHandleKey);
-    if (root) {
-      try {
-        // Walk to the OBJ's parent directory, then enumerate its files.
-        const parts = String(opts.originalPath).split(/[\\/]+/).filter(Boolean);
-        let dir = root;
-        for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
-        for await (const [name, handle] of dir.entries()) {
-          if (handle.kind === 'file') await add(name, handle);
-        }
-      } catch { /* directory walk failed — material falls back */ }
-    }
-  }
-  return map;
-}
-
-/** Swap Tools.PreprocessUrl to serve sibling files by filename. Returns restore fn. */
-function _installSiblingUrls(map) {
-  if (!map?.size || !BABYLON.Tools) return () => {};
-  // Same-name fallback: when the OBJ's mtllib statement names a file we don't
-  // have but exactly ONE .mtl sibling exists, serve that one (artists rename
-  // OBJs without updating mtllib constantly).
-  const mtlUrls = [...map.entries()].filter(([n]) => n.endsWith('.mtl')).map(([, u]) => u);
-  const soloMtl = mtlUrls.length === 1 ? mtlUrls[0] : null;
-  const prev = BABYLON.Tools.PreprocessUrl;
-  BABYLON.Tools.PreprocessUrl = (url) => {
-    const name = String(url).split(/[\\/]/).pop()?.toLowerCase();
-    const hit = name ? map.get(name) : null;
-    if (hit) return hit;
-    if (soloMtl && name?.endsWith('.mtl')) return soloMtl;
-    return typeof prev === 'function' ? prev(url) : url;
-  };
-  return () => { BABYLON.Tools.PreprocessUrl = prev; };
-}
-
-/**
- * Note when the OBJ references a .mtl no sibling satisfies. A missing MTL is
- * a VALID import (mesh gets the fallback material) — console note only, no
- * toast nagging (field request).
- */
-async function _noteMissingMtl(blob, filename, map) {
-  try {
-    const head = await blob.slice(0, 65536).text();
-    const refs = [...head.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)]
-      .map(m => m[1].trim().split(/[\\/]/).pop()?.toLowerCase())
-      .filter(Boolean);
-    const hasAnyMtl = [...(map?.keys() ?? [])].some(n => n.endsWith('.mtl'));
-    const missing = refs.filter(r => !map?.has(r));
-    if (missing.length && !hasAnyMtl) {
-      console.warn(`${filename}: references ${missing[0]} but no .mtl was provided — using default material. ` +
-        'Drop the .mtl/textures together with the .obj, or import from a mounted folder, to bind materials.');
-    }
-  } catch { /* note only */ }
-}
-
-function _revokeObjSiblings(assetId) {
-  const map = _objSiblings.get(assetId);
-  if (!map) return;
-  for (const url of map.values()) URL.revokeObjectURL(url);
-  _objSiblings.delete(assetId);
-}
-
 /**
  * Load an AssetContainer from a blob URL. OBJ parses in a worker when
  * available (Babylon's OBJ loader is a synchronous text parse — big files
@@ -198,32 +110,9 @@ async function _loadContainer(blobUrl, ext, scene, onProgress, siblings) {
 
 // ── Public API ───────────────────────────────────────────
 
-/**
- * Prompt the user to mount a directory via the File System Access API.
- * Persists the handle in IndexedDB for session restoration (Phase 6).
- * @returns {Promise<{handle: FileSystemDirectoryHandle, key: string}>}
- */
-export async function mountDirectory() {
-  const handle = await window.showDirectoryPicker();
-  const key = `dir_${handle.name}_${Date.now()}`;
-  _dirHandles.set(key, handle);
-  await putHandle(key, handle);
-  return { handle, key };
-}
-
-/**
- * Restore a previously-mounted directory handle (requires re-grant of permission).
- * @param {string} key
- * @returns {Promise<FileSystemDirectoryHandle|null>}
- */
-export async function restoreDirectory(key) {
-  const handle = await getHandle(key);
-  if (!handle) return null;
-  const granted = await handle.requestPermission({ mode: 'read' });
-  if (granted !== 'granted') return null;
-  _dirHandles.set(key, handle);
-  return handle;
-}
+// Directory mounts — owned by ./assets/DirMounts.js, re-exported so the
+// AssetLoader surface stays unchanged.
+export { mountDirectory, restoreDirectory, getDirectoryHandle };
 
 /**
  * Load an asset from a FileSystemFileHandle (Asset Panel drag).
@@ -286,13 +175,13 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   // siblings (blob URLs have no usable base URL).
   let siblings = null;
   if (ext === '.obj') {
-    siblings = await _collectObjSiblings(opts);
-    if (siblings.size) _objSiblings.set(assetId, siblings);
-    _noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
+    siblings = await collectObjSiblings(opts);
+    if (siblings.size) rememberObjSiblings(assetId, siblings);
+    noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
   }
 
   _importBegin(`Reading ${filename}…`);
-  const restoreUrls = _installSiblingUrls(siblings);
+  const restoreUrls = installSiblingUrls(siblings);
 
   try {
     const container = await _loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
@@ -373,7 +262,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     return meshIds;
   } catch (err) {
     revokeBlobUrl(assetId);
-    _revokeObjSiblings(assetId);
+    revokeObjSiblings(assetId);
     removeContainer(assetId);
     throw err;
   } finally {
@@ -400,8 +289,8 @@ export async function instantiateAsset(assetId, position) {
   const scene = SceneManager.getScene();
   _importBegin(`Reading ${asset.filename}…`);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
-  const siblings = _objSiblings.get(assetId);
-  const restoreUrls = _installSiblingUrls(siblings);
+  const siblings = getObjSiblings(assetId);
+  const restoreUrls = installSiblingUrls(siblings);
   try {
     const container = await _loadContainer(
       blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings
@@ -450,7 +339,7 @@ export function releaseAsset(assetId) {
       removeContainer(assetId);
     }
     revokeBlobUrl(assetId);
-    _revokeObjSiblings(assetId);
+    revokeObjSiblings(assetId);
   }
 
   setState(s => {
@@ -727,11 +616,6 @@ function _filterContainerToLibraryItem(container, libraryItem) {
   if (Array.isArray(container.materials) && usedMaterials.size) {
     container.materials = container.materials.filter(mat => usedMaterials.has(mat));
   }
-}
-
-/** @param {string} key */
-export function getDirectoryHandle(key) {
-  return _dirHandles.get(key) ?? null;
 }
 
 /** True if the extension is a recognised mesh container. */
@@ -1040,10 +924,10 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
 
   let siblings = null;
   if (extension === '.obj') {
-    siblings = await _collectObjSiblings(opts);
-    if (siblings.size) _objSiblings.set(assetId, siblings);
+    siblings = await collectObjSiblings(opts);
+    if (siblings.size) rememberObjSiblings(assetId, siblings);
   }
-  const restoreUrls = _installSiblingUrls(siblings);
+  const restoreUrls = installSiblingUrls(siblings);
   let container;
   try {
     container = await _loadContainer(blobUrl, extension, scene, null, siblings);
@@ -1052,7 +936,7 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
     // leak the source blob URL or the OBJ sibling URLs — the caller turns this
     // asset into a ghost and never revokes them otherwise.
     revokeBlobUrl(assetId);
-    _revokeObjSiblings(assetId);
+    revokeObjSiblings(assetId);
     throw err;
   } finally {
     restoreUrls();
@@ -1100,7 +984,7 @@ export function resetAll() {
   resetRegistry();
   resetTextures();
   revokeAllBlobUrls();
-  for (const id of [..._objSiblings.keys()]) _revokeObjSiblings(id);
+  revokeAllObjSiblings();
 }
 
 /**
