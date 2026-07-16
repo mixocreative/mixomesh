@@ -11,6 +11,7 @@ import { EVENTS } from '../core/events.js';
 import { icon } from '../core/Icons.js';
 import { MM_PER_BU } from '../core/scene/SceneConstants.js';
 import { applyTranslations } from '../i18n/index.js';
+import { escEnter } from './lib/fields.js';
 
 let _root = null;
 let _open = false;
@@ -38,7 +39,7 @@ export function init() {
 
   for (const axis of ['x', 'y', 'z']) {
     _inputs[axis].addEventListener('change', () => _commitFromInputs());
-    _inputs[axis].addEventListener('keydown', (e) => { if (e.key === 'Enter') _commitFromInputs(); });
+    escEnter(_inputs[axis]);   // Enter blurs → change commits; no Escape revert
   }
 
   _root.querySelector('[data-act="show-cursor"]')?.addEventListener('change', _toggleShowCursor);

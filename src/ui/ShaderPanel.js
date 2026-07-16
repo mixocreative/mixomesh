@@ -16,6 +16,8 @@ import { AssetPanel } from './AssetPanel.js';
 import { Modal } from './Modal.js';
 import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js';
 import { Workspace } from './Workspace.js';
+import { wireNumbers } from './lib/fields.js';
+import { createCollapseController } from './lib/sections.js';
 
 const DRAG_MIME       = 'application/x-mixomesh-asset';
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
@@ -25,8 +27,8 @@ let _bodyEl       = null;
 let _root         = null;
 let _editingId    = null;     // shaderId currently in the inline editor
 // Section keys the user has collapsed inside the panel. Preserved across
-// renders this session; not persisted (Phase 6 work).
-const _collapsedSections = new Set();
+// renders this session; not persisted (session-only by design).
+const _collapse = createCollapseController();
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -281,19 +283,7 @@ function _render() {
 }
 
 function _applyAndWireSectionCollapse() {
-  _bodyEl.querySelectorAll('.sp-section[data-section]').forEach(sec => {
-    const key = sec.dataset.section;
-    if (_collapsedSections.has(key)) sec.classList.add('sp-collapsed');
-    const header = sec.querySelector(':scope > .sp-section-header');
-    if (!header) return;
-    header.addEventListener('click', (e) => {
-      // Clicks on header-internal buttons (e.g. + new shader) shouldn't toggle.
-      if (e.target.closest('button')) return;
-      sec.classList.toggle('sp-collapsed');
-      if (sec.classList.contains('sp-collapsed')) _collapsedSections.add(key);
-      else _collapsedSections.delete(key);
-    });
-  });
+  _collapse.wire(_bodyEl, { sectionSelector: '.sp-section[data-section]', collapsedClass: 'sp-collapsed' });
 }
 
 // ── Shader list ──────────────────────────────────────────
@@ -528,15 +518,12 @@ function _wireEditor(shaderId) {
     ['sp-uv-rot', 'rotation'],
   ];
   for (const [elId, key] of uvFields) {
-    const el = _bodyEl.querySelector(`#${elId}`);
-    el?.addEventListener('change', () => {
-      const n = parseFloat(el.value);
-      if (!Number.isFinite(n)) { _render(); return; }
+    wireNumbers(_bodyEl, `#${elId}`, (_el, n) => {
       const prevUV = { ...getState().scene.shaders[shaderId].uvBase };
       if (Math.abs(prevUV[key] - n) < 1e-9) return;
       const nextUV = { ...prevUV, [key]: n };
       push(new ShaderUpdateCommand(shaderId, 'uvBase', prevUV, nextUV));
-    });
+    }, { onInvalid: _render });
   }
 
   // Texture drop-target

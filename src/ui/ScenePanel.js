@@ -35,6 +35,8 @@ import { Toast } from './Toast.js';
 import { reportError } from './Status.js';
 import { triggerDownload } from '../core/print/Download.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
+import { escEnter, wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
+import { createCollapseController } from './lib/sections.js';
 import {
   TONE_EXPOSURE, TONE_CONTRAST, SHADOW_DARKNESS,
   KEY_INTENSITY, FILL_INTENSITY, HEMI_INTENSITY,
@@ -101,23 +103,10 @@ const RESOLUTION_PRESETS = [
 // Per-user section collapse (localStorage, NEVER in .mixo — same per-user
 // rule as workspaces). Environment + Camera start collapsed so the Rendering
 // section is reachable without scrolling (UX audit P1).
-const COLLAPSE_KEY = 'mixomesh.scenePanel.collapsed.v1';
-const COLLAPSE_DEFAULTS = { grid: false, environment: true, camera: true, section: true, rendering: false };
-
-function _loadCollapsed() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? 'null');
-    return { ...COLLAPSE_DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
-  } catch {
-    return { ...COLLAPSE_DEFAULTS };
-  }
-}
-
-function _saveCollapsed() {
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(_collapsed)); } catch { /* private mode */ }
-}
-
-const _collapsed = _loadCollapsed();
+const _collapse = createCollapseController({
+  storageKey: 'mixomesh.scenePanel.collapsed.v1',
+  defaults: { grid: false, environment: true, camera: true, section: true, rendering: false },
+});
 let _bodyEl = null;
 let _root = null;
 
@@ -234,7 +223,7 @@ function _section(key, title, inner) {
     ? `<span${i18nAttr}>${title}</span>`
     : title;
   return `
-    <section class="pp-section ${_collapsed[key] ? 'pp-collapsed' : ''}" data-sec="${key}">
+    <section class="pp-section ${_collapse.isCollapsed(key) ? 'pp-collapsed' : ''}" data-sec="${key}">
       <header class="pp-section-header">${sectionIcon(SECTION_ICONS[key] ?? '')}${titleSpan}${resetBtn}</header>
       ${inner}
     </section>`;
@@ -258,16 +247,6 @@ function _toggle(dataAttr, key, label, on) {
     + `${dataAttr}="${key}" aria-pressed="${on ? 'true' : 'false'}">`
     + `<span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(label)}</button>`;
 }
-// New value to APPLY when an element fires: a button toggles its aria-pressed,
-// a checkbox reports its post-change `checked`.
-const _nextVal = (el) => el.tagName === 'BUTTON' ? el.getAttribute('aria-pressed') !== 'true' : el.checked;
-const _evt     = (el) => el.tagName === 'BUTTON' ? 'click' : 'change';
-function _reflectToggle(el, on) {
-  if (el.tagName !== 'BUTTON') return;
-  el.classList.toggle('pp-toggle-on', on);
-  el.setAttribute('aria-pressed', on ? 'true' : 'false');
-}
-
 function _render() {
   if (!_bodyEl) return;
   const s = getState();
@@ -571,13 +550,8 @@ function _setRenderOut(patch) {
 function _wire() {
   // Section collapse — same .pp-collapsed pattern as the Properties panel,
   // but persisted per-user.
-  _bodyEl.querySelectorAll('.pp-section[data-sec]').forEach(sec => {
-    sec.querySelector(':scope > .pp-section-header')?.addEventListener('click', () => {
-      const key = sec.dataset.sec;
-      sec.classList.toggle('pp-collapsed');
-      _collapsed[key] = sec.classList.contains('pp-collapsed');
-      _saveCollapsed();
-    });
+  _collapse.wire(_bodyEl, {
+    sectionSelector: '.pp-section[data-sec]', collapsedClass: 'pp-collapsed', datasetKey: 'sec',
   });
 
   // Per-section ↺ reset — stopPropagation so the header doesn't also collapse.
@@ -589,71 +563,53 @@ function _wire() {
   });
 
   // Grid styling → SceneManager.setGrid (writes state.scene.grid itself).
-  _bodyEl.querySelectorAll('[data-grid]').forEach(input => {
-    input.addEventListener('change', () => {
-      const grid = getState().scene.grid ?? {};
-      const cellEl = _bodyEl.querySelector('[data-grid="cellMM"]');
-      const subEl  = _bodyEl.querySelector('[data-grid="subdivisions"]');
-      const cellMM = parseFloat(cellEl.value);
-      const subdivisions = parseInt(subEl.value, 10);
-      if (!Number.isFinite(cellMM) || cellMM <= 0 ||
-          !Number.isFinite(subdivisions) || subdivisions < 1) { _render(); return; }
-      if (cellMM === grid.cellMM && subdivisions === grid.subdivisions) return;
-      SceneManager.setGrid({ cellMM, subdivisions });
-    });
-    _escEnter(input);
-  });
+  // Either field changing re-reads and validates BOTH (they commit together).
+  wireNumbers(_bodyEl, '[data-grid]', () => {
+    const grid = getState().scene.grid ?? {};
+    const cellMM = parseFloat(_bodyEl.querySelector('[data-grid="cellMM"]').value);
+    const subdivisions = parseInt(_bodyEl.querySelector('[data-grid="subdivisions"]').value, 10);
+    if (!Number.isFinite(cellMM) || cellMM <= 0 ||
+        !Number.isFinite(subdivisions) || subdivisions < 1) { _render(); return; }
+    if (cellMM === grid.cellMM && subdivisions === grid.subdivisions) return;
+    SceneManager.setGrid({ cellMM, subdivisions });
+  }, { onInvalid: _render, onEscape: _render });
 
   // Grid/axes visibility — toggle buttons (checkbox→toggle audit). No
   // dependent rows, so reflect the pressed state in place instead of a full
   // re-render.
-  _bodyEl.querySelectorAll('[data-overlay]').forEach(el => {
-    el.addEventListener(_evt(el), () => {
-      const name = el.dataset.overlay;
-      const enabled = _nextVal(el);
-      setState(s => ({
-        ...s,
-        scene: { ...s.scene, overlays: { ...s.scene.overlays, [name]: enabled } },
-      }), SILENT);
-      SceneManager.setOverlay(name, enabled);
-      _reflectToggle(el, enabled);
-    });
+  wireToggles(_bodyEl, '[data-overlay]', (el, enabled) => {
+    const name = el.dataset.overlay;
+    setState(s => ({
+      ...s,
+      scene: { ...s.scene, overlays: { ...s.scene.overlays, [name]: enabled } },
+    }), SILENT);
+    SceneManager.setOverlay(name, enabled);
+    reflectToggle(el, enabled);
   });
 
   // Render numbers.
-  _bodyEl.querySelectorAll('[data-render]').forEach(input => {
-    input.addEventListener('change', () => {
-      const key = input.dataset.render;
-      const value = parseFloat(input.value);
-      if (!Number.isFinite(value)) { _render(); return; }
-      _setRender({ [key]: value });
-    });
-    _escEnter(input);
-  });
+  wireNumbers(_bodyEl, '[data-render]', (input, value) => {
+    _setRender({ [input.dataset.render]: value });
+  }, { onInvalid: _render, onEscape: _render });
 
-  // Boolean render features — now toggle BUTTONS (checkbox→toggle audit).
+  // Boolean render features — toggle BUTTONS (checkbox→toggle audit).
   // vignette / floorEnabled / shadowsEnabled / hdriEnabled / ssaoEnabled gate
   // dependent rows, so those re-render the panel (which also re-paints the
   // pressed state from fresh state).
-  _bodyEl.querySelectorAll('[data-render-toggle]').forEach(el => {
-    el.addEventListener(_evt(el), () => {
-      const key = el.dataset.renderToggle;
-      const next = _nextVal(el);
-      if (key === 'hdriEnabled' && next) _hdriToastWanted = true;
-      _setRender({ [key]: next });
-      if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled', 'ssaoEnabled'].includes(key)) _render();
-      else _reflectToggle(el, next);
-    });
+  wireToggles(_bodyEl, '[data-render-toggle]', (el, next) => {
+    const key = el.dataset.renderToggle;
+    if (key === 'hdriEnabled' && next) _hdriToastWanted = true;
+    _setRender({ [key]: next });
+    if (['vignette', 'floorEnabled', 'shadowsEnabled', 'hdriEnabled', 'ssaoEnabled'].includes(key)) _render();
+    else reflectToggle(el, next);
   });
 
   // Render selects (background / tone mapping / HDRI preset).
-  _bodyEl.querySelectorAll('[data-render-select]').forEach(sel => {
-    sel.addEventListener('change', () => {
-      if (sel.dataset.renderSelect === 'hdriPreset') _hdriToastWanted = true;
-      _setRender({ [sel.dataset.renderSelect]: sel.value });
-      // background switch swaps the visible intensity slider — re-render.
-      if (sel.dataset.renderSelect === 'background') _render();
-    });
+  wireSelects(_bodyEl, '[data-render-select]', (sel, value) => {
+    if (sel.dataset.renderSelect === 'hdriPreset') _hdriToastWanted = true;
+    _setRender({ [sel.dataset.renderSelect]: value });
+    // background switch swaps the visible intensity slider — re-render.
+    if (sel.dataset.renderSelect === 'background') _render();
   });
 
   // Section plane — session-only state + SceneManager.setSectionPlane.
@@ -662,16 +618,14 @@ function _wire() {
   // selector here would attach to every section element and re-render the
   // panel on any child input's change (the render-view detach bug).
   // Cut view = toggle button (gates dependent rows → _render). Flip = checkbox
-  // (sub-option of an enabled cut). _evt/_nextVal handle both element kinds.
-  _bodyEl.querySelectorAll('[data-sect-toggle]').forEach(el => {
-    el.addEventListener(_evt(el), () => {
-      const key = el.dataset.sectToggle;
-      _setSection({ [key]: _nextVal(el) });
-      if (key === 'enabled') _render();
-    });
+  // (sub-option of an enabled cut). wireToggles handles both element kinds.
+  wireToggles(_bodyEl, '[data-sect-toggle]', (el, next) => {
+    const key = el.dataset.sectToggle;
+    _setSection({ [key]: next });
+    if (key === 'enabled') _render();
   });
-  _bodyEl.querySelector('[data-sect-select="axis"]')?.addEventListener('change', (e) => {
-    _setSection({ axis: e.target.value });
+  wireSelects(_bodyEl, '[data-sect-select="axis"]', (_sel, value) => {
+    _setSection({ axis: value });
     _render();   // offset slider range follows the new axis extent (lo..hi)
   });
   // Offset SLIDER — range spans the content extent (set in _render). 'input'
@@ -684,14 +638,6 @@ function _wire() {
     if (out) out.textContent = v.toFixed(1);
     _setSection({ offsetMM: v });
   });
-  _bodyEl.querySelectorAll('[data-sect]').forEach(input => {
-    input.addEventListener('change', () => {
-      const v = parseFloat(input.value);
-      if (!Number.isFinite(v)) { _render(); return; }
-      _setSection({ [input.dataset.sect]: v });
-    });
-    _escEnter(input);
-  });
 
   // Colour pickers (floor). `input` not `change` — live drag preview.
   _bodyEl.querySelectorAll('[data-render-color]').forEach(picker => {
@@ -703,8 +649,8 @@ function _wire() {
   // Texture cap — store on scene.render then re-cap every live texture.
   // Downscales from / restores to the per-texture full-res source; export
   // reads that source so output stays full-res regardless of the cap.
-  _bodyEl.querySelector('[data-texcap]')?.addEventListener('change', (e) => {
-    const px = Number(e.target.value) || 0;
+  wireSelects(_bodyEl, '[data-texcap]', (_sel, value) => {
+    const px = Number(value) || 0;
     _setRender({ textureCapPx: px });
     AssetLoader.recapAllTextures(px);
   });
@@ -721,13 +667,15 @@ function _wire() {
 // ── Rendering (output) section ───────────────────────────
 
 function _wireRendering() {
-  _bodyEl.querySelector('[data-ro-preset]')?.addEventListener('change', (e) => {
-    const preset = RESOLUTION_PRESETS[Number(e.target.value)];
+  wireSelects(_bodyEl, '[data-ro-preset]', (_sel, value) => {
+    const preset = RESOLUTION_PRESETS[Number(value)];
     if (!preset) return;                      // Custom — W/H inputs drive it
     _setRenderOut({ width: preset.w, height: preset.h });
     _render();
   });
 
+  // W/H hand-wired: clampDimension never rejects (invalid → fallback), so
+  // wireNumbers' finite gate doesn't apply.
   _bodyEl.querySelectorAll('[data-ro]').forEach(input => {
     input.addEventListener('change', () => {
       const key = input.dataset.ro;
@@ -735,11 +683,11 @@ function _wireRendering() {
       _setRenderOut({ [key]: value });
       _render();
     });
-    _escEnter(input);
+    escEnter(input, _render);
   });
 
-  _bodyEl.querySelector('[data-ro-toggle="transparent"]')?.addEventListener('change', (e) => {
-    _setRenderOut({ transparent: e.target.checked });
+  wireToggles(_bodyEl, '[data-ro-toggle="transparent"]', (_el, on) => {
+    _setRenderOut({ transparent: on });
   });
 
   // Render view — compose mode. ON: park free navigation, jump to the stored
@@ -763,27 +711,21 @@ function _wireRendering() {
       _exitRenderView();
       if (navPose) SceneManager.restoreCameraState(navPose);
     }
-    _reflectToggle(btn, _rv.active);
+    reflectToggle(btn, _rv.active);
   });
 
   _bodyEl.querySelector('[data-action="export-png"]')?.addEventListener('click', () => _exportPng());
 
-  _bodyEl.querySelectorAll('[data-tt]').forEach(input => {
-    input.addEventListener('change', () => {
-      const v = parseFloat(input.value);
-      if (!Number.isFinite(v) || v <= 0) { _render(); return; }
-      _setRenderOut({ turntable: { [input.dataset.tt]: v } });
-    });
-    _escEnter(input);
+  wireNumbers(_bodyEl, '[data-tt]', (input, v) => {
+    if (v <= 0) { _render(); return; }
+    _setRenderOut({ turntable: { [input.dataset.tt]: v } });
+  }, { onInvalid: _render, onEscape: _render });
+  wireSelects(_bodyEl, '[data-tt-select]', (sel, value) => {
+    const key = sel.dataset.ttSelect;
+    _setRenderOut({ turntable: { [key]: key === 'fps' ? Number(value) : value } });
   });
-  _bodyEl.querySelectorAll('[data-tt-select]').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const key = sel.dataset.ttSelect;
-      _setRenderOut({ turntable: { [key]: key === 'fps' ? Number(sel.value) : sel.value } });
-    });
-  });
-  _bodyEl.querySelector('[data-tt-toggle="ease"]')?.addEventListener('change', (e) => {
-    _setRenderOut({ turntable: { ease: e.target.checked } });
+  wireToggles(_bodyEl, '[data-tt-toggle="ease"]', (_el, on) => {
+    _setRenderOut({ turntable: { ease: on } });
   });
 
   // Preview — plays the sweep live (camera + lights rotate around the world
@@ -888,13 +830,6 @@ function _setSection(patch) {
 
 function _applySection() {
   SceneManager.setSectionPlane({ ...SECTION_DEFAULTS, ...(getState().scene.section ?? {}) });
-}
-
-function _escEnter(input) {
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') { _render(); }
-  });
 }
 
 function _fmt(v, dp = 2) {

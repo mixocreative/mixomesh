@@ -18,6 +18,8 @@ import { icon, sectionIcon } from '../core/Icons.js';
 import { authoredScaleFromAsset, formatScaleRatio, parseScaleRatioText, objectRatio } from '../core/scale/ScaleMath.js';
 import { logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
+import { escEnter, wireNumbers, wireToggles, reflectToggle } from './lib/fields.js';
+import { createCollapseController } from './lib/sections.js';
 
 const BABYLON = window.BABYLON;
 
@@ -34,8 +36,8 @@ const SOURCE_UNIT_LABEL_KEYS = {
 let _root = null;
 let _bodyEl = null;
 // Section keys that the user has collapsed. Preserved across re-renders, lost
-// on page reload (intentional for Phase 4 — persistence lands in Phase 6).
-const _collapsedSections = new Set();
+// on page reload (session-only by design — object context resets per project).
+const _collapse = createCollapseController();
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -131,17 +133,7 @@ function _render() {
 }
 
 function _applyAndWireSectionCollapse() {
-  _bodyEl.querySelectorAll('.pp-section[data-section]').forEach(sec => {
-    const key = sec.dataset.section;
-    if (_collapsedSections.has(key)) sec.classList.add('pp-collapsed');
-    const header = sec.querySelector(':scope > .pp-section-header');
-    if (!header) return;
-    header.addEventListener('click', () => {
-      sec.classList.toggle('pp-collapsed');
-      if (sec.classList.contains('pp-collapsed')) _collapsedSections.add(key);
-      else _collapsedSections.delete(key);
-    });
-  });
+  _collapse.wire(_bodyEl, { sectionSelector: '.pp-section[data-section]', collapsedClass: 'pp-collapsed' });
 }
 
 // ── Object section ───────────────────────────────────────
@@ -168,29 +160,23 @@ function _renderObjectSection(obj, multi, total) {
 
 function _wireObjectSection(obj) {
   const nameEl = _bodyEl.querySelector('#pp-name');
-  const visEl  = _bodyEl.querySelector('#pp-visible');
-  const lockEl = _bodyEl.querySelector('#pp-locked');
 
   if (nameEl && !nameEl.disabled) {
-    const commit = () => {
+    nameEl.addEventListener('change', () => {
       const next = nameEl.value.trim();
       if (next && next !== obj.name) push(new RenameCommand(obj.id, obj.name, next));
-    };
-    nameEl.addEventListener('change', commit);
-    nameEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
-      if (e.key === 'Escape') { nameEl.value = obj.name; nameEl.blur(); }
     });
+    escEnter(nameEl, () => { nameEl.value = obj.name; nameEl.blur(); });
   }
 
   // Visible / Locked are toggle BUTTONS (checkbox→toggle audit) — object mode
   // switches with eye/lock glyphs. The panel re-renders on VISIBILITY_CHANGED
   // / LOCK_CHANGED, so the pressed state + glyph repaint from fresh state.
-  visEl?.addEventListener('click', () => {
-    push(new VisibilityCommand([obj.id], { [obj.id]: !!obj.visible }, visEl.getAttribute('aria-pressed') !== 'true'));
+  wireToggles(_bodyEl, '#pp-visible', (_el, next) => {
+    push(new VisibilityCommand([obj.id], { [obj.id]: !!obj.visible }, next));
   });
-  lockEl?.addEventListener('click', () => {
-    push(new LockCommand([obj.id], { [obj.id]: !!obj.locked }, lockEl.getAttribute('aria-pressed') !== 'true'));
+  wireToggles(_bodyEl, '#pp-locked', (_el, next) => {
+    push(new LockCommand([obj.id], { [obj.id]: !!obj.locked }, next));
   });
 }
 
@@ -355,27 +341,18 @@ function _wireTransformSection(meshId) {
     if (parsed) _applyObjectRatio(parsed); else _render();
   };
   ratioInput?.addEventListener('change', commitRatioText);
-  ratioInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); ratioInput.blur(); }
-    if (e.key === 'Escape') { _render(); }
-  });
+  if (ratioInput) escEnter(ratioInput, _render);
 
   _bodyEl.querySelectorAll('[data-xform]').forEach(input => {
     if (input.disabled) return;
     input.addEventListener('change', () => _commitTransformInput(meshId, input));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { _render(); }
-    });
+    escEnter(input, _render);
   });
 
   _bodyEl.querySelectorAll('[data-size-axis]').forEach(input => {
     if (input.disabled) return;
     input.addEventListener('change', () => _commitSizeInput(meshId, input));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { _render(); }
-    });
+    escEnter(input, _render);
   });
 
 
@@ -885,17 +862,13 @@ function _wireUVOverrideSection(obj) {
   ];
 
   for (const [elId, key] of fields) {
-    const el = _bodyEl.querySelector(`#${elId}`);
-    if (!el) continue;
-    el.addEventListener('change', () => {
-      const n = parseFloat(el.value);
-      if (!Number.isFinite(n)) { _render(); return; }
+    wireNumbers(_bodyEl, `#${elId}`, (_el, n) => {
       const prev = getState().scene.uvOverrides[obj.id] ?? null;
       const base = prev ?? { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 };
       if (Math.abs(base[key] - n) < 1e-9) return;
       const next = { ...base, [key]: n };
       push(new UVOverrideCommand(obj.id, prev, next));
-    });
+    }, { onInvalid: _render });
   }
 
   _bodyEl.querySelector('#pp-uv-reset')?.addEventListener('click', () => {
@@ -963,13 +936,9 @@ function _renderPrintPartSection(obj) {
 function _wirePrintPartSection(obj) {
   // Per-object export flag = toggle button (checkbox→toggle audit). No
   // PRINT_PART re-render subscription, so reflect the pressed state in place.
-  const cb = _bodyEl.querySelector('#pp-is-print-part');
-  if (!cb) return;
-  cb.addEventListener('click', () => {
-    const next = cb.getAttribute('aria-pressed') !== 'true';
+  wireToggles(_bodyEl, '#pp-is-print-part', (el, next) => {
     push(new PrintPartCommand(obj.id, !!obj.isPrintPart, next));
-    cb.classList.toggle('pp-toggle-on', next);
-    cb.setAttribute('aria-pressed', next ? 'true' : 'false');
+    reflectToggle(el, next);
   });
 }
 

@@ -16,6 +16,7 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState } from '../core/scale/ScaleMath.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
+import { wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
 // reference dimensions only. Export format is chosen by the buttons below.
@@ -440,8 +441,7 @@ function _renderExportTab() {
     }
   };
 
-  el.querySelector('#pp-bake-solid').addEventListener('change', (e) => {
-    const on = !!e.target.checked;
+  wireToggles(el, '#pp-bake-solid', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
   });
 
@@ -525,8 +525,7 @@ function _renderBedTab() {
     }
   };
 
-  el.querySelector('#pp-printer-select').addEventListener('change', (e) => {
-    const id = e.target.value;
+  wireSelects(el, '#pp-printer-select', (_sel, id) => {
     const p = PRINTERS[id];
     if (!p) return;
     if (!p.bed || p.bed.x === null) {
@@ -538,27 +537,25 @@ function _renderBedTab() {
     _render();
   });
 
-  el.querySelectorAll('[data-bed-axis]').forEach(inp => {
-    inp.addEventListener('change', (e) => {
-      const axis = e.target.dataset.bedAxis;
-      const v = parseFloat(e.target.value);
-      if (!(v > 0)) { e.target.value = getState().print.bedDimensions[axis]; return; }
-      const dims = { ...getState().print.bedDimensions, [axis]: v };
-      commit({ printerId: _matchPrinterByBed(dims), dims });
-      _render();
-    });
-  });
+  // Invalid/non-positive dims restore the stored value in place (no
+  // re-render — the user keeps focus to retype).
+  const restoreBedAxis = (inp) => {
+    inp.value = getState().print.bedDimensions[inp.dataset.bedAxis];
+  };
+  wireNumbers(el, '[data-bed-axis]', (inp, v) => {
+    if (!(v > 0)) { restoreBedAxis(inp); return; }
+    const dims = { ...getState().print.bedDimensions, [inp.dataset.bedAxis]: v };
+    commit({ printerId: _matchPrinterByBed(dims), dims });
+    _render();
+  }, { onInvalid: restoreBedAxis });
 
-  el.querySelector('#pp-bed-show').addEventListener('click', (e) => {
-    const btn = e.currentTarget;
-    const on = btn.getAttribute('aria-pressed') !== 'true';
+  wireToggles(el, '#pp-bed-show', (btn, on) => {
     setState(s => ({
       ...s,
       scene: { ...s.scene, overlays: { ...s.scene.overlays, bedPreview: on } },
     }), { silent: true });
     SceneManager.setOverlay('bedPreview', on);
-    btn.classList.toggle('pp-toggle-on', on);
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    reflectToggle(btn, on);
   });
 
   return el;

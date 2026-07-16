@@ -262,6 +262,9 @@ src/
     hash.js                ← sha256Hex — shared §10b identity hash (AssetLoader + persistence)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
   ui/
+    lib/                     ← shared panel-wiring helpers (2026-07-17 restructure)
+      fields.js              ← escEnter / wireNumbers / wireSelects / wireToggles / reflectToggle
+      sections.js            ← createCollapseController (session Set or per-user localStorage)
     Outliner.js
     PropertiesPanel.js
     ShaderPanel.js
@@ -524,6 +527,7 @@ match what the specced responsibilities actually cost.
 | each `core/render/*.js` | < 300 (FrameCapture ≈ 230 — both engines' PNG paths + offline frame renderer) |
 | `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
 | Each `src/ui/*.js` | < 900 (PropertiesPanel/ShaderPanel are section stacks; split per-section when a panel exceeds this) |
+| each `src/ui/lib/*.js` | < 100 (shared wiring helpers only — no panel-init/locale framework) |
 | `AppShell.js` | < 300 (shell controls + resize/collapse wiring) |
 | `src/app/main.ts` | < 220 (bootstrap + dependency wiring only) |
 
@@ -2872,7 +2876,7 @@ Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
 - **Swatch palette:** DEFAULT_SWATCHES from `src/config/swatches.json` (Primer / Military / Metals / Miniatures) + User section with `+` button to capture current editor's color. Click swatch → `ColorApplyCommand` pushed.
 - **Merge modal:** When `registerFromContainer` encounters material-name collisions → modal with per-conflict radios (Use existing / Rename import / Replace scene shader) + "Apply to all" checkbox.
 - **Auto-focus:** Subscribes to `ACTIVE_OBJECT_CHANGED`. When active object changes, `ShaderPanel.focus(shaderId)` is called UNLESS an `<input>` / `<select>` / `<textarea>` inside the Library has DOM focus (prevents focus theft mid-edit).
-- **Sub-sections:** All collapsible via chevron headers (Scene Shaders, Editor, Swatches). Collapse state is module-local, lost on reload.
+- **Sub-sections:** All collapsible via chevron headers (Scene Shaders, Editor, Swatches). Collapse state is session-only, lost on reload (`ui/lib/sections.js createCollapseController` without a storageKey — same controller as Properties/Scene).
 
 ### Asset Panel (`src/ui/AssetPanel.js`)
 - Bottom-docked, resizable.
@@ -2994,6 +2998,42 @@ State lives in `state.scene.overlays` (silent writes). Re-renders on
 `PROJECT_LOADED` / `PROJECT_NEW`. Mode overlays re-applied on `ASSET_INSTANTIATED`
 so late imports pick up the active mode.
 
+### Shared panel-wiring helpers (`src/ui/lib/`)
+Two helper modules (2026-07-17 maintainability restructure) fold the wiring
+boilerplate the right-side panels used to hand-roll. Deliberately minimal —
+NO panel-init/locale framework (2-line boilerplate is cheaper than a
+framework; locked in the restructure plan).
+
+`fields.js`:
+- `escEnter(input, onEscape?)` — Enter commits (preventDefault + blur →
+  'change' fires), Escape runs the panel's revert (usually `_render`,
+  sometimes a value restore). Omit `onEscape` for Enter-only (CursorPanel).
+- `wireNumbers(root, selector, apply, { onInvalid?, onEscape?, parse? })` —
+  'change' → parse (default `parseFloat`); non-finite → `onInvalid(input)`,
+  else `apply(input, value)`. Keyboard handling is opt-in via `onEscape`
+  (UV-override fields have none — matches pre-helper behavior).
+- `wireSelects(root, selector, apply)` — 'change' → `apply(sel, sel.value)`.
+- `wireToggles(root, selector, apply)` — aria-pressed BUTTON (click) or
+  checkbox ('change'), per the checkbox→toggle audit; `apply(el, next)` gets
+  the value to APPLY. Caller chooses `reflectToggle` in place vs a full
+  re-render when the toggle gates dependent rows.
+- `reflectToggle(el, on)` — repaint a toggle button (`pp-toggle-on` class +
+  aria-pressed); no-op for checkboxes.
+
+`sections.js`:
+- `createCollapseController({ storageKey?, defaults? })` →
+  `{ isCollapsed(key), toggle(key), wire(rootEl, { sectionSelector,
+  collapsedClass, datasetKey? }) }`. `storageKey` null = session-only
+  (Properties/Shader); string = per-user localStorage (ScenePanel — NEVER in
+  .mixo). `wire` applies stored state to fresh markup and binds
+  `:scope > header` clicks; clicks on header-internal buttons (↺ reset,
+  + new, ↧ copy) never toggle.
+
+Consumers: ScenePanel, PropertiesPanel, ShaderPanel, PrintPanel, CursorPanel.
+Panels keep hand-rolled wiring for shapes the helpers don't cover
+('input'-event sliders/pickers, drag-drop targets, command-dedup shader
+fields).
+
 ### Scene Panel (`src/ui/ScenePanel.js`)
 Right-panel section `#rp-scene` — the specialist section of the **Scene
 workspace** (hidden in Layout / Shade / Print). Scene-wide settings, moved
@@ -3002,9 +3042,13 @@ they stay reachable while an object is selected (the old Scene section only
 rendered with nothing active — Properties is object-scoped now).
 
 Every section is **collapsible** (same `.pp-collapsed` pattern as the
-Properties panel) with the collapse state persisted per-user in
-localStorage (`mixomesh.scenePanel.collapsed.v1` — NEVER in .mixo, same
-per-user rule as workspaces). Defaults: Environment + Camera + Section
+Properties panel; both use `ui/lib/sections.js createCollapseController` —
+this panel passes a `storageKey`) with the collapse state persisted per-user
+in localStorage (`mixomesh.scenePanel.collapsed.v1` — NEVER in .mixo, same
+per-user rule as workspaces). Field wiring (numbers/selects/toggles +
+Enter-blur/Escape-revert) goes through `ui/lib/fields.js`; only
+'input'-event controls (section-offset slider, colour pickers) and
+clamp-only inputs (render W/H) stay hand-wired. Defaults: Environment + Camera + Section
 collapsed so the Rendering section is reachable without scrolling. Long
 sections carry muted uppercase `.pp-subhead` sub-group labels (blender.css
 §8): Environment = HDRI lighting / Grade / Floor / Lights / Ambient
