@@ -198,7 +198,15 @@ src/
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
-    PersistenceManager.js
+    PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
+    persist/
+      constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
+      ProjectSerializer.js ← buildDocument + asset/object/group serialise, b64 codecs, transform (de)compose
+      AssetResolver.js     ← tiered byte resolve: live path → hash-scan → file handle → embedded → null
+      ProjectLoader.js     ← loadProject pipeline: migrate, world reset, ghost meshes, groups, relinkAsset
+      RecentProjects.js    ← recent-projects list (idb kv) + save-time viewport thumbnail
+      Autosave.js          ← interval autosave (skipEmbed A9) + boot crash recovery
+      DirtyTracker.js      ← position-based + sticky dirty, isDirty/clearDirty, dirty-confirm modal
     PrintManager.js        ← thin façade (~50 lines; size budget in §file-size-budget) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
     print/
       ExportContext.js     ← THE ONE typedef + builder; owns BU_TO_MM; previewExportContext + getExportedDimensions + getExportReference live here
@@ -508,7 +516,8 @@ match what the specced responsibilities actually cost.
 | `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
 | `MeshValidator.js` | < 460 (topology worker plumbing + group-union; pure topology lives in `workers/MeshValidate.worker.js`) |
-| `PersistenceManager.js` | < 800 |
+| `PersistenceManager.js` | < 200 (thin façade + file-handle lifecycle — serialise/resolve/load/autosave/dirty all in `core/persist/`) |
+| each `core/persist/*.js` | < 400 (ProjectLoader ≈ 380 — the whole load pipeline is one cohesive sequence) |
 | `PrintManager.js` | < 80 (thin façade only — orchestrator/serializers/ctx all in `core/print/`) |
 | each `core/print/*.js` | < 350 (Pipeline ≈ 300 — STL + 3MF inline; ObjWriter ≈ 180; ExportContext ≈ 180) |
 | `RenderOutput.js` | < 80 (thin façade only — capture/sweep/preview/recorder in `core/render/`) |
@@ -2035,7 +2044,18 @@ fallback now triggers only when the texture is genuinely gone.
 
 ## PART 11 — PERSISTENCE MANAGER
 
-**File: `src/core/PersistenceManager.js`**
+**File: `src/core/PersistenceManager.js`** — thin façade over `src/core/persist/*`
+(house pattern: AssetLoader over `assets/*`, PrintManager over `print/*`). The
+façade owns only the open-file handle and the save/saveAs/open/newProject/
+openRecent flows; document assembly lives in `persist/ProjectSerializer.js`,
+tiered asset resolution in `persist/AssetResolver.js`, the load pipeline +
+relink in `persist/ProjectLoader.js`, recents in `persist/RecentProjects.js`,
+autosave in `persist/Autosave.js`, and dirty tracking in
+`persist/DirtyTracker.js`. The `PersistenceManager` API object is deliberately
+NOT frozen — monkey-patching it is the established headless-test seam (same
+rationale as AssetLoader) — and `__test` is re-assembled from the persist
+modules under its original underscore key names so the headless tests and
+browser smokes stay pinned to one surface.
 
 ### Public API
 ```js
@@ -2054,10 +2074,11 @@ PersistenceManager.recoverAutosave()       → Promise<boolean>
 PersistenceManager.__test = {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
   _resolveAssetBlob, _scanDirForHash, _fileHandleAtPath,
-  _arrToMap, _migrate,
+  _arrToMap, _migrate, _resolveLoadedExportRatios,
+  _buildDocument, _loadProject,
 }
 ```
-Constants: `SCHEMA_VERSION = '3.2'` (3.2 adds the §10b texture-identity
+Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.2'` (3.2 adds the §10b texture-identity
 fields `sourceFileHash` / `sourceAssetId` / `babylonTextureName` on texture
 AssetEntries — 3.1 docs load unchanged, missing fields just skip the rebind
 and fall back to colour), `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`, `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally `AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
