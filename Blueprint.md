@@ -192,7 +192,7 @@ src/
     Selection.js           ← selection set + active id + pivot mode (§4b)
     BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
     SettingsStore.js       ← per-user PANEL settings: localStorage persist + seed + per-section/all reset (§ Settings persistence)
-    AssetLoader.js         ← mesh-asset loading/instancing/restore + façade
+    AssetLoader.js         ← mesh-asset façade + release/remove/reset lifecycle (impl in assets/)
     import/
       ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
@@ -228,6 +228,8 @@ src/
       ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
       AssetRegistration.js ← SceneObject/collection minting, unique names, logical-object grouping, validation queue
       AssetThumbnail.js    ← idle asset thumbnail (THUMB_LAYER camera-mask isolation)
+      AssetImport.js       ← live import: blob/handle → container → scene, overlay, library-GLB path, re-instantiate
+      AssetRestore.js      ← project restore + clones: restoreContainer, cloneMeshAsNewObject, asset bytes
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)
@@ -501,8 +503,8 @@ match what the specced responsibilities actually cost.
 | `InputManager.js` | < 750 (incl. modal G/R/S; extract `input/ModalTransform.js` if it grows) |
 | `SceneManager.js` | < 450 (engine/lighting/overlays orchestrator; camera, pivot, outline, bed/grid all split into `core/scene/`) |
 | each `core/scene/*.js` | < 250 (`CameraRig.js` < 550 — creation + custom nav + presets + framing + follow + optics + pose save/restore are one cohesive rig) |
-| `AssetLoader.js` | < 700 (mesh-side only; textures/split/blob-urls live in `core/assets/`) |
-| each `core/assets/*.js` | < 350 |
+| `AssetLoader.js` | < 150 (thin façade + release/remove/reset lifecycle — import/restore/minting all in `core/assets/`) |
+| each `core/assets/*.js` | < 400 (AssetImport ≈ 380 — both live-import paths + library-GLB registration) |
 | `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
 | `MeshValidator.js` | < 460 (topology worker plumbing + group-union; pure topology lives in `workers/MeshValidate.worker.js`) |
@@ -1447,7 +1449,13 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
 
 ## PART 8 — ASSET LOADER
 
-**File: `src/core/AssetLoader.js`**
+**File: `src/core/AssetLoader.js`** — thin façade; implementation lives in
+`src/core/assets/` (`AssetImport` live imports, `AssetRestore` project
+restore + clones, `AssetRegistration` SceneObject/collection minting,
+`AssetThumbnail` idle thumbnails, `MeshRegistry` registries + id minting,
+`DirMounts` mounted-directory handles, `ObjSiblings` OBJ sibling resolution).
+The façade owns only release/remove/reset lifecycle; the `AssetLoader` object
+is deliberately NOT frozen — monkey-patching it is the headless-test seam.
 
 ### Public API
 ```js
