@@ -226,6 +226,8 @@ src/
       MeshRegistry.js      ← module-local container/mesh/orphan registries + id minting
       DirMounts.js         ← mounted-directory handles: picker, idb persist, permission re-grant
       ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
+      AssetRegistration.js ← SceneObject/collection minting, unique names, logical-object grouping, validation queue
+      AssetThumbnail.js    ← idle asset thumbnail (THUMB_LAYER camera-mask isolation)
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)
@@ -411,8 +413,8 @@ Import path:
    rendered as the user-facing object; internal siblings are selected,
    transformed, hidden/locked, duplicated/deleted, grouped, validated, and
    exported through the lead.
-7. `AssetLoader` generates an idle thumbnail and queues non-blocking
-   validation.
+7. `assets/AssetThumbnail` generates an idle thumbnail and
+   `assets/AssetRegistration.queueValidation` queues non-blocking validation.
 
 Edit path:
 1. Pointer/keyboard input goes through `InputManager` or delegated UI handlers.
