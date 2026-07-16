@@ -90,7 +90,7 @@ Runtime contract:
 
 - `package.json` declares Vite, TypeScript, JSZip, mp4-muxer (turntable
   video container — WebCodecs chunks → mp4, zero-dependency; loaded via
-  dynamic `import()` in RenderOutput.js so it builds as its own lazy
+  dynamic `import()` in render/VideoRecorder.js so it builds as its own lazy
   chunk), and Babylon npm packages. Tests use Node's built-in test runner
   unless a future feature explicitly needs Vitest.
 - `public/env/` holds the three prefiltered HDRI presets (`studio.env`,
@@ -235,9 +235,13 @@ src/
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
-    RenderOutput.js        ← Scene ▸ Rendering capture engine: PNG stills + turntable video
+    RenderOutput.js        ← Scene ▸ Rendering façade over render/* (frozen export names)
     render/
       RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
+      FrameCapture.js      ← RTT pipeline: capturePng (WebGL+WebGPU), captureFrameRGBA, offline frame renderer, furniture hide
+      SweepRig.js          ← rigid camera/lights/env turntable rotation (shared by preview + recorder)
+      TurntablePreview.js  ← live viewport sweep (Esc / tab-hide cancel), owns preview handle
+      VideoRecorder.js     ← offline WebCodecs encode → mp4 (mp4-muxer lazy), owns recording flag
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
@@ -499,6 +503,8 @@ match what the specced responsibilities actually cost.
 | `PersistenceManager.js` | < 800 |
 | `PrintManager.js` | < 80 (thin façade only — orchestrator/serializers/ctx all in `core/print/`) |
 | each `core/print/*.js` | < 350 (Pipeline ≈ 300 — STL + 3MF inline; ObjWriter ≈ 180; ExportContext ≈ 180) |
+| `RenderOutput.js` | < 80 (thin façade only — capture/sweep/preview/recorder in `core/render/`) |
+| each `core/render/*.js` | < 300 (FrameCapture ≈ 230 — both engines' PNG paths + offline frame renderer) |
 | `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
 | Each `src/ui/*.js` | < 900 (PropertiesPanel/ShaderPanel are section stacks; split per-section when a panel exceeds this) |
 | `AppShell.js` | < 300 (shell controls + resize/collapse wiring) |
@@ -965,7 +971,7 @@ const initialState = {
     //      extent so the plane is visible even where the cut misses the solid.
     // Both carry no metadata.meshId (auto-excluded from clip/shadow/mask). The
     // geometric cut DOES appear in PNG/video exports; the fill + border are
-    // viewport furniture — RenderOutput._hideFurniture hides them during capture.
+    // viewport furniture — render/FrameCapture.hideFurniture hides them during capture.
     // The shadow-map pass renders depth directly, so shadows stay uncut (limit).
     // NOTE for a color-print tool: a REAL cut face for export/print is geometry,
     // not visual — that is the CSG2 path (PrintPipeline._csgRebake already uses
@@ -1265,7 +1271,7 @@ is verified correct on a real adapter by `WEBGPU_HEADFUL=1 npm run test:webgpu`.
 The original blocker (offline render-target → `readPixels` returned **empty** on
 WebGPU) was the missing command-buffer flush — WebGPU batches GPU commands and
 submits at frame boundaries, so a manual out-of-loop render left nothing to read;
-`RenderOutput` now calls `engine.flushFramebuffer()` after the manual render, and
+`render/FrameCapture` now calls `engine.flushFramebuffer()` after the manual render, and
 `capturePng`/thumbnail use a manual render→flush→readback→encode path on WebGPU
 (WebGL keeps the proven `CreateScreenshotUsingRenderTargetAsync`). It stays
 opt-in only because it's been verified on a single GPU/driver so far — flipping
@@ -1395,7 +1401,7 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
   Invalidation sources: caster `onAfterWorldMatrixUpdateObservable` (gizmo
   drags, bounce-in, programmatic transforms), caster add/dispose, shadow
   setting changes, and the turntable sweep's per-frame key-light rotation
-  (`RenderOutput._sweepRig.applyDelta`). Browser smoke pins soft (0<α<255)
+  (`render/SweepRig.createSweepRig().applyDelta`). Browser smoke pins soft (0<α<255)
   shadow pixels with a real caster — a stale map fails it.
 - Tunables are UPPER_SNAKE constants in `scene/SceneConstants.js`; the
   environment half of `applyRenderSettings` (lights/shadows/floor/HDRI)
@@ -3036,7 +3042,9 @@ All of it writes `state.scene.render` (silent) and applies via
 `sceneSettings.render`, re-applied on boot / load / new. Defaults mirror
 `scene/SceneConstants.js`.
 - **Rendering** — output production (`state.scene.renderOut`, persisted in
-  `sceneSettings.renderOut`; capture engine = `core/RenderOutput.js`):
+  `sceneSettings.renderOut`; capture engine = `core/RenderOutput.js`, a
+  façade over `core/render/{FrameCapture,SweepRig,TurntablePreview,VideoRecorder}.js`
+  with frozen export names — the smokes dynamic-import the façade path):
   - **Resolution** preset (1080p / 4K / Square / Portrait) + custom W×H
     (clamped 16–8192) and a **Transparent background** toggle (PNG only).
   - **Render view** checkbox — compose mode: parks the free-nav camera pose,
@@ -3050,13 +3058,13 @@ All of it writes `state.scene.render` (silent) and applies via
     off; there is no "Set view" button. Exits without touching the camera (or
     writing the stale pose) on `PROJECT_LOADED`/`PROJECT_NEW`.
   - **Export PNG** (button, or **Ctrl+Alt+E** globally — Blender's F12
-    belongs to DevTools in a browser) — `RenderOutput.capturePng`: RTT
+    belongs to DevTools in a browser) — `render/FrameCapture.capturePng`: RTT
     screenshot (`CreateScreenshotUsingRenderTargetAsync`) at the exact
     output resolution. The RTT path skips the camera post chain — no
     selection silhouette and no SSAO in renders — while keeping tone
     mapping (material-level). Scene furniture (grid / axes / bed preview /
     3D cursor / cross-section indicator) is hidden for the capture and
-    restored — `_hideFurniture` reads ACTUAL visibility, not proxy state: the
+    restored — `FrameCapture.hideFurniture` reads ACTUAL visibility, not proxy state: the
     cursor is hidden via `SceneManager.isCursorVisible()` (NOT
     `pivotMode==='cursor'`, since the N-panel Show toggle / open-panel can show
     it without cursor-pivot, and that must still stay out of exports); transparent mode
@@ -3075,7 +3083,7 @@ All of it writes `state.scene.render` (silent) and applies via
   - **Turntable video** — duration (s), FPS 30/60, direction Left/Right,
     ease in/out, plus a **Preview** button (plays the sweep live, no
     recording — button toggles to "Stop preview", Esc also stops).
-    **Sweep semantics (`RenderOutput._sweepRig`, shared by preview +
+    **Sweep semantics (`render/SweepRig.createSweepRig`, shared by preview +
     record): RIGID rotation of the camera rig about the WORLD vertical axis
     through the origin — the camera is never re-aimed and never pans.** The
     framing you start with is exactly what rotates: per-frame
