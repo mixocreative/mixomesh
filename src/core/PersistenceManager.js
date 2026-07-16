@@ -18,6 +18,7 @@ import {
   isApplying as historyIsApplying,
 } from './HistoryManager.js';
 import { Toast } from '../ui/Toast.js';
+import { reportError } from '../ui/Status.js';
 import { t } from '../i18n/index.js';
 import {
   kvSet, kvGet, kvDelete, kvKeys,
@@ -161,7 +162,9 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
           base.contentHash = a.contentHash ?? await _sha256Hex(buf);
         }
       } catch (err) {
-        console.error(`Could not embed asset ${a.filename}:`, err);
+        // Surface loudly: a silent miss here writes an incomplete .mixo the
+        // user believes is a full snapshot.
+        reportError(err, { title: t('toast.assetEmbedFailed', { name: a.filename }) });
       }
     }
     out.push(base);
@@ -304,6 +307,8 @@ async function _resolveAssetBlob(entry) {
         }
       }
     } catch (err) {
+      // Console-only by policy: the tiered resolve falls through to the
+      // embedded snapshot, and the unmatchedAssets modal surfaces the miss.
       console.error(`Live resolve failed for ${entry.filename}:`, err);
     }
   }
@@ -318,6 +323,7 @@ async function _resolveAssetBlob(entry) {
         return { blob: await fh.getFile(), live: true };
       }
     } catch (err) {
+      // Console-only by policy: falls through to the embedded snapshot.
       console.error(`File-handle resolve failed for ${entry.filename}:`, err);
     }
   }
@@ -529,6 +535,8 @@ async function _loadProject(doc) {
         unmatched.push(a);
       }
     } catch (err) {
+      // Console-only by policy: the ghost placeholder + unmatchedAssets modal
+      // already surface the failure in the scene.
       console.error(`Container restore failed for ${a.filename}:`, err);
       assetRes.set(a.id, { status: 'ghost' });
     }
@@ -845,6 +853,8 @@ export async function relinkAsset(assetId) {
 
 // ── Autosave ─────────────────────────────────────────────
 
+let _autosaveWarned = false;   // warn once per session, not every 60 s tick
+
 export function startAutosave(ms = 60000) {
   stopAutosave();
   _autosaveTimer = setInterval(async () => {
@@ -855,8 +865,14 @@ export function startAutosave(ms = 60000) {
         savedAt: new Date().toISOString(), doc,
       });
       dispatch(EVENTS.AUTOSAVE_WRITTEN, {});
+      _autosaveWarned = false;
     } catch (err) {
-      console.error('Autosave failed:', err);
+      if (_autosaveWarned) {
+        console.error('Autosave failed:', err);
+      } else {
+        _autosaveWarned = true;
+        reportError(err, { title: t('toast.autosaveFailed') });
+      }
     }
   }, ms);
 }

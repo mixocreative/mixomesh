@@ -3455,6 +3455,18 @@ fallbacks (`catch { /* optional */ }`) and domain loaders with their own staged
 / nested progress (`AssetLoader` import overlay, `PrintManager` export) — those
 aren't the shared concern and centralizing them would be false-DRY.
 
+Adopted catch-site policy (2026-07-17 sweep — every raw `catch` either routes
+through `reportError` or carries a one-line comment naming why it is silent):
+- **`reportError`**: PNG/turntable export failure (ScenePanel), auto-fix +
+  export failure (PrintPanel; export uses `modal:true`), asset-embed failure
+  during save, autosave failure (warn-ONCE per session flag, resets on next
+  success), user-requested validation failure (AssetLoader).
+- **Console-only by design**: tiered asset resolve + container restore in
+  PersistenceManager (the ghost mesh / unmatchedAssets modal already surface
+  the miss), thumbnail generation (cosmetic).
+- **Fully silent by design**: WorkerImport queue-chain detach (caller still
+  gets the rejection), EnvironmentRig idle HDRI prewarm.
+
 ### 14.2 Disposal Discipline
 **On delete mesh:**
 1. Detach gizmo.

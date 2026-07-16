@@ -10,6 +10,7 @@ import { SceneManager } from './SceneManager.js';
 import { ShaderLibrary } from './ShaderLibrary.js';
 import { MeshValidator } from './MeshValidator.js';
 import { Toast } from '../ui/Toast.js';
+import { reportError } from '../ui/Status.js';
 import { ProgressOverlay } from '../ui/ProgressOverlay.js';
 import { t } from '../i18n/index.js';
 import { putHandle, getHandle } from './idb.js';
@@ -1008,7 +1009,8 @@ function _queueValidation(meshId) {
       }
     } catch (err) {
       Toast.dismiss(toastId);
-      console.error('Validation failed:', err);
+      // User asked for this validation — a vanishing toast reads as "passed".
+      reportError(err, { title: t('toast.validateFailed', { name }) });
     }
   });
 }

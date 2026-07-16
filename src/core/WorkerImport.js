@@ -55,6 +55,8 @@ function _parseInWorker(blobUrl, ext, siblings, onProgress) {
     });
   });
   const result = _chain.then(run, run);
+  // Intentionally silent: only detaches the rejection from the queue chain —
+  // the caller still receives it via `result` (Status policy, local recovery).
   _chain = result.catch(() => {});
   return result;
 }

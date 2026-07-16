@@ -253,6 +253,8 @@ function _prewarmOtherPresets(current) {
     ? requestIdleCallback : (fn) => setTimeout(fn, 2000);
   idle(() => {
     for (const p of HDRI_PRESETS) {
+      // Intentionally silent: idle cache prewarm — a miss just means the
+      // preset loads from network when picked (Status policy, local recovery).
       if (p !== current) fetch(`env/${p}.env`, { priority: 'low' }).catch(() => {});
     }
   });

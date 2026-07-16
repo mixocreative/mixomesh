@@ -32,6 +32,7 @@ import {
 import { renderPngName, turntableVideoName, clampDimension } from '../core/render/RenderMath.js';
 import { RenderFrame } from './RenderFrame.js';
 import { Toast } from './Toast.js';
+import { reportError } from './Status.js';
 import { triggerDownload } from '../core/print/Download.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import {
@@ -828,8 +829,7 @@ function _wireRendering() {
         Toast.show(t('toast.turntableExported', { secs: tt.durationS, ext: result.ext.toUpperCase() }), 'success', 3500);
       }
     } catch (err) {
-      console.error('Turntable recording failed:', err);
-      Toast.show(t('toast.turntableFailed'), 'error', 5000);
+      reportError(err, { title: t('toast.turntableFailed') });
     } finally {
       btn.textContent = t('scene.exportVideo');
       _setBusy(false);
@@ -863,8 +863,7 @@ async function _exportPng() {
       { mime: 'image/png', ext: 'png', description: t('scene.pngImage') });
     Toast.show(t('toast.pngRendered', { width: ro.width, height: ro.height }), 'success', 3000);
   } catch (err) {
-    console.error('PNG render failed:', err);
-    Toast.show(t('toast.pngFailed'), 'error', 5000);
+    reportError(err, { title: t('toast.pngFailed') });
   } finally {
     if (btn) btn.textContent = t('scene.exportPng');
     _setBusy(false);

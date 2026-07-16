@@ -7,6 +7,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { Toast } from './Toast.js';
+import { reportError } from './Status.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
@@ -354,8 +355,7 @@ function _renderValidationTab() {
         Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
         _render();
       } catch (err) {
-        console.error('Auto-fix failed:', err);
-        Toast.show(t('toast.autoFixFailed', { msg: err.message }), 'error', 0);
+        reportError(err, { title: t('toast.autoFixFailed') });
       }
     });
   });
@@ -432,8 +432,8 @@ function _renderExportTab() {
       if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
       } else {
-        console.error(err);
-        Toast.show(t('toast.error', { msg: err.message }), 'error', 0);
+        // Export = heavy opaque op → detail modal per Status policy.
+        reportError(err, { title: t('print.exportFailed'), modal: true });
       }
     } finally {
       ProgressOverlay.hide();
