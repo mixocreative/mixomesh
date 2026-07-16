@@ -32,6 +32,12 @@ import {
   isTextureExt,
 } from './assets/AssetTypes.js';
 import { setBlobUrl, getBlobUrl, revokeBlobUrl, revokeAllBlobUrls } from './assets/BlobUrls.js';
+import {
+  newId as _newId,
+  getContainer, registerContainer, removeContainer,
+  getBabylonMesh, registerMesh, hasMesh, trackOrphan,
+  getContainerGeomMeshes, bindRestoredMesh, resetRegistry,
+} from './assets/MeshRegistry.js';
 import { isWorkerImportSupported, loadObjContainerViaWorker } from './WorkerImport.js';
 import {
   splitMultiMaterialMeshes, splitMultiMaterialMeshesInContainer,
@@ -51,17 +57,9 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 const THUMB_SIZE  = 128;
 const THUMB_LAYER = 0x40000000;     // unique camera mask bit for thumbnail isolation
 
-// Module-local — never persisted in state.
-const _containers   = new Map();    // assetId → BABYLON.AssetContainer
-const _meshRegistry = new Map();    // meshId  → BABYLON.AbstractMesh
-// Meshes that exist OUTSIDE any asset container (duplicate clones, restore
-// de-dupe clones) — container disposal can't reach them, so resetAll disposes
-// these explicitly to avoid leaks.
-const _orphanMeshes = new Set();
+// Module-local — never persisted in state. Container/mesh/orphan registries
+// live in ./assets/MeshRegistry.js.
 const _dirHandles   = new Map();    // key     → FileSystemDirectoryHandle (session)
-
-let _idCounter = 0;
-const _newId = (prefix) => `${prefix}_${Date.now().toString(36)}_${++_idCounter}`;
 
 /** sha256 hex of an ArrayBuffer — texture-identity scope (§10b). */
 async function _sha256Hex(buf) {
@@ -321,7 +319,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       return [];
     }
 
-    _containers.set(assetId, container);
+    registerContainer(assetId, container);
 
     // One-mesh-one-shader invariant: any MultiMaterial mesh splits into
     // N single-material siblings, each stamped with a shared sourceGroupId.
@@ -381,7 +379,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   } catch (err) {
     revokeBlobUrl(assetId);
     _revokeObjSiblings(assetId);
-    _containers.delete(assetId);
+    removeContainer(assetId);
     throw err;
   } finally {
     restoreUrls();
@@ -415,7 +413,7 @@ export async function instantiateAsset(assetId, position) {
     );
     if (asset.libraryItem) _filterContainerToLibraryItem(container, asset.libraryItem);
     splitMultiMaterialMeshesInContainer(container);
-    _containers.set(assetId, container);
+    registerContainer(assetId, container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
@@ -450,11 +448,11 @@ export function releaseAsset(assetId) {
   } else {
     const stillLinked = Object.values(getState().scene.objects).some(o => o.assetId === assetId && !o.isGhost);
     if (stillLinked) return;
-    const container = _containers.get(assetId);
+    const container = getContainer(assetId);
     if (container) {
       container.removeAllFromScene();
       container.dispose();
-      _containers.delete(assetId);
+      removeContainer(assetId);
     }
     revokeBlobUrl(assetId);
     _revokeObjSiblings(assetId);
@@ -467,15 +465,9 @@ export function releaseAsset(assetId) {
   }, { silent: true });
 }
 
-/** @param {string} assetId */
-export function getContainer(assetId) {
-  return _containers.get(assetId) ?? null;
-}
-
-/** @param {string} meshId */
-export function getBabylonMesh(meshId) {
-  return _meshRegistry.get(meshId) ?? null;
-}
+// Registry lookups — owned by ./assets/MeshRegistry.js, re-exported so the
+// AssetLoader surface stays unchanged.
+export { getContainer, getBabylonMesh, getContainerGeomMeshes, bindRestoredMesh };
 
 /**
  * Clone an existing SceneObject — duplicates the Babylon mesh and registers
@@ -487,7 +479,7 @@ export function getBabylonMesh(meshId) {
  * @returns {string|null} the new meshId, or null on failure
  */
 export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
-  const sourceMesh = _meshRegistry.get(sourceMeshId);
+  const sourceMesh = getBabylonMesh(sourceMeshId);
   const sourceObj  = getState().scene.objects[sourceMeshId];
   if (!sourceMesh || !sourceObj) return null;
 
@@ -499,7 +491,7 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   // and would corrupt the source instance through the shared buffer. Give the
   // duplicate its own geometry. (Per-object ratio redesign 2026-06-16.)
   clone.makeGeometryUnique?.();
-  _orphanMeshes.add(clone);   // lives outside the container — track for disposal
+  trackOrphan(clone);   // lives outside the container — track for disposal
 
   if (worldOffset) {
     clone.position.x += worldOffset.x ?? 0;
@@ -514,7 +506,7 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
   for (const child of clone.getChildMeshes?.(true) ?? []) {
     if (child.metadata?.edgeOverlay) { try { child.dispose(); } catch { /* */ } }
   }
-  _meshRegistry.set(newId, clone);
+  registerMesh(newId, clone);
 
   const newObj = {
     ...sourceObj,
@@ -547,7 +539,7 @@ export function cloneMeshAsNewObject(sourceMeshId, worldOffset) {
 
 /** Internal — used by DuplicateCommand's undo/redo to restore a saved clone. */
 export function restoreCloneToScene(meshId, savedObj, mesh) {
-  if (!_meshRegistry.has(meshId)) _meshRegistry.set(meshId, mesh);
+  if (!hasMesh(meshId)) registerMesh(meshId, mesh);
   setState(s => ({
     ...s,
     scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: savedObj } },
@@ -785,7 +777,7 @@ function _registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial,
     if (!mesh.geometry || (mesh.getTotalVertices?.() ?? 0) === 0) continue;
     const meshId = _newId('mesh');
     mesh.metadata = { ...(mesh.metadata ?? {}), meshId, assetId, sourceUnit };
-    _meshRegistry.set(meshId, mesh);
+    registerMesh(meshId, mesh);
 
     const shaderId = mesh.material ? byMaterial.get(mesh.material) : null;
     const sourceGroupId = mesh.metadata?.sourceGroupId ?? null;
@@ -902,7 +894,7 @@ function _createCollectionFromFilename(filename, assetId) {
 }
 
 async function _generateThumbnailFor(assetId) {
-  const container = _containers.get(assetId);
+  const container = getContainer(assetId);
   if (!container) return;
   const meshes = container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
   if (!meshes.length) return;
@@ -977,7 +969,7 @@ async function _renderThumbnail(meshes) {
 }
 
 function _queueValidation(meshId) {
-  const mesh = _meshRegistry.get(meshId);
+  const mesh = getBabylonMesh(meshId);
   if (!mesh) return;
   const name = mesh.name || 'mesh';
   if (!MeshValidator.shouldAutoValidate(mesh)) {
@@ -1016,19 +1008,6 @@ function _queueValidation(meshId) {
 }
 
 // ── Project restore (Phase 6) ────────────────────────────
-
-/**
- * Geometry-bearing meshes of a container, in stable load order. The same
- * filter `_registerInstantiatedMeshes` uses, so a saved `containerMeshIndex`
- * resolves back to the same mesh on reload.
- * @param {string} assetId
- * @returns {BABYLON.AbstractMesh[]}
- */
-export function getContainerGeomMeshes(assetId) {
-  const container = _containers.get(assetId);
-  if (!container) return [];
-  return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
-}
 
 /**
  * Raw bytes of a loaded asset, read back from its cached blob URL. Used by
@@ -1088,7 +1067,7 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   // mesh-per-material shape the saved sceneObjects were minted under, so
   // containerMeshIndex lookups line up. Split is deterministic in subMesh order.
   splitMultiMaterialMeshesInContainer(container);
-  _containers.set(assetId, container);
+  registerContainer(assetId, container);
   container.addAllToScene();
   // Run the SAME import normalization as a fresh load (units + glTF RH→LH flip +
   // winding fix, baked into vertices, parent=null, scaling=1) so a restored
@@ -1099,16 +1078,6 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const asset = getState().scene.assetLibrary[assetId];
   bakeImportTransform(container, importScaleFactor(asset?.sourceUnit ?? DEFAULT_SOURCE_UNIT, asset?.modelRatio ?? 1));
   return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
-}
-
-/**
- * Bind a restored container mesh to its persisted meshId so the rest of the
- * app (Selection, ShaderLibrary, HistoryManager) finds it by the same id it
- * had when saved.
- */
-export function bindRestoredMesh(meshId, mesh, assetId, sourceUnit = DEFAULT_SOURCE_UNIT) {
-  mesh.metadata = { ...(mesh.metadata ?? {}), meshId, assetId, sourceUnit };
-  _meshRegistry.set(meshId, mesh);
 }
 
 /**
@@ -1133,16 +1102,10 @@ export function cacheAssetBlob(assetId, blob) {
  * project". Mounted directory handles are session-scoped and kept.
  */
 export function resetAll() {
-  for (const c of _containers.values()) {
-    try { c.removeAllFromScene(); c.dispose(); } catch { /* */ }
-  }
-  for (const m of _orphanMeshes) { try { m.dispose(); } catch { /* */ } }
-  _orphanMeshes.clear();
+  resetRegistry();
   resetTextures();
   revokeAllBlobUrls();
   for (const id of [..._objSiblings.keys()]) _revokeObjSiblings(id);
-  _containers.clear();
-  _meshRegistry.clear();
 }
 
 /**
@@ -1156,7 +1119,7 @@ export function cloneRestoredMesh(srcMesh, meshId, assetId, sourceUnit = DEFAULT
   const clone = srcMesh.clone?.(`${srcMesh.name}.restdup`, srcMesh.parent ?? null, /*doNotCloneChildren*/ true);
   if (!clone) return srcMesh;
   clone.makeGeometryUnique?.();
-  _orphanMeshes.add(clone);
+  trackOrphan(clone);
   bindRestoredMesh(meshId, clone, assetId, sourceUnit);
   return clone;
 }

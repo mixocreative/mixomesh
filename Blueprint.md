@@ -223,6 +223,7 @@ src/
       TextureCap.js        ← viewport texture cap: capture-then-downscale GPU, export reads source
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
       BlobUrls.js          ← shared assetId → object-URL registry
+      MeshRegistry.js      ← module-local container/mesh/orphan registries + id minting
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)
