@@ -10,7 +10,7 @@ import { installEnv } from './env.mjs';
 installEnv();
 const { HistoryManager } = await import('../src/core/HistoryManager.js');
 const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
-const { dispatch } = await import('../src/core/StateManager.js');
+const { dispatch, setState, getState } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
 
 PersistenceManager.init();
@@ -85,6 +85,24 @@ await test('non-history mutation is sticky: undo does not clean it', () => {
     'position is back at saved but the sticky mutation is not undoable');
   markSaved();
   assert.equal(PersistenceManager.isDirty(), false, 'save clears sticky');
+});
+
+await test('scene.renderOut edit dirties (project-persisted slice, Stage 7 fix)', () => {
+  // Blueprint §5 rule: slices persisted only in .mixo MUST dirty. renderOut
+  // (incl. pose) is written to the .mixo by ProjectSerializer, so an edit
+  // through ScenePanel._setRenderOut has to fire PROJECT_DIRTY — the old
+  // SILENT flag silently discarded the composition change on save-prompt.
+  HistoryManager.clear();
+  markSaved();
+  const before = getState().scene.renderOut ?? {};
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, renderOut: { ...(s.scene.renderOut ?? {}), width: (before.width ?? 1920) + 1 } },
+  }));   // NO { silent: true } — must dirty
+  assert.equal(PersistenceManager.isDirty(), true,
+    'renderOut edit fires PROJECT_DIRTY (sticky against undo since not command-driven)');
+  markSaved();
+  assert.equal(PersistenceManager.isDirty(), false, 'save clears');
 });
 
 await test('command-driven PROJECT_DIRTY is NOT sticky (covered by position)', () => {

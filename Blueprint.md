@@ -1148,6 +1148,25 @@ Phase 6+ implementations:
   which the position diff already covers). Undoing back to the saved
   position therefore reads clean; editing after save then undoing past the
   save reads dirty.
+- **Silent-vs-dirty rule for state writes** (Stage 7, 2026-07-17):
+  a slice covered by a `SettingsStore` schema entry (per-user boot defaults —
+  `render`, `grid`, `overlays.grid/axes/printPreview`, `print` prefs, `gizmo`,
+  `pivotMode`) MUST be written with `{silent: true}` — those are personal
+  settings that follow the user across projects, not project state.
+  Conversely, a slice persisted only in the .mixo (by ProjectSerializer) MUST
+  be non-silent so it dirties, otherwise a `save?` prompt loses the change
+  the user just made. Session-only slices (`scene.section`, live selection,
+  live camera pose) stay silent — nothing persists them anywhere.
+  Concrete cases: `scene.renderOut` is dual-role — its allow-listed fields
+  (w/h/transparent/turntable) go to `SettingsStore` in parallel as boot
+  defaults, but the whole object (including `pose`, the render composition)
+  goes to .mixo, so `_setRenderOut` writes non-silently (Stage 7 fix, was
+  the ScenePanel.js:563 bug). ⚠ `scene.userSwatches` is a live conflict —
+  the intent comment (ShaderPanel.js:723) calls it "personal presets, not
+  project state" and `_addUserSwatch` writes with `{silent: true}`, but
+  ProjectSerializer L200 currently embeds it in the .mixo. Pick one: either
+  drop the serializer line (per-user) or drop the SILENT (per-project). Not
+  touched in Stage 7 to keep behavior; flag on the next persistence pass.
 
 ---
 

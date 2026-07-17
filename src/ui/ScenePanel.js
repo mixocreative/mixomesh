@@ -533,6 +533,13 @@ function _ro() {
 }
 
 function _setRenderOut(patch) {
+  // NOT silent — scene.renderOut (incl. pose) is persisted in the .mixo, so
+  // per the dirty rule (Blueprint §5): slices persisted only in .mixo must
+  // dirty. w/h/transparent/turntable are ALSO in the SettingsStore schema
+  // (per-user boot defaults), but the composition + pose belong to the
+  // project — editing here must mark it dirty so the user is prompted to
+  // save. SettingsStore still writes its allow-listed subset to localStorage
+  // in parallel (silent scheduleSave via its own listener).
   setState(s => {
     const cur = s.scene.renderOut ?? RENDEROUT_DEFAULTS;
     const next = { ...RENDEROUT_DEFAULTS, ...cur, ...patch };
@@ -540,7 +547,7 @@ function _setRenderOut(patch) {
       next.turntable = { ...RENDEROUT_DEFAULTS.turntable, ...cur.turntable, ...patch.turntable };
     }
     return { ...s, scene: { ...s.scene, renderOut: next } };
-  }, SILENT);
+  });
   if (_rv.active) {
     const ro = _ro();
     RenderFrame.show({ width: ro.width, height: ro.height });
