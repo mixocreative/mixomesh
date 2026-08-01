@@ -3819,7 +3819,10 @@ mirror → mate → array**.
   pick-time (faceId unstable).
 - **Array:** N linear/radial clones registered atomically in ONE `push` (pre-register before mutate).
 
-**Status.** Align + Array + Mirror shipped (`commands/PlacementCommands.js`): `AlignCommand`
+**Status.** Align + Array + Mirror + Mate shipped (`commands/PlacementCommands.js`) with a
+**Placement section in the N-panel** (`ui/CursorPanel.js`, Shift+N) holding the full matrix —
+align min/center/max × X/Y/Z, mirror X/Y/Z, array X/Y/Z, mate; ContextMenu keeps the common
+subset. `MateCommand` = snap-abut to the active object (auto axis/side). `AlignCommand`
 (world-AABB → `applyTransforms`; ContextMenu center X/Y/Z) · `ArrayCommand` (linear repeat via
 `cloneMeshAsNewObject`, soft-hide undo) · `MirrorCommand` (UV-preserving geometry reflection +
 winding + recompute-normals, recorded as a `mirror-<axis>` geometryFix so it **persists** via the

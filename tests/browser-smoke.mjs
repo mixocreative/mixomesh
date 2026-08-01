@@ -1388,6 +1388,19 @@ async function main() {
       assert(near(mateRT.undone, mateRT.before), 'mate undo restores the gap');
     }
 
+    // ── Placement panel renders the full verb matrix (ADR 0003 consolidation) ──
+    const placePanel = await evaluate(cdp, `(() => {
+      const btns = [...document.querySelectorAll('#n-panel .np-place-btn')].map(b => b.dataset.place);
+      return {
+        count: btns.length,
+        align: btns.filter(p => p.startsWith('align-')).length,
+        hasMirror: btns.includes('mirror-x'), hasArray: btns.includes('array-y'), hasMate: btns.includes('mate'),
+      };
+    })()`);
+    assert(placePanel.align === 9, `placement panel: 9 align buttons (min/center/max × xyz), got ${placePanel.align}`);
+    assert(placePanel.hasMirror && placePanel.hasArray && placePanel.hasMate,
+      'placement panel: mirror + array + mate buttons present');
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

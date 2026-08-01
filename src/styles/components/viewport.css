@@ -284,6 +284,24 @@
   margin-bottom: 4px;
 }
 .np-check input { accent-color: var(--accent); }
+.np-place-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.np-place-btn {
+  padding: 4px 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  background: var(--ctl-bg, var(--bg-2));
+  border: 1px solid var(--ctl-border, var(--border-1));
+  border-radius: var(--radius-1, 4px);
+  cursor: pointer;
+  text-align: center;
+}
+.np-place-btn:hover { background: var(--ctl-bg-hover, var(--bg-3)); }
+.np-place-btn:active { background: var(--accent); color: #fff; }
 .np-btn {
   width: 100%;
   height: 26px;

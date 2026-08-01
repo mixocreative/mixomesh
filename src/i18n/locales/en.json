@@ -417,6 +417,7 @@
   "context.arrayY": "Array Y (×3)",
   "context.arrayZ": "Array Z (×3)",
   "context.mate": "Mate to Active",
+  "placement.title": "Placement",
   "context.booleanUnion": "Combine: Union",
   "context.booleanSubtract": "Combine: Subtract",
   "context.booleanIntersect": "Combine: Intersect",

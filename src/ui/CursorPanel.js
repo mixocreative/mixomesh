@@ -5,6 +5,8 @@
 
 import { SceneManager } from '../core/SceneManager.js';
 import { Selection } from '../core/Selection.js';
+import { AssetLoader } from '../core/AssetLoader.js';
+import { push, AlignCommand, MirrorCommand, ArrayCommand, MateCommand } from '../core/HistoryManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { subscribe, getState } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
@@ -45,6 +47,11 @@ export function init() {
   _root.querySelector('[data-act="show-cursor"]')?.addEventListener('change', _toggleShowCursor);
   _root.querySelector('[data-act="pivot-cursor"]')?.addEventListener('change', _togglePivotCursor);
 
+  _root.querySelector('.np-placement')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-place]');
+    if (btn) _runPlacement(btn.dataset.place);
+  });
+
   InputManager.register('Shift+N', 'global', toggle);
   subscribe(EVENTS.CURSOR_CHANGED, () => { _refreshInputs(); _syncButtons(); });
   subscribe(EVENTS.PIVOT_MODE_CHANGED, _syncButtons);   // stay in sync with the toolbar's pivot group
@@ -72,8 +79,46 @@ function _markup() {
         <label class="np-check"><input type="checkbox" data-act="show-cursor"> <span data-i18n-key="cursor.show">Show 3D cursor</span></label>
         <label class="np-check"><input type="checkbox" data-act="pivot-cursor"> <span data-i18n-key="cursor.useAsPivot">Use cursor as pivot</span></label>
       </div>
+      <div class="np-section np-placement">
+        <div class="np-row-label" data-i18n-key="placement.title">Placement</div>
+        <div class="np-place-grid">
+          ${['x', 'y', 'z'].map(a => `
+            <button type="button" class="np-place-btn" data-place="align-${a}-min" title="Align Min ${a.toUpperCase()}">${a.toUpperCase()}⊣</button>
+            <button type="button" class="np-place-btn" data-place="align-${a}-center" title="Align Center ${a.toUpperCase()}">${a.toUpperCase()}⊟</button>
+            <button type="button" class="np-place-btn" data-place="align-${a}-max" title="Align Max ${a.toUpperCase()}">${a.toUpperCase()}⊢</button>`).join('')}
+        </div>
+        <div class="np-place-grid">
+          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="mirror-${a}" title="Mirror ${a.toUpperCase()}">⇄${a.toUpperCase()}</button>`).join('')}
+          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" title="Array ${a.toUpperCase()} ×3">⋯${a.toUpperCase()}</button>`).join('')}
+          <button type="button" class="np-place-btn" data-place="mate" title="Mate to active">⊐</button>
+        </div>
+      </div>
     </div>
   `;
+}
+
+// Placement verbs from the N-panel (ADR 0003) — the full mode matrix that would
+// clutter the ContextMenu. Align needs ≥2; array/mirror use the active object.
+function _runPlacement(place) {
+  const ids = Selection.getSelectedIds();
+  const activeId = Selection.getActiveId();
+  if (!ids.length) return;
+  if (place.startsWith('align-')) {
+    const [, axis, mode] = place.split('-');
+    if (ids.length > 1) push(new AlignCommand(ids, axis, mode));
+  } else if (place.startsWith('mirror-')) {
+    push(new MirrorCommand(ids, place.split('-')[1]));
+  } else if (place.startsWith('array-')) {
+    const axis = place.split('-')[1];
+    const m = activeId && AssetLoader.getBabylonMesh(activeId);
+    if (!m) return;
+    m.computeWorldMatrix(true);
+    const bb = m.getBoundingInfo().boundingBox;
+    const width = Math.abs(bb.maximumWorld[axis] - bb.minimumWorld[axis]) || 0.1;
+    push(new ArrayCommand(activeId, 3, axis, width));
+  } else if (place === 'mate') {
+    if (ids.length > 1 && activeId) push(new MateCommand(ids, activeId));
+  }
 }
 
 function _retranslate(root) {
