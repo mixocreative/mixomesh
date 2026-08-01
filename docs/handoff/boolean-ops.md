@@ -38,17 +38,28 @@ from "arranges parts" to "kitbashes").
 - [x] Debate panel dispatched (3 haiku agents: engine/threading, data-model/undo/persist, texture+UX).
 - [x] ADR 0002 skeleton written (`docs/adr/0002-interactive-boolean.md`) — 4 axes + known prior
       (export SKIPS CSG2 for textured meshes ⇒ CSG2 loses UVs = the crux). Decisions `[TO FILL]`.
-- [ ] Synthesis → fill ADR 0002 decisions + first-slice plan.
-- [ ] Implement first slice (per ADR).
-- [ ] BLUEPRINT + docs updated.
-- [ ] Tests green, committed.
+- [x] Synthesis → ADR 0002 FINAL (f0ab058): solid-colour destructive Boolean, synthetic
+      embedded asset, main-thread, gated. 4-slice plan in the ADR.
+- [x] **Slice 1 DONE:** `src/core/BooleanService.js` — `evaluateBooleanEligibility` (pure gating:
+      needs-two / multi-part / too-large / needs-texture-bake / ready) + `DEFAULT_BOOLEAN_TRIANGLE_CAP`
+      (50k); `tests/boolean-service.test.mjs` (8 asserts). BLUEPRINT §Boolean + module registry updated.
+- [ ] **Slice 2 (NEXT):** CSG2 compute wrapper in BooleanService (main-thread, reuse
+      `PrintPipeline._ensureCSG2` init pattern: `CSG2.FromMesh → op → toMesh → VertexData.ExtractFromMesh`)
+      + `BooleanCommand` (execute/undo, SmartReplace soft-delete of operands) + synthetic embedded asset
+      (serialise result → bytes → register asset so it round-trips). Browser smoke: union two solid cubes
+      → one watertight mesh, survives `.mixo` reload.
+- [ ] **Slice 3:** ContextMenu Union/Subtract/Intersect + modals (texture bake-or-cancel,
+      non-manifold→validator) + i18n (en/ja/zh-Hant).
+- [ ] **Slice 4:** end-to-end browser smoke (real CSG2, all 3 ops; textured→gated).
 
 ## RESUME POINTER
 
-**Current:** dispatching the 3-agent debate panel (each audits the relevant code + argues a
-lens). **Next:** synthesize their positions into `docs/adr/0002-interactive-boolean.md`,
-then implement the first slice, update BLUEPRINT.md, test, commit. If the debate outputs are
-lost, re-dispatch using the 4 axes above + the code map below.
+**Current:** Slice 1 (pure gating) DONE + green + committed. **Next = Slice 2** (see checklist):
+add the CSG2 compute wrapper to `BooleanService.js` reusing the `PrintPipeline._ensureCSG2` init
+pattern, then `BooleanCommand` + the synthetic-embedded-asset persistence path, guarded by a browser
+smoke (union two solid cubes → watertight → survives reload). Read ADR 0002 §Decision + §Implementation
+plan for the exact shape. Keep the suite green; commit per slice. Do NOT attempt textured Booleans
+(gated by design) or a worker (deferred).
 
 ## Code map (where the panel should look)
 
