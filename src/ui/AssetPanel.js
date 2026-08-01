@@ -7,6 +7,7 @@ import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { safeImport } from './ImportError.js';
 import { icon } from '../core/Icons.js';
+import { caps } from '../core/storage/capabilities.js';
 import { SUPPORTED_EXTENSIONS, SUPPORTED_TEXTURE_EXTENSIONS, extOf } from '../core/assets/AssetTypes.js';
 import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
 import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js';
@@ -86,7 +87,12 @@ export function init() {
   _gridBodyEl = document.getElementById('ap-grid-body');
   _gridSummaryEl = document.getElementById('ap-grid-summary');
 
-  _treeWrapEl.querySelector('#ap-mount-btn').addEventListener('click', promptMount);
+  const _mountBtn = _treeWrapEl.querySelector('#ap-mount-btn');
+  _mountBtn.addEventListener('click', promptMount);
+  // Capability-gate (ADR 0001): folder mounting needs a filesystem the runtime
+  // exposes. Hidden — not shown-and-broken — when unsupported (e.g. a no-FSA
+  // browser). No-op on Chrome/Edge/Electron where mountDirectory is true.
+  if (!caps.mountDirectory) _mountBtn.hidden = true;
   _treeWrapEl.querySelectorAll('.ap-tab').forEach(btn =>
     btn.addEventListener('click', () => _setTab(btn.dataset.tab)));
   _listEl.addEventListener('click', _onTreeClick);
