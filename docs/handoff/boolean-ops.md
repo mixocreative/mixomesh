@@ -35,8 +35,10 @@ from "arranges parts" to "kitbashes").
 ## Progress log
 
 - [x] Branch + handoff scaffold.
-- [ ] Debate panel dispatched (3 agents: engine, data-model, texture+UX).
-- [ ] Synthesis → ADR 0002.
+- [x] Debate panel dispatched (3 haiku agents: engine/threading, data-model/undo/persist, texture+UX).
+- [x] ADR 0002 skeleton written (`docs/adr/0002-interactive-boolean.md`) — 4 axes + known prior
+      (export SKIPS CSG2 for textured meshes ⇒ CSG2 loses UVs = the crux). Decisions `[TO FILL]`.
+- [ ] Synthesis → fill ADR 0002 decisions + first-slice plan.
 - [ ] Implement first slice (per ADR).
 - [ ] BLUEPRINT + docs updated.
 - [ ] Tests green, committed.
