@@ -25,11 +25,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # `npm install`, not `npm ci`: Vite 8 (rolldown) ships its native binary as
-      # a per-platform optionalDependency. A lockfile generated on Windows records
-      # only the win32 binary, and `npm ci` installs exactly the lockfile — so the
-      # linux-x64 binary is missing and the build dies with MODULE_NOT_FOUND.
-      # `npm install` re-resolves optional deps for the runner's platform.
+      # Vite 8 (rolldown) ships its native binary as a per-platform
+      # optionalDependency. The Windows-generated package-lock.json records only
+      # the win32 binary, and npm's optional-deps bug (npm/cli#4828) means even a
+      # plain `npm install` keeps the locked tree and never fetches the linux one
+      # — the build then dies with "Cannot find native binding". Deleting the
+      # lockfile first forces a fresh resolve that picks up the linux-x64 binary.
+      # (node_modules doesn't exist on a clean runner, so only the lockfile needs
+      # removing.) The official npm-bug workaround, applied in CI.
+      - run: rm -f package-lock.json
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
