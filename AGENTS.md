@@ -1,5 +1,11 @@
 # MIXOMESH — Project Context
 
+> **Runtime direction (2026-06-17):** moving toward ONE codebase serving a Web
+> build + a Windows Electron desktop build via a capability-tiered
+> `StorageAdapter` (opaque refs; `.mixo` = interop contract). Design:
+> `docs/adr/0001-storage-adapter-web-electron.md`. In-progress resume state:
+> `HANDOFF.md` (read first when continuing that work). macOS deferred.
+
 ## What this is
 Browser-based 3D model assembly tool for **full-color 3D printing**.
 

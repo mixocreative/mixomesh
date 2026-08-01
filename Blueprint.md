@@ -5,6 +5,12 @@
 > *Purpose · Data Structure · Public API · Implementation Rules · Pitfalls.*
 > Use Babylon.js APIs whenever available — see §0.4 "Babylon-First Rule."
 > Module size targets in §0.5 are enforced to keep files reviewable.
+>
+> **Runtime note (2026-06-17):** "Chrome/Edge Only" is being generalised to a
+> capability-tiered `StorageAdapter` so the same code runs as a Web build AND a
+> Windows Electron build (Chromium — same engine). Filesystem/persistence goes
+> behind the adapter; core (import/ratio/validation/export/`.mixo`) is unchanged.
+> See `docs/adr/0001-storage-adapter-web-electron.md` + `HANDOFF.md`.
 
 ## What this tool exists for
 
