@@ -52,6 +52,20 @@ from "arranges parts" to "kitbashes").
       non-manifold→validator) + i18n (en/ja/zh-Hant).
 - [ ] **Slice 4:** end-to-end browser smoke (real CSG2, all 3 ops; textured→gated).
 
+## Slice 2 debate — captured audit (do NOT re-run)
+
+**Persistence path (agent A audit):** `@babylonjs/serializers@9.6.2` IS bundled → GLB export
+available. `loadFromBlob`/`AssetImport` is the only register-from-bytes entry; it runs
+`bakeImportTransform` (unit factor + RH→LH flip) + seeds `ratio=modelRatio`. **Restore
+(`AssetRestore.restoreContainer` + `ProjectLoader._applyPersistedRatioBake`) re-applies BOTH →
+a world-space baked result would DOUBLE-transform.** Neutralise so both are no-ops: `sourceUnit`
+with unit-factor 1 + `modelRatio == ratio` ⇒ importScaleFactor=1 AND delta=1. NOTE: agent A read
+`sceneRatio` from `state.print.workingRatio` — that global was REMOVED in the per-object-ratio
+redesign; correct neutralisation is CONSTANTS `sourceUnit='meters'` (factor 1), `modelRatio=1`,
+`ratio=1` (agent B verifying). Open Q under interrogation: GLB round-trip (flip out==flip in?) vs
+serialising RAW VertexData and restoring directly (bypass import). Risks: material/shader on the
+result (solid-colour → assign default), contentHash for the embedded-only recovery tier.
+
 ## RESUME POINTER
 
 **Current:** Slice 1 (pure gating) DONE + green + committed. **Next = Slice 2** (see checklist):
