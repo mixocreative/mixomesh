@@ -4,7 +4,7 @@
 import { EVENTS } from '../events.js';
 import { dispatch, markDirty, getState } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
-import { applyTransforms, captureWorld } from './support.js';
+import { applyTransforms, captureWorld, withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { computeAlignDeltas } from '../placement/AlignMath.js';
 
@@ -77,5 +77,65 @@ export class AlignCommand {
   undo() {
     applyTransforms(this._prev);
     dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) });
+  }
+}
+
+/**
+ * Linear array: duplicate one object `count-1` times, each offset by `i·spacing`
+ * along a world axis (kitbash repeats — bolts, teeth). Reuses
+ * `cloneMeshAsNewObject` (independent geometry, persists like a normal duplicate).
+ * One undo step; clones are soft-hidden on undo (kept for redo), not disposed.
+ */
+export class ArrayCommand {
+  /**
+   * @param {string} sourceId  object to repeat
+   * @param {number} count      total copies incl. the source (≥2)
+   * @param {'x'|'y'|'z'} axis
+   * @param {number} spacing    world-unit step between copies
+   */
+  constructor(sourceId, count, axis, spacing) {
+    this._sourceId = sourceId;
+    this._count = Math.max(2, Math.floor(count) || 2);
+    this._axis = AXES.has(axis) ? axis : 'x';
+    this._spacing = Number(spacing) || 0;
+    this._clones = [];   // [{ id, obj }]
+    this._executed = false;
+    this.label = `Array (${this._count})`;
+  }
+
+  execute() {
+    if (this._executed) {   // redo — re-show the same clones
+      withDetachedPivot(() => {
+        for (const c of this._clones) {
+          const m = AssetLoader.getBabylonMesh(c.id);
+          if (m) m.setEnabled(true);
+          restoreSceneObject(c.id, c.obj);
+        }
+      });
+      markDirty();
+      return;
+    }
+    const B = window.BABYLON;
+    withDetachedPivot(() => {
+      for (let i = 1; i < this._count; i++) {
+        const offset = new B.Vector3(0, 0, 0);
+        offset[this._axis] = i * this._spacing;
+        const newId = AssetLoader.cloneMeshAsNewObject(this._sourceId, offset);
+        if (!newId) continue;
+        this._clones.push({ id: newId, obj: { ...getState().scene.objects[newId] } });
+      }
+    });
+    this._executed = true;
+    markDirty();
+  }
+
+  undo() {
+    withDetachedPivot(() => {
+      for (const c of this._clones) {
+        const m = AssetLoader.getBabylonMesh(c.id);
+        if (m) { m.setParent(null); m.setEnabled(false); }
+        removeSceneObject(c.id);
+      }
+    });
   }
 }

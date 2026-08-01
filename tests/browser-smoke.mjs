@@ -1296,6 +1296,35 @@ async function main() {
     assert(boolTex.blocked && boolTex.reason === 'needs-texture-bake',
       `boolean: a textured operand must block (no silent texture loss) — got blocked=${boolTex.blocked} reason=${boolTex.reason}`);
 
+    // ── ArrayCommand: repeat an object N times along an axis + undo (ADR 0003) ──
+    const arrayRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const scene = sm.SceneManager.getScene();
+      const before = new Set(Object.keys(st.getState().scene.objects));
+      const src = B.MeshBuilder.CreateBox('arr_src', { size: 0.05 }, scene);
+      src.position.set(0, 0.9, 0); src.metadata = { meshId: 'arr_src' };
+      al.AssetLoader.bindRestoredMesh('arr_src', src, 'arr-asset');
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, arr_src: { id: 'arr_src', name: 'src', assetId: 'arr-asset', collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 } } } }), { silent: true });
+      hm.push(new hm.ArrayCommand('arr_src', 3, 'x', 0.2));
+      const added = Object.keys(st.getState().scene.objects).filter(k => !before.has(k) && k !== 'arr_src');
+      const xOf = (id) => { const m = scene.meshes.find(x => x.metadata?.meshId === id); return m ? +m.position.x.toFixed(3) : null; };
+      const cloneXs = added.map(xOf).sort((a, b) => a - b);
+      hm.undo();
+      const remaining = Object.keys(st.getState().scene.objects).filter(k => added.includes(k));
+      return { addedCount: added.length, cloneXs, undoRemoved: remaining.length === 0 };
+    })()`);
+    {
+      const near = (a, b) => a != null && Math.abs(a - b) < 1e-3;
+      assert(arrayRT.addedCount === 2, `array ×3: should create 2 clones (got ${arrayRT.addedCount})`);
+      assert(near(arrayRT.cloneXs[0], 0.2) && near(arrayRT.cloneXs[1], 0.4),
+        `array: clones offset by spacing along x (got ${arrayRT.cloneXs.join(', ')})`);
+      assert(arrayRT.undoRemoved, 'array undo: should remove the clones');
+    }
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');
