@@ -27,6 +27,14 @@ function createWindow() {
   });
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+
+  // Headless smoke (MIXO_SMOKE=1): verify the built app boots in the desktop shell,
+  // then quit — so CI/dev can assert the desktop path loads without a lingering window.
+  if (process.env.MIXO_SMOKE) {
+    win.webContents.once('did-finish-load', () => { console.log('MIXO_SMOKE: loaded'); setTimeout(() => app.exit(0), 400); });
+    win.webContents.once('did-fail-load', (_e, code, desc) => { console.error('MIXO_SMOKE: fail', code, desc); app.exit(1); });
+    setTimeout(() => { console.error('MIXO_SMOKE: timeout'); app.exit(2); }, 20000);
+  }
 }
 
 // ── KV persistence (JSON file in userData) — backs DesktopStorageAdapter.kv* ──
