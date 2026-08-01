@@ -60,5 +60,14 @@ Verify green before each commit. macOS deferred until Web+Windows are production
 ## Progress
 
 - [x] Master sequence plan (this file).
-- [ ] A2 Slice 2 — debate/audit → implement → doc → test → commit.
-- [ ] A3, A4 · B1–B4 (ADR 0003) · C1–C4.
+- [x] **A2 Slice 2 core** — 2-agent cross-interrogation → ADR 0002 §Slice-2 → `computeBoolean`
+      (CSG2, verified API) + `GeometryCodec` (`.mxvd`). Committed, green. (A2 remainder =
+      BooleanCommand + `.mxvd` restore branch + smoke → `docs/handoff/boolean-ops.md`.)
+- [x] **B: ADR 0003** (2-agent debate) + **B-align slice 1** — `placement/AlignMath` pure deltas,
+      tested. (Remainder: AlignCommand + UI + mirror/mate/array → `docs/handoff/placement.md`.)
+- [x] **C1 Phase 1b** — `StorageAdapter` interface + `BrowserStorageAdapter` + boot singleton,
+      tested. (Remainder: route LEAF sites, then 1c/2/3 → `HANDOFF.md`.)
+- [ ] Remainders above · A3/A4 · B-mirror/mate/array · C1c/C2/C3.
+
+Each phase now has: plan (roadmap) · debate+audit (subagent panels) · a first tested implementation
+· docs (ADR + BLUEPRINT + handoff) · green + committed. Remainders sequenced in the handoffs.

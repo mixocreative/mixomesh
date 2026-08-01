@@ -206,6 +206,7 @@ src/
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
+    placement/AlignMath.js ← pure align-delta math for placement verbs — see §Placement + ADR 0003
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
@@ -3792,6 +3793,29 @@ Intersect on a 2+ selection (Subtract base = active object).
 `BooleanService.computeBoolean` (CSG2 wrapper), `GeometryCodec` (`.mxvd` encode/decode, headless-tested).
 Remaining Slice 2/3/4 (BooleanCommand + `.mxvd` restore branch + ContextMenu + browser smoke) tracked
 in `docs/handoff/boolean-ops.md`.
+
+---
+
+## §Placement — precision assembly verbs (kitbash)
+
+*Full design + rationale: `docs/adr/0003-placement-precision.md`. This is the contract.*
+
+Accurate part placement for kitbashing: **align · mirror · mate (face-snap) · array**. All are
+reversible ⇒ Commands on HistoryManager, expand multi-part logical objects via
+`logicalObjectCommandIds`, and hold one-mesh-one-shader. Sequence (safest first): **align →
+mirror → mate → array**.
+
+- **Align (slice 1, shipped):** `placement/AlignMath.computeAlignDeltas(items, mode)` — pure axis
+  deltas (min/center/max of the selection's world AABB). `AlignCommand` reads live AABBs + applies
+  via a transform Command. Headless-tested.
+- **Mirror:** vertex-bake reflection + `flipFaces` when `determinant < 0` (copy ImportNormalizer
+  winding fix) + `makeGeometryUnique` first. NOT node negative-scale.
+- **Mate:** pick two faces → `Quaternion.FromToRef(-nB, nA)` + coincident face centres; snap at
+  pick-time (faceId unstable).
+- **Array:** N linear/radial clones registered atomically in ONE `push` (pre-register before mutate).
+
+**Status.** Align slice 1 (`AlignMath`) shipped + tested; `AlignCommand` wiring + UI + mirror/mate/
+array tracked in `docs/handoff/placement.md`.
 
 ---
 
