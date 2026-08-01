@@ -42,7 +42,16 @@ Order = value-first (A, B are user-facing wins; C is delivery). No hard cross-de
 - **Polish ▸ TODO** — a **Placement panel** consolidating align min/max + an array count/spacing dialog
   (the ContextMenu is getting long — a panel/submenu is the right home). ContextMenu covers the common cases now.
 
-## Phase C — Storage adapter → Windows Electron (ADR 0001)  ▸ Phase 1a DONE
+## Phase C — Storage adapter → Windows Electron (ADR 0001)  ▸ scaffold DONE, packaging needs a desktop env
+
+- **1a ✅** capability model · **1b ✅** StorageAdapter + BrowserStorageAdapter (KV) ·
+  **Phase 2 scaffold ✅** — `electron/main.cjs` + `preload.cjs` + `DesktopStorageAdapter`
+  (code-complete, headless build-verified; web build untouched).
+- **NOT verifiable headless** (see `docs/handoff/electron.md`): `npm i -D electron` + run the shell,
+  route the LEAF fs sites (Phase 1c), electron-builder NSIS packaging, security-hardening review.
+  These need a real Windows desktop loop.
+
+### (original Phase C detail)
 
 - **C1 — Phase 1b:** `src/core/storage/StorageAdapter.js` domain interface + `BrowserStorageAdapter`
   delegating to today's code (opaque ref = handle); boot `storage` singleton; route the LEAF call
