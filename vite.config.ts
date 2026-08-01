@@ -7,6 +7,11 @@ const PROJECT_ROOT = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   root: PROJECT_ROOT,
   appType: 'spa',
+  // Relative base so the built app runs from ANY location without edits:
+  //  - GitHub Pages project sites serve from https://<user>.github.io/<repo>/
+  //  - the Electron desktop shell loads dist/index.html over file://
+  // Absolute ('/') asset URLs break both; './' resolves them against the page.
+  base: './',
   server: {
     host: '127.0.0.1',
     port: 5173,

@@ -5,16 +5,89 @@ Browser-based 3D model assembly tool for full-color 3D printing. MIXOMESH is
 continuous-tone color for UV-inkjet printers, while filament targets use solid
 per-part 3MF color groups.
 
-## Run
+## First-time setup
 
-Install dependencies, then start Vite:
+You need **Node.js 22 or newer** once. Get it from https://nodejs.org (the "LTS"
+button). Then, inside this folder, install the project's dependencies:
 
 ```bash
-node scripts/install-deps.mjs
+npm install
+```
+
+That's it — you only do this once (and again whenever dependencies change).
+
+## Run the web version locally
+
+Start the local web server:
+
+```bash
 npm run dev
 ```
 
-Open http://127.0.0.1:5173/index.html in Chrome or Edge.
+Then open **http://127.0.0.1:5173/** in Chrome or Edge. Edits reload live. Press
+`Ctrl+C` in the terminal to stop it.
+
+To preview the real production build instead (what visitors get online):
+
+```bash
+npm run build
+npm run preview
+```
+
+Open the **http://127.0.0.1:4173/** address it prints.
+
+## Run the desktop (offline) version
+
+The desktop app is the same tool in its own window, works fully offline, and can
+read/write local files. Build once, then launch it:
+
+```bash
+npm run build
+npm run electron
+```
+
+To make a double-clickable Windows installer (`.exe`) for other people:
+
+```bash
+npm install --save-dev electron-builder
+npm run dist
+```
+
+The installer lands in the `release/` folder.
+
+## Build a clean dist every time
+
+```bash
+npm run build
+```
+
+`npm run build` always **wipes the `dist/` folder first**, so every build is
+clean — no leftover old files. `dist/` is what gets published online and what the
+desktop app loads.
+
+## Put it online (GitHub Pages — free hosting)
+
+This repo is already wired to publish itself. One-time steps:
+
+1. Push the project to a GitHub repository (from this folder):
+
+   ```bash
+   git push
+   ```
+
+2. On GitHub, open the repo → **Settings** → **Pages**. Under
+   **"Build and deployment" → Source**, choose **"GitHub Actions"**. Save.
+
+That's all. From now on, **every `git push` rebuilds and republishes the site
+automatically** (via `.github/workflows/deploy.yml`). After a minute or two your
+app is live at:
+
+```
+https://<your-github-username>.github.io/<your-repo-name>/
+```
+
+You never edit any paths — the build uses relative links, so it works whatever
+your repo is named.
 
 ## Verify
 
