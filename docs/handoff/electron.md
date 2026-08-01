@@ -4,6 +4,15 @@ Solo dev, all on `master`. The desktop shell is scaffolded in `electron/` + wire
 capability model. **What's code-complete vs what still needs a real desktop run is called
 out below** — packaging/running can't be verified in a headless session.
 
+## RUNS + tested (2026)
+
+- **The desktop app boots** — `npm run build` then `npm run test:electron` launches the built
+  app in real Electron (`MIXO_SMOKE` quits once loaded) and asserts it loads without crashing.
+  Verified PASS on Windows. `npm run electron` runs it normally. So the desktop path
+  (preload → `window.electronAPI` → `DesktopStorageAdapter`) is exercised, not just scaffolded.
+- **Packaging configured** — `electron-builder.yml` (Windows NSIS) + `npm run dist`. Only step not
+  run here (heavy artifact build): `npm i -D electron-builder && npm run dist` → installer in `release/`.
+
 ## Done (code-complete, build-verified headless)
 
 - **Capability model** — `src/core/storage/capabilities.js`: `detectCapabilities` reads

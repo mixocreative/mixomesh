@@ -2,6 +2,7 @@
   "name": "mixomesh",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "install:deps": "node scripts/install-deps.mjs",
     "dev": "vite --host 127.0.0.1 --port 5173",
@@ -17,6 +18,7 @@
     "test:webgpu": "node tests/browser-webgpu-check.mjs",
     "test:electron": "node tests/electron-smoke.mjs",
     "electron": "electron electron/main.cjs",
+    "dist": "electron-builder --win",
     "i18n:check": "node scripts/i18n-check.mjs"
   },
   "dependencies": {

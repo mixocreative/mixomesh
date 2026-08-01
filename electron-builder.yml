@@ -1,0 +1,21 @@
+# electron-builder packaging config (ADR 0001 Phase 3). Produces a Windows NSIS
+# installer from the built web app + the Electron shell.
+#
+# Run: `npm i -D electron-builder && npm run build && npm run dist`
+# (heavy: downloads build tooling + writes an installer to release/). Optional
+# code-signing (SmartScreen warns until signed). macOS target deferred (ADR 0001).
+appId: com.mixomesh.app
+productName: MIXOMESH
+directories:
+  output: release
+  buildResources: electron
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
