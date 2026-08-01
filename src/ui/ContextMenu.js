@@ -225,7 +225,11 @@ async function _boolean(op) {
   if (ids.length < 2) return;
   const res = await performBoolean(ids, op);
   if (res && res.blocked) {
-    Toast.show(t('toast.booleanBlocked', { reason: res.reason }), 'warning', 4000);
+    const key = res.reason === 'needs-texture-bake' ? 'toast.booleanTextured'
+      : res.reason === 'multi-part' ? 'toast.booleanMultiPart'
+      : res.reason === 'too-large' ? 'toast.booleanTooLarge'
+      : 'toast.booleanBlocked';
+    Toast.show(t(key, { reason: res.reason }), 'warning', 4000);
     return;
   }
   push(res);

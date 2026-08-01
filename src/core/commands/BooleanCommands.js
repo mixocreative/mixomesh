@@ -15,12 +15,16 @@ import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './supp
 
 function _operandDescriptor(id, objects) {
   const m = AssetLoader.getBabylonMesh(id);
+  // Solid-colour = no base texture on the live material. CSG2/Manifold DROPS UVs
+  // (ADR 0002), so a textured operand must NOT silently combine — eligibility
+  // returns `needs-texture-bake` and performBoolean blocks (moat protection). A
+  // future bake-or-cancel modal lets the user consciously downgrade to solid.
+  const mat = m?.material;
+  const solidColor = !(mat && (mat.diffuseTexture || mat.albedoTexture || mat.emissiveTexture));
   return {
     id,
     triangles: m ? Math.floor((m.getTotalIndices?.() ?? 0) / 3) : 0,
-    // Solid-colour-first (ADR 0002): the textured-operand gate is a UI concern
-    // (bake-or-cancel modal). The command assumes solid operands.
-    solidColor: true,
+    solidColor,
     partCount: logicalObjectPartIds(id, objects).length,
   };
 }
@@ -39,6 +43,10 @@ export async function performBoolean(meshIds, op) {
   const operandIds = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))];
   const gate = evaluateBooleanEligibility(operandIds.map(id => _operandDescriptor(id, objects)));
   if (!gate.ok) return { blocked: true, reason: gate.reason };
+  // `needs-texture-bake` is a SOFT gate (ok:true) awaiting the bake-or-cancel modal.
+  // Until that ships, block it — CSG2 drops UVs, so proceeding would silently lose
+  // the texture (ADR 0002 moat). The modal will bake-to-solid then re-enter here.
+  if (gate.reason === 'needs-texture-bake') return { blocked: true, reason: 'needs-texture-bake' };
 
   const meshes = operandIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
   if (meshes.length < 2) return { blocked: true, reason: 'needs-two' };

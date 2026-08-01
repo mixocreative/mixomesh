@@ -1271,6 +1271,31 @@ async function main() {
     assert(boolRT.restoredTris === boolRT.resultTris,
       `boolean union: result survives .mixo reload (tris ${boolRT.resultTris} -> ${boolRT.restoredTris})`);
 
+    // A TEXTURED operand must BLOCK (CSG2 drops UVs — no silent texture loss; ADR 0002 moat).
+    const boolTex = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const scene = sm.SceneManager.getScene();
+      const mk = (id, textured) => {
+        const b = B.MeshBuilder.CreateBox(id, { size: 0.1 }, scene);
+        b.position.set(0, 0.7, 0); b.metadata = { meshId: id };
+        const m = new B.StandardMaterial(id + '_m', scene);
+        if (textured) m.diffuseTexture = new B.DynamicTexture(id + '_t', { width: 4, height: 4 }, scene, false);
+        b.material = m;
+        al.AssetLoader.bindRestoredMesh(id, b, 'btx-' + id);
+      };
+      mk('btx_a', false); mk('btx_b', true);
+      const obj = (id) => ({ id, name: id, assetId: 'btx-' + id, collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 });
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, btx_a: obj('btx_a'), btx_b: obj('btx_b') } } }), { silent: true });
+      const res = await hm.performBoolean(['btx_a', 'btx_b'], 'union');
+      return { blocked: !!res.blocked, reason: res.reason };
+    })()`);
+    assert(boolTex.blocked && boolTex.reason === 'needs-texture-bake',
+      `boolean: a textured operand must block (no silent texture loss) — got blocked=${boolTex.blocked} reason=${boolTex.reason}`);
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');
