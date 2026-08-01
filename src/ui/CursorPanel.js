@@ -90,7 +90,7 @@ function _markup() {
         <div class="np-place-grid">
           ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="mirror-${a}" title="Mirror ${a.toUpperCase()}">⇄${a.toUpperCase()}</button>`).join('')}
           ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" title="Array ${a.toUpperCase()} ×3">⋯${a.toUpperCase()}</button>`).join('')}
-          <button type="button" class="np-place-btn" data-place="mate" title="Mate to active">⊐</button>
+          <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate">⊐</button>
         </div>
       </div>
     </div>
