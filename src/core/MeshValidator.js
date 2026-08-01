@@ -384,12 +384,35 @@ export async function validateMesh(mesh) {
  * absolute MERGE_DISTANCE, so callers must apply them AT the displayed scale
  * (after the import seed + per-object ratio bake) for the weld to behave the
  * same on reload as it did when first applied.
+ * `mirror-x|y|z` (placement, ADR 0003) is also recorded + replayed here: reflect
+ * the LOCAL geometry about its bbox centre on that axis, reverse winding, recompute
+ * normals — UVs are preserved (unlike CSG2), so textured parts mirror cleanly. It is
+ * its own inverse (mirror twice = identity), which the command relies on for undo.
  * @param {BABYLON.Mesh} mesh
- * @param {'nonManifold'|'invertedNormals'} type
+ * @param {'nonManifold'|'invertedNormals'|'mirror-x'|'mirror-y'|'mirror-z'} type
  * @returns {boolean} true when the fix was applied
  */
 export function applyGeometryFix(mesh, type) {
   if (!mesh) return false;
+  if (type === 'mirror-x' || type === 'mirror-y' || type === 'mirror-z') {
+    const positions = mesh.getVerticesData?.(BABYLON.VertexBuffer.PositionKind);
+    const indices = mesh.getIndices?.();
+    if (!positions || !indices) return false;
+    const a = type === 'mirror-x' ? 0 : type === 'mirror-y' ? 1 : 2;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = a; i < positions.length; i += 3) { if (positions[i] < lo) lo = positions[i]; if (positions[i] > hi) hi = positions[i]; }
+    const twiceCentre = lo + hi;   // reflect v → (lo+hi) - v  (about the axis midpoint)
+    for (let i = a; i < positions.length; i += 3) positions[i] = twiceCentre - positions[i];
+    const flipped = new Uint32Array(indices.length);
+    for (let i = 0; i < indices.length; i += 3) { flipped[i] = indices[i]; flipped[i + 1] = indices[i + 2]; flipped[i + 2] = indices[i + 1]; }
+    mesh.setVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+    mesh.setIndices(flipped);
+    const normals = [];
+    BABYLON.VertexData.ComputeNormals(positions, flipped, normals);
+    mesh.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
+    mesh.refreshBoundingInfo?.();
+    return true;
+  }
   if (type === 'nonManifold') {
     if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
       const vd = BABYLON.VertexData.ExtractFromMesh(mesh);

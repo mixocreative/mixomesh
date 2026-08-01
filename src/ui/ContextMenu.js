@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, performBoolean } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, performBoolean } from '../core/HistoryManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
@@ -147,6 +147,10 @@ function _buildItems(info) {
     { label: t('context.booleanSubtract'),  shortcut: '',          action: 'bool-subtract',  iconName: 'Box',   cls: enabled(multi) },
     { label: t('context.booleanIntersect'), shortcut: '',          action: 'bool-intersect', iconName: 'Box',   cls: enabled(multi) },
     'sep',
+    { label: t('context.mirrorX'),          shortcut: '',          action: 'mirror-x',       iconName: 'Box', cls: enabled(hasSelection) },
+    { label: t('context.mirrorY'),          shortcut: '',          action: 'mirror-y',       iconName: 'Box', cls: enabled(hasSelection) },
+    { label: t('context.mirrorZ'),          shortcut: '',          action: 'mirror-z',       iconName: 'Box', cls: enabled(hasSelection) },
+    'sep',
     { label: t('context.delete'),          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
 }
@@ -175,6 +179,7 @@ function _runAction(action, info) {
   if (action === 'replace')    _smartReplace();
   if (action === 'swab')       _transformSwab();
   if (action.startsWith('align-')) _align(action);
+  if (action.startsWith('mirror-')) _mirror(action);
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
@@ -215,6 +220,13 @@ function _align(action) {
   if (ids.length < 2) return;
   const [, axis, mode] = action.split('-');
   push(new AlignCommand(ids, axis, mode));
+}
+
+// Mirror single-part objects about their centre on a world axis (ADR 0003).
+function _mirror(action) {
+  const ids = Selection.getSelectedIds();
+  if (!ids.length) return;
+  push(new MirrorCommand(ids, action.split('-')[1]));
 }
 
 // Interactive Boolean (ADR 0002). performBoolean is async (CSG2 + serialise); it

@@ -2,11 +2,12 @@
 // follow (docs/handoff/placement.md).
 
 import { EVENTS } from '../events.js';
-import { dispatch, markDirty, getState } from '../StateManager.js';
+import { dispatch, markDirty, getState, setState } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { applyTransforms, captureWorld, withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { computeAlignDeltas } from '../placement/AlignMath.js';
+import { applyGeometryFix } from '../MeshValidator.js';
 
 const AXES = new Set(['x', 'y', 'z']);
 
@@ -138,4 +139,42 @@ export class ArrayCommand {
       }
     });
   }
+}
+
+/**
+ * Mirror single-part objects about their own centre on a world axis, UV-preserving
+ * (reflect geometry + reverse winding + recompute normals — kept for export/print,
+ * unlike a node negative-scale which exports inside-out). Recorded as a `mirror-<axis>`
+ * geometryFix so it survives `.mixo` reload (replayed by persistence). Self-inverse:
+ * execute and undo both re-apply. Multi-part logical objects are skipped (their parts
+ * would each reflect about their own centre) — single-part first.
+ */
+export class MirrorCommand {
+  constructor(meshIds, axis) {
+    this._axis = AXES.has(axis) ? axis : 'x';
+    const objects = getState().scene.objects;
+    this._ids = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))]
+      .filter(id => logicalObjectPartIds(id, objects).length === 1 && AssetLoader.getBabylonMesh(id));
+    this.label = `Mirror ${this._axis.toUpperCase()}`;
+  }
+
+  _apply() {
+    const type = `mirror-${this._axis}`;
+    for (const id of this._ids) {
+      const m = AssetLoader.getBabylonMesh(id);
+      if (m) applyGeometryFix(m, type);
+      setState(s => {
+        const o = s.scene.objects[id];
+        if (!o) return s;
+        const fixes = new Set(o.geometryFixes ?? []);
+        if (fixes.has(type)) fixes.delete(type); else fixes.add(type);   // parity toggle
+        return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [id]: { ...o, geometryFixes: [...fixes] } } } };
+      }, { silent: true });
+      dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
+    }
+    markDirty();
+  }
+
+  execute() { this._apply(); }
+  undo() { this._apply(); }   // reflection is its own inverse
 }

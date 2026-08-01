@@ -1325,6 +1325,37 @@ async function main() {
       assert(arrayRT.undoRemoved, 'array undo: should remove the clones');
     }
 
+    // ── MirrorCommand: reflect geometry (UV-preserving) + record geometryFix + undo (ADR 0003) ──
+    const mirRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const scene = sm.SceneManager.getScene();
+      const box = B.MeshBuilder.CreateBox('mir_a', { size: 0.2 }, scene);
+      box.position.set(0, 1.1, 0); box.metadata = { meshId: 'mir_a' };
+      al.AssetLoader.bindRestoredMesh('mir_a', box, 'mir-asset');
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, mir_a: { id: 'mir_a', name: 'a', assetId: 'mir-asset', collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 } } } }), { silent: true });
+      const px0 = () => +box.getVerticesData(B.VertexBuffer.PositionKind)[0].toFixed(4);
+      const fixes = () => st.getState().scene.objects.mir_a.geometryFixes || [];
+      const before = px0();
+      hm.push(new hm.MirrorCommand(['mir_a'], 'x'));
+      const after = px0();
+      const recorded = fixes().includes('mirror-x');
+      hm.undo();
+      const undone = px0();
+      const cleared = !fixes().includes('mirror-x');
+      box.dispose();
+      return { before, after, undone, recorded, cleared };
+    })()`);
+    {
+      const near = (a, b) => Math.abs(a - b) < 1e-3;
+      assert(near(mirRT.after, -mirRT.before), `mirror-x reflects vertex about centre (${mirRT.before} -> ${mirRT.after})`);
+      assert(mirRT.recorded, 'mirror records a geometryFix so it survives reload');
+      assert(near(mirRT.undone, mirRT.before) && mirRT.cleared, 'mirror undo restores geometry + clears the fix');
+    }
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');
