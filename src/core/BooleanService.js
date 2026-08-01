@@ -74,3 +74,70 @@ export function evaluateBooleanEligibility(operands, opts = {}) {
 
   return { ok: true, reason: 'ready', totalTriangles };
 }
+
+// ── CSG2 compute (main-thread; browser-only — exercised by the Slice-2 smoke) ──
+//
+// CSG2/Manifold init is one-time per session, cached (mirrors PrintPipeline._ensureCSG2).
+// window.BABYLON is only touched at call time, so importing this module stays headless-safe.
+
+let _csgInit = null;
+
+async function _ensureCsg2() {
+  const B = window.BABYLON;
+  if (!B?.InitializeCSG2Async || !B?.CSG2) throw new Error('CSG2 unavailable in this runtime');
+  if (!_csgInit) {
+    _csgInit = B.InitializeCSG2Async().catch(err => { _csgInit = null; throw err; });
+  }
+  await _csgInit;
+}
+
+/**
+ * Compute a Boolean of the operand meshes on the main thread (CSG2/Manifold).
+ * Operands combine in WORLD space (`FromMesh` uses each mesh's world matrix), so the
+ * result is world-space geometry — the caller serialises it (GeometryCodec) into a
+ * synthetic `.mxvd` asset that restores 1:1 (ADR 0002). CSG2 API (verified in
+ * `@babylonjs/core/Meshes/csg2.d.ts`): union = `add`, `subtract`, `intersect`.
+ * Boolean is SOLID-COLOUR only (CSG2 drops UVs) — the result takes the first operand's
+ * diffuse colour, else the scene default (resin grey).
+ *
+ * @param {'union'|'subtract'|'intersect'} op  Subtract base = meshes[0].
+ * @param {import('@babylonjs/core').Mesh[]} meshes  ≥2, in application order.
+ * @param {{ name?: string }} [opts]
+ * @returns {Promise<import('@babylonjs/core').Mesh>} new world-space result mesh
+ */
+export async function computeBoolean(op, meshes, opts = {}) {
+  const B = window.BABYLON;
+  if (!Array.isArray(meshes) || meshes.length < 2) throw new Error('computeBoolean: need ≥2 meshes');
+  if (!['union', 'subtract', 'intersect'].includes(op)) throw new Error(`computeBoolean: bad op ${op}`);
+  await _ensureCsg2();
+
+  const scene = meshes[0].getScene();
+  const made = [];
+  try {
+    let acc = B.CSG2.FromMesh(meshes[0]);
+    made.push(acc);
+    for (let i = 1; i < meshes.length; i++) {
+      const next = B.CSG2.FromMesh(meshes[i]);
+      made.push(next);
+      acc = op === 'union' ? acc.add(next)
+        : op === 'subtract' ? acc.subtract(next)
+        : acc.intersect(next);
+      made.push(acc);
+    }
+    const name = opts.name || `${op}_result`;
+    const result = acc.toMesh(name, scene);   // NOT in `made` — this is the kept output
+
+    const srcMat = meshes[0].material;
+    const srcColor = srcMat && (srcMat.diffuseColor || srcMat.albedoColor);
+    if (srcColor) {
+      const mat = new B.StandardMaterial(`${name}_mat`, scene);
+      mat.diffuseColor = srcColor.clone();
+      result.material = mat;
+    } else {
+      result.material = scene.defaultMaterial;
+    }
+    return result;
+  } finally {
+    for (const csg of made) { try { csg.dispose?.(); } catch { /* already gone */ } }
+  }
+}

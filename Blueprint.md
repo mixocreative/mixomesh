@@ -204,7 +204,8 @@ src/
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
-    BooleanService.js      ← interactive Boolean (kitbash combine) engine — see §Boolean + ADR 0002
+    BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
+    GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
@@ -3769,19 +3770,28 @@ returns `{ok, reason}` — hard blocks first (`needs-two`, `multi-part` [same gu
 a desktop build passes a larger cap — ADR 0001 capabilities). Operands are also manifold-validated
 (existing MeshValidator) before CSG2; non-manifold → point to validation, no crash.
 
-**Data model — DESTRUCTIVE bake to a synthetic embedded asset.** The result geometry is serialised
-to bytes ONCE at bake (base64 worker) and registered as a normal embedded asset, so the result is
-an ordinary SceneObject that round-trips through the existing asset pipeline (no reload recompute,
-never stale). Operands are soft-deleted (SmartReplace pattern); `BooleanCommand.undo` restores them
-and drops the result + its synthetic asset. One-mesh-one-shader holds (solid result = one material).
+**Data model — DESTRUCTIVE bake to a synthetic embedded asset (`.mxvd`).** The result geometry is
+serialised to bytes via `GeometryCodec` (positions/normals/indices; no UV) and registered as an
+embedded asset (`extension:'.mxvd'`), so the result round-trips through the existing pipeline (no
+reload recompute, never stale). Restore adds ONE branch: `.mxvd` → decode → build mesh, SKIP
+`bakeImportTransform` (already world-space). **Field invariant for a neutral restore:**
+`sourceUnit='meters'` (unit factor 1) AND `modelRatio == ratio` (delta = modelRatio/ratio = 1) —
+use `modelRatio=1, ratio=1` (bytes ARE the displayed size; export "as shown"). Operands
+soft-deleted (SmartReplace pattern); `BooleanCommand.undo` restores them + drops the result + its
+synthetic asset. One-mesh-one-shader holds (solid result = one material).
+
+**CSG2 API (verified `csg2.d.ts`):** `CSG2.FromMesh(m)` (world-space), union = `.add()`,
+`.subtract()`, `.intersect()`, `.toMesh(name, scene)`, `.dispose()`. `BooleanService.computeBoolean`
+wraps it (main-thread, init cached).
 
 **Threading.** Main-thread CSG2 (init cached once, mirrors `PrintPipeline._ensureCSG2`); a worker is
 a deferred perf knob (no proven Manifold-in-worker path). Invocation: ContextMenu Union/Subtract/
 Intersect on a 2+ selection (Subtract base = active object).
 
-**Status.** Slice 1 shipped — `BooleanService.evaluateBooleanEligibility` + gating (headless-tested).
-Slices 2–4 (CSG2 compute wrapper + BooleanCommand + synthetic-asset persistence + ContextMenu +
-browser smoke) tracked in `docs/handoff/boolean-ops.md`.
+**Status.** Slice 1 (gating) + Slice 2 core shipped — `BooleanService.evaluateBooleanEligibility`,
+`BooleanService.computeBoolean` (CSG2 wrapper), `GeometryCodec` (`.mxvd` encode/decode, headless-tested).
+Remaining Slice 2/3/4 (BooleanCommand + `.mxvd` restore branch + ContextMenu + browser smoke) tracked
+in `docs/handoff/boolean-ops.md`.
 
 ---
 

@@ -43,11 +43,20 @@ from "arranges parts" to "kitbashes").
 - [x] **Slice 1 DONE:** `src/core/BooleanService.js` — `evaluateBooleanEligibility` (pure gating:
       needs-two / multi-part / too-large / needs-texture-bake / ready) + `DEFAULT_BOOLEAN_TRIANGLE_CAP`
       (50k); `tests/boolean-service.test.mjs` (8 asserts). BLUEPRINT §Boolean + module registry updated.
-- [ ] **Slice 2 (NEXT):** CSG2 compute wrapper in BooleanService (main-thread, reuse
-      `PrintPipeline._ensureCSG2` init pattern: `CSG2.FromMesh → op → toMesh → VertexData.ExtractFromMesh`)
-      + `BooleanCommand` (execute/undo, SmartReplace soft-delete of operands) + synthetic embedded asset
-      (serialise result → bytes → register asset so it round-trips). Browser smoke: union two solid cubes
-      → one watertight mesh, survives `.mixo` reload.
+- [x] **Slice 2 core done:** `BooleanService.computeBoolean` (CSG2 wrapper — union=`.add()`,
+      `.subtract()`, `.intersect()`, API verified in csg2.d.ts; main-thread, init cached) +
+      `src/core/GeometryCodec.js` (`.mxvd` encode/decode, 8 headless asserts). ADR 0002 §"Slice 2 design"
+      + BLUEPRINT §Boolean + registry updated. Green: typecheck · 104 headless · build.
+- [ ] **Slice 2 remainder (NEXT):** `src/core/commands/BooleanCommands.js` `BooleanCommand` —
+      execute: build operand descriptors → `evaluateBooleanEligibility` → `computeBoolean` →
+      `VertexData.ExtractFromMesh(result)` → `encodeGeometry` → register a synthetic embedded asset
+      (`extension:'.mxvd'`, `sourceUnit:'meters'`, `modelRatio:1`; result SceneObject `ratio:1`) →
+      soft-delete operands (SmartReplace pattern, snapshot for undo). undo: remove result + synthetic
+      asset, restore operands. PLUS the restore branch: in `AssetRestore.restoreContainer` (or
+      ProjectLoader), `extension==='.mxvd'` → `decodeGeometry` → build mesh → bind, SKIP
+      `bakeImportTransform`. Browser smoke: union two solid cubes → one watertight mesh → survives reload.
+      **Field invariant (both debate agents got this wrong): `modelRatio` MUST equal `ratio` (use 1,1) —
+      delta=modelRatio/ratio must be 1.**
 - [ ] **Slice 3:** ContextMenu Union/Subtract/Intersect + modals (texture bake-or-cancel,
       non-manifold→validator) + i18n (en/ja/zh-Hant).
 - [ ] **Slice 4:** end-to-end browser smoke (real CSG2, all 3 ops; textured→gated).

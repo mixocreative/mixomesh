@@ -119,6 +119,40 @@ UVs**. So Boolean-on-textured is the central risk: the moat vs the engine limita
 4. **Browser smoke** end-to-end (real CSG2): union/subtract/intersect on solid cubes; textured→gated;
    BLUEPRINT §Boolean.
 
+## Slice 2 design (adjudicated from a 2-agent cross-interrogation)
+
+**Persistence — raw VertexData synthetic asset (`.mxvd`), NOT GLB.** Serialise the CSG2 result's
+VertexData (positions/normals/indices; no UV — solid-colour) to a compact byte blob via a pure
+`GeometryCodec` (encode/decode). Register it as an embedded asset (`kind:'mesh'`, `extension:'.mxvd'`,
+embedded bytes, no handle). Restore adds ONE branch: `extension==='.mxvd'` → decode → build mesh,
+**skip `bakeImportTransform`** (already world-space). Chosen over the GLB round-trip both agents
+weighed — GLB rides RH↔LH conversion + the import-flip (fragile); raw VertexData restores verbatim.
+
+**Neutral restore — field invariant (corrects BOTH agents).** Restore applies unit-factor
+(`bakeImportTransform`) then `delta = modelRatio/ratio`. For a world-space result to restore 1:1:
+`sourceUnit='meters'` (unit factor 1) **AND `modelRatio == ratio`**. Both agents proposed
+`modelRatio=1` with `ratio=operandRatio` → that gives `delta=1/operandRatio` and SHRINKS the result.
+Correct: **`modelRatio=1, ratio=1`** — the bytes ARE the displayed size; the result carries ratio
+1:1; export "as shown" prints it at displayed size (consistent with the per-object-ratio model).
+(The `.mxvd` restore branch skips `bakeImportTransform` anyway, so this is belt-and-suspenders, but
+the SceneObject fields must still be neutral for any ratio-delta pass.)
+
+**CSG2 compute (API verified in `csg2.d.ts`).** `_ensureCsg2()` (mirror `PrintPipeline`), then
+`CSG2.FromMesh(m)` (defaults to WORLD matrix → operands combine in world space), and **union =
+`.add(other)`** (NOT `.union()` — agent guess was wrong), subtract = `.subtract()`, intersect =
+`.intersect()`, `.toMesh(name, scene)`, `.dispose()`. Result material = first operand's
+`diffuseColor` solid, else `scene.defaultMaterial` (resin grey).
+
+**`BooleanCommand`** (`src/core/commands/BooleanCommands.js`): execute = `evaluateBooleanEligibility`
+gate → `computeBoolean` → encode → register `.mxvd` asset + result SceneObject (`ratio=1`,
+`modelRatio` neutral) → soft-delete operands (SmartReplace pattern, capture snapshots). undo = remove
+result + synthetic asset, restore operands.
+
+**This-operation scope (kept green + testable):** `GeometryCodec` (pure encode/decode, headless
+round-trip test) + `BooleanService.computeBoolean` wrapper (verified CSG2 API). The `BooleanCommand`
++ `.mxvd` restore branch + ContextMenu + browser smoke are the next increment (handoff) — they touch
+the persistence restore core and are browser-verified, done as a careful pass so `master` stays green.
+
 ## Consequences
 
 - Ships the defining kitbash "combine" verb for **solid-colour** parts (the common case), reusing
