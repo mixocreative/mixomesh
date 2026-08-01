@@ -37,18 +37,54 @@ assets as ephemeral (imported by picker, embedded in `.mixo`).
 
 ## StorageAdapter surface (capability flags + methods)
 
-> **[TO FILL after code-audit synthesis]** — derived from the actual call sites the
-> storage-audit agent reports. Draft shape:
+**Design decision — DOMAIN-level interface, opaque refs (NOT FSA primitives).**
+The storage audit inventoried ~30 call sites and suggested a thin passthrough of the
+raw File System Access API (`showOpenFilePicker`, `createWritable`, `entries`, …). We
+reject that: it hard-codes the browser *handle* model into the interface, so the Node
+(Electron) impl would have to fake `FileSystemHandle`/`createWritable`/`entries`
+semantics. Instead the interface speaks the app's domain (open/save project, import/
+read/resolve asset, mount, watch). Every location token is an **opaque `ref`** — the
+browser adapter wraps a `FileSystemHandle`, the desktop adapter wraps an absolute path
+string; **callers never inspect a ref and refs never cross runtimes.** What crosses
+runtimes (and lives in `.mixo`) is a serialisable **descriptor** `{ path?, contentHash,
+handleKey? }`; `resolveAsset(descriptor)` turns it back into bytes via whatever tiers
+the runtime supports (real path → hash-scan → embedded bytes).
 
-```
+```text
 caps: { persistAssets, mountDirectory, relinkByPath, watchFiles, writeFiles }
-pickOpenProject() / pickSaveProject() / readProject(ref) / writeProject(ref, bytes)
-pickImportAssets() / readAsset(ref) / resolveAsset(descriptor) / watchAsset(ref, cb)
-mountDirectory() / recentProjects()
+
+Project:  pickOpenProject() -> {ref,name,bytes}|null
+          pickSaveProject(suggestedName) -> {ref,name}|null
+          readProject(ref) -> bytes        writeProject(ref, bytes)
+Assets:   pickImportAssets(accept) -> [{ref,name,bytes}]
+          readAsset(ref) -> bytes
+          resolveAsset(descriptor) -> {bytes, live}|null   // tiered; descriptor from .mixo
+          mountDirectory() -> {mountRef,name}|null          // caps.mountDirectory
+          listDirectory(mountRef) -> [{name,ref,kind}]      // AssetPanel scan
+          watchAsset(ref, cb) -> unsubscribe                // caps.watchFiles (desktop)
+Refs+KV:  persistRef(key,ref) / restoreRef(key) / deleteRef(key)   // handle/path store
+          kvSet/kvGet/kvDelete/kvKeys                        // autosave, recent, settings
+Export:   saveExport(suggestedName, bytes)                   // picker+write, else blob-download
 ```
-- **BrowserStorageAdapter** — File System Access + `idb` handle store (current behavior).
-  `persistAssets/mountDirectory/relinkByPath/watchFiles = false`.
-- **DesktopStorageAdapter** — Electron IPC → Node `fs`. All caps `true`. (Phase 2)
+
+- **BrowserStorageAdapter** — wraps today's File System Access + `idb` code (`ref` = handle).
+  `caps` feature-detected: `writeFiles/mountDirectory/relinkByPath = 'showOpenFilePicker' in window`;
+  `persistAssets = indexedDB present`; `watchFiles = false`.
+- **DesktopStorageAdapter** (Phase 2) — Electron IPC → Node `fs` (`ref` = absolute path).
+  All caps `true`. Injected when `window.electronAPI` is present.
+
+### Refactor order (from the LEAF/LEAKED audit)
+
+1. **LEAF — wrap cleanly behind the adapter:** `idb.js`, `PersistenceManager` doc I/O,
+   `persist/AssetResolver`, `persist/RecentProjects`, `persist/Autosave`,
+   `assets/DirMounts`, `assets/TextureAssets`, `print/Download`.
+2. **LEAKED — pull FS logic out into the adapter first, then route:**
+   `assets/AssetImport` (`_fileHandleKeyFor`→persistHandle mid-flow),
+   `assets/ObjSiblings` (directory walk + getFile), `ui/AssetPanel` (`_scanDirectory`/
+   `_cacheHandles` session handle tree), `ui/ViewportDrop` (reads OS DataTransferItem handles).
+3. **Core seams — confirmed runtime-agnostic, do NOT touch:** `ImportNormalizer`,
+   `ScaleMath`, `print/ExportContext`, `print/PrintPipeline` (+ PrintPrep/ObjWriter/
+   ThreeMFWriter). `PersistenceManager` *owns* the I/O funnel — the adapter injects there.
 
 ## UI capability-gating map
 

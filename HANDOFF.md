@@ -65,23 +65,42 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 - [x] Audit subagents dispatched (2 haiku agents: storage-coupling + UI-gating).
 - [x] ADR skeleton written: `docs/adr/0001-storage-adapter-web-electron.md`
       (2 sections marked `[TO FILL after audit]`: StorageAdapter surface + UI gating map).
-- [ ] Audit findings synthesized → fill the 2 ADR sections.
-- [ ] Architecture docs updated (Blueprint.md, AGENTS.md, memory).
-- [ ] Phase 1 StorageAdapter interface + BrowserStorageAdapter implemented.
-- [ ] Tests green (101 headless + browser smoke + export).
-- [ ] Committed.
+- [x] Audit findings synthesized → both ADR sections filled (263047a UI + interface after).
+- [x] ADR complete: domain-level adapter w/ OPAQUE REFS (not FSA primitives), LEAF/LEAKED
+      refactor order, core-agnostic confirmed. `docs/adr/0001-...md`.
+- [ ] Architecture docs updated (Blueprint.md, AGENTS.md, memory) — pointers to ADR.
+- [ ] Phase 1a: capability model + boot `storage` singleton + UI gating (this operation).
+- [ ] Phase 1b: wrap LEAF modules behind adapter methods (next).
+- [ ] Phase 1c: refactor LEAKED modules (AssetImport, ObjSiblings, AssetPanel scan, ViewportDrop).
+- [ ] Tests green (101 headless + browser smoke + export) at each step.
+- [ ] Committed at each boundary.
+
+## AUDIT RESULTS (captured — do NOT re-run the agents)
+
+- **Core seams runtime-agnostic (do not touch):** ImportNormalizer, ScaleMath,
+  print/ExportContext, print/PrintPipeline (+PrintPrep/ObjWriter/ThreeMFWriter).
+  PersistenceManager OWNS the I/O funnel → adapter injects there.
+- **LEAF (wrap cleanly):** idb.js, PersistenceManager doc I/O, persist/AssetResolver,
+  persist/RecentProjects, persist/Autosave, assets/DirMounts, assets/TextureAssets, print/Download.
+- **LEAKED (pull FS out first):** assets/AssetImport (`_fileHandleKeyFor`→persistHandle),
+  assets/ObjSiblings (dir walk), ui/AssetPanel (`_scanDirectory`/`_cacheHandles`), ui/ViewportDrop
+  (OS DataTransferItem handles).
+- **UI controls throwing-on-web today (gate behind caps):** ProjectMenu open/save/saveAs/recent/
+  relink; AssetPanel Mount Directory; ViewportDrop OS-file drop; exports degrade to blob-download
+  already. Full `file:line` map in the ADR §UI capability-gating.
+- **caps set:** persistAssets, mountDirectory, relinkByPath, watchFiles, writeFiles.
 
 ## RESUME POINTER (read this to continue)
 
-**Current step:** Phase 0 — 2 background audit agents running (A: storage/persistence code
-coupling + core-agnosticism + proposed adapter surface; B: UI filesystem controls + capability
-gating map). ADR skeleton awaits their findings.
-**Next action on resume:** if the audit findings are not in hand, re-run the two audits
-(prompts are reproducible from the ADR's two `[TO FILL]` section headings + the "Key files"
-list below). Then: fill ADR §"StorageAdapter surface" + §"UI capability-gating map" → update
-Blueprint.md/AGENTS.md/memory → implement Phase 1 (`src/core/storage/StorageAdapter` interface
-+ `BrowserStorageAdapter` wrapping current File System Access + idb, behavior unchanged) →
-green tests → commit. Do NOT add Electron in Phase 1.
+**Current step:** Phase 0 done (audit + ADR). Starting Phase 1a.
+**Next action on resume:** (1) if not done, add ADR pointers to Blueprint.md/AGENTS.md +
+a memory file. (2) Implement `src/core/storage/capabilities.js` (feature-detect FSA/IDB,
+`caps` singleton, Electron-override hook via `window.electronAPI`) + `src/core/storage/StorageAdapter.js`
+(domain interface JSDoc + BrowserStorageAdapter delegating to existing code, opaque ref=handle)
++ a boot `storage` singleton. (3) Gate the UI controls above behind `caps` (hide when false) —
+on a real browser all caps are true so NO visible change today; the mechanism is what matters.
+(4) Headless test for capability detection + a smoke assert that a forced-false cap hides its control.
+Keep behavior identical on Chrome. Do NOT add Electron in Phase 1.
 
 ## Verify commands
 
