@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { storage, BrowserStorageAdapter } from '../src/core/storage/StorageAdapter.js';
+import { DesktopStorageAdapter } from '../src/core/storage/DesktopStorageAdapter.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -30,6 +31,20 @@ test('importing the adapter does NOT eagerly load idb (headless-safe)', () => {
   // have thrown on import before reaching here. Reaching this assertion proves the
   // lazy-import keeps the module graph headless-safe.
   assert.ok(true);
+});
+
+test('DesktopStorageAdapter has the desktop shape + caps + KV methods', () => {
+  assert.equal(DesktopStorageAdapter.kind, 'desktop');
+  assert.ok(DesktopStorageAdapter.caps);
+  for (const m of ['kvSet', 'kvGet', 'kvDelete', 'kvKeys']) {
+    assert.equal(typeof DesktopStorageAdapter[m], 'function');
+  }
+});
+
+test('desktop KV methods are callable + return promises with no electronAPI (headless-safe)', () => {
+  const p = DesktopStorageAdapter.kvKeys();
+  assert.ok(p && typeof p.then === 'function');
+  assert.doesNotThrow(() => DesktopStorageAdapter.kvSet('x', 1));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

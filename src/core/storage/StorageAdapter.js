@@ -16,6 +16,7 @@
 // AssetImport still own them directly.
 
 import { caps, isDesktop } from './capabilities.js';
+import { DesktopStorageAdapter } from './DesktopStorageAdapter.js';
 
 /** @typedef {import('./capabilities.js').Capabilities} Capabilities */
 
@@ -54,4 +55,4 @@ export const BrowserStorageAdapter = {
  * in Phase 2; `isDesktop()` gates that swap. Browser is the only impl today.
  * @type {StorageAdapter}
  */
-export const storage = isDesktop() ? BrowserStorageAdapter : BrowserStorageAdapter;
+export const storage = isDesktop() ? DesktopStorageAdapter : BrowserStorageAdapter;
