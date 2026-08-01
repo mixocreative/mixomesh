@@ -3814,9 +3814,10 @@ mirror → mate → array**.
   pick-time (faceId unstable).
 - **Array:** N linear/radial clones registered atomically in ONE `push` (pre-register before mutate).
 
-**Status.** Align shipped + tested — `AlignMath` (pure deltas) + `AlignCommand`
-(`commands/PlacementCommands.js`, world-AABB read + `applyTransforms`, undo-safe, browser-smoke
-verified). UI wiring + mirror/mate/array tracked in `docs/handoff/placement.md`.
+**Status.** Align COMPLETE — `AlignMath` (pure deltas) + `AlignCommand`
+(`commands/PlacementCommands.js`, world-AABB read + `applyTransforms`, undo-safe) + ContextMenu
+"Align Center X/Y/Z" (multi-select) + i18n; browser-smoke verified. Mirror/mate/array + the
+min/max UI tracked in `docs/handoff/placement.md`.
 
 ---
 

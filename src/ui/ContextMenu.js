@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand } from '../core/HistoryManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
@@ -139,6 +139,10 @@ function _buildItems(info) {
     { label: t('context.smartReplace'),   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
     { label: t('context.transformSwab'),  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
     'sep',
+    { label: t('context.alignCenterX'),   shortcut: '',            action: 'align-x-center', iconName: 'Crosshair', cls: enabled(multi) },
+    { label: t('context.alignCenterY'),   shortcut: '',            action: 'align-y-center', iconName: 'Crosshair', cls: enabled(multi) },
+    { label: t('context.alignCenterZ'),   shortcut: '',            action: 'align-z-center', iconName: 'Crosshair', cls: enabled(multi) },
+    'sep',
     { label: t('context.delete'),          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
 }
@@ -166,6 +170,7 @@ function _runAction(action, info) {
   if (action === 'delete')     _delete();
   if (action === 'replace')    _smartReplace();
   if (action === 'swab')       _transformSwab();
+  if (action.startsWith('align-')) _align(action);
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
   if (action === 'cursor-to-origin') CursorTools.cursorToWorldOrigin();
@@ -197,6 +202,14 @@ function _transformSwab() {
   const activeId = Selection.getActiveId();
   if (ids.length < 2 || !activeId) return;
   push(new TransformSwabCommand(ids, activeId));
+}
+
+// Align the selection on one world axis (ADR 0003). action = `align-<axis>-<mode>`.
+function _align(action) {
+  const ids = Selection.getSelectedIds();
+  if (ids.length < 2) return;
+  const [, axis, mode] = action.split('-');
+  push(new AlignCommand(ids, axis, mode));
 }
 
 function _relink(meshId) {

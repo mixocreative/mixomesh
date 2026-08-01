@@ -16,9 +16,10 @@ Align → Mirror → Mate → Array.
       mode)` — reads each logical object's world AABB (union of parts), applies the axis delta via
       `applyTransforms` (TransformSwab pattern), undo restores; re-exported from HistoryManager.
       Browser smoke exercises align-x-min on 3 boxes + undo. Green.
-- [ ] **Align slice 3 (NEXT):** UI — a small align control (axis X/Y/Z × mode min/center/max) in
-      ContextMenu or a Placement section, pushing `AlignCommand`. + i18n. (Command is done + tested;
-      this is thin wiring.)
+- [x] **Align slice 3 done — ALIGN VERB COMPLETE:** ContextMenu entries "Align Center X/Y/Z"
+      (multi-select gated) → `_align('align-<axis>-<mode>')` → `AlignCommand`; i18n en/ja/zh-Hant.
+      typecheck · 106 headless · build · browser smoke green. (min/max modes exposed via a future
+      Placement panel — the command already supports them.)
 - [ ] **Mirror:** vertex-bake reflection + `flipFaces` (determinant<0, copy ImportNormalizer:100) +
       `makeGeometryUnique`; expand `logicalObjectCommandIds`; export-winding smoke.
 - [ ] **Mate:** face pick (`scene.pick`.faceId, `getFacetNormal`/`getFacetPosition`) → `FromToRef`
