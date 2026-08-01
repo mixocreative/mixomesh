@@ -61,10 +61,11 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 ## Progress log (update every boundary)
 
 - [x] Branch `feat/storage-adapter` created.
-- [x] HANDOFF.md scaffold written.
-- [ ] Audit subagents dispatched (code structure + UI).
-- [ ] Audit findings synthesized.
-- [ ] ADR written (docs/adr/ or docs/architecture/).
+- [x] HANDOFF.md scaffold written + committed (4ccca59).
+- [x] Audit subagents dispatched (2 haiku agents: storage-coupling + UI-gating).
+- [x] ADR skeleton written: `docs/adr/0001-storage-adapter-web-electron.md`
+      (2 sections marked `[TO FILL after audit]`: StorageAdapter surface + UI gating map).
+- [ ] Audit findings synthesized → fill the 2 ADR sections.
 - [ ] Architecture docs updated (Blueprint.md, AGENTS.md, memory).
 - [ ] Phase 1 StorageAdapter interface + BrowserStorageAdapter implemented.
 - [ ] Tests green (101 headless + browser smoke + export).
@@ -72,9 +73,15 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 
 ## RESUME POINTER (read this to continue)
 
-**Current step:** Phase 0 — about to dispatch audit subagents (haiku, read-only, compressed
-findings) for (1) storage/persistence code coupling + core-agnosticism, (2) UI capability-gating map.
-**Next action:** dispatch the 2 audit agents, then synthesize into an ADR, update this log, commit.
+**Current step:** Phase 0 — 2 background audit agents running (A: storage/persistence code
+coupling + core-agnosticism + proposed adapter surface; B: UI filesystem controls + capability
+gating map). ADR skeleton awaits their findings.
+**Next action on resume:** if the audit findings are not in hand, re-run the two audits
+(prompts are reproducible from the ADR's two `[TO FILL]` section headings + the "Key files"
+list below). Then: fill ADR §"StorageAdapter surface" + §"UI capability-gating map" → update
+Blueprint.md/AGENTS.md/memory → implement Phase 1 (`src/core/storage/StorageAdapter` interface
++ `BrowserStorageAdapter` wrapping current File System Access + idb, behavior unchanged) →
+green tests → commit. Do NOT add Electron in Phase 1.
 
 ## Verify commands
 
