@@ -204,6 +204,7 @@ src/
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
+    BooleanService.js      ← interactive Boolean (kitbash combine) engine — see §Boolean + ADR 0002
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
@@ -3746,6 +3747,41 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 | Numpad shortcuts assume numpad | `Alt+1/3/7` registered as alternates |
 | OBJ+MTL slicer support varies | Informational tooltip — not a blocking warning |
 | IndexedDB FS handle permission resets per session | Boot remount-folder modal (AssetPanel.promptRemount) re-grants via its button gesture; per-asset relink via the unmatched-assets modal |
+
+---
+
+## §Boolean — interactive Boolean (kitbash combine)
+
+*Full design + rationale: `docs/adr/0002-interactive-boolean.md`. This is the contract.*
+
+**Purpose.** The defining pre-slice kitbash "combine" verb: union / subtract / intersect
+on selected parts → one printable solid (or cut socket). Engine = Babylon CSG2 (Manifold),
+the same one the export re-bake uses (`PrintPipeline`).
+
+**Hard rule — SOLID-COLOUR ONLY.** CSG2/Manifold **drops UVs** (verified in
+`@babylonjs/core/Meshes/csg2.d.ts`; the export path already skips CSG2 for textured meshes,
+`PrintPrep.csgSolidOnly`). So a Boolean runs only on solid-colour operands. A textured operand
+triggers a **bake-to-solid-or-cancel modal** — NEVER a silent texture drop (the Mimaki colour moat).
+
+**Gating (pure, pre-CSG2).** `BooleanService.evaluateBooleanEligibility(operands, {triangleCap})`
+returns `{ok, reason}` — hard blocks first (`needs-two`, `multi-part` [same guard as SmartReplace],
+`too-large`), then the soft `needs-texture-bake`. `DEFAULT_BOOLEAN_TRIANGLE_CAP = 50_000` (web;
+a desktop build passes a larger cap — ADR 0001 capabilities). Operands are also manifold-validated
+(existing MeshValidator) before CSG2; non-manifold → point to validation, no crash.
+
+**Data model — DESTRUCTIVE bake to a synthetic embedded asset.** The result geometry is serialised
+to bytes ONCE at bake (base64 worker) and registered as a normal embedded asset, so the result is
+an ordinary SceneObject that round-trips through the existing asset pipeline (no reload recompute,
+never stale). Operands are soft-deleted (SmartReplace pattern); `BooleanCommand.undo` restores them
+and drops the result + its synthetic asset. One-mesh-one-shader holds (solid result = one material).
+
+**Threading.** Main-thread CSG2 (init cached once, mirrors `PrintPipeline._ensureCSG2`); a worker is
+a deferred perf knob (no proven Manifold-in-worker path). Invocation: ContextMenu Union/Subtract/
+Intersect on a 2+ selection (Subtract base = active object).
+
+**Status.** Slice 1 shipped — `BooleanService.evaluateBooleanEligibility` + gating (headless-tested).
+Slices 2–4 (CSG2 compute wrapper + BooleanCommand + synthetic-asset persistence + ContextMenu +
+browser smoke) tracked in `docs/handoff/boolean-ops.md`.
 
 ---
 
