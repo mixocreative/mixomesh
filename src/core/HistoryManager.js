@@ -11,6 +11,7 @@ export * from './commands/TransformCommands.js';
 export * from './commands/HierarchyCommands.js';
 export * from './commands/ShaderCommands.js';
 export * from './commands/ScaleCommands.js';
+export * from './commands/PlacementCommands.js';
 
 const STACK_LIMIT = 200;
 

@@ -1180,6 +1180,45 @@ async function main() {
     assert(shDedup.acrossAdded === 0 && shDedup.acrossMappedToFirst,
       `import dedupe: a material identical to an existing shader must dedupe to it (added ${shDedup.acrossAdded}, mapped ${shDedup.acrossMappedToFirst})`);
 
+    // ── AlignCommand aligns a selection + undo restores (ADR 0003 Phase B) ──
+    const alignRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const scene = sm.SceneManager.getScene();
+      const mk = (id, x) => {
+        const b = B.MeshBuilder.CreateBox(id, { size: 0.02 }, scene);
+        b.position.set(x, 0.5, 0);
+        b.metadata = { meshId: id };
+        al.AssetLoader.bindRestoredMesh(id, b, 'align-asset');
+        return b;
+      };
+      const boxes = [mk('al_a', 0), mk('al_b', 0.1), mk('al_c', 0.25)];
+      const obj = (id) => ({ id, name: id, assetId: 'align-asset', collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 });
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, al_a: obj('al_a'), al_b: obj('al_b'), al_c: obj('al_c') } } }), { silent: true });
+      const minX = (id) => { const m = scene.meshes.find(x=>x.metadata?.meshId===id); m.computeWorldMatrix(true); return +m.getBoundingInfo().boundingBox.minimumWorld.x.toFixed(5); };
+      const before = [minX('al_a'), minX('al_b'), minX('al_c')];
+      hm.push(new hm.AlignCommand(['al_a','al_b','al_c'], 'x', 'min'));
+      const after = [minX('al_a'), minX('al_b'), minX('al_c')];
+      hm.undo();
+      const undone = [minX('al_a'), minX('al_b'), minX('al_c')];
+      boxes.forEach(b => b.dispose());
+      return { before, after, undone };
+    })()`);
+    {
+      const near = (a, b) => Math.abs(a - b) < 1e-4;
+      assert(!(near(alignRT.before[0], alignRT.before[1]) && near(alignRT.before[1], alignRT.before[2])),
+        'align test setup: boxes should start at different x');
+      assert(near(alignRT.after[0], alignRT.after[1]) && near(alignRT.after[1], alignRT.after[2]),
+        `align min: all min-x edges should line up (${alignRT.after.join(', ')})`);
+      assert(near(alignRT.after[0], Math.min(...alignRT.before)),
+        'align min: target should be the selection minimum');
+      assert(alignRT.undone.every((v, i) => near(v, alignRT.before[i])),
+        'align undo: should restore original positions');
+    }
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');
