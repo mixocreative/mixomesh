@@ -1076,6 +1076,10 @@ async function main() {
       const ids = await al.AssetLoader.loadFromBlob(new Blob([stl],{type:'model/stl'}),'dup.stl',new B.Vector3(0,0,0),{});
       const src = ids[0];
       await new Promise(r=>setTimeout(r,300));
+      // Settle the SOURCE bounce BEFORE duplicating: cloneMeshAsNewObject copies
+      // the source's live node scaling at clone time, so a mid-bounce source would
+      // hand the copy a transient scale that settle then locks in (flaky dupBefore).
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();
       const before = new Set(Object.keys(st.getState().scene.objects));
       hm.push(new hm.DuplicateCommand([src]));
       const dup = Object.keys(st.getState().scene.objects).find(k => !before.has(k));
