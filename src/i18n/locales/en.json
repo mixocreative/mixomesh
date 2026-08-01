@@ -416,6 +416,7 @@
   "context.arrayX": "Array X (×3)",
   "context.arrayY": "Array Y (×3)",
   "context.arrayZ": "Array Z (×3)",
+  "context.mate": "Mate to Active",
   "context.booleanUnion": "Combine: Union",
   "context.booleanSubtract": "Combine: Subtract",
   "context.booleanIntersect": "Combine: Intersect",

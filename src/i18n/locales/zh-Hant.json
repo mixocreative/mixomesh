@@ -416,6 +416,7 @@
   "context.arrayX": "陣列 X（×3）",
   "context.arrayY": "陣列 Y（×3）",
   "context.arrayZ": "陣列 Z（×3）",
+  "context.mate": "貼合至作用中物件",
   "context.booleanUnion": "合併：聯集",
   "context.booleanSubtract": "合併：差集",
   "context.booleanIntersect": "合併：交集",

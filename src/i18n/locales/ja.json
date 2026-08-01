@@ -416,6 +416,7 @@
   "context.arrayX": "配列 X（×3）",
   "context.arrayY": "配列 Y（×3）",
   "context.arrayZ": "配列 Z（×3）",
+  "context.mate": "アクティブに接合",
   "context.booleanUnion": "結合：和",
   "context.booleanSubtract": "結合：差",
   "context.booleanIntersect": "結合：積",

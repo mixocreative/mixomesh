@@ -1356,6 +1356,36 @@ async function main() {
       assert(near(mirRT.undone, mirRT.before) && mirRT.cleared, 'mirror undo restores geometry + clears the fix');
     }
 
+    // ── MateCommand: abut a second object against the active one + undo (ADR 0003) ──
+    const mateRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const sel = await import('/src/core/Selection.js');
+      const scene = sm.SceneManager.getScene();
+      const mk = (id, x) => { const b = B.MeshBuilder.CreateBox(id, { size: 0.1 }, scene); b.position.set(x, 1.3, 0); b.metadata = { meshId: id }; al.AssetLoader.bindRestoredMesh(id, b, 'mate-' + id); return b; };
+      const anchor = mk('mate_a', 0), other = mk('mate_b', 0.5);   // 0.4 gap between faces
+      const obj = (id) => ({ id, name: id, assetId: 'mate-' + id, collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 });
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, mate_a: obj('mate_a'), mate_b: obj('mate_b') } } }), { silent: true });
+      sel.Selection.set(['mate_a', 'mate_b'], 'mate_a');   // active = anchor
+      const faceGap = () => { anchor.computeWorldMatrix(true); other.computeWorldMatrix(true); return +(other.getBoundingInfo().boundingBox.minimumWorld.x - anchor.getBoundingInfo().boundingBox.maximumWorld.x).toFixed(4); };
+      const before = faceGap();
+      hm.push(new hm.MateCommand(['mate_a', 'mate_b'], 'mate_a'));
+      const after = faceGap();
+      hm.undo();
+      const undone = faceGap();
+      anchor.dispose(); other.dispose();
+      return { before, after, undone };
+    })()`);
+    {
+      const near = (a, b) => Math.abs(a - b) < 1e-3;
+      assert(mateRT.before > 0.3, `mate setup: boxes start apart (gap ${mateRT.before})`);
+      assert(near(mateRT.after, 0), `mate: other object abuts active (gap → 0, got ${mateRT.after})`);
+      assert(near(mateRT.undone, mateRT.before), 'mate undo restores the gap');
+    }
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

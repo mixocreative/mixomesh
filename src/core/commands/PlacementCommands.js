@@ -178,3 +178,65 @@ export class MirrorCommand {
   execute() { this._apply(); }
   undo() { this._apply(); }   // reflection is its own inverse
 }
+
+// Union world AABB (per axis) of a logical object's live parts.
+function _objectAABB(id, objects) {
+  const parts = logicalObjectPartIds(id, objects).filter(p => AssetLoader.getBabylonMesh(p));
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  const K = ['x', 'y', 'z'];
+  for (const p of parts) {
+    const m = AssetLoader.getBabylonMesh(p);
+    m.computeWorldMatrix(true);
+    const bb = m.getBoundingInfo().boundingBox;
+    for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], bb.minimumWorld[K[a]]);
+      hi[a] = Math.max(hi[a], bb.maximumWorld[K[a]]);
+    }
+  }
+  return { lo, hi, parts };
+}
+
+/**
+ * Mate: slide each other selected object until it ABUTS the active object — a
+ * face-flush snap without a picking mode. Auto-picks the axis of greatest
+ * centre separation and the side the other object sits on, then translates it so
+ * their bounding boxes just touch. AABB-aligned faces only (no rotation); the
+ * arbitrary-face pick+rotate mate is the advanced version. Undo restores.
+ */
+export class MateCommand {
+  constructor(meshIds, activeId) {
+    this._prev = {};
+    this._next = {};
+    this.label = 'Mate';
+    const objects = getState().scene.objects;
+    const anchor = canonicalObjectId(activeId, objects);
+    if (!anchor) return;
+    const A = _objectAABB(anchor, objects);
+    if (!Number.isFinite(A.lo[0])) return;
+    const others = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))]
+      .filter(id => id !== anchor);
+    const K = ['x', 'y', 'z'];
+    for (const other of others) {
+      const O = _objectAABB(other, objects);
+      if (!Number.isFinite(O.lo[0])) continue;
+      let axis = 0, best = -Infinity;
+      for (let a = 0; a < 3; a++) {
+        const sep = Math.abs((O.lo[a] + O.hi[a]) - (A.lo[a] + A.hi[a])) / 2;
+        if (sep > best) { best = sep; axis = a; }
+      }
+      const k = K[axis];
+      const otherAboveAnchor = (O.lo[axis] + O.hi[axis]) >= (A.lo[axis] + A.hi[axis]);
+      const delta = otherAboveAnchor ? (A.hi[axis] - O.lo[axis]) : (A.lo[axis] - O.hi[axis]);
+      for (const p of O.parts) {
+        const m = AssetLoader.getBabylonMesh(p);
+        const w = captureWorld(m);
+        this._prev[p] = w;
+        this._next[p] = { position: { ...w.position, [k]: w.position[k] + delta }, rotation: { ...w.rotation }, scaling: { ...w.scaling } };
+      }
+    }
+  }
+
+  execute() { applyTransforms(this._next); markDirty(); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) }); }
+  undo() { applyTransforms(this._prev); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) }); }
+}

@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, performBoolean } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
@@ -155,6 +155,7 @@ function _buildItems(info) {
     { label: t('context.arrayX'),           shortcut: '',          action: 'array-x',        iconName: 'Copy', cls: enabled(hasSelection) },
     { label: t('context.arrayY'),           shortcut: '',          action: 'array-y',        iconName: 'Copy', cls: enabled(hasSelection) },
     { label: t('context.arrayZ'),           shortcut: '',          action: 'array-z',        iconName: 'Copy', cls: enabled(hasSelection) },
+    { label: t('context.mate'),             shortcut: '',          action: 'mate',           iconName: 'Crosshair', cls: enabled(multi) },
     'sep',
     { label: t('context.delete'),          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
@@ -186,6 +187,7 @@ function _runAction(action, info) {
   if (action.startsWith('align-')) _align(action);
   if (action.startsWith('mirror-')) _mirror(action);
   if (action.startsWith('array-')) _array(action.split('-')[1]);
+  if (action === 'mate') _mate();
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
@@ -245,6 +247,14 @@ function _array(axis) {
   const bb = m.getBoundingInfo().boundingBox;
   const width = Math.abs(bb.maximumWorld[axis] - bb.minimumWorld[axis]) || 0.1;
   push(new ArrayCommand(id, 3, axis, width));
+}
+
+// Mate: abut the other selected objects against the active one (auto axis/side).
+function _mate() {
+  const ids = Selection.getSelectedIds();
+  const activeId = Selection.getActiveId();
+  if (ids.length < 2 || !activeId) return;
+  push(new MateCommand(ids, activeId));
 }
 
 // Interactive Boolean (ADR 0002). performBoolean is async (CSG2 + serialise); it
