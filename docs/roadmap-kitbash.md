@@ -60,9 +60,10 @@ Verify green before each commit. macOS deferred until Web+Windows are production
 ## Progress
 
 - [x] Master sequence plan (this file).
-- [x] **A2 Slice 2 core** — 2-agent cross-interrogation → ADR 0002 §Slice-2 → `computeBoolean`
-      (CSG2, verified API) + `GeometryCodec` (`.mxvd`). Committed, green. (A2 remainder =
-      BooleanCommand + `.mxvd` restore branch + smoke → `docs/handoff/boolean-ops.md`.)
+- [x] **A2 — Interactive Boolean COMPLETE** (union/subtract/intersect). 2-agent design debate +
+      a 3rd integration-recipe agent → `computeBoolean` (CSG2) + `GeometryCodec` (`.mxvd`) +
+      `BooleanCommand`/`performBoolean` + synthetic `.mxvd` asset + restore branch + CSG2 in boot.ts
+      + ContextMenu UI + i18n. Browser-smoke round-trip verified. (Polish: textured bake modal → handoff.)
 - [x] **B: ADR 0003** (2-agent debate) + **B-align slice 1** — `placement/AlignMath` pure deltas,
       tested. (Remainder: AlignCommand + UI + mirror/mate/array → `docs/handoff/placement.md`.)
 - [x] **C1 Phase 1b** — `StorageAdapter` interface + `BrowserStorageAdapter` + boot singleton,
