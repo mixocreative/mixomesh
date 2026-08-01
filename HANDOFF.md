@@ -68,12 +68,24 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 - [x] Audit findings synthesized → both ADR sections filled (263047a UI + interface after).
 - [x] ADR complete: domain-level adapter w/ OPAQUE REFS (not FSA primitives), LEAF/LEAKED
       refactor order, core-agnostic confirmed. `docs/adr/0001-...md`.
-- [ ] Architecture docs updated (Blueprint.md, AGENTS.md, memory) — pointers to ADR.
-- [ ] Phase 1a: capability model + boot `storage` singleton + UI gating (this operation).
-- [ ] Phase 1b: wrap LEAF modules behind adapter methods (next).
-- [ ] Phase 1c: refactor LEAKED modules (AssetImport, ObjSiblings, AssetPanel scan, ViewportDrop).
-- [ ] Tests green (101 headless + browser smoke + export) at each step.
-- [ ] Committed at each boundary.
+- [x] Architecture docs updated: AGENTS.md + Blueprint.md pointers (74ae80d), memory
+      `storage_adapter_direction.md` + MEMORY.md index.
+- [x] Phase 1a: capability model `src/core/storage/capabilities.js` + `tests/capabilities.test.mjs`
+      (5 asserts) (fda14cc); first UI gate = AssetPanel Mount button behind `caps.mountDirectory` (6a03deb).
+- [x] De-flaked the dup round-trip smoke (settle source bounce before duplicating) (0b1a7d2)
+      — 3× green. IMPORTANT: keeps the green-gate reliable for handoff.
+- [ ] Phase 1b: `src/core/storage/StorageAdapter.js` — domain interface (per ADR) +
+      `BrowserStorageAdapter` delegating to today's code (opaque ref = FileSystemHandle);
+      boot `storage` singleton (browser impl now; desktop injected in Phase 2).
+- [ ] Phase 1b: route LEAF modules through the adapter (idb.js, persist/*, DirMounts,
+      TextureAssets, Download, PersistenceManager doc I/O).
+- [ ] Phase 1b: gate remaining UI controls behind caps — ProjectMenu open/save/saveAs
+      (`writeFiles`), recent (`persistAssets`), relink (`relinkByPath`); ViewportDrop OS-file handle.
+- [ ] Phase 1c: refactor LEAKED modules (AssetImport `_fileHandleKeyFor`, ObjSiblings dir-walk,
+      AssetPanel `_scanDirectory`/`_cacheHandles`, ViewportDrop DataTransferItem) to go via adapter.
+- [ ] Phase 2: Windows Electron shell + `DesktopStorageAdapter` (IPC → Node fs), inject caps.
+- [ ] Phase 3: electron-builder (NSIS) installer, security hardening, optional auto-update.
+- Verify green (typecheck · 102 headless · build · browser smoke ×N · export) at EACH commit.
 
 ## AUDIT RESULTS (captured — do NOT re-run the agents)
 
@@ -92,15 +104,24 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 
 ## RESUME POINTER (read this to continue)
 
-**Current step:** Phase 0 done (audit + ADR). Starting Phase 1a.
-**Next action on resume:** (1) if not done, add ADR pointers to Blueprint.md/AGENTS.md +
-a memory file. (2) Implement `src/core/storage/capabilities.js` (feature-detect FSA/IDB,
-`caps` singleton, Electron-override hook via `window.electronAPI`) + `src/core/storage/StorageAdapter.js`
-(domain interface JSDoc + BrowserStorageAdapter delegating to existing code, opaque ref=handle)
-+ a boot `storage` singleton. (3) Gate the UI controls above behind `caps` (hide when false) —
-on a real browser all caps are true so NO visible change today; the mechanism is what matters.
-(4) Headless test for capability detection + a smoke assert that a forced-false cap hides its control.
-Keep behavior identical on Chrome. Do NOT add Electron in Phase 1.
+**Current step:** Phase 0 (audit + ADR) DONE. Phase 1a (capability model + first UI gate)
+DONE + committed + green. Next = Phase 1b.
+**Next action on resume:** Build `src/core/storage/StorageAdapter.js` per ADR §"StorageAdapter
+surface" — the domain interface (JSDoc typedef) + `BrowserStorageAdapter` that DELEGATES to
+today's functions (PersistenceManager pickers, idb.js, DirMounts, AssetResolver, Download),
+with `ref` = opaque FileSystemHandle and `.mixo` descriptors `{path?,contentHash,handleKey?}`.
+Export a boot `storage` singleton (browser impl for now). Then incrementally route the LEAF
+call sites through it (list in Progress log + AUDIT RESULTS), one module per commit, keeping
+the suite green. Then gate the remaining UI controls (ProjectMenu open/save/saveAs/recent/relink)
+behind their caps like AssetPanel's mount button already does. THEN Phase 1c (LEAKED refactor).
+Do NOT add Electron until Phase 1 is fully green. Behavior on Chrome must stay identical
+throughout (all caps true → nothing hides, nothing changes).
+
+**Watch-outs:**
+- The browser smoke has import-bounce timing sensitivity; if a size round-trip flakes,
+  the fix is `settleImportBounce()` before measuring/cloning (see 0b1a7d2), not a longer wait.
+- `caps` is imported from `src/core/storage/capabilities.js`; override in tests via `setCapabilities`.
+- Keep `master` untouched — all work on `feat/storage-adapter` until Phase 1 reviewed.
 
 ## Verify commands
 
