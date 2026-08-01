@@ -4,7 +4,8 @@
 THIS is the first file to read. It tracks the goal, decisions, plan, and exactly
 what is done vs next. Update it at every safe boundary (before each commit).
 
-Branch: `feat/storage-adapter` (off `master` @ per-object-ratio-audit-2026-06-17).
+Workflow: solo dev — **all work on `master`, no feature branches** (merged 2026-06-17).
+Commit at each green boundary. This tracker persists across sessions.
 
 ---
 
@@ -121,7 +122,7 @@ throughout (all caps true → nothing hides, nothing changes).
 - The browser smoke has import-bounce timing sensitivity; if a size round-trip flakes,
   the fix is `settleImportBounce()` before measuring/cloning (see 0b1a7d2), not a longer wait.
 - `caps` is imported from `src/core/storage/capabilities.js`; override in tests via `setCapabilities`.
-- Keep `master` untouched — all work on `feat/storage-adapter` until Phase 1 reviewed.
+- Solo dev: work directly on `master`, commit at each green boundary (no feature branches).
 
 ## Verify commands
 

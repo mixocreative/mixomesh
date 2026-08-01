@@ -1,7 +1,7 @@
 # HANDOFF — Interactive Boolean (pre-slice kitbash combine)
 
 Durable resume tracker for the interactive Boolean feature. Read first on resume.
-Branch: `feat/boolean-ops` (off `master`).
+Workflow: solo dev — all work on `master`, no feature branches (merged 2026-06-17).
 
 ## Goal
 
