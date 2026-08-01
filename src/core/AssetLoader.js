@@ -20,7 +20,7 @@ import { revokeObjSiblings, revokeAllObjSiblings } from './assets/ObjSiblings.js
 import { registerAssetEntry } from './assets/AssetRegistration.js';
 import { loadFromBlob, loadFromHandle, instantiateAsset } from './assets/AssetImport.js';
 import {
-  getAssetBytes, restoreContainer, cacheAssetBlob,
+  getAssetBytes, restoreContainer, cacheAssetBlob, registerBakedResult,
   cloneRestoredMesh, cloneMeshAsNewObject, restoreCloneToScene,
 } from './assets/AssetRestore.js';
 import {
@@ -116,6 +116,6 @@ export const AssetLoader = {
   cloneMeshAsNewObject, restoreCloneToScene,
   getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh, cloneRestoredMesh,
   bindRestoredTexture,
-  restoreTexture, registerAssetEntry, cacheAssetBlob, resetAll,
+  restoreTexture, registerAssetEntry, cacheAssetBlob, registerBakedResult, resetAll,
   bakeImportTransform, importScaleFactor,
 };

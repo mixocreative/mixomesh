@@ -12,6 +12,7 @@ export * from './commands/HierarchyCommands.js';
 export * from './commands/ShaderCommands.js';
 export * from './commands/ScaleCommands.js';
 export * from './commands/PlacementCommands.js';
+export * from './commands/BooleanCommands.js';
 
 const STACK_LIMIT = 200;
 

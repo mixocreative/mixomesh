@@ -47,7 +47,16 @@ from "arranges parts" to "kitbashes").
       `.subtract()`, `.intersect()`, API verified in csg2.d.ts; main-thread, init cached) +
       `src/core/GeometryCodec.js` (`.mxvd` encode/decode, 8 headless asserts). ADR 0002 §"Slice 2 design"
       + BLUEPRINT §Boolean + registry updated. Green: typecheck · 104 headless · build.
-- [ ] **Slice 2 remainder (NEXT):** `src/core/commands/BooleanCommands.js` `BooleanCommand` —
+- [x] **Slice 2 + 3 DONE — Boolean is a working verb.** `BooleanCommands.performBoolean` +
+      `BooleanCommand` (undo/redo) · `AssetRestore.registerBakedResult` + `.mxvd` restore branch
+      (skips normalization; neutral fields modelRatio=ratio=1) · CSG2+InitializeCSG2Async added to
+      `boot.ts` (were missing) · ContextMenu "Combine: Union/Subtract/Intersect" + i18n. Browser
+      smoke: union 2 cubes → watertight, operands consumed, undo restores, `.mixo` round-trip. GREEN.
+- [ ] **Remaining polish:** textured-operand **bake-or-cancel modal** (currently textured is
+      solid-color-assumed / blocked via toast; the modal is the designed UX) · subtract/intersect
+      dedicated smokes · a Placement-panel min/max align + Boolean affordances. Colour note: result
+      inherits operand[0]'s shaderId (persists via ShaderLibrary); `.mxvd` stores geometry only.
+- [ ] ~~Slice 2 remainder~~ (superseded — done above):
       execute: build operand descriptors → `evaluateBooleanEligibility` → `computeBoolean` →
       `VertexData.ExtractFromMesh(result)` → `encodeGeometry` → register a synthetic embedded asset
       (`extension:'.mxvd'`, `sourceUnit:'meters'`, `modelRatio:1`; result SceneObject `ratio:1`) →

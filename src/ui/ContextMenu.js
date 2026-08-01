@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, performBoolean } from '../core/HistoryManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
@@ -143,6 +143,10 @@ function _buildItems(info) {
     { label: t('context.alignCenterY'),   shortcut: '',            action: 'align-y-center', iconName: 'Crosshair', cls: enabled(multi) },
     { label: t('context.alignCenterZ'),   shortcut: '',            action: 'align-z-center', iconName: 'Crosshair', cls: enabled(multi) },
     'sep',
+    { label: t('context.booleanUnion'),     shortcut: '',          action: 'bool-union',     iconName: 'Box',   cls: enabled(multi) },
+    { label: t('context.booleanSubtract'),  shortcut: '',          action: 'bool-subtract',  iconName: 'Box',   cls: enabled(multi) },
+    { label: t('context.booleanIntersect'), shortcut: '',          action: 'bool-intersect', iconName: 'Box',   cls: enabled(multi) },
+    'sep',
     { label: t('context.delete'),          shortcut: 'Del',         action: 'delete',  iconName: 'Trash2',     cls: enabled(hasSelection) + ' cm-danger' },
   ];
 }
@@ -171,6 +175,7 @@ function _runAction(action, info) {
   if (action === 'replace')    _smartReplace();
   if (action === 'swab')       _transformSwab();
   if (action.startsWith('align-')) _align(action);
+  if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
   if (action === 'cursor-to-origin') CursorTools.cursorToWorldOrigin();
@@ -210,6 +215,20 @@ function _align(action) {
   if (ids.length < 2) return;
   const [, axis, mode] = action.split('-');
   push(new AlignCommand(ids, axis, mode));
+}
+
+// Interactive Boolean (ADR 0002). performBoolean is async (CSG2 + serialise); it
+// applies the change + returns an already-applied command to push, or a blocked
+// reason to surface.
+async function _boolean(op) {
+  const ids = Selection.getSelectedIds();
+  if (ids.length < 2) return;
+  const res = await performBoolean(ids, op);
+  if (res && res.blocked) {
+    Toast.show(t('toast.booleanBlocked', { reason: res.reason }), 'warning', 4000);
+    return;
+  }
+  push(res);
 }
 
 function _relink(meshId) {

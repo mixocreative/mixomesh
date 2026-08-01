@@ -18,8 +18,10 @@ import {
   collectObjSiblings, rememberObjSiblings, installSiblingUrls, revokeObjSiblings,
 } from './ObjSiblings.js';
 import { splitMultiMaterialMeshesInContainer } from './MeshSplit.js';
-import { nextDupName } from './AssetRegistration.js';
+import { nextDupName, registerAssetEntry } from './AssetRegistration.js';
 import { loadContainer, filterContainerToLibraryItem } from './AssetImport.js';
+import { encodeGeometry, decodeGeometry } from '../GeometryCodec.js';
+import { sha256Hex } from '../hash.js';
 
 /**
  * Raw bytes of a loaded asset, read back from its cached blob URL. Used by
@@ -54,6 +56,12 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const scene = SceneManager.getScene();
   const blobUrl = URL.createObjectURL(blob);
   setBlobUrl(assetId, blobUrl);
+
+  // Synthetic baked geometry (Boolean result, ADR 0002): decode raw VertexData and
+  // build the mesh directly — it is ALREADY world-space, so NO import normalization
+  // (unit/flip/scale). The per-object ratio delta (a no-op at ratio=1) is applied by
+  // PersistenceManager like any other restored mesh.
+  if (extension === '.mxvd') return _restoreMxvd(assetId, blob);
 
   let siblings = null;
   if (extension === '.obj') {
@@ -98,6 +106,63 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
  */
 export function cacheAssetBlob(assetId, blob) {
   setBlobUrl(assetId, URL.createObjectURL(blob));
+}
+
+// Rebuild a Boolean result from its `.mxvd` bytes — verbatim world-space geometry,
+// no import normalization. Colour is restored by ShaderLibrary via the SceneObject's
+// shaderId (the `.mxvd` stores geometry only); the placeholder material is replaced.
+async function _restoreMxvd(assetId, blob) {
+  const B = window.BABYLON;
+  const scene = SceneManager.getScene();
+  const { positions, indices, normals } = decodeGeometry(await blob.arrayBuffer());
+  const mesh = new B.Mesh(`${assetId}_geom`, scene);
+  const vd = new B.VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  if (normals) vd.normals = normals;
+  vd.applyToMesh(mesh);
+  mesh.material = scene.defaultMaterial;
+  const container = new B.AssetContainer(scene);
+  container.meshes.push(mesh);
+  registerContainer(assetId, container);
+  return [mesh];
+}
+
+/**
+ * Register a live baked mesh (a Boolean result — ADR 0002) as a synthetic EMBEDDED
+ * `.mxvd` asset that round-trips through `.mixo`. Geometry is world-space, so restore
+ * skips import normalization; neutral fields (`sourceUnit:'meters'`, `modelRatio:1`)
+ * keep the per-object ratio delta at 1. Returns the minted `{ assetId, meshId }`; the
+ * caller creates the SceneObject (`ratio:1`) + assigns a shader for colour.
+ * @param {BABYLON.Mesh} mesh  live world-space result mesh
+ * @param {string} name
+ * @returns {Promise<{assetId:string, meshId:string}>}
+ */
+export async function registerBakedResult(mesh, name = 'Boolean Result') {
+  const B = window.BABYLON;
+  const assetId = newId('asset');
+  const meshId = newId('mesh');
+
+  const vd = B.VertexData.ExtractFromMesh(mesh);
+  const buffer = encodeGeometry({ positions: vd.positions, indices: vd.indices, normals: vd.normals });
+  const contentHash = await sha256Hex(buffer);
+  cacheAssetBlob(assetId, new Blob([buffer]));
+
+  bindRestoredMesh(meshId, mesh, assetId, 'meters');
+  const container = new B.AssetContainer(SceneManager.getScene());
+  container.meshes.push(mesh);
+  registerContainer(assetId, container);
+
+  registerAssetEntry({
+    id: assetId, name, filename: `${name}.mxvd`, displayName: name,
+    originalPath: null, extension: '.mxvd', kind: 'mesh',
+    sourceUnit: 'meters', unitConfirmed: true, modelRatio: 1,
+    directoryHandleKey: null, fileHandleKey: null,
+    contentHash, isImported: false,
+    sourceFileHash: null, sourceAssetId: null, babylonTextureName: null,
+    libraryItem: null, thumbnailDataUrl: null,
+  });
+  return { assetId, meshId };
 }
 
 /**

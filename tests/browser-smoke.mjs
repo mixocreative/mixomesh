@@ -1219,6 +1219,58 @@ async function main() {
         'align undo: should restore original positions');
     }
 
+    // ── Interactive Boolean: union two solid cubes → result survives reload (ADR 0002) ──
+    const boolRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const scene = sm.SceneManager.getScene();
+      const before = new Set(Object.keys(st.getState().scene.objects));
+      const mk = (id, x) => {
+        const b = B.MeshBuilder.CreateBox(id, { size: 0.1 }, scene);
+        b.position.set(x, 0.5, 0);
+        b.metadata = { meshId: id };
+        const m = new B.StandardMaterial(id + '_m', scene); m.diffuseColor = new B.Color3(0.2, 0.6, 0.9); b.material = m;
+        al.AssetLoader.bindRestoredMesh(id, b, 'bool-op-' + id);
+        return b;
+      };
+      mk('bop_a', 0); mk('bop_b', 0.05);   // overlapping 0.1 boxes
+      const obj = (id) => ({ id, name: id, assetId: 'bool-op-' + id, collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 });
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, bop_a: obj('bop_a'), bop_b: obj('bop_b') } } }), { silent: true });
+      const cmd = await hm.performBoolean(['bop_a', 'bop_b'], 'union');
+      if (cmd.blocked) return { err: 'blocked: ' + cmd.reason };
+      hm.push(cmd);
+      const keys = Object.keys(st.getState().scene.objects);
+      const resultId = keys.find(k => !before.has(k) && k !== 'bop_a' && k !== 'bop_b');
+      const operandsGone = !keys.includes('bop_a') && !keys.includes('bop_b');
+      const resultObj = st.getState().scene.objects[resultId];
+      const triOf = (id, sc) => { const m = sc.meshes.find(x => x.metadata?.meshId === id); return m ? Math.floor((m.getTotalIndices() || 0) / 3) : 0; };
+      const resultTris = triOf(resultId, scene);
+      // undo restores operands, redo re-applies
+      hm.undo();
+      const afterUndo = Object.keys(st.getState().scene.objects);
+      const undoRestored = afterUndo.includes('bop_a') && afterUndo.includes('bop_b') && !afterUndo.includes(resultId);
+      hm.redo();
+      // round-trip the redone result
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      const assetInDoc = (doc.assetLibrary || []).find(x => x.id === resultObj.assetId);
+      const embedded = !!assetInDoc && assetInDoc.extension === '.mxvd' && !!assetInDoc.fileData;
+      await pm.__test._loadProject(doc);
+      await new Promise(r => setTimeout(r, 400));
+      const restoredTris = triOf(resultId, sm.SceneManager.getScene());
+      return { hasResult: !!resultId, operandsGone, resultTris, undoRestored, embedded, restoredTris };
+    })()`);
+    assert(!boolRT.err, `boolean union: ${boolRT.err}`);
+    assert(boolRT.hasResult && boolRT.operandsGone, 'boolean union: result created + operands consumed');
+    assert(boolRT.resultTris > 0, 'boolean union: result has geometry');
+    assert(boolRT.undoRestored, 'boolean union: undo restores the operands + removes the result');
+    assert(boolRT.embedded, 'boolean union: result serialized as an embedded .mxvd asset');
+    assert(boolRT.restoredTris === boolRT.resultTris,
+      `boolean union: result survives .mixo reload (tris ${boolRT.resultTris} -> ${boolRT.restoredTris})`);
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

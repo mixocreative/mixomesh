@@ -3789,10 +3789,15 @@ wraps it (main-thread, init cached).
 a deferred perf knob (no proven Manifold-in-worker path). Invocation: ContextMenu Union/Subtract/
 Intersect on a 2+ selection (Subtract base = active object).
 
-**Status.** Slice 1 (gating) + Slice 2 core shipped — `BooleanService.evaluateBooleanEligibility`,
-`BooleanService.computeBoolean` (CSG2 wrapper), `GeometryCodec` (`.mxvd` encode/decode, headless-tested).
-Remaining Slice 2/3/4 (BooleanCommand + `.mxvd` restore branch + ContextMenu + browser smoke) tracked
-in `docs/handoff/boolean-ops.md`.
+**Status — COMPLETE (union/subtract/intersect).** `BooleanService` (gating + `computeBoolean` CSG2
+wrapper) · `GeometryCodec` (`.mxvd`) · `commands/BooleanCommands.js` `performBoolean` (async: gate →
+CSG2 → `registerBakedResult` synthetic `.mxvd` asset → soft-delete operands) + `BooleanCommand`
+undo/redo · `AssetRestore` `registerBakedResult` + the `.mxvd` restore branch (skips import
+normalization) · ContextMenu "Combine: Union/Subtract/Intersect" + i18n. **CSG2 + InitializeCSG2Async
+now imported in `boot.ts`** (were absent → the export re-bake also silently skipped; now active).
+Browser smoke: union two solid cubes → watertight result, operands consumed, undo restores, survives
+`.mixo` reload. Remaining polish (textured bake-or-cancel modal; subtract/intersect UI smokes) in
+`docs/handoff/boolean-ops.md`.
 
 ---
 
