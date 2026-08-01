@@ -2,7 +2,7 @@
 
 import { EVENTS } from '../events.js';
 import { getState, dispatch } from '../StateManager.js';
-import { kvSet, kvGet, kvDelete, kvKeys } from '../idb.js';
+import { storage } from '../storage/StorageAdapter.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { buildDocument } from './ProjectSerializer.js';
@@ -19,7 +19,7 @@ export function startAutosave(ms = 60000) {
     if (!isDirty()) return;
     try {
       const doc = await buildDocument({ skipEmbed: true });   // A9
-      await kvSet(`${AUTOSAVE_PREFIX}${getState().project.name}`, {
+      await storage.kvSet(`${AUTOSAVE_PREFIX}${getState().project.name}`, {
         savedAt: new Date().toISOString(), doc,
       });
       dispatch(EVENTS.AUTOSAVE_WRITTEN, {});
@@ -45,13 +45,13 @@ export function stopAutosave() {
  */
 export async function recoverAutosave() {
   let keys;
-  try { keys = await kvKeys(); } catch { return false; }
+  try { keys = await storage.kvKeys(); } catch { return false; }
   const auto = (keys || []).filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_PREFIX));
   if (!auto.length) return false;
 
   let newest = null;
   for (const k of auto) {
-    const v = await kvGet(k);
+    const v = await storage.kvGet(k);
     if (v?.savedAt && (!newest || v.savedAt > newest.savedAt)) newest = { key: k, ...v };
   }
   if (!newest) return false;
@@ -67,6 +67,6 @@ export async function recoverAutosave() {
     await loadProject(newest.doc);
     return true;
   }
-  await kvDelete(newest.key);
+  await storage.kvDelete(newest.key);
   return false;
 }
