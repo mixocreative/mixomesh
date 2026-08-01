@@ -8,6 +8,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
+import { Modal } from './Modal.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -41,6 +42,22 @@ export function init() {
   // Scroll / resize should dismiss the menu so it doesn't float orphaned.
   window.addEventListener('wheel',  () => { if (_isOpen) close(); }, { passive: true });
   window.addEventListener('resize', () => { if (_isOpen) close(); });
+
+  // Bake-or-cancel gate for combining textured objects (ADR 0002): Boolean drops
+  // UVs, so the user must consciously downgrade to a solid colour.
+  Modal.register('booleanTextureBake', ({ close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${escapeHtml(t('boolean.bakeTitle'))}</h2>
+      <p class="pm-modal-body">${escapeHtml(t('boolean.bakeBody'))}</p>
+      <div class="pm-modal-actions">
+        <button class="btn" data-r="cancel">${escapeHtml(t('boolean.bakeCancel'))}</button>
+        <button class="btn btn-primary" data-r="bake">${escapeHtml(t('boolean.bakeConfirm'))}</button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => close(b.dataset.r)));
+    return el;
+  });
 }
 
 /**
@@ -265,8 +282,19 @@ async function _boolean(op) {
   if (ids.length < 2) return;
   const res = await performBoolean(ids, op);
   if (res && res.blocked) {
-    const key = res.reason === 'needs-texture-bake' ? 'toast.booleanTextured'
-      : res.reason === 'multi-part' ? 'toast.booleanMultiPart'
+    if (res.reason === 'needs-texture-bake') {
+      // Offer to downgrade to solid colour + combine (CSG2 can't keep UVs).
+      Modal.open('booleanTextureBake', { onClose: (r) => {
+        if (r !== 'bake') return;
+        safeAsync(async () => {
+          const baked = await performBoolean(ids, op, { bakeTexturedToSolid: true });
+          if (baked && baked.blocked) Toast.show(t('toast.booleanBlocked', { reason: baked.reason }), 'warning', 4000);
+          else push(baked);
+        });
+      } });
+      return;
+    }
+    const key = res.reason === 'multi-part' ? 'toast.booleanMultiPart'
       : res.reason === 'too-large' ? 'toast.booleanTooLarge'
       : 'toast.booleanBlocked';
     Toast.show(t(key, { reason: res.reason }), 'warning', 4000);

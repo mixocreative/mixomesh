@@ -38,15 +38,18 @@ function _operandDescriptor(id, objects) {
  * @param {'union'|'subtract'|'intersect'} op  subtract base = meshIds[0]'s object
  * @returns {Promise<BooleanCommand | { blocked: true, reason: string }>}
  */
-export async function performBoolean(meshIds, op) {
+export async function performBoolean(meshIds, op, opts = {}) {
   const objects = getState().scene.objects;
   const operandIds = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))];
   const gate = evaluateBooleanEligibility(operandIds.map(id => _operandDescriptor(id, objects)));
   if (!gate.ok) return { blocked: true, reason: gate.reason };
-  // `needs-texture-bake` is a SOFT gate (ok:true) awaiting the bake-or-cancel modal.
-  // Until that ships, block it — CSG2 drops UVs, so proceeding would silently lose
-  // the texture (ADR 0002 moat). The modal will bake-to-solid then re-enter here.
-  if (gate.reason === 'needs-texture-bake') return { blocked: true, reason: 'needs-texture-bake' };
+  // `needs-texture-bake` is a SOFT gate (ok:true): CSG2 drops UVs, so proceeding
+  // silently loses the texture (ADR 0002 moat). Block UNLESS the caller explicitly
+  // opted into bake-to-solid (the modal) — then the result stays solid (no textured
+  // shader inherited below; computeBoolean already gives it the operand's colour).
+  if (gate.reason === 'needs-texture-bake' && !opts.bakeTexturedToSolid) {
+    return { blocked: true, reason: 'needs-texture-bake' };
+  }
 
   const meshes = operandIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
   if (meshes.length < 2) return { blocked: true, reason: 'needs-two' };
@@ -58,7 +61,9 @@ export async function performBoolean(meshIds, op) {
   const resultObj = {
     id: meshId, name: op, assetId,
     collectionId: lead?.collectionId ?? null, parentId: null,
-    shaderId: lead?.shaderId ?? null,
+    // Baked-to-solid ⇒ no textured shader on the result (it would render with no UVs);
+    // keep computeBoolean's solid material. Otherwise inherit the operand's shader.
+    shaderId: opts.bakeTexturedToSolid ? null : (lead?.shaderId ?? null),
     visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true,
     sourceGroupId: null, logicalObjectId: null, isInternalPart: false,
     containerMeshIndex: 0, ratio: 1,

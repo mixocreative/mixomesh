@@ -1291,10 +1291,12 @@ async function main() {
       const obj = (id) => ({ id, name: id, assetId: 'btx-' + id, collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 });
       st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, btx_a: obj('btx_a'), btx_b: obj('btx_b') } } }), { silent: true });
       const res = await hm.performBoolean(['btx_a', 'btx_b'], 'union');
-      return { blocked: !!res.blocked, reason: res.reason };
+      const baked = await hm.performBoolean(['btx_a', 'btx_b'], 'union', { bakeTexturedToSolid: true });
+      return { blocked: !!res.blocked, reason: res.reason, bakeProceeded: !(baked && baked.blocked) };
     })()`);
     assert(boolTex.blocked && boolTex.reason === 'needs-texture-bake',
       `boolean: a textured operand must block (no silent texture loss) — got blocked=${boolTex.blocked} reason=${boolTex.reason}`);
+    assert(boolTex.bakeProceeded, 'boolean: bakeTexturedToSolid should let a textured combine proceed (as solid)');
 
     // ── ArrayCommand: repeat an object N times along an axis + undo (ADR 0003) ──
     const arrayRT = await evaluate(cdp, `(async () => {
