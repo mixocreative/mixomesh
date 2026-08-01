@@ -30,15 +30,17 @@ Order = value-first (A, B are user-facing wins; C is delivery). No hard cross-de
   (texture bake-or-cancel, non-manifold → validator) + progress toast + i18n (en/ja/zh-Hant).
 - **A4 — Slice 4:** end-to-end browser smoke (real CSG2, all 3 ops; textured → gated); BLUEPRINT close.
 
-## Phase B — Placement precision (kitbash assembly)  ▸ NOT STARTED (needs its own ADR 0003)
+## Phase B — Placement precision (kitbash assembly)  ▸ MOSTLY DONE (ADR 0003)
 
-- **B1 — Face-to-face snap / mate:** pick a face on A, a face on B → align B's face to A's (normal
-  anti-parallel, coincident). The #1 assembly gap. Reuse gizmo/pivot + picking.
-- **B2 — Align-to-object:** min/max/center align on an axis across a selection (like Blender align).
-- **B3 — Mirror:** mirror a part across a world/cursor/active plane (undoable; watch winding/normals).
-- **B4 — Array / pattern:** linear + radial duplicate-with-count (bolts, teeth). Builds on Duplicate.
-
-Each = a Command (undo), typed events, BLUEPRINT update. ADR 0003 to lock the mate math + UX first.
+- **B2 — Align ✅** — `AlignCommand` (min/center/max; center X/Y/Z in ContextMenu), undo, smoke.
+- **B3 — Mirror ✅** — `MirrorCommand` UV-preserving reflection, persists via `mirror-<axis>`
+  geometryFix, self-inverse undo, ContextMenu Mirror X/Y/Z, smoke.
+- **B4 — Array ✅** — `ArrayCommand` linear repeat (ContextMenu Array X/Y/Z, auto-spacing ×3), undo, smoke.
+- **B1 — Face-mate ▸ TODO** — pick a face on A + a face on B → seat B flush to A (normal anti-parallel,
+  coincident). The one big remaining verb: needs face-picking (raycast → face normal/centroid) + the
+  seat transform (rotation to anti-align normals + translation). Its own focused pass.
+- **Polish ▸ TODO** — a **Placement panel** consolidating align min/max + an array count/spacing dialog
+  (the ContextMenu is getting long — a panel/submenu is the right home). ContextMenu covers the common cases now.
 
 ## Phase C — Storage adapter → Windows Electron (ADR 0001)  ▸ Phase 1a DONE
 
