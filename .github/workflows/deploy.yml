@@ -25,7 +25,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
+      # `npm install`, not `npm ci`: Vite 8 (rolldown) ships its native binary as
+      # a per-platform optionalDependency. A lockfile generated on Windows records
+      # only the win32 binary, and `npm ci` installs exactly the lockfile — so the
+      # linux-x64 binary is missing and the build dies with MODULE_NOT_FOUND.
+      # `npm install` re-resolves optional deps for the runner's platform.
+      - run: npm install --no-audit --no-fund
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
