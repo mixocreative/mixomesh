@@ -236,6 +236,34 @@ async function main() {
     assert(localeSwitch.after.outlinerEmpty.includes('拖到視窗'),
       `locale switch did not refresh generated Outliner empty text: ${localeSwitch.after.outlinerEmpty}`);
 
+    const printReadinessUi = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      document.querySelector('#rp-print-body [data-tab="export"]')?.click();
+      await frame();
+      const exportView = {
+        readiness: document.querySelector('#rp-print-body .pp-readiness')?.className ?? '',
+        issues: [...document.querySelectorAll('#rp-print-body .pp-readiness-issue')]
+          .map(row => row.dataset.issueCode),
+        formats: [...document.querySelectorAll('#rp-print-body [data-format]')]
+          .map(button => button.dataset.format),
+      };
+      document.querySelector('#rp-print-body [data-tab="bed"]')?.click();
+      await frame();
+      const presetLabel = document.querySelector('#pp-printer-select')?.closest('.pp-field-group')
+        ?.querySelector('label')?.textContent.trim() ?? '';
+      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      await frame();
+      return { exportView, presetLabel };
+    })()`);
+    assert(printReadinessUi.exportView.readiness.includes('blocked'),
+      'empty-scene readiness summary should render as blocked');
+    assert(printReadinessUi.exportView.issues.includes('no-print-parts'),
+      'empty-scene readiness issue is missing');
+    assert(printReadinessUi.exportView.formats.join(',') === 'obj,3mf,stl',
+      `all export buttons must remain visible: ${printReadinessUi.exportView.formats.join(',')}`);
+    assert(printReadinessUi.presetLabel === 'Build Volume Preset',
+      `printer selector was not simplified to Build Volume Preset: ${printReadinessUi.presetLabel}`);
+
     const cursorMenu = await evaluate(cdp, `(async () => {
       const cm = await import('/src/ui/ContextMenu.js');
       cm.open({ x: 24, y: 24, source: 'viewport' });

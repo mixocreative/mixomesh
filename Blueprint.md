@@ -220,6 +220,8 @@ src/
     print/
       ExportContext.js     ← THE ONE typedef + builder; owns BU_TO_MM; previewExportContext + getExportedDimensions + getExportReference live here
       PrintPipeline.js     ← export orchestrator + STL/3MF inline serializers; CSG/weld/validate; no module-level mutable state
+      BedFit.js            ← pure positive-XYZ build-volume bounds/overflow check
+      PrintReadiness.js    ← stable format-independent readiness issues + live export-bounds projection
       ObjWriter.js         ← OBJ + MTL serializer + Mimaki solid-PNG synthesis (format-specific code, NOT in the orchestrator)
       ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
       PrintNaming.js       ← filename helpers (take ctx; no getState)
@@ -1873,13 +1875,12 @@ no regression.
 **File: `src/core/MeshValidator.js`**
 
 ### Scope (v1)
-Three critical checks only. Pure JS — no WASM.
+Two topology checks only. Pure JS — no WASM.
 
 | Check | Severity | Method | Auto-Fix |
 |---|---|---|---|
 | Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | Merge by distance |
 | Inverted normals | **warning** (Phase 6) | **Signed mesh volume** (one O(tris) pass; V<0 ⇒ inward winding) — replaced the old 64-ray heuristic (O(tris) PER ray) 2026-06-13 | Flip winding |
-| Exceeds bed volume | warning | Compare mesh world AABB to bed dims | None |
 
 > **Topology runs in a Web Worker (perf goal 2026-06-13).** The non-manifold
 > + inverted-winding pass is the heavy part on dense print meshes (80k+ tris
@@ -1890,9 +1891,9 @@ Three critical checks only. Pure JS — no WASM.
 > ~12 ms wall, warm worker). The worker uses NUMERIC packed keys for the weld
 > + edge maps (no per-vertex/edge string allocation) and signed-volume
 > inverted-normals (no rays/octree). Inline pure-JS fallback runs when Worker
-> is unavailable (Node tests). The bed-bounds check stays on the main thread
-> (needs the world matrix; trivial). Group-union topology (split shells) is
-> built on the main thread then posted the same way.
+> is unavailable (Node tests). Group-union topology (split shells) is built on
+> the main thread then posted the same way. Build-volume checks belong to the
+> per-export-ratio `PrintReadiness` projection, not this mesh cache.
 
 > **Phase 6 severity change.** Non-manifold + inverted-normals were `error`
 > (hard-blocked export). A colour-print *assembly* tool works with downloaded
@@ -1941,9 +1942,9 @@ This is why a multi-shader model now reports the *object's* true watertightness
 objects validate directly. **Separate objects are never welded together** — only
 parts that share a `logicalObjectId` (split group or glTF primitive set).
 
-**Integrity checks** (zero-vertex mesh, missing registry entry, exceeds bed
-volume) stay per-mesh — they answer about the individual shell, not the
-part topology.
+**Export collection checks** reject zero-vertex and missing live registry
+meshes. `PrintReadiness` separately reports missing sources/textures and
+per-target build-volume fit; these are export-context concerns, not topology.
 
 **Pre-export gate** (§9 *Pre-Export Gate*) iterates print parts, but
 deduplicates by `sourceGroupId` so each part runs once even if it has 12
@@ -3091,6 +3092,25 @@ Validation reads the §9 A6 cache with an explicit "Validate All".
 Display modes (print-preview matte, wireframe edges + colour) live in the
 viewport toggles under the NavCube — see Viewport Toggles below — so they
 work from every workspace; there is no Preview tab.
+
+The Bed tab labels printer choices **Build Volume Preset**: choosing one only
+seeds `print.bedDimensions` and the viewport volume. The Export tab always
+keeps OBJ, 3MF, and STL actions visible. Above them it renders one derived
+readiness card with a summary per requested ratio and stable issue records:
+`no-print-parts`, `missing-source`, `missing-texture`, `unit-unconfirmed`,
+`geometry-error`, `geometry-warning`, `bed-overflow`, and `below-bed`.
+Geometry/source/texture errors block export; bed overflow, below-bed geometry,
+unconfirmed units, and geometry warnings require an explicit Export Anyway
+acknowledgement. Clicking a fit issue opens Bed; clicking a geometry issue
+opens Validation; issue rows select their first live related object.
+
+`BedFit.checkBedFit(bounds, bed)` compares millimetre print coordinates against
+the positive slicer volume `0..X, 0..Y, 0..Z`. `PrintReadiness` converts the
+centred Babylon bed (`X`, world `Z`, world-up `Y`) into that coordinate space,
+applies the same pivot-anchored target-ratio scaling as `PrintPrep.flattenWorld`,
+and returns `{ fits, overflowMM:{x,y,z}, belowBedMM }`. Readiness is a projection,
+never persisted, and its `formats` is always `['obj','3mf','stl']` regardless of
+the selected build-volume preset.
 
 ### Viewport Toggles (`src/ui/ViewportToggles.js`)
 Docked under the NavCube (`#viewport-toggles`). A mutually-exclusive **display-

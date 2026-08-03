@@ -17,6 +17,7 @@ import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState } from '../core/scale/ScaleMath.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 import { wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
+import * as Selection from '../core/Selection.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
 // reference dimensions only. Export format is chosen by the buttons below.
@@ -366,10 +367,51 @@ function _renderValidationTab() {
 
 // ── Export Tab ────────────────────────────────────────────
 
+function _issueLabel(issue) {
+  const key = `print.issue.${issue.code}`;
+  if (issue.code === 'bed-overflow') {
+    const amounts = Object.entries(issue.data?.overflowMM ?? {})
+      .filter(([, value]) => value > 0)
+      .map(([axis, value]) => `${axis.toUpperCase()} +${value.toFixed(1)} mm`)
+      .join(', ');
+    return `${t(key)}${amounts ? ` · ${amounts}` : ''}`;
+  }
+  if (issue.code === 'below-bed') {
+    return `${t(key)} · ${Number(issue.data?.belowBedMM ?? 0).toFixed(1)} mm`;
+  }
+  return t(key, { n: issue.objectIds?.length ?? 0 });
+}
+
+function _renderReadinessSummary(readiness) {
+  const statusIcon = readiness.status === 'ready' ? 'CheckCircle'
+    : readiness.status === 'warning' ? 'AlertTriangle' : 'AlertCircle';
+  let html = `<section class="pp-readiness ${escapeAttr(readiness.status)}" aria-label="${escapeAttr(t('print.readiness'))}">`;
+  html += `<div class="pp-readiness-head">${icon(statusIcon, { class: 'inline' })}<strong>${escapeHtml(t(`print.readiness.${readiness.status}`))}</strong></div>`;
+  if (readiness.targets.length) {
+    html += '<div class="pp-target-list">';
+    for (const target of readiness.targets) {
+      const size = target.bounds.max.map((value, axis) => Math.max(0, value - target.bounds.min[axis]));
+      html += `<div class="pp-target-summary"><span>${escapeHtml(formatScaleRatio(target.ratio))}</span><span>${size.map(value => value.toFixed(1)).join('×')} mm</span></div>`;
+    }
+    html += '</div>';
+  }
+  for (const readinessIssue of readiness.issues) {
+    const objectId = readinessIssue.objectIds?.[0] ?? '';
+    html += `<button type="button" class="pp-readiness-issue ${escapeAttr(readinessIssue.severity)}" data-issue-code="${escapeAttr(readinessIssue.code)}" data-object-id="${escapeAttr(objectId)}">`;
+    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : 'AlertTriangle', { class: 'inline' })}<span>${escapeHtml(_issueLabel(readinessIssue))}</span>`;
+    html += '</button>';
+  }
+  html += '</section>';
+  return html;
+}
+
 function _renderExportTab() {
   const bakeSolids = getState().print?.objBakeSolidTextures ?? false;
+  const readiness = PrintManager.getPrintReadiness();
 
   let html = '<div class="pp-tab-content">';
+
+  html += _renderReadinessSummary(readiness);
 
   html += '<div class="pp-field-group">';
   html += `<label>${escapeHtml(t('print.exportOptions'))}</label>`;
@@ -413,6 +455,17 @@ function _renderExportTab() {
   const el = document.createElement('div');
   el.innerHTML = html;
 
+  el.querySelectorAll('.pp-readiness-issue').forEach(row => {
+    row.addEventListener('click', () => {
+      const code = row.dataset.issueCode;
+      if (code === 'bed-overflow' || code === 'below-bed') _activeTab = 'bed';
+      else if (code === 'geometry-error' || code === 'geometry-warning') _activeTab = 'validation';
+      const objectId = row.dataset.objectId;
+      if (objectId && !getState().scene.objects[objectId]?.isGhost) Selection.set([objectId], objectId);
+      _render();
+    });
+  });
+
   // Collect options
   const getOptions = () => {
     const selectedOnly = el.querySelector('#pp-selected-only').checked;
@@ -425,13 +478,17 @@ function _renderExportTab() {
   // export gate, arch B6) — display models are routinely non-watertight, so
   // the default is "export anyway".
   const runExport = async (fn, opts) => {
-    if (_printPartsHaveWarnings() && !(await _confirmExportWithWarnings())) return;
+    const currentReadiness = PrintManager.getPrintReadiness(opts);
+    if (currentReadiness.requiresAcknowledgement
+        && !(await _confirmExportWithWarnings(currentReadiness.issues))) return;
     ProgressOverlay.show(t('progress.exporting'));
     try {
       await fn({ ...opts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
     } catch (err) {
       if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
+      } else if (err?.readinessIssues?.length) {
+        reportError(err, { title: t('print.readiness.blocked'), modal: true });
       } else {
         // Export = heavy opaque op → detail modal per Status policy.
         reportError(err, { title: t('print.exportFailed'), modal: true });
@@ -584,31 +641,23 @@ async function _render() {
 
 // ── Export warning gate (A6 / B6) ────────────────────────
 
-/** True when any print part's cached, non-stale validation carries warnings. */
-function _printPartsHaveWarnings() {
-  const { objects, validation } = getState().scene;
-  for (const [meshId, obj] of Object.entries(objects)) {
-    if (!obj.isPrintPart || obj.isGhost) continue;
-    const e = validation?.[meshId];
-    if (e && !e.stale && e.results?.some(r => r.severity === 'warning')) return true;
-  }
-  return false;
-}
-
-function _confirmExportWithWarnings() {
+function _confirmExportWithWarnings(issues) {
   return new Promise(resolve => {
     Modal.open('exportWarningsConfirm', {
+      issues,
       onClose: (r) => resolve(r === 'export'),
     });
   });
 }
 
-function _renderExportWarningsModal({ close }) {
+function _renderExportWarningsModal({ data, close }) {
+  const warnings = data?.issues?.filter(item => item.severity === 'warning') ?? [];
   const el = document.createElement('div');
   el.innerHTML = `
     <div class="modal-content">
       <h3>${escapeHtml(t('print.validationWarnings'))}</h3>
       <p>${escapeHtml(t('print.validationWarningsBody'))}</p>
+      <ul>${warnings.map(item => `<li>${escapeHtml(_issueLabel(item))}</li>`).join('')}</ul>
       <div class="modal-actions">
         <button class="btn" data-action="cancel">${escapeHtml(t('btn.cancel'))}</button>
         <button class="btn btn-primary" data-action="export">${escapeHtml(t('print.exportAnyway'))}</button>

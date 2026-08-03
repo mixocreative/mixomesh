@@ -253,6 +253,46 @@
   color: var(--text-0);
 }
 
+.pp-readiness {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+.pp-readiness.ready { border-color: color-mix(in srgb, #10b981 45%, var(--border-strong)); }
+.pp-readiness.warning { border-color: color-mix(in srgb, #f59e0b 50%, var(--border-strong)); }
+.pp-readiness.blocked { border-color: color-mix(in srgb, var(--danger) 55%, var(--border-strong)); }
+.pp-readiness-head,
+.pp-target-summary,
+.pp-readiness-issue {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pp-target-list { display: grid; gap: 2px; }
+.pp-target-summary {
+  justify-content: space-between;
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+}
+.pp-readiness-issue {
+  width: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.pp-readiness-issue:hover { background: var(--bg-3); }
+.pp-readiness-issue.warning { color: #f59e0b; }
+.pp-readiness-issue.error { color: var(--danger); }
+
 .pp-export-btn {
   background: var(--bg-3);
   border: 1px solid var(--border-strong);

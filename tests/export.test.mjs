@@ -145,6 +145,31 @@ await test('OBJ: missing registry mesh → throws', async () => {
   await rejects(PrintManager.exportOBJ(), /No printable meshes/);
 });
 
+await test('all formats stay available but a missing referenced texture blocks the pipeline', async () => {
+  setScene({
+    objects: { m1: obj('m1', { shaderId: 'shader_missing_tex' }) },
+    registry: { m1: mesh('m1') },
+  });
+  StateManager.setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      assetLibrary: {},
+      shaders: {
+        shader_missing_tex: {
+          id: 'shader_missing_tex',
+          diffuseTextureAssetId: 'texture_not_loaded',
+        },
+      },
+    },
+  }), { silent: true });
+  const readiness = PrintManager.getPrintReadiness();
+  assert.deepEqual(readiness.formats, ['obj', '3mf', 'stl']);
+  assert.equal(readiness.issues.some(issue => issue.code === 'missing-texture'), true);
+  await assert.rejects(PrintManager.exportOBJ(), err =>
+    err.readinessIssues?.some(issue => issue.code === 'missing-texture'));
+});
+
 // ── Auto-fix + post-fix validation ───────────────────────
 
 await test('OBJ: valid mesh → auto-fix runs on a clone, exports, downloads', async () => {

@@ -25,6 +25,8 @@ import { createFormats } from './PrintFormats.js';
 import { packageAndDownload } from './PrintPackaging.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './ThreeMFWriter.js';
 import { serializeOBJ } from './ObjWriter.js';
+import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
+import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -180,6 +182,14 @@ async function _runExport(formatKey, options = {}) {
   const fmt = FORMATS[formatKey];
   if (!fmt) throw new Error(`Unknown export format: ${formatKey}`);
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+  const readiness = getPrintReadiness(options);
+  if (!readiness.canExport) {
+    const noParts = readiness.targets.length === 0;
+    throw Object.assign(
+      new Error(noParts ? 'No printable meshes to export.' : 'Print readiness errors must be resolved before export.'),
+      { readinessIssues: readiness.issues },
+    );
+  }
 
   // CSG2 init runs ONCE for the whole batch (was once-per-target in the old
   // shape, producing N identical "unavailable" toasts on failure). Result
@@ -203,6 +213,52 @@ async function _runExport(formatKey, options = {}) {
     );
     await _runExportForTarget(fmt, targets[ti], options, csgReady, span);
   }
+}
+
+/** Current, format-independent readiness projection used by the panel and gate. */
+export function getPrintReadiness(options = {}) {
+  const state = getState();
+  const selected = new Set(state.selection?.selectedIds ?? []);
+  const objects = state.scene?.objects ?? {};
+  const units = collectPrintUnits(state, !!options.selectedOnly);
+  const unitsById = new Map(units.map(unit => [unit.logicalId, unit]));
+  const leads = Object.values(objects).filter(obj => obj?.isPrintPart
+    && shouldDisplayObject(obj)
+    && (!options.selectedOnly || selected.has(obj.id)));
+  const parts = leads.map(obj => {
+    const objectIds = logicalObjectPartIds(obj.id, objects);
+    const ids = objectIds.length ? objectIds : [obj.id];
+    const asset = state.scene.assetLibrary?.[obj.assetId];
+    const validationResults = ids.flatMap(id => {
+      const cached = state.scene.validation?.[id];
+      return cached && !cached.stale ? (cached.results ?? []) : [];
+    });
+    const textureAvailable = ids.every(id => {
+      const shader = state.scene.shaders?.[objects[id]?.shaderId];
+      const textureId = shader?.diffuseTextureAssetId;
+      return !textureId || !!state.scene.assetLibrary?.[textureId];
+    });
+    return {
+      objectId: obj.id,
+      objectIds: ids,
+      sourceAvailable: !obj.isGhost && unitsById.has(obj.id),
+      unitConfirmed: asset?.unitConfirmed !== false,
+      textureAvailable,
+      validationResults,
+    };
+  });
+  const explicit = exportRatiosFromState(state);
+  const ratios = explicit.length ? explicit : [null];
+  const targets = units.length ? ratios.map(target => {
+    const ctx = buildExportContext({ state, units, target, options });
+    return {
+      ratio: ctx.targetRatio,
+      requestedRatio: target,
+      bounds: boundsForExportContext(ctx, state.print.bedDimensions),
+      objectIds: units.map(unit => unit.logicalId),
+    };
+  }).filter(target => target.bounds) : [];
+  return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions });
 }
 
 async function _runExportForTarget(fmt, target, options, csgReady, progress) {
