@@ -4,7 +4,7 @@
 // loads. Needs `npm run build` first + electron installed. Opens a window briefly.
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 if (!existsSync('dist/index.html')) {
@@ -15,6 +15,16 @@ const isWin = process.platform === 'win32';
 const bin = join('node_modules', '.bin', isWin ? 'electron.cmd' : 'electron');
 if (!existsSync(bin)) {
   console.error('electron smoke: electron not installed (npm i)');
+  process.exit(1);
+}
+
+const mainSource = readFileSync('electron/main.cjs', 'utf8');
+const preloadSource = readFileSync('electron/preload.cjs', 'utf8');
+if (!mainSource.includes("ipcMain.on('app:close-response'")
+    || !mainSource.includes("win.webContents.send('app:close-requested'")
+    || !preloadSource.includes('onCloseRequested')
+    || !preloadSource.includes('respondToClose')) {
+  console.error('electron smoke: save/discard/cancel close bridge is incomplete');
   process.exit(1);
 }
 

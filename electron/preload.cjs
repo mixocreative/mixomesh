@@ -30,4 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeFile: (p, data) => ipcRenderer.invoke('fs:writeFile', p, data),
   pickOpen: (opts) => ipcRenderer.invoke('dialog:open', opts),
   pickSave: (opts) => ipcRenderer.invoke('dialog:save', opts),
+  onCloseRequested: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('app:close-requested', listener);
+    return () => ipcRenderer.removeListener('app:close-requested', listener);
+  },
+  respondToClose: (result) => ipcRenderer.send('app:close-response', result),
 });

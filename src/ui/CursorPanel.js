@@ -6,14 +6,15 @@
 import { SceneManager } from '../core/SceneManager.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
-import { push, AlignCommand, MirrorCommand, ArrayCommand, MateCommand } from '../core/HistoryManager.js';
+import { push, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand } from '../core/HistoryManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { subscribe, getState } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { icon } from '../core/Icons.js';
 import { MM_PER_BU } from '../core/scene/SceneConstants.js';
-import { applyTranslations } from '../i18n/index.js';
+import { t, applyTranslations } from '../i18n/index.js';
 import { escEnter } from './lib/fields.js';
+import { Toast } from './Toast.js';
 
 let _root = null;
 let _open = false;
@@ -81,16 +82,20 @@ function _markup() {
       </div>
       <div class="np-section np-placement">
         <div class="np-row-label" data-i18n-key="placement.title">Placement</div>
-        <div class="np-place-grid">
-          ${['x', 'y', 'z'].map(a => `
-            <button type="button" class="np-place-btn" data-place="align-${a}-min" title="Align Min ${a.toUpperCase()}">${a.toUpperCase()}⊣</button>
-            <button type="button" class="np-place-btn" data-place="align-${a}-center" title="Align Center ${a.toUpperCase()}">${a.toUpperCase()}⊟</button>
-            <button type="button" class="np-place-btn" data-place="align-${a}-max" title="Align Max ${a.toUpperCase()}">${a.toUpperCase()}⊢</button>`).join('')}
+        <div class="np-place-actions">
+          <button type="button" class="np-place-btn" data-place="drop-bed" data-i18n-title="placement.dropToBed"><span data-i18n-key="placement.dropToBed">Drop to Bed</span></button>
+          <button type="button" class="np-place-btn" data-place="center-bed" data-i18n-title="placement.centerOnBed"><span data-i18n-key="placement.centerOnBed">Center on Bed</span></button>
         </div>
         <div class="np-place-grid">
-          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="mirror-${a}" title="Mirror ${a.toUpperCase()}">⇄${a.toUpperCase()}</button>`).join('')}
-          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" title="Array ${a.toUpperCase()} ×3">⋯${a.toUpperCase()}</button>`).join('')}
-          <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate">⊐</button>
+          ${['x', 'y', 'z'].map(a => `
+            <button type="button" class="np-place-btn" data-place="align-${a}-min" data-i18n-title="placement.alignMin"><span data-i18n-key="placement.min">Min</span> ${a.toUpperCase()}</button>
+            <button type="button" class="np-place-btn" data-place="align-${a}-center" data-i18n-title="placement.alignCenter"><span data-i18n-key="placement.center">Center</span> ${a.toUpperCase()}</button>
+            <button type="button" class="np-place-btn" data-place="align-${a}-max" data-i18n-title="placement.alignMax"><span data-i18n-key="placement.max">Max</span> ${a.toUpperCase()}</button>`).join('')}
+        </div>
+        <div class="np-place-grid">
+          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="mirror-${a}" data-i18n-title="placement.mirror"><span data-i18n-key="placement.mirror">Mirror</span> ${a.toUpperCase()}</button>`).join('')}
+          ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" data-i18n-title="placement.array"><span data-i18n-key="placement.array">Array</span> ${a.toUpperCase()}</button>`).join('')}
+          <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate"><span data-i18n-key="context.mate">Mate to Active</span></button>
         </div>
       </div>
     </div>
@@ -103,7 +108,11 @@ function _runPlacement(place) {
   const ids = Selection.getSelectedIds();
   const activeId = Selection.getActiveId();
   if (!ids.length) return;
-  if (place.startsWith('align-')) {
+  if (place === 'drop-bed' || place === 'center-bed') {
+    const command = new BedPlacementCommand(ids, place === 'drop-bed' ? 'drop' : 'center');
+    if (command.affectedIds.length) push(command);
+    if (command.skippedIds.length) Toast.show(t('placement.lockedSkipped', { n: command.skippedIds.length }), 'warning', 3000);
+  } else if (place.startsWith('align-')) {
     const [, axis, mode] = place.split('-');
     if (ids.length > 1) push(new AlignCommand(ids, axis, mode));
   } else if (place.startsWith('mirror-')) {

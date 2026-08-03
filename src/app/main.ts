@@ -26,6 +26,7 @@ import { Workspace } from '../ui/Workspace.js';
 import { NumberScrub } from '../ui/NumberScrub.js';
 import { CursorPanel } from '../ui/CursorPanel.js';
 import { CopyPaste } from '../ui/CopyPaste.js';
+import { ViewportEmptyState } from '../ui/ViewportEmptyState.js';
 import * as i18n from '../i18n/index.js';
 
 type TransformCommit = {
@@ -83,6 +84,7 @@ async function bootstrap() {
   MeshStats.init();       // live mesh stats in the status-bar centre segment
   NavCube.init();
   PersistenceManager.init();
+  wireCloseFlow();
   ProjectMenu.init();
   AppShell.init();
   Workspace.init();   // after AppShell — applies workspace layout over the shell defaults
@@ -94,6 +96,7 @@ async function bootstrap() {
   const viewport = document.getElementById('viewport');
   if (!viewport) throw new Error('Viewport root missing');
   ViewportDrop.attach(viewport, SceneManager.getScene());
+  ViewportEmptyState.init();
 
   InputManager.setContextMenuHandler((info: ContextMenuInfo) => ContextMenu.open(info));
   Outliner.setContextMenuHandler((info: ContextMenuInfo) => ContextMenu.open(info));
@@ -110,6 +113,26 @@ async function bootstrap() {
   PersistenceManager.startAutosave();
   canvas.focus();
   safeAsync(() => AssetPanel.promptRemount());
+}
+
+function wireCloseFlow() {
+  const api = (window as unknown as {
+    electronAPI?: {
+      onCloseRequested?: (callback: () => void) => void;
+      respondToClose?: (result: { action: 'save' | 'discard' | 'cancel'; saved?: boolean }) => void;
+    };
+  }).electronAPI;
+  window.addEventListener('beforeunload', event => {
+    if (api || !PersistenceManager.isDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  api?.onCloseRequested?.(() => {
+    safeAsync(async () => {
+      const result = await PersistenceManager.requestClose();
+      api.respondToClose?.(result);
+    });
+  });
 }
 
 function renderBlockingMessage(title: string, message: string) {

@@ -154,6 +154,13 @@ async function main() {
             'cursor-to-selection',
             'cursor-to-origin',
           ].every(a => !document.querySelector('#n-panel [data-act="' + a + '"]')),
+          placementLabels: [...document.querySelectorAll('#n-panel [data-place]')]
+            .map(button => button.textContent.trim()),
+        },
+        emptyState: {
+          visible: !document.querySelector('.viewport-empty-state')?.hidden,
+          actions: [...document.querySelectorAll('.viewport-empty-state [data-empty-action]')]
+            .map(button => button.dataset.emptyAction),
         },
         before,
         collapsed,
@@ -187,6 +194,12 @@ async function main() {
     assert(snapshot.wsActive === 'layout', 'Layout pill button should be active by default');
     assert(snapshot.nPanel.mounted, '3D-cursor N-panel (with XYZ inputs) not mounted into the viewport');
     assert(snapshot.nPanel.noSnapActions, '3D-cursor N-panel should not contain cursor snap action buttons');
+    assert(snapshot.nPanel.placementLabels.includes('Drop to Bed')
+      && snapshot.nPanel.placementLabels.includes('Center on Bed')
+      && snapshot.nPanel.placementLabels.includes('Min X'),
+    `placement controls need readable labels: ${snapshot.nPanel.placementLabels.join(', ')}`);
+    assert(snapshot.emptyState.visible && snapshot.emptyState.actions.join(',') === 'import,open',
+      'zero-object viewport must offer Import Model and Open Project');
     assert(snapshot.before === 'true' && snapshot.collapsed === 'false' && snapshot.restored === 'true',
       'right-panel toggle did not update aria-expanded');
     assert(snapshot.splitBefore !== snapshot.splitAfter,

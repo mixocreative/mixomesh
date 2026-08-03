@@ -8,8 +8,90 @@ import { applyTransforms, captureWorld, withDetachedPivot, removeSceneObject, re
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { computeAlignDeltas } from '../placement/AlignMath.js';
 import { applyGeometryFix } from '../MeshValidator.js';
+import {
+  centerOnBedDelta,
+  dropToBedDelta,
+  multiplyQuaternion,
+  quaternionFromNormalToUp,
+} from '../placement/BedPlacement.js';
 
 const AXES = new Set(['x', 'y', 'z']);
+
+function _selectionBounds(ids) {
+  const min = { x: Infinity, y: Infinity, z: Infinity };
+  const max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  for (const id of ids) {
+    const mesh = AssetLoader.getBabylonMesh(id);
+    if (!mesh) continue;
+    mesh.computeWorldMatrix(true);
+    const box = mesh.getBoundingInfo().boundingBox;
+    for (const axis of ['x', 'y', 'z']) {
+      min[axis] = Math.min(min[axis], box.minimumWorld[axis]);
+      max[axis] = Math.max(max[axis], box.maximumWorld[axis]);
+    }
+  }
+  return Number.isFinite(min.x) ? { min, max } : null;
+}
+
+/** Drop/centre selected logical objects, or orient one picked face, as one undo step. */
+export class BedPlacementCommand {
+  constructor(meshIds, mode, { faceNormal = null } = {}) {
+    this.label = mode === 'drop' ? 'Drop to Bed'
+      : mode === 'center' ? 'Center on Bed' : 'Place Face on Bed';
+    this._mode = mode;
+    this._prev = {};
+    this._next = {};
+    this._finalizedFace = false;
+    const objects = getState().scene.objects;
+    const canonicals = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))];
+    this.skippedIds = canonicals.filter(id => objects[id]?.locked);
+    const unlocked = canonicals.filter(id => !objects[id]?.locked);
+    const targetCanonicals = mode === 'face' ? unlocked.slice(0, 1) : unlocked;
+    this._ids = [...new Set(targetCanonicals.flatMap(id => logicalObjectPartIds(id, objects)))]
+      .filter(id => AssetLoader.getBabylonMesh(id));
+    this.affectedIds = [...this._ids];
+    for (const id of this._ids) this._prev[id] = captureWorld(AssetLoader.getBabylonMesh(id));
+    if (mode === 'face' && faceNormal) {
+      const rotation = quaternionFromNormalToUp(faceNormal);
+      for (const [id, world] of Object.entries(this._prev)) {
+        this._next[id] = { ...world, rotation: multiplyQuaternion(rotation, world.rotation) };
+      }
+    } else {
+      const bounds = _selectionBounds(this._ids);
+      const delta = mode === 'center' ? centerOnBedDelta(bounds) : dropToBedDelta(bounds);
+      for (const [id, world] of Object.entries(this._prev)) {
+        this._next[id] = {
+          ...world,
+          position: {
+            x: world.position.x + delta.x,
+            y: world.position.y + delta.y,
+            z: world.position.z + delta.z,
+          },
+        };
+      }
+    }
+  }
+
+  execute() {
+    applyTransforms(this._next);
+    if (this._mode === 'face' && !this._finalizedFace) {
+      const bounds = _selectionBounds(this._ids);
+      const delta = dropToBedDelta(bounds);
+      for (const next of Object.values(this._next)) {
+        next.position = { ...next.position, y: next.position.y + delta.y };
+      }
+      this._finalizedFace = true;
+      applyTransforms(this._next);
+    }
+    markDirty();
+    dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: this._ids });
+  }
+
+  undo() {
+    applyTransforms(this._prev);
+    dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: this._ids });
+  }
+}
 
 /**
  * Align a selection along one WORLD axis to the selection's min / center / max.

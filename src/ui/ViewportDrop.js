@@ -54,6 +54,34 @@ export function attach(viewportEl, scene) {
   overlay.addEventListener('dragover', (e) => e.preventDefault());
 }
 
+/** Picker entry point shared by the viewport empty state and future menus. */
+export async function promptImport(position = BABYLON.Vector3.Zero()) {
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({ multiple: true });
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    throw err;
+  }
+  const files = await Promise.all(handles.map(handle => handle.getFile()));
+  const siblingFiles = files.filter(file => {
+    const ext = _extOf(file.name);
+    return ext === '.mtl' || AssetLoader.isTextureExt(ext);
+  });
+  const meshes = files.map((file, index) => ({ file, handle: handles[index] }))
+    .filter(({ file }) => AssetLoader.isMeshExt(_extOf(file.name)));
+  if (!meshes.length) {
+    Toast.show(t('toast.dropNeedsMesh'), 'info', 5000);
+    return;
+  }
+  for (const { file, handle } of meshes) {
+    await safeImport(() => AssetLoader.loadFromBlob(file, file.name, position, {
+      fileHandle: handle,
+      ...(siblingFiles.length ? { siblingFiles } : {}),
+    }), file.name);
+  }
+}
+
 // ── Predicates ───────────────────────────────────────────
 
 function _isAcceptable(e) {
@@ -170,4 +198,4 @@ function _extOf(filename) {
   return i === -1 ? '' : filename.slice(i).toLowerCase();
 }
 
-export const ViewportDrop = { attach };
+export const ViewportDrop = { attach, promptImport };

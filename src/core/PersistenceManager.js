@@ -140,11 +140,24 @@ export async function openRecent(rec) {
   await loadProject(JSON.parse(await file.text()));
 }
 
+/**
+ * Resolve an app-window close through the shared save/discard/cancel vocabulary.
+ * @returns {Promise<{action:'save'|'discard'|'cancel', saved?:boolean}>}
+ */
+export async function requestClose() {
+  if (!isDirty()) return { action: 'discard' };
+  const choice = await confirmDirty();
+  const action = choice === 'save' || choice === 'discard' ? choice : 'cancel';
+  if (action !== 'save') return { action };
+  const saved = await save();
+  return { action: 'save', saved };
+}
+
 // NOT frozen — monkey-patching this object is the established headless-test
 // seam (same rationale as AssetLoader, bundle-1 plan 2026-06-11).
 export const PersistenceManager = {
   init, isDirty,
-  save, saveAs, open, newProject,
+  save, saveAs, open, newProject, requestClose,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,
 };

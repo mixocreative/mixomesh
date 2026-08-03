@@ -207,6 +207,7 @@ src/
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
     placement/AlignMath.js ← pure align-delta math for placement verbs — see §Placement + ADR 0003
+    placement/BedPlacement.js ← pure drop/centre/face-normal quaternion math
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
@@ -297,6 +298,7 @@ src/
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
     ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b)
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
+    ViewportEmptyState.js  ← zero-object Import Model / Open Project entry point
     ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
     ViewportToolbar.js     ← floating bottom toolbar (Fusion 360-style)
     ViewportToggles.js     ← display-mode selector (Shaded/Matte/Base Color) + wireframe-edges overlay, under the NavCube
@@ -2155,6 +2157,7 @@ PersistenceManager.relinkAsset(assetId)    → Promise<void>   // user-driven re
 PersistenceManager.startAutosave(ms=60000) → void
 PersistenceManager.stopAutosave()          → void
 PersistenceManager.recoverAutosave()       → Promise<boolean>
+PersistenceManager.requestClose()          → Promise<{action:'save'|'discard'|'cancel',saved?:boolean}>
 // Test surface — pure helpers exported for headless tests; do NOT import from app code.
 PersistenceManager.__test = {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
@@ -3939,6 +3942,30 @@ subset. `MateCommand` = snap-abut to the active object (auto axis/side). `AlignC
 winding + recompute-normals, recorded as a `mirror-<axis>` geometryFix so it **persists** via the
 M1 replay; self-inverse undo; ContextMenu Mirror X/Y/Z; single-part only). Browser-smoke verified.
 Array count/spacing dialog + align min/max UI + face-mate tracked in `docs/handoff/placement.md`.
+
+**Bed placement (2026-08-03).** `BedPlacementCommand` expands logical objects,
+skips locked objects, and records one absolute-transform snapshot for the whole
+selection. **Drop to Bed** translates the union world AABB to world Y=0;
+**Center on Bed** moves its X/Z centre to the centred bed origin; **Place Face
+on Bed** is offered from a viewport face pick, rotates that world normal to up,
+then recomputes the final AABB and drops it to Y=0. Undo restores every part's
+exact world transform. N-panel buttons use visible translated words at every
+width (no glyph-only placement controls); Drop/Center also appear there and in
+the viewport context menu.
+
+### Empty viewport and close flow
+
+When `scene.objects` is empty, `ViewportEmptyState` overlays two primary entry
+points: **Import Model** (the same multi-file model/MTL/texture import path as a
+viewport drop) and **Open Project** (`PersistenceManager.open`). Any object,
+including a recoverable ghost, hides the overlay; New/removal/load events keep
+it synchronized.
+
+Browser close uses the native `beforeunload` prompt only while dirty. Electron
+intercepts `BrowserWindow.close`, asks the renderer over the allowlisted
+`app:close-requested` channel, and closes only after `{action:'discard'}` or a
+successful `{action:'save',saved:true}` response; cancel and failed/cancelled
+save leave the window open. The renderer never exposes Node or an OS path.
 
 ---
 

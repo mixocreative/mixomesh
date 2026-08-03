@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, performBoolean } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
@@ -171,6 +171,10 @@ function _buildItems(info) {
     { label: t('context.cursorToSelection'), shortcut: '',         action: 'cursor-to-sel', iconName: 'Crosshair', cls: enabled(hasSelection) },
     { label: t('context.cursorToWorldOrigin'), shortcut: '',      action: 'cursor-to-origin', iconName: 'Crosshair', cls: '' },
     'sep',
+    { label: t('placement.dropToBed'), shortcut: '', action: 'drop-bed', iconName: 'Download', cls: enabled(hasSelection) },
+    { label: t('placement.centerOnBed'), shortcut: '', action: 'center-bed', iconName: 'Crosshair', cls: enabled(hasSelection) },
+    { label: t('placement.placeFaceOnBed'), shortcut: '', action: 'face-bed', iconName: 'RotateCw', cls: enabled(hasSelection && !!info.faceNormal) },
+    'sep',
     { label: t('context.smartReplace'),   shortcut: '',            action: 'replace', iconName: 'RefreshCw',  cls: enabled(multi) },
     { label: t('context.transformSwab'),  shortcut: '',            action: 'swab',    iconName: 'Pipette',    cls: enabled(multi) },
     'sep',
@@ -226,6 +230,19 @@ function _runAction(action, info) {
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
   if (action === 'cursor-to-origin') CursorTools.cursorToWorldOrigin();
+  if (action === 'drop-bed' || action === 'center-bed') {
+    const command = new BedPlacementCommand(Selection.getSelectedIds(), action === 'drop-bed' ? 'drop' : 'center');
+    if (command.affectedIds.length) push(command);
+    if (command.skippedIds.length) Toast.show(t('placement.lockedSkipped', { n: command.skippedIds.length }), 'warning', 3000);
+  }
+  if (action === 'face-bed' && info.faceNormal) {
+    const activeId = Selection.getActiveId();
+    if (activeId) {
+      const command = new BedPlacementCommand([activeId], 'face', { faceNormal: info.faceNormal });
+      if (command.affectedIds.length) push(command);
+      if (command.skippedIds.length) Toast.show(t('placement.lockedSkipped', { n: command.skippedIds.length }), 'warning', 3000);
+    }
+  }
   if (action === 'relink')     _relink(info.targetId);
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
   if (action === 'col-rename') _renameCollection(info.targetId);

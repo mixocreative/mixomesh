@@ -25,9 +25,9 @@ Electron smokes after every small edit.
 
 **Progress (2026-08-03):** Tasks 1–4 shipped in `776cba6`, `40803d2`,
 `153bbf2`, and `947de76`. Task 5 shipped in `7da2184`; Task 6 shipped in
-`be2d9d9`; Task 7 shipped in `46ca2fe`; Task 8 shipped in `99571b9`. Task 9 is
-implemented and verified in the print-readiness commit following that shader
-identity boundary. Task 10 is next.
+`be2d9d9`; Task 7 shipped in `46ca2fe`; Task 8 shipped in `99571b9`; Task 9
+shipped in `d153ef3`. Task 10 is implemented and verified in the workflow
+completion commit following that print-readiness boundary. Task 11 is next.
 
 ## Task 1: Pin the build-volume-only contract
 

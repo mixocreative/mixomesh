@@ -86,6 +86,25 @@ await test('newProject: dirty + "Cancel" → flow aborts, world intact', async (
   assert.ok(getState().scene.objects.keep, 'cancel must keep the world');
 });
 
+await test('close flow returns the shared cancel action', async () => {
+  seedWorld();
+  modalChoice = 'cancel';
+  assert.deepEqual(await PersistenceManager.requestClose(), { action: 'cancel' });
+});
+
+await test('close flow never approves a failed or cancelled save', async () => {
+  cancelPicker();
+  seedWorld();
+  modalChoice = 'save';
+  assert.deepEqual(await PersistenceManager.requestClose(), { action: 'save', saved: false });
+});
+
+await test('close flow returns the shared discard action', async () => {
+  seedWorld();
+  modalChoice = 'discard';
+  assert.deepEqual(await PersistenceManager.requestClose(), { action: 'discard' });
+});
+
 await test('saveAs → save: accepted picker → returns true', async () => {
   acceptPicker();
   assert.equal(await PersistenceManager.saveAs(), true);

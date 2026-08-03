@@ -14,6 +14,7 @@ const { createOpaqueFileRegistry } = require('./OpaqueFileRegistry.cjs');
 const DEV_URL = process.env.MIXO_DEV_URL || '';
 let _kvPath = '';
 const _fileRefs = createOpaqueFileRegistry();
+const _approvedClose = new WeakSet();
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -29,6 +30,12 @@ function createWindow() {
   });
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+
+  win.on('close', event => {
+    if (_approvedClose.has(win) || process.env.MIXO_SMOKE) return;
+    event.preventDefault();
+    win.webContents.send('app:close-requested');
+  });
 
   // Headless smoke (MIXO_SMOKE=1): verify the built app boots in the desktop shell,
   // then quit — so CI/dev can assert the desktop path loads without a lingering window.
@@ -68,6 +75,15 @@ ipcMain.handle('fs:readFile', async (_e, p) => {
 ipcMain.handle('fs:writeFile', async (_e, p, data) => fs.writeFile(p, Buffer.from(data)));
 ipcMain.handle('dialog:open', async (_e, opts) => dialog.showOpenDialog(opts ?? {}));
 ipcMain.handle('dialog:save', async (_e, opts) => dialog.showSaveDialog(opts ?? {}));
+ipcMain.on('app:close-response', (event, result) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  const approved = result?.action === 'discard'
+    || result?.action === 'save' && result?.saved === true;
+  if (!approved) return;
+  _approvedClose.add(win);
+  win.close();
+});
 
 app.whenReady().then(() => {
   _kvPath = path.join(app.getPath('userData'), 'mixo-kv.json');

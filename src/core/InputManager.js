@@ -271,12 +271,17 @@ function _pickHorizontalPlaneAtPointer(y) {
 
 function _onContextMenuRMB(info) {
   const ev = info.event;
+  const pick = _scene.pick(_scene.pointerX, _scene.pointerY, mesh => !!mesh && mesh.isPickable !== false);
   const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
   if (id && !Selection.contains(id)) {
     Selection.set([id], id);
   }
   if (_onContextMenu) {
-    _onContextMenu({ x: ev.clientX, y: ev.clientY, source: 'viewport' });
+    const normal = pick?.hit ? pick.getNormal?.(true) : null;
+    _onContextMenu({
+      x: ev.clientX, y: ev.clientY, source: 'viewport',
+      faceNormal: normal ? { x: normal.x, y: normal.y, z: normal.z } : null,
+    });
   }
 }
 
