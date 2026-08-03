@@ -1593,6 +1593,23 @@ before mutating state or Babylon meshes. A duplicated split object receives a
 fresh `sourceGroupId` and its own lead `logicalObjectId`; it must never point
 back to the original logical object.
 
+### GroupNode (transform hierarchy, in `state.scene.groups[groupId]`)
+```js
+{
+  id, name,
+  parentId,                     // parent GroupNode id, or null
+  childIds: [],                 // direct SceneObject ids; subgroups link by parentId
+  origin,                       // 'import' | 'user'
+}
+```
+
+`origin` controls empty-group lifecycle, not rendering. Deleting objects always
+removes their ids from every `childIds` array. Imported groups that then have no
+direct objects or live subgroups are pruned recursively in the same undoable
+command; user groups remain as intentional organization. Documents written
+before `origin` existed normalize missing values to `'user'`, which avoids
+silently deleting a user's group.
+
 **Name uniqueness invariant.** `name` must be unique across the union of
 `state.scene.objects` and `state.scene.groups`. Two sites enforce it:
 
