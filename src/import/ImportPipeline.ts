@@ -15,6 +15,14 @@ export type ImportedTexture = {
   mimeType: string;
   width: number;
   height: number;
+  imageContentHash?: string;
+  textureView?: {
+    colorSpace: 'srgb' | 'linear';
+    invertY: boolean;
+    wrapU: number;
+    wrapV: number;
+    samplingMode: number;
+  };
 };
 
 export type RawImportedAsset<TContainer = unknown> = {

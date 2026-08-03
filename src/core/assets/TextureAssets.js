@@ -12,6 +12,8 @@ import { textureToDataUrl } from './TextureReadback.js';
 import { setBlobUrl, revokeBlobUrl } from './BlobUrls.js';
 import { captureAndCap, applyCapToTexture, currentCapPx, clearCapUrl, clearCapUrls } from './TextureCap.js';
 import { clearTextureSource, clearTextureSources } from './TextureSource.js';
+import { clearTextureImages, storeTextureImage } from './TextureImageStore.js';
+import { normalizeTextureView, textureViewFromBabylon } from './TextureView.js';
 
 const BABYLON = window.BABYLON;
 
@@ -75,6 +77,7 @@ export async function loadTextureFromBlob(blob, filename, opts = {}) {
 
   const scene = SceneManager.getScene();
   const assetId = _newId();
+  const imageContentHash = await storeTextureImage(blob);
   const blobUrl = URL.createObjectURL(blob);
   setBlobUrl(assetId, blobUrl);
 
@@ -98,6 +101,8 @@ export async function loadTextureFromBlob(blob, filename, opts = {}) {
     kind: 'texture',
     directoryHandleKey: opts.directoryHandleKey ?? null,
     babylonTextureName: typeof texture.name === 'string' ? texture.name : null,
+    imageContentHash,
+    textureView: textureViewFromBabylon(texture, imageContentHash),
     thumbnailDataUrl: blobUrl,   // the image itself doubles as the panel thumbnail
   };
   setState(s => ({
@@ -166,6 +171,8 @@ export function registerImportedTexture(texture, ctx = {}) {
     sourceFileHash: ctx.sourceFileHash ?? null,
     sourceAssetId: ctx.sourceAssetId ?? null,
     babylonTextureName: typeof texture.name === 'string' ? texture.name : null,
+    imageContentHash: null,
+    textureView: textureViewFromBabylon(texture, null),
     thumbnailDataUrl: null,   // populated async below
   };
   setState(s => ({
@@ -271,14 +278,18 @@ export async function restoreTexture(entry, blob) {
   const scene = SceneManager.getScene();
   const blobUrl = URL.createObjectURL(blob);
   setBlobUrl(entry.id, blobUrl);
+  const view = normalizeTextureView({ ...entry.textureView, imageContentHash: entry.imageContentHash });
   const texture = await new Promise((resolve, reject) => {
     const t = new BABYLON.Texture(
-      blobUrl, scene, false, false,
-      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+      blobUrl, scene, false, view.invertY,
+      view.samplingMode,
       () => resolve(t),
       (msg, err) => reject(err ?? new Error(String(msg))),
     );
   });
+  texture.gammaSpace = view.colorSpace !== 'linear';
+  texture.wrapU = view.wrapU;
+  texture.wrapV = view.wrapV;
   _tagTextureAsset(texture, entry.id);
   _textures.set(entry.id, texture);
   setState(s => ({
@@ -316,6 +327,7 @@ export function resetTextures() {
   _textures.clear();
   clearCapUrls();
   clearTextureSources();
+  clearTextureImages();
 }
 
 /**

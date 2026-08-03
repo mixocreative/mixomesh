@@ -14,11 +14,12 @@ import { clear as historyClear } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { kvDelete, getFileHandle } from '../idb.js';
-import { decompose, applyWorld, stripFileData, extOf } from './ProjectSerializer.js';
+import { decompose, applyWorld, stripFileData, extOf, bufFromB64 } from './ProjectSerializer.js';
 import { resolveAssetBlob } from './AssetResolver.js';
 import { clearDirty } from './DirtyTracker.js';
 import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
+import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
 
@@ -181,6 +182,14 @@ export async function loadProject(doc) {
     ui:        { ...s.ui, ...(data.ui || {}), workspace: s.ui.workspace, panelCollapsed: s.ui.panelCollapsed },
   }), SILENT);
 
+  // Image resources restore before texture views/assets, which restore before
+  // shaders. Equal hashes become one in-memory blob regardless of view count.
+  for (const image of data.textureImages || []) {
+    if (!image?.hash || !image.fileData) continue;
+    const blob = new Blob([bufFromB64(image.fileData)], { type: image.mimeType || 'application/octet-stream' });
+    await storeTextureImage(blob, image.width, image.height, image.hash);
+  }
+
   // Assets restore BEFORE shaders (§11 Load Sequence) — restoreShader rebinds
   // diffuseTextureAssetId via getBabylonTexture, which only resolves once
   // user textures are restored and container-owned textures are rebound.
@@ -205,7 +214,10 @@ export async function loadProject(doc) {
       assetRes.set(a.id, { status: 'imported' });
       continue;
     }
-    const r = await resolveAssetBlob(a);
+    const storedImage = a.kind === 'texture' && a.imageContentHash
+      ? getTextureImage(a.imageContentHash)
+      : null;
+    const r = storedImage ? { blob: storedImage.blob, live: false } : await resolveAssetBlob(a);
     if (a.kind === 'texture') {
       if (r) { await AssetLoader.restoreTexture(stripFileData(a), r.blob); assetRes.set(a.id, { status: r.live ? 'live' : 'static' }); }
       else   { AssetLoader.registerAssetEntry(stripFileData(a)); assetRes.set(a.id, { status: 'ghost' }); }

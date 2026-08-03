@@ -16,7 +16,7 @@
 // TextureReadback.EXPORT_FLIP_Y). The stored blob is literally what a full-res
 // GPU readback would have produced, frozen before the cap touches the texture.
 
-const _sources = new Map();   // assetId → { blob, width, height }
+const _sources = new Map();   // assetId → { blob, width, height, imageContentHash }
 
 /**
  * Record a texture's full-res export PNG under its asset id. Idempotent —
@@ -27,9 +27,9 @@ const _sources = new Map();   // assetId → { blob, width, height }
  * @param {number} width
  * @param {number} height
  */
-export function setTextureSource(assetId, blob, width, height) {
+export function setTextureSource(assetId, blob, width, height, imageContentHash = null) {
   if (!assetId || !blob || _sources.has(assetId)) return;
-  _sources.set(assetId, { blob, width, height });
+  _sources.set(assetId, { blob, width, height, imageContentHash });
 }
 
 /** @returns {{ blob: Blob, width: number, height: number }|null} */

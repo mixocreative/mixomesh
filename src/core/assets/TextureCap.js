@@ -16,7 +16,9 @@
 
 import { textureToPngBlob } from './TextureReadback.js';
 import { setTextureSource, getTextureSource } from './TextureSource.js';
-import { getState } from '../StateManager.js';
+import { getState, setState } from '../StateManager.js';
+import { storeTextureImage, updateTextureImageDimensions } from './TextureImageStore.js';
+import { textureViewFromBabylon } from './TextureView.js';
 
 const _capUrls = new Map();   // assetId → object URL currently applied (for revoke)
 
@@ -46,7 +48,29 @@ export async function captureAndCap(assetId, texture) {
       const blob = await textureToPngBlob(texture);   // export-ready, full res
       if (blob) {
         const s = texture.getSize?.() ?? {};
-        setTextureSource(assetId, blob, s.width | 0, s.height | 0);
+        const current = getState().scene.assetLibrary[assetId];
+        const imageContentHash = current?.imageContentHash
+          ?? await storeTextureImage(blob, s.width | 0, s.height | 0);
+        if (current?.imageContentHash) {
+          updateTextureImageDimensions(imageContentHash, s.width | 0, s.height | 0);
+        }
+        setTextureSource(assetId, blob, s.width | 0, s.height | 0, imageContentHash);
+        if (current && (!current.imageContentHash || !current.textureView)) {
+          setState(state => ({
+            ...state,
+            scene: {
+              ...state.scene,
+              assetLibrary: {
+                ...state.scene.assetLibrary,
+                [assetId]: {
+                  ...current,
+                  imageContentHash,
+                  textureView: textureViewFromBabylon(texture, imageContentHash),
+                },
+              },
+            },
+          }), { silent: true });
+        }
       }
     }
   } catch (err) {

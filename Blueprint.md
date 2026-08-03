@@ -237,6 +237,8 @@ src/
       AssetIndex.js        ← immutable mounted-file index + scoped query/refresh fallback
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
       TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind, recap-all
+      TextureImageStore.js ← SHA-256 → one immutable canonical encoded image blob
+      TextureView.js       ← sampling/color-space view normalization + stable identity key
       TextureSource.js     ← full-res export-PNG per assetId, frozen pre-cap (export fidelity)
       TextureCap.js        ← viewport texture cap: capture-then-downscale GPU, export reads source
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
@@ -1553,6 +1555,8 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
   sourceFileHash,              // texture identity scope — §10b (texture entries)
   sourceAssetId,               // owning mesh asset for imported textures — §10b
   babylonTextureName,          // loader-minted texture.name for reload rebind — §10b
+  imageContentHash,            // SHA-256 of canonical encoded image bytes; filename excluded
+  textureView,                 // {imageContentHash,colorSpace,invertY,wrapU,wrapV,samplingMode}
 }
 ```
 
@@ -2043,14 +2047,14 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 ### Import Merge Strategy
 On material-name collision during `registerFromContainer`:
 1. **Auto-dedupe first.** `_findContentDuplicate(mat)` builds a signature from the imported material — `type | diffuseColor | opacity | roughness | metallic | uvBase | diffuseTextureAssetId` — and compares to every existing scene shader's signature. An exact match silently reuses the existing shaderId, redirects the imported mesh's `material` pointer, disposes the duplicate material, and skips the merge modal entirely. This catches the most common case (the user dropped the same file twice).
-2. **Texture identity reuse** runs as part of step 1's signature. The current
-   implementation uses the source-scoped heuristic
-   `${sourceFileHash}|${name}|${width}|${height}|${className}` in
-   `AssetLoader.registerImportedTexture`, so two imports of the same source
-   file can share one `diffuseTextureAssetId`. This is not a byte/pixel content
-   comparison and must never merge across different source files. The planned
-   content-addressed image/view replacement is specified in
-   `docs/superpowers/specs/2026-08-03-editor-asset-hierarchy-ux-design.md`.
+2. **Texture resource identity is separate from its view.**
+   `TextureImageStore` keys canonical encoded bytes by SHA-256, so equal bytes
+   share one stored blob regardless of filename. `TextureView` separately
+   normalizes color space, invert-Y, wrap U/V, and sampling mode. UV transform
+   remains a ShaderEntry field. Same-name/different-byte images never merge;
+   equal bytes with different view keys share storage but not a mutable Babylon
+   texture. GPU-only imported images use the full-resolution capture-before-cap
+   PNG as their canonical bytes.
 3. **Only remaining conflicts hit the modal.** If a name still collides AND content differs, dispatch `EVENTS.MODAL_OPEN` with id `shaderMerge`, payload `{ conflicts }`.
 4. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**. Default: Rename. Checkbox "Apply to all conflicts in this import."
 5. On confirm: apply choices, continue load.
@@ -2140,17 +2144,19 @@ PersistenceManager.__test = {
   _buildDocument, _loadProject,
 }
 ```
-Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.2'` (3.2 adds the §10b texture-identity
-fields `sourceFileHash` / `sourceAssetId` / `babylonTextureName` on texture
-AssetEntries — 3.1 docs load unchanged, missing fields just skip the rebind
-and fall back to colour), `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`, `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally `AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
+Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.3'` (3.3 adds
+top-level content-addressed `textureImages` plus `imageContentHash` / `textureView`
+on texture AssetEntries; 3.2 and older per-asset `fileData` still loads),
+`FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`,
+`AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally
+`AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
 
-### Full Project Schema (v3.1)
+### Full Project Schema (v3.3)
 Every field persisted. Restored exactly.
 
 ```jsonc
 {
-  "version": "3.1",
+  "version": "3.3",
   "savedAt": "ISO8601",
   "project": { "name": "..." },
   "sceneSettings": {
@@ -2182,6 +2188,7 @@ Every field persisted. Restored exactly.
     "objBakeSolidTextures": false
   },
   "assetLibrary":  [ /* AssetEntry without container or blobUrl */ ],
+  "textureImages": [ /* unique {hash,width,height,mimeType,fileData}; one per SHA-256 */ ],
   "collections":   [ /* CollectionEntry[] — outliner display buckets */ ],
   "shaders":       [ /* ShaderEntry without linkedMeshIds */ ],
   "uvOverrides":   { /* Record<meshId, UVOverride> */ },
@@ -2215,12 +2222,15 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 3. Dispose all current Babylon meshes/materials/containers, revoke blob URLs.
 4. Restore print, sceneSettings, ui, gizmo, uvOverrides, userSwatches,
    collections into state (no Babylon work).
+5. Decode and hash-validate `textureImages` into TextureImageStore.
 8. Resolve + restore every assetLibrary entry sequentially:
    - For each: run `_resolveAssetBlob` (see priority table above).
    - Mesh assets: restoreContainer, then REBIND imported textures owned by
      this container (§10b reload rebind rule: match persisted
      babylonTextureName, register under the persisted texture assetId).
-   - User-loaded texture assets: restoreTexture under the persisted id.
+   - User-loaded texture assets: resolve `imageContentHash` from the image
+     store first (legacy `fileData`/live tiers remain fallback), then create its
+     independent texture view under the persisted id.
    - Unresolved → create ghost (state.scene.objects entry with isGhost: true).
 5. Restore shaders into state + create Babylon materials in ShaderLibrary.
    MUST run AFTER step 8 — restoreShader rebinds diffuseTextureAssetId via

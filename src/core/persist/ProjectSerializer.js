@@ -13,6 +13,7 @@ import { sha256Hex } from '../hash.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
+import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
 
@@ -81,6 +82,8 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
       sourceFileHash: a.sourceFileHash ?? null,
       sourceAssetId: a.sourceAssetId ?? null,
       babylonTextureName: a.babylonTextureName ?? null,
+      imageContentHash: a.imageContentHash ?? null,
+      textureView: a.textureView ?? null,
       libraryItem: a.libraryItem ?? null,
       thumbnailDataUrl: typeof a.thumbnailDataUrl === 'string'
         && a.thumbnailDataUrl.startsWith('data:') ? a.thumbnailDataUrl : null,
@@ -97,9 +100,13 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
     // crash-recovery resolves it to a ghost. Container-owned textures still
     // never carry standalone bytes (skipped either way).
     const isContainerTexture = a.kind === 'texture' && a.isImported;
+    const hasContentAddressedImage = a.kind === 'texture'
+      && a.imageContentHash && getTextureImage(a.imageContentHash);
     const hasLiveTier = !!a.directoryHandleKey || !!a.fileHandleKey;
     if (skipEmbed && (hasLiveTier || isContainerTexture)) {
       base.contentHash = a.contentHash ?? null;
+    } else if (hasContentAddressedImage) {
+      base.contentHash = a.imageContentHash;
     } else if (!isContainerTexture) {
       try {
         const buf = await AssetLoader.getAssetBytes(a.id);
@@ -120,6 +127,20 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
     out.push(base);
   }
   return out;
+}
+
+export async function serialiseTextureImages() {
+  const referenced = new Set(Object.values(getState().scene.assetLibrary)
+    .map(asset => asset.imageContentHash).filter(Boolean));
+  return Promise.all(listTextureImages()
+    .filter(image => referenced.has(image.hash))
+    .map(async image => ({
+      hash: image.hash,
+      width: image.width,
+      height: image.height,
+      mimeType: image.mimeType,
+      fileData: await encodeBase64Async(await image.blob.arrayBuffer()),
+    })));
 }
 
 function _serialiseSceneObjects() {
@@ -195,6 +216,7 @@ export async function buildDocument(opts = {}) {
     },
     print: { ...s.print },
     assetLibrary: await _serialiseAssetLibrary(opts),
+    textureImages: await serialiseTextureImages(),
     collections: Object.values(s.scene.collections ?? {}),
     shaders: Object.values(s.scene.shaders).map(({ linkedMeshIds, ...rest }) => rest),
     uvOverrides: { ...s.scene.uvOverrides },
