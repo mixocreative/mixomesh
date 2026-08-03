@@ -6,12 +6,13 @@ import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
-import { logicalObjectCommandIds, logicalObjectPartIds } from '../core/LogicalObjects.js';
+import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
 import { Modal } from './Modal.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
+import { Outliner } from './Outliner.js';
 
 let _root = null;
 let _isOpen = false;
@@ -123,6 +124,15 @@ function _buildItems(info) {
     ];
   }
 
+  if (info.targetKind === 'group' && info.targetId) {
+    const group = getState().scene.groups[info.targetId];
+    return [
+      { label: t('context.selectMembers'), shortcut: '', action: 'group-select', iconName: 'Boxes', cls: '' },
+      { label: t('context.selectParent'), shortcut: '', action: 'select-parent', iconName: 'GitBranch', cls: group?.parentId ? '' : 'cm-disabled' },
+      { label: t('context.revealOutliner'), shortcut: '', action: 'reveal-outliner', iconName: 'LocateFixed', cls: '' },
+    ];
+  }
+
   const selIds = Selection.getSelectedIds();
   const hasSelection = selIds.length > 0;
   const multi = selIds.length > 1;
@@ -135,6 +145,13 @@ function _buildItems(info) {
     ? info.targetId : null;
 
   return [
+    ...(info.targetKind === 'object' && info.targetId ? [
+      { label: t('context.selectParent'), shortcut: '', action: 'select-parent', iconName: 'GitBranch', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
+      { label: t('context.selectSiblings'), shortcut: '', action: 'select-siblings', iconName: 'Boxes', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
+      { label: t('context.selectImportMembers'), shortcut: '', action: 'select-import', iconName: 'Package', cls: objs[info.targetId]?.collectionId ? '' : 'cm-disabled' },
+      { label: t('context.revealOutliner'), shortcut: '', action: 'reveal-outliner', iconName: 'LocateFixed', cls: '' },
+      'sep',
+    ] : []),
     ...(ghostId ? [
       { label: objs[ghostId].isGhost ? t('context.relinkAsset') : t('context.relinkLiveFile'),
         shortcut: '', action: 'relink', iconName: 'Link', cls: '' },
@@ -213,6 +230,54 @@ function _runAction(action, info) {
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
   if (action === 'col-rename') _renameCollection(info.targetId);
   if (action === 'col-delete') _deleteCollection(info.targetId);
+  if (action === 'group-select') _selectGroupMembers(info.targetId);
+  if (action === 'select-parent') _selectParent(info.targetId, info.targetKind);
+  if (action === 'select-siblings') _selectSiblings(info.targetId);
+  if (action === 'select-import') _selectImportMembers(info.targetId);
+  if (action === 'reveal-outliner') Outliner.reveal(info.targetId ?? Selection.getActiveId());
+}
+
+function _groupMemberIds(groupId) {
+  const { groups, objects } = getState().scene;
+  const root = groups[groupId];
+  if (!root) return [];
+  const ids = [];
+  const stack = [root];
+  while (stack.length) {
+    const group = stack.pop();
+    for (const id of group.childIds ?? []) {
+      if (objects[id] && shouldDisplayObject(objects[id])) ids.push(id);
+    }
+    for (const child of Object.values(groups)) if (child.parentId === group.id) stack.push(child);
+  }
+  return ids;
+}
+
+function _selectGroupMembers(groupId) {
+  const ids = _groupMemberIds(groupId);
+  if (ids.length) Selection.set(ids, ids[ids.length - 1]);
+}
+
+function _selectParent(targetId, targetKind) {
+  const state = getState();
+  const parentId = targetKind === 'group'
+    ? state.scene.groups[targetId]?.parentId
+    : state.scene.objects[targetId]?.parentId;
+  if (parentId) _selectGroupMembers(parentId);
+}
+
+function _selectSiblings(objectId) {
+  const state = getState();
+  const parentId = state.scene.objects[objectId]?.parentId;
+  if (!parentId) return;
+  const ids = (state.scene.groups[parentId]?.childIds ?? [])
+    .filter(id => state.scene.objects[id] && shouldDisplayObject(state.scene.objects[id]));
+  if (ids.length) Selection.set(ids, objectId);
+}
+
+function _selectImportMembers(objectId) {
+  const collectionId = getState().scene.objects[objectId]?.collectionId;
+  if (collectionId) _selectCollectionMembers(collectionId);
 }
 
 function _smartReplace() {

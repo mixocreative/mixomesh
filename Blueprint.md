@@ -2835,13 +2835,20 @@ otherwise the panel falls back to its placeholder icon.
 
 ### Outliner (`src/ui/Outliner.js`)
 - Renders unified tree from `state.scene.objects` + `state.scene.groups` + `state.scene.collections`.
-- Row icons via `Icons.icon(name, attrs)` — see Part 2. Validation status
+- Row type is explicit: Collection/import provenance uses `Package`, a real
+  TransformNode group uses `GitBranch`, and geometry uses `Box`. Picking in the
+  viewport selects only the Object; it expands and reveals the object's
+  Collection/Group ancestor path without selecting those ancestors. Clicking a
+  Collection or Group row selects its live descendant Objects.
+- Row icons use `Icons.icon(name, attrs)` — see Part 2. Validation status
   badges (warning/error, stale-dimmed) read the §9 A6 cache and render as
   trusted markup after the escaped name.
 - Drag-to-reparent (`PARENT_CHANGED`) — PLANNED, not implemented.
 - Multi-select: `Shift+click` add, `Ctrl+click` toggle. Dispatch `SELECTION_CHANGED`.
 - Double-click row name → inline rename (text input, blur/Enter commits via `RenameCommand`; collections via `RenameCollectionCommand`).
-- Search bar (name / shader / validation filters) — PLANNED, not implemented.
+- The search bar filters by Object, Group, or Collection name. A matching
+  Object keeps its complete ancestor path visible; clearing search restores the
+  unfiltered tree without changing selection.
 - Ghost rows: red `CircleAlert` icon. Relink runs from the unmatched-assets
   modal (ProjectMenu) — per-row right-click relink is PLANNED.
 - **Row layout** uses a 6-column grid: `[indent] [type-icon] [name] [visibility] [lock] [print-part]`. The print-part column shows a `Printer` icon button on object rows (highlighted amber when `isPrintPart: true`); group rows get a blank placeholder span to keep alignment. Clicking the icon toggles `isPrintPart` via `PrintPartCommand`.
@@ -2858,6 +2865,9 @@ A **collection** is a display-only outliner container per imported file. It carr
 3. **Mixed-collection groups** render at the outliner root (not inside any collection) with a `Mixed` badge next to the group name. Their members keep their original `collectionId` tags — the group is just routing display.
 4. **Standalone (no group) objects** render inside their `collectionId` container, or at root if untagged.
 5. Empty collections auto-hide (no row when 0 visible children).
+6. Empty user-created groups remain visible with an `Empty` badge. Empty
+   imported groups are removed by the lifecycle contract in §AssetLoader
+   GroupNode / `DeleteCommand`, so rendering never needs to mask stale state.
 
 The `Mixed` badge is static sibling markup after the escaped group-name span,
 so inline rename reads only the actual group name and never treats the badge
@@ -2869,6 +2879,12 @@ Collection row interactions:
 - Double-click name → inline rename through `RenameCollectionCommand`
   (dispatches `COLLECTION_RENAMED`; undoable).
 - RMB → context menu: **Select Members**, **Rename Collection…**, **Delete Collection** (the last untags every member, leaving them visible as "uncollected" at outliner root; the collection entry is then removed from state).
+
+Object/group context navigation adds **Select Parent Group**, **Select
+Siblings**, **Select Import Members**, and **Reveal in Outliner** where the
+target supports them. Because selection stores geometry ids only, selecting a
+parent group means selecting all of that group's live descendant Objects; it
+does not make the meshless TransformNode an active geometry object.
 
 Outliner row events are delegated from `#ol-list`; rows are not individually
 re-wired on every render. Rows expose `role="treeitem"`, `tabindex="0"`, and

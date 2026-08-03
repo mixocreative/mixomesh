@@ -1401,6 +1401,77 @@ async function main() {
     assert(placePanel.hasMirror && placePanel.hasArray && placePanel.hasMate,
       'placement panel: mirror + array + mate buttons present');
 
+    // ── Outliner semantics: Import / Group / Object stay distinct ──
+    const outlinerSemantics = await evaluate(cdp, `(async () => {
+      const st = await import('/src/core/StateManager.js');
+      const ev = await import('/src/core/events.js');
+      const sel = await import('/src/core/Selection.js');
+      st.setState(s => ({
+        ...s,
+        scene: {
+          ...s.scene,
+          collections: { ...s.scene.collections, ol_col: { id: 'ol_col', name: 'Import.glb', sourceFile: 'Import.glb', sourceAssetId: 'ol_asset' } },
+          groups: {
+            ...s.scene.groups,
+            ol_group: { id: 'ol_group', name: 'Assembly', parentId: null, childIds: ['ol_object'], origin: 'import' },
+            ol_empty: { id: 'ol_empty', name: 'My Group', parentId: null, childIds: [], origin: 'user' },
+          },
+          objects: {
+            ...s.scene.objects,
+            ol_object: { id: 'ol_object', name: 'Body', assetId: 'ol_asset', collectionId: 'ol_col', parentId: 'ol_group', shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 },
+          },
+        },
+        ui: { ...s.ui, outlinerCollapsed: { ...s.ui.outlinerCollapsed, ol_col: true, ol_group: true } },
+      }), { silent: true });
+      st.dispatch(ev.EVENTS.OBJECT_RESTORED, { id: 'ol_object' });
+      sel.Selection.set(['ol_object'], 'ol_object');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const collection = document.querySelector('[data-id="ol_col"]');
+      const group = document.querySelector('[data-id="ol_group"]');
+      const object = document.querySelector('[data-id="ol_object"]');
+      const empty = document.querySelector('[data-id="ol_empty"]');
+      const search = document.querySelector('#ol-search');
+      if (search) {
+        search.value = 'Body';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const shown = id => document.querySelector('[data-id="' + id + '"]')?.hidden === false;
+      const cm = await import('/src/ui/ContextMenu.js');
+      cm.ContextMenu.open({ x: 10, y: 10, source: 'outliner', targetId: 'ol_group', targetKind: 'group' });
+      const groupActions = [...document.querySelectorAll('.context-menu [data-action]')].map(item => item.dataset.action);
+      document.querySelector('.context-menu [data-action="group-select"]')?.click();
+      const groupSelectedObject = sel.Selection.getSelectedIds().includes('ol_object');
+      cm.ContextMenu.open({ x: 10, y: 10, source: 'outliner', targetId: 'ol_object', targetKind: 'object' });
+      const objectActions = [...document.querySelectorAll('.context-menu [data-action]')].map(item => item.dataset.action);
+      cm.ContextMenu.close();
+      return {
+        objectSelected: object?.getAttribute('aria-selected') === 'true',
+        groupSelected: group?.getAttribute('aria-selected') === 'true',
+        collectionExpanded: collection?.getAttribute('aria-expanded') === 'true',
+        groupExpanded: group?.getAttribute('aria-expanded') === 'true',
+        iconsDiffer: collection?.querySelector('.ol-icon')?.innerHTML !== group?.querySelector('.ol-icon')?.innerHTML,
+        emptyBadge: empty?.textContent.includes('Empty') ?? false,
+        hasSearch: !!search,
+        searchKeepsPath: shown('ol_col') && shown('ol_group') && shown('ol_object'),
+        groupActions,
+        objectActions,
+        groupSelectedObject,
+      };
+    })()`);
+    assert(outlinerSemantics.objectSelected && !outlinerSemantics.groupSelected,
+      'viewport/object selection selects only the Object row');
+    assert(outlinerSemantics.collectionExpanded && outlinerSemantics.groupExpanded,
+      'active Object selection reveals its Import and Group ancestors');
+    assert(outlinerSemantics.iconsDiffer, 'Import and Group rows use distinct icons');
+    assert(outlinerSemantics.emptyBadge, 'empty user groups are explicitly labelled Empty');
+    assert(outlinerSemantics.hasSearch && outlinerSemantics.searchKeepsPath,
+      'Outliner name search keeps matching objects and their ancestor path visible');
+    assert(outlinerSemantics.groupSelectedObject && outlinerSemantics.groupActions.includes('select-parent'),
+      'Group context navigation selects descendants and exposes parent navigation');
+    assert(['select-parent', 'select-siblings', 'select-import', 'reveal-outliner']
+      .every(action => outlinerSemantics.objectActions.includes(action)),
+    'Object context menu exposes parent, sibling, import, and reveal navigation');
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

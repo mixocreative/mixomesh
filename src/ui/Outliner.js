@@ -10,6 +10,7 @@ import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 let _root  = null;
 let _listEl = null;
 let _onContextMenu = null;
+let _searchQuery = '';
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -32,7 +33,6 @@ const _SUBSCRIBE = [
   EVENTS.LOCK_CHANGED,
   EVENTS.OBJECT_UPDATED,
   EVENTS.SELECTION_CHANGED,
-  EVENTS.ACTIVE_OBJECT_CHANGED,
   EVENTS.PROJECT_LOADED,
   EVENTS.VALIDATION_COMPLETE,   // status icons read the A6 cache
   EVENTS.TRANSFORM_COMMITTED,   // stale-marking after moves
@@ -51,9 +51,16 @@ export function init() {
     <div class="ol-header">
       <span class="ol-title" data-i18n-key="panel.outliner.title">Outliner</span>
     </div>
+    <input class="ol-search" id="ol-search" type="search"
+           placeholder="${escapeAttr(t('outliner.searchPlaceholder'))}"
+           aria-label="${escapeAttr(t('outliner.searchLabel'))}">
     <div class="ol-list" id="ol-list" role="tree" data-i18n-aria-label="outliner.sceneObjects"></div>
   `;
   _listEl = _root.querySelector('#ol-list');
+  _root.querySelector('#ol-search').addEventListener('input', event => {
+    _searchQuery = event.target.value;
+    _render();
+  });
   _listEl.addEventListener('click', _onListClick);
   _listEl.addEventListener('dblclick', _onListDblClick);
   _listEl.addEventListener('contextmenu', _onListContextMenu);
@@ -63,6 +70,7 @@ export function init() {
   _listEl.addEventListener('keydown', _onListKeyDown);
 
   for (const ev of _SUBSCRIBE) subscribe(ev, _render);
+  subscribe(EVENTS.ACTIVE_OBJECT_CHANGED, _revealActiveObject);
   // Locale changes must rebuild row markup generated from t(), then refresh
   // static title/list data-i18n attributes in one root walk.
   subscribe(EVENTS.LOCALE_CHANGED, () => { _render(); _retranslate(_root); });
@@ -88,9 +96,11 @@ function _render() {
   // Partition top-level groups by collection homogeneity.
   const groupsByCol = new Map();        // collectionId → group[]
   const mixedGroups = [];
+  const rootGroups = [];
   for (const g of topGroups) {
     const c = groupCol.get(g.id);
-    if (c === 'mixed' || c == null) { mixedGroups.push(g); continue; }
+    if (c === 'mixed') { mixedGroups.push(g); continue; }
+    if (c == null) { rootGroups.push(g); continue; }
     if (!groupsByCol.has(c)) groupsByCol.set(c, []);
     groupsByCol.get(c).push(g);
   }
@@ -116,6 +126,7 @@ function _render() {
   }
   // Mixed-collection groups render at outliner root with a [Mixed] badge.
   for (const g of mixedGroups) parts.push(_renderGroupBranch(g, groups, objects, collapsed, 0, /*mixed*/ true));
+  for (const g of rootGroups)  parts.push(_renderGroupBranch(g, groups, objects, collapsed, 0, false));
   // Uncollected orphan objects render at root.
   for (const o of uncolObjs)   parts.push(_renderObjectRow(o, 0));
 
@@ -126,6 +137,44 @@ function _render() {
 
   _listEl.innerHTML = parts.join('');
   _applySelectionHighlight();
+  _applySearchFilter(objects, groups, collections);
+}
+
+function _applySearchFilter(objects, groups, collections) {
+  const query = _searchQuery.trim().toLocaleLowerCase();
+  if (!query) {
+    _listEl.querySelectorAll('.ol-row').forEach(row => { row.hidden = false; });
+    return;
+  }
+  const visibleIds = new Set();
+  const addGroupPath = (groupId) => {
+    const seen = new Set();
+    let id = groupId;
+    while (id && !seen.has(id)) {
+      seen.add(id);
+      visibleIds.add(id);
+      id = groups[id]?.parentId ?? null;
+    }
+  };
+  for (const object of Object.values(objects)) {
+    if (!shouldDisplayObject(object) || !String(object.name ?? '').toLocaleLowerCase().includes(query)) continue;
+    visibleIds.add(object.id);
+    if (object.collectionId) visibleIds.add(object.collectionId);
+    addGroupPath(object.parentId);
+  }
+  const groupCollections = _computeGroupCollections(groups, objects);
+  for (const group of Object.values(groups)) {
+    if (!String(group.name ?? '').toLocaleLowerCase().includes(query)) continue;
+    addGroupPath(group.id);
+    const signature = groupCollections.get(group.id);
+    if (signature && signature !== 'mixed') visibleIds.add(signature);
+  }
+  for (const collection of Object.values(collections)) {
+    if (String(collection.name ?? '').toLocaleLowerCase().includes(query)) visibleIds.add(collection.id);
+  }
+  _listEl.querySelectorAll('.ol-row').forEach(row => {
+    row.hidden = !visibleIds.has(row.dataset.id);
+  });
 }
 
 /**
@@ -160,7 +209,6 @@ function _computeGroupCollections(allGroups, allObjects) {
 function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allObjects, collapsed) {
   const isCollapsed = !!collapsed[col.id];
   const count = memberGroups.length + memberObjs.length;
-  const iconName = isCollapsed ? 'Folder' : 'FolderOpen';
   const twirl = `<span class="ol-twirl">${icon(isCollapsed ? 'ChevronRight' : 'ChevronDown', { width: 12, height: 12 })}</span>`;
   const header = `
     <div class="ol-row ol-row-collection"
@@ -173,7 +221,7 @@ function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allOb
          aria-selected="false"
          style="padding-left:0px">
       ${twirl}
-      <span class="ol-icon">${icon(iconName, { width: 14, height: 14 })}</span>
+      <span class="ol-icon" title="${escapeAttr(t('outliner.typeImport'))}">${icon('Package', { width: 14, height: 14 })}</span>
       <span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
@@ -191,18 +239,24 @@ function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth, mixe
   const isCollapsed = !!collapsed[group.id];
   const children = (group.childIds ?? []).map(id => allObjects[id]).filter(shouldDisplayObject);
   const subgroups = Object.values(allGroups).filter(g => g.parentId === group.id);
+  const empty = children.length + subgroups.length === 0;
+  const badges = [
+    mixed ? `<span class="ol-mixed-badge">${_escape(t('outliner.mixed'))}</span>` : '',
+    empty ? `<span class="ol-empty-badge">${_escape(t('outliner.emptyGroup'))}</span>` : '',
+  ].join('');
 
   let html = _renderRow({
     id: group.id,
     kind: 'group',
     name: group.name,
-    nameSuffix: mixed ? `<span class="ol-mixed-badge">${_escape(t('outliner.mixed'))}</span>` : '',
+    nameSuffix: badges,
     visible: true,
     locked: false,
     depth,
-    hasChildren: children.length + subgroups.length > 0,
+    hasChildren: !empty,
     isCollapsed,
-    iconName: isCollapsed ? 'Folder' : 'FolderOpen',
+    iconName: 'GitBranch',
+    typeTitle: t('outliner.typeGroup'),
   });
 
   if (!isCollapsed) {
@@ -225,6 +279,7 @@ function _renderObjectRow(obj, depth) {
     hasChildren: false,
     isCollapsed: false,
     iconName: obj.isGhost ? 'CircleAlert' : (obj.isUnlinked ? 'Link' : 'Box'),
+    typeTitle: t('outliner.typeObject'),
     isGhost: obj.isGhost,
     isUnlinked: obj.isUnlinked,
   });
@@ -243,7 +298,7 @@ function _validationBadge(meshId) {
   return `<span class="${cls}" title="${title}">${icon(name, { width: 11, height: 11 })}</span>`;
 }
 
-function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, isGhost, isUnlinked }) {
+function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, typeTitle = '', isGhost, isUnlinked }) {
   const indent  = depth * 14;
   const twirl   = hasChildren
     ? `<span class="ol-twirl">${icon(isCollapsed ? 'ChevronRight' : 'ChevronDown', { width: 12, height: 12 })}</span>`
@@ -265,7 +320,7 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
          aria-selected="false"
          style="padding-left:${indent}px">
       ${twirl}
-      <span class="ol-icon">${icon(iconName, { width: 14, height: 14 })}</span>
+      <span class="ol-icon" title="${escapeAttr(typeTitle)}">${icon(iconName, { width: 14, height: 14 })}</span>
       <span class="ol-name" data-name>${_escape(name)}</span>${nameSuffix}
       <button class="ol-icon-btn ol-vis"  type="button" data-action="vis"  title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
       <button class="ol-icon-btn ol-lock" type="button" data-action="lock" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
@@ -333,6 +388,37 @@ function _setCollapsed(id, collapsed) {
     ui: { ...s.ui, outlinerCollapsed: { ...s.ui.outlinerCollapsed, [id]: collapsed } },
   }), { silent: true });
   _render();
+}
+
+function _revealActiveObject() {
+  reveal(getState().selection.activeId);
+}
+
+export function reveal(objectId) {
+  const state = getState();
+  const object = state.scene.objects[objectId];
+  if (!object) { _render(); return; }
+  const revealIds = [];
+  if (object.collectionId) revealIds.push(object.collectionId);
+  let parentId = object.parentId;
+  const seen = new Set();
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    revealIds.push(parentId);
+    parentId = state.scene.groups[parentId]?.parentId ?? null;
+  }
+  if (revealIds.some(id => state.ui.outlinerCollapsed?.[id])) {
+    setState(s => {
+      const outlinerCollapsed = { ...s.ui.outlinerCollapsed };
+      for (const id of revealIds) outlinerCollapsed[id] = false;
+      return { ...s, ui: { ...s.ui, outlinerCollapsed } };
+    }, { silent: true });
+  }
+  _render();
+  requestAnimationFrame(() => {
+    const row = _listEl?.querySelector(`[data-id="${CSS.escape(object.id)}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  });
 }
 
 function _rowFromEvent(e) {
@@ -516,4 +602,4 @@ function _applySelectionHighlight() {
   });
 }
 
-export const Outliner = { init, setContextMenuHandler };
+export const Outliner = { init, setContextMenuHandler, reveal };
