@@ -2111,12 +2111,13 @@ drops them (2026-06-11 review C2/H6).
   for identical source bytes, so it re-identifies the texture inside a
   restored container.
 
-**Dedupe rule** (`AssetLoader.registerImportedTexture`): signature is
-`sourceFileHash | babylonTextureName | width | height | class`. Same file
-re-imported → dedupes to one assetId. Different files NEVER silently merge,
-even when loaders mint generic names like `Image_0` at equal dimensions.
-Cross-file pixel-level dedupe is intentionally out of scope — correctness
-over compactness.
+**Dedupe rule:** imported textures get an immediate conservative signature of
+`sourceFileHash | babylonTextureName | width | height | class | textureView` so
+same-source re-imports reuse an asset without merging different sampler views.
+Original encoded image bytes are then SHA-256 content-addressed in
+`TextureImageStore`: equal bytes from different files share one immutable image
+payload, while each `TextureView` independently preserves colour space, invertY,
+wrap U/V, and sampling mode. No name-only or perceptual matching is allowed.
 
 **Reload rebind rule** (PersistenceManager load): after `restoreContainer`
 succeeds for mesh asset `A`, every persisted imported-texture entry with
@@ -2882,8 +2883,8 @@ otherwise the panel falls back to its placeholder icon.
 - The search bar filters by Object, Group, or Collection name. A matching
   Object keeps its complete ancestor path visible; clearing search restores the
   unfiltered tree without changing selection.
-- Ghost rows: red `CircleAlert` icon. Relink runs from the unmatched-assets
-  modal (ProjectMenu) — per-row right-click relink is PLANNED.
+- Ghost rows: red `CircleAlert` icon. Relink runs from both the unmatched-assets
+  modal and the object row/viewport context menu.
 - **Row layout** uses a 6-column grid: `[indent] [type-icon] [name] [visibility] [lock] [print-part]`. The print-part column shows a `Printer` icon button on object rows (highlighted amber when `isPrintPart: true`); group rows get a blank placeholder span to keep alignment. Clicking the icon toggles `isPrintPart` via `PrintPartCommand`.
 
 #### Collections (Blender-style import buckets)
@@ -3828,7 +3829,7 @@ build history. Detailed behaviour contracts live in the module sections above.
 
 - **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export via the explicit OBJ / 3MF / STL format buttons.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
-- **Secondary targets:** Bambu / Prusa / Orca-style filament printers use 3MF `<colorgroup>` with one solid colour per part.
+- **Secondary workflows:** solid-only scenes export 3MF `<colorgroup>` for Bambu / Prusa / Orca-style slicing. Textured scenes use the 3MF Materials Extension regardless of the selected build-volume preset.
 - **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:browser`, and `npm run test:export`. Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
 
 ### Build history
@@ -3838,7 +3839,7 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 
 ### Locked Design Decisions
 
-- Per-printer behaviour is data-driven by `src/config/printers.json`; adding printers should not require export-code edits unless a genuinely new writer mode is introduced.
+- Printer presets are build-area data only (`displayName`, `vendor`, XYZ bed). Adding one never changes or selects an export writer.
 - Mimaki targets must never collapse textures to solid colours. Filament targets intentionally collapse to solid per-part colours.
 - One-mesh-one-shader remains an invariant. MultiMaterial imports split into single-material siblings stamped with `sourceGroupId`; validator/exporter re-union by group.
 - Export prep is non-destructive: clones get unique geometry before any world flattening, welding, normal creation, CSG, or serialization.
@@ -3850,7 +3851,6 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 - Persistence load restores glTF-embedded imported-texture shaders to persisted diffuse colour when the original embedded texture cannot be rebound; geometry, user-loaded textures, shader parameters, transforms, groups, collections, camera, and print state restore.
 - Mimaki 3MF loader/writer is XML-contract complete; external slicer compatibility should be rechecked when export semantics change.
 - 3MF `<m:texture2d>` optional defaults (`contentbox`, tiling, filter) are omitted unless a Mimaki slicer requires explicit values.
-- Vertex-colour printer mode is scaffolded in `printers.json` but has no writer pipeline because no current Mimaki target needs it.
 
 ---
 ## PART 16 — ACCEPTED CONSTRAINTS

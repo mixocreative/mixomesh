@@ -1,6 +1,6 @@
 # Editor Asset, Hierarchy, and Print UX Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make hierarchy, asset browsing, shared shader/image identity, print readiness, and print placement predictable without expanding MIXOMESH into a general DCC.
 
@@ -26,8 +26,8 @@ Electron smokes after every small edit.
 **Progress (2026-08-03):** Tasks 1–4 shipped in `776cba6`, `40803d2`,
 `153bbf2`, and `947de76`. Task 5 shipped in `7da2184`; Task 6 shipped in
 `be2d9d9`; Task 7 shipped in `46ca2fe`; Task 8 shipped in `99571b9`; Task 9
-shipped in `d153ef3`. Task 10 is implemented and verified in the workflow
-completion commit following that print-readiness boundary. Task 11 is next.
+shipped in `d153ef3`; Task 10 shipped in `970e3d4`. Task 11 passed every release
+gate and is recorded by the final documentation commit. The plan is complete.
 
 ## Task 1: Pin the build-volume-only contract
 
@@ -36,7 +36,7 @@ completion commit following that print-readiness boundary. Task 11 is next.
 - Modify: `BLUEPRINT.md`
 - Modify: `AGENTS.md`
 
-- [ ] Add a profile-schema test:
+- [x] Add a profile-schema test:
 
 ```js
 for (const [id, profile] of Object.entries(printers)) {
@@ -45,12 +45,12 @@ for (const [id, profile] of Object.entries(printers)) {
 }
 ```
 
-- [ ] Run `node --import ./tests/register-hooks.mjs --test tests/hygiene.test.mjs`.
+- [x] Run `node --import ./tests/register-hooks.mjs --test tests/hygiene.test.mjs`.
   Expected: PASS against the current runtime config.
-- [ ] Ensure both canonical documents state: profiles provide build-volume
+- [x] Ensure both canonical documents state: profiles provide build-volume
   reference only; OBJ/3MF/STL are explicit; content chooses textured versus
   solid representation.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add AGENTS.md BLUEPRINT.md tests/hygiene.test.mjs
@@ -64,7 +64,7 @@ git commit -m "docs: pin build volume profile contract"
 - Create: `tests/hierarchy-integrity.test.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing tests for stale-child removal, recursive imported-group
+- [x] Write failing tests for stale-child removal, recursive imported-group
   pruning, preserved empty user groups, and old-group migration:
 
 ```js
@@ -78,9 +78,9 @@ assert.deepEqual(planHierarchyRemoval({ user: groups.user }, new Set(['mesh'])).
 assert.equal(normalizeGroupOrigin({}).origin, 'user');
 ```
 
-- [ ] Run `node --import ./tests/register-hooks.mjs --test tests/hierarchy-integrity.test.mjs`.
+- [x] Run `node --import ./tests/register-hooks.mjs --test tests/hierarchy-integrity.test.mjs`.
   Expected: FAIL because the module does not exist.
-- [ ] Implement the pure API:
+- [x] Implement the pure API:
 
 ```js
 export function normalizeGroupOrigin(group) {
@@ -109,10 +109,10 @@ export function planHierarchyRemoval(groups, removedIds) {
 }
 ```
 
-- [ ] Add `origin: 'import' | 'user'` to the canonical Blueprint `GroupNode`
+- [x] Add `origin: 'import' | 'user'` to the canonical Blueprint `GroupNode`
   schema; absent persisted values normalize to `'user'`.
-- [ ] Re-run the focused test. Expected: PASS.
-- [ ] Commit:
+- [x] Re-run the focused test. Expected: PASS.
+- [x] Commit:
 
 ```powershell
 git add src/core/hierarchy/HierarchyIntegrity.js tests/hierarchy-integrity.test.mjs BLUEPRINT.md
@@ -129,7 +129,7 @@ git commit -m "feat: define hierarchy lifecycle policy"
 - Modify: `tests/persistence.test.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Add a failing command test. After execute, no group may contain a deleted
+- [x] Add a failing command test. After execute, no group may contain a deleted
   id; empty imported ancestors are gone; an empty user group remains. Undo must
   deep-equal the original groups and redo must deep-equal the first result:
 
@@ -142,22 +142,22 @@ cmd.undo();
 assert.deepEqual(getState().scene.groups, before);
 ```
 
-- [ ] Run `node --import ./tests/register-hooks.mjs --test tests/safety-commands.test.mjs`.
+- [x] Run `node --import ./tests/register-hooks.mjs --test tests/safety-commands.test.mjs`.
   Expected: FAIL on stale membership.
-- [ ] In `DeleteCommand`, snapshot `groups` before the first execution, compute
+- [x] In `DeleteCommand`, snapshot `groups` before the first execution, compute
   and retain the after snapshot, and apply snapshots via `setState(...,
   { silent: true })`. Dispose/recreate pruned Babylon TransformNodes through
   core hierarchy helpers. Dispatch typed events and `markDirty()` once.
-- [ ] Stamp imported groups with `origin: 'import'`, `GroupCommand` groups with
+- [x] Stamp imported groups with `origin: 'import'`, `GroupCommand` groups with
   `origin: 'user'`, and normalize absent values during project load.
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 node --import ./tests/register-hooks.mjs --test tests/safety-commands.test.mjs tests/persistence.test.mjs
 ```
 
   Expected: PASS including old-document migration.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/commands/HierarchyCommands.js src/core/import/ImportHierarchy.js src/core/persist/ProjectLoader.js tests/safety-commands.test.mjs tests/persistence.test.mjs BLUEPRINT.md
@@ -177,22 +177,22 @@ git commit -m "fix: preserve sound hierarchy across delete undo"
 - Modify: `tests/browser-smoke.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Add a failing browser block for `Import → Group → Object`. Viewport/object
+- [x] Add a failing browser block for `Import → Group → Object`. Viewport/object
   selection must select only the object row, expand its ancestors, reveal it,
   and use different icons for all three kinds. Empty user groups show `Empty`.
-- [ ] Run `npm run test:browser`. Expected: FAIL on semantics/reveal assertions.
-- [ ] Use `Package` for Import, a hierarchy/pivot icon for Group, and `Box` for
+- [x] Run `npm run test:browser`. Expected: FAIL on semantics/reveal assertions.
+- [x] Use `Package` for Import, a hierarchy/pivot icon for Group, and `Box` for
   Object. Add translated type tooltips/badges.
-- [ ] Subscribe to `ACTIVE_OBJECT_CHANGED`; expand collection/group ancestors
+- [x] Subscribe to `ACTIVE_OBJECT_CHANGED`; expand collection/group ancestors
   and call `scrollIntoView({ block: 'nearest' })` on the object row without
   selecting its ancestors.
-- [ ] Add navigation actions **Select Parent**, **Select Siblings**, **Select
+- [x] Add navigation actions **Select Parent**, **Select Siblings**, **Select
   Import Members**, and **Reveal in Outliner**. They change selection/UI state,
   not history.
-- [ ] Add name search that retains ancestor rows of matching descendants.
+- [x] Add name search that retains ancestor rows of matching descendants.
   Defer drag-reparent until lifecycle behavior has shipped.
-- [ ] Run `npm run i18n:check` and `npm run test:browser`. Expected: PASS.
-- [ ] Commit:
+- [x] Run `npm run i18n:check` and `npm run test:browser`. Expected: PASS.
+- [x] Commit:
 
 ```powershell
 git add src/core/Icons.js src/ui/Outliner.js src/ui/ContextMenu.js src/styles/components.css src/i18n tests/browser-smoke.mjs BLUEPRINT.md
@@ -212,7 +212,7 @@ git commit -m "feat: clarify outliner hierarchy and reveal selection"
 - Modify: `docs/adr/0001-storage-adapter-web-electron.md`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Add failing adapter-contract tests for `mountDirectory`, `listDirectory`,
+- [x] Add failing adapter-contract tests for `mountDirectory`, `listDirectory`,
   and `readFile`, using this runtime-neutral result shape:
 
 ```js
@@ -220,16 +220,16 @@ git commit -m "feat: clarify outliner hierarchy and reveal selection"
 { name: 'kits', path: 'kits', kind: 'directory', ref: opaqueRef }
 ```
 
-- [ ] Run `node --import ./tests/register-hooks.mjs --test tests/storage-adapter.test.mjs`.
+- [x] Run `node --import ./tests/register-hooks.mjs --test tests/storage-adapter.test.mjs`.
   Expected: FAIL because directory methods are declarations only.
-- [ ] Implement browser methods over File System Access handles. Implement
+- [x] Implement browser methods over File System Access handles. Implement
   desktop refs as opaque ids mapped to validated paths in the main process.
   Reject traversal and any resolved path outside the selected mount root.
-- [ ] Route `DirMounts` through `storage`; live refs remain module-local and
+- [x] Route `DirMounts` through `storage`; live refs remain module-local and
   project state stores only serializable descriptors.
-- [ ] Run the storage test and `npm run test:electron`. Expected: PASS with no
+- [x] Run the storage test and `npm run test:electron`. Expected: PASS with no
   console, GPU, or IPC errors.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/storage src/core/assets/DirMounts.js electron tests/storage-adapter.test.mjs tests/electron-smoke.mjs docs/adr/0001-storage-adapter-web-electron.md BLUEPRINT.md
@@ -249,7 +249,7 @@ git commit -m "feat: route asset directories through storage adapter"
 - Modify: `tests/browser-smoke.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing pure tests for exact-folder browse, descendant search,
+- [x] Write failing pure tests for exact-folder browse, descendant search,
   all-library search, kind filter, stable sorting, one result per file, and
   relative-path provenance:
 
@@ -262,9 +262,9 @@ assert.deepEqual(queryAssets(index, {
 }).map(x => x.path), ['kits/parts/wheel.glb']);
 ```
 
-- [ ] Run `node --import ./tests/register-hooks.mjs --test tests/asset-index.test.mjs`.
+- [x] Run `node --import ./tests/register-hooks.mjs --test tests/asset-index.test.mjs`.
   Expected: FAIL because the module does not exist.
-- [ ] Implement an immutable `files`/`folders` index and pure query:
+- [x] Implement an immutable `files`/`folders` index and pure query:
 
 ```js
 export function queryAssets(index, q) {
@@ -276,15 +276,15 @@ export function queryAssets(index, q) {
 }
 ```
 
-- [ ] Index only on mount/refresh. In the Sources pane add Session `All`,
+- [x] Index only on mount/refresh. In the Sources pane add Session `All`,
   `Used`, `Unused`, `Issues` plus mounted trees. In Assets add breadcrumb,
   scope, kind filter, count, and relative path. Search defaults to descendants
   unless the user explicitly chose another scope.
-- [ ] Add refresh/unmount; preserve selected path or fall back to its nearest
+- [x] Add refresh/unmount; preserve selected path or fall back to its nearest
   existing ancestor. Retain multiple mounts in-session.
-- [ ] Run the focused test, `npm run i18n:check`, and `npm run test:browser`.
+- [x] Run the focused test, `npm run i18n:check`, and `npm run test:browser`.
   Expected: PASS.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/assets/AssetIndex.js src/ui/AssetPanel.js src/styles/components.css src/i18n tests/asset-index.test.mjs tests/browser-smoke.mjs BLUEPRINT.md
@@ -306,7 +306,7 @@ git commit -m "feat: add scoped indexed asset browser"
 - Modify: `tests/persistence.test.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing tests for same-name/different bytes, same bytes/different
+- [x] Write failing tests for same-name/different bytes, same bytes/different
   names, same image/different sampler, and one persisted blob for two views:
 
 ```js
@@ -317,9 +317,9 @@ assert.notEqual(textureViewKey({ imageContentHash: h, wrapU: 1 }),
 assert.equal(uniqueEmbeddedBlobCount(twoViewsSameHash), 1);
 ```
 
-- [ ] Run the three focused tests. Expected: FAIL because resource and view
+- [x] Run the three focused tests. Expected: FAIL because resource and view
   identity are not separated.
-- [ ] Hash loose-image original bytes before upload. For GPU-only embedded
+- [x] Hash loose-image original bytes before upload. For GPU-only embedded
   images, hash the existing full-resolution PNG from capture-before-cap. Store
   one blob per SHA-256. Texture AssetEntries add:
 
@@ -331,12 +331,12 @@ assert.equal(uniqueEmbeddedBlobCount(twoViewsSameHash), 1);
 ```
 
   UV transform remains a shader field.
-- [ ] Persist one image payload per hash. Restore image blobs, then texture
+- [x] Persist one image payload per hash. Restore image blobs, then texture
   views, then shaders. Equal images with different views create separate
   Babylon textures backed by shared bytes.
-- [ ] Run focused tests and `npm run test:export`. Expected: PASS with pixels
+- [x] Run focused tests and `npm run test:export`. Expected: PASS with pixels
   retained and duplicate embedded bytes emitted once.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/assets src/core/persist src/import/ImportPipeline.ts tests/texture-identity.test.mjs tests/texture-source.test.mjs tests/persistence.test.mjs BLUEPRINT.md
@@ -359,7 +359,7 @@ git commit -m "feat: content address texture image bytes"
 - Modify: `tests/browser-smoke.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing signature tests: names do not matter; every supported
+- [x] Write failing signature tests: names do not matter; every supported
   appearance field and texture-view key does; unsupported features make a
   material ineligible for automatic merge:
 
@@ -369,19 +369,19 @@ assert.notEqual(signature(base).key, signature({ ...base, opacity: 0.5 }).key);
 assert.equal(signature({ ...base, clearCoat: true }).eligible, false);
 ```
 
-- [ ] Run the new test. Expected: FAIL because the module does not exist.
-- [ ] Return `{ eligible, key, reasons }` from `ShaderSignature`. Import-time
+- [x] Run the new test. Expected: FAIL because the module does not exist.
+- [x] Return `{ eligible, key, reasons }` from `ShaderSignature`. Import-time
   dedupe silently reuses only eligible exact matches. Preserve the current
   same-name/different-content modal.
-- [ ] Add `ShaderConsolidateCommand`: snapshot changed object shader ids and
+- [x] Add `ShaderConsolidateCommand`: snapshot changed object shader ids and
   removed shader/material entries; execute rewires to the chosen canonical
   shader; undo restores all links and entries. Use existing duplication for
   **Make Unique**.
-- [ ] Show duplicate candidate groups with field equality and linked-object
+- [x] Show duplicate candidate groups with field equality and linked-object
   counts. Never run consolidation continuously after edits.
-- [ ] Run the new test, `shader-live-update`, i18n check, and browser smoke.
+- [x] Run the new test, `shader-live-update`, i18n check, and browser smoke.
   Expected: PASS including edit-one-updates-all and undo.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/shaders/ShaderSignature.js src/core/ShaderLibrary.js src/core/commands/ShaderCommands.js src/core/HistoryManager.js src/ui/ShaderPanel.js src/i18n tests/shader-identity.test.mjs tests/shader-live-update.test.mjs tests/browser-smoke.mjs BLUEPRINT.md
@@ -404,7 +404,7 @@ git commit -m "feat: make shader sharing exact and explicit"
 - Modify: `tests/browser-smoke.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing tests for exact fit, each axis overflow, below-bed geometry,
+- [x] Write failing tests for exact fit, each axis overflow, below-bed geometry,
   no print parts, unconfirmed units, missing textures, multiple ratios, and
   format independence:
 
@@ -415,8 +415,8 @@ assert.deepEqual(checkBedFit(
 assert.equal(buildReadiness(ctx).issues.find(x => x.code === 'bed-overflow').severity, 'warning');
 ```
 
-- [ ] Run both new tests. Expected: FAIL because modules do not exist.
-- [ ] Emit stable untranslated issue records, for example:
+- [x] Run both new tests. Expected: FAIL because modules do not exist.
+- [x] Emit stable untranslated issue records, for example:
 
 ```js
 { code: 'bed-overflow', severity: 'warning', objectIds, data: { overflowMM } }
@@ -425,12 +425,12 @@ assert.equal(buildReadiness(ctx).issues.find(x => x.code === 'bed-overflow').sev
 
   Geometry/source errors block; bed overflow and unit uncertainty warn and
   require acknowledgement. No issue hides a format button.
-- [ ] Rename UI to **Build Volume Preset**. Render readiness and export summary
+- [x] Rename UI to **Build Volume Preset**. Render readiness and export summary
   above persistent OBJ/3MF/STL buttons; issue rows focus the relevant object or
   field.
-- [ ] Run focused tests, i18n check, browser smoke, and export smoke. Expected:
+- [x] Run focused tests, i18n check, browser smoke, and export smoke. Expected:
   PASS; every format remains available for every profile.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/core/print src/ui/PrintPanel.js src/i18n tests/bed-fit.test.mjs tests/print-readiness.test.mjs tests/export.test.mjs tests/browser-smoke.mjs BLUEPRINT.md
@@ -461,17 +461,17 @@ git commit -m "feat: add print readiness and build volume fit"
 - Modify: `tests/browser-smoke.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing pure placement tests for **Drop to Bed**, **Center on Bed**,
+- [x] Write failing pure placement tests for **Drop to Bed**, **Center on Bed**,
   and selected-face-normal-to-up **Place Face on Bed**. Pin the final bed offset
   after rotation.
-- [ ] Implement each as one undoable absolute-transform command; multi-select
+- [x] Implement each as one undoable absolute-transform command; multi-select
   is one history entry and locked objects are skipped/reported.
-- [ ] Add zero-object **Import Model** and **Open Project** actions. Import uses
+- [x] Add zero-object **Import Model** and **Open Project** actions. Import uses
   the existing asset picker; Open uses `PersistenceManager.open()`. Hide the
   overlay when a displayable object exists.
-- [ ] Replace glyph-only placement labels (`X⊣`, `X⊟`, `⊐`) with visible labels
+- [x] Replace glyph-only placement labels (`X⊣`, `X⊟`, `⊐`) with visible labels
   at normal width and translated `title`/`aria-label` at every width.
-- [ ] Add close-flow tests with one shared result vocabulary:
+- [x] Add close-flow tests with one shared result vocabulary:
 
 ```js
 { action: 'save' | 'discard' | 'cancel' }
@@ -480,9 +480,9 @@ git commit -m "feat: add print readiness and build volume fit"
   Browser uses native `beforeunload`; Electron asks renderer dirty state and
   presents one Save/Discard/Cancel prompt. Failed save never closes. Autosave
   recovery remains available after abnormal exit.
-- [ ] Run placement, persistence-abort, i18n, browser, and Electron tests.
+- [x] Run placement, persistence-abort, i18n, browser, and Electron tests.
   Expected: PASS without console/GPU/IPC errors.
-- [ ] Commit:
+- [x] Commit:
 
 ```powershell
 git add src/ui src/core/placement src/core/commands/PlacementCommands.js src/core/HistoryManager.js src/core/PersistenceManager.js src/app/main.ts electron src/styles/components.css src/i18n tests/bed-placement.test.mjs tests/persistence-abort.test.mjs tests/electron-smoke.mjs tests/browser-smoke.mjs BLUEPRINT.md
@@ -495,7 +495,7 @@ git commit -m "feat: complete import placement and close flows"
 - Modify: `BLUEPRINT.md`
 - Modify: `BUILDLOG.md`
 
-- [ ] Run in order:
+- [x] Run in order:
 
 ```powershell
 npm run lint
@@ -509,15 +509,15 @@ npm run test:electron
 
   Expected: every command exits 0, with no console, GPU, IPC, or export errors.
   Investigate Electron GPU command-buffer output; do not waive it.
-- [ ] Audit stale claims/placeholders:
+- [x] Audit stale claims/placeholders:
 
 ```powershell
 rg -n "printer-driven|not undoable|content dedupe|TBD|TODO|PLANNED" AGENTS.md BLUEPRINT.md docs/superpowers
 ```
 
   Every hit must be explicit history or match shipped behavior.
-- [ ] Update the Blueprint baseline and Build Log only after all gates pass.
-- [ ] Commit:
+- [x] Update the Blueprint baseline and Build Log only after all gates pass.
+- [x] Commit:
 
 ```powershell
 git add BLUEPRINT.md BUILDLOG.md
