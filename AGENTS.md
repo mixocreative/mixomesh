@@ -17,10 +17,11 @@ Browser-based 3D model assembly tool for **full-color 3D printing**.
   OrcaSlicer/PrusaSlicer pipeline). 3MF with `<colorgroup>` + per-object
   `pindex` for filament zone assignment. One solid color per part.
 
-Per-printer behavior is data-driven via `src/config/printers.json` (single
-source of truth for printer profile: format, color mode, texture limits,
-bed dimensions, axis/winding/unit, export prep pipeline). Adding a printer
-= adding a JSON row, not editing code.
+Printer/build-volume reference data is data-driven via
+`src/config/printers.json` (display name, vendor, and bed dimensions only).
+Adding a build-volume preset = adding a JSON row, not editing code. Export
+format remains an explicit OBJ / 3MF / STL choice and is independent of the
+selected printer.
 
 Babylon.js, Chrome/Edge only. The supported runtime is Vite + TypeScript:
 `index.html` loads `src/app/boot.ts`, which builds `window.BABYLON` from
@@ -55,11 +56,12 @@ behaviours. Treat it that way:
    writing custom geometry/scene/IO code.
 5. Chrome/Edge only. Single startup check halts on other browsers.
    No Firefox/Safari fallback paths.
-6. Export pipeline is **printer-driven**, not format-driven. The target
-   printer (from `src/config/printers.json`) declares format + color mode +
-   prep steps. Mimaki = textured 3MF Materials Extension or OBJ+MTL+PNG
-   (textures preserved). Filament = 3MF with `<colorgroup>` (solid per
-   part). Never collapse textures to solid colors for Mimaki targets.
+6. Export format is **button-driven**, not printer-driven. The selected printer
+   is a build-volume reference only and must not hide, switch, or block OBJ /
+   3MF / STL. Export content selects the representation: textured 3MF uses the
+   Materials Extension; solid 3MF uses `<colorgroup>`; OBJ uses MTL + PNG when
+   textures exist. Never collapse texture data merely because of a printer
+   preset.
 7. One-mesh-one-shader is an enforced invariant. AssetLoader splits any
    `MultiMaterial` mesh into N single-material siblings at import time and
    stamps `sourceGroupId` on the SceneObject state entries so validator +

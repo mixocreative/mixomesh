@@ -2020,7 +2020,14 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 ### Import Merge Strategy
 On material-name collision during `registerFromContainer`:
 1. **Auto-dedupe first.** `_findContentDuplicate(mat)` builds a signature from the imported material — `type | diffuseColor | opacity | roughness | metallic | uvBase | diffuseTextureAssetId` — and compares to every existing scene shader's signature. An exact match silently reuses the existing shaderId, redirects the imported mesh's `material` pointer, disposes the duplicate material, and skips the merge modal entirely. This catches the most common case (the user dropped the same file twice).
-2. **Texture dedupe** runs as part of step 1's signature. Imported (glTF-embedded) textures are deduped by `${name}|${width}|${height}|${className}` in `AssetLoader.registerImportedTexture` so two imports of the same file end up sharing one `diffuseTextureAssetId` — without this, shader content-dedupe would fail because the texture ids would differ.
+2. **Texture identity reuse** runs as part of step 1's signature. The current
+   implementation uses the source-scoped heuristic
+   `${sourceFileHash}|${name}|${width}|${height}|${className}` in
+   `AssetLoader.registerImportedTexture`, so two imports of the same source
+   file can share one `diffuseTextureAssetId`. This is not a byte/pixel content
+   comparison and must never merge across different source files. The planned
+   content-addressed image/view replacement is specified in
+   `docs/superpowers/specs/2026-08-03-editor-asset-hierarchy-ux-design.md`.
 3. **Only remaining conflicts hit the modal.** If a name still collides AND content differs, dispatch `EVENTS.MODAL_OPEN` with id `shaderMerge`, payload `{ conflicts }`.
 4. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**. Default: Rename. Checkbox "Apply to all conflicts in this import."
 5. On confirm: apply choices, continue load.
@@ -2837,7 +2844,8 @@ as editable text.
 Collection row interactions:
 - Click name → select every mesh with that `collectionId` (descends across groups).
 - Click chevron → toggle collapsed state in `ui.outlinerCollapsed[colId]`.
-- Double-click name → inline rename (dispatches `COLLECTION_RENAMED`, not undoable for now).
+- Double-click name → inline rename through `RenameCollectionCommand`
+  (dispatches `COLLECTION_RENAMED`; undoable).
 - RMB → context menu: **Select Members**, **Rename Collection…**, **Delete Collection** (the last untags every member, leaving them visible as "uncollected" at outliner root; the collection entry is then removed from state).
 
 Outliner row events are delegated from `#ol-list`; rows are not individually
