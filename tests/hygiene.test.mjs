@@ -3,6 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { installEnv } from './env.mjs';
+import printers from '../src/config/printers.json' with { type: 'json' };
 
 installEnv();
 console.error = () => {};
@@ -30,6 +31,13 @@ async function test(name, fn) {
 await test('A8: subscribe(undefined event) throws in dev instead of silently dying', () => {
   // EVENTS.TYPO_NAME is undefined — the PrintPanel OBJECT_ADDED bug shape.
   assert.throws(() => subscribe(undefined, () => {}), /unknown event/i);
+});
+
+await test('printer profiles contain build-volume reference data only', () => {
+  for (const [id, profile] of Object.entries(printers)) {
+    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'displayName', 'vendor'], id);
+    assert.equal(['format', 'pipeline', 'colorMode'].some(key => key in profile), false, id);
+  }
 });
 
 // (M13 cursor-scaling-on-world-rescale test removed with RescaleWorldCommand in
