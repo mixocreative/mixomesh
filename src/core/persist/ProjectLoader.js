@@ -18,6 +18,7 @@ import { decompose, applyWorld, stripFileData, extOf } from './ProjectSerializer
 import { resolveAssetBlob } from './AssetResolver.js';
 import { clearDirty } from './DirtyTracker.js';
 import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
+import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 
 const BABYLON = window.BABYLON;
 
@@ -79,10 +80,11 @@ function _restoreGroups(groupDefs, objMap) {
     node.metadata = { ...(node.metadata ?? {}), groupId: g.id };
     applyWorld(node, g.transform);
     nodes.set(g.id, node);
-    groupsState[g.id] = {
+    groupsState[g.id] = normalizeGroupOrigin({
       id: g.id, name: g.name, parentId: g.parentId ?? null,
       childIds: [...(g.childIds ?? [])],
-    };
+      origin: g.origin,
+    });
   }
   setState(s => ({ ...s, scene: { ...s.scene, groups: groupsState } }), SILENT);
 

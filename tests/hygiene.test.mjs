@@ -72,6 +72,8 @@ await test('M17: undoing a nested group restores the Babylon parent, not scene r
   const cmd = new GroupCommand(['m1'], 'Inner');
   cmd.execute();
   assert.notEqual(m.parent, nOut, 'execute parents the mesh under the new inner node');
+  const inner = Object.values(getState().scene.groups).find(group => group.name === 'Inner');
+  assert.equal(inner?.origin, 'user', 'groups created in the editor preserve intentional empty groups');
 
   cmd.undo();
   assert.equal(getState().scene.objects.m1.parentId, 'gOut', 'state parent restored');

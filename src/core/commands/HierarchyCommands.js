@@ -9,6 +9,7 @@ import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { canonicalObjectId, logicalObjectCommandIds } from '../LogicalObjects.js';
+import { planHierarchyRemoval } from '../hierarchy/HierarchyIntegrity.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteTransform, findGroupNode,
   findNodeForId, captureWorld, patchSceneObject, removeSceneObject,
@@ -180,6 +181,9 @@ export class DeleteCommand {
       if (!obj || !mesh) continue;
       this._snapshots.push({ id, obj: { ...obj }, mesh, prevParent: null });
     }
+    this._groupsBefore = structuredClone(getState().scene.groups);
+    this._groupsAfter = null;
+    this._prunedGroupIds = [];
     this.label = requestedCount === 1 ? 'Delete' : `Delete (${requestedCount})`;
   }
   execute() {
@@ -193,12 +197,31 @@ export class DeleteCommand {
         s.mesh.setEnabled(false);
         removeSceneObject(s.id);
       }
+      if (!this._groupsAfter) {
+        const plan = planHierarchyRemoval(
+          this._groupsBefore,
+          new Set(this._snapshots.map(snapshot => snapshot.id)),
+        );
+        this._groupsAfter = structuredClone(plan.groups);
+        for (const groupId of plan.pruneIds) delete this._groupsAfter[groupId];
+        this._prunedGroupIds = plan.pruneIds;
+      }
+      _setGroups(this._groupsAfter);
+      for (const groupId of this._prunedGroupIds) {
+        findGroupNode(groupId)?.setEnabled(false);
+        dispatch(EVENTS.GROUP_DISSOLVED, { groupId });
+      }
       Selection.clear();
     });
     markDirty();
   }
   undo() {
     withDetachedPivot(() => {
+      _setGroups(this._groupsBefore);
+      for (const groupId of this._prunedGroupIds) {
+        findGroupNode(groupId)?.setEnabled(true);
+        dispatch(EVENTS.GROUP_CREATED, { groupId });
+      }
       for (const s of this._snapshots) {
         s.mesh.setEnabled(true);
         s.mesh.setParent(s.prevParent);
@@ -206,6 +229,13 @@ export class DeleteCommand {
       }
     });
   }
+}
+
+function _setGroups(groups) {
+  setState(state => ({
+    ...state,
+    scene: { ...state.scene, groups: structuredClone(groups) },
+  }), SILENT);
 }
 
 /**
@@ -253,6 +283,7 @@ export class GroupCommand {
             name: this._groupName,
             parentId: null,
             childIds: this._ids.slice(),
+            origin: 'user',
           },
         };
         const newObjects = { ...state.scene.objects };
@@ -302,7 +333,7 @@ export class UngroupCommand {
   constructor(groupId) {
     this._groupId = groupId;
     const g = getState().scene.groups[groupId];
-    this._snapshot = g ? { id: g.id, name: g.name, parentId: g.parentId, childIds: g.childIds.slice() } : null;
+    this._snapshot = g ? { ...g, childIds: g.childIds.slice() } : null;
     this.label = 'Ungroup';
   }
   execute() {

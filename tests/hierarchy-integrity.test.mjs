@@ -5,6 +5,7 @@ import {
   normalizeGroupOrigin,
   planHierarchyRemoval,
 } from '../src/core/hierarchy/HierarchyIntegrity.js';
+import { buildImportHierarchy } from '../src/core/import/ImportHierarchy.js';
 
 test('removing an object cleans its id from every group', () => {
   const groups = {
@@ -55,4 +56,21 @@ test('an imported group containing a preserved user subgroup is preserved', () =
 test('missing group origin migrates conservatively to user', () => {
   assert.equal(normalizeGroupOrigin({ id: 'old' }).origin, 'user');
   assert.equal(normalizeGroupOrigin({ id: 'new', origin: 'import' }).origin, 'import');
+});
+
+test('captured import transform nodes are marked as imported groups', () => {
+  const root = { name: 'Assembly', parent: null, metadata: {} };
+  const mesh = {
+    name: 'Part', parent: root, geometry: {},
+    getTotalVertices() { return 3; },
+  };
+  let serial = 0;
+
+  const hierarchy = buildImportHierarchy(
+    { meshes: [mesh], transformNodes: [root] },
+    prefix => `${prefix}_${++serial}`,
+    name => name,
+  );
+
+  assert.equal(Object.values(hierarchy.groups)[0].origin, 'import');
 });

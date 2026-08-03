@@ -163,6 +163,7 @@ function _serialiseGroups() {
     return {
       id: g.id, name: g.name, parentId: g.parentId ?? null,
       childIds: [...(g.childIds ?? [])],
+      origin: g.origin === 'import' ? 'import' : 'user',
       transform: node ? decompose(node) : null,
     };
   });

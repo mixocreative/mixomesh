@@ -1112,7 +1112,12 @@ HistoryManager.endBatch()           → void  // finish and push the batch as on
 Implemented in Phase 3:
 - `TransformCommand` — `{ prev, next, alreadyApplied? }` keyed by meshId. Sets absolute transforms via `setParent(null)` cycle so the world position survives the change. Used by both gizmo drag-end and Properties Panel input commits.
 - `VisibilityCommand`, `LockCommand`, `RenameCommand`
-- `DeleteCommand` — soft-deletes (`setEnabled(false)` + remove from state) so undo restores instantly without re-instantiating from the asset container.
+- `DeleteCommand` — soft-deletes (`setEnabled(false)` + remove from state) so
+  undo restores instantly without re-instantiating from the asset container.
+  The same command removes deleted ids from every `GroupNode.childIds`, prunes
+  recursively empty `origin:'import'` ancestors from state, and disables their
+  retained TransformNodes. Undo restores the exact group snapshot, nodes,
+  memberships, and mesh parents; `origin:'user'` empty groups remain.
 - `DuplicateCommand` — clones via `AssetLoader.cloneMeshAsNewObject`, offsets +10 mm in X so the clone is visible, auto-selects new meshes. Sharing geometry on redo: clones are kept disabled in memory and re-enabled on redo (same pattern as DeleteCommand).
 - `GroupCommand` / `UngroupCommand` — creates/disposes a `TransformNode` pivot; reparents members preserving world transform. All three commands wrap their parent-touching work in a `_withDetachedPivot` helper that temporarily detaches the selection-visual pivot so meshes are in their canonical parents during the mutation.
 

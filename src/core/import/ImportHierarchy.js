@@ -93,6 +93,7 @@ export function buildImportHierarchy(container, makeId, uniqueName) {
       name: _uniqueLocalName(requestedName, usedNames),
       childIds: [],
       parentId: parentNode ? groupIdByNode.get(parentNode) ?? null : null,
+      origin: 'import',
     };
   }
 

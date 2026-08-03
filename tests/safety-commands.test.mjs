@@ -10,7 +10,7 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 console.error = () => {};
-const { SourceUnitCommand, RescaleObjectCommand, ShaderDeleteCommand, ShaderDuplicateCommand } =
+const { DeleteCommand, SourceUnitCommand, RescaleObjectCommand, ShaderDeleteCommand, ShaderDuplicateCommand } =
   await import('../src/core/HistoryManager.js');
 const { ShaderLibrary } = await import('../src/core/ShaderLibrary.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
@@ -101,6 +101,65 @@ await test('ratio command updates state before OBJECT_UPDATED listeners run', ()
   }
 
   assert.deepEqual(seen, [4, 2]);
+});
+
+await test('DeleteCommand cleans memberships, prunes imported ancestors, and restores exact hierarchy', () => {
+  const makeNode = (id, parent = null) => ({
+    metadata: { groupId: id }, parent, enabled: true,
+    setEnabled(value) { this.enabled = value; },
+  });
+  const rootNode = makeNode('root');
+  const leafNode = makeNode('leaf', rootNode);
+  const userNode = makeNode('user');
+  const fakeScene = { transformNodes: [rootNode, leafNode, userNode] };
+  SceneManager.getScene = () => fakeScene;
+
+  const makeMesh = (id, parent) => ({
+    metadata: { meshId: id }, parent, enabled: true,
+    setParent(value) { this.parent = value; },
+    setEnabled(value) { this.enabled = value; },
+  });
+  const importedMesh = makeMesh('importedMesh', leafNode);
+  const userMesh = makeMesh('userMesh', userNode);
+  meshes.set('importedMesh', importedMesh);
+  meshes.set('userMesh', userMesh);
+
+  const before = {
+    root: { id: 'root', name: 'Root', parentId: null, childIds: [], origin: 'import' },
+    leaf: { id: 'leaf', name: 'Leaf', parentId: 'root', childIds: ['importedMesh'], origin: 'import' },
+    user: { id: 'user', name: 'User', parentId: null, childIds: ['userMesh'], origin: 'user' },
+  };
+  setState(state => ({
+    ...state,
+    scene: {
+      ...state.scene,
+      groups: structuredClone(before),
+      objects: {
+        importedMesh: { id: 'importedMesh', name: 'Imported', parentId: 'leaf', assetId: 'a1' },
+        userMesh: { id: 'userMesh', name: 'User mesh', parentId: 'user', assetId: 'a2' },
+      },
+    },
+  }), { silent: true });
+
+  const cmd = new DeleteCommand(['importedMesh', 'userMesh']);
+  cmd.execute();
+  const after = structuredClone(getState().scene.groups);
+  assert.deepEqual(after, {
+    user: { id: 'user', name: 'User', parentId: null, childIds: [], origin: 'user' },
+  });
+  assert.equal(rootNode.enabled, false);
+  assert.equal(leafNode.enabled, false);
+  assert.equal(userNode.enabled, true);
+
+  cmd.undo();
+  assert.deepEqual(getState().scene.groups, before);
+  assert.equal(importedMesh.parent, leafNode);
+  assert.equal(userMesh.parent, userNode);
+  assert.equal(rootNode.enabled, true);
+  assert.equal(leafNode.enabled, true);
+
+  cmd.execute();
+  assert.deepEqual(getState().scene.groups, after);
 });
 
 // ── M14: shader id stability across undo/redo ────────────────────────────
