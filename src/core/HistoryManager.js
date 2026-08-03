@@ -13,6 +13,7 @@ export * from './commands/ShaderCommands.js';
 export * from './commands/ScaleCommands.js';
 export * from './commands/PlacementCommands.js';
 export * from './commands/BooleanCommands.js';
+export * from './commands/SliceConnectorCommands.js';
 
 const STACK_LIMIT = 200;
 

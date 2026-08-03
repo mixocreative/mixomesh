@@ -13,6 +13,7 @@ import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { Outliner } from './Outliner.js';
+import { SliceConnectorSession } from './SliceConnectorSession.js';
 
 let _root = null;
 let _isOpen = false;
@@ -185,6 +186,7 @@ function _buildItems(info) {
     { label: t('context.booleanUnion'),     shortcut: '',          action: 'bool-union',     iconName: 'Box',   cls: enabled(multi) },
     { label: t('context.booleanSubtract'),  shortcut: '',          action: 'bool-subtract',  iconName: 'Box',   cls: enabled(multi) },
     { label: t('context.booleanIntersect'), shortcut: '',          action: 'bool-intersect', iconName: 'Box',   cls: enabled(multi) },
+    { label: t('context.sliceConnector'),    shortcut: '',          action: 'slice-connector',iconName: 'Scissors', cls: enabled(hasSelection && !multi) },
     'sep',
     { label: t('context.mirrorX'),          shortcut: '',          action: 'mirror-x',       iconName: 'Box', cls: enabled(hasSelection) },
     { label: t('context.mirrorY'),          shortcut: '',          action: 'mirror-y',       iconName: 'Box', cls: enabled(hasSelection) },
@@ -227,6 +229,7 @@ function _runAction(action, info) {
   if (action.startsWith('array-')) _array(action.split('-')[1]);
   if (action === 'mate') _mate();
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
+  if (action === 'slice-connector') SliceConnectorSession.start();
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
   if (action === 'cursor-to-origin') CursorTools.cursorToWorldOrigin();

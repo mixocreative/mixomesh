@@ -25,6 +25,7 @@ let _canvas = null;
 let _modal = null;   // active modal G/R/S op (see _enterModal)
 let _bodyDrag = null; // pending / active LMB-on-mesh-body drag (see _onSelectionPointerDown)
 let _onContextMenu = null;
+let _viewportToolHandler = null;
 let _rmbPending = null;   // pending context-menu request — committed on RMB-UP if not dragged
 const RMB_DRAG_THRESHOLD_PX = 4;
 
@@ -102,6 +103,11 @@ export function setContextMenuHandler(fn) {
   _onContextMenu = fn;
 }
 
+/** Give a temporary viewport tool first refusal on pointer events. */
+export function setViewportToolHandler(fn) {
+  _viewportToolHandler = typeof fn === 'function' ? fn : null;
+}
+
 /**
  * Register a shortcut handler.
  * @param {string} shortcut  e.g. 'Ctrl+Z', 'G', 'Numpad1'
@@ -134,6 +140,10 @@ export function setContext(context) {
 function _onPointer(info) {
   if (!info?.event) return;
   const ev = info.event;
+  if (_viewportToolHandler?.(info) === true) {
+    ev.preventDefault?.();
+    return;
+  }
 
   if (info.type === PointerEventTypes.POINTERMOVE) {
     if (_rmbPending) {
@@ -851,4 +861,4 @@ function _registerAll() {
   register('.',   'viewport', () => Selection.cyclePivotMode());
 }
 
-export const InputManager = { init, register, unregister, setContext, setContextMenuHandler };
+export const InputManager = { init, register, unregister, setContext, setContextMenuHandler, setViewportToolHandler };

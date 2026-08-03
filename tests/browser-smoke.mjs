@@ -1352,6 +1352,58 @@ async function main() {
       `boolean: a textured operand must block (no silent texture loss) — got blocked=${boolTex.blocked} reason=${boolTex.reason}`);
     assert(boolTex.bakeProceeded, 'boolean: bakeTexturedToSolid should let a textured combine proceed (as solid)');
 
+    // ── Slice & Connector: camera-plane split + plug/socket bake + undo ──
+    const sliceConnRT = await evaluate(cdp, `(async () => {
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const scene = sm.SceneManager.getScene();
+      const before = new Set(Object.keys(st.getState().scene.objects));
+      const src = B.MeshBuilder.CreateBox('sconn_src', { size: 0.1 }, scene);
+      src.position.set(0, 0.85, 0);
+      src.metadata = { meshId: 'sconn_src' };
+      const mat = new B.StandardMaterial('sconn_mat', scene);
+      mat.diffuseColor = new B.Color3(0.8, 0.45, 0.15);
+      src.material = mat;
+      al.AssetLoader.bindRestoredMesh('sconn_src', src, 'sconn-asset');
+      st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, sconn_src: {
+        id: 'sconn_src', name: 'slice source', assetId: 'sconn-asset', collectionId: null, parentId: null,
+        shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true,
+        sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1,
+      } } } }), { silent: true });
+      const cmd = await hm.performSliceConnector('sconn_src', {
+        cameraNormal: { x: 1, y: 0, z: 0 },
+        connectorPoint: { x: 0, y: 0.85, z: 0 },
+        maleSide: 'front',
+        diameterMM: 6,
+        depthMM: 8,
+        clearanceMM: 0.2,
+      });
+      if (cmd.blocked) return { err: 'blocked: ' + cmd.reason };
+      hm.push(cmd);
+      const keys = Object.keys(st.getState().scene.objects);
+      const added = keys.filter(k => !before.has(k) && k !== 'sconn_src');
+      const tris = added.map(id => {
+        const m = scene.meshes.find(x => x.metadata?.meshId === id);
+        return m ? Math.floor((m.getTotalIndices() || 0) / 3) : 0;
+      });
+      hm.undo();
+      const undoKeys = Object.keys(st.getState().scene.objects);
+      return {
+        addedCount: added.length,
+        sourceGone: !keys.includes('sconn_src'),
+        tris,
+        undoRestored: undoKeys.includes('sconn_src') && added.every(id => !undoKeys.includes(id)),
+      };
+    })()`);
+    assert(!sliceConnRT.err, `slice connector: ${sliceConnRT.err}`);
+    assert(sliceConnRT.addedCount === 2 && sliceConnRT.sourceGone,
+      `slice connector: should create two halves and consume source (${JSON.stringify(sliceConnRT)})`);
+    assert(sliceConnRT.tris.every(n => n > 0), `slice connector: both halves need geometry (${sliceConnRT.tris.join(', ')})`);
+    assert(sliceConnRT.undoRestored, 'slice connector: undo restores source and removes baked halves');
+
     // ── ArrayCommand: repeat an object N times along an axis + undo (ADR 0003) ──
     const arrayRT = await evaluate(cdp, `(async () => {
       const B = window.BABYLON;

@@ -343,6 +343,70 @@
 .viewport-empty-state[hidden] { display: none; }
 .viewport-empty-state strong { color: var(--text-0); font-size: var(--fs-lg); }
 .viewport-empty-actions { display: flex; gap: var(--sp-3); margin-top: var(--sp-2); }
+
+/* ── Slice connector viewport tool ─────────────────────── */
+.slice-tool-panel {
+  position: absolute;
+  right: var(--sp-4);
+  top: calc(var(--sp-4) + 48px);
+  z-index: 1200;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  box-shadow: var(--shadow-md);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+}
+.slice-tool-panel header,
+.slice-tool-panel footer,
+.slice-tool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.slice-tool-panel header { justify-content: space-between; }
+.slice-tool-panel footer { justify-content: flex-end; }
+.slice-tool-panel button,
+.slice-tool-panel select,
+.slice-tool-panel input {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--text-0);
+  font: inherit;
+}
+.slice-tool-panel button {
+  cursor: pointer;
+  padding: var(--sp-2) var(--sp-3);
+}
+.slice-tool-panel button:hover { border-color: var(--border-focus); }
+.slice-tool-panel .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.slice-tool-panel label {
+  display: grid;
+  grid-template-columns: 1fr 86px;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--text-1);
+}
+.slice-tool-panel input,
+.slice-tool-panel select {
+  width: 86px;
+  padding: var(--sp-2);
+}
+.slice-tool-hint {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.35;
+}
 .np-btn:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
 .np-btn:disabled {
   color: var(--text-disabled);

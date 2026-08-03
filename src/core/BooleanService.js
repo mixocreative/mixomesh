@@ -91,6 +91,33 @@ async function _ensureCsg2() {
   await _csgInit;
 }
 
+function _stripOptionalVertexData(mesh) {
+  const B = window.BABYLON;
+  const kinds = [
+    B.VertexBuffer.UVKind,
+    B.VertexBuffer.UV2Kind,
+    B.VertexBuffer.ColorKind,
+    B.VertexBuffer.MatricesIndicesKind,
+    B.VertexBuffer.MatricesWeightsKind,
+    B.VertexBuffer.MatricesIndicesExtraKind,
+    B.VertexBuffer.MatricesWeightsExtraKind,
+  ].filter(Boolean);
+  for (const kind of kinds) {
+    if (mesh.isVerticesDataPresent?.(kind)) mesh.removeVerticesData(kind);
+  }
+}
+
+function _cloneForCsg(mesh, name) {
+  const clone = mesh.clone(`${name}_csg_operand`, mesh.parent ?? null, true);
+  if (!clone) return mesh;
+  clone.makeGeometryUnique?.();
+  clone.isVisible = false;
+  clone.isPickable = false;
+  clone.metadata = { ...(clone.metadata ?? {}), booleanFurniture: true };
+  _stripOptionalVertexData(clone);
+  return clone;
+}
+
 /**
  * Compute a Boolean of the operand meshes on the main thread (CSG2/Manifold).
  * Operands combine in WORLD space (`FromMesh` uses each mesh's world matrix), so the
@@ -113,11 +140,13 @@ export async function computeBoolean(op, meshes, opts = {}) {
 
   const scene = meshes[0].getScene();
   const made = [];
+  const operands = [];
   try {
-    let acc = B.CSG2.FromMesh(meshes[0]);
+    for (let i = 0; i < meshes.length; i++) operands.push(_cloneForCsg(meshes[i], `${op}_${i}`));
+    let acc = B.CSG2.FromMesh(operands[0]);
     made.push(acc);
-    for (let i = 1; i < meshes.length; i++) {
-      const next = B.CSG2.FromMesh(meshes[i]);
+    for (let i = 1; i < operands.length; i++) {
+      const next = B.CSG2.FromMesh(operands[i]);
       made.push(next);
       acc = op === 'union' ? acc.add(next)
         : op === 'subtract' ? acc.subtract(next)
@@ -139,5 +168,6 @@ export async function computeBoolean(op, meshes, opts = {}) {
     return result;
   } finally {
     for (const csg of made) { try { csg.dispose?.(); } catch { /* already gone */ } }
+    for (const mesh of operands) { try { mesh.dispose?.(); } catch { /* already gone */ } }
   }
 }

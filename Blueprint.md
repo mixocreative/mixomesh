@@ -205,6 +205,7 @@ src/
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
+    SliceConnectorService.js ← viewport Slice & Connector geometry planning — §Slice Connector
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
     placement/AlignMath.js ← pure align-delta math for placement verbs — see §Placement + ADR 0003
     placement/BedPlacement.js ← pure drop/centre/face-normal quaternion math
@@ -296,6 +297,7 @@ src/
     AppShell.js            ← shell controls: panel collapse/resize + boot status
     renderSafe.js          ← escaping helpers + validated image data URLs
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
+    SliceConnectorSession.js ← viewport-first cut plane + connector placement session — §Slice Connector
     ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b)
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportEmptyState.js  ← zero-object Import Model / Open Project entry point
@@ -3912,6 +3914,53 @@ now imported in `boot.ts`** (were absent → the export re-bake also silently sk
 Browser smoke: union two solid cubes → watertight result, operands consumed, undo restores, survives
 `.mixo` reload. Remaining polish (textured bake-or-cancel modal; subtract/intersect UI smokes) in
 `docs/handoff/boolean-ops.md`.
+
+---
+
+## §Slice Connector — viewport cut plane with printable connector
+
+**Purpose.** Split one selected solid-colour object into two printable baked parts with a
+slicer-style connector workflow: choose cut from the viewport, place connector on the cut face,
+then apply. This follows the Creality/Prusa/Bambu slicer mental model: cut tool opens a live
+plane widget, the user positions the plane in-scene, then adds connector geometry on the cut plane.
+
+**Interaction contract.** ContextMenu exposes **Slice & Connector...** for a single selected object.
+Starting it enters a temporary viewport session (`ui/SliceConnectorSession.js`) and installs an
+`InputManager.setViewportToolHandler` callback so LMB/RMB events are owned by the tool instead of
+selection/body-drag. The session:
+
+1. captures the active camera forward ray as the initial cut-plane normal;
+2. draws a translucent cut plane plus amber straight guide line across the selected object;
+3. lets LMB-drag move the plane along its normal;
+4. switches to connector placement with a **Place connector** button;
+5. places the connector by clicking the cut plane;
+6. previews peg/socket position while size, depth, clearance, and male side are edited;
+7. applies through `HistoryManager.push(await performSliceConnector(...))`;
+8. cancels via panel Cancel or RMB, disposing all viewport furniture.
+
+**Geometry contract.** `SliceConnectorService.planSliceConnector(bounds, options)` is pure and
+accepts `cameraNormal`, `planeOffsetMM`, `connectorPoint`, `maleSide`, `diameterMM`, `depthMM`, and
+`clearanceMM`. It returns plane centre/normal, projected connector point, connector centre,
+front/back half-space cutter boxes, peg direction, peg diameter, socket diameter
+(`diameter + 2*clearance`), and connector length (`depth + 1mm root overlap`). `connectorPoint` is
+always projected onto the cut plane before CSG so an imprecise click cannot create a floating peg.
+
+**Bake contract.** `commands/SliceConnectorCommands.js` runs CSG2 in this order: intersect source
+with front/back cutters, union the peg into the chosen male side, subtract the clearance-expanded
+socket from the opposite side, register both results as embedded `.mxvd` assets, soft-delete the
+source SceneObject, and select both baked halves. Undo restores the original mesh/object and hides
+the baked halves; redo consumes the source and restores the baked halves. Like Boolean, CSG is
+solid-colour only; textured objects and multi-part logical objects are blocked because UVs would be
+lost and one-mesh-one-shader must hold.
+
+**CSG robustness.** `BooleanService.computeBoolean` clones operands for CSG and strips optional
+vertex streams (`uv`, `uv2`, colours, skinning matrices/weights) from the clones. This avoids
+Babylon CSG2's "geometries having the same number of properties" failure without mutating live
+content meshes.
+
+**Accepted V1 limits.** The first viewport version supports one cylindrical plug/socket connector.
+Dowel mode (holes in both halves plus a separate printed pin), dovetail, snap, screen-line angle
+handles, multi-connector arrays, and textured cut preservation are deferred.
 
 ---
 
