@@ -241,7 +241,7 @@ src/
       MeshSplit.js         ← split-on-import invariant (pure planner + Babylon factory)
       BlobUrls.js          ← shared assetId → object-URL registry
       MeshRegistry.js      ← module-local container/mesh/orphan registries + id minting
-      DirMounts.js         ← mounted-directory handles: picker, idb persist, permission re-grant
+      DirMounts.js         ← adapter-owned directory refs: browser IDB restore; desktop session token
       ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
       AssetRegistration.js ← SceneObject/collection minting, unique names, logical-object grouping, validation queue
       AssetThumbnail.js    ← idle asset thumbnail (THUMB_LAYER camera-mask isolation)
@@ -1499,7 +1499,7 @@ Neutral studio look — flat, even, slightly punchy, like Fusion's default env.
 `src/core/assets/` (`AssetImport` live imports, `AssetRestore` project
 restore + clones, `AssetRegistration` SceneObject/collection minting,
 `AssetThumbnail` idle thumbnails, `MeshRegistry` registries + id minting,
-`DirMounts` mounted-directory handles, `ObjSiblings` OBJ sibling resolution).
+`DirMounts` mounted-directory opaque refs, `ObjSiblings` OBJ sibling resolution).
 The façade owns only release/remove/reset lifecycle; the `AssetLoader` object
 is deliberately NOT frozen — monkey-patching it is the headless-test seam.
 
@@ -1798,16 +1798,16 @@ async function generateThumbnail(meshes, size = 128) {
 ```
 Run inside `requestIdleCallback` to avoid jank.
 
-### Chrome Directory Mount
+### Capability-tiered Directory Mount
 ```js
 async function mountDirectory() {
-  const handle = await window.showDirectoryPicker();
-  const key = `dir_${handle.name}_${Date.now()}`;
-  await idbSet(key, handle);              // store for session restoration
-  return { handle, key };
+  const mounted = await storage.mountDirectory(); // {ref,name}; ref is opaque
+  const key = `dir_${mounted.name}_${Date.now()}`;
+  if (storage.kind === 'browser') await putHandle(key, mounted.ref);
+  return { ref: mounted.ref, key, name: mounted.name };
 }
 ```
-On project load, retrieve handle via `idbGet(key)`, call `handle.requestPermission({ mode: 'read' })`. If denied, show non-blocking banner with re-grant button. Ghost objects render until resolved.
+Browser refs are `FileSystemDirectoryHandle`s kept private to the adapter boundary. On project load, retrieve the handle via `getHandle(key)` and call `requestPermission({ mode: 'read' })`; denial shows a non-blocking re-grant banner and ghost objects remain until resolved. Desktop refs are random main-process registry tokens (`mount_*` / `ref_*`), never absolute paths, and are session-scoped: a new desktop session asks the user to mount again. `listDirectory(ref, displayParent)` returns normalized `{name,path,kind,ref}` entries; `path` is display-relative only. `readFile(ref)` is the only renderer read operation. Invented or stale tokens are rejected by the main process.
 
 ### Imported vs User-Loaded Textures (Phase 4)
 glTF-embedded textures register via `registerImportedTexture(babylonTexture)`. Babylon's glTF loader does not populate `texture.url` with a usable path for embedded images — it sets bookkeeping names like `"data:tex_1"`. Thumbnails must be generated asynchronously via GPU readback:

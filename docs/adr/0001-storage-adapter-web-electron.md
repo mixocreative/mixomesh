@@ -44,8 +44,9 @@ reject that: it hard-codes the browser *handle* model into the interface, so the
 (Electron) impl would have to fake `FileSystemHandle`/`createWritable`/`entries`
 semantics. Instead the interface speaks the app's domain (open/save project, import/
 read/resolve asset, mount, watch). Every location token is an **opaque `ref`** — the
-browser adapter wraps a `FileSystemHandle`, the desktop adapter wraps an absolute path
-string; **callers never inspect a ref and refs never cross runtimes.** What crosses
+browser adapter owns a `FileSystemHandle`; the desktop adapter owns a random token whose
+absolute path exists only in the Electron main process. **Callers never inspect a ref,
+renderer state never contains an OS path, and refs never cross runtimes or sessions.** What crosses
 runtimes (and lives in `.mixo`) is a serialisable **descriptor** `{ path?, contentHash,
 handleKey? }`; `resolveAsset(descriptor)` turns it back into bytes via whatever tiers
 the runtime supports (real path → hash-scan → embedded bytes).
@@ -59,8 +60,9 @@ Project:  pickOpenProject() -> {ref,name,bytes}|null
 Assets:   pickImportAssets(accept) -> [{ref,name,bytes}]
           readAsset(ref) -> bytes
           resolveAsset(descriptor) -> {bytes, live}|null   // tiered; descriptor from .mixo
-          mountDirectory() -> {mountRef,name}|null          // caps.mountDirectory
-          listDirectory(mountRef) -> [{name,ref,kind}]      // AssetPanel scan
+          mountDirectory() -> {ref,name}|null               // caps.mountDirectory
+          listDirectory(ref,displayParent?) -> [{name,path,ref,kind}]
+          readFile(ref) -> File|Blob                        // files only
           watchAsset(ref, cb) -> unsubscribe                // caps.watchFiles (desktop)
 Refs+KV:  persistRef(key,ref) / restoreRef(key) / deleteRef(key)   // handle/path store
           kvSet/kvGet/kvDelete/kvKeys                        // autosave, recent, settings
@@ -70,8 +72,10 @@ Export:   saveExport(suggestedName, bytes)                   // picker+write, el
 - **BrowserStorageAdapter** — wraps today's File System Access + `idb` code (`ref` = handle).
   `caps` feature-detected: `writeFiles/mountDirectory/relinkByPath = 'showOpenFilePicker' in window`;
   `persistAssets = indexedDB present`; `watchFiles = false`.
-- **DesktopStorageAdapter** (Phase 2) — Electron IPC → Node `fs` (`ref` = absolute path).
-  All caps `true`. Injected when `window.electronAPI` is present.
+- **DesktopStorageAdapter** — Electron IPC → a main-process registry (`ref` = random
+  `mount_*` / `ref_*` token). The renderer cannot submit or receive absolute paths for
+  mounted assets; unknown/stale tokens fail closed. All caps `true`. Injected when
+  `window.electronAPI` is present.
 
 ### Refactor order (from the LEAF/LEAKED audit)
 

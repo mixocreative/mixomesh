@@ -9,9 +9,11 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { createOpaqueFileRegistry } = require('./OpaqueFileRegistry.cjs');
 
 const DEV_URL = process.env.MIXO_DEV_URL || '';
 let _kvPath = '';
+const _fileRefs = createOpaqueFileRegistry();
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -48,7 +50,17 @@ ipcMain.handle('kv:get', async (_e, key) => { const o = await _readKv(); return 
 ipcMain.handle('kv:delete', async (_e, key) => { const o = await _readKv(); delete o[key]; await _writeKv(o); });
 ipcMain.handle('kv:keys', async () => Object.keys(await _readKv()));
 
-// ── Real filesystem (path refs) ──
+// ── Mounted asset directories (opaque renderer refs) ──
+ipcMain.handle('dialog:mountDirectory', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const absolutePath = result.filePaths[0];
+  return _fileRefs.registerMount(absolutePath, path.basename(absolutePath));
+});
+ipcMain.handle('fs:listDirectoryRef', (_e, ref, parentPath) => _fileRefs.listDirectory(ref, parentPath));
+ipcMain.handle('fs:readFileRef', (_e, ref) => _fileRefs.readFile(ref));
+
+// ── Legacy project/export filesystem leaves ──
 ipcMain.handle('fs:readFile', async (_e, p) => {
   const b = await fs.readFile(p);
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);   // ArrayBuffer

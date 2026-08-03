@@ -75,16 +75,17 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
       (5 asserts) (fda14cc); first UI gate = AssetPanel Mount button behind `caps.mountDirectory` (6a03deb).
 - [x] De-flaked the dup round-trip smoke (settle source bounce before duplicating) (0b1a7d2)
       — 3× green. IMPORTANT: keeps the green-gate reliable for handoff.
-- [ ] Phase 1b: `src/core/storage/StorageAdapter.js` — domain interface (per ADR) +
+- [x] Phase 1b (directory slice): `src/core/storage/StorageAdapter.js` domain interface +
       `BrowserStorageAdapter` delegating to today's code (opaque ref = FileSystemHandle);
-      boot `storage` singleton (browser impl now; desktop injected in Phase 2).
+      boot `storage` singleton; desktop directory refs are main-process registry tokens.
 - [ ] Phase 1b: route LEAF modules through the adapter (idb.js, persist/*, DirMounts,
       TextureAssets, Download, PersistenceManager doc I/O).
 - [ ] Phase 1b: gate remaining UI controls behind caps — ProjectMenu open/save/saveAs
       (`writeFiles`), recent (`persistAssets`), relink (`relinkByPath`); ViewportDrop OS-file handle.
 - [ ] Phase 1c: refactor LEAKED modules (AssetImport `_fileHandleKeyFor`, ObjSiblings dir-walk,
       AssetPanel `_scanDirectory`/`_cacheHandles`, ViewportDrop DataTransferItem) to go via adapter.
-- [ ] Phase 2: Windows Electron shell + `DesktopStorageAdapter` (IPC → Node fs), inject caps.
+- [x] Phase 2 (directory slice): Windows Electron shell + `DesktopStorageAdapter`; mounted
+      assets use allowlisted opaque-ref IPC and never expose OS paths to the renderer.
 - [ ] Phase 3: electron-builder (NSIS) installer, security hardening, optional auto-update.
 - Verify green (typecheck · 102 headless · build · browser smoke ×N · export) at EACH commit.
 

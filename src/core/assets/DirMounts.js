@@ -1,22 +1,24 @@
-// Mounted-directory handles (File System Access API). Session-scoped map,
-// persisted to IndexedDB so a later session can re-mount after permission
-// re-grant. Kept across project switches (BLUEPRINT §14.2).
+// Mounted-directory opaque refs. Browser refs are File System Access handles and
+// can be restored from IndexedDB; desktop refs are main-process-only tokens and
+// are intentionally session-scoped. Kept across project switches (BLUEPRINT §14.2).
 
 import { putHandle, getHandle } from '../idb.js';
+import { storage } from '../storage/StorageAdapter.js';
 
-const _dirHandles = new Map();    // key → FileSystemDirectoryHandle (session)
+const _dirRefs = new Map();    // key → adapter-owned opaque ref (session)
 
 /**
- * Prompt the user to mount a directory via the File System Access API.
- * Persists the handle in IndexedDB for session restoration (Phase 6).
- * @returns {Promise<{handle: FileSystemDirectoryHandle, key: string}>}
+ * Prompt through the active adapter. `handle` remains as a compatibility alias
+ * while callers migrate to the runtime-neutral `ref` field.
+ * @returns {Promise<{ref:any, handle:any, key:string, name:string}|null>}
  */
 export async function mountDirectory() {
-  const handle = await window.showDirectoryPicker();
-  const key = `dir_${handle.name}_${Date.now()}`;
-  _dirHandles.set(key, handle);
-  await putHandle(key, handle);
-  return { handle, key };
+  const mounted = await storage.mountDirectory();
+  if (!mounted) return null;
+  const key = `dir_${mounted.name}_${Date.now()}`;
+  _dirRefs.set(key, mounted.ref);
+  if (storage.kind === 'browser') await putHandle(key, mounted.ref);
+  return { ref: mounted.ref, handle: mounted.ref, key, name: mounted.name };
 }
 
 /**
@@ -25,15 +27,16 @@ export async function mountDirectory() {
  * @returns {Promise<FileSystemDirectoryHandle|null>}
  */
 export async function restoreDirectory(key) {
+  if (storage.kind !== 'browser') return null;
   const handle = await getHandle(key);
   if (!handle) return null;
   const granted = await handle.requestPermission({ mode: 'read' });
   if (granted !== 'granted') return null;
-  _dirHandles.set(key, handle);
+  _dirRefs.set(key, handle);
   return handle;
 }
 
 /** @param {string} key */
 export function getDirectoryHandle(key) {
-  return _dirHandles.get(key) ?? null;
+  return _dirRefs.get(key) ?? null;
 }

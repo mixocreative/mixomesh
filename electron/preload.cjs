@@ -21,7 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kvGet: (key) => ipcRenderer.invoke('kv:get', key),
   kvDelete: (key) => ipcRenderer.invoke('kv:delete', key),
   kvKeys: () => ipcRenderer.invoke('kv:keys'),
-  // Real filesystem (path refs).
+  // Mounted asset directories use opaque refs; OS paths never enter renderer state.
+  mountDirectory: () => ipcRenderer.invoke('dialog:mountDirectory'),
+  listDirectory: (ref, parentPath) => ipcRenderer.invoke('fs:listDirectoryRef', ref, parentPath),
+  readFileRef: (ref) => ipcRenderer.invoke('fs:readFileRef', ref),
+  // Legacy project/export leaf operations; migrate separately behind descriptors.
   readFile: (p) => ipcRenderer.invoke('fs:readFile', p),
   writeFile: (p, data) => ipcRenderer.invoke('fs:writeFile', p, data),
   pickOpen: (opts) => ipcRenderer.invoke('dialog:open', opts),
