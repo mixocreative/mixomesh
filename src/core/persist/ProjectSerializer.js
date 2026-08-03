@@ -171,6 +171,7 @@ function _serialiseSceneObjects() {
       // vertices, not the raw source bytes — persist the applied fix types so
       // they replay on reload (M1) instead of vanishing.
       geometryFixes: Array.isArray(o.geometryFixes) && o.geometryFixes.length ? [...o.geometryFixes] : undefined,
+      sliceRecipe: o.sliceRecipe ? JSON.parse(JSON.stringify(o.sliceRecipe)) : undefined,
       transform: mesh ? decompose(mesh) : (o._savedTransform ?? null),
     };
   });

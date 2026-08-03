@@ -1,7 +1,9 @@
 const VALID_SIDES = new Set(['front', 'back']);
+const VALID_SHAPES = new Set(['round', 'square']);
 const DEFAULTS = Object.freeze({
   planeOffsetMM: 0,
   maleSide: 'front',
+  connectorShape: 'round',
   diameterMM: 6,
   depthMM: 8,
   clearanceMM: 0.2,
@@ -75,12 +77,14 @@ function _boundsDiag(bounds) {
  */
 export function normalizeSliceConnectorOptions(options = {}) {
   const maleSide = VALID_SIDES.has(options.maleSide) ? options.maleSide : DEFAULTS.maleSide;
+  const connectorShape = VALID_SHAPES.has(options.connectorShape) ? options.connectorShape : DEFAULTS.connectorShape;
   const planeOffsetMM = _finite(options.planeOffsetMM, DEFAULTS.planeOffsetMM);
   const diameterMM = _positive(options.diameterMM, DEFAULTS.diameterMM);
   const depthMM = _positive(options.depthMM, DEFAULTS.depthMM);
   const clearanceMM = _nonNegative(options.clearanceMM, DEFAULTS.clearanceMM);
   return {
     maleSide,
+    connectorShape,
     planeOffsetMM,
     diameterMM,
     depthMM,
@@ -90,6 +94,56 @@ export function normalizeSliceConnectorOptions(options = {}) {
     depthBU: mmToBU(depthMM),
     clearanceBU: mmToBU(clearanceMM),
   };
+}
+
+function _baseNameFromObject(source) {
+  const recipeBase = source?.sliceRecipe?.baseName;
+  if (typeof recipeBase === 'string' && recipeBase.trim()) return recipeBase.trim();
+  return String(source?.name || 'Part').replace(/\s+-\s+Part\s+\d+$/i, '').trim() || 'Part';
+}
+
+/**
+ * Allocate short stable part names for one cut. Repeated cuts keep the same
+ * base name and increment the family part number instead of nesting cut labels.
+ */
+export function nextSlicePartNames(objects = {}, source = {}) {
+  const baseName = _baseNameFromObject(source);
+  let maxIndex = 0;
+  const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const visiblePattern = new RegExp(`^${escaped}\\s+-\\s+Part\\s+(\\d+)$`, 'i');
+  for (const obj of Object.values(objects ?? {})) {
+    const recipe = obj?.sliceRecipe;
+    if (recipe?.baseName === baseName && Number.isInteger(recipe.partIndex)) {
+      maxIndex = Math.max(maxIndex, recipe.partIndex);
+    }
+    const match = String(obj?.name ?? '').match(visiblePattern);
+    if (match) maxIndex = Math.max(maxIndex, Number(match[1]) || 0);
+  }
+  const malePartIndex = maxIndex + 1;
+  const femalePartIndex = maxIndex + 2;
+  const fmt = n => String(n).padStart(2, '0');
+  return {
+    baseName,
+    maleName: `${baseName} - Part ${fmt(malePartIndex)}`,
+    femaleName: `${baseName} - Part ${fmt(femalePartIndex)}`,
+    malePartIndex,
+    femalePartIndex,
+  };
+}
+
+export function findSliceRecipePair(objects = {}, objectId) {
+  const selected = objects?.[objectId];
+  const recipeId = selected?.sliceRecipe?.recipeId;
+  if (!recipeId) return null;
+  let maleId = null;
+  let femaleId = null;
+  for (const obj of Object.values(objects ?? {})) {
+    if (obj?.sliceRecipe?.recipeId !== recipeId) continue;
+    if (obj.sliceRecipe.role === 'male') maleId = obj.id;
+    if (obj.sliceRecipe.role === 'female') femaleId = obj.id;
+  }
+  if (!maleId || !femaleId) return null;
+  return { recipeId, maleId, femaleId, ids: [maleId, femaleId] };
 }
 
 /**
@@ -117,6 +171,42 @@ export function projectPointToPlane(point, planeCenter, planeNormal) {
   return _cleanVector(_addScaled(point, n, -d));
 }
 
+export function planeFromCutLine({ lineStart, lineEnd, cameraNormal }) {
+  const start = {
+    x: _finite(lineStart?.x, 0),
+    y: _finite(lineStart?.y, 0),
+    z: _finite(lineStart?.z, 0),
+  };
+  const end = {
+    x: _finite(lineEnd?.x, 0),
+    y: _finite(lineEnd?.y, 0),
+    z: _finite(lineEnd?.z, 0),
+  };
+  const lineDirection = _normalize({
+    x: end.x - start.x,
+    y: end.y - start.y,
+    z: end.z - start.z,
+  }, { x: 1, y: 0, z: 0 });
+  const cameraDir = _normalize(cameraNormal, { x: 0, y: 0, z: 1 });
+  const planeNormal = _normalize({
+    x: lineDirection.y * cameraDir.z - lineDirection.z * cameraDir.y,
+    y: lineDirection.z * cameraDir.x - lineDirection.x * cameraDir.z,
+    z: lineDirection.x * cameraDir.y - lineDirection.y * cameraDir.x,
+  }, { x: 1, y: 0, z: 0 });
+  return {
+    lineStart: start,
+    lineEnd: end,
+    lineDirection,
+    cameraNormal: cameraDir,
+    planeNormal,
+    planeCenter: _cleanVector({
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+      z: (start.z + end.z) / 2,
+    }),
+  };
+}
+
 /**
  * Produce the deterministic split/connector plan consumed by Babylon CSG and
  * by headless tests. The plane is viewport-first: callers pass a camera-derived
@@ -124,9 +214,13 @@ export function projectPointToPlane(point, planeCenter, planeNormal) {
  */
 export function planSliceConnector(bounds, options = {}) {
   const opts = normalizeSliceConnectorOptions(options);
-  const planeNormal = _normalize(options.cameraNormal, { x: 0, y: 0, z: 1 });
+  const linePlane = options.lineStart && options.lineEnd
+    ? planeFromCutLine({ lineStart: options.lineStart, lineEnd: options.lineEnd, cameraNormal: options.cameraNormal })
+    : null;
+  const planeNormal = linePlane?.planeNormal ?? _normalize(options.cameraNormal, { x: 0, y: 0, z: 1 });
   const sourceCenter = _boundsCenter(bounds);
-  const planeCenter = _addScaled(sourceCenter, planeNormal, opts.planeOffsetBU);
+  const baseCenter = linePlane?.planeCenter ?? sourceCenter;
+  const planeCenter = _addScaled(baseCenter, planeNormal, opts.planeOffsetBU);
   const connectorOnPlane = projectPointToPlane(options.connectorPoint ?? planeCenter, planeCenter, planeNormal);
   const maleSign = opts.maleSide === 'front' ? 1 : -1;
   const pegDirection = _cleanVector({
@@ -141,6 +235,9 @@ export function planSliceConnector(bounds, options = {}) {
     ...opts,
     planeCenter: _cleanVector(planeCenter),
     planeNormal,
+    lineStart: linePlane?.lineStart ?? null,
+    lineEnd: linePlane?.lineEnd ?? null,
+    lineDirection: linePlane?.lineDirection ?? null,
     connectorPoint: connectorOnPlane,
     connectorCenter: _cleanVector(connectorCenter),
     pegDirection,
@@ -172,6 +269,19 @@ function _orientLocalYTo(B, mesh, dir) {
   mesh.rotationQuaternion = q;
 }
 
+function _makeConnectorPrimitive(B, scene, name, plan, socket = false) {
+  const diameter = socket ? plan.socketDiameterBU : plan.pegDiameterBU;
+  const height = socket ? plan.connectorLengthBU + plan.clearanceBU : plan.connectorLengthBU;
+  if (plan.connectorShape === 'square') {
+    return B.MeshBuilder.CreateBox(name, { width: diameter, depth: diameter, height }, scene);
+  }
+  return B.MeshBuilder.CreateCylinder(name, {
+    diameter,
+    height,
+    tessellation: 32,
+  }, scene);
+}
+
 export function worldBoundsForMesh(mesh) {
   mesh.computeWorldMatrix(true);
   const bb = mesh.getBoundingInfo().boundingBox;
@@ -190,19 +300,11 @@ export function createSliceConnectorMeshes(B, scene, plan, namePrefix = 'slice_c
   negativeCutter.position = _vector3(B, plan.negativeCutter.center);
   _orientLocalYTo(B, negativeCutter, plan.planeNormal);
 
-  const peg = B.MeshBuilder.CreateCylinder(`${namePrefix}_peg`, {
-    diameter: plan.pegDiameterBU,
-    height: plan.connectorLengthBU,
-    tessellation: 32,
-  }, scene);
+  const peg = _makeConnectorPrimitive(B, scene, `${namePrefix}_peg`, plan, false);
   _orientLocalYTo(B, peg, plan.pegDirection);
   peg.position = _vector3(B, plan.connectorCenter);
 
-  const socket = B.MeshBuilder.CreateCylinder(`${namePrefix}_socket`, {
-    diameter: plan.socketDiameterBU,
-    height: plan.connectorLengthBU + plan.clearanceBU,
-    tessellation: 32,
-  }, scene);
+  const socket = _makeConnectorPrimitive(B, scene, `${namePrefix}_socket`, plan, true);
   _orientLocalYTo(B, socket, plan.pegDirection);
   socket.position = _vector3(B, plan.connectorCenter);
 

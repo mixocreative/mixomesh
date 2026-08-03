@@ -362,6 +362,33 @@
   color: var(--text-0);
   font-size: var(--fs-sm);
 }
+.slice-tool-line-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1100;
+  pointer-events: none;
+}
+.slice-tool-cut-line {
+  stroke: #f59e0b;
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.75));
+}
+.slice-tool-progress {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+.slice-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.slice-tool-body p {
+  margin: 0;
+  color: var(--text-1);
+  line-height: 1.35;
+}
 .slice-tool-panel header,
 .slice-tool-panel footer,
 .slice-tool-row {

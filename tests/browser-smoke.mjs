@@ -1375,8 +1375,11 @@ async function main() {
       } } } }), { silent: true });
       const cmd = await hm.performSliceConnector('sconn_src', {
         cameraNormal: { x: 1, y: 0, z: 0 },
+        lineStart: { x: 0, y: 0.8, z: -0.04 },
+        lineEnd: { x: 0, y: 0.9, z: 0.04 },
         connectorPoint: { x: 0, y: 0.85, z: 0 },
         maleSide: 'front',
+        connectorShape: 'square',
         diameterMM: 6,
         depthMM: 8,
         clearanceMM: 0.2,
@@ -1385,16 +1388,25 @@ async function main() {
       hm.push(cmd);
       const keys = Object.keys(st.getState().scene.objects);
       const added = keys.filter(k => !before.has(k) && k !== 'sconn_src');
+      const addedObjs = added.map(id => st.getState().scene.objects[id]);
       const tris = added.map(id => {
         const m = scene.meshes.find(x => x.metadata?.meshId === id);
         return m ? Math.floor((m.getTotalIndices() || 0) / 3) : 0;
       });
+      const recipeIds = [...new Set(addedObjs.map(o => o.sliceRecipe?.recipeId).filter(Boolean))];
+      const names = addedObjs.map(o => o.name).sort();
+      const roles = addedObjs.map(o => o.sliceRecipe?.role).sort();
+      const shapes = addedObjs.map(o => o.sliceRecipe?.connectorShape);
       hm.undo();
       const undoKeys = Object.keys(st.getState().scene.objects);
       return {
         addedCount: added.length,
         sourceGone: !keys.includes('sconn_src'),
         tris,
+        names,
+        roles,
+        recipeCount: recipeIds.length,
+        shapes,
         undoRestored: undoKeys.includes('sconn_src') && added.every(id => !undoKeys.includes(id)),
       };
     })()`);
@@ -1402,6 +1414,12 @@ async function main() {
     assert(sliceConnRT.addedCount === 2 && sliceConnRT.sourceGone,
       `slice connector: should create two halves and consume source (${JSON.stringify(sliceConnRT)})`);
     assert(sliceConnRT.tris.every(n => n > 0), `slice connector: both halves need geometry (${sliceConnRT.tris.join(', ')})`);
+    assert(sliceConnRT.names.includes('slice source - Part 01') && sliceConnRT.names.includes('slice source - Part 02'),
+      `slice connector: names should be stable part numbers (${sliceConnRT.names.join(', ')})`);
+    assert(sliceConnRT.roles.join(',') === 'female,male',
+      `slice connector: recipe roles should identify male/female (${sliceConnRT.roles.join(',')})`);
+    assert(sliceConnRT.recipeCount === 1 && sliceConnRT.shapes.every(x => x === 'square'),
+      `slice connector: both halves should share one square-connector recipe (${JSON.stringify(sliceConnRT)})`);
     assert(sliceConnRT.undoRestored, 'slice connector: undo restores source and removes baked halves');
 
     // ── ArrayCommand: repeat an object N times along an axis + undo (ADR 0003) ──

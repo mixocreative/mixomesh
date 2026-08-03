@@ -3920,30 +3920,41 @@ Browser smoke: union two solid cubes → watertight result, operands consumed, u
 ## §Slice Connector — viewport cut plane with printable connector
 
 **Purpose.** Split one selected solid-colour object into two printable baked parts with a
-slicer-style connector workflow: choose cut from the viewport, place connector on the cut face,
-then apply. This follows the Creality/Prusa/Bambu slicer mental model: cut tool opens a live
-plane widget, the user positions the plane in-scene, then adds connector geometry on the cut plane.
+slicer-style connector workflow: draw a straight cut line from the current camera view, create a
+temporary two-part cut preview, choose connector side/shape/size/depth/clearance, then finish as
+two baked objects. This follows the Creality/Prusa/Bambu mental model where the visible action is a
+straight screen-space cut line, not numeric plane entry.
 
 **Interaction contract.** ContextMenu exposes **Slice & Connector...** for a single selected object.
 Starting it enters a temporary viewport session (`ui/SliceConnectorSession.js`) and installs an
 `InputManager.setViewportToolHandler` callback so LMB/RMB events are owned by the tool instead of
-selection/body-drag. The session:
+selection/body-drag. The session is non-destructive until **Finish**:
 
-1. captures the active camera forward ray as the initial cut-plane normal;
-2. draws a translucent cut plane plus amber straight guide line across the selected object;
-3. lets LMB-drag move the plane along its normal;
-4. switches to connector placement with a **Place connector** button;
-5. places the connector by clicking the cut plane;
-6. previews peg/socket position while size, depth, clearance, and male side are edited;
-7. applies through `HistoryManager.push(await performSliceConnector(...))`;
-8. cancels via panel Cancel or RMB, disposing all viewport furniture.
+1. **Draw line** — user LMB-drags a straight SVG overlay line across the object from the active
+   camera view. The line endpoints are ray-cast to the view plane through the object's centre.
+2. **Cut** — user confirms the line; the session computes the cut plane from `{line direction ×
+   camera forward}` and creates temporary CSG preview halves only. The project state is not mutated.
+3. **Choose male** — both temporary halves are visible; user chooses Part A or Part B as the male
+   side. Later steps hide every preview half except the male side so placement is unambiguous.
+4. **Place origin** — user clicks the cut plane/intersection area on the male preview to mark where
+   the connector grows.
+5. **Shape/size** — user chooses round cylinder or square/traditional peg and drags on the plane
+   (or enters mm) to set diameter/width.
+6. **Depth** — user drags to set connector depth; preview peg grows along the cut normal.
+7. **Clearance** — user enters socket clearance in millimetres.
+8. **Finish** — session disposes temporary preview meshes, then runs
+   `HistoryManager.push(await performSliceConnector(...))` to create the persistent two-object
+   result. Cancel/RMB at any step restores the original object and disposes all furniture.
 
 **Geometry contract.** `SliceConnectorService.planSliceConnector(bounds, options)` is pure and
-accepts `cameraNormal`, `planeOffsetMM`, `connectorPoint`, `maleSide`, `diameterMM`, `depthMM`, and
-`clearanceMM`. It returns plane centre/normal, projected connector point, connector centre,
-front/back half-space cutter boxes, peg direction, peg diameter, socket diameter
-(`diameter + 2*clearance`), and connector length (`depth + 1mm root overlap`). `connectorPoint` is
-always projected onto the cut plane before CSG so an imprecise click cannot create a floating peg.
+accepts `cameraNormal`, either `lineStart`/`lineEnd` or the legacy `planeOffsetMM` camera plane,
+`connectorPoint`, `maleSide`, `connectorShape`, `diameterMM`, `depthMM`, and `clearanceMM`.
+`planeFromCutLine({lineStart,lineEnd,cameraNormal})` computes the plane normal from
+`normalize(cross(lineDirection, cameraNormal))`. The plan returns plane centre/normal, projected
+connector point, connector centre, front/back half-space cutter boxes, peg direction, connector
+shape, peg size, socket size (`diameter + 2*clearance`), and connector length (`depth + 1mm root
+overlap`). `connectorPoint` is always projected onto the cut plane before CSG so an imprecise click
+cannot create a floating peg.
 
 **Bake contract.** `commands/SliceConnectorCommands.js` runs CSG2 in this order: intersect source
 with front/back cutters, union the peg into the chosen male side, subtract the clearance-expanded
@@ -3953,14 +3964,24 @@ the baked halves; redo consumes the source and restores the baked halves. Like B
 solid-colour only; textured objects and multi-part logical objects are blocked because UVs would be
 lost and one-mesh-one-shader must hold.
 
+**Naming + recipe metadata (Level 2).** Final visible names use stable family part numbers, not
+nested cut labels: `{baseName} - Part 01`, `{baseName} - Part 02`, etc. Repeated cuts on any part
+reuse `sliceRecipe.baseName` and allocate the next unused part numbers. Each result SceneObject
+persists `sliceRecipe` with `recipeId`, `baseName`, `partIndex`, `role` (`male`/`female`),
+`sourceObjectId`, `sourceAssetId`, cut line, camera normal, plane, connector point, shape, size,
+depth, clearance, and parent recipe id. `findSliceRecipePair(objects, id)` locates the matching
+male/female pair by recipe id. This is the rebuild/edit contract: a future "Edit Slice Connector"
+command can validate that both matching parts exist, recover the source asset, and replace the pair
+from the stored recipe rather than trying to edit baked peg/socket geometry directly.
+
 **CSG robustness.** `BooleanService.computeBoolean` clones operands for CSG and strips optional
 vertex streams (`uv`, `uv2`, colours, skinning matrices/weights) from the clones. This avoids
 Babylon CSG2's "geometries having the same number of properties" failure without mutating live
 content meshes.
 
-**Accepted V1 limits.** The first viewport version supports one cylindrical plug/socket connector.
-Dowel mode (holes in both halves plus a separate printed pin), dovetail, snap, screen-line angle
-handles, multi-connector arrays, and textured cut preservation are deferred.
+**Accepted limits.** One cut + one connector pair per operation. Round and square plug/socket
+connectors are supported. Dowel mode (holes in both halves plus a separate printed pin), dovetail,
+snap, multi-connector arrays, and textured cut preservation are deferred.
 
 ---
 

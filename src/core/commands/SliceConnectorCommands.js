@@ -7,6 +7,7 @@ import { computeBoolean } from '../BooleanService.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import {
   evaluateSliceConnectorEligibility,
+  nextSlicePartNames,
   planSliceConnector,
   worldBoundsForMesh,
   createSliceConnectorMeshes,
@@ -22,14 +23,36 @@ function _triangles(mesh) {
   return Math.floor((mesh?.getTotalIndices?.() ?? 0) / 3);
 }
 
-function _sideLabel(side) {
-  return side === 'front' ? 'Front' : 'Back';
+function _recipeObject({ recipeId, baseName, partIndex, role, side, source, plan, options }) {
+  return {
+    version: 1,
+    recipeId,
+    baseName,
+    partIndex,
+    role,
+    side,
+    sourceObjectId: source.id,
+    sourceAssetId: source.assetId,
+    sourceName: source.name,
+    parentRecipeId: source.sliceRecipe?.recipeId ?? null,
+    lineStart: plan.lineStart,
+    lineEnd: plan.lineEnd,
+    cameraNormal: plan.cameraNormal ?? options.cameraNormal ?? null,
+    planeNormal: plan.planeNormal,
+    planeCenter: plan.planeCenter,
+    connectorPoint: plan.connectorPoint,
+    maleSide: plan.maleSideKey,
+    connectorShape: plan.connectorShape,
+    diameterMM: plan.diameterMM,
+    depthMM: plan.depthMM,
+    clearanceMM: plan.clearanceMM,
+  };
 }
 
-function _resultObject({ id, assetId, source, side, shaderId }) {
+function _resultObject({ id, assetId, source, name, sliceRecipe, shaderId }) {
   return {
     id,
-    name: `${source.name} ${_sideLabel(side)}`,
+    name,
     assetId,
     collectionId: source.collectionId ?? null,
     parentId: null,
@@ -44,6 +67,7 @@ function _resultObject({ id, assetId, source, side, shaderId }) {
     isInternalPart: false,
     containerMeshIndex: 0,
     ratio: 1,
+    sliceRecipe,
   };
 }
 
@@ -104,6 +128,8 @@ export async function performSliceConnector(meshId, options = {}) {
   const B = window.BABYLON;
   const scene = mesh.getScene();
   const plan = planSliceConnector(worldBoundsForMesh(mesh), options);
+  const names = nextSlicePartNames(objects, source);
+  const recipeId = `slice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const furniture = createSliceConnectorMeshes(B, scene, plan, `slice_${id}`);
   const temps = Object.values(furniture);
   for (const temp of temps) _stripCsgOptionalVertexData(temp);
@@ -117,24 +143,44 @@ export async function performSliceConnector(meshId, options = {}) {
 
     const maleRaw = plan.maleSideKey === 'front' ? frontHalf : backHalf;
     const femaleRaw = plan.femaleSideKey === 'front' ? frontHalf : backHalf;
-    const maleFinal = await computeBoolean('union', [maleRaw, furniture.peg], { name: `${source.name}_${_sideLabel(plan.maleSideKey)}` });
-    const femaleFinal = await computeBoolean('subtract', [femaleRaw, furniture.socket], { name: `${source.name}_${_sideLabel(plan.femaleSideKey)}` });
+    const maleFinal = await computeBoolean('union', [maleRaw, furniture.peg], { name: names.maleName });
+    const femaleFinal = await computeBoolean('subtract', [femaleRaw, furniture.socket], { name: names.femaleName });
 
-    const male = await AssetLoader.registerBakedResult(maleFinal, `${source.name} ${_sideLabel(plan.maleSideKey)}`);
-    const female = await AssetLoader.registerBakedResult(femaleFinal, `${source.name} ${_sideLabel(plan.femaleSideKey)}`);
+    const male = await AssetLoader.registerBakedResult(maleFinal, names.maleName);
+    const female = await AssetLoader.registerBakedResult(femaleFinal, names.femaleName);
     const resultObjs = {
       [male.meshId]: _resultObject({
         id: male.meshId,
         assetId: male.assetId,
         source,
-        side: plan.maleSideKey,
+        name: names.maleName,
+        sliceRecipe: _recipeObject({
+          recipeId,
+          baseName: names.baseName,
+          partIndex: names.malePartIndex,
+          role: 'male',
+          side: plan.maleSideKey,
+          source,
+          plan,
+          options,
+        }),
         shaderId: source.shaderId ?? null,
       }),
       [female.meshId]: _resultObject({
         id: female.meshId,
         assetId: female.assetId,
         source,
-        side: plan.femaleSideKey,
+        name: names.femaleName,
+        sliceRecipe: _recipeObject({
+          recipeId,
+          baseName: names.baseName,
+          partIndex: names.femalePartIndex,
+          role: 'female',
+          side: plan.femaleSideKey,
+          source,
+          plan,
+          options,
+        }),
         shaderId: source.shaderId ?? null,
       }),
     };
