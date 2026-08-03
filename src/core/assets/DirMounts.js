@@ -38,5 +38,35 @@ export async function restoreDirectory(key) {
 
 /** @param {string} key */
 export function getDirectoryHandle(key) {
-  return _dirRefs.get(key) ?? null;
+  const ref = _dirRefs.get(key);
+  return ref ? directoryRefFacade(storage, ref) : null;
+}
+
+/**
+ * Legacy handle-shaped view over opaque adapter refs. Keeps OBJ sibling and
+ * restore walkers runtime-neutral while their public API migrates by leaf.
+ */
+export function directoryRefFacade(adapter, ref) {
+  const list = () => adapter.listDirectory(ref, '');
+  const fileFacade = file => ({ kind: 'file', name: file.name, getFile: () => adapter.readFile(file.ref) });
+  return {
+    kind: 'directory',
+    async getDirectoryHandle(name) {
+      const child = (await list()).find(row => row.kind === 'directory' && row.name === name);
+      if (!child) throw new Error(`Directory not found: ${name}`);
+      return directoryRefFacade(adapter, child.ref);
+    },
+    async getFileHandle(name) {
+      const child = (await list()).find(row => row.kind === 'file' && row.name === name);
+      if (!child) throw new Error(`File not found: ${name}`);
+      return fileFacade(child);
+    },
+    async *entries() {
+      for (const child of await list()) {
+        yield [child.name, child.kind === 'directory'
+          ? directoryRefFacade(adapter, child.ref)
+          : fileFacade(child)];
+      }
+    },
+  };
 }

@@ -630,7 +630,7 @@ async function _assignTextureFromPayload(shaderId, payload) {
       const handle = AssetPanel.getFileHandle(payload.mountKey, payload.path);
       if (!handle) throw new Error('Texture file handle not available');
       assetId = await AssetLoader.loadTextureFromHandle(handle, {
-        directoryHandleKey: payload.mountKey, originalPath: payload.path,
+        directoryHandleKey: payload.mountKey, originalPath: payload.sourcePath ?? payload.path,
       });
     }
     if (!assetId) return;

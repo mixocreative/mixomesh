@@ -23,6 +23,11 @@ Work on one slice at a time. Use focused tests for red/green loops; run
 lint/typecheck/build once at each slice boundary. Do not run all browser/export/
 Electron smokes after every small edit.
 
+**Progress (2026-08-03):** Tasks 1–4 shipped in `776cba6`, `40803d2`,
+`153bbf2`, and `947de76`. Task 5 shipped in `7da2184`. Task 6 is implemented
+and verified in the scoped-index commit following that storage boundary. Task 7
+is the next executable task.
+
 ## Task 1: Pin the build-volume-only contract
 
 **Files:**

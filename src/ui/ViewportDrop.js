@@ -71,7 +71,7 @@ function _handleDrop(e, position) {
 
   const panelPayload = dt.getData(DRAG_MIME);
   if (panelPayload) {
-    const { mountKey, path, filename } = JSON.parse(panelPayload);
+    const { mountKey, path, sourcePath, filename } = JSON.parse(panelPayload);
     safeImport(async () => {
       if (mountKey === SESSION_KEY) {
         // path IS the assetId; re-instantiate from existing container
@@ -81,7 +81,7 @@ function _handleDrop(e, position) {
       const handle = AssetPanel.getFileHandle(mountKey, path);
       if (!handle) throw new Error(`No file handle for ${filename}`);
       await AssetLoader.loadFromHandle(handle, position, {
-        directoryHandleKey: mountKey, originalPath: path,
+        directoryHandleKey: mountKey, originalPath: sourcePath ?? path,
       });
     }, filename ?? 'asset');
     return;

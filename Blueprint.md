@@ -234,6 +234,7 @@ src/
     scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
     assets/
       AssetTypes.js        ← supported extensions + extension parser
+      AssetIndex.js        ← immutable mounted-file index + scoped query/refresh fallback
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
       TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind, recap-all
       TextureSource.js     ← full-res export-PNG per assetId, frozen pre-cap (export fidelity)
@@ -2957,28 +2958,42 @@ Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
 - Uses `src/core/assets/AssetTypes.js` for canonical supported mesh/texture
   extension lists and extension parsing; the panel must not carry divergent
   local extension tables.
+- `AssetIndex.scanAssetMount(storage, mount)` recursively reads opaque adapter
+  refs exactly once on mount/refresh and returns frozen `files` / `folders`
+  projections. Each file row carries `mountKey`, display-relative `path`,
+  mount-root-relative `sourcePath`, `assetKind`, and an opaque live `ref`.
+  Rendering and searching use `queryAssets`; neither touches the filesystem.
+  Rows deduplicate by `mountKey:path` and sort deterministically by name, path,
+  then mount. `nearestFolderPath` preserves selection across refresh or walks to
+  the nearest surviving ancestor.
 - Left column: a two-tab switcher (built ONCE in `init` — `src/app/main.ts` appends the
   panel-collapse button into `.ap-tree-header`, so the header element must
   survive re-renders; only `#ap-tree-list`, `#ap-grid-summary`, and
   `#ap-grid-body` re-render).
-  - **Session** tab — all assets registered to *this project's* `assetLibrary`
+  - **Session** tab — smart views `All`, `Used`, `Unused`, and `Issues` over all
+    assets registered to *this project's* `assetLibrary`
     (loose drops + folder loads, regardless of source). Per-card **Linked /
     Snapshot** badge derived from `!!(asset.directoryHandleKey || asset.fileHandleKey)`.
-    No tree (CSS: `#ap-tree[data-tab="session"] .ap-tree-list { display: none }`).
     Mount button is also hidden on this tab — mounting belongs to Library.
     Drag from a Session card uses `mountKey: SESSION_KEY`; ViewportDrop
     re-instantiates the existing AssetContainer (no reload, identical to a
     "Duplicate" via drag).
   - **Asset Library** tab — the *mounted folder browser*. Same lifecycle as a
-    cross-project folder (re-mounted via `last_mount_dir` on boot, see §11
-    Boot behaviour). Tree of mount roots + subdirectories. Mount button visible.
+    cross-project folder (browser re-mounted via `last_mount_dir` on boot, see
+    §11 Boot behaviour; desktop tokens are session-only). Tree of multiple mount
+    roots + subdirectories. Mount, refresh-selected, and unmount-selected actions
+    are visible.
     Drag from a Library card carries the directoryHandleKey + relPath; the drop
     handler loads through `AssetLoader.loadFromHandle` so it registers as a
     Linked asset in this project's Session.
-- Right column: thumbnail grid. Hover preview tooltip.
+- Right column: breadcrumb + thumbnail grid. Library cards show their relative
+  provenance path so identically named files remain distinguishable.
 - Right-column filter controls are built once and persist across grid renders:
-  a search input filters by filename/path and an asset-kind select filters
-  All / Meshes / Textures. The grid summary reports shown vs total assets.
+  a search input filters by filename/path, a scope select chooses This folder /
+  Folder + subfolders / All libraries, and an asset-kind select filters All /
+  Meshes / Textures. Normal browsing shows direct children only. Starting a
+  search defaults scope to descendants unless the user explicitly selected a
+  scope. The grid summary reports shown vs total assets.
 - Card: name, extension badge, source-unit badge (with warning icon if
   unconfirmed), and on Session — Linked/Snapshot link-status badge.
 - Tree rows and cards escape all `data-*` attributes before writing HTML;
@@ -2986,7 +3001,9 @@ Renamed from "Shader Panel" in Phase 4. Right-panel lower section.
   those values.
 - Double-click → Session: `instantiateAsset(assetId)` at origin; Library:
   `loadFromHandle(...)` at origin (or `loadTextureFromHandle` for textures).
-- Mounting a folder auto-switches to the Library tab.
+- Mounting a folder auto-switches to the Library tab. Refresh rebuilds only that
+  mount's index and keeps the selected folder or nearest existing ancestor;
+  unmount discards only the in-session source, never project assets.
 - Event handling is delegated from `#ap-tree-list` and `#ap-grid`; card and
   folder-row listeners are not re-created per render. Folder rows are
   `role="treeitem"` with `tabindex="0"` and support Enter/Space activation plus
@@ -3012,10 +3029,10 @@ Supported drop sources:
   `mountKey: '__session__'` and `path = assetId`. Calls
   `AssetLoader.instantiateAsset(assetId, position)`.
 - Asset Panel library card: custom MIME with `mountKey`, relative `path`, and
-  filename. Retrieves a `FileSystemFileHandle` via
+  mount-root-relative `sourcePath`. Retrieves a handle-shaped adapter wrapper via
   `AssetPanel.getFileHandle(mountKey, path)`, then calls
   `AssetLoader.loadFromHandle(handle, position, { directoryHandleKey:
-  mountKey, originalPath: path })`.
+  mountKey, originalPath: sourcePath })`.
 - OS file explorer: reads `DataTransferItem.getAsFile()` and, while still
   inside the synchronous drop event, captures the Chrome-only
   `getAsFileSystemHandle()` promise. Mesh extensions are checked through

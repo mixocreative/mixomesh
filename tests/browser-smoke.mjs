@@ -131,6 +131,14 @@ async function main() {
         toolbar: !!document.querySelector('.pm-bar'),
         outliner: !!document.querySelector('#ol-list'),
         assetGrid: !!document.querySelector('#ap-grid'),
+        assetBrowser: {
+          breadcrumb: !!document.querySelector('#ap-breadcrumb'),
+          scopeValues: [...document.querySelectorAll('#ap-scope-filter option')].map(o => o.value),
+          smartViews: [...document.querySelectorAll('#ap-tree-list [data-session-view]')]
+            .map(row => row.dataset.sessionView),
+          libraryActions: ['ap-mount-btn', 'ap-refresh-btn', 'ap-unmount-btn']
+            .every(id => !!document.getElementById(id)),
+        },
         toastRoot: !!document.querySelector('#toast-container[aria-live]'),
         modalRoot: !!document.querySelector('#modal-root'),
         progressRoot: !!document.querySelector('#progress-root'),
@@ -164,6 +172,12 @@ async function main() {
     assert(snapshot.toolbar, 'project toolbar missing');
     assert(snapshot.outliner, 'outliner list missing');
     assert(snapshot.assetGrid, 'asset grid missing');
+    assert(snapshot.assetBrowser.breadcrumb, 'asset browser breadcrumb missing');
+    assert(snapshot.assetBrowser.scopeValues.join(',') === 'folder,descendants,all',
+      `asset search scopes incorrect: ${snapshot.assetBrowser.scopeValues.join(',')}`);
+    assert(snapshot.assetBrowser.smartViews.join(',') === 'all,used,unused,issues',
+      `session smart views incorrect: ${snapshot.assetBrowser.smartViews.join(',')}`);
+    assert(snapshot.assetBrowser.libraryActions, 'asset library mount/refresh/unmount actions missing');
     assert(snapshot.toastRoot, 'toast root missing');
     assert(snapshot.modalRoot, 'modal root missing');
     assert(snapshot.progressRoot, 'progress root missing');

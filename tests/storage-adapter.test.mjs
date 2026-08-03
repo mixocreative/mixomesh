@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { storage, BrowserStorageAdapter } from '../src/core/storage/StorageAdapter.js';
 import { DesktopStorageAdapter } from '../src/core/storage/DesktopStorageAdapter.js';
+import { directoryRefFacade } from '../src/core/assets/DirMounts.js';
 
 let passed = 0, failed = 0;
 async function test(name, fn) {
@@ -96,6 +97,24 @@ await test('desktop directory methods delegate only opaque mount ids to the brid
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
+});
+
+await test('directory facade supports nested sibling lookup without exposing refs', async () => {
+  const file = { name: 'paint.png' };
+  const rows = new Map([
+    ['root', [{ name: 'parts', kind: 'directory', ref: 'nested', path: 'parts' }]],
+    ['nested', [{ name: 'paint.png', kind: 'file', ref: 'paint', path: 'paint.png' }]],
+  ]);
+  const facade = directoryRefFacade({
+    listDirectory: async ref => rows.get(ref) ?? [],
+    readFile: async ref => ref === 'paint' ? file : null,
+  }, 'root');
+  const parts = await facade.getDirectoryHandle('parts');
+  const names = [];
+  for await (const [name] of parts.entries()) names.push(name);
+  assert.deepEqual(names, ['paint.png']);
+  assert.equal(await (await parts.getFileHandle('paint.png')).getFile(), file);
+  assert.equal(JSON.stringify(facade).includes('root'), false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

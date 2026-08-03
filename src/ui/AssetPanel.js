@@ -8,15 +8,19 @@ import { Toast, safeAsync } from './Toast.js';
 import { safeImport } from './ImportError.js';
 import { icon } from '../core/Icons.js';
 import { caps } from '../core/storage/capabilities.js';
-import { SUPPORTED_EXTENSIONS, SUPPORTED_TEXTURE_EXTENSIONS, extOf } from '../core/assets/AssetTypes.js';
+import { storage } from '../core/storage/StorageAdapter.js';
+import {
+  combineAssetIndexes,
+  createAssetIndex,
+  nearestFolderPath,
+  queryAssets,
+  scanAssetMount,
+} from '../core/assets/AssetIndex.js';
 import { authoredScaleFromAsset, formatScaleRatio } from '../core/scale/ScaleMath.js';
 import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js';
 
 const BABYLON = window.BABYLON;
 
-const MESH_EXT    = new Set(SUPPORTED_EXTENSIONS);
-const TEXTURE_EXT = new Set(SUPPORTED_TEXTURE_EXTENSIONS);
-const SUPPORTED   = new Set([...MESH_EXT, ...TEXTURE_EXT]);
 const DRAG_MIME   = 'application/x-mixomesh-asset';
 
 const SESSION_KEY = '__session__';
@@ -34,13 +38,16 @@ let _treeWrapEl    = null;          // #ap-tree (carries data-tab for CSS)
 let _gridEl        = null;
 let _gridBodyEl    = null;
 let _gridSummaryEl = null;
+let _breadcrumbEl  = null;
 let _activeTab     = 'session';     // 'session' | 'library' — top-level switch
 let _selectedKey   = SESSION_KEY;   // mountKey or SESSION_KEY
-let _selectedPath  = '';            // relative path within selected mount; '' = root
+let _selectedPath  = '';            // display-relative folder path within selected mount
+let _sessionView   = 'all';         // 'all' | 'used' | 'unused' | 'issues'
 let _query         = '';
 let _kindFilter    = 'all';         // 'all' | 'mesh' | 'texture'
-const _mounts      = new Map();     // mountKey → { handle, tree }
-const _fileHandles = new Map();     // `${mountKey}:${relPath}` → FileSystemFileHandle
+let _scope         = 'folder';      // 'folder' | 'descendants' | 'all'
+let _scopeExplicit = false;
+const _mounts      = new Map();     // mountKey → { ref, name, index }
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -64,13 +71,25 @@ export function init() {
           ${icon('Upload', { width: 14, height: 14 })}
           <span data-i18n-key="asset.mount">Mount</span>
         </button>
+        <button class="ap-icon-btn" id="ap-refresh-btn" type="button" data-i18n-title="asset.refresh" data-i18n-aria-label="asset.refresh">
+          ${icon('RefreshCw', { width: 14, height: 14 })}
+        </button>
+        <button class="ap-icon-btn" id="ap-unmount-btn" type="button" data-i18n-title="asset.unmount" data-i18n-aria-label="asset.unmount">
+          ${icon('Trash2', { width: 14, height: 14 })}
+        </button>
       </div>
       <ul class="ap-tree-list" id="ap-tree-list" role="tree" data-i18n-aria-label="asset.mountedFolders"></ul>
     </div>
     <div class="ap-divider"></div>
     <div class="ap-grid" id="ap-grid">
+      <div class="ap-breadcrumb" id="ap-breadcrumb" aria-live="polite"></div>
       <div class="ap-grid-controls" role="search">
         <input class="ap-search" id="ap-search" type="search" data-i18n-placeholder="asset.filter" autocomplete="off" data-i18n-aria-label="asset.filter">
+        <select class="ap-scope-filter" id="ap-scope-filter" data-i18n-aria-label="asset.searchScope">
+          <option value="folder" data-i18n-key="asset.scope.folder">This folder</option>
+          <option value="descendants" data-i18n-key="asset.scope.descendants">Folder + subfolders</option>
+          <option value="all" data-i18n-key="asset.scope.all">All libraries</option>
+        </select>
         <select class="ap-kind-filter" id="ap-kind-filter" data-i18n-aria-label="asset.typeFilter">
           <option value="all" data-i18n-key="asset.filter.all">All</option>
           <option value="mesh" data-i18n-key="asset.filter.meshes">Meshes</option>
@@ -86,9 +105,12 @@ export function init() {
   _gridEl     = document.getElementById('ap-grid');
   _gridBodyEl = document.getElementById('ap-grid-body');
   _gridSummaryEl = document.getElementById('ap-grid-summary');
+  _breadcrumbEl = document.getElementById('ap-breadcrumb');
 
   const _mountBtn = _treeWrapEl.querySelector('#ap-mount-btn');
   _mountBtn.addEventListener('click', promptMount);
+  _treeWrapEl.querySelector('#ap-refresh-btn').addEventListener('click', () => safeAsync(_refreshSelectedMount));
+  _treeWrapEl.querySelector('#ap-unmount-btn').addEventListener('click', _unmountSelected);
   // Capability-gate (ADR 0001): folder mounting needs a filesystem the runtime
   // exposes. Hidden — not shown-and-broken — when unsupported (e.g. a no-FSA
   // browser). No-op on Chrome/Edge/Electron where mountDirectory is true.
@@ -109,7 +131,7 @@ export function init() {
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
   // Header is built once and survives re-renders — only retranslate it on
   // locale switch; the grid body has no section.* labels in scope for v1.
-  subscribe(EVENTS.LOCALE_CHANGED, () => { _retranslate(_root); _renderGrid(); });
+  subscribe(EVENTS.LOCALE_CHANGED, () => { _retranslate(_root); _renderTreeList(); _renderGrid(); });
 
   Modal.register('remountFolder', ({ data, close }) => {
     const el = document.createElement('div');
@@ -134,15 +156,14 @@ export function init() {
 
 const LAST_MOUNT_KEY = 'last_mount_dir';
 
-/** Scan a granted directory handle into the panel + cache its file handles. */
-async function _mountHandle(key, handle, announce) {
-  const tree = await _scanDirectory(handle, '');
-  _mounts.set(key, { handle, tree });
-  _cacheHandles(key, tree);
+/** Index an adapter-owned directory ref once; rendering/search never scans storage. */
+async function _mountRef(key, ref, name, announce) {
+  const index = await scanAssetMount(storage, { mountKey: key, name, ref });
+  _mounts.set(key, { ref, name, index });
   _selectedKey  = key;
-  _selectedPath = '';
+  _selectedPath = name;
   _setTab('library');
-  if (announce) Toast.show(t('toast.mounted', { name: handle.name }), 'success', 3000);
+  if (announce) Toast.show(t('toast.mounted', { name }), 'success', 3000);
 }
 
 /** Switch between Session and Library tabs. Drives `data-tab` on #ap-tree. */
@@ -161,7 +182,7 @@ function _setTab(tab) {
     const first = _mounts.keys().next();
     if (!first.done) {
       _selectedKey  = first.value;
-      _selectedPath = '';
+      _selectedPath = _mounts.get(first.value).name;
     }
   }
   _renderTreeList();
@@ -171,9 +192,10 @@ function _setTab(tab) {
 /** Programmatically trigger the directory-mount picker (also bound to header button). */
 export async function promptMount() {
   await safeAsync(async () => {
-    const { key, handle } = await AssetLoader.mountDirectory();
-    await _mountHandle(key, handle, true);
-    await kvSet(LAST_MOUNT_KEY, { key, name: handle.name });
+    const mounted = await AssetLoader.mountDirectory();
+    if (!mounted) return;
+    await _mountRef(mounted.key, mounted.ref, mounted.name, true);
+    await kvSet(LAST_MOUNT_KEY, { key: mounted.key, name: mounted.name });
   });
 }
 
@@ -183,6 +205,7 @@ export async function promptMount() {
  * gesture). Replaces autosave recovery on startup.
  */
 export async function promptRemount() {
+  if (storage.kind !== 'browser') return;
   let rec;
   try { rec = await kvGet(LAST_MOUNT_KEY); } catch { return; }
   if (!rec?.key) return;
@@ -203,7 +226,7 @@ export async function promptRemount() {
       Toast.show(t('toast.folderPermissionDenied'), 'warning', 4000);
       return;
     }
-    await _mountHandle(rec.key, handle, true);
+    await _mountRef(rec.key, handle, rec.name || handle.name, true);
   });
 }
 
@@ -215,66 +238,89 @@ export async function promptRemount() {
  * @returns {FileSystemFileHandle|null}
  */
 export function getFileHandle(mountKey, path) {
-  return _fileHandles.get(`${mountKey}:${path}`) ?? null;
+  const file = _libraryIndex().files.find(row => row.mountKey === mountKey && row.path === path);
+  if (!file) return null;
+  return {
+    name: file.name,
+    getFile: () => storage.readFile(file.ref),
+  };
 }
 
-// ── Directory scan ───────────────────────────────────────
+function _libraryIndex() {
+  return _mounts.size
+    ? combineAssetIndexes([..._mounts.values()].map(mount => mount.index))
+    : createAssetIndex();
+}
 
-async function _scanDirectory(dirHandle, prefix) {
-  const node = { name: dirHandle.name, path: prefix, dirs: [], files: [] };
-  for await (const [name, entry] of dirHandle.entries()) {
-    const relPath = prefix ? `${prefix}/${name}` : name;
-    if (entry.kind === 'directory') {
-      node.dirs.push(await _scanDirectory(entry, relPath));
-    } else {
-      const ext = extOf(name);
-      if (SUPPORTED.has(ext)) {
-        const kind = TEXTURE_EXT.has(ext) ? 'texture' : 'mesh';
-        node.files.push({ name, path: relPath, ext, kind, handle: entry });
-      }
-    }
+async function _refreshSelectedMount() {
+  const mount = _mounts.get(_selectedKey);
+  if (!mount) return;
+  const requestedPath = _selectedPath;
+  const index = await scanAssetMount(storage, {
+    mountKey: _selectedKey,
+    name: mount.name,
+    ref: mount.ref,
+  });
+  mount.index = index;
+  _selectedPath = nearestFolderPath(index, _selectedKey, requestedPath) ?? mount.name;
+  _renderTreeList();
+  _renderGrid();
+  Toast.show(t('toast.assetFolderRefreshed', { name: mount.name }), 'success', 2500);
+}
+
+function _unmountSelected() {
+  if (!_mounts.delete(_selectedKey)) return;
+  const next = _mounts.entries().next();
+  if (next.done) {
+    _selectedKey = SESSION_KEY;
+    _selectedPath = '';
+    _setTab('session');
+    return;
   }
-  node.dirs.sort((a, b) => a.name.localeCompare(b.name));
-  node.files.sort((a, b) => a.name.localeCompare(b.name));
-  return node;
-}
-
-function _cacheHandles(mountKey, node) {
-  for (const f of node.files) _fileHandles.set(`${mountKey}:${f.path}`, f.handle);
-  for (const d of node.dirs)  _cacheHandles(mountKey, d);
-}
-
-function _findNode(node, relPath) {
-  if (!relPath) return node;
-  for (const d of node.dirs) {
-    if (d.path === relPath) return d;
-    if (relPath.startsWith(d.path + '/')) {
-      const found = _findNode(d, relPath);
-      if (found) return found;
-    }
-  }
-  return null;
+  _selectedKey = next.value[0];
+  _selectedPath = next.value[1].name;
+  _renderTreeList();
+  _renderGrid();
 }
 
 // ── Tree rendering ───────────────────────────────────────
 
-// Session tab has no tree (one logical bucket); Library tab lists mount roots
-// and their subdirectories. The list element is empty on Session — CSS hides
-// it via `#ap-tree[data-tab="session"] .ap-tree-list { display: none }`.
 function _renderTreeList() {
-  if (_activeTab === 'session' || _mounts.size === 0) {
+  if (_activeTab === 'session') {
+    const views = [
+      ['all', 'Layers', t('asset.smart.all')],
+      ['used', 'Box', t('asset.smart.used')],
+      ['unused', 'Circle', t('asset.smart.unused')],
+      ['issues', 'CircleAlert', t('asset.smart.issues')],
+    ];
+    _listEl.innerHTML = views.map(([view, iconName, label]) => _renderTreeRow({
+      label,
+      iconName,
+      key: SESSION_KEY,
+      relPath: view,
+      depth: 0,
+      hasChildren: false,
+      sessionView: view,
+    })).join('');
+    return;
+  }
+  if (_mounts.size === 0) {
     _listEl.innerHTML = '';
     return;
   }
   const parts = [];
   for (const [mountKey, m] of _mounts) {
-    parts.push(_renderTreeBranch(mountKey, m.tree, 0));
+    const root = m.index.folders.find(folder => folder.path === m.name);
+    if (root) parts.push(_renderTreeBranch(mountKey, root, m.index, 0));
   }
   _listEl.innerHTML = parts.join('');
 }
 
-function _renderTreeBranch(mountKey, node, depth) {
-  const hasChildren = node.dirs.length > 0;
+function _renderTreeBranch(mountKey, node, index, depth) {
+  const children = index.folders.filter(folder => (
+    folder.mountKey === mountKey && folder.parentPath === node.path
+  ));
+  const hasChildren = children.length > 0;
   let html = _renderTreeRow({
     label: node.name,
     iconName: 'FolderOpen',
@@ -285,14 +331,17 @@ function _renderTreeBranch(mountKey, node, depth) {
   });
   if (hasChildren) {
     html += '<ul class="ap-tree-children">';
-    for (const d of node.dirs) html += _renderTreeBranch(mountKey, d, depth + 1);
+    for (const child of children) html += _renderTreeBranch(mountKey, child, index, depth + 1);
     html += '</ul>';
   }
   return html;
 }
 
-function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren }) {
-  const selected = key === _selectedKey && relPath === _selectedPath ? 'selected' : '';
+function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren, sessionView = '' }) {
+  const isSelected = sessionView
+    ? _activeTab === 'session' && sessionView === _sessionView
+    : key === _selectedKey && relPath === _selectedPath;
+  const selected = isSelected ? 'selected' : '';
   const indent = depth * 12;
   const toggler = hasChildren
     ? `<span class="ap-tree-toggle">${icon('ChevronDown', { width: 12, height: 12 })}</span>`
@@ -303,6 +352,7 @@ function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren }) {
            data-tree-row
            data-mount-key="${escapeAttr(key)}"
            data-rel-path="${escapeAttr(relPath)}"
+           data-session-view="${escapeAttr(sessionView)}"
            data-has-children="${hasChildren ? 'true' : 'false'}"
            role="treeitem"
            tabindex="0"
@@ -321,9 +371,16 @@ function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren }) {
 
 function _renderGrid() {
   let files = [];
+  let total = 0;
+  const scopeEl = _gridEl.querySelector('#ap-scope-filter');
   if (_activeTab === 'session') {
-    files = _sessionFiles();
+    files = _sessionFiles(_sessionView);
+    total = files.length;
+    _breadcrumbEl.textContent = t(`asset.smart.${_sessionView}`);
+    scopeEl.disabled = true;
   } else if (_mounts.size === 0) {
+    _breadcrumbEl.textContent = t('panel.library.title');
+    scopeEl.disabled = true;
     _gridSummaryEl.textContent = '';
     _gridBodyEl.innerHTML = `
       <div class="ap-empty">
@@ -331,15 +388,17 @@ function _renderGrid() {
       </div>`;
     return;
   } else {
-    const mount = _mounts.get(_selectedKey);
-    if (mount) {
-      const node = _findNode(mount.tree, _selectedPath);
-      if (node) files = node.files.map(f => ({ ...f, mountKey: _selectedKey }));
-    }
+    scopeEl.disabled = false;
+    scopeEl.value = _scope;
+    _breadcrumbEl.textContent = _scope === 'all' ? t('asset.scope.all') : _selectedPath;
+    const index = _libraryIndex();
+    const query = { mountKey: _selectedKey, folderPath: _selectedPath, scope: _scope };
+    total = queryAssets(index, { ...query, text: '', kind: 'all' }).length;
+    files = queryAssets(index, { ...query, text: _query, kind: _kindFilter })
+      .map(file => ({ ...file, kind: file.assetKind }));
   }
 
-  const total = files.length;
-  const filtered = _filterFiles(files);
+  const filtered = _activeTab === 'session' ? _filterFiles(files) : files;
   _gridSummaryEl.textContent = total
     ? t('asset.summary', {
       filtered: filtered.length,
@@ -383,8 +442,21 @@ function _plural(count, word) {
 // loads), regardless of source. Liveness is shown per-card via the
 // Linked/Snapshot badge — not by filtering.
 function _sessionFiles() {
-  const library = getState().scene.assetLibrary;
-  return Object.values(library).map(a => ({
+  const scene = getState().scene;
+  const library = scene.assetLibrary;
+  const objects = Object.values(scene.objects);
+  const usedIds = new Set(objects.map(object => object.assetId).filter(Boolean));
+  for (const shader of Object.values(scene.shaders)) {
+    if (shader.diffuseTextureAssetId) usedIds.add(shader.diffuseTextureAssetId);
+  }
+  const issueIds = new Set(objects.filter(object => object.isGhost).map(object => object.assetId));
+  return Object.values(library).filter(asset => {
+    const used = usedIds.has(asset.id);
+    if (_sessionView === 'used') return used;
+    if (_sessionView === 'unused') return !used;
+    if (_sessionView === 'issues') return issueIds.has(asset.id) || asset.unitConfirmed === false;
+    return true;
+  }).map(a => ({
     name: a.displayName ?? a.filename,
     path: a.id,
     ext: a.extension,
@@ -439,6 +511,7 @@ function _renderCard(file) {
          aria-label="${escapeAttr(label)}"
          data-mount-key="${escapeAttr(file.mountKey)}"
          data-path="${escapeAttr(file.path)}"
+         data-source-path="${escapeAttr(file.sourcePath ?? file.path)}"
          data-filename="${escapeAttr(file.name)}"
          data-kind="${escapeAttr(kind)}"
          title="${escapeAttr(file.path)}">
@@ -446,6 +519,7 @@ function _renderCard(file) {
       ${thumbHtml}
       <div class="ac-meta">
         <span class="ac-name">${_escape(file.name)}</span>
+        ${isSession ? '' : `<span class="ac-path">${_escape(file.path)}</span>`}
         <span class="ac-badges">${badges}</span>
       </div>
     </div>
@@ -481,8 +555,14 @@ function _activateTreeRow(row, toggleOnly) {
     row.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     return;
   }
-  _selectedKey  = row.dataset.mountKey;
-  _selectedPath = row.dataset.relPath ?? '';
+  if (row.dataset.sessionView) {
+    _sessionView = row.dataset.sessionView;
+    _selectedKey = SESSION_KEY;
+    _selectedPath = '';
+  } else {
+    _selectedKey  = row.dataset.mountKey;
+    _selectedPath = row.dataset.relPath ?? '';
+  }
   _listEl.querySelectorAll('[data-tree-row]').forEach(r => {
     const selected = r === row;
     r.classList.toggle('selected', selected);
@@ -493,13 +573,21 @@ function _activateTreeRow(row, toggleOnly) {
 
 function _onGridInput(e) {
   if (e.target.id !== 'ap-search') return;
+  const startingSearch = !_query.trim() && e.target.value.trim();
   _query = e.target.value;
+  if (_activeTab === 'library' && !_scopeExplicit) {
+    _scope = startingSearch ? 'descendants' : _query.trim() ? _scope : 'folder';
+    _gridEl.querySelector('#ap-scope-filter').value = _scope;
+  }
   _renderGrid();
 }
 
 function _onGridChange(e) {
-  if (e.target.id !== 'ap-kind-filter') return;
-  _kindFilter = e.target.value;
+  if (e.target.id === 'ap-kind-filter') _kindFilter = e.target.value;
+  else if (e.target.id === 'ap-scope-filter') {
+    _scope = e.target.value;
+    _scopeExplicit = true;
+  } else return;
   _renderGrid();
 }
 
@@ -537,13 +625,14 @@ function _cardPayload(card) {
   return {
     mountKey: card.dataset.mountKey,
     path: card.dataset.path,
+    sourcePath: card.dataset.sourcePath,
     filename: card.dataset.filename,
     kind: card.dataset.kind ?? 'mesh',
   };
 }
 
 function _activateCard(card) {
-  const { mountKey, path, kind } = _cardPayload(card);
+  const { mountKey, path, sourcePath, kind } = _cardPayload(card);
   const filename = card.dataset.filename ?? path ?? 'asset';
   safeImport(async () => {
     if (mountKey === SESSION_KEY) {
@@ -560,13 +649,13 @@ function _activateCard(card) {
       // Double-clicking a texture loads it into the asset library so it
       // can be assigned to a shader from the ShaderPanel. No scene drop.
       await AssetLoader.loadTextureFromHandle(handle, {
-        directoryHandleKey: mountKey, originalPath: path,
+        directoryHandleKey: mountKey, originalPath: sourcePath,
       });
     } else {
       await AssetLoader.loadFromHandle(
         handle,
         new BABYLON.Vector3(0, 0, 0),
-        { directoryHandleKey: mountKey, originalPath: path },
+        { directoryHandleKey: mountKey, originalPath: sourcePath },
       );
     }
   }, filename);
@@ -575,7 +664,8 @@ function _activateCard(card) {
 function _findAssetForFile(file) {
   const library = getState().scene.assetLibrary;
   for (const a of Object.values(library)) {
-    if (a.directoryHandleKey === file.mountKey && a.originalPath === file.path) return a;
+    if (a.directoryHandleKey === file.mountKey
+        && a.originalPath === (file.sourcePath ?? file.path)) return a;
   }
   return null;
 }

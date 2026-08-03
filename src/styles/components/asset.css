@@ -52,6 +52,7 @@
 .ap-tab.active { background: var(--bg-3); color: var(--accent); }
 .ap-tab:focus-visible,
 .ap-btn:focus-visible,
+.ap-icon-btn:focus-visible,
 .ap-tree-row:focus-visible,
 .asset-card:focus-visible,
 .ac-delete:focus-visible {
@@ -59,9 +60,9 @@
   outline-offset: 2px;
 }
 
-/* Session tab has no tree branches and no mount action — hide both. */
-#ap-tree[data-tab="session"] .ap-tree-list { display: none; }
-#ap-tree[data-tab="session"] #ap-mount-btn { display: none; }
+/* Session has smart views; filesystem actions belong only to Library. */
+#ap-tree[data-tab="session"] #ap-mount-btn,
+#ap-tree[data-tab="session"] .ap-icon-btn { display: none; }
 
 .ap-btn {
   background: var(--bg-3);
@@ -79,6 +80,22 @@
 }
 .ap-btn:hover { background: var(--bg-4); border-color: var(--border-focus); }
 .ap-btn:active { transform: translateY(1px); }
+
+.ap-icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.ap-icon-btn:hover { color: var(--text-0); background: var(--bg-3); }
 
 .ap-divider {
   background: var(--border);
@@ -124,12 +141,13 @@
 
 .ap-grid-controls {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(100px, 128px);
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, 170px) minmax(100px, 128px);
   gap: var(--sp-3);
   margin-bottom: var(--sp-3);
 }
 
 .ap-search,
+.ap-scope-filter,
 .ap-kind-filter {
   min-width: 0;
   background: var(--bg-3);
@@ -142,10 +160,24 @@
 }
 
 .ap-search:focus,
+.ap-scope-filter:focus,
 .ap-kind-filter:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px var(--ring-focus);
   outline: none;
+}
+
+.ap-scope-filter:disabled { opacity: 0.5; }
+
+.ap-breadcrumb {
+  min-height: 18px;
+  margin-bottom: var(--sp-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ap-grid-summary {
@@ -268,6 +300,13 @@
 #viewport.drag-over #viewport-drop-overlay {
   border-color: var(--accent);
   background: rgba(245, 158, 11, 0.06);
+}
+.ac-path {
+  color: var(--text-2);
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Asset card: delete button ────────────────────────── */
