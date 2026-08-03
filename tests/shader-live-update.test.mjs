@@ -13,6 +13,7 @@ console.error = () => {};
 const { ShaderLibrary } = await import('../src/core/ShaderLibrary.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { setState, getState } = await import('../src/core/StateManager.js');
+const { ShaderConsolidateCommand } = await import('../src/core/commands/ShaderCommands.js');
 
 const meshes = new Map();
 AssetLoader.getBabylonMesh = (id) => meshes.get(id) ?? null;
@@ -114,6 +115,27 @@ await test('H8: type change rebuilds UV-override clones from the new base', () =
   assert.equal(m.material, newClone, 'override mesh holds the rebuilt clone');
   assert.equal(getState().scene.uvOverrides['m_type_uv'].offsetX, 0.4,
     'override values survive the rebuild');
+});
+
+await test('exact duplicate consolidation rewires all links and undo restores identities', () => {
+  fakeMesh('m_con_a');
+  fakeMesh('m_con_b');
+  seedObjects(['m_con_a', 'm_con_b']);
+  const canonical = ShaderLibrary.createShader({ name: 'Canonical', diffuseColor: '#123456' });
+  const duplicate = ShaderLibrary.createShader({ name: 'Duplicate', diffuseColor: '#123456' });
+  ShaderLibrary.assignToMesh(canonical, 'm_con_a');
+  ShaderLibrary.assignToMesh(duplicate, 'm_con_b');
+
+  const command = new ShaderConsolidateCommand([{ canonicalId: canonical, duplicateIds: [duplicate] }]);
+  command.execute();
+  assert.equal(getState().scene.objects.m_con_b.shaderId, canonical);
+  assert.equal(getState().scene.shaders[duplicate], undefined);
+  assert.deepEqual(new Set(getState().scene.shaders[canonical].linkedMeshIds), new Set(['m_con_a', 'm_con_b']));
+
+  command.undo();
+  assert.equal(getState().scene.objects.m_con_a.shaderId, canonical);
+  assert.equal(getState().scene.objects.m_con_b.shaderId, duplicate);
+  assert.ok(getState().scene.shaders[duplicate], 'undo recreates removed shader entry/material');
 });
 
 console.log('\n' + out.join('\n'));

@@ -13,7 +13,7 @@ import { setBlobUrl, revokeBlobUrl } from './BlobUrls.js';
 import { captureAndCap, applyCapToTexture, currentCapPx, clearCapUrl, clearCapUrls } from './TextureCap.js';
 import { clearTextureSource, clearTextureSources } from './TextureSource.js';
 import { clearTextureImages, storeTextureImage } from './TextureImageStore.js';
-import { normalizeTextureView, textureViewFromBabylon } from './TextureView.js';
+import { normalizeTextureView, textureViewFromBabylon, textureViewKey } from './TextureView.js';
 
 const BABYLON = window.BABYLON;
 
@@ -190,7 +190,8 @@ function _importedTextureSignature(texture, sourceFileHash) {
   const w = size?.width ?? 0;
   const h = size?.height ?? 0;
   const cls = texture.constructor?.name ?? 'Texture';
-  return `${sourceFileHash ?? ''}|${texture.name ?? ''}|${w}|${h}|${cls}`;
+  const viewKey = textureViewKey(textureViewFromBabylon(texture, null));
+  return `${sourceFileHash ?? ''}|${texture.name ?? ''}|${w}|${h}|${cls}|${viewKey}`;
 }
 
 function _findImportedTextureBySignature(texture, ctx = {}) {

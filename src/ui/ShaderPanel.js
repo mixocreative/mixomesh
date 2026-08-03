@@ -6,10 +6,11 @@ import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
 import {
-  push,
+  push, beginBatch, endBatch,
   ShaderCreateCommand, ShaderUpdateCommand, ShaderDuplicateCommand,
-  ShaderDeleteCommand, ShaderAssignCommand, ColorApplyCommand,
+  ShaderDeleteCommand, ShaderAssignCommand, ShaderConsolidateCommand, ColorApplyCommand,
 } from '../core/HistoryManager.js';
+import { findDuplicateShaderGroups } from '../core/shaders/ShaderSignature.js';
 import { Toast, safeAsync } from './Toast.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { AssetPanel } from './AssetPanel.js';
@@ -289,6 +290,7 @@ function _applyAndWireSectionCollapse() {
 // ── Shader list ──────────────────────────────────────────
 
 function _renderList(shaders) {
+  const groups = findDuplicateShaderGroups(shaders, { assets: getState().scene.assetLibrary });
   const rows = shaders.length
     ? shaders.map(s => _renderListRow(s)).join('')
     : `<div class="sp-empty">${_escape(t('shader.emptyList'))}</div>`;
@@ -299,6 +301,18 @@ function _renderList(shaders) {
         <span>${sectionIcon('Layers')}${_escape(t('shader.sceneShaders'))}</span>
         <button class="sp-icon-btn" id="sp-new" title="${escapeAttr(t('shader.newShader'))}">${icon('Plus', { width: 14, height: 14 })}</button>
       </header>
+      ${groups.length ? `
+        <div class="sp-duplicate-candidates">
+          <div>
+            <strong>${_escape(t('shader.exactDuplicates', { n: groups.length }))}</strong>
+            <span>${_escape(t('shader.duplicateLinks', {
+              n: groups.reduce((sum, group) => sum + group.linkedObjectCount, 0),
+            }))}</span>
+          </div>
+          <ul>${groups.map(group => `<li>${_escape(group.shaderIds
+            .map(id => getState().scene.shaders[id]?.name ?? id).join(' = '))}</li>`).join('')}</ul>
+          <button class="sp-btn" id="sp-consolidate" type="button">${_escape(t('shader.consolidateDuplicates'))}</button>
+        </div>` : ''}
       <ul class="sp-list">${rows}</ul>
     </section>
   `;
@@ -335,6 +349,16 @@ export function renderShaderPreview(sh, size = 18) {
 }
 
 function _wireList() {
+  _bodyEl.querySelector('#sp-consolidate')?.addEventListener('click', () => {
+    const shaders = Object.values(getState().scene.shaders);
+    const groups = findDuplicateShaderGroups(shaders, { assets: getState().scene.assetLibrary });
+    if (!groups.length) return;
+    const canonicalByDuplicate = new Map(groups.flatMap(group => (
+      group.duplicateIds.map(id => [id, group.canonicalId])
+    )));
+    if (_editingId && canonicalByDuplicate.has(_editingId)) _editingId = canonicalByDuplicate.get(_editingId);
+    push(new ShaderConsolidateCommand(groups));
+  });
   _bodyEl.querySelector('#sp-new')?.addEventListener('click', () => {
     const cmd = new ShaderCreateCommand({ name: 'Material', type: 'standard' });
     push(cmd);
@@ -453,7 +477,7 @@ function _renderEditor(sh) {
       </div>
 
       <div class="sp-actions">
-        <button class="sp-btn" id="sp-act-duplicate">${icon('Copy',  { width: 12, height: 12 })}<span>${_escape(t('context.duplicate'))}</span></button>
+        <button class="sp-btn" id="sp-act-duplicate">${icon('Copy',  { width: 12, height: 12 })}<span>${_escape(t('shader.makeUnique'))}</span></button>
         <button class="sp-btn" id="sp-act-assign" ${selCount ? '' : 'disabled'}>${icon('Link', { width: 12, height: 12 })}<span>${_escape(t('shader.assignCount', { n: selCount }))}</span></button>
         <button class="sp-btn" id="sp-act-select" ${linked ? '' : 'disabled'}>${icon('Focus', { width: 12, height: 12 })}<span>${_escape(t('shader.selectLinked'))}</span></button>
         <button class="sp-btn sp-btn-danger" id="sp-act-delete" ${linked ? 'disabled' : ''} title="${escapeAttr(linked ? t('shader.refuseDeleteTitle', { n: linked }) : t('shader.deleteTitle'))}">${icon('Trash2', { width: 12, height: 12 })}<span>${_escape(t('context.delete'))}</span></button>
@@ -557,9 +581,14 @@ function _wireEditor(shaderId) {
 
   // Action buttons
   _bodyEl.querySelector('#sp-act-duplicate')?.addEventListener('click', () => {
+    const ids = logicalObjectCommandIds(Selection.getSelectedIds(), getState().scene.objects)
+      .filter(id => getState().scene.objects[id]?.shaderId === shaderId);
+    beginBatch(t('shader.makeUnique'));
     const cmd = new ShaderDuplicateCommand(shaderId);
     push(cmd);
     const newId = cmd.getNewId();
+    if (newId && ids.length) push(new ShaderAssignCommand(ids, newId));
+    endBatch();
     if (newId) _editingId = newId;
     _render();
   });

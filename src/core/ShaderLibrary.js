@@ -2,6 +2,7 @@ import { EVENTS } from './events.js';
 import { dispatch, setState, getState } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { SceneManager } from './SceneManager.js';
+import { shaderSignature } from './shaders/ShaderSignature.js';
 import swatchData from '../config/swatches.json' with { type: 'json' };
 
 const BABYLON = window.BABYLON;
@@ -308,7 +309,8 @@ function _findNameConflicts(container, importCtx = {}) {
  */
 function _findContentDuplicate(mat, importCtx = {}, sigIndex = null) {
   const fresh = _buildEntryFromMaterial(mat, importCtx);
-  const sig = _shaderSignature(fresh);
+  const sig = _shaderSignature(fresh, mat);
+  if (!sig) return null;
   // O(1) lookup against a prebuilt signature→id index (the import paths pass
   // one — finding #15: rebuilding every existing shader's signature per material
   // was O(M×S)). Falls back to a linear scan for any ad-hoc caller.
@@ -327,26 +329,17 @@ function _buildSignatureIndex() {
   const idx = new Map();
   for (const [id, sh] of Object.entries(getState().scene.shaders)) {
     const sig = _shaderSignature(sh);
-    if (!idx.has(sig)) idx.set(sig, id);
+    if (sig && !idx.has(sig)) idx.set(sig, id);
   }
   return idx;
 }
 
-function _shaderSignature(sh) {
-  const u = sh.uvBase ?? {};
-  return [
-    sh.type,
-    (sh.diffuseColor ?? '').toLowerCase(),
-    Number(sh.opacity ?? 1).toFixed(4),
-    Number(sh.roughness ?? 1).toFixed(4),
-    Number(sh.metallic ?? 0).toFixed(4),
-    Number(u.offsetX ?? 0).toFixed(4),
-    Number(u.offsetY ?? 0).toFixed(4),
-    Number(u.scaleX ?? 1).toFixed(4),
-    Number(u.scaleY ?? 1).toFixed(4),
-    Number(u.rotation ?? 0).toFixed(4),
-    sh.diffuseTextureAssetId ?? '',
-  ].join('|');
+function _shaderSignature(sh, material = null) {
+  const signature = shaderSignature(sh, {
+    assets: getState().scene.assetLibrary,
+    material,
+  });
+  return signature.eligible ? signature.key : null;
 }
 
 function _promptMergeChoices(conflicts) {
@@ -389,10 +382,10 @@ function _doRegister(container, choices, importCtx = {}) {
     // Build the entry + signature ONCE per material (reused on every branch);
     // the content-dedupe lookup is now O(1) against sigIndex.
     const fresh = _buildEntryFromMaterial(mat, importCtx);
-    const sig = _shaderSignature(fresh);
+    const sig = _shaderSignature(fresh, mat);
 
     // ── Auto-dedupe by content (any matching existing/earlier shader) ──
-    const dupId = sigIndex.get(sig) ?? null;
+    const dupId = sig ? sigIndex.get(sig) ?? null : null;
     if (dupId) {
       const existingMat = _materials.get(dupId);
       if (existingMat) {
@@ -462,7 +455,7 @@ function _doRegister(container, choices, importCtx = {}) {
       const updated = getState().scene.shaders[conflictId];
       if (updated) {
         const newSig = _shaderSignature(updated);
-        if (!sigIndex.has(newSig)) sigIndex.set(newSig, conflictId);
+        if (newSig && !sigIndex.has(newSig)) sigIndex.set(newSig, conflictId);
       }
       continue;
     }
@@ -487,7 +480,7 @@ function _doRegister(container, choices, importCtx = {}) {
     }), SILENT);
     dispatch(EVENTS.SHADER_CREATED, { shaderId: entry.id });
     // A later identical material in this same import now dedups to this one.
-    if (!sigIndex.has(sig)) sigIndex.set(sig, entry.id);
+    if (sig && !sigIndex.has(sig)) sigIndex.set(sig, entry.id);
   }
 
   return { shaderIds, byMaterial };

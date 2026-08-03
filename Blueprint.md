@@ -232,6 +232,8 @@ src/
       Download.js          ← save picker + anchor fallback
     printers/              ← PrinterProfile.ts (type-only printer JSON schema)
     scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
+    shaders/
+      ShaderSignature.js  ← exact supported appearance identity + duplicate candidates
     assets/
       AssetTypes.js        ← supported extensions + extension parser
       AssetIndex.js        ← immutable mounted-file index + scoped query/refresh fallback
@@ -2043,10 +2045,19 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 ### Shader Duplication
 - New ShaderEntry with copied fields, `linkedMeshIds: []`, new id and auto-incremented name (e.g. `Hull_Metal` → `Hull_Metal.001`).
 - Babylon material cloned via `mat.clone(newId)`. Same texture **reference** (not a copy).
+- **Make Unique** batches duplication plus assignment of selected linked objects
+  into one undo entry; future edits propagate only inside the new sharing set.
 
 ### Import Merge Strategy
 On material-name collision during `registerFromContainer`:
-1. **Auto-dedupe first.** `_findContentDuplicate(mat)` builds a signature from the imported material — `type | diffuseColor | opacity | roughness | metallic | uvBase | diffuseTextureAssetId` — and compares to every existing scene shader's signature. An exact match silently reuses the existing shaderId, redirects the imported mesh's `material` pointer, disposes the duplicate material, and skips the merge modal entirely. This catches the most common case (the user dropped the same file twice).
+1. **Auto-dedupe first.** `ShaderSignature` compares every supported appearance
+   field exactly: type, diffuse color, opacity, roughness, metallic, UV base,
+   and content-addressed texture-view identity. Names, shader ids, and linked
+   counts are excluded. Unsupported active features (clear coat, sheen,
+   subsurface, anisotropy, iridescence, or unsupported texture slots) make a
+   material ineligible rather than silently losing appearance. An eligible
+   exact match reuses the existing shaderId, redirects the imported mesh's
+   material pointer, disposes the duplicate material, and skips the merge modal.
 2. **Texture resource identity is separate from its view.**
    `TextureImageStore` keys canonical encoded bytes by SHA-256, so equal bytes
    share one stored blob regardless of filename. `TextureView` separately
@@ -2056,6 +2067,13 @@ On material-name collision during `registerFromContainer`:
    texture. GPU-only imported images use the full-resolution capture-before-cap
    PNG as their canonical bytes.
 3. **Only remaining conflicts hit the modal.** If a name still collides AND content differs, dispatch `EVENTS.MODAL_OPEN` with id `shaderMerge`, payload `{ conflicts }`.
+
+Existing user-authored shaders are never continuously merged after edits.
+`findDuplicateShaderGroups` projects exact candidates in the Shader Library,
+including names and linked-object totals. **Consolidate Duplicates** pushes one
+`ShaderConsolidateCommand`: it rewires duplicate-linked objects to the first
+canonical shader, removes now-unlinked duplicate entries/materials, and
+snapshots all links and entries so one Undo restores the previous identities.
 4. Modal options per conflict: **Use existing** / **Rename import** / **Replace scene shader**. Default: Rename. Checkbox "Apply to all conflicts in this import."
 5. On confirm: apply choices, continue load.
 

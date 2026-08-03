@@ -38,6 +38,18 @@ await test('same file re-imported (new instance, same hash) → dedupes to one a
   assert.equal(a, b, 'identical source bytes must share one texture asset');
 });
 
+await test('same image source with a different sampler view stays distinct', () => {
+  const a = AssetLoader.registerImportedTexture(
+    { ...fakeTex('Sampler'), wrapU: 1 },
+    { sourceFileHash: 'FILE_VIEW', sourceAssetId: 'asset_1' },
+  );
+  const b = AssetLoader.registerImportedTexture(
+    { ...fakeTex('Sampler'), wrapU: 2 },
+    { sourceFileHash: 'FILE_VIEW', sourceAssetId: 'asset_2' },
+  );
+  assert.notEqual(a, b);
+});
+
 await test('DIFFERENT files, identical generic name + size → distinct assetIds (H6)', () => {
   const a = AssetLoader.registerImportedTexture(fakeTex('Image_0'), { sourceFileHash: 'FILE_A', sourceAssetId: 'asset_a' });
   const b = AssetLoader.registerImportedTexture(fakeTex('Image_0'), { sourceFileHash: 'FILE_B', sourceAssetId: 'asset_b' });

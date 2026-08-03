@@ -733,7 +733,6 @@ async function main() {
     assert(wave.recAborted === true, `project switch did not abort the recording (${wave.recAborted})`);
     assert(wave.recIdle, 'isRecording stuck true after project-switch abort');
     console.log(`  ssao: ${wave.ssaoOn ? 'active' : 'unsupported on this GPU (tolerated)'}`);
-
     // Import error handling: a failed import surfaces the detail MODAL (filename
     // + message + collapsible technical details), not a transient toast, and the
     // modal dismisses cleanly.
@@ -1485,6 +1484,35 @@ async function main() {
     assert(['select-parent', 'select-siblings', 'select-import', 'reveal-outliner']
       .every(action => outlinerSemantics.objectActions.includes(action)),
     'Object context menu exposes parent, sibling, import, and reveal navigation');
+
+    // Run late: this deliberately mutates shader identity/history, so it must
+    // not perturb the rendering/import diagnostics above.
+    const shaderConsolidation = await evaluate(cdp, `(async () => {
+      const { ShaderLibrary } = await import('/src/core/ShaderLibrary.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const history = await import('/src/core/HistoryManager.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const a = ShaderLibrary.createShader({ name: 'Smoke Exact A', diffuseColor: '#135724' });
+      const b = ShaderLibrary.createShader({ name: 'Smoke Exact B', diffuseColor: '#135724' });
+      await frame();
+      const button = document.querySelector('#sp-consolidate');
+      const candidateText = document.querySelector('.sp-duplicate-candidates')?.textContent ?? '';
+      button?.click();
+      await frame();
+      const after = [!!getState().scene.shaders[a], !!getState().scene.shaders[b]];
+      history.undo();
+      await frame();
+      const restored = [!!getState().scene.shaders[a], !!getState().scene.shaders[b]];
+      return { hasButton: !!button, candidateText, after, restored };
+    })()`);
+    assert(shaderConsolidation.hasButton, 'exact duplicate shader candidate action missing');
+    assert(shaderConsolidation.candidateText.includes('Smoke Exact A')
+      && shaderConsolidation.candidateText.includes('Smoke Exact B'),
+    'duplicate shader candidate names missing');
+    assert(shaderConsolidation.after.filter(Boolean).length === 1,
+      'consolidating exact shaders should retain one canonical shader');
+    assert(shaderConsolidation.restored.every(Boolean),
+      'undo should restore consolidated shader identities');
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

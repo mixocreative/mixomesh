@@ -63,6 +63,29 @@
   flex-direction: column;
   gap: 2px;
 }
+
+.sp-duplicate-candidates {
+  margin: 0 var(--sp-3) var(--sp-3);
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+}
+.sp-duplicate-candidates > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.sp-duplicate-candidates ul {
+  margin: 0;
+  padding-left: var(--sp-5);
+  color: var(--text-2);
+}
+.sp-duplicate-candidates .sp-btn { justify-self: start; }
 .sp-row {
   display: grid;
   grid-template-columns: 18px 1fr 28px 22px;

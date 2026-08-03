@@ -106,6 +106,54 @@ export class ShaderDuplicateCommand {
 }
 
 /**
+ * Explicitly consolidate exact duplicate groups. This is never triggered by
+ * later edits: the command snapshots every object link and removed entry so
+ * one undo restores the user's previous sharing intent.
+ */
+export class ShaderConsolidateCommand {
+  constructor(groups) {
+    const shaders = getState().scene.shaders;
+    const objects = getState().scene.objects;
+    this._groups = groups.map(group => ({
+      canonicalId: group.canonicalId,
+      duplicateIds: [...group.duplicateIds],
+    }));
+    const duplicates = new Set(this._groups.flatMap(group => group.duplicateIds));
+    this._entries = {};
+    for (const id of duplicates) {
+      const entry = shaders[id];
+      if (entry) this._entries[id] = {
+        ...entry,
+        uvBase: { ...(entry.uvBase ?? {}) },
+        linkedMeshIds: [],
+      };
+    }
+    this._previousLinks = {};
+    for (const [id, object] of Object.entries(objects)) {
+      if (duplicates.has(object.shaderId)) this._previousLinks[id] = object.shaderId;
+    }
+    this.label = 'Consolidate Duplicate Shaders';
+  }
+
+  execute() {
+    for (const group of this._groups) {
+      for (const [meshId, previousId] of Object.entries(this._previousLinks)) {
+        if (group.duplicateIds.includes(previousId)) ShaderLibrary.assignToMesh(group.canonicalId, meshId);
+      }
+      for (const duplicateId of group.duplicateIds) ShaderLibrary.deleteShader(duplicateId);
+    }
+    markDirty();
+  }
+
+  undo() {
+    for (const entry of Object.values(this._entries)) ShaderLibrary.createShader(entry);
+    for (const [meshId, shaderId] of Object.entries(this._previousLinks)) {
+      ShaderLibrary.assignToMesh(shaderId, meshId);
+    }
+  }
+}
+
+/**
  * Delete a shader (only valid when no meshes are linked — the UI button must
  * gate on that). Undo recreates the shader from its captured fields.
  */
