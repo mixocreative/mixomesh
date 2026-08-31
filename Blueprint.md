@@ -213,6 +213,7 @@ src/
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
+      ProjectIntegrity.js  ← portable .mixo save gate: required asset refs + missing-byte error shape
       ProjectSerializer.js ← buildDocument + asset/object/group serialise, b64 codecs, transform (de)compose
       AssetResolver.js     ← tiered byte resolve: live path → hash-scan → file handle → embedded → null
       ProjectLoader.js     ← loadProject pipeline: migrate, world reset, ghost meshes, groups, relinkAsset
@@ -2160,9 +2161,10 @@ fallback now triggers only when the texture is genuinely gone.
 (house pattern: AssetLoader over `assets/*`, PrintManager over `print/*`). The
 façade owns only the open-file handle and the save/saveAs/open/newProject/
 openRecent flows; document assembly lives in `persist/ProjectSerializer.js`,
-tiered asset resolution in `persist/AssetResolver.js`, the load pipeline +
-relink in `persist/ProjectLoader.js`, recents in `persist/RecentProjects.js`,
-autosave in `persist/Autosave.js`, and dirty tracking in
+tiered asset resolution in `persist/AssetResolver.js`, portable-save required
+asset detection/error shaping in `persist/ProjectIntegrity.js`, the load
+pipeline + relink in `persist/ProjectLoader.js`, recents in
+`persist/RecentProjects.js`, autosave in `persist/Autosave.js`, and dirty tracking in
 `persist/DirtyTracker.js`. The `PersistenceManager` API object is deliberately
 NOT frozen — monkey-patching it is the established headless-test seam (same
 rationale as AssetLoader) — and `__test` is re-assembled from the persist
@@ -2249,6 +2251,33 @@ Every field persisted. Restored exactly.
 }
 ```
 
+### Portable Project Integrity (manual save gate)
+`.mixo` is the editable Mixomesh project snapshot, not a pointer file to the
+user's current mounted asset library. `ProjectSerializer.buildDocument()` must
+abort before bytes are written if required scene assets cannot be embedded or
+resolved into content-addressed texture payloads.
+
+`ProjectIntegrity.collectRequiredAssetRefs(state)` defines **required assets**
+as:
+- every `SceneObject.assetId`;
+- every `shader.diffuseTextureAssetId` assigned to a SceneObject;
+- for required imported/container-owned texture AssetEntries, their
+  `sourceAssetId` mesh container, because that container owns the texture bytes.
+
+Manual `save()` / `saveAs()` uses `buildDocument({skipEmbed:false})`; every
+required non-container asset must produce `fileData` or a
+content-addressed `textureImages[]` entry in the same document. A live
+`directoryHandleKey` / `fileHandleKey` is useful for relinking, but it is not
+sufficient for portability because a clean browser profile or another machine
+will not have that handle. Missing required entries or bytes throw
+`Error("Cannot save portable .mixo; ...")` with `err.portableIssues[]`, and the
+caller must not write a partial project file.
+
+Unused Asset Panel library entries are conveniences: they may remain linked or
+unembedded without blocking save, because they do not determine whether the
+saved scene reopens or exports. Export/readiness still blocks on ghosts and
+missing assigned textures.
+
 ### Asset Resolution Priority (locked — `_resolveAssetBlob`)
 Every asset has one resolution attempt on load. Walk top-down; first hit wins.
 
@@ -2305,9 +2334,10 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
   decision: folder relink beats session recovery for this workflow).
   `recoverAutosave()` exists for an explicit recovery entry point.
 - Cleared after successful explicit save.
-- Known cost (arch A9, accepted for now): each autosave re-embeds all asset
-  bytes as base64 on the main thread. Planned relief: autosave docs without
-  `fileData` (recovery resolves via live tiers + last explicit save).
+- Autosave uses `buildDocument({skipEmbed:true})`: handle-backed assets keep
+  their live/hash tiers lightweight, while handleless loose-drop assets must
+  still embed bytes or the autosave is discarded by the catch path. This keeps
+  crash recovery from replacing a loose drag-drop with an unrecoverable ghost.
 
 ### Recent Projects
 - Max 10. Stored under IndexedDB key `recent_projects`.
@@ -3798,6 +3828,7 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/progress-overlay.test.mjs` | 2 | ProgressOverlay blocks document-level keyboard events while visible and releases them after hide |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |
+| `tests/portable-project.test.mjs` | 4 | Portable `.mixo` integrity: manual saves reject required mesh assets without embedded bytes, mounted-library meshes embed for clean-profile reopen, content-addressed texture payloads satisfy used texture refs, autosave skips only handle-backed assets |
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |
 | `tests/import-metadata.test.mjs` | 5 | ImportMetadata: Blender glTF `extras` ratio parsing, `library = 1` marker detection, library item root detection |
 | `tests/library-import.test.mjs` | 3 | AssetLoader GLB library mode: marked pack registers one AssetEntry per top-level object without SceneObjects; child asset instantiates only its own object; normal GLB empty hierarchy imports as Outliner groups |

@@ -1259,6 +1259,11 @@ async function main() {
       hm.undo();
       const undone = [minX('al_a'), minX('al_b'), minX('al_c')];
       boxes.forEach(b => b.dispose());
+      st.setState(s => {
+        const objects = { ...s.scene.objects };
+        delete objects.al_a; delete objects.al_b; delete objects.al_c;
+        return { ...s, scene: { ...s.scene, objects } };
+      }, { silent: true });
       return { before, after, undone };
     })()`);
     {

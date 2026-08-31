@@ -14,6 +14,12 @@ import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
+import {
+  collectRequiredAssetRefs,
+  createPortableProjectError,
+  missingRequiredAssetBytesIssue,
+  missingRequiredAssetEntryIssue,
+} from './ProjectIntegrity.js';
 
 const BABYLON = window.BABYLON;
 
@@ -66,9 +72,16 @@ export function stripFileData(a) {
 }
 
 async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
-  const lib = getState().scene.assetLibrary;
+  const state = getState();
+  const lib = state.scene.assetLibrary;
+  const requiredRefs = collectRequiredAssetRefs(state);
+  const portableIssues = [];
+  for (const [assetId, requiredBy] of requiredRefs.entries()) {
+    if (!lib[assetId]) portableIssues.push(missingRequiredAssetEntryIssue(assetId, requiredBy));
+  }
   const out = [];
   for (const a of Object.values(lib)) {
+    const requiredBy = requiredRefs.get(a.id) ?? null;
     const base = {
       id: a.id, name: a.name, filename: a.filename,
       displayName: a.displayName ?? null,
@@ -103,10 +116,12 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
     const hasContentAddressedImage = a.kind === 'texture'
       && a.imageContentHash && getTextureImage(a.imageContentHash);
     const hasLiveTier = !!a.directoryHandleKey || !!a.fileHandleKey;
+    let hasPortableBytes = false;
     if (skipEmbed && (hasLiveTier || isContainerTexture)) {
       base.contentHash = a.contentHash ?? null;
     } else if (hasContentAddressedImage) {
       base.contentHash = a.imageContentHash;
+      hasPortableBytes = true;
     } else if (!isContainerTexture) {
       try {
         const buf = await AssetLoader.getAssetBytes(a.id);
@@ -117,6 +132,7 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
           // Bytes are immutable per assetId — reuse the import-time hash
           // instead of re-hashing on every save (review M16).
           base.contentHash = a.contentHash ?? await sha256Hex(buf);
+          hasPortableBytes = true;
         }
       } catch (err) {
         // Surface loudly: a silent miss here writes an incomplete .mixo the
@@ -124,8 +140,15 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
         reportError(err, { title: t('toast.assetEmbedFailed', { name: a.filename }) });
       }
     }
+    if (requiredBy && !isContainerTexture && !hasPortableBytes && !(skipEmbed && hasLiveTier)) {
+      portableIssues.push(missingRequiredAssetBytesIssue(a, requiredBy));
+    }
+    if (requiredBy && isContainerTexture && !a.sourceAssetId) {
+      portableIssues.push(missingRequiredAssetBytesIssue(a, requiredBy));
+    }
     out.push(base);
   }
+  if (portableIssues.length) throw createPortableProjectError(portableIssues);
   return out;
 }
 

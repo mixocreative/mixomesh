@@ -11,7 +11,7 @@ installEnv();
 console.error = () => {};
 const { PersistenceManager, __test } = await import('../src/core/PersistenceManager.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
-const { setState, getState, dispatch, subscribe } = await import('../src/core/StateManager.js');
+const { setState, getState, dispatch, subscribe, replaceState, freshState } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
 
 // No live camera headless — the save path serialises camera state.
@@ -106,6 +106,7 @@ await test('close flow returns the shared discard action', async () => {
 });
 
 await test('saveAs → save: accepted picker → returns true', async () => {
+  replaceState(freshState());
   acceptPicker();
   assert.equal(await PersistenceManager.saveAs(), true);
 });
