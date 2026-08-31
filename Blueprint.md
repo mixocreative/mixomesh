@@ -2859,10 +2859,13 @@ package writers: `print/ThreeMFWriter.js`):
    an `<object><components>…</components></object>`, and root build items point
    at the top component objects instead of every leaf mesh. Component transforms
    are explicit identity matrices because the existing prep pipeline already
-   baked world-space millimetre placement into vertices; topology is preserved
-   without making the printer profile choose flattening. Individual-per-part
-   3MF export stays standalone by design and does not carry cross-part
-   hierarchy.
+   baked world-space millimetre placement into vertices. Component-object
+   resources are emitted in dependency postorder (mesh resources, then child
+   groups, then parent groups) so every `<component objectid="…">` references
+   an object that is already defined, matching the 3MF Core producer contract.
+   Topology is preserved without making the printer profile choose flattening.
+   Individual-per-part 3MF export stays standalone by design and does not carry
+   cross-part hierarchy.
 
 ### STL Export (Geometry-only fallback)
 **Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
@@ -3804,7 +3807,7 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
 | `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
-| `tests/threemf-components.test.mjs` | 3 | 3MF components: solid/textured hierarchy export emits component objects, Materials Extension resources remain intact, and component import creates transform groups with child meshes |
+| `tests/threemf-components.test.mjs` | 4 | 3MF components: solid/textured hierarchy export emits component objects, nested component resources are dependency-ordered, Materials Extension resources remain intact, and component import creates transform groups with child meshes |
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: content-driven textured vs solid-only flavor, texture dedup, UV round-trip via pseudo-loader regex, printer dropdown does not switch flavor |
 | `tests/validator-group.test.mjs` | 6 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam; validate-all dedupes split groups |
 | `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |

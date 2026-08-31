@@ -138,6 +138,32 @@ function _hierarchyPlan(units, state, meshObjectIds) {
   };
 }
 
+function _componentResourceOrder(plan) {
+  const order = [];
+  const visiting = new Set();
+  const visited = new Set();
+  const childGroupsByParent = new Map();
+  for (const group of Object.values(plan.groups)) {
+    if (!plan.includedGroups.has(group.id)) continue;
+    const parentId = group.parentId ?? null;
+    if (!childGroupsByParent.has(parentId)) childGroupsByParent.set(parentId, []);
+    childGroupsByParent.get(parentId).push(group.id);
+  }
+
+  const visit = (groupId) => {
+    if (!plan.includedGroups.has(groupId) || visited.has(groupId)) return;
+    if (visiting.has(groupId)) throw new Error(`Invalid hierarchy: component cycle at "${groupId}"`);
+    visiting.add(groupId);
+    for (const childId of childGroupsByParent.get(groupId) ?? []) visit(childId);
+    visiting.delete(groupId);
+    visited.add(groupId);
+    order.push(groupId);
+  };
+
+  for (const groupId of plan.orderedGroupIds) visit(groupId);
+  return order;
+}
+
 function _appendComponentHierarchy({ objs, items, units, state, meshObjectIds, nextObjectId }) {
   const plan = _hierarchyPlan(units, state, meshObjectIds);
   if (!plan) {
@@ -150,7 +176,7 @@ function _appendComponentHierarchy({ objs, items, units, state, meshObjectIds, n
   const groupObjectIds = new Map();
   for (const groupId of plan.orderedGroupIds) groupObjectIds.set(groupId, nextObjectId++);
 
-  for (const groupId of plan.orderedGroupIds) {
+  for (const groupId of _componentResourceOrder(plan)) {
     const group = plan.groups[groupId];
     const components = [];
     for (const childGroup of Object.values(plan.groups)) {

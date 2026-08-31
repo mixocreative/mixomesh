@@ -148,6 +148,25 @@ function stateForHierarchy() {
   };
 }
 
+function stateForNestedHierarchy() {
+  return {
+    scene: {
+      objects: {
+        body: { id: 'body', name: 'Body', parentId: 'child', collectionId: 'import_a', visible: true, isPrintPart: true },
+      },
+      groups: {
+        parent: { id: 'parent', name: 'Parent', parentId: null, childIds: [], origin: 'user' },
+        child: { id: 'child', name: 'Child', parentId: 'parent', childIds: ['body'], origin: 'user' },
+      },
+      assetLibrary: {},
+    },
+  };
+}
+
+function objectStart(model, objectId) {
+  return model.indexOf(`<object id="${objectId}"`);
+}
+
 let passed = 0, failed = 0;
 const out = [];
 async function test(name, fn) {
@@ -179,6 +198,21 @@ await test('textured 3MF export keeps Materials Extension resources and componen
   assert.match(model, /<m:texture2dgroup id="2" texid="1">/);
   assert.match(model, /<object id="\d+" type="model" name="Robot"><components>/);
   assert.match(model, /<component objectid="\d+" transform="1 0 0 0 1 0 0 0 1 0 0 0"\/>/);
+});
+
+await test('nested 3MF components define children before parents that reference them', () => {
+  const mesh = makeMesh('Body');
+  const entries = Writer.buildColorGroupEntries([unit(mesh, 'body')], { state: stateForNestedHierarchy() });
+  const model = entries.find(e => e.path === '3D/3dmodel.model').data;
+
+  const meshObject = model.match(/<object id="(\d+)" type="model" pid="1" pindex="0">/);
+  const childObject = model.match(/<object id="(\d+)" type="model" name="Child"><components>/);
+  const parentObject = model.match(/<object id="(\d+)" type="model" name="Parent"><components>/);
+  assert.ok(meshObject && childObject && parentObject, 'expected mesh, child group, and parent group object resources');
+
+  assert.match(model, new RegExp(`<component objectid="${childObject[1]}" transform="1 0 0 0 1 0 0 0 1 0 0 0"\\/>`));
+  assert.ok(objectStart(model, meshObject[1]) < objectStart(model, childObject[1]), 'mesh object must precede child component object');
+  assert.ok(objectStart(model, childObject[1]) < objectStart(model, parentObject[1]), 'child component object must precede parent component object');
 });
 
 await test('3MF component import creates transform groups and child meshes', async () => {
