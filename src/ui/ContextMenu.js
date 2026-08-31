@@ -3,7 +3,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
@@ -130,6 +130,7 @@ function _buildItems(info) {
     return [
       { label: t('context.selectMembers'), shortcut: '', action: 'group-select', iconName: 'Boxes', cls: '' },
       { label: t('context.selectParent'), shortcut: '', action: 'select-parent', iconName: 'GitBranch', cls: group?.parentId ? '' : 'cm-disabled' },
+      { label: t('context.unparent'), shortcut: '', action: 'unparent', iconName: 'GitBranch', cls: group?.parentId ? '' : 'cm-disabled' },
       { label: t('context.revealOutliner'), shortcut: '', action: 'reveal-outliner', iconName: 'LocateFixed', cls: '' },
     ];
   }
@@ -150,6 +151,7 @@ function _buildItems(info) {
       { label: t('context.selectParent'), shortcut: '', action: 'select-parent', iconName: 'GitBranch', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.selectSiblings'), shortcut: '', action: 'select-siblings', iconName: 'Boxes', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.selectImportMembers'), shortcut: '', action: 'select-import', iconName: 'Package', cls: objs[info.targetId]?.collectionId ? '' : 'cm-disabled' },
+      { label: t('context.unparent'), shortcut: '', action: 'unparent', iconName: 'GitBranch', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.revealOutliner'), shortcut: '', action: 'reveal-outliner', iconName: 'LocateFixed', cls: '' },
       'sep',
     ] : []),
@@ -167,6 +169,7 @@ function _buildItems(info) {
     'sep',
     { label: t('context.group'),           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
     { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
+    { label: t('context.unparent'),        shortcut: '',            action: 'unparent', iconName: 'GitBranch', cls: enabled(someGrouped) },
     'sep',
     { label: t('context.selectionToCursor'), shortcut: '',         action: 'sel-to-cursor', iconName: 'Crosshair', cls: enabled(hasSelection) },
     { label: t('context.cursorToSelection'), shortcut: '',         action: 'cursor-to-sel', iconName: 'Crosshair', cls: enabled(hasSelection) },
@@ -221,6 +224,7 @@ function _runAction(action, info) {
   if (action === 'duplicate')  _duplicate();
   if (action === 'group')      _group();
   if (action === 'ungroup')    _ungroup();
+  if (action === 'unparent')   _unparent(info);
   if (action === 'delete')     _delete();
   if (action === 'replace')    _smartReplace();
   if (action === 'swab')       _transformSwab();
@@ -453,6 +457,18 @@ function _ungroup() {
   }
   if (!groupIds.size) return;
   for (const gid of groupIds) push(new UngroupCommand(gid));
+}
+
+function _unparent(info) {
+  const state = getState();
+  if (info?.targetKind === 'group' && info.targetId) {
+    if (state.scene.groups[info.targetId]?.parentId) push(new UnparentCommand(info.targetId));
+    return;
+  }
+  const ids = Selection.getSelectedIds().length ? Selection.getSelectedIds() : [info?.targetId].filter(Boolean);
+  for (const id of ids) {
+    if (state.scene.objects[id]?.parentId) push(new UnparentCommand(id));
+  }
 }
 
 function _delete() {

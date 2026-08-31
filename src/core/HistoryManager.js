@@ -1,6 +1,6 @@
 // Undo/redo stack machinery. Command classes live in src/core/commands/*
-// (TransformCommands / HierarchyCommands / ShaderCommands / ScaleCommands,
-// shared helpers in support.js) and are re-exported below so existing
+// (TransformCommands / HierarchyCommands / ParentCommands / ShaderCommands /
+// ScaleCommands, shared helpers in support.js) and are re-exported below so existing
 // importers keep working — `import { push, TransformCommand } from
 // './HistoryManager.js'` is unchanged (review L29 / Blueprint §0.5 split).
 
@@ -9,6 +9,7 @@ import { dispatch, withoutDirty } from './StateManager.js';
 
 export * from './commands/TransformCommands.js';
 export * from './commands/HierarchyCommands.js';
+export * from './commands/ParentCommands.js';
 export * from './commands/ShaderCommands.js';
 export * from './commands/ScaleCommands.js';
 export * from './commands/PlacementCommands.js';

@@ -2,7 +2,8 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
-import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand } from '../core/HistoryManager.js';
+import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand, ReparentCommand, UnparentCommand } from '../core/HistoryManager.js';
+import { validateParentChange } from '../core/hierarchy/HierarchyIntegrity.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
@@ -20,6 +21,8 @@ function _retranslate(root) {
 }
 
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
+const HIERARCHY_DRAG_MIME = 'application/x-mixomesh-hierarchy-node';
+let _draggingNode = null;
 
 const _SUBSCRIBE = [
   EVENTS.ASSET_INSTANTIATED,
@@ -64,6 +67,8 @@ export function init() {
   _listEl.addEventListener('click', _onListClick);
   _listEl.addEventListener('dblclick', _onListDblClick);
   _listEl.addEventListener('contextmenu', _onListContextMenu);
+  _listEl.addEventListener('dragstart', _onListDragStart);
+  _listEl.addEventListener('dragend', _onListDragEnd);
   _listEl.addEventListener('dragover', _onListDragOver);
   _listEl.addEventListener('dragleave', _onListDragLeave);
   _listEl.addEventListener('drop', _onListDrop);
@@ -316,6 +321,7 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
          data-has-children="${hasChildren ? 'true' : 'false'}"
          role="treeitem"
          tabindex="0"
+         draggable="${kind === 'object' || kind === 'group' ? 'true' : 'false'}"
          ${hasChildren ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''}
          aria-selected="false"
          style="padding-left:${indent}px">
@@ -342,6 +348,42 @@ function _readShaderDrop(e) {
   } catch {
     return null;
   }
+}
+
+function _readHierarchyDrop(e) {
+  if (_draggingNode) return _draggingNode;
+  try {
+    const raw = e.dataTransfer?.getData(HIERARCHY_DRAG_MIME);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.id && (parsed.kind === 'object' || parsed.kind === 'group') ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function _isValidParentDrop(node, parentId) {
+  if (!node?.id || !parentId) return false;
+  const state = getState();
+  const currentParent = node.kind === 'group'
+    ? state.scene.groups[node.id]?.parentId ?? null
+    : state.scene.objects[node.id]?.parentId ?? null;
+  if (currentParent === parentId) return false;
+  try {
+    validateParentChange(node.id, parentId, state);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function _isValidRootDrop(node) {
+  if (!node?.id) return false;
+  const state = getState();
+  const currentParent = node.kind === 'group'
+    ? state.scene.groups[node.id]?.parentId ?? null
+    : state.scene.objects[node.id]?.parentId ?? null;
+  return !!currentParent;
 }
 
 function _toggleVisibility(meshId) {
@@ -469,33 +511,102 @@ function _onListContextMenu(e) {
   if (_onContextMenu) _onContextMenu({ x: e.clientX, y: e.clientY, source: 'outliner', targetId: id, targetKind: kind });
 }
 
+function _onListDragStart(e) {
+  const row = _rowFromEvent(e);
+  if (!row || (row.dataset.kind !== 'object' && row.dataset.kind !== 'group')) return;
+  const id = row.dataset.id;
+  const state = getState();
+  if (row.dataset.kind === 'object') {
+    const obj = state.scene.objects[id];
+    if (!obj || obj.isGhost || obj.isUnlinked) {
+      e.preventDefault();
+      return;
+    }
+  } else if (!state.scene.groups[id]) {
+    e.preventDefault();
+    return;
+  }
+  _draggingNode = { id, kind: row.dataset.kind };
+  if (e.dataTransfer) {
+    e.dataTransfer.setData(HIERARCHY_DRAG_MIME, JSON.stringify(_draggingNode));
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  row.classList.add('ol-dragging');
+}
+
+function _onListDragEnd() {
+  _draggingNode = null;
+  _listEl?.classList.remove('ol-drop-root');
+  _listEl?.querySelectorAll('.ol-dragging,.ol-drop-parent,.ol-drop-shader')
+    .forEach(row => row.classList.remove('ol-dragging', 'ol-drop-parent', 'ol-drop-shader'));
+}
+
 function _onListDragOver(e) {
   const row = _rowFromEvent(e);
-  if (!row || row.dataset.kind !== 'object' || !_hasShaderPayload(e)) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-  row.classList.add('ol-drop-shader');
+  if (row?.dataset.kind === 'object' && _hasShaderPayload(e)) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    row.classList.add('ol-drop-shader');
+    return;
+  }
+
+  const node = _readHierarchyDrop(e);
+  if (!node) return;
+  if (row?.dataset.kind === 'group' && _isValidParentDrop(node, row.dataset.id)) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    row.classList.add('ol-drop-parent');
+    return;
+  }
+  if (!row && _isValidRootDrop(node)) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    _listEl.classList.add('ol-drop-root');
+  }
 }
 
 function _onListDragLeave(e) {
   const row = _rowFromEvent(e);
-  if (!row || row.contains(e.relatedTarget)) return;
-  row.classList.remove('ol-drop-shader');
+  if (!row) {
+    if (!_listEl.contains(e.relatedTarget)) _listEl.classList.remove('ol-drop-root');
+    return;
+  }
+  if (row.contains(e.relatedTarget)) return;
+  row.classList.remove('ol-drop-shader', 'ol-drop-parent');
 }
 
 function _onListDrop(e) {
   const row = _rowFromEvent(e);
-  if (!row) return;
-  row.classList.remove('ol-drop-shader');
-  if (row.dataset.kind !== 'object') return;
-  const shaderId = _readShaderDrop(e);
-  if (!shaderId) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const id = row.dataset.id;
-  const obj = getState().scene.objects[id];
-  if (!obj || obj.shaderId === shaderId) return;
-  push(new ShaderAssignCommand(logicalObjectPartIds(id, getState().scene.objects), shaderId));
+  _listEl.classList.remove('ol-drop-root');
+  row?.classList.remove('ol-drop-shader', 'ol-drop-parent');
+
+  if (row?.dataset.kind === 'object') {
+    const shaderId = _readShaderDrop(e);
+    if (shaderId) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = row.dataset.id;
+      const obj = getState().scene.objects[id];
+      if (!obj || obj.shaderId === shaderId) return;
+      push(new ShaderAssignCommand(logicalObjectPartIds(id, getState().scene.objects), shaderId));
+      return;
+    }
+  }
+
+  const node = _readHierarchyDrop(e);
+  if (!node) return;
+  if (row?.dataset.kind === 'group' && _isValidParentDrop(node, row.dataset.id)) {
+    e.preventDefault();
+    e.stopPropagation();
+    push(new ReparentCommand(node.id, row.dataset.id));
+    _setCollapsed(row.dataset.id, false);
+    return;
+  }
+  if (!row && _isValidRootDrop(node)) {
+    e.preventDefault();
+    e.stopPropagation();
+    push(new UnparentCommand(node.id));
+  }
 }
 
 function _onListKeyDown(e) {

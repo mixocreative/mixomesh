@@ -48,6 +48,9 @@
 .ol-row.ol-selected { background: var(--bg-3); color: var(--text-0); }
 .ol-row.ol-active { box-shadow: inset 2px 0 0 0 var(--accent); color: var(--text-0); }
 .ol-row.ol-drop-shader { outline: 1px solid var(--accent); background: rgba(245, 158, 11, 0.12); }
+.ol-row.ol-drop-parent { outline: 1px solid var(--accent); background: rgba(78, 168, 222, 0.12); }
+.ol-row.ol-dragging { opacity: 0.55; }
+.ol-list.ol-drop-root { outline: 1px dashed var(--accent); outline-offset: -3px; }
 .ol-row.ol-hidden .ol-name,
 .ol-row.ol-hidden .ol-icon { opacity: 0.45; }
 .ol-row.ol-locked .ol-lock { color: var(--warning); }

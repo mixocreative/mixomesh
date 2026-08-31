@@ -438,6 +438,7 @@
   "context.duplicate": "Duplicate",
   "context.group": "Group",
   "context.ungroup": "Ungroup",
+  "context.unparent": "Unparent",
   "context.selectionToCursor": "Selection → Cursor",
   "context.cursorToSelection": "Cursor → Selection",
   "context.cursorToWorldOrigin": "Cursor → World Origin",

@@ -185,7 +185,8 @@ src/
     commands/
       support.js           ← shared command helpers (pivot detach, transforms, state patch)
       TransformCommands.js ← Transform / TransformSwab
-      HierarchyCommands.js ← Visibility/Lock/Rename*/Delete/Group/Ungroup/Duplicate/SmartReplace/PrintPart
+      HierarchyCommands.js ← Visibility/Lock/Rename*/Delete/Duplicate/SmartReplace/PrintPart
+      ParentCommands.js    ← Reparent/Unparent/CreateGroup/Group/Ungroup
       ShaderCommands.js    ← ShaderCreate/Assign/Update/Duplicate/Delete, UVOverride, ColorApply
       ScaleCommands.js     ← RescaleWorld + SourceUnit
     InputManager.js
@@ -331,6 +332,7 @@ tests/                     ← headless harness — Node-native, no build (§14b
   env.mjs                  ← installEnv(): Babylon shim, atob/btoa, DOMParser
   export.test.mjs          ← PrintManager export pipeline
   export-planner.test.mjs  ← filename/profile/scale planner
+  hierarchy.test.mjs       ← hierarchy parent commands + cycle rejection
   validator.test.mjs       ← MeshValidator severity + position-welded manifold
   validator-group.test.mjs ← sourceGroupId union topology checks
   persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
@@ -338,6 +340,7 @@ tests/                     ← headless harness — Node-native, no build (§14b
   scale.test.mjs           ← ScaleMath contracts + compatibility helpers
   split-on-import.test.mjs ← MultiMaterial split invariant
   state-shape.test.mjs     ← default state and migration invariants
+  threemf-components.test.mjs ← 3MF component hierarchy import/export
   threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader contracts
 ```
 
@@ -414,9 +417,12 @@ Import path:
 4. Normal scene imports call `splitMultiMaterialMeshesInContainer()` before
    shader registration. If the GLB scene graph contains meshless transform
    nodes with geometry descendants (Blender Collections exported with "Full
-   Collection Hierarchy", or manual Empty parents), `ImportHierarchy` captures
-   those nodes as Outliner folders before import-transform baking flattens the
-   Babylon graph.
+   Collection Hierarchy", manual Empty parents, or 3MF component assemblies),
+   `ImportHierarchy` captures those nodes as Outliner groups before
+   import-transform baking. The bake folds loader/unit/reflection transforms
+   into mesh vertices, then keeps only the promoted group nodes as clean
+   identity `TransformNode` parents and reparents baked meshes under them, so
+   the runtime hierarchy is editable instead of state-only.
    Blender modeler/export rule:
    `export_hierarchy_full_collections=True`,
    `export_hierarchy_flatten_objs=False`, and `export_extras=True` when custom
@@ -530,7 +536,7 @@ match what the specced responsibilities actually cost.
 | `events.js` | < 80 |
 | `StateManager.js` | < 200 |
 | `HistoryManager.js` | < 200 (stack machinery + façade only; commands live in `core/commands/`) |
-| each `core/commands/*.js` | < 500 (HierarchyCommands is the big one by design) |
+| each `core/commands/*.js` | < 500 (parent/group transform commands live in `ParentCommands.js`) |
 | `InputManager.js` | < 750 (incl. modal G/R/S; extract `input/ModalTransform.js` if it grows) |
 | `SceneManager.js` | < 450 (engine/lighting/overlays orchestrator; camera, pivot, outline, bed/grid all split into `core/scene/`) |
 | each `core/scene/*.js` | < 250 (`CameraRig.js` < 550 — creation + custom nav + presets + framing + follow + optics + pose save/restore are one cohesive rig) |
@@ -1119,7 +1125,7 @@ HistoryManager.endBatch()           → void  // finish and push the batch as on
 ```
 
 ### Standard Commands (in `src/core/commands/` — Transform / Hierarchy /
-### Shader / Scale modules + shared `support.js`; HistoryManager re-exports all)
+### Parent / Shader / Scale modules + shared `support.js`; HistoryManager re-exports all)
 Implemented in Phase 3:
 - `TransformCommand` — `{ prev, next, alreadyApplied? }` keyed by meshId. Sets absolute transforms via `setParent(null)` cycle so the world position survives the change. Used by both gizmo drag-end and Properties Panel input commits.
 - `VisibilityCommand`, `LockCommand`, `RenameCommand`
@@ -1130,7 +1136,9 @@ Implemented in Phase 3:
   retained TransformNodes. Undo restores the exact group snapshot, nodes,
   memberships, and mesh parents; `origin:'user'` empty groups remain.
 - `DuplicateCommand` — clones via `AssetLoader.cloneMeshAsNewObject`, offsets +10 mm in X so the clone is visible, auto-selects new meshes. Sharing geometry on redo: clones are kept disabled in memory and re-enabled on redo (same pattern as DeleteCommand).
-- `GroupCommand` / `UngroupCommand` — creates/disposes a `TransformNode` pivot; reparents members preserving world transform. All three commands wrap their parent-touching work in a `_withDetachedPivot` helper that temporarily detaches the selection-visual pivot so meshes are in their canonical parents during the mutation.
+- `ReparentCommand` / `UnparentCommand` — moves a SceneObject leaf or GroupNode under another GroupNode, or back to scene root. The shared `HierarchyIntegrity.validateParentChange()` helper rejects missing parents, self-parenting, descendant-parent cycles, and any existing cycle encountered while walking ancestors. Commands snapshot before/after parent ids and world transforms inside `execute()` after `_withDetachedPivot` normalizes the graph, then use Babylon `setParent()` plus matrix decomposition/re-application so world transforms do not jump.
+- `CreateGroupCommand` / `GroupCommand` — creates a meshless `TransformNode` pivot at the selected meshes' median world position, reparents every selected logical part into it, removes those object ids from previous parent `childIds`, and records the new group as `origin:'user'`. `GroupCommand` remains the compatibility export; `CreateGroupCommand` is the formal command name.
+- `UngroupCommand` — dissolves one GroupNode. Direct SceneObject children and direct subgroup children move to the dissolved group's parent (or root), state `childIds` / subgroup `parentId` are updated together, and undo recreates the original TransformNode with the captured world transform before restoring the exact group snapshot. All parent-touching commands wrap their work in `_withDetachedPivot` so meshes are in canonical parents during mutation.
 
 Phase 4 implementations (Shader System):
 - `ShaderCreateCommand` — `{ shaderId }` — creates new Babylon material, entry in state, pushes with `getNewId()`.
@@ -1576,8 +1584,8 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                //   state.scene.objects + state.scene.groups
                                //   (see "Name uniqueness invariant" below)
   assetId,                     // back-reference to AssetEntry
-  collectionId,                // outliner display bucket (null = uncollected)
-  parentId,                    // groupId if this mesh is inside a group, else null
+  collectionId,                // outliner/import display bucket; never scene-graph parentage
+  parentId,                    // transform-parent GroupNode id, else null
   shaderId,                    // shader currently assigned (null = scene default)
   visible, locked, isGhost,    // booleans
   isPrintPart,                 // include in OBJ/STL export
@@ -1603,13 +1611,19 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
 }
 ```
 
+`collectionId` and `parentId` are intentionally independent. Moving an object
+between collections changes only display routing; reparenting changes only the
+transform hierarchy. A mixed-collection group is legal and renders at the
+Outliner root with a badge rather than rewriting member collections.
+
 Selection stores only visible logical-object lead ids. Any command that changes
 the object lifecycle or transform surface (`DeleteCommand`, `DuplicateCommand`,
-`GroupCommand`, hide/lock toggles, copy/paste transform, Properties transforms,
-and export collection) expands those leads to every internal material-split part
-before mutating state or Babylon meshes. A duplicated split object receives a
-fresh `sourceGroupId` and its own lead `logicalObjectId`; it must never point
-back to the original logical object.
+`GroupCommand`, `ReparentCommand`, `UnparentCommand`, hide/lock toggles,
+copy/paste transform, Properties transforms, and export collection) expands
+those leads to every internal material-split part before mutating state or
+Babylon meshes. A duplicated split object receives a fresh `sourceGroupId` and
+its own lead `logicalObjectId`; it must never point back to the original logical
+object.
 
 ### GroupNode (transform hierarchy, in `state.scene.groups[groupId]`)
 ```js
@@ -1620,6 +1634,10 @@ back to the original logical object.
   origin,                       // 'import' | 'user'
 }
 ```
+
+GroupNodes are the first-class transform parents in the runtime and map to
+Babylon `TransformNode`s. Mesh SceneObjects are leaf geometry; object-as-parent
+is not part of the current runtime contract.
 
 `origin` controls empty-group lifecycle, not rendering. Deleting objects always
 removes their ids from every `childIds` array. Imported groups that then have no
@@ -1677,17 +1695,21 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    Supported: `.glb .gltf .obj .stl` (Babylon loaders package) + `.3mf`
    (`src/core/ThreeMFLoader.js`, a self-registered SceneLoader plugin — Babylon
    ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`:
-   unzip OPC → `3D/3dmodel.model` → per `<object>`/`<mesh>` build a Babylon
-   mesh, rotate `RotationX(+90°)` (3MF Z-up → Babylon Y-up, undoing the export
-   `Y_UP_TO_Z_UP`), restore winding (export wrote `v1,v3,v2`), map
-   `m:colorgroup`+`pid/pindex` → `StandardMaterial.diffuseColor`, apply any
-   `<build><item>` transform. Returns an AssetContainer so every downstream
-   path (shaders, re-instantiate, project restore) is identical to other
-   formats. Vertices are raw mm → handled by the normal import-scale model
-   exactly like STL (so scale is NOT bit-identical across a working≠target
-   ratio — same inherent behaviour as re-importing an exported OBJ/STL).
-   Component-only assemblies (no `<mesh>`) are unsupported — we never export
-   those (one `<object>`+`<mesh>` per part).
+   unzip OPC → `3D/3dmodel.model` → mesh `<object>` resources become Babylon
+   meshes; component `<object>` resources become meshless TransformNodes for
+   import hierarchy; `<component objectid transform>` and `<build><item>` form
+   the placement tree. Component/build transforms are composed in 3MF space and
+   baked into child mesh vertices before the `RotationX(+90°)` 3MF Z-up →
+   Babylon Y-up conversion. The loader restores winding (export wrote
+   `v1,v3,v2`) and maps `m:colorgroup`+`pid/pindex` to
+   `StandardMaterial.diffuseColor`, or `m:texture2dgroup` to
+   `StandardMaterial.diffuseTexture`. Repeated component references instantiate
+   editable mesh copies rather than shared geometry. Returns an AssetContainer
+   so every downstream path (shaders, re-instantiate, project restore) is
+   identical to other formats. Vertices are raw mm → handled by the normal
+   import-scale model exactly like STL (so scale is NOT bit-identical across a
+   working≠target ratio — same inherent behaviour as re-importing an exported
+   OBJ/STL).
 4. Read import metadata via `src/core/import/ImportMetadata.js`. It scans
    Babylon's `node.metadata.gltf.extras` on meshes and transform nodes with
    normalized key matching.
@@ -2831,6 +2853,16 @@ package writers: `print/ThreeMFWriter.js`):
    The writer concatenates the internal mesh vertex buffers and writes
    per-triangle material attributes (`pid` + `p1/p2/p3`) so shader boundaries
    survive without exposing split siblings as separate printer objects.
+7. If the exported logical units still have `parentId` ancestry in
+   `state.scene.groups`, `ThreeMFWriter` emits additional component objects:
+   each logical unit remains a mesh resource, each included GroupNode becomes
+   an `<object><components>…</components></object>`, and root build items point
+   at the top component objects instead of every leaf mesh. Component transforms
+   are explicit identity matrices because the existing prep pipeline already
+   baked world-space millimetre placement into vertices; topology is preserved
+   without making the printer profile choose flattening. Individual-per-part
+   3MF export stays standalone by design and does not carry cross-part
+   hierarchy.
 
 ### STL Export (Geometry-only fallback)
 **Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
@@ -2879,7 +2911,12 @@ otherwise the panel falls back to its placeholder icon.
 - Row icons use `Icons.icon(name, attrs)` — see Part 2. Validation status
   badges (warning/error, stale-dimmed) read the §9 A6 cache and render as
   trusted markup after the escaped name.
-- Drag-to-reparent (`PARENT_CHANGED`) — PLANNED, not implemented.
+- Drag-to-reparent: Object and Group rows are draggable hierarchy sources.
+  Dropping on a Group row pushes `ReparentCommand(sourceId, groupId)`;
+  dropping on empty Outliner space pushes `UnparentCommand(sourceId)`.
+  Collection rows are not parent targets. The UI calls
+  `validateParentChange()` for drop affordances, so invalid self/cycle/missing
+  parent targets do not highlight and no raw state mutation bypasses commands.
 - Multi-select: `Shift+click` add, `Ctrl+click` toggle. Dispatch `SELECTION_CHANGED`.
 - Double-click row name → inline rename (text input, blur/Enter commits via `RenameCommand`; collections via `RenameCollectionCommand`).
 - The search bar filters by Object, Group, or Collection name. A matching
@@ -2916,10 +2953,10 @@ Collection row interactions:
   (dispatches `COLLECTION_RENAMED`; undoable).
 - RMB → context menu: **Select Members**, **Rename Collection…**, **Delete Collection** (the last untags every member, leaving them visible as "uncollected" at outliner root; the collection entry is then removed from state).
 
-Object/group context navigation adds **Select Parent Group**, **Select
-Siblings**, **Select Import Members**, and **Reveal in Outliner** where the
-target supports them. Because selection stores geometry ids only, selecting a
-parent group means selecting all of that group's live descendant Objects; it
+Object/group context navigation adds **Select Parent Group**, **Unparent**,
+**Select Siblings**, **Select Import Members**, and **Reveal in Outliner** where
+the target supports them. Because selection stores geometry ids only, selecting
+a parent group means selecting all of that group's live descendant Objects; it
 does not make the meshless TransformNode an active geometry object.
 
 Outliner row events are delegated from `#ol-list`; rows are not individually
@@ -2928,6 +2965,7 @@ re-wired on every render. Rows expose `role="treeitem"`, `tabindex="0"`, and
 F2 begins inline rename, and ArrowLeft/ArrowRight collapse or expand collection
 and group branches. Object rows still own shader drop targets, but the drop
 handler is delegated and routes assignment through `ShaderAssignCommand`.
+Hierarchy drops are a separate MIME payload from shader drops.
 
 ### Properties Panel (`src/ui/PropertiesPanel.js`)
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
@@ -3760,11 +3798,13 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/printer-profile.test.mjs` | 3 | PrinterProfiles: Mimaki default profile, filament target selection, unknown-id Mimaki fallback |
 | `tests/import-metadata.test.mjs` | 5 | ImportMetadata: Blender glTF `extras` ratio parsing, `library = 1` marker detection, library item root detection |
 | `tests/library-import.test.mjs` | 3 | AssetLoader GLB library mode: marked pack registers one AssetEntry per top-level object without SceneObjects; child asset instantiates only its own object; normal GLB empty hierarchy imports as Outliner groups |
+| `tests/hierarchy.test.mjs` | 4 | Hierarchy commands: reparent/unparent preserve world transforms, keep `collectionId` independent, reject invalid parent edges, and ungroup direct objects/subgroups with deterministic undo/redo |
 | `tests/logical-objects.test.mjs` | 3 | Selection canonicalizes an internal split pick to the visible logical object while resolving all internal meshes for manipulation; delete removes every internal split part; duplicate creates an independent logical split object |
 | `tests/scale.test.mjs` | 8 | ScaleMath: ratio parser/formatter, Authored→Scene normalization, Scene→Print export scale, scene-scale rebake factor, v3.1 field compatibility |
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
 | `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
+| `tests/threemf-components.test.mjs` | 3 | 3MF components: solid/textured hierarchy export emits component objects, Materials Extension resources remain intact, and component import creates transform groups with child meshes |
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: content-driven textured vs solid-only flavor, texture dedup, UV round-trip via pseudo-loader regex, printer dropdown does not switch flavor |
 | `tests/validator-group.test.mjs` | 6 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam; validate-all dedupes split groups |
 | `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |

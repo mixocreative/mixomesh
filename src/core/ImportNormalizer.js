@@ -78,6 +78,25 @@ export function bakeImportTransform(container, factor, position) {
   const geo = container.meshes.filter(
     m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0
   );
+  const groupNodes = container.transformNodes.filter(n => n?.metadata?.groupId);
+  const groupSet = new Set(groupNodes);
+  const nearestGroupAncestor = (node) => {
+    let current = node?.parent ?? null;
+    while (current) {
+      if (groupSet.has(current)) return current;
+      current = current.parent ?? null;
+    }
+    return null;
+  };
+  const nodeDepth = (node) => {
+    let depth = 0;
+    let current = node?.parent ?? null;
+    while (current) { depth++; current = current.parent ?? null; }
+    return depth;
+  };
+  const groupParent = new Map(groupNodes.map(n => [n, nearestGroupAncestor(n)]));
+  const groupDepth = new Map(groupNodes.map(n => [n, nodeDepth(n)]));
+  const meshParent = new Map(geo.map(m => [m, nearestGroupAncestor(m)]));
 
   // Snapshot full world matrices before any detaching so the loop order
   // can't perturb a result mid-flight.
@@ -101,10 +120,33 @@ export function bakeImportTransform(container, factor, position) {
     m.refreshBoundingInfo?.();
   }
 
-  // The container's transform / empty nodes (incl. Babylon's __root__) are
-  // now childless — drop them so the hierarchy is flat and decompose-clean.
+  // Rebuild imported group nodes as clean identity transform parents. Their
+  // original world transforms are already baked into child mesh vertices above;
+  // keeping only identity group nodes preserves editable topology without
+  // leaking loader/reflection transforms into the scene.
+  for (const n of groupNodes) {
+    n.setParent(null);
+    if (n.position?.set) n.position.set(0, 0, 0);
+    else n.position = new BABYLON.Vector3(0, 0, 0);
+    n.rotationQuaternion = BABYLON.Quaternion.Identity();
+    n.rotation?.set?.(0, 0, 0);
+    if (n.scaling?.set) n.scaling.set(1, 1, 1);
+    else n.scaling = new BABYLON.Vector3(1, 1, 1);
+    n.computeWorldMatrix?.(true);
+  }
+  for (const n of [...groupNodes].sort((a, b) => (groupDepth.get(a) ?? 0) - (groupDepth.get(b) ?? 0))) {
+    n.setParent(groupParent.get(n) ?? null);
+  }
+  for (const m of geo) {
+    const parent = meshParent.get(m);
+    if (parent) m.setParent(parent);
+  }
+
+  // Non-promoted transform / empty nodes (incl. Babylon's __root__) are now
+  // childless — drop them so the remaining hierarchy is decompose-clean.
   for (const n of nodes) {
     if (geo.includes(n)) continue;
+    if (groupSet.has(n)) continue;
     try { n.dispose(true, false); } catch { /* */ }
   }
 }

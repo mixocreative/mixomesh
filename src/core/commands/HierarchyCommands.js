@@ -4,7 +4,6 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
-import { SceneManager } from '../SceneManager.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
@@ -16,7 +15,6 @@ import {
   restoreSceneObject,
 } from './support.js';
 
-const BABYLON = window.BABYLON;
 let _duplicateGroupSerial = 0;
 
 function _expandedCommandIds(ids) {
@@ -236,159 +234,6 @@ function _setGroups(groups) {
     ...state,
     scene: { ...state.scene, groups: structuredClone(groups) },
   }), SILENT);
-}
-
-/**
- * Group N selected objects under a new TransformNode pivot at the median.
- * The new group's id is stable across redo/undo cycles.
- */
-export class GroupCommand {
-  constructor(meshIds, groupName = 'Group') {
-    this._ids       = _expandedCommandIds(meshIds);
-    this._groupId   = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    this._groupName = groupName;
-    this._prevParents = {};
-    this.label = 'Group';
-  }
-  execute() {
-    withDetachedPivot(() => {
-      const meshes = this._ids
-        .map(id => AssetLoader.getBabylonMesh(id))
-        .filter(Boolean);
-      if (!meshes.length) return;
-
-      // Capture previous logical parents
-      const objects = getState().scene.objects;
-      for (const id of this._ids) {
-        this._prevParents[id] = objects[id]?.parentId ?? null;
-      }
-
-      // Median in world space
-      const center = new BABYLON.Vector3(0, 0, 0);
-      meshes.forEach(m => center.addInPlace(m.getAbsolutePosition()));
-      center.scaleInPlace(1 / meshes.length);
-
-      const scene = SceneManager.getScene();
-      const node = new BABYLON.TransformNode(this._groupName, scene);
-      node.position = center;
-      node.metadata = { groupId: this._groupId };
-
-      for (const m of meshes) m.setParent(node);
-
-      setState(state => {
-        const newGroups = {
-          ...state.scene.groups,
-          [this._groupId]: {
-            id: this._groupId,
-            name: this._groupName,
-            parentId: null,
-            childIds: this._ids.slice(),
-            origin: 'user',
-          },
-        };
-        const newObjects = { ...state.scene.objects };
-        for (const id of this._ids) {
-          if (newObjects[id]) newObjects[id] = { ...newObjects[id], parentId: this._groupId };
-        }
-        return { ...state, scene: { ...state.scene, groups: newGroups, objects: newObjects } };
-      }, SILENT);
-
-      dispatch(EVENTS.GROUP_CREATED, { groupId: this._groupId });
-    });
-    markDirty();
-  }
-  undo() {
-    withDetachedPivot(() => {
-      for (const id of this._ids) {
-        const m = AssetLoader.getBabylonMesh(id);
-        if (!m) continue;
-        // Restore the CANONICAL Babylon parent — for nested groups that is
-        // the previous group's TransformNode, not scene root (review M17).
-        // setParent preserves the world transform either way.
-        const prevGroupNode = findGroupNode(this._prevParents[id] ?? null);
-        m.setParent(prevGroupNode ?? null);
-      }
-      const node = findGroupNode(this._groupId);
-      if (node) node.dispose();
-
-      setState(state => {
-        const newGroups = { ...state.scene.groups };
-        delete newGroups[this._groupId];
-        const newObjects = { ...state.scene.objects };
-        for (const id of this._ids) {
-          if (newObjects[id]) newObjects[id] = { ...newObjects[id], parentId: this._prevParents[id] ?? null };
-        }
-        return { ...state, scene: { ...state.scene, groups: newGroups, objects: newObjects } };
-      }, SILENT);
-      dispatch(EVENTS.GROUP_DISSOLVED, { groupId: this._groupId });
-    });
-  }
-}
-
-/**
- * Dissolve an existing group. Members are unparented (preserving world transform)
- * back to the group's parent (or scene root); the TransformNode is disposed.
- */
-export class UngroupCommand {
-  constructor(groupId) {
-    this._groupId = groupId;
-    const g = getState().scene.groups[groupId];
-    this._snapshot = g ? { ...g, childIds: g.childIds.slice() } : null;
-    this.label = 'Ungroup';
-  }
-  execute() {
-    if (!this._snapshot) return;
-    withDetachedPivot(() => {
-      const meshes = this._snapshot.childIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
-      // Members return to the dissolved group's PARENT node (or scene root
-      // for top-level groups) — review M17, mirrors GroupCommand.undo.
-      const parentNode = findGroupNode(this._snapshot.parentId ?? null);
-      for (const m of meshes) m.setParent(parentNode ?? null);
-      const node = findGroupNode(this._groupId);
-      if (node) node.dispose();
-
-      setState(state => {
-        const newGroups = { ...state.scene.groups };
-        delete newGroups[this._groupId];
-        const newObjects = { ...state.scene.objects };
-        for (const id of this._snapshot.childIds) {
-          if (newObjects[id]) newObjects[id] = { ...newObjects[id], parentId: this._snapshot.parentId };
-        }
-        return { ...state, scene: { ...state.scene, groups: newGroups, objects: newObjects } };
-      }, SILENT);
-      dispatch(EVENTS.GROUP_DISSOLVED, { groupId: this._groupId });
-    });
-    markDirty();
-  }
-  undo() {
-    if (!this._snapshot) return;
-    withDetachedPivot(() => {
-      const meshes = this._snapshot.childIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
-      if (!meshes.length) return;
-      const center = new BABYLON.Vector3(0, 0, 0);
-      meshes.forEach(m => center.addInPlace(m.getAbsolutePosition()));
-      center.scaleInPlace(1 / meshes.length);
-
-      const scene = SceneManager.getScene();
-      const node = new BABYLON.TransformNode(this._snapshot.name, scene);
-      node.position = center;
-      node.metadata = { groupId: this._groupId };
-      for (const m of meshes) m.setParent(node);
-
-      setState(state => {
-        const newGroups = {
-          ...state.scene.groups,
-          [this._groupId]: { ...this._snapshot, childIds: this._snapshot.childIds.slice() },
-        };
-        const newObjects = { ...state.scene.objects };
-        for (const id of this._snapshot.childIds) {
-          if (newObjects[id]) newObjects[id] = { ...newObjects[id], parentId: this._groupId };
-        }
-        return { ...state, scene: { ...state.scene, groups: newGroups, objects: newObjects } };
-      }, SILENT);
-      dispatch(EVENTS.GROUP_CREATED, { groupId: this._groupId });
-    });
-  }
 }
 
 /**

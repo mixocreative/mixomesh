@@ -56,6 +56,36 @@ function _itemMatrix(transformStr) {
   );
 }
 
+function _localName(node) {
+  return node?.localName || String(node?.tagName ?? '').split(':').pop();
+}
+
+function _directChildren(node, name) {
+  const kids = node?.children ? [...node.children] : [...(node?.childNodes ?? [])].filter(n => n.nodeType === 1);
+  return kids.filter(child => _localName(child) === name);
+}
+
+function _firstDirect(node, name) {
+  return _directChildren(node, name)[0] ?? null;
+}
+
+function _matrixFor(componentOrItem) {
+  return _itemMatrix(componentOrItem?.getAttribute('transform')) ?? BABYLON.Matrix.Identity();
+}
+
+function _multiplyMatrices(a, b) {
+  if (!a) return b ?? BABYLON.Matrix.Identity();
+  if (!b) return a;
+  return b.multiply(a);
+}
+
+function _instanceName(obj, objectId, counts) {
+  const base = obj.getAttribute('name') || `Part_${objectId}`;
+  const n = (counts.get(objectId) ?? 0) + 1;
+  counts.set(objectId, n);
+  return n === 1 ? base : `${base}.${String(n).padStart(3, '0')}`;
+}
+
 /** Locate the 3D model part: follow _rels/.rels, fall back to our export path. */
 async function _findModelXml(zip) {
   let target = '3D/3dmodel.model';
@@ -147,24 +177,13 @@ async function _buildContainer(scene, zip, modelXml) {
   const flip = Z_UP_TO_Y_UP();
   const usedTexIds = new Set();   // texture2d ids actually bound to a material
 
-  // Build placements: prefer <build><item>; if absent, place every meshed
-  // object at identity (a model with geometry but no build section).
-  const builds = [...doc.getElementsByTagName('item')]
-    .map(it => ({ id: it.getAttribute('objectid'), m: _itemMatrix(it.getAttribute('transform')) }));
-  const placements = builds.length
-    ? builds
-    : [...objectsById.keys()].map(id => ({ id, m: null }));
-
   let made = 0;
-  for (const { id, m } of placements) {
-    const obj = objectsById.get(id);
-    if (!obj) continue;
-    const meshEl = obj.getElementsByTagName('mesh')[0];
-    if (!meshEl) continue;                       // component-only — skip
+  const instanceCounts = new Map();
 
+  const createMeshInstance = (objectId, obj, meshEl, matrix, parentNode) => {
     const vEls = meshEl.getElementsByTagName('vertex');
     const tEls = meshEl.getElementsByTagName('triangle');
-    if (!vEls.length || !tEls.length) continue;
+    if (!vEls.length || !tEls.length) return 0;
 
     const positions = new Array(vEls.length * 3);
     for (let i = 0; i < vEls.length; i++) {
@@ -173,8 +192,8 @@ async function _buildContainer(scene, zip, modelXml) {
         parseFloat(vEls[i].getAttribute('y')) || 0,
         parseFloat(vEls[i].getAttribute('z')) || 0,
       );
-      if (m) p = BABYLON.Vector3.TransformCoordinates(p, m);   // 3MF-space item placement
-      p = BABYLON.Vector3.TransformCoordinates(p, flip);       // Z-up → Babylon Y-up
+      if (matrix) p = BABYLON.Vector3.TransformCoordinates(p, matrix);   // 3MF-space build/component placement
+      p = BABYLON.Vector3.TransformCoordinates(p, flip);                 // Z-up → Babylon Y-up
       positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z;
     }
 
@@ -205,7 +224,7 @@ async function _buildContainer(scene, zip, modelXml) {
       }
     }
 
-    const mesh = new BABYLON.Mesh(obj.getAttribute('name') || `Part_${id}`, scene);
+    const mesh = new BABYLON.Mesh(_instanceName(obj, objectId, instanceCounts), scene);
     const vd = new BABYLON.VertexData();
     vd.positions = positions;
     vd.indices = indices;
@@ -234,15 +253,59 @@ async function _buildContainer(scene, zip, modelXml) {
     }
     mat.backFaceCulling = false;
     mesh.material = mat;
+    if (parentNode) mesh.setParent(parentNode);
 
-    // Hand the entities to the container the way Babylon's own loaders do:
-    // detach from the live scene now, AssetLoader calls addAllToScene().
     container.meshes.push(mesh);
     container.materials.push(mat);
-    scene.removeMesh(mesh);
-    scene.removeMaterial(mat);
-    made++;
+    return 1;
+  };
+
+  const instantiateObject = (objectId, matrix, parentNode, stack = new Set()) => {
+    if (stack.has(objectId)) throw new Error(`3MF: component cycle at object ${objectId}`);
+    const obj = objectsById.get(objectId);
+    if (!obj) return 0;
+    const nextStack = new Set(stack);
+    nextStack.add(objectId);
+    const meshEl = _firstDirect(obj, 'mesh');
+    if (meshEl) return createMeshInstance(objectId, obj, meshEl, matrix, parentNode);
+
+    const componentsEl = _firstDirect(obj, 'components');
+    if (!componentsEl) return 0;
+    const node = new BABYLON.TransformNode(_instanceName(obj, objectId, instanceCounts), scene);
+    node.metadata = { ...(node.metadata ?? {}), threeMFObjectId: objectId, importHierarchy: true };
+    if (parentNode) node.setParent(parentNode);
+    container.transformNodes.push(node);
+
+    let childCount = 0;
+    for (const component of _directChildren(componentsEl, 'component')) {
+      const childObjectId = component.getAttribute('objectid');
+      const childMatrix = _multiplyMatrices(matrix, _matrixFor(component));
+      childCount += instantiateObject(childObjectId, childMatrix, node, nextStack);
+    }
+    if (!childCount) {
+      container.transformNodes = container.transformNodes.filter(n => n !== node);
+      node.dispose();
+    }
+    return childCount;
+  };
+
+  // Build placements: prefer direct <build><item>; if absent, place every
+  // resource object at identity.
+  const buildEl = doc.getElementsByTagName('build')[0];
+  const buildItems = buildEl ? _directChildren(buildEl, 'item') : [];
+  const placements = buildItems.length
+    ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it) }))
+    : [...objectsById.keys()].map(id => ({ id, matrix: BABYLON.Matrix.Identity() }));
+
+  for (const placement of placements) {
+    made += instantiateObject(placement.id, placement.matrix, null);
   }
+
+  // Hand entities to the container the way Babylon's own loaders do: detach
+  // from the live scene now; AssetLoader calls addAllToScene().
+  for (const mesh of container.meshes) scene.removeMesh?.(mesh);
+  for (const mat of container.materials) scene.removeMaterial?.(mat);
+  for (const node of container.transformNodes) scene.removeTransformNode?.(node);
 
   // Revoke blob URLs for texture2d parts that no built object referenced
   // (audit LOW #8) — used textures keep their URL alive for the live Babylon
@@ -251,7 +314,7 @@ async function _buildContainer(scene, zip, modelXml) {
     if (t.url && !usedTexIds.has(tid)) { try { URL.revokeObjectURL(t.url); } catch { /* */ } }
   }
 
-  if (!made) throw new Error('3MF: no importable mesh objects (component-only assemblies are unsupported)');
+  if (!made) throw new Error('3MF: no importable mesh objects');
   return container;
 }
 
@@ -292,3 +355,8 @@ export function registerThreeMFLoader() {
 }
 
 registerThreeMFLoader();
+
+export const __test = {
+  buildContainer: _buildContainer,
+  itemMatrix: _itemMatrix,
+};

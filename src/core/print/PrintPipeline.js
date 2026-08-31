@@ -403,7 +403,7 @@ async function _serialize3MFColorGroup(ctx) {
   }
   return {
     kind: 'zip', mime: 'model/3mf', filename: `${exportBaseName(ctx)}.3mf`,
-    entries: buildColorGroupEntries(ctx.cloneGroups),
+    entries: buildColorGroupEntries(ctx.cloneGroups, { state: ctx.state }),
   };
 }
 
@@ -411,7 +411,7 @@ async function _serialize3MFMaterialsExt(ctx) {
   if (ctx.individually) {
     return _wrapIndividual3MF(ctx, list => buildMaterialsExtEntries(list));
   }
-  const entries = await buildMaterialsExtEntries(ctx.cloneGroups);
+  const entries = await buildMaterialsExtEntries(ctx.cloneGroups, { state: ctx.state });
   return { kind: 'zip', mime: 'model/3mf', filename: `${exportBaseName(ctx)}.3mf`, entries };
 }
 

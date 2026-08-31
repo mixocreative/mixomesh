@@ -438,6 +438,7 @@
   "context.duplicate": "複製",
   "context.group": "グループ化",
   "context.ungroup": "グループ解除",
+  "context.unparent": "親から外す",
   "context.selectionToCursor": "選択 → カーソル",
   "context.cursorToSelection": "カーソル → 選択",
   "context.cursorToWorldOrigin": "カーソル → ワールド原点",

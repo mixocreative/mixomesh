@@ -23,13 +23,29 @@ export function withDetachedPivot(fn) {
   finally { Selection.refresh(); }
 }
 
+export function applyAbsoluteNodeTransform(node, t) {
+  if (!node || !t) return;
+  const parent = node.parent ?? null;
+  node.setParent?.(null);
+  if (node.position?.set) node.position.set(t.position.x, t.position.y, t.position.z);
+  else node.position = new BABYLON.Vector3(t.position.x, t.position.y, t.position.z);
+  node.rotationQuaternion = new BABYLON.Quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
+  node.rotation?.set?.(0, 0, 0);
+  if (node.scaling?.set) node.scaling.set(t.scaling.x, t.scaling.y, t.scaling.z);
+  else node.scaling = new BABYLON.Vector3(t.scaling.x, t.scaling.y, t.scaling.z);
+  node.setParent?.(parent);   // preserves the world transform we just set
+  node.computeWorldMatrix?.(true);
+}
+
 export function applyAbsoluteTransform(mesh, t) {
-  const parent = mesh.parent;
-  mesh.setParent(null);
-  mesh.position.set(t.position.x, t.position.y, t.position.z);
-  mesh.rotationQuaternion = new BABYLON.Quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
-  mesh.scaling.set(t.scaling.x, t.scaling.y, t.scaling.z);
-  mesh.setParent(parent);   // preserves the world transform we just set
+  applyAbsoluteNodeTransform(mesh, t);
+}
+
+export function setParentPreserveWorld(node, parent) {
+  if (!node) return;
+  const world = captureWorldNode(node);
+  node.setParent?.(parent ?? null);
+  applyAbsoluteNodeTransform(node, world);
 }
 
 export function applyTransforms(snapshot) {
@@ -58,18 +74,37 @@ export function findNodeForId(id) {
   return findGroupNode(id);
 }
 
-/** Snapshot a mesh's world transform in the {position,rotation:quat,scaling} shape. */
-export function captureWorld(mesh) {
-  mesh.computeWorldMatrix(true);
-  const q = mesh.absoluteRotationQuaternion
-    ?? BABYLON.Quaternion.FromEulerVector(mesh.rotation ?? BABYLON.Vector3.Zero());
-  const p = mesh.getAbsolutePosition();
-  const s = mesh.absoluteScaling ?? mesh.scaling;
+/** Snapshot a node's world transform in the {position,rotation:quat,scaling} shape. */
+export function captureWorldNode(node) {
+  node.computeWorldMatrix?.(true);
+  const world = node.getWorldMatrix?.();
+  if (world?.decompose) {
+    const s0 = new BABYLON.Vector3(1, 1, 1);
+    const q0 = new BABYLON.Quaternion(0, 0, 0, 1);
+    const p0 = new BABYLON.Vector3(0, 0, 0);
+    if (world.decompose(s0, q0, p0)) {
+      return {
+        position: { x: p0.x, y: p0.y, z: p0.z },
+        rotation: { x: q0.x, y: q0.y, z: q0.z, w: q0.w },
+        scaling:  { x: s0.x, y: s0.y, z: s0.z },
+      };
+    }
+  }
+  const q = node.absoluteRotationQuaternion
+    ?? node.rotationQuaternion
+    ?? BABYLON.Quaternion.FromEulerVector(node.rotation ?? BABYLON.Vector3.Zero());
+  const p = node.getAbsolutePosition?.() ?? node.position ?? BABYLON.Vector3.Zero();
+  const s = node.absoluteScaling ?? node.scaling ?? new BABYLON.Vector3(1, 1, 1);
   return {
     position: { x: p.x, y: p.y, z: p.z },
     rotation: { x: q.x, y: q.y, z: q.z, w: q.w },
     scaling:  { x: s.x, y: s.y, z: s.z },
   };
+}
+
+/** Snapshot a mesh's world transform in the {position,rotation:quat,scaling} shape. */
+export function captureWorld(mesh) {
+  return captureWorldNode(mesh);
 }
 
 /** Patch one SceneObject's fields immutably (silent). No-op when absent. */

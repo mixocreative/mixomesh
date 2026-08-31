@@ -47,18 +47,18 @@ function _materialHex(mesh) {
 }
 
 /** Filament colorgroup package: [Content_Types] + rels + model XML. */
-export function buildColorGroupEntries(meshList) {
+export function buildColorGroupEntries(meshList, options = {}) {
   return [
     { path: '[Content_Types].xml', data: CONTENT_TYPES },
     { path: '_rels/.rels',         data: RELS },
-    { path: '3D/3dmodel.model',    data: _buildColorGroupModel(meshList) },
+    { path: '3D/3dmodel.model',    data: _buildColorGroupModel(meshList, options) },
   ];
 }
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
-export async function buildMaterialsExtEntries(meshList) {
+export async function buildMaterialsExtEntries(meshList, options = {}) {
   const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON);
-  const modelXml = _buildMaterialsExtModel(meshList, pathByMesh);
+  const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options);
   const entries = [
     { path: '[Content_Types].xml', data: CONTENT_TYPES_TEXTURED },
     { path: '_rels/.rels',         data: RELS },
@@ -74,9 +74,9 @@ export async function buildMaterialsExtEntries(meshList) {
 function _normaliseUnits(list) {
   return (list ?? []).map(entry => {
     if (Array.isArray(entry?.meshes)) {
-      return { name: entry.name, meshes: entry.meshes };
+      return { logicalId: entry.logicalId ?? entry.meshes[0]?.logicalId ?? entry.meshes[0]?.meshId, name: entry.name, meshes: entry.meshes };
     }
-    return { name: entry?.name, meshes: [entry] };
+    return { logicalId: entry?.logicalId ?? entry?.meshId, name: entry?.name, meshes: [entry] };
   }).filter(unit => unit.meshes.length);
 }
 
@@ -95,7 +95,93 @@ function _flattenEntries(list) {
  * for the right-handed consumer, then the whole build is centred on the
  * origin so it lands on the slicer bed. `unit="millimeter"` is literal.
  */
-function _buildColorGroupModel(list) {
+function _xmlAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function _unitId(unit) {
+  return unit.logicalId ?? unit.meshes.find(entry => entry.logicalId)?.logicalId
+    ?? unit.meshes.find(entry => entry.meshId)?.meshId
+    ?? null;
+}
+
+function _hierarchyPlan(units, state, meshObjectIds) {
+  const scene = state?.scene;
+  const groups = scene?.groups ?? {};
+  const objects = scene?.objects ?? {};
+  const includedGroups = new Set();
+  const unitParent = new Map();
+
+  for (const unit of units) {
+    if (!meshObjectIds.has(unit)) continue;
+    const id = _unitId(unit);
+    const parentId = id ? objects[id]?.parentId ?? null : null;
+    unitParent.set(unit, parentId);
+    let cursor = parentId;
+    const seen = new Set();
+    while (cursor && groups[cursor] && !seen.has(cursor)) {
+      seen.add(cursor);
+      includedGroups.add(cursor);
+      cursor = groups[cursor].parentId ?? null;
+    }
+  }
+  if (!includedGroups.size) return null;
+  return {
+    groups,
+    includedGroups,
+    orderedGroupIds: Object.keys(groups).filter(id => includedGroups.has(id)),
+    unitParent,
+  };
+}
+
+function _appendComponentHierarchy({ objs, items, units, state, meshObjectIds, nextObjectId }) {
+  const plan = _hierarchyPlan(units, state, meshObjectIds);
+  if (!plan) {
+    for (const objectId of meshObjectIds.values()) {
+      items.push(`<item objectid="${objectId}" transform="${THREEMF_IDENTITY}"/>`);
+    }
+    return nextObjectId;
+  }
+
+  const groupObjectIds = new Map();
+  for (const groupId of plan.orderedGroupIds) groupObjectIds.set(groupId, nextObjectId++);
+
+  for (const groupId of plan.orderedGroupIds) {
+    const group = plan.groups[groupId];
+    const components = [];
+    for (const childGroup of Object.values(plan.groups)) {
+      if ((childGroup.parentId ?? null) === groupId && groupObjectIds.has(childGroup.id)) {
+        components.push(`<component objectid="${groupObjectIds.get(childGroup.id)}" transform="${THREEMF_IDENTITY}"/>`);
+      }
+    }
+    for (const unit of units) {
+      if ((plan.unitParent.get(unit) ?? null) === groupId && meshObjectIds.has(unit)) {
+        components.push(`<component objectid="${meshObjectIds.get(unit)}" transform="${THREEMF_IDENTITY}"/>`);
+      }
+    }
+    objs.push(`<object id="${groupObjectIds.get(groupId)}" type="model" name="${_xmlAttr(group?.name ?? groupId)}"><components>${components.join('')}</components></object>`);
+  }
+
+  for (const groupId of plan.orderedGroupIds) {
+    const parentId = plan.groups[groupId]?.parentId ?? null;
+    if (!plan.includedGroups.has(parentId)) {
+      items.push(`<item objectid="${groupObjectIds.get(groupId)}" transform="${THREEMF_IDENTITY}"/>`);
+    }
+  }
+  for (const unit of units) {
+    const parentId = plan.unitParent.get(unit) ?? null;
+    if (!plan.includedGroups.has(parentId) && meshObjectIds.has(unit)) {
+      items.push(`<item objectid="${meshObjectIds.get(unit)}" transform="${THREEMF_IDENTITY}"/>`);
+    }
+  }
+  return nextObjectId;
+}
+
+function _buildColorGroupModel(list, options = {}) {
   const units = _normaliseUnits(list);
   const flat = _flattenEntries(units);
   const colors = [];
@@ -109,6 +195,7 @@ function _buildColorGroupModel(list) {
 
   const objs = [];
   const items = [];
+  const meshObjectIds = new Map();
   let objId = 2;                                  // id 1 = colorgroup
   for (const unit of units) {
     const built = _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex);
@@ -118,14 +205,10 @@ function _buildColorGroupModel(list) {
       `<object id="${objId}" type="model"${objectAttrs}>` +
       `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
     );
-    // Geometry is fully baked into the vertices (flattenWorld → absolute,
-    // origin-centred). The build item therefore carries an EXPLICIT identity
-    // matrix (3MF 3×4 row-major) — no viewer/slicer can place the object
-    // anywhere but exactly where its vertices say. Placement is consistent
-    // across every 3MF consumer.
-    items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
+    meshObjectIds.set(unit, objId);
     objId++;
   }
+  _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
 
   const colorXml = colors.map(c => `<m:color color="${c}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -217,7 +300,7 @@ function _convertVertices(list) {
  * `v1/v2/v3` — vertex i ↔ UV i. Welding is skipped on textured meshes (see
  * PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
  */
-function _buildMaterialsExtModel(list, pathByMesh) {
+function _buildMaterialsExtModel(list, pathByMesh, options = {}) {
   const units = _normaliseUnits(list);
   const flat = _flattenEntries(units);
   // Pass 1: assign resource ids, gather distinct solid colours.
@@ -268,6 +351,7 @@ function _buildMaterialsExtModel(list, pathByMesh) {
   // Objects + build items.
   const objs = [];
   const items = [];
+  const meshObjectIds = new Map();
   let objId = nextId;
   for (const unit of units) {
     const built = _buildUnitMaterialsMeshXml(
@@ -280,9 +364,10 @@ function _buildMaterialsExtModel(list, pathByMesh) {
       `<object id="${objId}" type="model"${objectAttrs}>` +
       `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
     );
-    items.push(`<item objectid="${objId}" transform="${THREEMF_IDENTITY}"/>`);
+    meshObjectIds.set(unit, objId);
     objId++;
   }
+  _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">

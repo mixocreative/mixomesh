@@ -438,6 +438,7 @@
   "context.duplicate": "複製",
   "context.group": "群組",
   "context.ungroup": "取消群組",
+  "context.unparent": "移出上層",
   "context.selectionToCursor": "選取項 → 游標",
   "context.cursorToSelection": "游標 → 選取項",
   "context.cursorToWorldOrigin": "游標 → 世界原點",
