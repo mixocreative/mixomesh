@@ -11,10 +11,19 @@ import { subscribe, dispatch } from '../core/StateManager.js';
 //   The renderer wires its own internal event handlers and calls close(result)
 //   when the user confirms / cancels.
 const _renderers = new Map();
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 let _rootEl   = null;
 let _shellEl  = null;
-let _current  = null;   // { id, onClose, blocking }
+let _current  = null;   // { id, onClose, blocking, previousFocus }
+let _titleSeq = 0;
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -68,19 +77,25 @@ function _onOpen(payload) {
     console.error(`Modal: no renderer registered for "${payload.id}"`);
     return;
   }
+  const previousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
   // Replace whatever's currently up.
-  if (_current) _close();
+  if (_current) _close(undefined, { restoreFocus: false });
 
   _current = {
     id: payload.id,
     onClose: typeof payload.onClose === 'function' ? payload.onClose : null,
     blocking: !!payload.blocking,
+    previousFocus,
   };
 
   _shellEl = document.createElement('div');
   _shellEl.className = 'modal-shell';
   _shellEl.setAttribute('role', 'dialog');
   _shellEl.setAttribute('aria-modal', 'true');
+  _shellEl.tabIndex = -1;
   _shellEl.addEventListener('click', _stopPropagation);
 
   const node = renderer({
@@ -98,16 +113,19 @@ function _onOpen(payload) {
   _rootEl.innerHTML = '';
   _rootEl.appendChild(_shellEl);
   _rootEl.classList.remove('hidden');
+  _syncAccessibleName(payload);
 
   // Focus the first interactive element so keyboard users land inside.
-  const focusable = _shellEl.querySelector(
-    'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
-  );
-  focusable?.focus?.();
+  const [focusable] = _focusableElements();
+  (focusable ?? _shellEl).focus?.({ preventScroll: true });
 }
 
 function _onKey(e) {
   if (!_current) return;
+  if (e.key === 'Tab') {
+    _trapFocus(e);
+    return;
+  }
   if (e.key === 'Escape' && !_current.blocking) {
     e.preventDefault();
     e.stopPropagation();
@@ -124,9 +142,11 @@ function _onBackdrop(e) {
 
 function _stopPropagation(e) { e.stopPropagation(); }
 
-function _close(result) {
+function _close(result, opts = {}) {
   if (!_current) return;
+  const restoreFocus = opts.restoreFocus !== false;
   const cb = _current.onClose;
+  const previousFocus = _current.previousFocus;
   _current = null;
 
   if (_rootEl) {
@@ -138,6 +158,59 @@ function _close(result) {
   dispatch(EVENTS.MODAL_CLOSE, { result });
   try { cb?.(result); }
   catch (err) { console.error('Modal onClose handler threw:', err); }
+  if (restoreFocus && previousFocus?.isConnected) {
+    requestAnimationFrame(() => previousFocus.focus?.({ preventScroll: true }));
+  }
+}
+
+function _syncAccessibleName(payload) {
+  if (!_shellEl) return;
+  if (_shellEl.hasAttribute('aria-label') || _shellEl.hasAttribute('aria-labelledby')) return;
+  const title = _shellEl.querySelector('.modal-title, .pm-modal-title, h1, h2, h3');
+  if (title?.textContent?.trim()) {
+    if (!title.id) title.id = `modal-title-${_safeId(payload.id)}-${++_titleSeq}`;
+    _shellEl.setAttribute('aria-labelledby', title.id);
+    return;
+  }
+  _shellEl.setAttribute('aria-label', String(payload.label || payload.title || payload.id));
+}
+
+function _trapFocus(e) {
+  if (!_shellEl) return;
+  const focusable = _focusableElements();
+  if (!focusable.length) {
+    e.preventDefault();
+    _shellEl.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (!_shellEl.contains(active)) {
+    e.preventDefault();
+    first.focus({ preventScroll: true });
+  } else if (e.shiftKey && active === first) {
+    e.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+  e.stopPropagation();
+}
+
+function _focusableElements() {
+  if (!_shellEl) return [];
+  return [..._shellEl.querySelectorAll(FOCUSABLE_SELECTOR)]
+    .filter(el => !el.hasAttribute('disabled') && _isVisible(el));
+}
+
+function _isVisible(el) {
+  return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+}
+
+function _safeId(value) {
+  return String(value ?? 'modal').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
 }
 
 export const Modal = { init, register, open, close };

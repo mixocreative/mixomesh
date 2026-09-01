@@ -32,7 +32,7 @@
 .pm-recent-name { font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-recent-date { font-size: var(--fs-xs); color: var(--text-2); }
 
-.pm-modal { padding: var(--sp-5); min-width: 360px; max-width: 520px; }
+.pm-modal { padding: var(--sp-5); min-width: min(360px, 88vw); max-width: 520px; }
 .pm-modal-title { font-size: var(--fs-lg); margin: 0 0 var(--sp-4); color: var(--text-0); }
 .pm-modal-body { font-size: var(--fs-sm); color: var(--text-1); margin: 0 0 var(--sp-5); line-height: 1.5; }
 .pm-modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); }
@@ -41,7 +41,9 @@
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3); padding: var(--sp-3); border-bottom: 1px solid var(--border);
 }
+.pm-asset-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pm-asset-name { font-size: var(--fs-sm); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-asset-usage { font-size: var(--fs-xs); color: var(--text-2); }
 
 .ol-row.ol-unlinked .ol-icon { color: var(--accent); }
 

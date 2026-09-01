@@ -5,6 +5,7 @@ import { SettingsStore } from '../core/SettingsStore.js';
 import { HistoryManager, RenameProjectCommand } from '../core/HistoryManager.js';
 import { Modal } from './Modal.js';
 import { Toast, safeAsync } from './Toast.js';
+import { reportError } from './Status.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
 import { t, applyTranslations } from '../i18n/index.js';
@@ -41,8 +42,8 @@ export function init() {
     const act = btn.dataset.act;
     if (act === 'new')    safeAsync(() => PersistenceManager.newProject());
     if (act === 'open')   safeAsync(() => PersistenceManager.open());
-    if (act === 'save')   safeAsync(() => PersistenceManager.save());
-    if (act === 'saveas') safeAsync(() => PersistenceManager.saveAs());
+    if (act === 'save')   safeAsync(() => _runProjectSave(() => PersistenceManager.save()));
+    if (act === 'saveas') safeAsync(() => _runProjectSave(() => PersistenceManager.saveAs()));
     if (act === 'recent') _toggleRecent();
     if (act === 'reset-settings') {
       SettingsStore.resetAll();
@@ -166,6 +167,18 @@ async function _toggleRecent() {
   _recentWrap.classList.remove('hidden');
 }
 
+async function _runProjectSave(saveFn) {
+  try {
+    await saveFn();
+  } catch (err) {
+    if (err?.portableIssues?.length) {
+      Modal.open('portableSaveBlocked', { issues: err.portableIssues });
+      return;
+    }
+    reportError(err, { title: t('toast.errorTitle'), modal: true });
+  }
+}
+
 // ── Modal renderers ──────────────────────────────────────
 
 function _registerModals() {
@@ -230,6 +243,50 @@ function _registerModals() {
       }));
     return el;
   });
+
+  Modal.register('portableSaveBlocked', ({ data, close }) => {
+    const issues = data?.issues ?? [];
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${_esc(t('project.portableSaveBlockedTitle'))}</h2>
+      <p class="pm-modal-body">${_esc(t('project.portableSaveBlockedBody'))}</p>
+      <div class="pm-asset-list">
+        ${_renderPortableIssueRows(issues)}
+      </div>
+      <div class="pm-modal-actions">
+        <button class="btn btn-primary" data-r="ok">${_esc(t('btn.close'))}</button>
+      </div>`;
+    el.querySelector('[data-r="ok"]').addEventListener('click', () => close('ok'));
+    el.querySelectorAll('[data-relink]').forEach(b =>
+      b.addEventListener('click', () => {
+        const row = b.closest('.pm-asset-row');
+        safeAsync(async () => {
+          await PersistenceManager.relinkAsset(b.dataset.relink);
+          row?.remove();
+          if (!el.querySelectorAll('.pm-asset-row').length) close('ok');
+        });
+      }));
+    return el;
+  });
+}
+
+function _renderPortableIssueRows(issues) {
+  return issues.map(issue => {
+    const name = issue.filename || issue.assetId || t('project.missingAsset');
+    const usage = t('project.portableSaveAssetUsage', { n: issue.requiredBy?.length ?? 0 });
+    const relink = issue.assetId
+      ? `<button class="btn btn-sm" data-relink="${escapeAttr(issue.assetId)}">${_esc(t('project.relink'))}</button>`
+      : '';
+    return `
+      <div class="pm-asset-row" data-id="${escapeAttr(issue.assetId ?? '')}">
+        <span class="pm-asset-meta">
+          <span class="pm-asset-name">${_esc(name)}</span>
+          <span class="pm-asset-usage">${_esc(usage)}</span>
+        </span>
+        ${relink}
+      </div>`;
+  }).join('');
 }
 
 export const ProjectMenu = { init };

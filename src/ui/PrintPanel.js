@@ -382,11 +382,29 @@ function _issueLabel(issue) {
   return t(key, { n: issue.objectIds?.length ?? 0 });
 }
 
+function _issueActionLabel(issue) {
+  const actions = {
+    'no-print-parts': 'print.issueAction.no-print-parts',
+    'missing-source': 'print.issueAction.missing-source',
+    'missing-texture': 'print.issueAction.missing-texture',
+    'unit-unconfirmed': 'print.issueAction.unit-unconfirmed',
+    'bed-overflow': 'print.issueAction.bed-overflow',
+    'below-bed': 'print.issueAction.below-bed',
+    'geometry-error': 'print.issueAction.geometry',
+    'geometry-warning': 'print.issueAction.geometry',
+  };
+  const key = actions[issue.code];
+  return key ? t(key) : '';
+}
+
 function _renderReadinessSummary(readiness) {
   const statusIcon = readiness.status === 'ready' ? 'CheckCircle'
     : readiness.status === 'warning' ? 'AlertTriangle' : 'AlertCircle';
   let html = `<section class="pp-readiness ${escapeAttr(readiness.status)}" aria-label="${escapeAttr(t('print.readiness'))}">`;
   html += `<div class="pp-readiness-head">${icon(statusIcon, { class: 'inline' })}<strong>${escapeHtml(t(`print.readiness.${readiness.status}`))}</strong></div>`;
+  if (!readiness.canExport) {
+    html += `<p class="pp-readiness-hint">${escapeHtml(t('print.readiness.blockedHint'))}</p>`;
+  }
   if (readiness.targets.length) {
     html += '<div class="pp-target-list">';
     for (const target of readiness.targets) {
@@ -397,8 +415,12 @@ function _renderReadinessSummary(readiness) {
   }
   for (const readinessIssue of readiness.issues) {
     const objectId = readinessIssue.objectIds?.[0] ?? '';
+    const action = _issueActionLabel(readinessIssue);
     html += `<button type="button" class="pp-readiness-issue ${escapeAttr(readinessIssue.severity)}" data-issue-code="${escapeAttr(readinessIssue.code)}" data-object-id="${escapeAttr(objectId)}">`;
-    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : 'AlertTriangle', { class: 'inline' })}<span>${escapeHtml(_issueLabel(readinessIssue))}</span>`;
+    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : 'AlertTriangle', { class: 'inline' })}`;
+    html += `<span class="pp-readiness-copy"><span>${escapeHtml(_issueLabel(readinessIssue))}</span>`;
+    if (action) html += `<span class="pp-readiness-action">${escapeHtml(action)}</span>`;
+    html += '</span>';
     html += '</button>';
   }
   html += '</section>';
@@ -436,15 +458,18 @@ function _renderExportTab() {
   html += '<div class="pp-field-group">';
   html += `<label>${escapeHtml(t('print.format'))}</label>`;
 
-  html += `<button class="pp-export-btn pp-export-obj" data-format="obj">`;
+  const disabledAttr = readiness.canExport ? ''
+    : ` disabled aria-disabled="true" title="${escapeAttr(t('print.exportDisabledTitle'))}"`;
+
+  html += `<button class="pp-export-btn pp-export-obj" data-format="obj"${disabledAttr}>`;
   html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportObj'))}`;
   html += `</button>`;
 
-  html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf">`;
+  html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf"${disabledAttr}>`;
   html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.export3mf'))}`;
   html += `</button>`;
 
-  html += `<button class="pp-export-btn pp-export-stl" data-format="stl">`;
+  html += `<button class="pp-export-btn pp-export-stl" data-format="stl"${disabledAttr}>`;
   html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportStl'))}`;
   html += `</button>`;
 
@@ -458,8 +483,7 @@ function _renderExportTab() {
   el.querySelectorAll('.pp-readiness-issue').forEach(row => {
     row.addEventListener('click', () => {
       const code = row.dataset.issueCode;
-      if (code === 'bed-overflow' || code === 'below-bed') _activeTab = 'bed';
-      else if (code === 'geometry-error' || code === 'geometry-warning') _activeTab = 'validation';
+      _routeReadinessIssue(code);
       const objectId = row.dataset.objectId;
       if (objectId && !getState().scene.objects[objectId]?.isGhost) Selection.set([objectId], objectId);
       _render();
@@ -479,6 +503,14 @@ function _renderExportTab() {
   // the default is "export anyway".
   const runExport = async (fn, opts) => {
     const currentReadiness = PrintManager.getPrintReadiness(opts);
+    if (!currentReadiness.canExport) {
+      reportError(new Error(t('print.readiness.blockedHint')), {
+        title: t('print.readiness.blocked'),
+        modal: true,
+      });
+      _render();
+      return;
+    }
     if (currentReadiness.requiresAcknowledgement
         && !(await _confirmExportWithWarnings(currentReadiness.issues))) return;
     ProgressOverlay.show(t('progress.exporting'));
@@ -512,6 +544,16 @@ function _renderExportTab() {
     runExport(PrintManager.exportSTL, getOptions()));
 
   return el;
+}
+
+function _routeReadinessIssue(code) {
+  if (code === 'bed-overflow' || code === 'below-bed' || code === 'unit-unconfirmed') {
+    _activeTab = 'bed';
+  } else if (code === 'geometry-error' || code === 'geometry-warning') {
+    _activeTab = 'validation';
+  } else if (code === 'no-print-parts' || code === 'missing-source' || code === 'missing-texture') {
+    Workspace.setWorkspace('layout');
+  }
 }
 
 // ── Bed Tab ──────────────────────────────────────────────

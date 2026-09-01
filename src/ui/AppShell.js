@@ -2,8 +2,10 @@ import { icon } from '../core/Icons.js';
 import { LocaleSwitcher } from './LocaleSwitcher.js';
 import { subscribe } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
+import { applyTranslations } from '../i18n/index.js';
 
 const MIN_SECTION_PX = 80;
+const OUTER_RESIZE_STEP_PX = 16;
 const _saved = { olWidth: 260, rpWidth: 300, apHeight: 220 };
 
 /** Wire static shell affordances that are outside individual panels. */
@@ -11,8 +13,13 @@ export function init() {
   _wireRightPanelSections();
   _wireOuterPanels();
   const host = document.getElementById('locale-switcher-host');
+  const guard = document.getElementById('viewport-size-guard');
   LocaleSwitcher.mount(host);
-  subscribe(EVENTS.LOCALE_CHANGED, () => LocaleSwitcher.refresh(host));
+  applyTranslations(guard);
+  subscribe(EVENTS.LOCALE_CHANGED, () => {
+    LocaleSwitcher.refresh(host);
+    applyTranslations(guard);
+  });
   clearBootStatus();
 }
 
@@ -129,10 +136,11 @@ function _wireOuterPanels() {
   const setVar = (name, val) => app.style.setProperty(name, `${val}px`);
 
   olEl.style.position = 'relative';
-  _wireEW(_addHandle(olEl, 'ew-right'), +1,
+  _wireEW(_addHandle(olEl, 'ew-right', 'Resize outliner', 'vertical'), +1,
     () => olEl.getBoundingClientRect().width,
     (w) => setVar('--outliner-width', Math.max(140, Math.min(600, w))),
     () => olEl.classList.remove('ol-outer-collapsed'),
+    { min: 140, max: 600 },
   );
 
   const olColBtn = _makeBtn(icon('ChevronLeft', { width: 13, height: 13 }), 'Collapse outliner', 'panel-collapse-btn');
@@ -151,10 +159,11 @@ function _wireOuterPanels() {
   });
 
   rpEl.style.position = 'relative';
-  _wireEW(_addHandle(rpEl, 'ew-left'), -1,
+  _wireEW(_addHandle(rpEl, 'ew-left', 'Resize inspector', 'vertical'), -1,
     () => rpEl.getBoundingClientRect().width,
     (w) => setVar('--right-panel-width', Math.max(200, Math.min(600, w))),
     () => rpEl.classList.remove('rp-outer-collapsed'),
+    { min: 200, max: 600 },
   );
 
   const rpColBtn = _makeBtn(icon('ChevronRight', { width: 13, height: 13 }), 'Collapse inspector', 'panel-collapse-btn rp-panel-collapse');
@@ -173,10 +182,11 @@ function _wireOuterPanels() {
   });
 
   apEl.style.position = 'relative';
-  _wireNS(_addHandle(apEl, 'ns-top'), -1,
+  _wireNS(_addHandle(apEl, 'ns-top', 'Resize assets panel', 'horizontal'), -1,
     () => apEl.getBoundingClientRect().height,
     (h) => setVar('--asset-panel-height', Math.max(80, Math.min(500, h))),
     () => apEl.classList.remove('ap-outer-collapsed'),
+    { min: 80, max: 500 },
   );
 
   const apColBtn = _makeBtn(icon('ChevronDown', { width: 13, height: 13 }), 'Collapse assets', 'panel-collapse-btn');
@@ -195,9 +205,14 @@ function _wireOuterPanels() {
   });
 }
 
-function _addHandle(parent, type) {
+function _addHandle(parent, type, label, orientation) {
   const el = document.createElement('div');
   el.className = `panel-resize panel-resize-${type}`;
+  el.tabIndex = 0;
+  el.title = label;
+  el.setAttribute('role', 'separator');
+  el.setAttribute('aria-label', label);
+  el.setAttribute('aria-orientation', orientation);
   parent.appendChild(el);
   return el;
 }
@@ -212,50 +227,116 @@ function _makeBtn(innerHTML, label, cls) {
   return btn;
 }
 
-function _wireEW(handle, dir, getCur, apply, onStart) {
+function _wireEW(handle, dir, getCur, apply, onStart, opts = {}) {
   let startX = 0, startW = 0;
+  const min = opts.min ?? 0;
+  const max = opts.max ?? Number.MAX_SAFE_INTEGER;
+  const applySize = (width) => {
+    const next = Math.max(min, Math.min(max, width));
+    apply(next);
+    handle.setAttribute('aria-valuenow', String(Math.round(next)));
+  };
+  _syncResizeAria(handle, min, max, getCur());
+
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     startX = e.clientX;
     startW = getCur();
     onStart?.();
-    handle.setPointerCapture(e.pointerId);
+    try { handle.setPointerCapture(e.pointerId); } catch { /* pointer capture optional */ }
+    handle.classList.add('dragging');
     document.body.style.cursor = 'ew-resize';
+    _syncResizeAria(handle, min, max, startW);
   });
   handle.addEventListener('pointermove', (e) => {
     if (!handle.hasPointerCapture(e.pointerId)) return;
-    apply(startW + (e.clientX - startX) * dir);
+    applySize(startW + (e.clientX - startX) * dir);
   });
   const end = (e) => {
     if (!handle.hasPointerCapture(e.pointerId)) return;
     try { handle.releasePointerCapture(e.pointerId); } catch { /* pointer capture optional */ }
+    handle.classList.remove('dragging');
     document.body.style.cursor = '';
   };
   handle.addEventListener('pointerup', end);
   handle.addEventListener('pointercancel', end);
+  handle.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') {
+      onStart?.();
+      applySize(getCur() + (-OUTER_RESIZE_STEP_PX * dir));
+    } else if (e.key === 'ArrowRight') {
+      onStart?.();
+      applySize(getCur() + (OUTER_RESIZE_STEP_PX * dir));
+    } else if (e.key === 'Home') {
+      onStart?.();
+      applySize(min);
+    } else if (e.key === 'End') {
+      onStart?.();
+      applySize(max);
+    } else {
+      return;
+    }
+    e.preventDefault();
+  });
 }
 
-function _wireNS(handle, dir, getCur, apply, onStart) {
+function _wireNS(handle, dir, getCur, apply, onStart, opts = {}) {
   let startY = 0, startH = 0;
+  const min = opts.min ?? 0;
+  const max = opts.max ?? Number.MAX_SAFE_INTEGER;
+  const applySize = (height) => {
+    const next = Math.max(min, Math.min(max, height));
+    apply(next);
+    handle.setAttribute('aria-valuenow', String(Math.round(next)));
+  };
+  _syncResizeAria(handle, min, max, getCur());
+
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     startY = e.clientY;
     startH = getCur();
     onStart?.();
-    handle.setPointerCapture(e.pointerId);
+    try { handle.setPointerCapture(e.pointerId); } catch { /* pointer capture optional */ }
+    handle.classList.add('dragging');
     document.body.style.cursor = 'ns-resize';
+    _syncResizeAria(handle, min, max, startH);
   });
   handle.addEventListener('pointermove', (e) => {
     if (!handle.hasPointerCapture(e.pointerId)) return;
-    apply(startH + (e.clientY - startY) * dir);
+    applySize(startH + (e.clientY - startY) * dir);
   });
   const end = (e) => {
     if (!handle.hasPointerCapture(e.pointerId)) return;
     try { handle.releasePointerCapture(e.pointerId); } catch { /* pointer capture optional */ }
+    handle.classList.remove('dragging');
     document.body.style.cursor = '';
   };
   handle.addEventListener('pointerup', end);
   handle.addEventListener('pointercancel', end);
+  handle.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp') {
+      onStart?.();
+      applySize(getCur() + (-OUTER_RESIZE_STEP_PX * dir));
+    } else if (e.key === 'ArrowDown') {
+      onStart?.();
+      applySize(getCur() + (OUTER_RESIZE_STEP_PX * dir));
+    } else if (e.key === 'Home') {
+      onStart?.();
+      applySize(min);
+    } else if (e.key === 'End') {
+      onStart?.();
+      applySize(max);
+    } else {
+      return;
+    }
+    e.preventDefault();
+  });
+}
+
+function _syncResizeAria(handle, min, max, value) {
+  handle.setAttribute('aria-valuemin', String(min));
+  handle.setAttribute('aria-valuemax', String(max));
+  handle.setAttribute('aria-valuenow', String(Math.round(value)));
 }
 
 export const AppShell = { init, clearBootStatus };

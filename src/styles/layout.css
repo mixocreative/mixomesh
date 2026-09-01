@@ -140,6 +140,38 @@
   pointer-events: auto;
 }
 
+#viewport-size-guard {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  box-sizing: border-box;
+  background: rgba(10, 10, 11, 0.96);
+  color: #d7d2c8;
+  text-align: center;
+  font-family: var(--font-sans);
+  line-height: 1.45;
+}
+
+#viewport-size-guard strong {
+  color: #fff8ea;
+  font-size: var(--fs-lg);
+}
+
+#viewport-size-guard span {
+  max-width: 48ch;
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 899px) {
+  #viewport-size-guard { display: flex; }
+}
+
 /* ── Right panel ──────────────────────────────────────── */
 #right-panel {
   grid-column: 3;

@@ -292,6 +292,21 @@
 .pp-readiness-issue:hover { background: var(--bg-3); }
 .pp-readiness-issue.warning { color: #f59e0b; }
 .pp-readiness-issue.error { color: var(--danger); }
+.pp-readiness-copy {
+  display: block;
+  min-width: 0;
+}
+.pp-readiness-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+.pp-readiness-action {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+}
 
 .pp-export-btn {
   background: var(--bg-3);
@@ -311,6 +326,17 @@
 .pp-export-btn:hover {
   background: var(--bg-4);
   border-color: var(--border-focus);
+}
+.pp-export-btn:disabled {
+  background: var(--bg-2);
+  border-color: var(--border);
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.pp-export-btn:disabled:hover {
+  background: var(--bg-2);
+  border-color: var(--border);
 }
 
 .modal-content {

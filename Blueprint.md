@@ -47,7 +47,9 @@ only). Export format selection is deliberately button-driven in the UI: OBJ,
 - **Export format is button-driven.** The Export panel's OBJ / 3MF / STL
   buttons choose the pipeline explicitly. Printer profile selection is a
   build-area reference for bed preview, dimension checks, labels, and scale
-  context; it must not hide, switch, or block an export format button.
+  context; it must not hide, switch, or block a specific export format button.
+  Print-readiness hard errors may disable all format buttons together while
+  keeping OBJ / 3MF / STL visible and manually chosen.
 - **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
   `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
   stamping `sourceGroupId` on each SceneObject. One sibling is the visible
@@ -79,6 +81,13 @@ from the wrong working directory. The wrapper does not make static file servers
 supported; it exists so VS Code/Live Server style hosts that serve `.ts` as
 `video/mp2t` fail visibly in `#boot-status` with the Vite command instead of
 hanging forever on "Loading MIXOMESH...".
+
+The static shell also contains `#viewport-size-guard`, a localized full-screen
+status overlay shown by CSS below 900 px width. MIXOMESH is a dense desktop
+3D/print workspace; below that width the 3D viewport and inspector columns are
+not usable, so the app declares the minimum instead of clipping controls.
+`#renderCanvas` is focusable and carries `role="application"` plus an
+accessible label because it owns custom 3D keyboard/pointer interaction.
 
 `src/app/boot.ts` imports the pinned Babylon npm packages, assembles the legacy
 `window.BABYLON` namespace expected by the existing JS modules, registers
@@ -3172,14 +3181,19 @@ work from every workspace; there is no Preview tab.
 
 The Bed tab labels printer choices **Build Volume Preset**: choosing one only
 seeds `print.bedDimensions` and the viewport volume. The Export tab always
-keeps OBJ, 3MF, and STL actions visible. Above them it renders one derived
-readiness card with a summary per requested ratio and stable issue records:
+keeps OBJ, 3MF, and STL actions visible; when `readiness.canExport === false`
+all three buttons render disabled with the same recovery title rather than
+failing late or hiding a format. Above them it renders one derived readiness
+card with a summary per requested ratio, a blocking-state recovery hint, and
+stable issue records:
 `no-print-parts`, `missing-source`, `missing-texture`, `unit-unconfirmed`,
 `geometry-error`, `geometry-warning`, `bed-overflow`, and `below-bed`.
 Geometry/source/texture errors block export; bed overflow, below-bed geometry,
 unconfirmed units, and geometry warnings require an explicit Export Anyway
 acknowledgement. Clicking a fit issue opens Bed; clicking a geometry issue
-opens Validation; issue rows select their first live related object.
+opens Validation; clicking no-print-parts/source/texture issues switches to
+Layout so the user can import, relink, or pick the affected asset. Issue rows
+select their first live related object when one exists.
 
 `BedFit.checkBedFit(bounds, bed)` compares millimetre print coordinates against
 the positive slicer volume `0..X, 0..Y, 0..Z`. `PrintReadiness` converts the
@@ -3484,20 +3498,35 @@ Collapses non-essential segments below 1280px.
 
 ### Modal (`src/ui/Modal.js`)
 Generic. Listens for `MODAL_OPEN`. Renders by id (`shaderMerge`, `dirtyConfirm`, `validationErrors`, `importError`, etc.).
+Every opened modal gets `role="dialog"` + `aria-modal="true"` and an accessible
+name: the shell uses the first `.modal-title` / `.pm-modal-title` / heading as
+`aria-labelledby`, falling back to a payload/title/id label. Opening a modal
+stores the previously focused element, moves focus to the first enabled visible
+control (or the shell), traps Tab/Shift+Tab inside the dialog, closes on Escape
+unless `blocking`, and restores focus to the opener after close.
 
 ### App Shell (`src/ui/AppShell.js`)
 Owns behaviour for the static shell declared in `index.html`: right-panel
 section collapse (`button.rp-section-header` with `aria-expanded`), right-panel
 splitter drag + keyboard resize (`role="separator"`), outer panel
-collapse/expand buttons, and removal of `#boot-status` after successful
-initialisation. `src/app/main.ts` calls `AppShell.init()` after the panels have rendered
-their headers; `src/app/main.ts` no longer owns resize/collapse helper code.
+collapse/expand buttons, outer panel resize separators, the localized
+`#viewport-size-guard`, and removal of `#boot-status` after successful
+initialisation. Outer resize handles are focusable `role="separator"` controls
+with `aria-orientation`, `aria-valuemin/max/now`, and arrow/Home/End keyboard
+resizing that matches pointer resizing. `src/app/main.ts` calls
+`AppShell.init()` after the panels have rendered their headers; `src/app/main.ts`
+no longer owns resize/collapse helper code.
 
 ### Project Menu (`src/ui/ProjectMenu.js`)
 Header toolbar: **New / Open / Save / Save As** buttons + Recent-projects flyout (thumbnails + timestamps; max 10 from `PersistenceManager.getRecentProjects`). The header also exposes the **`#project-name` inline editor** — clicking (or pressing Enter/Space while focused) swaps the label for a text input pre-selected to the current name; Enter or blur commits via `HistoryManager.push(new RenameProjectCommand(prev, next))` (so the rename is undoable and marks the project dirty), Escape cancels, empty / whitespace cancels. Subscribes to `PROJECT_LOADED / PROJECT_SAVED / PROJECT_NEW / PROJECT_RENAMED` to refresh the label — the refresh skips the element while `data-editing="1"` so it can't clobber an open editor. Why editable in-place: the project name is the prefix for every export filename (see §12 *Export filenames*), so changing it must be a one-second action — not a hidden side-effect of Save As. Owns four `Modal.register` IDs the persistence flow dispatches into:
 - `dirtyConfirm` — "Unsaved changes" → returns `'save' | 'discard' | 'cancel'`.
 - `recoverAutosave` — surface a found autosave → `'recover' | 'discard'`.
 - `unmatchedAssets` — Linked assets that fell back to Snapshot (only those with a link expectation: `directoryHandleKey || fileHandleKey`). Per-item **Relink…** button calls `PersistenceManager.relinkAsset(id)` and drops the row when it resolves.
+- `portableSaveBlocked` — manual save failed the portable `.mixo` gate
+  (`err.portableIssues[]`). Lists missing required assets/usage and offers the
+  same per-item **Relink…** recovery. Save/Save As surface this modal directly
+  instead of a transient toast because a `.mixo` without required geometry or
+  texture bytes would not reopen/export the same project.
 
 `ProjectMenu.init()` is called from `src/app/main.ts` after `PersistenceManager.init()`; the persistence module dispatches `MODAL_OPEN` events but the renderers themselves live here so the UI layer owns markup.
 Recent-project thumbnails are treated as persisted untrusted data and pass
@@ -3883,7 +3912,10 @@ It launches the browser headless with a
 remote-debugging port, drives Chrome DevTools Protocol directly, and fails on
 page exceptions or console errors. Assertions cover app boot, canvas, project
 toolbar, outliner, asset grid, right-panel `aria-expanded` toggles, splitter
-keyboard resize, toast/modal/progress roots, and removal of `#boot-status`.
+keyboard resize, named/trapped modals with focus return, visible keyboard
+focus on primary shell controls, keyboard outer-panel resizing, blocked export
+button states, portable-save recovery modal, narrow-window guard, toast/modal/
+progress roots, and removal of `#boot-status`.
 If Chrome/Edge is missing, the script exits with a clear setup error. This is
 not an external slicer acceptance check; it is a fast app-shell regression
 guard for local UI changes.

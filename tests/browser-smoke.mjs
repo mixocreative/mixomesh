@@ -128,6 +128,10 @@ async function main() {
           SceneLoader: !!window.BABYLON?.SceneLoader,
         },
         canvas: !!document.querySelector('#renderCanvas'),
+        canvasA11y: {
+          role: document.querySelector('#renderCanvas')?.getAttribute('role') ?? '',
+          label: document.querySelector('#renderCanvas')?.getAttribute('aria-label') ?? '',
+        },
         toolbar: !!document.querySelector('.pm-bar'),
         outliner: !!document.querySelector('#ol-list'),
         assetGrid: !!document.querySelector('#ap-grid'),
@@ -176,6 +180,8 @@ async function main() {
     assert(snapshot.babylon.OBJExport, 'BABYLON.OBJExport missing');
     assert(snapshot.babylon.SceneLoader, 'BABYLON.SceneLoader missing');
     assert(snapshot.canvas, 'canvas missing');
+    assert(snapshot.canvasA11y.role === 'application' && snapshot.canvasA11y.label.includes('3D scene viewport'),
+      'interactive canvas should expose an application role and accessible label');
     assert(snapshot.toolbar, 'project toolbar missing');
     assert(snapshot.outliner, 'outliner list missing');
     assert(snapshot.assetGrid, 'asset grid missing');
@@ -204,6 +210,179 @@ async function main() {
       'right-panel toggle did not update aria-expanded');
     assert(snapshot.splitBefore !== snapshot.splitAfter,
       'right splitter keyboard resize did not change aria-valuenow');
+
+    const modalA11y = await evaluate(cdp, `(async () => {
+      const { Modal } = await import('/src/ui/Modal.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const opener = document.querySelector('.pm-btn[data-act="save"]');
+      opener?.focus();
+      Modal.open('dirtyConfirm', {});
+      await frame();
+      const shell = document.querySelector('.modal-shell');
+      const labelledby = shell?.getAttribute('aria-labelledby') ?? '';
+      const labelEl = labelledby ? document.getElementById(labelledby) : null;
+      return {
+        role: shell?.getAttribute('role') ?? '',
+        modal: shell?.getAttribute('aria-modal') ?? '',
+        named: !!shell?.getAttribute('aria-label') || !!labelEl?.textContent.trim(),
+        firstFocusInside: !!shell?.contains(document.activeElement),
+      };
+    })()`);
+    assert(modalA11y.role === 'dialog' && modalA11y.modal === 'true',
+      'dirty-confirm modal must expose dialog semantics');
+    assert(modalA11y.named, 'dirty-confirm modal needs an accessible name');
+    assert(modalA11y.firstFocusInside, 'dirty-confirm modal should move focus inside when opened');
+    for (let i = 0; i < 5; i++) {
+      await cdp.send('Input.dispatchKeyEvent', {
+        type: 'rawKeyDown', key: 'Tab', code: 'Tab',
+        windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      });
+      await cdp.send('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Tab', code: 'Tab',
+        windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      });
+    }
+    const modalTrap = await evaluate(cdp, `(() => {
+      const shell = document.querySelector('.modal-shell');
+      return !!shell?.contains(document.activeElement);
+    })()`);
+    assert(modalTrap, 'dirty-confirm modal should trap Tab focus inside the dialog');
+    const modalReturn = await evaluate(cdp, `(async () => {
+      const { Modal } = await import('/src/ui/Modal.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      Modal.close('cancel');
+      await frame();
+      return document.activeElement?.matches('.pm-btn[data-act="save"]') ?? false;
+    })()`);
+    assert(modalReturn, 'closing dirty-confirm modal should restore focus to the opener');
+
+    const focusAudit = await evaluate(cdp, `(async () => {
+      const { Workspace } = await import('/src/ui/Workspace.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      Workspace.setWorkspace('print');
+      await frame();
+      const selectors = [
+        '#project-name',
+        '.pm-btn[data-act="save"]',
+        '.ws-btn[data-ws="print"]',
+        '#rp-print-body .pp-tab[data-tab="scale"]',
+        '#viewport-toolbar button, #viewport-toggles button, .nav-cube button',
+      ];
+      const results = selectors.map(selector => {
+        const el = document.querySelector(selector);
+        if (!el) return { selector, missing: true, visible: false };
+        el.focus();
+        const cs = getComputedStyle(el);
+        const outlineWidth = Number.parseFloat(cs.outlineWidth) || 0;
+        return {
+          selector,
+          active: document.activeElement === el,
+          visible: (cs.outlineStyle !== 'none' && outlineWidth >= 2) || cs.boxShadow !== 'none',
+          outline: cs.outlineStyle + ' ' + cs.outlineWidth,
+          boxShadow: cs.boxShadow,
+        };
+      });
+      Workspace.setWorkspace('layout');
+      await frame();
+      return results;
+    })()`);
+    for (const item of focusAudit) {
+      assert(!item.missing, `focus target missing: ${item.selector}`);
+      assert(item.active, `focus target did not accept focus: ${item.selector}`);
+      assert(item.visible, `focus target lacks visible focus style: ${item.selector}`);
+    }
+
+    const panelResizeA11y = await evaluate(cdp, `(() => {
+      const outliner = document.getElementById('outliner');
+      const handle = document.querySelector('#outliner .panel-resize-ew-right');
+      const before = outliner?.getBoundingClientRect().width ?? 0;
+      handle?.focus();
+      handle?.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowRight',
+        bubbles: true,
+        cancelable: true,
+      }));
+      const after = outliner?.getBoundingClientRect().width ?? 0;
+      return {
+        active: document.activeElement === handle,
+        role: handle?.getAttribute('role') ?? '',
+        orientation: handle?.getAttribute('aria-orientation') ?? '',
+        now: handle?.getAttribute('aria-valuenow') ?? '',
+        before,
+        after,
+      };
+    })()`);
+    assert(panelResizeA11y.active, 'outliner resize handle should be keyboard focusable');
+    assert(panelResizeA11y.role === 'separator' && panelResizeA11y.orientation === 'vertical',
+      'outliner resize handle should expose vertical separator semantics');
+    assert(panelResizeA11y.now, 'outliner resize handle should expose aria-valuenow');
+    assert(panelResizeA11y.after > panelResizeA11y.before,
+      'outliner resize handle ArrowRight should widen the outliner');
+
+    const portableSaveUi = await evaluate(cdp, `(async () => {
+      const pm = await import('/src/core/PersistenceManager.js');
+      const { Modal } = await import('/src/ui/Modal.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const originalSave = pm.PersistenceManager.save;
+      pm.PersistenceManager.save = async () => {
+        throw Object.assign(new Error('Cannot save portable .mixo'), {
+          portableIssues: [{
+            code: 'missing-asset-bytes',
+            assetId: 'texture-a',
+            filename: 'mimaki-diffuse.png',
+            kind: 'texture',
+            requiredBy: ['part-a'],
+          }],
+        });
+      };
+      document.querySelector('.pm-btn[data-act="save"]')?.click();
+      await frame();
+      await new Promise(r => setTimeout(r, 20));
+      const shell = document.querySelector('.modal-shell');
+      const out = {
+        title: shell?.querySelector('.pm-modal-title')?.textContent.trim() ?? '',
+        issue: shell?.querySelector('.pm-asset-row')?.textContent.trim() ?? '',
+        relink: !!shell?.querySelector('[data-relink="texture-a"]'),
+      };
+      pm.PersistenceManager.save = originalSave;
+      Modal.close('cleanup');
+      await frame();
+      return out;
+    })()`);
+    assert(portableSaveUi.title.includes('Cannot save portable .mixo'),
+      `portable save failures should open a recovery modal: ${portableSaveUi.title}`);
+    assert(portableSaveUi.issue.includes('mimaki-diffuse.png') && portableSaveUi.relink,
+      'portable save recovery modal should list the missing asset and offer relink');
+
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 375,
+      height: 812,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(100);
+    const narrowGuard = await evaluate(cdp, `(() => {
+      const el = document.getElementById('viewport-size-guard');
+      if (!el) return { exists: false, visible: false, text: '' };
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return {
+        exists: true,
+        visible: cs.display !== 'none' && r.width >= 300 && r.height >= 300,
+        text: el.textContent.trim(),
+      };
+    })()`);
+    assert(narrowGuard.exists && narrowGuard.visible,
+      'narrow windows should show the minimum-width workspace guard');
+    assert(/wider/i.test(narrowGuard.text),
+      `workspace guard should explain the width requirement: ${narrowGuard.text}`);
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 1366,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(100);
 
     const localeSwitch = await evaluate(cdp, `(async () => {
       const { setLocale } = await import('/src/i18n/index.js');
@@ -259,6 +438,8 @@ async function main() {
           .map(row => row.dataset.issueCode),
         formats: [...document.querySelectorAll('#rp-print-body [data-format]')]
           .map(button => button.dataset.format),
+        disabled: [...document.querySelectorAll('#rp-print-body [data-format]')]
+          .map(button => button.disabled),
       };
       document.querySelector('#rp-print-body [data-tab="bed"]')?.click();
       await frame();
@@ -274,6 +455,8 @@ async function main() {
       'empty-scene readiness issue is missing');
     assert(printReadinessUi.exportView.formats.join(',') === 'obj,3mf,stl',
       `all export buttons must remain visible: ${printReadinessUi.exportView.formats.join(',')}`);
+    assert(printReadinessUi.exportView.disabled.every(Boolean),
+      'blocked readiness should disable export buttons instead of failing late');
     assert(printReadinessUi.presetLabel === 'Build Volume Preset',
       `printer selector was not simplified to Build Volume Preset: ${printReadinessUi.presetLabel}`);
 

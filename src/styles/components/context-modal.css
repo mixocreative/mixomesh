@@ -53,7 +53,7 @@ body.modal-scale     #renderCanvas { cursor: nwse-resize; }
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
-  min-width: 360px;
+  min-width: min(360px, 92vw);
   max-width: min(720px, 92vw);
   max-height: 88vh;
   display: flex;

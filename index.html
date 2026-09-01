@@ -59,7 +59,7 @@
     <aside id="outliner" aria-label="Scene outliner"></aside>
 
     <main id="viewport" aria-label="3D viewport">
-      <canvas id="renderCanvas" tabindex="0" aria-label="Interactive 3D scene viewport">
+      <canvas id="renderCanvas" tabindex="0" role="application" aria-label="Interactive 3D scene viewport">
         MIXOMESH 3D viewport.
       </canvas>
       <div id="viewport-drop-overlay"></div>
@@ -115,6 +115,10 @@
   <div id="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
   <div id="modal-root" class="modal-overlay hidden"></div>
   <div id="progress-root" class="progress-overlay hidden" aria-live="polite"></div>
+  <div id="viewport-size-guard" role="status" aria-live="polite">
+    <strong data-i18n-key="app.workspaceTooNarrowTitle">MIXOMESH needs a wider workspace</strong>
+    <span data-i18n-key="app.workspaceTooNarrowBody">Use Chrome or Edge at 900 px or wider to keep the 3D viewport, panels, and export controls usable.</span>
+  </div>
 
   <script type="module">
     import('/src/app/boot.ts').catch(function (err) {
