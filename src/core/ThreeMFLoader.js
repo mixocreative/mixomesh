@@ -69,6 +69,42 @@ function _firstDirect(node, name) {
   return _directChildren(node, name)[0] ?? null;
 }
 
+function _parseModelXml(modelXml) {
+  const doc = new DOMParser().parseFromString(modelXml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) {
+    throw new Error('3MF: malformed 3D model XML');
+  }
+  return doc;
+}
+
+function _objectsById(doc) {
+  const objects = new Map();
+  for (const obj of doc.getElementsByTagName('object')) {
+    objects.set(obj.getAttribute('id'), obj);
+  }
+  return objects;
+}
+
+function _cleanPackagePath(path) {
+  return String(path || '').trim().replace(/^\/+/, '');
+}
+
+function _resolvePackagePath(path, basePath = '') {
+  const clean = _cleanPackagePath(path);
+  if (!clean) return '';
+  if (String(path || '').trim().startsWith('/')) return clean;
+  const base = _cleanPackagePath(basePath);
+  const slash = base.lastIndexOf('/');
+  return `${slash >= 0 ? base.slice(0, slash + 1) : ''}${clean}`.replace(/\/+/g, '/');
+}
+
+function _componentModelPath(component) {
+  return component?.getAttribute('p:path')
+    || component?.getAttribute('path')
+    || component?.getAttributeNS?.('http://schemas.microsoft.com/3dmanufacturing/production/2015/06', 'path')
+    || '';
+}
+
 function _matrixFor(componentOrItem) {
   return _itemMatrix(componentOrItem?.getAttribute('transform')) ?? BABYLON.Matrix.Identity();
 }
@@ -101,7 +137,7 @@ async function _findModelXml(zip) {
   }
   const modelFile = zip.file(target) || zip.file('3D/3dmodel.model');
   if (!modelFile) throw new Error('3MF: no 3D model part found in package');
-  return modelFile.async('text');
+  return { path: target, text: await modelFile.async('text') };
 }
 
 /**
@@ -132,55 +168,78 @@ async function _texturePartToUrl(zip, partPath) {
  *   m:texture2dgroup (Mimaki textured)   → mat.diffuseTexture from a PNG
  *                                          part inside the OPC zip
  */
-async function _buildContainer(scene, zip, modelXml) {
-  const doc = new DOMParser().parseFromString(modelXml, 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) {
-    throw new Error('3MF: malformed 3D model XML');
-  }
+async function _buildContainer(scene, zip, modelXml, opts = {}) {
+  const makeContext = async (modelPath, xml) => {
+    const doc = _parseModelXml(xml);
+    const cleanPath = _cleanPackagePath(modelPath) || '3D/3dmodel.model';
 
-  // colorgroup id → [Color3,…] (Materials extension; export writes group "1").
-  const colorGroups = new Map();
-  for (const cg of doc.getElementsByTagNameNS(NS_MATERIAL, 'colorgroup')) {
-    const cols = [...cg.getElementsByTagNameNS(NS_MATERIAL, 'color')]
-      .map(c => _hexToColor3(c.getAttribute('color')));
-    colorGroups.set(cg.getAttribute('id'), cols);
-  }
+    // colorgroup id → [Color3,…] (Materials extension; export writes group "1").
+    const colorGroups = new Map();
+    for (const cg of doc.getElementsByTagNameNS(NS_MATERIAL, 'colorgroup')) {
+      const cols = [...cg.getElementsByTagNameNS(NS_MATERIAL, 'color')]
+        .map(c => _hexToColor3(c.getAttribute('color')));
+      colorGroups.set(cg.getAttribute('id'), cols);
+    }
 
-  // texture2d id → { path, url } (resolved blob URLs from the OPC zip).
-  const textures = new Map();
-  for (const t of doc.getElementsByTagNameNS(NS_MATERIAL, 'texture2d')) {
-    const id = t.getAttribute('id');
-    const path = t.getAttribute('path') || '';
-    const url = await _texturePartToUrl(zip, path);
-    textures.set(id, { path, url });
-  }
+    // texture2d id → { path, url } (resolved blob URLs from the OPC zip).
+    const textures = new Map();
+    for (const t of doc.getElementsByTagNameNS(NS_MATERIAL, 'texture2d')) {
+      const id = t.getAttribute('id');
+      const path = _resolvePackagePath(t.getAttribute('path') || '', cleanPath);
+      const url = await _texturePartToUrl(zip, path);
+      textures.set(id, { path, url });
+    }
 
-  // texture2dgroup id → { texId, coords[{u,v}, ...] }
-  const texGroups = new Map();
-  for (const tg of doc.getElementsByTagNameNS(NS_MATERIAL, 'texture2dgroup')) {
-    const id = tg.getAttribute('id');
-    const texId = tg.getAttribute('texid');
-    const coords = [...tg.getElementsByTagNameNS(NS_MATERIAL, 'tex2coord')]
-      .map(c => ({
-        u: parseFloat(c.getAttribute('u')) || 0,
-        v: parseFloat(c.getAttribute('v')) || 0,
-      }));
-    texGroups.set(id, { texId, coords });
-  }
+    // texture2dgroup id → { texId, coords[{u,v}, ...] }
+    const texGroups = new Map();
+    for (const tg of doc.getElementsByTagNameNS(NS_MATERIAL, 'texture2dgroup')) {
+      const id = tg.getAttribute('id');
+      const texId = tg.getAttribute('texid');
+      const coords = [...tg.getElementsByTagNameNS(NS_MATERIAL, 'tex2coord')]
+        .map(c => ({
+          u: parseFloat(c.getAttribute('u')) || 0,
+          v: parseFloat(c.getAttribute('v')) || 0,
+        }));
+      texGroups.set(id, { texId, coords });
+    }
 
-  const objectsById = new Map();
-  for (const obj of doc.getElementsByTagName('object')) {
-    objectsById.set(obj.getAttribute('id'), obj);
-  }
+    return {
+      path: cleanPath,
+      doc,
+      objectsById: _objectsById(doc),
+      colorGroups,
+      textures,
+      texGroups,
+    };
+  };
+
+  const contextCache = new Map();
+  const loadContext = async (modelPath, xml = null) => {
+    const cleanPath = _cleanPackagePath(modelPath) || '3D/3dmodel.model';
+    if (contextCache.has(cleanPath)) return contextCache.get(cleanPath);
+    const promise = (async () => {
+      let text = xml;
+      if (text == null) {
+        const file = zip?.file(cleanPath);
+        if (!file) return null;
+        text = await file.async('text');
+      }
+      return makeContext(cleanPath, text);
+    })();
+    contextCache.set(cleanPath, promise);
+    return promise;
+  };
+
+  const rootContext = await loadContext(opts.modelPath || '3D/3dmodel.model', modelXml);
 
   const container = new BABYLON.AssetContainer(scene);
   const flip = Z_UP_TO_Y_UP();
-  const usedTexIds = new Set();   // texture2d ids actually bound to a material
+  const usedTexIds = new Set();   // model path + texture2d ids actually bound to a material
 
   let made = 0;
   const instanceCounts = new Map();
 
-  const createMeshInstance = (objectId, obj, meshEl, matrix, parentNode) => {
+  const createMeshInstance = (ctx, objectId, obj, meshEl, matrix, parentNode) => {
     const vEls = meshEl.getElementsByTagName('vertex');
     const tEls = meshEl.getElementsByTagName('triangle');
     if (!vEls.length || !tEls.length) return 0;
@@ -198,7 +257,7 @@ async function _buildContainer(scene, zip, modelXml) {
     }
 
     const pid = obj.getAttribute('pid');
-    const tg = pid != null ? texGroups.get(pid) : null;
+    const tg = pid != null ? ctx.texGroups.get(pid) : null;
 
     const indices = new Array(tEls.length * 3);
     const uvs = tg ? new Array(vEls.length * 2).fill(0) : null;
@@ -236,19 +295,19 @@ async function _buildContainer(scene, zip, modelXml) {
 
     const mat = new BABYLON.StandardMaterial(`${mesh.name}__3mf`, scene);
     if (tg) {
-      const tex = textures.get(tg.texId);
+      const tex = ctx.textures.get(tg.texId);
       if (tex?.url) {
         const bt = new BABYLON.Texture(tex.url, scene, false, false);
         bt.name = `${mesh.name}__tex`;
         mat.diffuseTexture = bt;
         container.textures?.push?.(bt);
-        usedTexIds.add(tg.texId);
+        usedTexIds.add(`${ctx.path}:${tg.texId}`);
       } else {
         mat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
       }
     } else {
       const pindex = parseInt(obj.getAttribute('pindex') || '0', 10);
-      const group = pid != null ? colorGroups.get(pid) : null;
+      const group = pid != null ? ctx.colorGroups.get(pid) : null;
       mat.diffuseColor = (group && group[pindex]) ? group[pindex] : new BABYLON.Color3(0.8, 0.8, 0.8);
     }
     mat.backFaceCulling = false;
@@ -260,14 +319,15 @@ async function _buildContainer(scene, zip, modelXml) {
     return 1;
   };
 
-  const instantiateObject = (objectId, matrix, parentNode, stack = new Set()) => {
-    if (stack.has(objectId)) throw new Error(`3MF: component cycle at object ${objectId}`);
-    const obj = objectsById.get(objectId);
+  const instantiateObject = async (ctx, objectId, matrix, parentNode, stack = new Set()) => {
+    const stackKey = `${ctx?.path || 'model'}:${objectId}`;
+    if (stack.has(stackKey)) throw new Error(`3MF: component cycle at object ${objectId}`);
+    const obj = ctx?.objectsById.get(objectId);
     if (!obj) return 0;
     const nextStack = new Set(stack);
-    nextStack.add(objectId);
+    nextStack.add(stackKey);
     const meshEl = _firstDirect(obj, 'mesh');
-    if (meshEl) return createMeshInstance(objectId, obj, meshEl, matrix, parentNode);
+    if (meshEl) return createMeshInstance(ctx, objectId, obj, meshEl, matrix, parentNode);
 
     const componentsEl = _firstDirect(obj, 'components');
     if (!componentsEl) return 0;
@@ -279,8 +339,12 @@ async function _buildContainer(scene, zip, modelXml) {
     let childCount = 0;
     for (const component of _directChildren(componentsEl, 'component')) {
       const childObjectId = component.getAttribute('objectid');
+      const childPath = _componentModelPath(component);
+      const childCtx = childPath
+        ? await loadContext(_resolvePackagePath(childPath, ctx.path))
+        : ctx;
       const childMatrix = _multiplyMatrices(matrix, _matrixFor(component));
-      childCount += instantiateObject(childObjectId, childMatrix, node, nextStack);
+      childCount += await instantiateObject(childCtx, childObjectId, childMatrix, node, nextStack);
     }
     if (!childCount) {
       container.transformNodes = container.transformNodes.filter(n => n !== node);
@@ -291,14 +355,14 @@ async function _buildContainer(scene, zip, modelXml) {
 
   // Build placements: prefer direct <build><item>; if absent, place every
   // resource object at identity.
-  const buildEl = doc.getElementsByTagName('build')[0];
+  const buildEl = rootContext.doc.getElementsByTagName('build')[0];
   const buildItems = buildEl ? _directChildren(buildEl, 'item') : [];
   const placements = buildItems.length
     ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it) }))
-    : [...objectsById.keys()].map(id => ({ id, matrix: BABYLON.Matrix.Identity() }));
+    : [...rootContext.objectsById.keys()].map(id => ({ id, matrix: BABYLON.Matrix.Identity() }));
 
   for (const placement of placements) {
-    made += instantiateObject(placement.id, placement.matrix, null);
+    made += await instantiateObject(rootContext, placement.id, placement.matrix, null);
   }
 
   // Hand entities to the container the way Babylon's own loaders do: detach
@@ -310,8 +374,12 @@ async function _buildContainer(scene, zip, modelXml) {
   // Revoke blob URLs for texture2d parts that no built object referenced
   // (audit LOW #8) — used textures keep their URL alive for the live Babylon
   // texture; unused ones would otherwise leak for the page's lifetime.
-  for (const [tid, t] of textures) {
-    if (t.url && !usedTexIds.has(tid)) { try { URL.revokeObjectURL(t.url); } catch { /* */ } }
+  for (const ctxPromise of contextCache.values()) {
+    const ctx = await ctxPromise;
+    if (!ctx) continue;
+    for (const [tid, t] of ctx.textures) {
+      if (t.url && !usedTexIds.has(`${ctx.path}:${tid}`)) { try { URL.revokeObjectURL(t.url); } catch { /* */ } }
+    }
   }
 
   if (!made) throw new Error('3MF: no importable mesh objects');
@@ -328,7 +396,8 @@ export function registerThreeMFLoader() {
     const zip = await JSZip.loadAsync(data);          // data = ArrayBuffer (isBinary)
     // zip is threaded into _buildContainer so the Materials Extension path
     // can read embedded PNG texture parts directly out of the OPC package.
-    return _buildContainer(scene, zip, await _findModelXml(zip));
+    const model = await _findModelXml(zip);
+    return _buildContainer(scene, zip, model.text, { modelPath: model.path });
   };
 
   BABYLON.SceneLoader.RegisterPlugin({

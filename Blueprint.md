@@ -1704,13 +1704,18 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    is pinned by the browser export smoke's OBJ block).
    Supported: `.glb .gltf .obj .stl` (Babylon loaders package) + `.3mf`
    (`src/core/ThreeMFLoader.js`, a self-registered SceneLoader plugin — Babylon
-   ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`:
-   unzip OPC → `3D/3dmodel.model` → mesh `<object>` resources become Babylon
-   meshes; component `<object>` resources become meshless TransformNodes for
-   import hierarchy; `<component objectid transform>` and `<build><item>` form
-   the placement tree. Component/build transforms are composed in 3MF space and
-   baked into child mesh vertices before the `RotationX(+90°)` 3MF Z-up →
-   Babylon Y-up conversion. The loader restores winding (export wrote
+   ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`
+   for files we write, plus the production-extension component layout emitted
+   by slicers such as Bambu Studio:
+   unzip OPC → `_rels/.rels` target / `3D/3dmodel.model` → mesh `<object>`
+   resources become Babylon meshes; component `<object>` resources become
+   meshless TransformNodes for import hierarchy; `<component objectid transform>`
+   and `<build><item>` form the placement tree. If a component carries
+   `p:path` / `path`, the loader resolves that OPC path relative to the current
+   model part, parses the related `.model` part, and instantiates the referenced
+   `objectid` from that part. Component/build transforms are composed in 3MF
+   space and baked into child mesh vertices before the `RotationX(+90°)` 3MF
+   Z-up → Babylon Y-up conversion. The loader restores winding (export wrote
    `v1,v3,v2`) and maps `m:colorgroup`+`pid/pindex` to
    `StandardMaterial.diffuseColor`, or `m:texture2dgroup` to
    `StandardMaterial.diffuseTexture`. Repeated component references instantiate
@@ -3880,7 +3885,7 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
 | `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
-| `tests/threemf-components.test.mjs` | 4 | 3MF components: solid/textured hierarchy export emits component objects, nested component resources are dependency-ordered, Materials Extension resources remain intact, and component import creates transform groups with child meshes |
+| `tests/threemf-components.test.mjs` | 5 | 3MF components: solid/textured hierarchy export emits component objects, nested component resources are dependency-ordered, Materials Extension resources remain intact, component import creates transform groups with child meshes, and production-extension `p:path` component links load related model parts |
 | `tests/threemf-materials-ext.test.mjs` | 6 | 3MF Materials Extension writer: content-driven textured vs solid-only flavor, texture dedup, UV round-trip via pseudo-loader regex, printer dropdown does not switch flavor |
 | `tests/validator-group.test.mjs` | 6 | Group-aware MeshValidator: split siblings re-union as welded watertight body; broken group reports the real seam; validate-all dedupes split groups |
 | `tests/render-output.test.mjs` | 6 | RenderMath: dimension clamp, turntable easing endpoints/symmetry, signed 360° alpha, video format pick (mp4 avc3 → WebM vp8 fallback, thrower-safe), frame aspect-fit/centre, render/turntable filenames share the export stem contract |

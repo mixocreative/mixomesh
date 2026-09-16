@@ -238,6 +238,41 @@ await test('3MF component import creates transform groups and child meshes', asy
   assert.equal(container.meshes[0].material.diffuseColor.g, 1);
 });
 
+await test('3MF import follows production component paths into related model parts', async () => {
+  const rootModelXml = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">
+  <resources>
+    <object id="2" type="model" name="PlateObject"><components>
+      <component p:path="/3D/Objects/object_46.model" objectid="1" transform="1 0 0 0 1 0 0 0 1 4 0 0"/>
+    </components></object>
+  </resources>
+  <build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></build>
+</model>`;
+  const relatedModelXml = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">
+  <resources>
+    <object id="1" type="model"><mesh><vertices>
+      <vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/>
+    </vertices><triangles><triangle v1="0" v2="2" v3="1"/></triangles></mesh></object>
+  </resources>
+</model>`;
+  const files = new Map([['3D/Objects/object_46.model', relatedModelXml]]);
+  const zip = {
+    file(path) {
+      const clean = String(path).replace(/^\//, '');
+      const text = files.get(clean);
+      return text ? { async: async () => text } : null;
+    },
+  };
+
+  const container = await Loader.__test.buildContainer(scene, zip, rootModelXml);
+
+  assert.equal(container.transformNodes.length, 1);
+  assert.equal(container.transformNodes[0].name, 'PlateObject');
+  assert.equal(container.meshes.length, 1);
+  assert.equal(container.meshes[0].parent, container.transformNodes[0]);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
