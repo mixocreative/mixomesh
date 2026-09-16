@@ -14,6 +14,67 @@ const BABYLON = window.BABYLON;
 
 export { DEFAULT_SOURCE_UNIT, SOURCE_UNIT_FACTORS };
 
+function _isGeometryMesh(m) {
+  return !!(m?.geometry && (m.getTotalVertices?.() ?? 0) > 0);
+}
+
+function _copyVectorProp(target, source, prop) {
+  const value = source?.[prop];
+  if (!value) return;
+  if (target?.[prop]?.copyFrom) {
+    target[prop].copyFrom(value);
+  } else if (value.clone) {
+    target[prop] = value.clone();
+  } else {
+    target[prop] = value;
+  }
+}
+
+function _copyNodeTransform(target, source) {
+  if (!target || !source) return;
+  if (typeof target.setParent === 'function') target.setParent(source.parent ?? null);
+  else target.parent = source.parent ?? null;
+  _copyVectorProp(target, source, 'position');
+  _copyVectorProp(target, source, 'rotation');
+  _copyVectorProp(target, source, 'scaling');
+  const q = source.rotationQuaternion ?? null;
+  target.rotationQuaternion = q?.clone ? q.clone() : q;
+}
+
+function _reparentDirectChildren(container, from, to) {
+  for (const node of [...(container.meshes ?? []), ...(container.transformNodes ?? [])]) {
+    if (!node || node === from || node.parent !== from) continue;
+    if (typeof node.setParent === 'function') node.setParent(to);
+    else node.parent = to;
+  }
+}
+
+function _materializeInstanceMesh(container, mesh) {
+  if (typeof mesh?.bakeTransformIntoVertices === 'function') return mesh;
+  const source = mesh?.sourceMesh ?? mesh?._sourceMesh ?? null;
+  if (!_isGeometryMesh(mesh) || !source || typeof source.clone !== 'function') return mesh;
+
+  const clone = source.clone(mesh.name || source.name || 'mesh', mesh.parent ?? null, true);
+  if (!clone || typeof clone.bakeTransformIntoVertices !== 'function') return mesh;
+
+  _copyNodeTransform(clone, mesh);
+  clone.metadata = { ...(clone.metadata ?? {}), ...(mesh.metadata ?? {}) };
+  if ('isVisible' in mesh) clone.isVisible = mesh.isVisible;
+  if ('visibility' in mesh) clone.visibility = mesh.visibility;
+  if (mesh.material && 'material' in clone) clone.material = mesh.material;
+  clone.makeGeometryUnique?.();
+  _reparentDirectChildren(container, mesh, clone);
+  try { mesh.dispose?.(true, false); } catch { /* importer cleanup is best-effort */ }
+  return clone;
+}
+
+function _materializeInstanceMeshes(container) {
+  if (!Array.isArray(container?.meshes)) return;
+  for (let i = 0; i < container.meshes.length; i++) {
+    container.meshes[i] = _materializeInstanceMesh(container, container.meshes[i]);
+  }
+}
+
 /**
  * The one unit/ratio scale used by the import-normalization seam: source-unit
  * conversion × (model's own ratio / scene working ratio). Both the fresh-load
@@ -65,6 +126,7 @@ export function importScaleFactor(sourceUnit, modelRatio, ratio = modelRatio) {
  * @param {BABYLON.Vector3} [position]  world drop offset
  */
 export function bakeImportTransform(container, factor, position) {
+  _materializeInstanceMeshes(container);
   const nodes = [...container.meshes, ...container.transformNodes];
   const roots = nodes.filter(n => !n.parent);
 
@@ -75,9 +137,11 @@ export function bakeImportTransform(container, factor, position) {
     r.position.scaleInPlace(factor);
   }
 
-  const geo = container.meshes.filter(
-    m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0
-  );
+  const geo = container.meshes.filter(_isGeometryMesh);
+  const unbakeable = geo.find(m => typeof m.bakeTransformIntoVertices !== 'function');
+  if (unbakeable) {
+    throw new Error(`Unsupported imported geometry node: ${unbakeable.name || 'unnamed'} cannot be normalized.`);
+  }
   const groupNodes = container.transformNodes.filter(n => n?.metadata?.groupId);
   const groupSet = new Set(groupNodes);
   const nearestGroupAncestor = (node) => {

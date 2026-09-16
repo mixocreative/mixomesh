@@ -1789,9 +1789,22 @@ After scaling, **1 BU in the scene == 1 m at the working ratio's print size**. T
 > 2. Babylon's HighlightLayer stencil + gizmo passes lose precision when world transforms operate at sub-mm scale, manifesting as halo bleed onto mesh faces. Normalising scale to 1 fixes it.
 >
 > Source-unit changes (Properties Panel) re-bake the **delta** (`newFactor / oldFactor`) into vertices; non-root local positions are scaled by the same delta so within-asset spacing follows. The world drop anchor (root node position) is left alone so the asset doesn't jump when the user corrects a unit.
+>
+> **Babylon instance materialization.** Before building the geometry list,
+> `bakeImportTransform` must replace any geometry-bearing `InstancedMesh`
+> (or equivalent node with `sourceMesh` but no `bakeTransformIntoVertices`)
+> with a real `Mesh` cloned from its `sourceMesh`, copying the instance's local
+> transform/visibility/metadata/material, calling `makeGeometryUnique()`, and
+> disposing the instance. This keeps GLB files that reuse mesh data importable
+> while preserving the downstream invariant that every SceneObject owns bakeable
+> vertex data for source-unit changes, ratio changes, validation, and 3MF/OBJ/STL
+> export. If a geometry node still cannot be materialized into a bakeable mesh,
+> import fails with a clear unsupported-geometry error instead of a raw Babylon
+> method error.
 
 ```js
 function applyImportScaling(container, factor, dropPos) {
+  materializeInstancedGeometry(container);
   const scaleMat = BABYLON.Matrix.Scaling(factor, factor, factor);
   for (const m of container.meshes) {
     if (m.geometry) m.bakeTransformIntoVertices(scaleMat);
