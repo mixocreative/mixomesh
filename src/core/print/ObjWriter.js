@@ -136,7 +136,26 @@ function _safeAlpha01(v) {
 // replaced by mat.name / mesh.name and misaligned with the OBJ usemtl key.
 function _objMaterialName(mesh) {
   const mat = mesh?.material;
-  return String(mat?.id ?? mat?.name ?? mesh?.name ?? 'material');
+  return objToken(String(mat?.id ?? mat?.name ?? mesh?.name ?? 'material'));
+}
+
+/**
+ * Wavefront `o` / `g` / `usemtl` / `newmtl` / `mtllib` arguments are
+ * whitespace-delimited tokens. A material id such as `Base Color` becomes
+ * `usemtl Base` in most parsers (Mimaki prep tool, MeshLab, Blender) and the
+ * texture silently drops. Collapse whitespace to `_`; keep everything else.
+ */
+export function objToken(name) {
+  const t = String(name ?? '').replace(/\s+/g, '_');
+  return t || 'material';
+}
+
+// Babylon's serializer writes `o <mesh.name>` and `usemtl <mat.id>` raw; the
+// MTL side is ours (objToken'd). Normalise the OBJ side to the same tokens so
+// the two files agree and no directive carries an embedded space.
+function _normalizeObjTokens(objString) {
+  return String(objString).replace(/^(o|g|usemtl)[ \t]+(.+?)\s*$/gm,
+    (_, key, name) => `${key} ${objToken(name)}`);
 }
 
 function _mtlColor(mat) {
@@ -144,10 +163,8 @@ function _mtlColor(mat) {
 }
 
 function _mtlLineColor(prefix, color) {
-  const r = Number(color?.r ?? 0).toFixed(4);
-  const g = Number(color?.g ?? 0).toFixed(4);
-  const b = Number(color?.b ?? 0).toFixed(4);
-  return `${prefix} ${r} ${g} ${b}`;
+  const c01 = (v) => Math.max(0, Math.min(1, Number(v ?? 0) || 0)).toFixed(4);
+  return `${prefix} ${c01(color?.r)} ${c01(color?.g)} ${c01(color?.b)}`;
 }
 
 function _buildOBJMtl(meshEntries, filenameByMaterialName) {
@@ -164,8 +181,10 @@ function _buildOBJMtl(meshEntries, filenameByMaterialName) {
       `newmtl ${matName}`,
       `Ns ${Number(mat.specularPower ?? 64).toFixed(4)}`,
       'Ni 1.5000',
+      // Opacity as `d` ONLY. `Tr` is read as transparency by some parsers
+      // and as opacity by others (Blender historically); writing both lets
+      // the two disagree on the same material.
       `d ${alpha.toFixed(4)}`,
-      `Tr ${(1 - alpha).toFixed(4)}`,
       'illum 2',
       _mtlLineColor('Ka', mat.ambientColor || { r: 0, g: 0, b: 0 }),
       _mtlLineColor('Kd', color),
@@ -180,8 +199,8 @@ function _buildOBJMtl(meshEntries, filenameByMaterialName) {
 }
 
 function _rewriteObjMtllib(objString, base) {
-  const desired = `mtllib ${base}.mtl`;
-  const text = String(objString);
+  const desired = `mtllib ${objToken(base)}.mtl`;
+  const text = _normalizeObjTokens(objString);
   if (/^mtllib\s+.+$/m.test(text)) return text.replace(/^mtllib\s+.+$/m, desired);
   return `${desired}\n${text}`;
 }

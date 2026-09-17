@@ -470,6 +470,21 @@ await test('zip entries whose paths collide (case-insensitive) are suffixed, nev
   assert.equal(Object.keys(files).length, 4, 'both parts present');
 });
 
+
+await test('OBJ/MTL: material ids with spaces become single tokens in BOTH files; no Tr line; Kd clamped', async () => {
+  const m = mesh('m1', { color: { r: 1.5, g: -0.2, b: 0.5 } });
+  m.material = { id: 'Base Color 01', diffuseColor: { r: 1.5, g: -0.2, b: 0.5 } };
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  assert.match(files['Test_r1to1.obj'], /^usemtl Base_Color_01$/m, 'usemtl is one token');
+  assert.match(files['Test_r1to1.mtl'], /^newmtl Base_Color_01$/m, 'newmtl matches usemtl');
+  assert.match(files['Test_r1to1.mtl'], /^Kd 1\.0000 0\.0000 0\.5000$/m, 'Kd clamped to [0,1]');
+  assert.match(files['Test_r1to1.mtl'], /^d 1\.0000$/m);
+  assert.ok(!/^Tr /m.test(files['Test_r1to1.mtl']), 'no ambiguous Tr line');
+});
+
 await test('3MF: valid mesh → OPC package with model XML + colour, downloads', async () => {
   setScene({ objects: { m1: obj('m1') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });

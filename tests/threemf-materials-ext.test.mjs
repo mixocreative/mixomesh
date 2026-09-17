@@ -194,7 +194,7 @@ await test('default Mimaki target + textured mesh → Materials Extension layout
   assert.match(model, /<m:tex2coord u="0\.3" v="0\.4"\/>/);
   assert.match(model, /<m:tex2coord u="0\.5" v="0\.6"\/>/);
   // Object pid points at the texture2dgroup, NOT a colorgroup.
-  assert.match(model, /<object id="3" type="model" pid="2">/);
+  assert.match(model, /<object id="3" type="model" pid="2" pindex="0">/);
   // Triangle carries p1/p2/p3 mirroring v1/v2/v3 (writer/loader contract).
   // The fake mesh has no ClockWise flag (CounterClockWise default), so
   // PrintSpace.printIndices keeps the buffer order — p triple follows.
@@ -220,7 +220,7 @@ await test('Bambu target + textured mesh → Materials Extension layout (printer
   assert.ok(files['3D/_rels/3dmodel.model.rels'], 'per-part rels present');
   const model = files['3D/3dmodel.model'];
   assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
-  assert.match(model, /<object id="3" type="model" pid="2">/);
+  assert.match(model, /<object id="3" type="model" pid="2" pindex="0">/);
   assert.ok(!/<m:colorgroup/.test(model), 'no colorgroup when every mesh is textured');
 });
 
@@ -264,7 +264,7 @@ await test('Mimaki target + mixed (textured + solid) → both resources, distinc
   assert.match(model, /<m:texture2dgroup id="2" texid="1">/);
   assert.match(model, /<m:colorgroup id="3">/);
   // Textured object points at tex2dgroup id (no pindex).
-  assert.match(model, /<object id="4" type="model" pid="2">/);
+  assert.match(model, /<object id="4" type="model" pid="2" pindex="0">/);
   // Solid object points at colorgroup id + pindex.
   assert.match(model, /<object id="5" type="model" pid="3" pindex="0">/);
 });

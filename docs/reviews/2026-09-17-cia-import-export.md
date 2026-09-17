@@ -37,16 +37,27 @@ texture loss, path collisions, prep errors and picker cancel).
 | C4 | CRITICAL | JSZip overwrote colliding entry paths (`Cube`/`cube`, `a/b`/`a:b`) → a part silently missing | `PrintPackaging.uniqueEntryPaths` suffixes `_2`, case-insensitive | `export.test.mjs` "paths collide" |
 | H6 | HIGH | Save-picker cancel toasted "✓ Exported"; multi-ratio batch re-prompted | `triggerDownload` returns false → info "cancelled" toast, batch stops | `export.test.mjs` "picker cancelled" |
 | H1 | HIGH | Non-`PrintPrep.` prep errors swallowed → part exported at raw BU scale | every prep error aborts the export, step + mesh named | `export.test.mjs` "prep step throws" |
+| M7 | MEDIUM | OBJ `usemtl`/`o`/`mtllib` with embedded spaces → most parsers (Mimaki prep tool, MeshLab, Blender) truncate the token and drop the texture | `objToken` sanitiser applied to BOTH OBJ and MTL sides | `export.test.mjs` "material ids with spaces" |
+| L1 | LOW | MTL wrote both `d` and `Tr`; parsers disagree on `Tr` semantics; `Kd` unclamped | `d` only, `Kd`/`Ka`/`Ks`/`Ke` clamped to [0,1] | same test |
+| M5 | MEDIUM | Textured 3MF `<object pid>` without `pindex` (Core §4.1 requires it) | `pindex="0"` emitted | `threemf-materials-ext.test.mjs` |
 
 Live verification (headless Chrome via the app's own import + export paths, tetra fixture):
 3MF → PrusaSlicer `manifold=yes volume=1000`, z 0..20 (rests on bed); trimesh `+1000`,
 winding consistent. OBJ → `+1000`. STL → LE count 4, `+1000`. PrusaSlicer 3MF import →
 Babylon apex at +Y. Cull-on screenshot = cull-off screenshot (outward).
 
+## Mimaki practice (decided 2026-09-17)
+Primary hand-off = **OBJ + MTL + PNG** (oldest, most-documented full-colour path in the
+Mimaki prep tool; plain text, inspectable). Textured 3MF stays as the second option.
+Both now: single-token OBJ directives, `d`-only opacity, clamped colours, `pindex` on
+every `pid`, outward CCW winding, right-handed Z-up (3MF) / Y-up (OBJ), sRGB PNG at
+source resolution, one texture per mesh, UVs in 0–1. UNVERIFIED: the Mimaki prep tool
+itself was not on this machine; its manual is the authority for texture caps.
+
 ## OPEN — owner decisions / next work (graded, evidence in agent reports of this run)
 
 ### CRITICAL / HIGH
-- **H4 PBR albedo (linear) written as sRGB** in 3MF `<m:color>`, MTL `Kd`, synth PNG — 0.5 grey exports as `#363636`. Fix: `toGammaSpace()` for PBR materials.
+- **H4 re-graded to LOW / partly wrong.** Babylon binds `albedoColor` raw (`pbrBaseMaterial.js:1662`, no linear conversion), and the app's colour picker stores sRGB hex → `albedoColor` → export hex is the identity of what the user picked. Only glTF-imported FLAT colours (`baseColorFactor`, linear by spec) export darker than intended; textured parts are unaffected. Fix if wanted: convert `baseColorFactor` to gamma at glTF import (ShaderLibrary), not at export.
 - **H5 bed-fit readiness computed in a frame no writer produces** (`PrintReadiness.js:91-99`) — "below-bed"/"overflow" warnings describe a fictional placement. Fix: route through `PrintSpace` + the writer's seating.
 - **H3 (persist) ghost assets silent at load** + project then unsaveable (`ProjectLoader.js:227,262` → ghost, success toast; `ProjectSerializer.js:151` throws on save). Fix: load summary modal listing ghosts with Relink; exclude ghosts from portable-save requirement or offer "save without".
 - **H1 (persist) no schema/version validation on load** (`migrate` returns doc, `version` never read; `resetWorld()` before any validation). Fix: validate shape + version before reset.
@@ -62,8 +73,6 @@ Babylon apex at +Y. Cull-on screenshot = cull-off screenshot (outward).
 - Validator never emits severity `error` → export validation gate is vacuous; "auto-fixed on export" message promises a step that does not exist (`MeshValidator.js:347`, `PrintPipeline.js:325`).
 - Stale validation cache → silent "ready".
 - Units with no indices dropped silently (empty `<build>` possible after CSG).
-- Spec: textured `<object pid>` without `pindex` (Core §4.1 requires it when `pid` set).
-- OBJ tokens with whitespace (`mtllib`/`usemtl`/`o`) break many parsers.
 - Batch export re-reads live state per target (selection/rename mid-batch changes reference).
 - saveAs binds handle + renames before the write can fail (0-byte file left).
 - Autosave races load/save; poisoned autosave re-offered every boot; keyed by name.
@@ -108,6 +117,6 @@ Babylon apex at +Y. Cull-on screenshot = cull-off screenshot (outward).
 2b. VSM map: 6 System-1 seams (import, export, persist, render, boolean, UI), 3* = tests/*, 3 = state/settings/config/printers.json, 4 = Babylon loaders + slicer files, 5 = Status.js/catch policy.
 3. Full suite: ✅ `npm test` 133/133 on HEAD (this commit); `test:browser` PASS; `test:export` PASS; build ✅.
 4. Runtime walk: ✅ headless Chrome import→export→PrusaSlicer for glb/3MF/OBJ/STL; cull screenshots; ⏭ production-model slicer eyeball (owner, 1 action).
-5. Fixes applied: 13 (X1-X5, P1, P2, L1, L2, C2, C4, H6, H1) | Escalated: 8 HIGH+ listed above.
+5. Fixes applied: 16 (X1-X5, P1, P2, L1, L2, C2, C4, H6, H1, M7, M5, MTL d/Kd) | Escalated: 7 HIGH+ listed above (H4 re-graded LOW).
 6. Tier: Screen — elapsed ≈ 3 h.
 7. Skill score: not run (no `tools/score.py` fixture run this session).

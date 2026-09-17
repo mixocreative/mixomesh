@@ -417,7 +417,9 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
     const texGroupId = tex2dGroupIdByMesh.get(mesh);
     const solidPidx = colorIndex.get(_materialHex(mesh)) ?? 0;
     if (single) {
-      if (texGroupId) objectAttrs = ` pid="${texGroupId}"`;
+      // 3MF Core §4.1: `pindex` is REQUIRED whenever `pid` is present, even
+      // for a texture2dgroup (strict consumers such as lib3mf reject it).
+      if (texGroupId) objectAttrs = ` pid="${texGroupId}" pindex="0"`;
       else if (colorGroupId != null) objectAttrs = ` pid="${colorGroupId}" pindex="${solidPidx}"`;
     }
     for (let i = 0; i < idx.length; i += 3) {
