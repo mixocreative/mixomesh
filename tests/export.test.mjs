@@ -335,14 +335,60 @@ await test('OBJ: never runs CSG2 (colour-safe — STL-only)', async () => {
 
 // ── Repair (export gate: watertight clones) ──────────────
 
-await test('repair: runs on the export clone only — registry mesh untouched', async () => {
+// T6: fake engines return the FULL vendored diagnose contract
+// ({boundary, nonManifold, components, isWatertight}) — a partial fake let
+// the pipeline's C1 skip-check read `undefined === 0` and pass by accident.
+const DIAG_OPEN   = { boundary: 3, nonManifold: 0, components: 1, isWatertight: false };
+const DIAG_CLOSED = { boundary: 0, nonManifold: 0, components: 1, isWatertight: true };
+
+/** Engine that reports an open mesh, then a closed one once repaired. */
+function openThenFixedEngine({ onRepair } = {}) {
+  let repaired = false;
+  return {
+    diagnose: () => (repaired ? { ...DIAG_CLOSED } : { ...DIAG_OPEN }),
+    repairObject: async (V, T) => {
+      repaired = true;
+      onRepair?.();
+      // Appending a triangle makes the output "changed" → forces write-back.
+      return { V, T: [...T, [0, 1, 2]], report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 } };
+    },
+  };
+}
+
+/** Engine whose repair leaves the mesh open (confirmed not watertight). */
+function stillOpenEngine({ onRepair } = {}) {
+  return {
+    diagnose: () => ({ ...DIAG_OPEN }),
+    repairObject: async (V, T) => { onRepair?.(); return { V, T, report: { holesFilled: 0, nmFixed: 0, merged: 0 } }; },
+  };
+}
+
+// C1: MeshFixLib stage 1 merges duplicate positions — which is what a UV seam
+// is made of — so running it on a part that is ALREADY closed could only cost
+// texture fidelity. The pipeline must diagnose first and leave it alone.
+await test('C1 repair: a clone that already diagnoses closed is SKIPPED, never rewritten', async () => {
+  let repairCalls = 0, diagnoseCalls = 0;
   MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: true }),
-    repairObject: async (V, T) => ({
-      V, T: [...T, [0, 1, 2]],   // extra triangle → "changed", forces write-back
-      report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
-    }),
+    diagnose: () => { diagnoseCalls++; return { ...DIAG_CLOSED }; },
+    repairObject: async (V, T) => { repairCalls++; return { V, T, report: {} }; },
   });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ();
+    assert.ok(diagnoseCalls >= 1, 'the clone WAS diagnosed');
+    assert.equal(repairCalls, 0, 'a healthy clone is never handed to the repair engine');
+    assert.equal(_clones[0].__repaired, undefined, 'clone geometry never rewritten — UVs cannot be touched');
+    assert.equal(calls.downloads.length, 1, 'export still produced');
+    assert.equal(toasts.filter(toast => toast.type === 'warning').length, 0,
+      'a skipped healthy clone is not a warning');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+  }
+});
+
+await test('repair: runs on the export clone only — registry mesh untouched', async () => {
+  MeshRepair.__test.setEngine(openThenFixedEngine());
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     MeshValidator.validateMesh = valOK;
@@ -358,10 +404,7 @@ await test('repair: runs on the export clone only — registry mesh untouched', 
 
 await test('repair: options.repair === false skips the step (engine never invoked)', async () => {
   let calledCount = 0;
-  MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: false }),
-    repairObject: async (V, T) => { calledCount++; return { V, T, report: {} }; },
-  });
+  MeshRepair.__test.setEngine(openThenFixedEngine({ onRepair: () => { calledCount++; } }));
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     MeshValidator.validateMesh = valOK;
@@ -384,10 +427,7 @@ await test('repair: engine unavailable → one warning toast, never throws, stil
 });
 
 await test('repair: strictExport true + still-not-watertight after repair → rejects listing the part, nothing downloaded', async () => {
-  MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: false }),
-    repairObject: async (V, T) => ({ V, T, report: {} }),   // unchanged — hole survives
-  });
+  MeshRepair.__test.setEngine(stillOpenEngine());
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true });
@@ -401,10 +441,7 @@ await test('repair: strictExport true + still-not-watertight after repair → re
 });
 
 await test('repair: strictExport false + still-not-watertight after repair → exports, warning toast names the part', async () => {
-  MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: false }),
-    repairObject: async (V, T) => ({ V, T, report: {} }),
-  });
+  MeshRepair.__test.setEngine(stillOpenEngine());
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     MeshValidator.validateMesh = valOK;
@@ -417,10 +454,7 @@ await test('repair: strictExport false + still-not-watertight after repair → e
 });
 
 await test('repair: non-strict export with a confirmed not-watertight clone → exactly ONE warning toast, matching toast.exportedWithWarnings', async () => {
-  MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: false }),
-    repairObject: async (V, T) => ({ V, T, report: {} }),
-  });
+  MeshRepair.__test.setEngine(stillOpenEngine());
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     MeshValidator.validateMesh = valOK;
@@ -440,13 +474,7 @@ await test('repair: ClockWise clone re-tagged CounterClockWise on a repair write
   const B = globalThis.window.BABYLON;
   const savedCSG = B.CSG2, savedInit = B.InitializeCSG2Async;
   B.CSG2 = undefined; B.InitializeCSG2Async = undefined;
-  MeshRepair.__test.setEngine({
-    diagnose: () => ({ isWatertight: true }),
-    repairObject: async (V, T) => ({
-      V, T: [...T, [0, 1, 2]],   // extra triangle → "changed", forces the flag re-tag
-      report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
-    }),
-  });
+  MeshRepair.__test.setEngine(openThenFixedEngine());
   try {
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { side: 0 }) } });
     MeshValidator.validateMesh = valOK;
@@ -456,6 +484,35 @@ await test('repair: ClockWise clone re-tagged CounterClockWise on a repair write
   } finally {
     MeshRepair.__test.setEngine(null);
     B.CSG2 = savedCSG; B.InitializeCSG2Async = savedInit;
+  }
+});
+
+await test('F10 repair: after a CSG re-bake the verdict describes the SHIPPED geometry', async () => {
+  // The repair step leaves this clone open, so the pre-CSG verdict is
+  // "not watertight". CSG2 then re-bakes it (Manifold output is watertight by
+  // construction) — the pipeline must RE-DIAGNOSE the re-baked clone, so
+  // strict mode does not block and no not-watertight warning fires.
+  const B = globalThis.window.BABYLON;
+  const realFromMesh = B.CSG2.FromMesh;
+  let csgDone = false;
+  B.CSG2.FromMesh = (m) => { csgDone = true; return realFromMesh(m); };
+  MeshRepair.__test.setEngine({
+    diagnose: () => (csgDone ? { ...DIAG_CLOSED } : { ...DIAG_OPEN }),
+    repairObject: async (V, T) => ({ V, T, report: { holesFilled: 0 } }),   // still open
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportSTL();
+    assert.equal(calls.csgFrom.length, 1, 'the CSG re-bake ran');
+    assert.equal(calls.downloads.length, 1, 'strict mode did NOT block: the shipped geometry is watertight');
+    assert.equal(toasts.filter(toast => toast.type === 'warning').length, 0,
+      'no stale "not watertight" warning from the pre-CSG verdict');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+    B.CSG2.FromMesh = realFromMesh;
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: false } }), { silent: true });
   }
 });
 

@@ -17,7 +17,8 @@ import { getState } from '../StateManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
-import { repairMesh, ensureRepairEngine } from '../repair/MeshRepair.js';
+import { repairMesh, diagnoseMesh, ensureRepairEngine } from '../repair/MeshRepair.js';
+import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
@@ -84,10 +85,38 @@ function _csgRebake(mesh) {
   csg.dispose?.();
 }
 
-function _tryCsg(mesh, ctx) {
+async function _tryCsg(mesh, ctx) {
   if (!ctx.csgReady) return;
   try { _csgRebake(mesh); }
-  catch { ctx.csgSkipped.push(mesh.name); }
+  catch (err) {
+    // CIA F3: never a silent catch on the export path — name the mesh, same
+    // posture as _tryRepair below.
+    console.error(`CSG re-bake skipped for ${mesh.name}:`, err);
+    ctx.csgSkipped.push(mesh.name);
+    return;
+  }
+  await _refreshRepairVerdict(mesh, ctx);
+}
+
+/**
+ * Re-diagnose a clone whose geometry was REPLACED after the repair step ran
+ * (CIA F10). CSG2 rebuilds the mesh wholesale from Manifold output, so the
+ * strict-export gate and the post-export warning toast would otherwise
+ * describe pre-CSG geometry that is not what got written to the file.
+ * A verdict of `null` (diagnose itself failed) stays "unknown" — warned
+ * about, never a strict-mode blocker, exactly like _tryRepair's error path.
+ */
+async function _refreshRepairVerdict(mesh, ctx) {
+  if (!ctx.repairReady) return;
+  let verdict = null;
+  try { verdict = (await diagnoseMesh(mesh)).isWatertight; }
+  catch (err) { console.error(`Post-CSG diagnose failed for ${mesh.name}:`, err); }
+  const entry = ctx.repairReport.find(r => r.name === mesh.name);
+  if (entry) { entry.isWatertight = verdict; entry.afterCsg = true; }
+  else ctx.repairReport.push({ name: mesh.name, isWatertight: verdict, afterCsg: true });
+  const at = ctx.repairSkipped.indexOf(mesh.name);
+  if (verdict === true) { if (at >= 0) ctx.repairSkipped.splice(at, 1); }
+  else if (at < 0) ctx.repairSkipped.push(mesh.name);
 }
 
 // ── repair (watertight fix on the export CLONE) ──────────
@@ -119,6 +148,17 @@ async function _ensureRepairRuntime(options) {
 async function _tryRepair(mesh, ctx) {
   if (!ctx.repairReady) return;
   try {
+    // C1: diagnose FIRST and leave a healthy clone completely alone.
+    // MeshFixLib's stage 1 merges duplicate positions — which is exactly what
+    // a UV seam is made of — so running it on a hole-free part rewrote the
+    // geometry for no gain and could only cost texture fidelity. A part with
+    // real defects is still repaired, and MeshRepair.arraysToMesh now carries
+    // seam UVs through that repair.
+    const d = await diagnoseMesh(mesh);
+    if (d.boundaryEdges === 0 && d.nonManifoldEdges === 0 && d.isWatertight) {
+      ctx.repairReport.push({ name: mesh.name, isWatertight: true, skipped: true });
+      return;
+    }
     const r = await repairMesh(mesh);
     ctx.repairReport.push({ name: mesh.name, isWatertight: r.isWatertight });
     if (!r.isWatertight) ctx.repairSkipped.push(mesh.name);
@@ -134,18 +174,13 @@ async function _tryRepair(mesh, ctx) {
 
 // ── weld helpers ─────────────────────────────────────────
 
-const WELD_DISTANCE = 1e-4;   // 0.1 mm at 1 BU = 1 m. Matches MeshValidator.
-
+// I6: the weld itself lives in src/core/repair/Weld.js and is shared with
+// MeshValidator's offline 'nonManifold' fix. It merges only vertices that
+// share BOTH position and UV, so the unconditional `weld` prep step on the
+// OBJ/STL paths cannot tear a textured part's seams (review C1).
 function _weld(mesh) {
-  const B = window.BABYLON;
   try {
-    if (typeof mesh.mergeVerticesByDistance === 'function') {
-      mesh.mergeVerticesByDistance(WELD_DISTANCE);
-    } else if (typeof B.VertexData?.MergeByDistance === 'function') {
-      const vd = B.VertexData.ExtractFromMesh(mesh);
-      B.VertexData.MergeByDistance(vd, WELD_DISTANCE);
-      vd.applyToMesh(mesh);
-    }
+    weldMesh(mesh, WELD_DISTANCE);
   } catch (err) {
     console.error(`Vertex weld skipped for ${mesh.name}:`, err);
   }
