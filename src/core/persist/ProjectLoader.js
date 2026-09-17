@@ -346,7 +346,7 @@ async function _loadProjectInner(doc, previousName) {
       // fix was first applied (M1). Each SceneObject owns a distinct mesh here
       // (duplicates were cloned above), so this replays once per object.
       if (Array.isArray(o.geometryFixes) && o.geometryFixes.length) {
-        MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
+        await MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
       }
       applyWorld(mesh, o.transform);
       const vis = o.visible !== false;

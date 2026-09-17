@@ -36,8 +36,8 @@ const flip = (tris) => tris.map(([a, b, c]) => [a, c, b]);
 // `sideOrientation` / `material` are optional so a test can mimic Babylon's
 // effective orientation (undefined ⇒ CounterClockWise default, 0 ⇒ ClockWise).
 function buildMesh(tris, extra = {}) {
-  const positions = [];
-  const indices = [];
+  let positions = [];
+  let indices = [];
   let n = 0;
   for (const [a, b, c] of tris) {
     for (const idx of [a, b, c]) {
@@ -47,8 +47,14 @@ function buildMesh(tris, extra = {}) {
   }
   return {
     name: 'unit',
-    getVerticesData: () => new Float32Array(positions),
+    // kind is ignored except 'uv' (no UV data in this fixture) — matches
+    // MeshRepair's meshToArrays/arraysToMesh, which read/write 'position' and
+    // 'uv' by literal string. Stateful so a repair write-back (setVerticesData/
+    // setIndices) is visible to a later getIndices()/getVerticesData() call.
+    getVerticesData: (kind) => (kind === 'uv' ? undefined : new Float32Array(positions)),
     getIndices: () => indices,
+    setVerticesData: (kind, data) => { if (kind === 'position') positions = Array.from(data); },
+    setIndices: (data) => { indices = Array.from(data); },
     getWorldMatrix: () => ({}),
     getBoundingInfo: () => ({ boundingBox: {
       minimumWorld: { x: 0, y: 0, z: 0, subtract: (o) => ({ x: -o.x, y: -o.y, z: -o.z }) },
@@ -185,6 +191,27 @@ await test('worker pure function applies the same orientation rule', async () =>
   } finally {
     globalThis.self = prevSelf;
   }
+});
+
+// ── holes (MeshRepair engine) 2026-09-17 ─────────────────────────────────
+await test('open mesh → holes warning with count, auto-fix available', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }), repairObject: async (V, T) => ({ V, T: [...T, [1,2,3]], report: { holesFilled: 1 } }) });
+  const m = buildMesh([[0,2,1],[0,1,3],[0,3,2]]);           // 3 of 4 tetra faces
+  const results = await MeshValidator.validateMesh(m);
+  const holes = results.find(r => r.type === 'holes');
+  assert.ok(holes, 'holes reported'); assert.equal(holes.count, 3); assert.equal(holes.autoFixAvailable, true);
+  await MeshValidator.autoFix(m, results);
+  assert.equal(m.getIndices().length, 12, 'engine closed the hole');
+  assert.equal(holes.fixed, true);
+});
+await test('engine unavailable → holes still reported, autoFixAvailable false, no throw', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine(null);
+  const m = buildMesh([[0,2,1],[0,1,3],[0,3,2]]);
+  const results = await MeshValidator.validateMesh(m);
+  const holes = results.find(r => r.type === 'holes');
+  assert.ok(holes); assert.equal(holes.autoFixAvailable, false);
 });
 
 console.log('\n' + out.join('\n'));

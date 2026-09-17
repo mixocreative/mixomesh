@@ -172,6 +172,40 @@ await test('validateMesh routes by metadata.meshId, not Babylon mesh name', asyn
     `divergent-name sibling must still route through the group union, got ${JSON.stringify(results)}`);
 });
 
+// ── holes on the group union (2026-09-17) ────────────────────────────────
+// Repair applies per part, not to the synthetic welded union, so group-scope
+// holes are always reported with autoFixAvailable: false.
+const holes = (results) => results.find(r => r.type === 'holes');
+
+await test('validateGroup: open group union → holes reported, never auto-fixable', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }) });
+  const lo = buildHalfMesh('lo', LO_TRIS);
+  seedState([{ id: 'lo', sourceGroupId: 'grp_holes', mesh: lo }]);
+  const results = await MeshValidator.validateGroup('grp_holes');
+  const r = holes(results);
+  assert.ok(r, 'open group union should report holes');
+  assert.equal(r.count, 3);
+  assert.equal(r.autoFixAvailable, false, 'repair applies per part, not to the union');
+  assert.equal(r.scope, 'group');
+  assert.equal(r.sourceGroupId, 'grp_holes');
+});
+
+await test('validateMesh isLogicalGroup branch → holes reported on the union, never auto-fixable', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }) });
+  const lo = buildHalfMesh('lo', LO_TRIS);
+  const hi = buildHalfMesh('hi', HI_TRIS.slice(0, HI_TRIS.length - 1));   // drop a face
+  seedState([
+    { id: 'lo', sourceGroupId: 'grp_holes_route', mesh: lo },
+    { id: 'hi', sourceGroupId: 'grp_holes_route', mesh: hi },
+  ]);
+  const results = await MeshValidator.validateMesh(lo);
+  const r = holes(results);
+  assert.ok(r, 'broken multi-part object should report holes via the group path');
+  assert.equal(r.autoFixAvailable, false);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
