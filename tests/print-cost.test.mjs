@@ -18,7 +18,8 @@ import { installEnv } from './env.mjs';
 installEnv();
 
 const { StateManager } = await import('../src/core/StateManager.js');
-const { unitVolumesMM3, overlappingPairs, quote } = await import('../src/core/print/PrintCost.js');
+const { unitVolumesMM3, overlappingPairs, quote, totalTriangles } = await import('../src/core/print/PrintCost.js');
+const { REPAIR_TRIANGLE_CAP } = await import('../src/core/repair/MeshRepair.js');
 
 // ── Fixture: a tetrahedron with V0=(0,0,0), V1=(-10,0,0), V2=(0,20,0),
 // V3=(0,0,30) — an axis-aligned right tetrahedron, volume = (1/6)*10*20*30
@@ -47,6 +48,24 @@ function fakeMesh({ pos, idx }, { side = 1, offset = [0, 0, 0] } = {}) {
           maximumWorld: { x: hi[0] + offset[0], y: hi[1] + offset[1], z: hi[2] + offset[2] },
         },
       };
+    },
+  };
+}
+
+// A mesh with a huge (fake) triangle count and a `getVerticesData` that
+// THROWS if ever called — proves `quote()` short-circuits on the cheap
+// `totalTriangles` gate before doing any real per-vertex work. `getIndices`
+// only needs a `.length`, so a bare-length array avoids allocating real data.
+function fakeHugeMesh() {
+  return {
+    sideOrientation: 1,
+    material: null,
+    getVerticesData() { throw new Error('tooBig gate must short-circuit before getVerticesData is ever called'); },
+    getIndices() { return new Array((REPAIR_TRIANGLE_CAP + 1) * 3); },
+    computeWorldMatrix() {},
+    getWorldMatrix() { return window.BABYLON.Matrix.Translation(0, 0, 0); },
+    getBoundingInfo() {
+      return { boundingBox: { minimumWorld: { x: 0, y: 0, z: 0 }, maximumWorld: { x: 0, y: 0, z: 0 } } };
     },
   };
 }
@@ -144,6 +163,28 @@ await test('quote: not-watertight part → approximate with reason; missing pric
   assert.equal(q2.total, null, 'total must be null, never 0, when no price resolves');
   assert.ok(q2.reasons.includes('noPrice'), `expected noPrice, got ${q2.reasons.join(',')}`);
   assert.equal(q2.approximate, true);
+});
+
+await test('totalTriangles: cheap array-length sum across units/parts', () => {
+  const ctx = ctxWith([
+    { id: 'a', mesh: fakeMesh(tetra) },
+    { id: 'b', mesh: fakeMesh(tetra, { offset: [2, 0, 0] }) },
+  ]);
+  assert.equal(totalTriangles(ctx), 8, 'two 4-triangle tetrahedra = 8 triangles');
+});
+
+await test('quote: above REPAIR_TRIANGLE_CAP short-circuits before any volume computation (tooBig, never throws)', () => {
+  const ctx = ctxWith([{ id: 'a', mesh: fakeHugeMesh() }]);
+  // fakeHugeMesh's getVerticesData throws — if quote() ever called
+  // unitVolumesMM3/overlappingPairs on it, this assertion would throw
+  // instead of returning cleanly, proving the gate runs FIRST.
+  const q = quote(ctx, { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' },
+    { densityGcm3: 1.1 });
+  assert.deepEqual(q, {
+    volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
+    supportCost: null, total: null, currency: 'USD', approximate: true, overlaps: 0,
+    reasons: ['tooBig'],
+  });
 });
 
 console.log('\n' + out.join('\n'));

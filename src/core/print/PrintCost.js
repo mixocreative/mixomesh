@@ -15,11 +15,33 @@
  */
 
 import { positionsToPrintSpace, printIndices, signedVolume, toPrintSpace } from './PrintSpace.js';
+import { REPAIR_TRIANGLE_CAP } from '../repair/MeshRepair.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 const AABB_EPSILON_MM = 0.01;
+
+/**
+ * Cheap triangle count across every unit/part — `getIndices().length` reads
+ * only, never `getVerticesData` or any per-vertex work. `quote()` calls this
+ * FIRST and bails out before `unitVolumesMM3`/`overlappingPairs` ever run
+ * when the scene is above `REPAIR_TRIANGLE_CAP`, so a huge scene never pays
+ * for the full per-vertex pass just to discover it should show "—".
+ *
+ * @param {import('./ExportContext.js').ExportContext} ctx
+ * @returns {number}
+ */
+export function totalTriangles(ctx) {
+  let tris = 0;
+  for (const unit of ctx.units ?? []) {
+    for (const part of unit.parts ?? []) {
+      const idx = part.mesh?.getIndices?.();
+      if (idx?.length) tris += idx.length / 3;
+    }
+  }
+  return tris;
+}
 
 /**
  * World-space (BU) position buffer → a NEW Float32Array, one vertex per
@@ -155,6 +177,19 @@ export function overlappingPairs(ctx) {
  * @param {{densityGcm3?:number, pricePerGram?:number, supportDensityGcm3?:number, supportPricePerGram?:number, defaultSupportPercent?:number}|null} material
  */
 export function quote(ctx, s, material) {
+  const currency = s?.currency || 'USD';
+  // Triangle-count gate FIRST — cheap array-length reads only. Above the cap,
+  // bail out before unitVolumesMM3/overlappingPairs ever touch a vertex
+  // buffer (a huge scene must never pay for the full per-vertex pass just to
+  // show "—").
+  if (totalTriangles(ctx) > REPAIR_TRIANGLE_CAP) {
+    return {
+      volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
+      supportCost: null, total: null, currency, approximate: true, overlaps: 0,
+      reasons: ['tooBig'],
+    };
+  }
+
   const vols = unitVolumesMM3(ctx);
   const pairs = overlappingPairs(ctx);
   const volumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
@@ -186,7 +221,7 @@ export function quote(ctx, s, material) {
     supportGrams,
     supportCost,
     total,
-    currency: s?.currency || 'USD',
+    currency,
     approximate: reasons.length > 0,
     overlaps: pairs.length,
     reasons,

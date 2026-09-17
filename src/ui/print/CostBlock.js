@@ -14,8 +14,7 @@
 import { getState, setState } from '../../core/StateManager.js';
 import { SettingsStore } from '../../core/SettingsStore.js';
 import { PrintManager } from '../../core/PrintManager.js';
-import { unitVolumesMM3, quote } from '../../core/print/PrintCost.js';
-import { REPAIR_TRIANGLE_CAP } from '../../core/repair/MeshRepair.js';
+import { quote } from '../../core/print/PrintCost.js';
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { wireNumbers, wireSelects } from '../lib/fields.js';
@@ -116,28 +115,52 @@ export function renderCostBlock(container, state) {
     commit({ currency: v });
   });
 
+  // Instant recompute while typing: an `input` listener updates ONLY the
+  // result line from the live (uncommitted) field values — no settings
+  // write, no full block re-render. The `change` handlers above still own
+  // committing the value (setState + SettingsStore.save) once the user
+  // finishes editing (blur/Enter), which re-renders from the committed state.
+  const livePreview = () => _renderResult(container, getState(), _liveCostOverride(container, getState()));
+  for (const sel of ['#pp-cost-price', '#pp-cost-support-price', '#pp-cost-support-pct', '#pp-cost-currency']) {
+    container.querySelector(sel)?.addEventListener('input', livePreview);
+  }
+
   _renderResult(container, state);
 }
 
-function _renderResult(container, state) {
+/** Read the cost fields' LIVE (possibly uncommitted) DOM values, falling back to `state.cost`. */
+function _liveCostOverride(container, state) {
+  const cost = state.cost ?? {};
+  const num = (id, fallback) => {
+    const v = parseFloat(container.querySelector(id)?.value);
+    return Number.isFinite(v) ? Math.max(0, v) : fallback;
+  };
+  const currencyRaw = container.querySelector('#pp-cost-currency')?.value ?? cost.currency ?? 'USD';
+  return {
+    pricePerGram: num('#pp-cost-price', cost.pricePerGram || 0),
+    supportPricePerGram: num('#pp-cost-support-price', cost.supportPricePerGram || 0),
+    supportPercent: num('#pp-cost-support-pct', cost.supportPercent || 0),
+    currency: (currencyRaw || 'USD').trim().slice(0, 4).toUpperCase() || 'USD',
+  };
+}
+
+/**
+ * @param {HTMLElement} container
+ * @param {object} state
+ * @param {object} [override] live (uncommitted) cost field values, for the
+ *   `input`-driven preview; omit to use the committed `state.cost`.
+ */
+function _renderResult(container, state, override = null) {
   const el = container.querySelector('#pp-cost-total');
   if (!el) return;
 
   const material = _material(state);
-  const cost = state.cost ?? {};
+  const cost = { ...(state.cost ?? {}), ...(override ?? {}) };
   const currency = cost.currency || 'USD';
 
   const ctx = PrintManager.previewExportContext();
   if (!ctx) {
     el.textContent = '—';
-    return;
-  }
-
-  const vols = unitVolumesMM3(ctx);
-  const totalTriangles = [...vols.values()].reduce((sum, v) => sum + v.triangles, 0);
-  if (totalTriangles > REPAIR_TRIANGLE_CAP) {
-    el.innerHTML = `— <span class="pp-approx" title="${escapeAttr(t('print.cost.reasonTooBig'))}">` +
-      `${escapeHtml(t('print.cost.approximate'))}</span>`;
     return;
   }
 
@@ -147,6 +170,14 @@ function _renderResult(container, state) {
     supportPercent: cost.supportPercent || 0,
     currency,
   }, material);
+
+  if (q.volumeCM3 === null) {
+    // Above REPAIR_TRIANGLE_CAP — quote() bailed out before computing
+    // anything (PrintCost.js `totalTriangles` gate).
+    el.innerHTML = `— <span class="pp-approx" title="${escapeAttr(t('print.cost.reasonTooBig'))}">` +
+      `${escapeHtml(t('print.cost.approximate'))}</span>`;
+    return;
+  }
 
   const fmt = (v, digits) => (v == null ? '—' : v.toFixed(digits));
   const resultText = t('print.cost.result', {
