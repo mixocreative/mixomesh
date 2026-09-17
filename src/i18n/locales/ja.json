@@ -201,6 +201,7 @@
   "print.cost.result": "{volume} cm³ · {grams} g · {materialCost} + サポート {supportCost} = {total} {currency}",
   "print.cost.approximate": "概算",
   "print.cost.reasonNotWatertight": "{n} 個のパーツが水密ではありません — 体積は概算です",
+  "print.cost.reasonNotValidated": "{n} 個のパーツは未検証 — 体積は未確認です",
   "print.cost.reasonOverlap": "{n} 組の重なりを二重カウントしています",
   "print.cost.reasonNoPrice": "この素材に価格が設定されていません",
   "print.cost.reasonNoDensity": "この素材に密度が設定されていません",

@@ -16,6 +16,7 @@
 
 import { positionsToPrintSpace, printIndices, signedVolume, toPrintSpace } from './PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from '../repair/MeshRepair.js';
+import { caps } from '../storage/capabilities.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -23,10 +24,23 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 const AABB_EPSILON_MM = 0.01;
 
 /**
+ * Triangle ceiling for a LIVE cost estimate (M9). This is a UI-responsiveness
+ * limit, not a repair limit: the quote recomputes on every keystroke in the
+ * Cost block, so it tracks the HUD triangle budget (`caps.triangleBudget`)
+ * rather than borrowing REPAIR_TRIANGLE_CAP, which exists for a completely
+ * different reason (how much geometry the WASM repair engine can chew on the
+ * main thread). Read at call time — capabilities are detected at boot, after
+ * this module is imported.
+ */
+export function costTriangleCap() {
+  return caps.triangleBudget > 0 ? caps.triangleBudget : REPAIR_TRIANGLE_CAP;
+}
+
+/**
  * Cheap triangle count across every unit/part — `getIndices().length` reads
  * only, never `getVerticesData` or any per-vertex work. `quote()` calls this
  * FIRST and bails out before `unitVolumesMM3`/`overlappingPairs` ever run
- * when the scene is above `REPAIR_TRIANGLE_CAP`, so a huge scene never pays
+ * when the scene is above `costTriangleCap()`, so a huge scene never pays
  * for the full per-vertex pass just to discover it should show "—".
  *
  * @param {import('./ExportContext.js').ExportContext} ctx
@@ -73,6 +87,25 @@ function _hasOpenResult(state, unit) {
 }
 
 /**
+ * True when every part of `unit` has a FRESH validation-cache entry.
+ *
+ * CIA F5 / I11: "no cache entry" is not "watertight" — it is "nobody has
+ * checked". Treating it as watertight made the quote read as an exact number
+ * for geometry whose volume may be meaningless (an open shell's signed volume
+ * is arbitrary). Same semantics as PrintReadiness' `validation-pending`: a
+ * missing OR stale entry counts as not validated.
+ */
+function _isValidated(state, unit) {
+  const cache = state?.scene?.validation ?? {};
+  const parts = unit.parts ?? [];
+  if (!parts.length) return false;
+  return parts.every(part => {
+    const entry = cache[part.meshId];
+    return !!entry && !entry.stale;
+  });
+}
+
+/**
  * Per-unit volume in print-space mm³. Each part's LOCAL positions are
  * transformed by its own world matrix (BU), then pivot-anchored ratio-scaled
  * and converted to mm with `ctx.unitFactor` (mirrors PrintPrep.flattenWorld's
@@ -81,7 +114,7 @@ function _hasOpenResult(state, unit) {
  * object accumulate correctly; the abs() only guards the unit total.
  *
  * @param {import('./ExportContext.js').ExportContext} ctx
- * @returns {Map<string, {volumeMM3:number, triangles:number, watertight:boolean}>}
+ * @returns {Map<string, {volumeMM3:number, triangles:number, watertight:boolean, validated:boolean}>}
  */
 export function unitVolumesMM3(ctx) {
   const out = new Map();
@@ -106,7 +139,8 @@ export function unitVolumesMM3(ctx) {
       tris += idx.length / 3;
     }
     const watertight = !_hasOpenResult(ctx.state, unit);
-    out.set(unit.logicalId, { volumeMM3: Math.abs(vol), triangles: tris, watertight });
+    const validated = _isValidated(ctx.state, unit);
+    out.set(unit.logicalId, { volumeMM3: Math.abs(vol), triangles: tris, watertight, validated });
   }
   return out;
 }
@@ -136,10 +170,19 @@ function _unitBoundsMM(ctx, unit) {
   return found ? { min, max } : null;
 }
 
+/**
+ * AABB intersection with a tolerance that EXCLUDES merely touching boxes.
+ *
+ * M6: the epsilon's sign was inverted (`a.max + eps < b.min`), which made two
+ * parts placed flush against each other — the normal case for a kitbash or a
+ * bed layout — count as an overlapping pair and marked every such quote
+ * approximate for no reason. Boxes must interpenetrate by more than `eps` to
+ * count: `a.max - eps < b.min` ⇒ separated.
+ */
 function _aabbOverlap(a, b, eps) {
   for (let axis = 0; axis < 3; axis++) {
-    if (a.max[axis] + eps < b.min[axis]) return false;
-    if (b.max[axis] + eps < a.min[axis]) return false;
+    if (a.max[axis] - eps < b.min[axis]) return false;
+    if (b.max[axis] - eps < a.min[axis]) return false;
   }
   return true;
 }
@@ -172,17 +215,23 @@ export function overlappingPairs(ctx) {
  * mean "use the material default" — see config/default-settings.json `cost`.
  * `total` is `null` (never 0) when density or price cannot be resolved.
  *
+ * `geometry` (optional, I10) lets a caller that already computed
+ * `unitVolumesMM3`/`overlappingPairs` for this exact ctx hand them back in
+ * instead of paying for the whole per-vertex pass again — the Cost block's
+ * live `input` preview recomputes only the money that way.
+ *
  * @param {import('./ExportContext.js').ExportContext} ctx
  * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, currency?:string}} s
  * @param {{densityGcm3?:number, pricePerGram?:number, supportDensityGcm3?:number, supportPricePerGram?:number, defaultSupportPercent?:number}|null} material
+ * @param {{vols?:Map, pairs?:Array}|null} [geometry] pre-computed geometry for this ctx
  */
-export function quote(ctx, s, material) {
+export function quote(ctx, s, material, geometry = null) {
   const currency = s?.currency || 'USD';
   // Triangle-count gate FIRST — cheap array-length reads only. Above the cap,
   // bail out before unitVolumesMM3/overlappingPairs ever touch a vertex
   // buffer (a huge scene must never pay for the full per-vertex pass just to
   // show "—").
-  if (totalTriangles(ctx) > REPAIR_TRIANGLE_CAP) {
+  if (totalTriangles(ctx) > costTriangleCap()) {
     return {
       volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
       supportCost: null, total: null, currency, approximate: true, overlaps: 0,
@@ -190,8 +239,8 @@ export function quote(ctx, s, material) {
     };
   }
 
-  const vols = unitVolumesMM3(ctx);
-  const pairs = overlappingPairs(ctx);
+  const vols = geometry?.vols ?? unitVolumesMM3(ctx);
+  const pairs = geometry?.pairs ?? overlappingPairs(ctx);
   const volumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
 
   const density = material?.densityGcm3 || null;
@@ -205,7 +254,12 @@ export function quote(ctx, s, material) {
 
   const reasons = [];
   const open = [...vols.values()].filter(v => !v.watertight).length;
+  // A part nobody has validated (or whose result went stale after an edit) is
+  // NOT evidence of watertightness — say so rather than quoting a number as
+  // if it were exact (CIA F5 / I11).
+  const unchecked = [...vols.values()].filter(v => !v.validated).length;
   if (open) reasons.push(`notWatertight:${open}`);
+  if (unchecked) reasons.push(`notValidated:${unchecked}`);
   if (pairs.length) reasons.push(`overlap:${pairs.length}`);
   if (!density) reasons.push('noDensity');
   if (!price) reasons.push('noPrice');

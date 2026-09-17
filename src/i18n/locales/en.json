@@ -201,6 +201,7 @@
   "print.cost.result": "{volume} cm³ · {grams} g · {materialCost} + support {supportCost} = {total} {currency}",
   "print.cost.approximate": "Approximate",
   "print.cost.reasonNotWatertight": "{n} part(s) not watertight — volume approximate",
+  "print.cost.reasonNotValidated": "{n} part(s) not validated yet — volume unverified",
   "print.cost.reasonOverlap": "{n} overlapping pair(s) counted twice",
   "print.cost.reasonNoPrice": "No price set for this material",
   "print.cost.reasonNoDensity": "No density set for this material",

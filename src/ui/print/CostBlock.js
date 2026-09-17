@@ -14,7 +14,7 @@
 import { getState, setState } from '../../core/StateManager.js';
 import { SettingsStore } from '../../core/SettingsStore.js';
 import { PrintManager } from '../../core/PrintManager.js';
-import { quote } from '../../core/print/PrintCost.js';
+import { quote, unitVolumesMM3, overlappingPairs, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { wireNumbers, wireSelects } from '../lib/fields.js';
@@ -32,13 +32,25 @@ function _materials(state) {
 function _material(state) {
   const materials = _materials(state);
   const wanted = state.cost?.materialId;
-  return materials.find(m => m.id === wanted) ?? materials[0] ?? null;
+  const found = materials.find(m => m.id === wanted);
+  if (found) return found;
+  // CIA F13: falling back to materials[0] without recording it meant the
+  // quote silently used a different material than `cost.materialId` names
+  // (e.g. after a printer switch dropped the selected material). Commit the
+  // fallback so the select, the quote and the persisted setting agree.
+  const fallback = materials[0] ?? null;
+  if (fallback && wanted !== fallback.id) {
+    setState(st => ({ ...st, cost: { ...st.cost, materialId: fallback.id } }), { silent: true });
+  }
+  return fallback;
 }
 
 /** Map a PrintCost.js reason code → a translated string for the badge title. */
 function _reasonText(reason) {
   const nw = /^notWatertight:(\d+)$/.exec(reason);
   if (nw) return t('print.cost.reasonNotWatertight', { n: Number(nw[1]) });
+  const nv = /^notValidated:(\d+)$/.exec(reason);
+  if (nv) return t('print.cost.reasonNotValidated', { n: Number(nv[1]) });
   const ov = /^overlap:(\d+)$/.exec(reason);
   if (ov) return t('print.cost.reasonOverlap', { n: Number(ov[1]) });
   if (reason === 'noPrice') return t('print.cost.reasonNoPrice');
@@ -120,6 +132,8 @@ export function renderCostBlock(container, state) {
   // write, no full block re-render. The `change` handlers above still own
   // committing the value (setState + SettingsStore.save) once the user
   // finishes editing (blur/Enter), which re-renders from the committed state.
+  // I10: money-only. The geometry pass (per-vertex volume + AABB overlap) is
+  // memoised per ExportContext, so a keystroke never re-walks the scene.
   const livePreview = () => _renderResult(container, getState(), _liveCostOverride(container, getState()));
   for (const sel of ['#pp-cost-price', '#pp-cost-support-price', '#pp-cost-support-pct', '#pp-cost-currency']) {
     container.querySelector(sel)?.addEventListener('input', livePreview);
@@ -150,6 +164,21 @@ function _liveCostOverride(container, state) {
  * @param {object} [override] live (uncommitted) cost field values, for the
  *   `input`-driven preview; omit to use the committed `state.cost`.
  */
+// I10: the geometry half of a quote (per-vertex volumes + AABB overlap) is
+// the expensive half and depends ONLY on the ExportContext. Memoise it by ctx
+// identity so the live `input` preview recomputes money alone. `previewExport
+// Context()` builds a fresh frozen ctx per call, so a scene/selection change
+// produces a new identity and the cache misses exactly when it should.
+let _geomCacheCtx = null;
+let _geomCache = null;
+
+function _geometryFor(ctx) {
+  if (_geomCacheCtx === ctx && _geomCache) return _geomCache;
+  _geomCacheCtx = ctx;
+  _geomCache = { vols: unitVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
+  return _geomCache;
+}
+
 function _renderResult(container, state, override = null) {
   const el = container.querySelector('#pp-cost-total');
   if (!el) return;
@@ -164,15 +193,20 @@ function _renderResult(container, state, override = null) {
     return;
   }
 
+  // The triangle gate inside quote() must run BEFORE any per-vertex work, so
+  // the geometry cache is only consulted for a scene the quote will actually
+  // measure (quote() itself re-checks and short-circuits).
+  const geometry = totalTriangles(ctx) > costTriangleCap() ? null : _geometryFor(ctx);
+
   const q = quote(ctx, {
     pricePerGram: cost.pricePerGram || 0,
     supportPricePerGram: cost.supportPricePerGram || 0,
     supportPercent: cost.supportPercent || 0,
     currency,
-  }, material);
+  }, material, geometry);
 
   if (q.volumeCM3 === null) {
-    // Above REPAIR_TRIANGLE_CAP — quote() bailed out before computing
+    // Above costTriangleCap() — quote() bailed out before computing
     // anything (PrintCost.js `totalTriangles` gate).
     el.innerHTML = `— <span class="pp-approx" title="${escapeAttr(t('print.cost.reasonTooBig'))}">` +
       `${escapeHtml(t('print.cost.approximate'))}</span>`;

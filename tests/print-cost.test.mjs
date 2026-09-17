@@ -18,8 +18,13 @@ import { installEnv } from './env.mjs';
 installEnv();
 
 const { StateManager } = await import('../src/core/StateManager.js');
-const { unitVolumesMM3, overlappingPairs, quote, totalTriangles } = await import('../src/core/print/PrintCost.js');
-const { REPAIR_TRIANGLE_CAP } = await import('../src/core/repair/MeshRepair.js');
+const { unitVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap } =
+  await import('../src/core/print/PrintCost.js');
+const { setCapabilities } = await import('../src/core/storage/capabilities.js');
+
+// M9: the cost gate is a UI-responsiveness cap that tracks the HUD triangle
+// budget, NOT the repair engine's cap. Pin a small deterministic budget.
+setCapabilities({ triangleBudget: 5000 });
 
 // ── Fixture: a tetrahedron with V0=(0,0,0), V1=(-10,0,0), V2=(0,20,0),
 // V3=(0,0,30) — an axis-aligned right tetrahedron, volume = (1/6)*10*20*30
@@ -61,7 +66,7 @@ function fakeHugeMesh() {
     sideOrientation: 1,
     material: null,
     getVerticesData() { throw new Error('tooBig gate must short-circuit before getVerticesData is ever called'); },
-    getIndices() { return new Array((REPAIR_TRIANGLE_CAP + 1) * 3); },
+    getIndices() { return new Array((costTriangleCap() + 1) * 3); },
     computeWorldMatrix() {},
     getWorldMatrix() { return window.BABYLON.Matrix.Translation(0, 0, 0); },
     getBoundingInfo() {
@@ -109,12 +114,48 @@ await test('unitVolumesMM3: 1000 mm³ tetra at ratio 1, ×8 at ratio 2', () => {
 });
 
 await test('unitVolumesMM3: watertight flag follows the validation cache (holes/nonManifold → false)', () => {
+  setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
   const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
-  assert.equal(unitVolumesMM3(ctx).get('a').watertight, true, 'no cache entry = assumed watertight');
+  assert.equal(unitVolumesMM3(ctx).get('a').watertight, true, 'clean cache entry = watertight');
 
-  setValidation({ a: { results: [{ type: 'holes', severity: 'warning', message: 'x' }] } });
+  setValidation({ a: { results: [{ type: 'holes', severity: 'warning', message: 'x' }], stale: false } });
   const ctx2 = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
   assert.equal(unitVolumesMM3(ctx2).get('a').watertight, false);
+});
+
+// CIA F5 / I11: "never validated" is not "watertight" - it is "nobody has
+// checked", and an open shell's signed volume is arbitrary. The quote must
+// say so instead of presenting the number as if it were exact.
+await test('F5: a part with no cache entry is NOT validated and the quote says so', () => {
+  setValidation({});
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
+  assert.equal(unitVolumesMM3(ctx).get('a').validated, false, 'no cache entry = not validated');
+
+  const q = quote(ctx, { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' },
+    { densityGcm3: 1.1 });
+  assert.ok(q.reasons.includes('notValidated:1'), `expected notValidated:1, got ${q.reasons.join(',')}`);
+  assert.equal(q.approximate, true, 'unverified geometry can never read as an exact quote');
+  assert.ok(!q.reasons.some(r => /notWatertight/.test(r)),
+    'not-validated is its OWN reason - it must not be double-counted as not-watertight');
+});
+
+await test('F5: a STALE cache entry counts as not validated (same as PrintReadiness validation-pending)', () => {
+  setValidation({ a: { results: [], validatedAt: Date.now(), stale: true } });
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
+  assert.equal(unitVolumesMM3(ctx).get('a').validated, false);
+  const q = quote(ctx, { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' },
+    { densityGcm3: 1.1 });
+  assert.ok(q.reasons.includes('notValidated:1'));
+});
+
+await test('F5: a freshly validated, clean part carries NO notValidated reason', () => {
+  setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
+  assert.equal(unitVolumesMM3(ctx).get('a').validated, true);
+  const q = quote(ctx, { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' },
+    { densityGcm3: 1.1 });
+  assert.ok(!q.reasons.some(r => /notValidated/.test(r)), `got ${q.reasons.join(',')}`);
+  assert.equal(q.approximate, false, 'a validated, closed, priced part quotes exactly');
 });
 
 await test('overlappingPairs: AABB intersection flags overlapping units, never subtracts', () => {
@@ -131,6 +172,42 @@ await test('overlappingPairs: AABB intersection flags overlapping units, never s
     { id: 'c', mesh: fakeMesh(tetra, { offset: [1000, 0, 0] }) },
   ]);
   assert.equal(overlappingPairs(far).length, 0, 'far-apart units do not overlap');
+});
+
+// M6: the epsilon's sign was inverted, so two parts placed flush against each
+// other - the normal kitbash / bed-layout case - counted as overlapping and
+// marked every such quote approximate for no reason.
+await test('M6: exactly-touching boxes do NOT overlap; a 0.1 mm interpenetration does', () => {
+  // The tetra spans x in [-10, 0]. Offsetting by +10 puts the second unit's
+  // minimum exactly at the first's maximum: touching, not overlapping.
+  const touching = ctxWith([
+    { id: 'a', mesh: fakeMesh(tetra) },
+    { id: 'b', mesh: fakeMesh(tetra, { offset: [10, 0, 0] }) },
+  ]);
+  assert.equal(overlappingPairs(touching).length, 0,
+    'flush faces are a legitimate layout, not an overlap');
+
+  // 0.1 mm of real interpenetration (10x the 0.01 mm epsilon) IS an overlap.
+  const overlapping = ctxWith([
+    { id: 'a', mesh: fakeMesh(tetra) },
+    { id: 'b', mesh: fakeMesh(tetra, { offset: [9.9, 0, 0] }) },
+  ]);
+  assert.equal(overlappingPairs(overlapping).length, 1,
+    '0.1 mm interpenetration is flagged');
+});
+
+// I10: the Cost block memoises the geometry pass per ExportContext and hands
+// it back, so a keystroke recomputes money only.
+await test('I10: quote accepts pre-computed geometry and does no per-vertex work with it', () => {
+  setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
+  const geometry = { vols: unitVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
+  // Poison the mesh: any fresh geometry pass would now throw.
+  ctx.units[0].parts[0].mesh.getVerticesData = () => { throw new Error('re-walked the scene'); };
+  const q = quote(ctx, { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' },
+    { densityGcm3: 1.1 }, geometry);
+  assert.ok(Math.abs(q.volumeCM3 - 1) < 1e-6, 'same volume, from the cached pass');
+  assert.ok(Math.abs(q.materialCost - 0.55) < 1e-6, 'money recomputed from the new settings');
 });
 
 await test('quote: grams = cm³ × density; support premium; overlap flagged not subtracted', () => {
@@ -173,7 +250,7 @@ await test('totalTriangles: cheap array-length sum across units/parts', () => {
   assert.equal(totalTriangles(ctx), 8, 'two 4-triangle tetrahedra = 8 triangles');
 });
 
-await test('quote: above REPAIR_TRIANGLE_CAP short-circuits before any volume computation (tooBig, never throws)', () => {
+await test('M9: quote above costTriangleCap() short-circuits before any volume computation (tooBig, never throws)', () => {
   const ctx = ctxWith([{ id: 'a', mesh: fakeHugeMesh() }]);
   // fakeHugeMesh's getVerticesData throws — if quote() ever called
   // unitVolumesMM3/overlappingPairs on it, this assertion would throw

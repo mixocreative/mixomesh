@@ -201,6 +201,7 @@
   "print.cost.result": "{volume} cm³ · {grams} g · {materialCost} + 支撐 {supportCost} = {total} {currency}",
   "print.cost.approximate": "約略值",
   "print.cost.reasonNotWatertight": "{n} 個零件不密閉 — 體積為約略值",
+  "print.cost.reasonNotValidated": "{n} 個部件尚未驗證 — 體積未經確認",
   "print.cost.reasonOverlap": "{n} 組重疊被重複計算",
   "print.cost.reasonNoPrice": "此材料尚未設定價格",
   "print.cost.reasonNoDensity": "此材料尚未設定密度",
