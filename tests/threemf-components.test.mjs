@@ -273,6 +273,88 @@ await test('3MF import follows production component paths into related model par
   assert.equal(container.meshes[0].parent, container.transformNodes[0]);
 });
 
+
+// ── Independent producer: PrusaSlicer 2.9.3 (`prusa-slicer-console --export-3mf`)
+// wrote tests/fixtures/prusa-tetra.3mf from a tetrahedron with glTF vertices
+// (0,0,0) (10,0,0) (0,20,0) (0,0,30). Its model XML is embedded verbatim below
+// (class-d fixture, S24). Expected Babylon result = PrintSpace.fromPrintSpace.
+const PRUSA_TETRA_MODEL_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">
+ <metadata name="slic3rpe:Version3mf">1</metadata>
+ <metadata name="Title">prusa-tetra</metadata>
+ <metadata name="Designer"></metadata>
+ <metadata name="Description">prusa-tetra</metadata>
+ <metadata name="Copyright"></metadata>
+ <metadata name="LicenseTerms"></metadata>
+ <metadata name="Rating"></metadata>
+ <metadata name="CreationDate">2026-09-17</metadata>
+ <metadata name="ModificationDate">2026-09-17</metadata>
+ <metadata name="Application">PrusaSlicer-2.9.3</metadata>
+ <resources>
+  <object id="1" type="model">
+   <mesh>
+    <vertices>
+     <vertex x="0" y="0" z="0"/>
+     <vertex x="10.000001" y="0" z="0"/>
+     <vertex x="0" y="20.0000019" z="0"/>
+     <vertex x="0" y="0" z="30.0000019"/>
+    </vertices>
+    <triangles>
+     <triangle v1="0" v2="2" v3="1"/>
+     <triangle v1="0" v2="1" v3="3"/>
+     <triangle v1="0" v2="3" v3="2"/>
+     <triangle v1="1" v2="2" v3="3"/>
+    </triangles>
+   </mesh>
+  </object>
+ </resources>
+ <build>
+  <item objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1"/>
+ </build>
+</model>
+`;
+
+const signedVol = (pos, idx) => {
+  let v6 = 0;
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
+    v6 += pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1])
+        - pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c])
+        + pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+  }
+  return v6 / 6;
+};
+
+await test('3MF import (PrusaSlicer-written file): +Z up → Babylon +Y, x reflected, winding Babylon-outward', async () => {
+  const container = await Loader.__test.buildContainer(scene, null, PRUSA_TETRA_MODEL_XML);
+  assert.equal(container.meshes.length, 1);
+  const m = container.meshes[0];
+  const pos = Array.from(m.getVerticesData('position')).map(v => Math.round(v * 1e6) / 1e6);
+  // 3MF (x, y, z) → Babylon (-x, z, -y): apex (0,0,30) lands at (0, 30, 0), i.e. UP.
+  assert.deepEqual(pos, [0, 0, 0, -10.000001, 0, 0, 0, 0, -20.000002, 0, 30.000002, 0]);
+  const idx = Array.from(m.getIndices());
+  assert.deepEqual(idx, [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3], 'file order kept (reflection makes it Babylon-CCW-outward)');
+  assert.ok(signedVol(pos, idx) < 0, 'negative raw signed volume = outward for a CounterClockWise-flagged Babylon mesh');
+  assert.notEqual(m.sideOrientation, 0, 'loader meshes keep the default CounterClockWise flag');
+});
+
+await test('3MF import honours the model unit attribute (inch → mm ×25.4; unknown unit → throws)', async () => {
+  const inch = PRUSA_TETRA_MODEL_XML.replace('unit="millimeter"', 'unit="inch"');
+  const c = await Loader.__test.buildContainer(scene, null, inch);
+  const pos = Array.from(c.meshes[0].getVerticesData('position'));
+  assert.ok(Math.abs(pos[3] - (-10.000001 * 25.4)) < 1e-3, `x scaled by 25.4, got ${pos[3]}`);
+  assert.ok(Math.abs(pos[10] - (30.000002 * 25.4)) < 1e-3, `apex scaled by 25.4, got ${pos[10]}`);
+  const bad = PRUSA_TETRA_MODEL_XML.replace('unit="millimeter"', 'unit="furlong"');
+  await assert.rejects(Loader.__test.buildContainer(scene, null, bad), /unsupported unit "furlong"/);
+});
+
+await test('3MF import refuses a triangle whose vertex index is out of range (no silent garbage mesh)', async () => {
+  const oob = PRUSA_TETRA_MODEL_XML.replace('<triangle v1="1" v2="2" v3="3"/>', '<triangle v1="1" v2="2" v3="99"/>');
+  await assert.rejects(Loader.__test.buildContainer(scene, null, oob), /references a vertex outside 0\.\.3/);
+  const nan = PRUSA_TETRA_MODEL_XML.replace('<vertex x="10.000001" y="0" z="0"/>', '<vertex x="ten" y="0" z="0"/>');
+  await assert.rejects(Loader.__test.buildContainer(scene, null, nan), /non-numeric coordinate/);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

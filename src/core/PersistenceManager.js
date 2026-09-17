@@ -95,8 +95,17 @@ export async function open() {
   }
   const file = await handle.getFile();
   const doc  = JSON.parse(await file.text());
-  _fileHandle = handle;
+  await _loadAndBind(doc, handle);
+}
+
+// Bind the save target only once the loaded state is coherent. Binding
+// BEFORE loadProject meant a torn load (world already reset, then a throw)
+// left Ctrl+S pointing at the user's good file with an empty scene — one
+// keystroke from overwriting their only copy (audit 2026-09-17, C1).
+async function _loadAndBind(doc, handle) {
+  _fileHandle = null;
   await loadProject(doc);
+  _fileHandle = handle;
 }
 
 /** Reset to a blank project (confirm if dirty). */
@@ -136,8 +145,7 @@ export async function openRecent(rec) {
     return;
   }
   const file = await handle.getFile();
-  _fileHandle = handle;
-  await loadProject(JSON.parse(await file.text()));
+  await _loadAndBind(JSON.parse(await file.text()), handle);
 }
 
 /**

@@ -31,9 +31,10 @@ let _registry = {};
 let _clones = [];
 AssetLoader.getBabylonMesh = (id) => _registry[id] ?? null;
 
-function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [0, 0, 0] } = {}) {
+function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [0, 0, 0], side = 1 } = {}) {
   return {
     name,
+    sideOrientation: side,   // 1 = CounterClockWise (Babylon default), 0 = ClockWise (glTF imports)
     material: color ? { id: 'mat-' + name, diffuseColor: color } : { id: 'mat-' + name },
     _verts: verts, _size: size, _color: color, _origin: origin,
     getTotalVertices() { return this._verts; },
@@ -59,7 +60,7 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [
     refreshBoundingInfo() {},
     dispose() { this.__disposed = true; },
     clone(cloneName) {
-      const c = mesh(cloneName || (name + '__c'), { verts, size, color, origin });
+      const c = mesh(cloneName || (name + '__c'), { verts, size, color, origin, side });
       c.material = this.material;
       c.__isClone = true;
       _clones.push(c);
@@ -95,6 +96,12 @@ function obj(id, over = {}) {
     isGhost: false, isUnlinked: false, isPrintPart: true, ...over,
   };
 }
+
+const stlInfo = (bytes) => {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  return { bytes: u8.length, tris: view.getUint32(80, true), trisBE: view.getUint32(80, false) };
+};
 
 const valOK         = async () => [];
 const valErrAlways  = async () => [{ severity: 'error', message: 'non-manifold' }];
@@ -328,7 +335,7 @@ await test('STL: CSG2 unavailable → exports without re-bake, warns', async () 
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
     MeshValidator.validateMesh = valOK;
     await PrintManager.exportSTL();
-    assert.equal(calls.stlCreate.length, 1, 'STL still produced');
+    assert.equal(calls.downloads.length, 1, 'STL still produced');
     assert.equal(calls.csgFrom.length, 0, 'no CSG2 re-bake');
     assert.ok(toasts.some(t => t.type === 'warning' && /CSG2 unavailable/.test(t.msg)), 'warned');
   } finally {
@@ -342,8 +349,7 @@ await test('STL: CSG2 available → re-bakes every mesh then exports', async () 
   await PrintManager.exportSTL();
   assert.equal(calls.csgFrom.length, 2, 'CSG2 re-bake per mesh');
   assert.equal(calls.vdApply.length, 2, 'baked geometry applied back');
-  assert.equal(calls.stlCreate.length, 1);
-  assert.equal(calls.stlCreate[0].count, 2);
+  assert.equal(calls.downloads.length, 1, 'one combined STL');
   assert.ok(_clones.every(c => c.__optimized && c.__normals), 'optimize + normals on clones');
 });
 
@@ -356,7 +362,7 @@ await test('STL: non-watertight mesh (CSG2 rejects) → skips quietly, still exp
       registry: { m1: mesh('m1'), m2: mesh('m2') } });
     MeshValidator.validateMesh = valOK;
     await PrintManager.exportSTL();                 // must NOT throw
-    assert.equal(calls.stlCreate.length, 1, 'export still produced');
+    assert.equal(calls.downloads.length, 1, 'export still produced');
     assert.ok(toasts.some(t => t.type === 'info' && /not watertight/.test(t.msg)),
       'one summarized info toast');
   } finally {
@@ -377,7 +383,7 @@ await test('STL: error surviving auto-fix → blocks with list', async () => {
     assert.ok(err.validationErrors?.length === 1);
     return true;
   });
-  assert.equal(calls.stlCreate.length, 0);
+  assert.equal(calls.downloads.length, 0);
 });
 
 await test('STL: individually → one STL call per mesh + outer zip of N parts', async () => {
@@ -385,17 +391,18 @@ await test('STL: individually → one STL call per mesh + outer zip of N parts',
     registry: { m1: mesh('m1'), m2: mesh('m2'), m3: mesh('m3') } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportSTL({ individually: true });
-  // One CreateSTL call per mesh, each with a single-mesh list and download=false
-  assert.equal(calls.stlCreate.length, 3, 'one STL call per mesh');
-  for (const c of calls.stlCreate) {
-    assert.equal(c.count, 1);
-    assert.equal(c.rest[0], false, 'download=false so bytes return for zipping');
-  }
-  // Outer zip contains the three .stl entries named `${project}_${mesh}_r{w}to{t}.stl`
+  // Outer zip contains the three .stl entries named `${project}_${mesh}_r{w}to{t}.stl`,
+  // each a real little-endian binary STL (StlWriter, not the Babylon serializer).
   const outer = zipInstances.at(-1).files;
   assert.ok(outer['Test_m1_r1to1.stl'], 'project+mesh+ratio in name');
   assert.ok(outer['Test_m2_r1to1.stl']);
   assert.ok(outer['Test_m3_r1to1.stl']);
+  for (const key of ['Test_m1_r1to1.stl', 'Test_m2_r1to1.stl', 'Test_m3_r1to1.stl']) {
+    const info = stlInfo(outer[key]);
+    assert.equal(info.tris, 1, `${key}: one triangle, little-endian count`);
+    assert.notEqual(info.trisBE, 1, `${key}: count is NOT big-endian (regression: Babylon CreateSTL isLittleEndian=false)`);
+    assert.equal(info.bytes, 84 + 50, `${key}: 80-byte header + count + 50 bytes/facet`);
+  }
   assert.equal(calls.downloads.at(-1), 'Test_r1to1.zip',
     'outer zip uses project+ratio default filename');
 });
@@ -405,7 +412,7 @@ await test('STL: individually + selectedOnly → only selected mesh in outer zip
     registry: { m1: mesh('m1'), m2: mesh('m2') }, selectedIds: ['m2'] });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportSTL({ individually: true, selectedOnly: true });
-  assert.equal(calls.stlCreate.length, 1, 'only the selected mesh exported');
+  assert.equal(Object.keys(zipInstances.at(-1).files).length, 1, 'only the selected mesh exported');
   const outer = zipInstances.at(-1).files;
   assert.ok(outer['Test_m2_r1to1.stl']);
   assert.ok(!outer['Test_m1_r1to1.stl'], 'unselected mesh excluded');
@@ -441,9 +448,49 @@ await test('3MF: valid mesh → OPC package with model XML + colour, downloads',
   assert.match(model, /<m:color color="#FF0000FF"\/>/);
   assert.match(model, /<object id="2" type="model" pid="1" pindex="0">/);
   assert.match(model, /<vertex /);
-  assert.match(model, /<triangle v1="0" v2="2" v3="1"\/>/, 'winding flipped for RH 3MF');
+  // CounterClockWise-flagged (default) mesh: PrintSpace keeps the buffer
+  // order — the reflection in toPrintSpace already makes it outward for the
+  // right-handed 3MF reader. (A ClockWise-flagged glTF mesh is reversed; see
+  // the dedicated test below and tests/print-space.test.mjs.)
+  assert.match(model, /<triangle v1="0" v2="1" v3="2"\/>/, 'CounterClockWise mesh written as-is');
   assert.match(model, /<build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 0 0 0"\/><\/build>/,
     'build item carries explicit identity — placement is fully baked');
+});
+
+await test('3MF: ClockWise-flagged (glTF-imported) mesh → triangle reversed so the right-handed reader sees it outward', async () => {
+  // CSG2 off: the CSG re-bake replaces geometry with Babylon-native winding
+  // and resets the flag (covered by the next test); without it the clone
+  // keeps the glTF loader's ClockWise flag and must be reversed on write.
+  const B = globalThis.window.BABYLON;
+  const savedCSG = B.CSG2, savedInit = B.InitializeCSG2Async;
+  B.CSG2 = undefined; B.InitializeCSG2Async = undefined;
+  try {
+    setScene({ objects: { m1: obj('m1') },
+      registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 }, side: 0 }) } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportThreeMF();
+  } finally {
+    B.CSG2 = savedCSG; B.InitializeCSG2Async = savedInit;
+  }
+  assert.equal(_clones[0].sideOrientation, 0, 'clone carries the ClockWise flag');
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  assert.match(model, /<triangle v1="0" v2="2" v3="1"\/>/, 'ClockWise mesh reversed (PrintSpace.printIndices)');
+  // Axis map: Babylon (1,0,0) → 3MF (-1,0,0); Babylon (0,1,0) (up) → 3MF (0,0,1) (up).
+  // Then centred in X/Y (cx = -0.5) and rested on the bed (min z → 0).
+  assert.match(model, /<vertex x="0\.5" y="0" z="0"\/>/);
+  assert.match(model, /<vertex x="-0\.5" y="0" z="0"\/>/, 'Babylon +X lands on 3MF -X (glTF reflection undone)');
+  assert.match(model, /<vertex x="0\.5" y="0" z="1"\/>/, 'Babylon +Y lands on 3MF +Z (up stays up), build rests on z=0');
+});
+
+await test('3MF: CSG re-bake resets a ClockWise clone to CounterClockWise (Manifold output is native winding)', async () => {
+  setScene({ objects: { m1: obj('m1') },
+    registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 }, side: 0 }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportThreeMF();
+  assert.equal(calls.csgFrom.length, 1, 'CSG re-bake ran');
+  assert.equal(_clones[0].sideOrientation, 1, 'flag reset after CSG output replaced the geometry');
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  assert.match(model, /<triangle v1="0" v2="1" v3="2"\/>/, 'fresh CSG geometry written as-is');
 });
 
 await test('3MF: distinct colours → one colorgroup entry each', async () => {
@@ -591,9 +638,7 @@ await test('filename: combined STL → `${project}${suffix}.stl` (single-blob pa
     workingRatio: 12, targetRatio: 35 });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportSTL();
-  assert.equal(calls.stlCreate.length, 1);
-  assert.equal(calls.stlCreate[0].rest[0], false,
-    'STL combined now goes through _triggerDownload (download=false)');
+  assert.equal(calls.downloads.length, 1, 'STL combined goes through packageAndDownload');
   // Export reference = active object's ratio (12 here) → target 35:
   // suffix _r{activeRatio}to{target}.
   assert.equal(calls.downloads.at(-1), 'Test_r12to35.stl');

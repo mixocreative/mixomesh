@@ -116,10 +116,11 @@ export function importScaleFactor(sourceUnit, modelRatio, ratio = modelRatio) {
  *     from every readout while keeping the model visually identical.
  *  3. The drop anchor.
  *
- * Because step 2 is a reflection, baking it into a now-positive-scale mesh
- * reverses triangle winding — so faces are flipped back when the baked linear
- * matrix has a negative determinant, keeping culling and exported OBJ/STL
- * winding outward.
+ * Because step 2 is a reflection, baking it reverses triangle winding.
+ * Babylon's `bakeTransformIntoVertices` compensates by itself (it flips faces
+ * when the matrix determinant is negative), so this module must NOT flip
+ * again — the mesh keeps the ClockWise side flag Babylon's glTF loader set,
+ * and its index order after the bake renders outward under that flag.
  *
  * @param {BABYLON.AssetContainer} container
  * @param {number} factor    unit × ratio scale
@@ -180,7 +181,13 @@ export function bakeImportTransform(container, factor, position) {
     m.rotation.set(0, 0, 0);
     m.scaling.set(1, 1, 1);
 
-    if (linear.determinant() < 0) m.flipFaces(false);
+    // NOTE: Babylon's bakeTransformIntoVertices already calls flipFaces()
+    // when the baked matrix has a negative determinant (mesh.js, "flip
+    // faces?"). Flipping again here un-did that and left every glTF import
+    // inside-out under its ClockWise side flag — visible as far faces with
+    // back-face culling on, an "inverted normals" validator warning on every
+    // import, and inverted OBJ/3MF winding. Verified 2026-09-17 (cull-on vs
+    // cull-off screenshots + PrusaSlicer/trimesh signed volumes).
     m.refreshBoundingInfo?.();
   }
 

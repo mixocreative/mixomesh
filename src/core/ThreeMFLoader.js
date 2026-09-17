@@ -18,12 +18,17 @@
 // the pre-export scene unless workingRatio == targetRatio, which is the same
 // inherent ratio-model behaviour as re-importing an exported OBJ/STL.
 
+import { fromPrintSpace } from './print/PrintSpace.js';
+
 const BABYLON = window.BABYLON;
 
 const PLUGIN_NAME = '3mf';
 const EXT = '.3mf';
-// Inverse of PrintManager's Y_UP_TO_Z_UP (= RotationX(-90°)).
-const Z_UP_TO_Y_UP = () => BABYLON.Matrix.RotationX(Math.PI / 2);
+// Axis map lives in print/PrintSpace.js (shared with every writer). 3MF
+// `unit` → millimetres, per 3MF Core §3.4 (default millimeter).
+const UNIT_TO_MM = Object.freeze({
+  micron: 0.001, millimeter: 1, centimeter: 10, inch: 25.4, foot: 304.8, meter: 1000,
+});
 
 const NS_MATERIAL = 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02';
 
@@ -172,6 +177,10 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   const makeContext = async (modelPath, xml) => {
     const doc = _parseModelXml(xml);
     const cleanPath = _cleanPackagePath(modelPath) || '3D/3dmodel.model';
+    const unitAttr = (doc.documentElement?.getAttribute?.('unit')
+      ?? doc.getElementsByTagName('model')[0]?.getAttribute('unit') ?? 'millimeter').trim().toLowerCase();
+    const unitScale = UNIT_TO_MM[unitAttr || 'millimeter'];
+    if (!unitScale) throw new Error(`3MF: unsupported unit "${unitAttr}" (expected micron|millimeter|centimeter|inch|foot|meter)`);
 
     // colorgroup id → [Color3,…] (Materials extension; export writes group "1").
     const colorGroups = new Map();
@@ -206,6 +215,7 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     return {
       path: cleanPath,
       doc,
+      unitScale,
       objectsById: _objectsById(doc),
       colorGroups,
       textures,
@@ -233,7 +243,6 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   const rootContext = await loadContext(opts.modelPath || '3D/3dmodel.model', modelXml);
 
   const container = new BABYLON.AssetContainer(scene);
-  const flip = Z_UP_TO_Y_UP();
   const usedTexIds = new Set();   // model path + texture2d ids actually bound to a material
 
   let made = 0;
@@ -245,16 +254,19 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     if (!vEls.length || !tEls.length) return 0;
 
     const positions = new Array(vEls.length * 3);
+    const unitScale = ctx.unitScale;
     for (let i = 0; i < vEls.length; i++) {
-      let p = new BABYLON.Vector3(
-        parseFloat(vEls[i].getAttribute('x')) || 0,
-        parseFloat(vEls[i].getAttribute('y')) || 0,
-        parseFloat(vEls[i].getAttribute('z')) || 0,
-      );
+      const el = vEls[i];
+      const vx = Number(el.getAttribute('x')), vy = Number(el.getAttribute('y')), vz = Number(el.getAttribute('z'));
+      if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(vz)) {
+        throw new Error(`3MF: vertex ${i} of object ${objectId} has a non-numeric coordinate`);
+      }
+      let p = new BABYLON.Vector3(vx * unitScale, vy * unitScale, vz * unitScale);
       if (matrix) p = BABYLON.Vector3.TransformCoordinates(p, matrix);   // 3MF-space build/component placement
-      p = BABYLON.Vector3.TransformCoordinates(p, flip);                 // Z-up → Babylon Y-up
-      positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z;
+      const [bx, by, bz] = fromPrintSpace(p.x, p.y, p.z);               // 3MF RH Z-up → Babylon LH Y-up
+      positions[i * 3] = bx; positions[i * 3 + 1] = by; positions[i * 3 + 2] = bz;
     }
+    const vertexCount = vEls.length;
 
     const pid = obj.getAttribute('pid');
     const tg = pid != null ? ctx.texGroups.get(pid) : null;
@@ -263,11 +275,18 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     const uvs = tg ? new Array(vEls.length * 2).fill(0) : null;
     for (let i = 0; i < tEls.length; i++) {
       const tEl = tEls[i];
-      const a = +tEl.getAttribute('v1');
-      const b = +tEl.getAttribute('v2');
-      const c = +tEl.getAttribute('v3');
-      // Invert the export's winding reversal (it wrote v1,v3,v2): swap back.
-      indices[i * 3] = a; indices[i * 3 + 1] = c; indices[i * 3 + 2] = b;
+      const a = Number(tEl.getAttribute('v1'));
+      const b = Number(tEl.getAttribute('v2'));
+      const c = Number(tEl.getAttribute('v3'));
+      if (!(Number.isInteger(a) && Number.isInteger(b) && Number.isInteger(c))
+          || a < 0 || b < 0 || c < 0 || a >= vertexCount || b >= vertexCount || c >= vertexCount) {
+        throw new Error(`3MF: triangle ${i} of object ${objectId} references a vertex outside 0..${vertexCount - 1}`);
+      }
+      // 3MF triangles are counter-clockwise-outward in a right-handed space.
+      // fromPrintSpace is a reflection, which makes the same index order read
+      // clockwise — exactly Babylon's convention for a CounterClockWise-flagged
+      // (default) mesh in a left-handed scene. So: keep the file's order.
+      indices[i * 3] = a; indices[i * 3 + 1] = b; indices[i * 3 + 2] = c;
 
       // Per-triangle UV indices for textured objects. Exporter writes one
       // tex2coord per vertex with p_i == v_i — last-write-wins is harmless

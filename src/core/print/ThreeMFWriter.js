@@ -8,17 +8,15 @@
 // writers — if either changes shape, mirror the other.
 
 import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
+import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 
 const BABYLON = window.BABYLON;
 
-// Babylon is Y-up (and, after the import bake, left-handed). 3MF / slicers
-// are Z-up right-handed. This rotation maps Babylon (x,y,z) → 3MF; the
-// winding flip restores outward normals for the RH consumer. Both are single
-// switches: if a live test shows the model lying down / mirrored, this is the
-// one place to adjust (LH↔RH reasoning is unreliable on paper — verify in a
-// slicer, same lesson as the nav-cube convention).
-const Y_UP_TO_Z_UP = BABYLON.Matrix.RotationX(-Math.PI / 2);
-const THREEMF_REVERSE_WINDING = true;
+// Axis + winding: Babylon (left-handed, Y-up) → 3MF (right-handed, Z-up) is
+// ONE shared map in PrintSpace.js, verified 2026-09-17 against a
+// PrusaSlicer-written 3MF (tests/fixtures/prusa-tetra.3mf). Do not add a
+// rotation or a blanket winding flip here — per-mesh winding is decided by
+// PrintSpace.printIndices from Babylon's effective side orientation.
 // 3MF 3×4 row-major identity — emitted on every build item so placement is
 // driven solely by the baked vertices, never a viewer-guessed transform.
 const THREEMF_IDENTITY = '1 0 0 0 1 0 0 0 1 0 0 0';
@@ -91,8 +89,9 @@ function _flattenEntries(list) {
  * one-colour-per-part model the filament pipeline produces.
  *
  * Vertices arrive world-space millimetre (from `flattenWorld`) in Babylon
- * Y-up; here they're rotated into 3MF Z-up (`Y_UP_TO_Z_UP`), winding flipped
- * for the right-handed consumer, then the whole build is centred on the
+ * Y-up; here they're mapped into 3MF Z-up right-handed space
+ * (`PrintSpace.toPrintSpace`), each mesh's triangles oriented outward
+ * (`PrintSpace.printIndices`), then the whole build is centred on the
  * origin so it lands on the slicer bed. `unit="millimeter"` is literal.
  */
 function _xmlAttr(value) {
@@ -253,8 +252,8 @@ function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex) {
 
   for (const { mesh } of unit.meshes) {
     const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) continue;
+    const idx = printIndices(mesh);   // outward in 3MF's right-handed space
+    if (!pos || idx.length === 0) continue;
     for (let i = 0; i < pos.length; i += 3) {
       vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
     }
@@ -262,9 +261,8 @@ function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex) {
     if (single) objectAttrs = ` pid="1" pindex="${pidx}"`;
     for (let i = 0; i < idx.length; i += 3) {
       const a = idx[i] + vertexOffset;
-      const [b, c] = THREEMF_REVERSE_WINDING
-        ? [idx[i + 2] + vertexOffset, idx[i + 1] + vertexOffset]
-        : [idx[i + 1] + vertexOffset, idx[i + 2] + vertexOffset];
+      const b = idx[i + 1] + vertexOffset;
+      const c = idx[i + 2] + vertexOffset;
       triangles += single
         ? `<triangle v1="${a}" v2="${b}" v3="${c}"/>`
         : `<triangle v1="${a}" v2="${b}" v3="${c}" pid="1" p1="${pidx}" p2="${pidx}" p3="${pidx}"/>`;
@@ -284,14 +282,12 @@ function _convertVertices(list) {
   for (const { mesh } of list) {
     const p = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
     if (!p) continue;
-    const out = new Float32Array(p.length);
-    for (let i = 0; i < p.length; i += 3) {
-      const w = BABYLON.Vector3.TransformCoordinates(
-        new BABYLON.Vector3(p[i], p[i + 1], p[i + 2]), Y_UP_TO_Z_UP);
-      out[i] = w.x; out[i + 1] = w.y; out[i + 2] = w.z;
-      if (w.x < mnx) mnx = w.x; if (w.x > mxx) mxx = w.x;
-      if (w.y < mny) mny = w.y; if (w.y > mxy) mxy = w.y;
-      if (w.z < mnz) mnz = w.z; if (w.z > mxz) mxz = w.z;
+    const out = positionsToPrintSpace(p);
+    for (let i = 0; i < out.length; i += 3) {
+      const x = out[i], y = out[i + 1], z = out[i + 2];
+      if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+      if (y < mny) mny = y; if (y > mxy) mxy = y;
+      if (z < mnz) mnz = z; if (z > mxz) mxz = z;
     }
     converted.set(mesh, out);
   }
@@ -299,7 +295,9 @@ function _convertVertices(list) {
     converted,
     cx: Number.isFinite(mnx) ? (mnx + mxx) / 2 : 0,
     cy: Number.isFinite(mny) ? (mny + mxy) / 2 : 0,
-    cz: Number.isFinite(mnz) ? (mnz + mxz) / 2 : 0,
+    // Z is UP in 3MF: rest the build on the bed (min z → 0) instead of
+    // centring it, which put half the part below the plate.
+    cz: Number.isFinite(mnz) ? mnz : 0,
   };
 }
 
@@ -411,8 +409,8 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
 
   for (const { mesh } of unit.meshes) {
     const pos = converted.get(mesh);
-    const idx = mesh.getIndices();
-    if (!pos || !idx || idx.length === 0) continue;
+    const idx = printIndices(mesh);   // outward in 3MF's right-handed space
+    if (!pos || idx.length === 0) continue;
     for (let i = 0; i < pos.length; i += 3) {
       vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
     }
@@ -424,8 +422,8 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
     }
     for (let i = 0; i < idx.length; i += 3) {
       const localA = idx[i];
-      const localB = THREEMF_REVERSE_WINDING ? idx[i + 2] : idx[i + 1];
-      const localC = THREEMF_REVERSE_WINDING ? idx[i + 1] : idx[i + 2];
+      const localB = idx[i + 1];
+      const localC = idx[i + 2];
       const a = localA + vertexOffset;
       const b = localB + vertexOffset;
       const c = localC + vertexOffset;

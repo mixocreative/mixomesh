@@ -239,6 +239,8 @@ src/
       ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
       PrintNaming.js       ← filename helpers (take ctx; no getState)
       PrintPrep.js         ← reusable clone prep steps (THROW on missing ctx.pivot/ratioFactor/unitFactor)
+      PrintSpace.js        ← THE axis + winding seam (Babylon LH Y-up ↔ print RH Z-up); used by 3MF/STL writers + 3MF loader
+      StlWriter.js         ← binary little-endian STL through PrintSpace (Babylon STLExport rejected)
       PrintFormats.js      ← format registry: labels, prep order, serializers
       PrintPackaging.js    ← zip/blob packaging + download dispatch
       PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
@@ -521,7 +523,7 @@ Before writing custom logic, check if Babylon provides it. **Required uses:**
 | Need | Use this |
 |---|---|
 | OBJ + MTL export | `BABYLON.OBJExport.OBJ(meshes, materials, matlibname)` |
-| STL export | `BABYLON.STLExport.CreateSTL(meshes, ...)` |
+| STL export | `print/StlWriter.js` (own little-endian binary writer through `PrintSpace`). `BABYLON.STLExport` REJECTED 2026-09-17: it applies its own Y/Z swap (a mirror) and the call shipped `isLittleEndian=false` — slicers read a garbage triangle count |
 | Selection outline | custom mask-RTT silhouette (`scene/SelectionOutline.js`) — HighlightLayer REJECTED: its stencil leaks onto PBR faces reporting any alpha mode (§7) |
 | Asset thumbnails | `BABYLON.Tools.CreateScreenshotUsingRenderTarget(engine, camera, size, cb)` |
 | World axes overlay | `new BABYLON.AxesViewer(scene, size)` |
@@ -1714,9 +1716,18 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    `p:path` / `path`, the loader resolves that OPC path relative to the current
    model part, parses the related `.model` part, and instantiates the referenced
    `objectid` from that part. Component/build transforms are composed in 3MF
-   space and baked into child mesh vertices before the `RotationX(+90°)` 3MF
-   Z-up → Babylon Y-up conversion. The loader restores winding (export wrote
-   `v1,v3,v2`) and maps `m:colorgroup`+`pid/pindex` to
+   space and baked into child mesh vertices, then each vertex goes through
+   `print/PrintSpace.fromPrintSpace` (3MF right-handed Z-up → Babylon
+   left-handed Y-up: `(x, y, z) → (-x, z, -y)`, a reflection — the exact
+   inverse of the writer's `toPrintSpace`). The model `unit` attribute scales
+   to mm (micron/millimeter/centimeter/inch/foot/meter; anything else throws);
+   triangle indices outside the vertex range and non-numeric coordinates
+   throw instead of producing a garbage mesh. Triangle order is kept as
+   written (the reflection already makes 3MF's CCW-outward read as Babylon's
+   default CounterClockWise front). Verified 2026-09-17 against a
+   PrusaSlicer-authored file (`tests/fixtures/prusa-tetra.3mf`, embedded in
+   `tests/threemf-components.test.mjs`). The loader maps
+   `m:colorgroup`+`pid/pindex` to
    `StandardMaterial.diffuseColor`, or `m:texture2dgroup` to
    `StandardMaterial.diffuseTexture`. Repeated component references instantiate
    editable mesh copies rather than shared geometry. Returns an AssetContainer
@@ -2924,18 +2935,45 @@ package writers: `print/ThreeMFWriter.js`):
    Individual-per-part 3MF export stays standalone by design and does not carry
    cross-part hierarchy.
 
-### STL Export (Geometry-only fallback)
-**Use `BABYLON.STLExport.CreateSTL()`.** STL is geometry-only and does not
-carry shader, texture, or per-part color metadata.
+### Print-space axis + winding contract (ALL writers + the 3MF loader)
+`src/core/print/PrintSpace.js` is the ONE seam between Babylon (left-handed,
+Y-up) and print files (right-handed, Z-up, mm). Locked 2026-09-17 after the
+audit found three writers using three conventions (3MF mirrored + upside-down,
+STL mirrored + big-endian, OBJ inside-out) and every glTF import rendered
+inside-out:
+- `toPrintSpace(x,y,z) = (-x, -z, y)`, `fromPrintSpace(x,y,z) = (-x, z, -y)`.
+  Both are reflections (det -1): Babylon's glTF loader bakes `(-x, y, z)` for
+  the left-handed scene and slicers want `(x, -z, y)` of the glTF source.
+- Winding is per mesh, never a blanket flip: `printIndices(mesh)` reverses
+  only when Babylon's effective side orientation is ClockWise (glTF imports;
+  material flag overrides mesh flag). A native/OBJ/STL/3MF-loaded mesh
+  (CounterClockWise) is written as-is. Same rule as Babylon's own OBJ
+  serializer. `PrintPipeline._csgRebake` resets the clone to CounterClockWise
+  because Manifold output is native winding.
+- `ImportNormalizer` bakes the reflection ONCE — Babylon's
+  `bakeTransformIntoVertices` already flips faces on det<0; the old second
+  `flipFaces` was the inside-out bug.
+- Authority: PrusaSlicer 2.9.3 export of a known tetrahedron
+  (`tests/fixtures/prusa-tetra.3mf`) + trimesh signed volumes; pinned in
+  `tests/print-space.test.mjs`, `tests/threemf-components.test.mjs`,
+  `tests/export.test.mjs`. Any change here re-runs those AND a real slicer.
+- 3MF builds are centred in X/Y and rested on the bed (min z = 0).
 
-Current implementation (`print/PrintPipeline.js` — STL serializer inline):
+### STL Export (Geometry-only fallback)
+**Use `print/StlWriter.js`** (own binary writer). STL is geometry-only and
+does not carry shader, texture, or per-part color metadata.
+
+Current implementation:
 1. `_runExport('stl', options)` clones logical print units and makes every
    clone geometry unique.
 2. Format prep runs: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
    `createNormals`.
 3. CSG2 is attempted only when available. Non-watertight parts skip CSG and
    report an informational toast; validation still gates hard errors.
-4. `_serializeSTL(ctx)` calls Babylon STL serialization on prepared clones.
+4. `StlWriter.serializeSTL(ctx)` encodes prepared clones: 80-byte header,
+   uint32 LITTLE-endian facet count, 50 bytes/facet (normal + 3 vertices as
+   LE float32, attribute count 0), vertices through `PrintSpace`, facet
+   normal from the emitted (outward) winding.
 5. Combined mode emits one `.stl`; individual mode emits an outer `.zip` with
    one STL per logical object.
 6. STL remains a fallback for non-color printer targets, not a Mimaki

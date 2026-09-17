@@ -186,8 +186,9 @@ await test('default Mimaki target + textured mesh → Materials Extension layout
   // Object pid points at the texture2dgroup, NOT a colorgroup.
   assert.match(model, /<object id="3" type="model" pid="2">/);
   // Triangle carries p1/p2/p3 mirroring v1/v2/v3 (writer/loader contract).
-  // Winding flip means v1,v2,v3 = a,c,b — p triple flips identically.
-  assert.match(model, /<triangle v1="0" v2="2" v3="1" p1="0" p2="2" p3="1"\/>/);
+  // The fake mesh has no ClockWise flag (CounterClockWise default), so
+  // PrintSpace.printIndices keeps the buffer order — p triple follows.
+  assert.match(model, /<triangle v1="0" v2="1" v3="2" p1="0" p2="1" p3="2"\/>/);
   // No colorgroup since every mesh is textured.
   assert.ok(!/<m:colorgroup/.test(model), 'no colorgroup when every mesh is textured');
 });

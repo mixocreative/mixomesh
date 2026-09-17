@@ -2,7 +2,7 @@
 // overlay, OBJ sibling resolution, split-on-import, library-GLB registration,
 // and asset re-instantiation from the cached blob URL.
 
-import { dispatch, setState, getState } from '../StateManager.js';
+import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { EVENTS } from '../events.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
@@ -233,6 +233,10 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
 
+    // Import is a non-undoable mutation of the project (assets + objects), so
+    // it must count as unsaved work — otherwise "close without saving" reads
+    // clean after dropping models in (audit 2026-09-17, H2).
+    markDirty();
     return meshIds;
   } catch (err) {
     revokeBlobUrl(assetId);
@@ -284,6 +288,7 @@ export async function instantiateAsset(assetId, position) {
     const collectionId = createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
     const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1);
     for (const meshId of meshIds) queueValidation(meshId);
+    markDirty();
     return meshIds;
   } finally {
     restoreUrls();

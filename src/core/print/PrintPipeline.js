@@ -25,6 +25,7 @@ import { createFormats } from './PrintFormats.js';
 import { packageAndDownload } from './PrintPackaging.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './ThreeMFWriter.js';
 import { serializeOBJ } from './ObjWriter.js';
+import { serializeSTL } from './StlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 
@@ -62,6 +63,11 @@ function _csgRebake(mesh) {
   const baked = csg.toMesh(`${mesh.name}__csg`, mesh.getScene());
   const vd = B.VertexData.ExtractFromMesh(baked);
   vd.applyToMesh(mesh);
+  // CSG2.toMesh emits geometry in Babylon's NATIVE winding (CounterClockWise
+  // front). A glTF-imported clone still carries the loader's ClockWise flag,
+  // which would make PrintSpace.printIndices reverse the fresh winding and
+  // ship the part inside-out (found 2026-09-17 on the STL path via trimesh).
+  mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
   baked.dispose();
   csg.dispose?.();
 }
@@ -118,7 +124,7 @@ const PREP_STEPS = createPrepSteps({
 
 const FORMATS = createFormats({
   serializeOBJ,
-  serializeSTL: _serializeSTL,
+  serializeSTL,
   serialize3MF: _serialize3MF,
 });
 
@@ -293,6 +299,10 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress) {
       // CRITICAL: Babylon's clone shares geometry by reference. Without a
       // unique copy here, prep would corrupt the live scene mesh.
       clone.makeGeometryUnique?.();
+      // The side-orientation flag decides export winding (PrintSpace.printIndices).
+      // glTF imports carry ClockWise on the MESH (material.sideOrientation is
+      // null), so copy it explicitly rather than trusting clone() to.
+      if (mesh.sideOrientation != null) clone.sideOrientation = mesh.sideOrientation;
       // Track the clone IMMEDIATELY so the finally{} dispose loop catches it
       // even if a prep step throws (re-thrown PrintPrep.* contract violations
       // would otherwise leak the freshly-cloned Babylon mesh and its GPU
@@ -341,26 +351,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress) {
   }
 }
 
-// ── per-format serializers (STL + 3MF inline; OBJ in ObjWriter) ──
-
-function _serializeSTL(ctx) {
-  const meshes = ctx.meshes.map(e => e.mesh);
-  if (ctx.individually) {
-    const entries = [];
-    for (const unit of ctx.cloneGroups) {
-      const base = perMeshBaseName(ctx, unit.name);
-      const data = BABYLON.STLExport.CreateSTL(unit.meshes.map(e => e.mesh), false, base, true, false, false, false);
-      entries.push({ path: `${base}.stl`, data });
-    }
-    return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
-  }
-  // Combined STL: ask the exporter for raw bytes (download=false), route
-  // through packageAndDownload like every other format so the user sees the
-  // same Save-As dialog with the project+ratio default name.
-  const base = exportBaseName(ctx);
-  const data = BABYLON.STLExport.CreateSTL(meshes, false, base, true, false, false, false);
-  return { kind: 'blob', mime: 'model/stl', filename: `${base}.stl`, data };
-}
+// ── per-format serializers (3MF inline; OBJ in ObjWriter, STL in StlWriter) ──
 
 /**
  * 3MF dispatch — content-driven. The Export panel chooses 3MF; texture

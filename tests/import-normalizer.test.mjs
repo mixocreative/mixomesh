@@ -17,12 +17,12 @@ function v(x = 0, y = 0, z = 0) {
   };
 }
 
-function matrix({ tx = 0, ty = 0, tz = 0 } = {}) {
+function matrix({ tx = 0, ty = 0, tz = 0, det = 1 } = {}) {
   return {
-    clone() { return matrix({ tx, ty, tz }); },
+    clone() { return matrix({ tx, ty, tz, det }); },
     setTranslation() {},
     getTranslation() { return v(tx, ty, tz); },
-    determinant() { return 1; },
+    determinant() { return det; },
   };
 }
 
@@ -108,6 +108,19 @@ await test('import normalization materializes instance meshes before vertex baki
   assert.ok(container.meshes[1].bakedMatrix, 'materialized mesh should go through the normal bake path');
   assert.equal(container.meshes[1].geometryUnique, true, 'materialized mesh must own geometry for later per-object bakes');
   assert.equal(container.meshes[1].parent, null, 'normalizer should leave imported meshes transform-clean');
+});
+
+
+await test('reflected world (det < 0, the glTF root flip) is baked ONCE — no extra flipFaces on top of the Babylon bake', () => {
+  // Mesh.bakeTransformIntoVertices already calls flipFaces() when the matrix
+  // determinant is negative. A second flip here left every glTF import
+  // inside-out (audit 2026-09-17). The normalizer must only bake.
+  const root = makeNode('__root__');
+  const m = makeBakeableMesh('Reflected', root, matrix({ det: -1 }));
+  bakeImportTransform({ meshes: [m], transformNodes: [root] }, 1);
+  assert.ok(m.bakedMatrix, 'reflection baked into vertices');
+  assert.equal(m.bakedMatrix.determinant(), -1, 'the baked matrix is the reflection itself');
+  assert.equal(m.flipped, undefined, 'no explicit flipFaces — the Babylon bake handles winding');
 });
 
 console.log('\n' + out.join('\n'));

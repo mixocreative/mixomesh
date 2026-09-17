@@ -13,6 +13,9 @@ const { StateManager } = await import('../src/core/StateManager.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
+const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
+const { dispatch } = await import('../src/core/StateManager.js');
+const { EVENTS } = await import('../src/core/events.js');
 
 MeshValidator.shouldAutoValidate = () => false;
 
@@ -165,6 +168,17 @@ await test('normal GLB import preserves empty node hierarchy as outliner groups'
     Object.values(state.scene.objects).map(o => [o.name, o.parentId]).sort(),
     [['Body', mug.id], ['Handle', mug.id]],
   );
+});
+
+
+await test('importing a model marks the project dirty (close-without-save must prompt)', async () => {
+  resetState();
+  PersistenceManager.init();
+  dispatch(EVENTS.PROJECT_SAVED, {});            // baseline: clean
+  assert.equal(PersistenceManager.isDirty(), false, 'clean before import');
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  await AssetLoader.loadFromBlob(new Blob(['glb']), 'beverage.glb');
+  assert.equal(PersistenceManager.isDirty(), true, 'import is unsaved work');
 });
 
 console.log('\n' + out.join('\n'));
