@@ -162,6 +162,19 @@ async function _texturePartToUrl(zip, partPath) {
   } catch { return null; }
 }
 
+let _splitSeq = 0;
+
+/**
+ * Material key for one triangle: a texture2dgroup is one material per group
+ * (UVs vary per corner, the texture does not); a colorgroup (or any other
+ * indexed property resource) is one material per (group, index).
+ */
+function _triangleMaterialKey(ctx, pid, pindex) {
+  const tg = pid != null ? ctx.texGroups.get(pid) : null;
+  if (tg) return { str: `t:${pid}`, pid, pindex: 0, tg };
+  return { str: pid != null ? `c:${pid}:${pindex}` : '', pid, pindex, tg: null };
+}
+
 /**
  * Parse the 3MF model XML into Babylon meshes inside an AssetContainer.
  * One mesh per built object; component-only assemblies are skipped (we never
@@ -248,6 +261,49 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   let made = 0;
   const instanceCounts = new Map();
 
+  const greyColor = () => new BABYLON.Color3(0.8, 0.8, 0.8);
+
+  /**
+   * Material for one triangle-group key (see _triangleMaterialKey). A
+   * texture2dgroup key binds the embedded PNG; a colorgroup key resolves the
+   * colour; anything else (no property, unknown group) is the grey fallback.
+   */
+  const makeMaterial = (ctx, name, key) => {
+    const mat = new BABYLON.StandardMaterial(`${name}__3mf`, scene);
+    if (key.tg) {
+      const tex = ctx.textures.get(key.tg.texId);
+      if (tex?.url) {
+        const bt = new BABYLON.Texture(tex.url, scene, false, false);
+        bt.name = `${name}__tex`;
+        mat.diffuseTexture = bt;
+        container.textures?.push?.(bt);
+        usedTexIds.add(`${ctx.path}:${key.tg.texId}`);
+      } else {
+        mat.diffuseColor = greyColor();
+      }
+    } else {
+      const group = key.pid != null ? ctx.colorGroups.get(key.pid) : null;
+      mat.diffuseColor = (group && group[key.pindex]) ? group[key.pindex] : greyColor();
+    }
+    mat.backFaceCulling = false;
+    container.materials.push(mat);
+    return mat;
+  };
+
+  const finishMesh = (mesh, positions, indices, uvs, material, parent) => {
+    const vd = new BABYLON.VertexData();
+    vd.positions = positions;
+    vd.indices = indices;
+    if (uvs) vd.uvs = uvs;
+    const normals = [];
+    BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+    vd.normals = normals;
+    vd.applyToMesh(mesh);
+    mesh.material = material;
+    if (parent) mesh.setParent(parent);
+    container.meshes.push(mesh);
+  };
+
   const createMeshInstance = (ctx, objectId, obj, meshEl, matrix, parentNode) => {
     const vEls = meshEl.getElementsByTagName('vertex');
     const tEls = meshEl.getElementsByTagName('triangle');
@@ -268,11 +324,16 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     }
     const vertexCount = vEls.length;
 
-    const pid = obj.getAttribute('pid');
-    const tg = pid != null ? ctx.texGroups.get(pid) : null;
+    // Object-level property defaults (3MF Core §4.1: a triangle without
+    // `pid` inherits the object's pid/pindex; `p2`/`p3` default to `p1`).
+    const objPid = obj.getAttribute('pid');
+    const objPindexRaw = parseInt(obj.getAttribute('pindex') || '0', 10);
+    const objPindex = Number.isFinite(objPindexRaw) ? objPindexRaw : 0;
 
-    const indices = new Array(tEls.length * 3);
-    const uvs = tg ? new Array(vEls.length * 2).fill(0) : null;
+    // Triangles grouped by material key, first-seen order. Every entry keeps
+    // the file's index order (see winding note below) plus the resolved
+    // per-corner property index so textured groups can look up UVs.
+    const groups = new Map();   // keyStr → { key, tris: [a,b,c,p1,p2,p3, …] }
     for (let i = 0; i < tEls.length; i++) {
       const tEl = tEls[i];
       const a = Number(tEl.getAttribute('v1'));
@@ -282,60 +343,104 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
           || a < 0 || b < 0 || c < 0 || a >= vertexCount || b >= vertexCount || c >= vertexCount) {
         throw new Error(`3MF: triangle ${i} of object ${objectId} references a vertex outside 0..${vertexCount - 1}`);
       }
-      // 3MF triangles are counter-clockwise-outward in a right-handed space.
-      // fromPrintSpace is a reflection, which makes the same index order read
-      // clockwise — exactly Babylon's convention for a CounterClockWise-flagged
-      // (default) mesh in a left-handed scene. So: keep the file's order.
-      indices[i * 3] = a; indices[i * 3 + 1] = b; indices[i * 3 + 2] = c;
-
-      // Per-triangle UV indices for textured objects. Exporter writes one
-      // tex2coord per vertex with p_i == v_i — last-write-wins is harmless
-      // because every triangle covering vertex k writes the same coord.
-      if (uvs) {
-        const p1 = +tEl.getAttribute('p1') || 0;
-        const p2 = +tEl.getAttribute('p2') || 0;
-        const p3 = +tEl.getAttribute('p3') || 0;
-        const co = tg.coords;
-        if (co[p1]) { uvs[a * 2] = co[p1].u; uvs[a * 2 + 1] = co[p1].v; }
-        if (co[p2]) { uvs[b * 2] = co[p2].u; uvs[b * 2 + 1] = co[p2].v; }
-        if (co[p3]) { uvs[c * 2] = co[p3].u; uvs[c * 2 + 1] = co[p3].v; }
-      }
+      const triPid = tEl.getAttribute('pid');
+      const pid = triPid != null && triPid !== '' ? triPid : objPid;
+      const p1Attr = tEl.getAttribute('p1');
+      const hasP1 = p1Attr != null && p1Attr !== '';
+      // A triangle that names no property of its own inherits the object's
+      // pindex for all three corners; one that names pid/p1 uses those.
+      const p1 = hasP1 ? (parseInt(p1Attr, 10) || 0) : objPindex;
+      const p2 = parseInt(tEl.getAttribute('p2') ?? '', 10);
+      const p3 = parseInt(tEl.getAttribute('p3') ?? '', 10);
+      const key = _triangleMaterialKey(ctx, pid, p1);
+      let g = groups.get(key.str);
+      if (!g) { g = { key, tris: [] }; groups.set(key.str, g); }
+      g.tris.push(a, b, c, p1, Number.isFinite(p2) ? p2 : p1, Number.isFinite(p3) ? p3 : p1);
     }
 
-    const mesh = new BABYLON.Mesh(_instanceName(obj, objectId, instanceCounts), scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.indices = indices;
-    if (uvs) vd.uvs = uvs;
-    const normals = [];
-    BABYLON.VertexData.ComputeNormals(positions, indices, normals);
-    vd.normals = normals;
-    vd.applyToMesh(mesh);
+    const baseName = _instanceName(obj, objectId, instanceCounts);
 
-    const mat = new BABYLON.StandardMaterial(`${mesh.name}__3mf`, scene);
-    if (tg) {
-      const tex = ctx.textures.get(tg.texId);
-      if (tex?.url) {
-        const bt = new BABYLON.Texture(tex.url, scene, false, false);
-        bt.name = `${mesh.name}__tex`;
-        mat.diffuseTexture = bt;
-        container.textures?.push?.(bt);
-        usedTexIds.add(`${ctx.path}:${tg.texId}`);
-      } else {
-        mat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+    // 3MF triangles are counter-clockwise-outward in a right-handed space.
+    // fromPrintSpace is a reflection, which makes the same index order read
+    // clockwise — exactly Babylon's convention for a CounterClockWise-flagged
+    // (default) mesh in a left-handed scene. So: keep the file's order.
+
+    if (groups.size === 1) {
+      // Fast path — one material for the whole object: full vertex pool as
+      // written, per-vertex UVs from the (single) texture2dgroup.
+      const { key, tris } = groups.values().next().value;
+      const indices = new Array(tEls.length * 3);
+      const uvs = key.tg ? new Array(vertexCount * 2).fill(0) : null;
+      const co = key.tg?.coords;
+      for (let i = 0, t = 0; i < tris.length; i += 6, t += 3) {
+        const a = tris[i], b = tris[i + 1], c = tris[i + 2];
+        indices[t] = a; indices[t + 1] = b; indices[t + 2] = c;
+        // Exporter writes one tex2coord per vertex with p_i == v_i —
+        // last-write-wins is harmless because every triangle covering
+        // vertex k writes the same coord.
+        if (uvs) {
+          const p1 = tris[i + 3], p2 = tris[i + 4], p3 = tris[i + 5];
+          if (co[p1]) { uvs[a * 2] = co[p1].u; uvs[a * 2 + 1] = co[p1].v; }
+          if (co[p2]) { uvs[b * 2] = co[p2].u; uvs[b * 2 + 1] = co[p2].v; }
+          if (co[p3]) { uvs[c * 2] = co[p3].u; uvs[c * 2 + 1] = co[p3].v; }
+        }
       }
-    } else {
-      const pindex = parseInt(obj.getAttribute('pindex') || '0', 10);
-      const group = pid != null ? ctx.colorGroups.get(pid) : null;
-      mat.diffuseColor = (group && group[pindex]) ? group[pindex] : new BABYLON.Color3(0.8, 0.8, 0.8);
+      const mesh = new BABYLON.Mesh(baseName, scene);
+      finishMesh(mesh, positions, indices, uvs, makeMaterial(ctx, mesh.name, key), parentNode);
+      return 1;
     }
-    mat.backFaceCulling = false;
-    mesh.material = mat;
-    if (parentNode) mesh.setParent(parentNode);
 
-    container.meshes.push(mesh);
-    container.materials.push(mat);
-    return 1;
+    // Multi-material object — per-triangle `pid`/`p1` mixing several
+    // property entries (our own writer does this for a logical unit made of
+    // per-material sibling meshes; third-party files do it over one vertex
+    // pool). One-mesh-one-shader (AGENTS.md rule 7): emit ONE Babylon mesh
+    // per material key, each with a compacted vertex buffer, all parented to
+    // a shared TransformNode and stamped with one sourceGroupId so
+    // AssetRegistration / the validator treat them as ONE logical object.
+    const node = new BABYLON.TransformNode(baseName, scene);
+    node.metadata = { ...(node.metadata ?? {}), threeMFObjectId: objectId, importHierarchy: true };
+    if (parentNode) node.setParent(parentNode);
+    container.transformNodes.push(node);
+    const sourceGroupId = `3mf:${ctx.path}:${objectId}:${++_splitSeq}`;
+
+    let k = 0;
+    for (const { key, tris } of groups.values()) {
+      const remap = new Map();   // source vertex (+ tex2coord for textured) → compact index
+      const subPositions = [];
+      const subUvs = key.tg ? [] : null;
+      const co = key.tg?.coords;
+      const subIndices = new Array(tris.length / 2);
+      const compact = (v, p) => {
+        // Textured groups key on (vertex, coord) so a UV seam at a shared
+        // vertex splits exactly as the file describes it; solid groups key
+        // on the vertex alone.
+        const rk = subUvs ? `${v}:${p}` : v;
+        let idx = remap.get(rk);
+        if (idx == null) {
+          idx = subPositions.length / 3;
+          remap.set(rk, idx);
+          subPositions.push(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]);
+          if (subUvs) { const uv = co[p]; subUvs.push(uv ? uv.u : 0, uv ? uv.v : 0); }
+        }
+        return idx;
+      };
+      for (let i = 0, t = 0; i < tris.length; i += 6, t += 3) {
+        subIndices[t]     = compact(tris[i],     tris[i + 3]);
+        subIndices[t + 1] = compact(tris[i + 1], tris[i + 4]);
+        subIndices[t + 2] = compact(tris[i + 2], tris[i + 5]);
+      }
+      const mesh = new BABYLON.Mesh(`${baseName}__mat${k}`, scene);
+      mesh.metadata = {
+        ...(mesh.metadata ?? {}),
+        sourceGroupId,
+        sourceMeshName: baseName,
+        splitPartIndex: k,
+        threeMFObjectId: objectId,
+      };
+      finishMesh(mesh, subPositions, subIndices, subUvs, makeMaterial(ctx, mesh.name, key), node);
+      k++;
+    }
+    return k;
   };
 
   const instantiateObject = async (ctx, objectId, matrix, parentNode, stack = new Set()) => {
