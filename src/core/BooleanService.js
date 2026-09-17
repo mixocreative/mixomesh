@@ -84,11 +84,22 @@ export function evaluateBooleanEligibility(operands, opts = {}) {
 
 let _csgInit = null;
 
+// Absolute-from-site-root so both `npm run dev` and the Electron
+// `file://dist/index.html` load resolve (relative `base: './'` in
+// vite.config.js means a leading '/' would break the packaged app). Babylon
+// appends '/manifold.js' to this and imports it as an ES module; that module
+// then fetches manifold.wasm relative to itself (see public/vendor/manifold-3d/manifold.js).
+function _manifoldVendorUrl() {
+  return (typeof document !== 'undefined' && document.baseURI)
+    ? new URL('vendor/manifold-3d', document.baseURI).href
+    : '/vendor/manifold-3d';
+}
+
 async function _ensureCsg2() {
   const B = window.BABYLON;
   if (!B?.InitializeCSG2Async || !B?.CSG2) throw new Error('CSG2 unavailable in this runtime');
   if (!_csgInit) {
-    _csgInit = B.InitializeCSG2Async().catch(err => { _csgInit = null; throw err; });
+    _csgInit = B.InitializeCSG2Async({ manifoldUrl: _manifoldVendorUrl() }).catch(err => { _csgInit = null; throw err; });
   }
   await _csgInit;
 }
