@@ -214,13 +214,17 @@ function _registerModals() {
     return el;
   });
 
-  Modal.register('unmatchedAssets', ({ data, close }) => {
+  // Relink-list modals share one renderer: `unmatchedAssets` (linked file
+  // missing, restored from the embedded snapshot — project still complete)
+  // and `ghostAssets` (H3: no bytes anywhere — red placeholders in the scene;
+  // relink or delete, the project saves either way with `ghost: true`).
+  const relinkListModal = (titleKey, bodyKey) => ({ data, close }) => {
     const assets = data?.assets ?? [];
     const el = document.createElement('div');
     el.className = 'pm-modal';
     el.innerHTML = `
-      <h2 class="pm-modal-title">${_esc(t('project.unmatchedAssetsTitle'))}</h2>
-      <p class="pm-modal-body">${_esc(t('project.unmatchedAssetsBody', { n: assets.length }))}</p>
+      <h2 class="pm-modal-title">${_esc(t(titleKey))}</h2>
+      <p class="pm-modal-body">${_esc(t(bodyKey, { n: assets.length }))}</p>
       <div class="pm-asset-list">
         ${assets.map(a => `
           <div class="pm-asset-row" data-id="${escapeAttr(a.id)}">
@@ -242,7 +246,9 @@ function _registerModals() {
         });
       }));
     return el;
-  });
+  };
+  Modal.register('unmatchedAssets', relinkListModal('project.unmatchedAssetsTitle', 'project.unmatchedAssetsBody'));
+  Modal.register('ghostAssets', relinkListModal('project.ghostAssetsTitle', 'project.ghostAssetsBody'));
 
   Modal.register('portableSaveBlocked', ({ data, close }) => {
     const issues = data?.issues ?? [];

@@ -10,6 +10,11 @@ function _addRequired(refs, assetId, ownerId) {
  * scene. This is deliberately narrower than the whole Asset Panel library:
  * unused library cards are conveniences, but SceneObjects and assigned shader
  * textures are project state.
+ *
+ * Ghosts are excluded (H3): a ghost object / ghost asset has no bytes anywhere
+ * by definition — the load already told the user, and the serializer writes
+ * the entry with `ghost: true` so the project reopens with the same ghost.
+ * Demanding bytes here would make every project with one lost file unsaveable.
  */
 export function collectRequiredAssetRefs(state) {
   const refs = new Map();
@@ -19,10 +24,11 @@ export function collectRequiredAssetRefs(state) {
   const assets = scene.assetLibrary ?? {};
 
   for (const obj of Object.values(objects)) {
-    if (!obj?.id) continue;
-    _addRequired(refs, obj.assetId, obj.id);
+    if (!obj?.id || obj.isGhost) continue;
+    if (!assets[obj.assetId]?.isGhost) _addRequired(refs, obj.assetId, obj.id);
     const shader = obj.shaderId ? shaders[obj.shaderId] : null;
-    _addRequired(refs, shader?.diffuseTextureAssetId, obj.id);
+    const texId = shader?.diffuseTextureAssetId;
+    if (texId && !assets[texId]?.isGhost) _addRequired(refs, texId, obj.id);
   }
 
   for (const [assetId, requiredBy] of [...refs.entries()]) {

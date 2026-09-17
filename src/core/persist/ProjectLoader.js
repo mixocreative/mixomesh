@@ -18,6 +18,8 @@ import { decompose, applyWorld, stripFileData, extOf, bufFromB64 } from './Proje
 import { resolveAssetBlob } from './AssetResolver.js';
 import { clearDirty } from './DirtyTracker.js';
 import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
+import { validateDocument } from './ProjectValidator.js';
+import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
@@ -142,8 +144,35 @@ export function arrToMap(arr) {
   return m;
 }
 
-/** Rebuild the full project (state + scene) from a parsed .mixo document. */
+export { isLoading };
+
+export const IMPORT_IN_FLIGHT_MESSAGE =
+  'An import is still running — wait for it to finish before opening a project';
+
+/** Throw if an asset import is mid-flight (F20). Shared by load / new / recover. */
+export function assertNoImportInFlight() {
+  if (AssetLoader.isImporting()) throw new Error(IMPORT_IN_FLIGHT_MESSAGE);
+}
+
+/**
+ * Rebuild the full project (state + scene) from a parsed .mixo document.
+ * Validates the document and refuses during an import BEFORE any state
+ * mutation — a bad file or a racing import leaves the current project intact
+ * (audit 2026-09-17 H1 / F20). `isLoading()` is true for the whole call.
+ */
 export async function loadProject(doc) {
+  assertNoImportInFlight();
+  validateDocument(doc);
+  const previousName = getState().project?.name ?? null;
+  setLoading(true);
+  try {
+    await _loadProjectInner(doc, previousName);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function _loadProjectInner(doc, previousName) {
   const data = migrate(doc);
   historyClear();
   resetWorld();
@@ -204,6 +233,12 @@ export async function loadProject(doc) {
 
   const assetRes = new Map();   // assetId → { status, geom? }
   const unmatched = [];
+  const ghosts = [];            // asset entries with no bytes anywhere (H3)
+  const _ghostAsset = (a) => {
+    AssetLoader.registerAssetEntry({ ...stripFileData(a), isGhost: true });
+    assetRes.set(a.id, { status: 'ghost' });
+    ghosts.push(a);
+  };
   const sceneObjectCountByAsset = new Map();
   for (const o of data.sceneObjects || []) {
     sceneObjectCountByAsset.set(o.assetId, (sceneObjectCountByAsset.get(o.assetId) ?? 0) + 1);
@@ -220,11 +255,11 @@ export async function loadProject(doc) {
     const r = storedImage ? { blob: storedImage.blob, live: false } : await resolveAssetBlob(a);
     if (a.kind === 'texture') {
       if (r) { await AssetLoader.restoreTexture(stripFileData(a), r.blob); assetRes.set(a.id, { status: r.live ? 'live' : 'static' }); }
-      else   { AssetLoader.registerAssetEntry(stripFileData(a)); assetRes.set(a.id, { status: 'ghost' }); }
+      else   { _ghostAsset(a); }
       continue;
     }
+    if (!r) { _ghostAsset(a); continue; }
     AssetLoader.registerAssetEntry(stripFileData(a));
-    if (!r) { assetRes.set(a.id, { status: 'ghost' }); continue; }
     if (a.libraryItem && !sceneObjectCountByAsset.get(a.id)) {
       AssetLoader.cacheAssetBlob(a.id, r.blob);
       assetRes.set(a.id, { status: r.live ? 'live' : 'static' });
@@ -260,10 +295,10 @@ export async function loadProject(doc) {
         unmatched.push(a);
       }
     } catch (err) {
-      // Console-only by policy: the ghost placeholder + unmatchedAssets modal
-      // already surface the failure in the scene.
+      // Console-only by policy: the ghost placeholder + ghostAssets modal
+      // (H3) surface the failure to the user at the end of the load.
       console.error(`Container restore failed for ${a.filename}:`, err);
-      assetRes.set(a.id, { status: 'ghost' });
+      _ghostAsset(a);
     }
   }
 
@@ -321,6 +356,11 @@ export async function loadProject(doc) {
       ghost = true;
       const box = _makeGhostMesh(o);
       applyWorld(box, o.transform);
+      // Asset entry absent from the library altogether — still a ghost the
+      // user must see; list it once under the object's name.
+      if (!res && !ghosts.some(g => g.id === o.assetId)) {
+        ghosts.push({ id: o.assetId, filename: o.name, name: o.name, missingEntry: true });
+      }
     }
     objMap[o.id] = {
       id: o.id, name: o.name, assetId: o.assetId,
@@ -380,12 +420,28 @@ export async function loadProject(doc) {
 
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});                        // project is clean post-load
-  await kvDelete(`${AUTOSAVE_PREFIX}${getState().project.name}`);
+  // Only AFTER a successful load: the just-opened project's own autosave is
+  // stale, and so is the one for the project we just left (its dirty state
+  // was either saved or explicitly discarded via the dirty-confirm). A failed
+  // load above throws before reaching here, so a torn load keeps both (M2).
+  const loadedName = getState().project.name;
+  await kvDelete(`${AUTOSAVE_PREFIX}${loadedName}`);
+  if (previousName && previousName !== loadedName) {
+    await kvDelete(`${AUTOSAVE_PREFIX}${previousName}`);
+  }
 
   if (unmatched.length) {
     dispatch(EVENTS.MODAL_OPEN, { id: 'unmatchedAssets', assets: unmatched });
   }
-  Toast.show(t('toast.loaded', { name: getState().project.name }), 'success', 3000);
+  if (ghosts.length) {
+    // H3: never a plain "Loaded" — the scene is incomplete. The modal lists
+    // every ghost with a Relink button; the project is still saveable (ghost
+    // entries serialise with `ghost: true` and no bytes).
+    dispatch(EVENTS.MODAL_OPEN, { id: 'ghostAssets', assets: ghosts });
+    Toast.show(t('toast.loadedWithGhosts', { name: loadedName, n: ghosts.length }), 'warning', 6000);
+    return;
+  }
+  Toast.show(t('toast.loaded', { name: loadedName }), 'success', 3000);
 }
 
 // ── Relink ───────────────────────────────────────────────
@@ -430,6 +486,13 @@ export async function relinkAsset(assetId) {
     }), SILENT);
     if (o.shaderId && getState().scene.shaders[o.shaderId]) ShaderLibrary.assignToMesh(o.shaderId, o.id);
   }
+  // The asset now has bytes again (blob URL registered by restoreContainer):
+  // drop the ghost marker so the next save embeds it instead of `ghost: true`.
+  setState(s => {
+    const entry = s.scene.assetLibrary[assetId];
+    if (!entry?.isGhost) return s;
+    return { ...s, scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: { ...entry, isGhost: false } } } };
+  }, SILENT);
   ShaderLibrary.rebuildLinkedIndex();
   dispatch(EVENTS.ASSET_RELINKED, { assetId });
   dispatch(EVENTS.PROJECT_LOADED, {});   // cheap full re-render of Outliner etc.

@@ -1,5 +1,5 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, getState, setState } from '../core/StateManager.js';
+import { subscribe, getState, setState, markDirty } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
@@ -353,6 +353,7 @@ function _renderValidationTab() {
             const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
             return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
           }, { silent: true });
+          markDirty();   // persisted in .mixo (replayed on reload) — not undoable, must dirty (M4)
         }
         Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
         _render();
@@ -532,6 +533,7 @@ function _renderExportTab() {
 
   wireToggles(el, '#pp-bake-solid', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
+    markDirty();   // print slice is persisted wholesale in .mixo (M4)
   });
 
   el.querySelector('.pp-export-obj').addEventListener('click', () =>
@@ -617,6 +619,7 @@ function _renderBedTab() {
       ...s,
       print: { ...s.print, targetPrinterId: next.printerId, bedDimensions: next.dims },
     }), { silent: true });
+    markDirty();   // bed/printer are persisted in .mixo — close-without-save must not read clean (M4)
     SceneManager.rebuildBed();
     MeshValidator.invalidateAll();   // exceedsBed results depend on bed dims (A6)
     if (getState().scene.overlays.bedPreview) {

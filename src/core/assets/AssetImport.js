@@ -36,6 +36,7 @@ import {
   createCollectionFromFilename, queueValidation,
 } from './AssetRegistration.js';
 import { queueThumbnail } from './AssetThumbnail.js';
+import { isLoading as isProjectLoading } from '../persist/LoadGate.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import '../ThreeMFLoader.js';
@@ -68,6 +69,21 @@ function _importProgress(filename) {
 function _importEnd() {
   _importDepth = Math.max(0, _importDepth - 1);
   if (_importDepth === 0) ProgressOverlay.hide();
+}
+
+/** True while any loadFromBlob / instantiateAsset is in flight (F20 / M2). */
+export function isImporting() {
+  return _importDepth > 0;
+}
+
+export const PROJECT_LOADING_MESSAGE =
+  'A project is still loading — wait for it to finish before importing';
+
+// F20: an import that lands mid-load would mint objects into a world that
+// loadProject is still rebuilding (or that resetWorld is about to wipe).
+// Surfaced through the normal safeImport modal by the caller.
+function _assertNoProjectLoad() {
+  if (isProjectLoading()) throw new Error(PROJECT_LOADING_MESSAGE);
 }
 
 /**
@@ -129,6 +145,7 @@ function _applyResinDefault(container) {
  * @returns {Promise<string[]>} created meshIds
  */
 export async function loadFromBlob(blob, filename, position, opts = {}) {
+  _assertNoProjectLoad();
   const ext = extOf(filename);
   if (!SUPPORTED_EXTENSIONS.includes(ext)) {
     throw new Error(`Unsupported file type: ${ext}`);
@@ -258,6 +275,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
  * @returns {Promise<string[]>} new meshIds
  */
 export async function instantiateAsset(assetId, position) {
+  _assertNoProjectLoad();
   const asset = getState().scene.assetLibrary[assetId];
   if (!asset) throw new Error(`Asset ${assetId} not in library`);
 

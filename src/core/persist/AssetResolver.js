@@ -78,7 +78,20 @@ export async function resolveAssetBlob(entry) {
     }
   }
   if (entry.fileData) {
-    return { blob: new Blob([bufFromB64(entry.fileData)]), live: false };
+    const bytes = bufFromB64(entry.fileData);
+    // M5: the embedded copy must match the hash recorded at import. A mismatch
+    // (edited/corrupt .mixo) is unresolvable → ghost, surfaced by the load
+    // summary; never throw and tear the whole load. Legacy docs without a
+    // contentHash are trusted as before.
+    if (entry.contentHash) {
+      const actual = await sha256Hex(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+      if (actual !== entry.contentHash) {
+        console.error(`Embedded bytes for ${entry.filename} do not match contentHash `
+          + `(expected ${entry.contentHash}, got ${actual}) — treating as unresolvable`);
+        return null;
+      }
+    }
+    return { blob: new Blob([bytes]), live: false };
   }
   return null;
 }

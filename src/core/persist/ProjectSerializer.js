@@ -67,7 +67,9 @@ export function applyWorld(node, t) {
 // ── Serialise ────────────────────────────────────────────
 
 export function stripFileData(a) {
-  const { fileData, ...rest } = a;   // never keep base64 in live state
+  // Never keep base64 in live state. `ghost` is a document marker (H3) —
+  // the loader re-derives `isGhost` from what actually resolved.
+  const { fileData, ghost, ...rest } = a;
   return rest;
 }
 
@@ -102,6 +104,16 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
         && a.thumbnailDataUrl.startsWith('data:') ? a.thumbnailDataUrl : null,
       fileData: null, contentHash: null,
     };
+    // H3: a ghost has no bytes anywhere (load could not resolve it). Persist
+    // the entry with a `ghost: true` marker + its hash/handle keys so the
+    // project saves and reopens with the same relinkable ghost, instead of
+    // blocking every save until the user finds the file.
+    if (a.isGhost) {
+      base.ghost = true;
+      base.contentHash = a.contentHash ?? null;
+      out.push(base);
+      continue;
+    }
     // Embed bytes for meshes + user-loaded textures. glTF-embedded textures
     // are owned by their container — no standalone bytes to keep. Autosave
     // passes skipEmbed (arch A9): re-encoding every asset to base64 each

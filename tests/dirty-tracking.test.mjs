@@ -10,8 +10,9 @@ import { installEnv } from './env.mjs';
 installEnv();
 const { HistoryManager } = await import('../src/core/HistoryManager.js');
 const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
-const { dispatch, setState, getState } = await import('../src/core/StateManager.js');
+const { dispatch, setState, getState, markDirty } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
+const { readFileSync } = await import('node:fs');
 
 PersistenceManager.init();
 
@@ -115,6 +116,40 @@ await test('command-driven PROJECT_DIRTY is NOT sticky (covered by position)', (
   HistoryManager.undo();
   assert.equal(PersistenceManager.isDirty(), false,
     'undo cleans command-driven dirty — it must not have stuck');
+});
+
+await test('M4: print.bedDimensions / targetPrinterId write the way PrintPanel commits → dirty', () => {
+  // PrintPanel's bed commit is a silent setState (no undo command) followed by
+  // markDirty(): the print slice is persisted wholesale in the .mixo, so a
+  // close-without-save after a bed change must NOT read clean.
+  HistoryManager.clear();
+  markSaved();
+  setState(s => ({
+    ...s,
+    print: { ...s.print, targetPrinterId: 'custom', bedDimensions: { x: 1, y: 2, z: 3 } },
+  }), { silent: true });
+  markDirty();
+  assert.equal(PersistenceManager.isDirty(), true, 'bed change dirties');
+  assert.deepEqual(getState().print.bedDimensions, { x: 1, y: 2, z: 3 });
+  markSaved();
+  assert.equal(PersistenceManager.isDirty(), false);
+});
+
+await test('M4: PrintPanel source routes every persisted print/geometryFixes write through markDirty()', () => {
+  // Regression guard on the source itself (PrintPanel is not importable
+  // headless): each silent setState of a .mixo-persisted field must be
+  // followed by markDirty() within a few lines.
+  const src = readFileSync(new URL('../src/ui/PrintPanel.js', import.meta.url), 'utf8');
+  const lines = src.split(/\r?\n/);
+  assert.match(src, /import \{[^}]*\bmarkDirty\b[^}]*\} from '\.\.\/core\/StateManager\.js'/,
+    'PrintPanel imports markDirty');
+  const writes = ['geometryFixes: fixes', 'bedDimensions: next.dims', 'objBakeSolidTextures: on'];
+  for (const w of writes) {
+    const at = lines.findIndex(l => l.includes(w));
+    assert.ok(at >= 0, `write site present: ${w}`);
+    const win = lines.slice(at, at + 6).join('\n');
+    assert.match(win, /markDirty\(\)/, `markDirty() follows the ${w} write`);
+  }
 });
 
 console.log('\n' + out.join('\n'));

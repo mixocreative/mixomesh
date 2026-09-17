@@ -18,7 +18,7 @@ import {
 import { mountDirectory, restoreDirectory, getDirectoryHandle } from './assets/DirMounts.js';
 import { revokeObjSiblings, revokeAllObjSiblings } from './assets/ObjSiblings.js';
 import { registerAssetEntry } from './assets/AssetRegistration.js';
-import { loadFromBlob, loadFromHandle, instantiateAsset } from './assets/AssetImport.js';
+import { loadFromBlob, loadFromHandle, instantiateAsset, isImporting } from './assets/AssetImport.js';
 import {
   getAssetBytes, restoreContainer, cacheAssetBlob, registerBakedResult,
   cloneRestoredMesh, cloneMeshAsNewObject, restoreCloneToScene,
@@ -35,7 +35,7 @@ import {
 // ── Re-exported surface (unchanged for callers/tests) ────────────────────
 
 export { mountDirectory, restoreDirectory, getDirectoryHandle };
-export { loadFromBlob, loadFromHandle, instantiateAsset };
+export { loadFromBlob, loadFromHandle, instantiateAsset, isImporting };
 export { getContainer, getBabylonMesh, getContainerGeomMeshes, bindRestoredMesh };
 export {
   getAssetBytes, restoreContainer, cacheAssetBlob,
@@ -108,7 +108,7 @@ export function resetAll() {
 // is the established headless-test seam (bundle-1 plan 2026-06-11).
 export const AssetLoader = {
   mountDirectory, restoreDirectory,
-  loadFromHandle, loadFromBlob,
+  loadFromHandle, loadFromBlob, isImporting,
   loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
   registerImportedTexture, recapAllTextures,
   isMeshExt, isTextureExt,

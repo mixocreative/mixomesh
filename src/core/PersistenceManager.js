@@ -20,7 +20,7 @@ import { FILE_EXT, FILE_TYPES, AUTOSAVE_PREFIX, SILENT } from './persist/constan
 import { b64FromBuf, bufFromB64, extOf, buildDocument } from './persist/ProjectSerializer.js';
 import { resolveAssetBlob, scanDirForHash, fileHandleAtPath } from './persist/AssetResolver.js';
 import {
-  loadProject, resetWorld, relinkAsset,
+  loadProject, resetWorld, relinkAsset, isLoading, assertNoImportInFlight,
   migrate, resolveLoadedExportRatios, arrToMap,
 } from './persist/ProjectLoader.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
@@ -29,7 +29,7 @@ import { isDirty, clearDirty, confirmDirty, init } from './persist/DirtyTracker.
 
 // ── Re-exported surface (unchanged for callers/tests) ────────────────────
 
-export { relinkAsset, getRecentProjects };
+export { relinkAsset, getRecentProjects, isLoading };
 export { startAutosave, stopAutosave, recoverAutosave };
 export { isDirty, init };
 
@@ -48,24 +48,41 @@ let _fileHandle = null;     // FileSystemFileHandle of the open .mixo
 export async function save() {
   if (!_fileHandle) return saveAs();
   const text = JSON.stringify(await buildDocument());
-  const w = await _fileHandle.createWritable();
-  await w.write(text);
-  await w.close();
-  setState(s => ({ ...s, project: { ...s.project, lastSavedAt: new Date().toISOString() } }), SILENT);
-  clearDirty();
-  dispatch(EVENTS.PROJECT_SAVED, {});
-  await pushRecent(getState().project.name, _fileHandle);
-  await kvDelete(`${AUTOSAVE_PREFIX}${getState().project.name}`);
-  Toast.show(t('toast.projectSaved'), 'success', 2000);
+  await _writeTo(_fileHandle, text);
+  await _afterWrite();
   return true;
 }
 
+async function _writeTo(handle, text) {
+  const w = await handle.createWritable();
+  await w.write(text);
+  await w.close();
+}
+
+// Post-write bookkeeping shared by save / saveAs: runs only once bytes are on
+// disk. `staleName` = the project name before a saveAs rename, whose autosave
+// key is now stale too.
+async function _afterWrite(staleName = null) {
+  setState(s => ({ ...s, project: { ...s.project, lastSavedAt: new Date().toISOString() } }), SILENT);
+  clearDirty();
+  dispatch(EVENTS.PROJECT_SAVED, {});
+  const name = getState().project.name;
+  await pushRecent(name, _fileHandle);
+  await kvDelete(`${AUTOSAVE_PREFIX}${name}`);
+  if (staleName && staleName !== name) await kvDelete(`${AUTOSAVE_PREFIX}${staleName}`);
+  Toast.show(t('toast.projectSaved'), 'success', 2000);
+}
+
 /**
- * Prompt for a file location and save there.
+ * Prompt for a file location and save there. The document is built and
+ * written to the picked handle FIRST; only a successful write binds the
+ * handle and renames the project (audit 2026-09-17 M1) — a failed write
+ * leaves the previous handle/name untouched instead of adopting a 0-byte file.
  * @returns {Promise<boolean>} true on save, false on picker cancel.
  */
 export async function saveAs() {
-  const suggested = `${getState().project.name || 'Untitled'}${FILE_EXT}`;
+  const previousName = getState().project.name || 'Untitled';
+  const suggested = `${previousName}${FILE_EXT}`;
   let handle;
   try {
     handle = await window.showSaveFilePicker({ suggestedName: suggested, types: FILE_TYPES });
@@ -73,10 +90,26 @@ export async function saveAs() {
     if (err?.name === 'AbortError') return false;
     throw err;
   }
-  _fileHandle = handle;
   const name = handle.name.replace(/\.mixo$/i, '');
+  const doc = await buildDocument();
+  doc.project = { ...doc.project, name };   // the file carries its own name
+  await _writeTo(handle, JSON.stringify(doc));   // throws → nothing below runs
+  _fileHandle = handle;
   setState(s => ({ ...s, project: { ...s.project, name } }), SILENT);
-  return save();
+  await _afterWrite(previousName);
+  return true;
+}
+
+/**
+ * Parse .mixo text. JSON errors become a user-readable message instead of a
+ * raw SyntaxError (H1); shape/version checks live in loadProject.
+ */
+function _parseDoc(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error('Not a .mixo file or the file is corrupt', { cause: err });
+  }
 }
 
 /** Prompt for a .mixo file and load it. */
@@ -94,7 +127,7 @@ export async function open() {
     throw err;
   }
   const file = await handle.getFile();
-  const doc  = JSON.parse(await file.text());
+  const doc  = _parseDoc(await file.text());
   await _loadAndBind(doc, handle);
 }
 
@@ -110,6 +143,7 @@ async function _loadAndBind(doc, handle) {
 
 /** Reset to a blank project (confirm if dirty). */
 export async function newProject() {
+  assertNoImportInFlight();   // F20: an import mid-flight would mint objects into the blank project
   if (isDirty()) {
     const choice = await confirmDirty();
     if (choice === 'cancel') return;
@@ -145,7 +179,7 @@ export async function openRecent(rec) {
     return;
   }
   const file = await handle.getFile();
-  await _loadAndBind(JSON.parse(await file.text()), handle);
+  await _loadAndBind(_parseDoc(await file.text()), handle);
 }
 
 /**
@@ -164,7 +198,7 @@ export async function requestClose() {
 // NOT frozen — monkey-patching this object is the established headless-test
 // seam (same rationale as AssetLoader, bundle-1 plan 2026-06-11).
 export const PersistenceManager = {
-  init, isDirty,
+  init, isDirty, isLoading,
   save, saveAs, open, newProject, requestClose,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,

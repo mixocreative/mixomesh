@@ -13,6 +13,7 @@ const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { freshState, replaceState, setState } = await import('../src/core/StateManager.js');
 const { clearTextureImages, storeTextureImage } = await import('../src/core/assets/TextureImageStore.js');
+const { sha256Hex } = await import('../src/core/hash.js');
 
 SceneManager.saveCameraState = () => ({
   alpha: 0, beta: 0, radius: 1, target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
@@ -104,6 +105,7 @@ await test('manual .mixo save rejects a used mesh asset with no embedded bytes',
 
 await test('manual .mixo save embeds a used mounted-library mesh for clean-profile reopen', async () => {
   const src = Uint8Array.from([1, 2, 3, 4, 255]);
+  const srcHash = await sha256Hex(bytesOf(src));   // embedded tier verifies this on reopen (M5)
   AssetLoader.getAssetBytes = async assetId => (assetId === 'asset_a' ? bytesOf(src) : null);
   setState(s => ({
     ...s,
@@ -113,7 +115,7 @@ await test('manual .mixo save embeds a used mounted-library mesh for clean-profi
         asset_a: meshAsset('asset_a', {
           directoryHandleKey: 'mount_old',
           originalPath: 'library/asset_a.glb',
-          contentHash: 'known-hash',
+          contentHash: srcHash,
         }),
       },
       objects: { mesh_a: sceneObject('mesh_a', 'asset_a') },
@@ -191,6 +193,47 @@ await test('autosave may skip handle-backed used assets, but not handleless loos
     assert.equal(err.portableIssues[0].assetId, 'loose');
     return true;
   });
+});
+
+await test('H3: a ghost asset (no bytes anywhere) is NOT a portable-save blocker; saved with ghost: true', async () => {
+  const src = Uint8Array.from([1, 2, 3]);
+  AssetLoader.getAssetBytes = async assetId => (assetId === 'asset_ok' ? bytesOf(src) : null);
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      assetLibrary: {
+        asset_ok: meshAsset('asset_ok'),
+        asset_ghost: meshAsset('asset_ghost', { isGhost: true, contentHash: 'lost-hash' }),
+      },
+      objects: {
+        mesh_ok: sceneObject('mesh_ok', 'asset_ok'),
+        mesh_ghost: sceneObject('mesh_ghost', 'asset_ghost', { isGhost: true }),
+      },
+    },
+  }), { silent: true });
+
+  const doc = await __test._buildDocument();
+  const ghost = doc.assetLibrary.find(a => a.id === 'asset_ghost');
+  assert.equal(ghost.ghost, true);
+  assert.equal(ghost.fileData, null);
+  assert.equal(ghost.contentHash, 'lost-hash');
+  assert.equal(doc.assetLibrary.find(a => a.id === 'asset_ok').ghost, undefined);
+  assert.ok(doc.assetLibrary.find(a => a.id === 'asset_ok').fileData);
+  assert.equal(doc.sceneObjects.find(o => o.id === 'mesh_ghost').isGhost, true);
+});
+
+await test('H3: a ghost object whose asset entry is missing entirely does not block save', async () => {
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      assetLibrary: {},
+      objects: { mesh_ghost: sceneObject('mesh_ghost', 'asset_gone', { isGhost: true }) },
+    },
+  }), { silent: true });
+  const doc = await __test._buildDocument();
+  assert.equal(doc.sceneObjects.length, 1);
 });
 
 console.log('\n' + out.join('\n'));

@@ -231,7 +231,7 @@ await test('priority 3: no granted dir → falls back to embedded static copy', 
   const entry = {
     filename: 'x.glb', extension: '.glb',
     directoryHandleKey: 'DIRKEY', originalPath: 'x.glb',
-    contentHash: 'nope',
+    contentHash: await _sha256Hex(u8(embedded).buffer),   // matches the embedded copy
     fileData: _b64FromBuf(u8(embedded).buffer),
   };
   const r = await _resolveAssetBlob(entry);
@@ -246,12 +246,36 @@ await test('priority 3b: dir present, path miss, NO hash match → embedded fall
   const entry = {
     filename: 'y.glb', extension: '.glb',
     directoryHandleKey: 'DIRKEY', originalPath: 'gone/y.glb',
-    contentHash: await _sha256Hex(u8([123, 124])),   // matches nothing in dir
+    contentHash: await _sha256Hex(u8(embedded).buffer),   // matches nothing in dir, matches embedded
     fileData: _b64FromBuf(u8(embedded).buffer),
   };
   const r = await _resolveAssetBlob(entry);
   assert.equal(r.live, false);
   eqBytes(await bytesOf(r.blob), embedded);
+});
+
+await test('M5: embedded bytes whose sha256 disagrees with contentHash → null (ghost), logged', async () => {
+  const logged = [];
+  const prev = console.error;
+  console.error = (...a) => logged.push(a.map(String).join(' '));
+  try {
+    const r = await _resolveAssetBlob({
+      filename: 't.glb', extension: '.glb',
+      directoryHandleKey: null, originalPath: null,
+      contentHash: await _sha256Hex(u8([1, 2, 3]).buffer),
+      fileData: _b64FromBuf(u8([1, 2, 4]).buffer),   // tampered
+    });
+    assert.equal(r, null, 'tampered embed must not resolve');
+    assert.ok(logged.some(l => /contentHash/.test(l)), 'mismatch is logged');
+  } finally { console.error = prev; }
+});
+
+await test('M5: embedded bytes with NO contentHash still resolve (legacy docs)', async () => {
+  const r = await _resolveAssetBlob({
+    filename: 'l.glb', extension: '.glb', contentHash: null,
+    fileData: _b64FromBuf(u8([5, 6]).buffer),
+  });
+  eqBytes(await bytesOf(r.blob), [5, 6]);
 });
 
 await test('priority 4: no live, no embedded → null (caller makes a ghost)', async () => {
