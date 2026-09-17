@@ -105,13 +105,19 @@ async function _ensureRepairRuntime(options) {
 }
 
 /**
- * Attempt watertight repair on one export CLONE. Never throws — a failed or
- * unavailable engine, or a still-not-watertight result, is recorded on ctx
- * for the strict-mode gate and the post-export warning toast; the
- * pre-existing weld/CSG prep steps must keep running regardless.
+ * Attempt watertight repair on one export CLONE. Never throws — a
+ * still-not-watertight result (confirmed by the engine, or unknown because
+ * the engine failed mid-attempt) is recorded on ctx for the strict-mode gate
+ * and the post-export warning toast; the pre-existing weld/CSG prep steps
+ * must keep running regardless.
+ *
+ * A batch-wide unavailable engine (ctx.repairReady false — see
+ * _ensureRepairRuntime) is NOT recorded here: that already produced its own
+ * one-time toast.repairUnavailable, and re-listing every clone in
+ * repairSkipped would double up that message with a second, redundant toast.
  */
 async function _tryRepair(mesh, ctx) {
-  if (!ctx.repairReady) { ctx.repairSkipped.push(mesh.name); return; }
+  if (!ctx.repairReady) return;
   try {
     const r = await repairMesh(mesh);
     ctx.repairReport.push({ name: mesh.name, isWatertight: r.isWatertight });
@@ -120,6 +126,7 @@ async function _tryRepair(mesh, ctx) {
     // Engine failure mid-batch (e.g. the triangle cap) or any other repair
     // failure: unknown watertight status (null), never a strict-mode
     // blocker on its own — only a CONFIRMED not-watertight result is.
+    console.error(`Repair skipped for ${mesh.name}:`, err);
     ctx.repairReport.push({ name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
     ctx.repairSkipped.push(mesh.name);
   }
@@ -437,13 +444,16 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     if (ctx.csgSkipped.length) {
       Toast.show(t('toast.partsNotWatertight', { n: ctx.csgSkipped.length }), 'info', 5000);
     }
-    // Non-strict export with a CONFIRMED still-not-watertight clone: one
-    // warning toast naming the part(s) (strict mode would have thrown above
-    // before reaching here — this only fires when strictExport is off).
-    const stillNotWatertight = ctx.repairReport.filter(r => r.isWatertight === false);
-    if (stillNotWatertight.length) {
+    // A repair attempt that couldn't confirm watertight (confirmed open, or
+    // errored mid-attempt): one warning toast naming the part(s). Strict
+    // mode would already have thrown above on a CONFIRMED failure, so this
+    // only fires for strictExport:false or an "unknown" (e.g. capped) result.
+    // This is the SOLE owner of toast.exportedWithWarnings for the pipeline —
+    // PrintPanel's "Export anyway" path relies on this same toast rather than
+    // firing its own (a caller-side duplicate was fix-round-1 finding #2).
+    if (ctx.repairSkipped.length) {
       Toast.show(
-        t('toast.exportedWithWarnings', { names: stillNotWatertight.map(r => r.name).join(', ') }),
+        t('toast.exportedWithWarnings', { names: ctx.repairSkipped.join(', ') }),
         'warning', 5000,
       );
     }

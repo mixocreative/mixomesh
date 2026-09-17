@@ -545,7 +545,6 @@ function _renderExportTab() {
       return;
     }
     let exportOpts = opts;
-    let exportedAnyway = false;
     if (currentReadiness.requiresAcknowledgement) {
       const choice = await _confirmExportGate(currentReadiness.issues);
       if (choice === 'autofix') {
@@ -576,8 +575,11 @@ function _renderExportTab() {
         // Clones are still repaired on export regardless (the `repair` prep
         // step runs on every export); this only records the user's explicit
         // "export anyway" so a caller-level repair:false can never sneak in.
+        // The pipeline is the sole owner of toast.exportedWithWarnings — it
+        // knows the real post-repair result (which parts, if any, are still
+        // not watertight); the panel does not also toast here (fix-round-1
+        // finding #2 — a caller-side toast here duplicated the pipeline's).
         exportOpts = { ...opts, repair: true };
-        exportedAnyway = true;
       } else {
         return;   // 'cancel', ESC, or backdrop dismissal
       }
@@ -585,12 +587,6 @@ function _renderExportTab() {
     ProgressOverlay.show(t('progress.exporting'));
     try {
       await fn({ ...exportOpts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
-      if (exportedAnyway) {
-        Toast.show(t('toast.exportedWithWarnings', {
-          names: currentReadiness.issues.filter(i => i.severity === 'warning')
-            .map(i => _issueLabel(i)).join('; '),
-        }), 'warning', 5000);
-      }
     } catch (err) {
       if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });

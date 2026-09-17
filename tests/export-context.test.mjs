@@ -120,6 +120,30 @@ await test('buildExportContext: csgSkipped + meshes + cloneGroups arrays stay mu
   assert.equal(ctx.cloneGroups.length, 1);
 });
 
+await test('buildExportContext: repairReady defaults false; repairSkipped + repairReport stay mutable inside frozen ctx', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE,
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.repairReady, false, 'defaults false when omitted');
+  ctx.repairSkipped.push('m1__export');
+  ctx.repairReport.push({ name: 'm1__export', isWatertight: false });
+  assert.equal(ctx.repairSkipped.length, 1);
+  assert.equal(ctx.repairReport.length, 1);
+  assert.equal(ctx.repairReport[0].isWatertight, false);
+});
+
+await test('buildExportContext: repairReady reflects the passed flag', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE,
+    units: [unit('a', 72)],
+    target: null,
+    repairReady: true,
+  });
+  assert.equal(ctx.repairReady, true);
+});
+
 await test('buildExportContext: pivot defaults to reference unit origin', () => {
   const ctx = ExportContext.buildExportContext({
     state: { ...FAKE_STATE, selection: { activeId: 'a', selectedIds: ['a'] } },

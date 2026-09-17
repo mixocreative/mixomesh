@@ -183,7 +183,7 @@
   "print.issueAction.below-bed": "ベッドを開いてパーツをビルドプレート上へ移動してください。",
   "print.issueAction.geometry": "検証を開いてジオメトリを修復または確認してください。",
   "print.validationWarnings": "検証警告",
-  "print.validationWarningsBody": "ブロックされないプリント準備警告を確認してください。そのまま書き出しますか？",
+  "print.validationWarningsBody": "これらの非ブロッキングな印刷準備の警告を確認し、自動修復して書き出すか、そのまま書き出してください。",
   "print.exportAnyway": "そのまま書き出す",
   "print.exportGate.title": "書き出し準備の警告",
   "print.exportGate.fixAndExport": "自動修復して書き出す",

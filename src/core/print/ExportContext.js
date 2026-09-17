@@ -68,10 +68,19 @@ function _capturePrefs(state) {
  * @property {string[]} csgSkipped    Mutated by pipeline.
  * @property {boolean} repairReady    Mutated by pipeline once the repair engine init resolves
  *                                    (and false when the caller passed options.repair === false).
- * @property {string[]} repairSkipped Mutated by pipeline: clone names the repair step could not
- *                                    confirm watertight (engine unavailable, capped, or still open).
+ * @property {string[]} repairSkipped Mutated by pipeline: names of clones the repair step ATTEMPTED
+ *                                    (repairReady was true) but could not confirm watertight — still
+ *                                    open, or the attempt itself errored (e.g. the triangle cap). Does
+ *                                    NOT include clones skipped by a batch-wide unavailable engine
+ *                                    (that case is a single toast.repairUnavailable, not a per-part
+ *                                    listing). Drives the post-export toast.exportedWithWarnings —
+ *                                    PrintPipeline is the sole place that reads/fires it.
  * @property {Array<{name:string, isWatertight:boolean|null, error?:string}>} repairReport
- *                                    Mutated by pipeline: one entry per clone the repair step ran on.
+ *                                    Mutated by pipeline: one entry per clone the repair step actually
+ *                                    ran on (repairReady true). isWatertight is false only for a
+ *                                    CONFIRMED still-open result — that is what the strictExport gate
+ *                                    checks; null means the attempt itself failed (unknown status,
+ *                                    never a strict-mode blocker on its own).
  * @property {Array} meshes           Mutated by pipeline (clone entries).
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
  * @property {{objBakeSolidTextures:boolean}} prefs  Snapshotted state.print prefs (frozen).

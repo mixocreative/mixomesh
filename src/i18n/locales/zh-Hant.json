@@ -183,7 +183,7 @@
   "print.issueAction.below-bed": "開啟載台面板，將部件移到列印平台上方。",
   "print.issueAction.geometry": "開啟驗證面板以修復或檢查幾何。",
   "print.validationWarnings": "驗證警告",
-  "print.validationWarningsBody": "請檢查這些不會阻擋匯出的列印準備警告。仍要匯出嗎？",
+  "print.validationWarningsBody": "請檢查這些不會阻擋匯出的列印準備警告，然後選擇自動修復並匯出，或仍然匯出。",
   "print.exportAnyway": "仍然匯出",
   "print.exportGate.title": "匯出準備警告",
   "print.exportGate.fixAndExport": "自動修復並匯出",

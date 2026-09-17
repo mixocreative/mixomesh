@@ -183,7 +183,7 @@
   "print.issueAction.below-bed": "Open Bed to move the part above the build plate.",
   "print.issueAction.geometry": "Open Validation to repair or review geometry.",
   "print.validationWarnings": "Validation warnings",
-  "print.validationWarningsBody": "Review these non-blocking print-readiness warnings. Export anyway?",
+  "print.validationWarningsBody": "Review these non-blocking print-readiness warnings, then Auto-fix and export, or export anyway.",
   "print.exportAnyway": "Export anyway",
   "print.exportGate.title": "Export readiness warnings",
   "print.exportGate.fixAndExport": "Auto-fix and export",

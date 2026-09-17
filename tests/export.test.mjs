@@ -16,6 +16,7 @@ const { AssetLoader }  = await import('../src/core/AssetLoader.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { PrintManager } = await import('../src/core/PrintManager.js');
 const MeshRepair = await import('../src/core/repair/MeshRepair.js');
+const { t } = await import('../src/i18n/index.js');
 const { Toast } = await import('../src/ui/Toast.js');
 const toasts = [];
 Toast.show = (msg, type) => { toasts.push({ msg, type }); };
@@ -412,6 +413,49 @@ await test('repair: strictExport false + still-not-watertight after repair → e
     assert.ok(toasts.some(t => t.type === 'warning' && /m1/.test(t.msg)), 'warning toast mentions the part');
   } finally {
     MeshRepair.__test.setEngine(null);
+  }
+});
+
+await test('repair: non-strict export with a confirmed not-watertight clone → exactly ONE warning toast, matching toast.exportedWithWarnings', async () => {
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: false }),
+    repairObject: async (V, T) => ({ V, T, report: {} }),
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ();
+    const warningToasts = toasts.filter(toast => toast.type === 'warning');
+    assert.equal(warningToasts.length, 1, 'exactly one warning toast for the whole export (no duplicate from the panel — there is no panel here — and none doubled by the pipeline itself)');
+    assert.equal(warningToasts[0].msg, t('toast.exportedWithWarnings', { names: 'm1__export' }),
+      'message text matches toast.exportedWithWarnings');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+  }
+});
+
+await test('repair: ClockWise clone re-tagged CounterClockWise on a repair write-back; registry mesh untouched', async () => {
+  // CSG2 disabled so only the repair step's own flag re-tag (repairMesh,
+  // matching _csgRebake's rule) is exercised — not CSG's.
+  const B = globalThis.window.BABYLON;
+  const savedCSG = B.CSG2, savedInit = B.InitializeCSG2Async;
+  B.CSG2 = undefined; B.InitializeCSG2Async = undefined;
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: true }),
+    repairObject: async (V, T) => ({
+      V, T: [...T, [0, 1, 2]],   // extra triangle → "changed", forces the flag re-tag
+      report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+    }),
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { side: 0 }) } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ();
+    assert.equal(_clones[0].sideOrientation, 1, 'repaired clone re-tagged CounterClockWise');
+    assert.equal(_registry.m1.sideOrientation, 0, 'live scene mesh keeps its original ClockWise flag');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+    B.CSG2 = savedCSG; B.InitializeCSG2Async = savedInit;
   }
 });
 
