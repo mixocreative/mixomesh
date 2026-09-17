@@ -342,6 +342,24 @@ await test('texture dedup: two meshes referencing the same texture asset share o
   assert.equal((model.match(/texid="1"/g) || []).length, 2, 'both groups bind to tex id 1');
 });
 
+await test('colour contract: PBR albedo (linear 0.216) exports as sRGB #808080FF; Standard diffuse raw', async () => {
+  const pbr = solidMesh('p');
+  pbr.material = { id: 'mat-p', albedoColor: { r: 0.2159, g: 0.2159, b: 0.2159 } };
+  const std = solidMesh('s', { color: { r: 128 / 255, g: 128 / 255, b: 128 / 255 } });
+  setScene({
+    objects:  { p: obj('p'), s: obj('s') },
+    registry: { p: pbr, s: std },
+    targetPrinterId: 'mimaki-3duj-553',
+  });
+  await PrintManager.exportThreeMF();
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  // Both resolve to the SAME sRGB colour, so the writer dedupes them into one entry.
+  assert.equal((model.match(/<m:color color="#808080FF"\/>/g) || []).length, 1,
+    'linear PBR albedo and raw Standard diffuse both serialise as #808080FF (deduped)');
+  assert.ok(!/#373737FF/.test(model), 'PBR albedo must NOT be written raw (0.2159 → #37)');
+  assert.equal((model.match(/pindex="0"/g) || []).length, 2, 'both objects bind the single colour');
+});
+
 // ── Report ───────────────────────────────────────────────
 
 console.log('\n' + out.join('\n'));

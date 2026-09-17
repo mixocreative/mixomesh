@@ -239,7 +239,8 @@ await test('OBJ: generated MTL supports PBR/albedo materials without Babylon Sta
   m.material = {
     id: 'pbr-mat',
     name: 'PBR Mat',
-    albedoColor: { r: 0.25, g: 0.5, b: 0.75 },
+    // PBR albedo is LINEAR; MTL Kd is sRGB → 0.2159 linear encodes to 0.5020 (#80).
+    albedoColor: { r: 0.2159, g: 0.2159, b: 0.2159 },
     alpha: 0.6,
   };
   const origClone = m.clone;
@@ -249,7 +250,7 @@ await test('OBJ: generated MTL supports PBR/albedo materials without Babylon Sta
   await PrintManager.exportOBJ();
   const mtl = zipInstances.at(-1).files['Test_r1to1.mtl'];
   assert.match(mtl, /^newmtl pbr-mat/m);
-  assert.match(mtl, /^Kd 0\.2500 0\.5000 0\.7500/m);
+  assert.match(mtl, /^Kd 0\.5020 0\.5020 0\.5020/m, 'PBR albedo gamma-encoded once for Kd');
   assert.match(mtl, /^d 0\.6000/m);
 });
 

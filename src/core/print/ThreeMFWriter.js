@@ -8,6 +8,7 @@
 // writers — if either changes shape, mirror the other.
 
 import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
+import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 
 const BABYLON = window.BABYLON;
@@ -36,10 +37,13 @@ const RELS = `<?xml version="1.0" encoding="UTF-8"?>
 
 const TEXTURE_REL_TYPE = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture';
 
-/** Solid diffuse colour of a mesh's material as 3MF #RRGGBBFF. */
+/**
+ * Solid diffuse colour of a mesh's material as 3MF #RRGGBBFF (sRGB). Standard
+ * `diffuseColor` is read raw; PBR `albedoColor` is linear and is gamma-encoded
+ * by `materialSrgbColor` (Blueprint §10 colour contract).
+ */
 function _materialHex(mesh) {
-  const m = mesh.material || {};
-  const c = m.diffuseColor || m.albedoColor || m.baseColor;
+  const c = materialSrgbColor(mesh.material);
   if (!c) return '#CCCCCCFF';
   return `#${hex2(clamp255(c.r))}${hex2(clamp255(c.g))}${hex2(clamp255(c.b))}FF`;
 }

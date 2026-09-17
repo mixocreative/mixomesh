@@ -3,6 +3,7 @@ import { dispatch, setState, getState } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { SceneManager } from './SceneManager.js';
 import { shaderSignature } from './shaders/ShaderSignature.js';
+import { srgbToLinear01, linearToSrgb01 } from './shaders/ColorSpace.js';
 import swatchData from '../config/swatches.json' with { type: 'json' };
 
 const BABYLON = window.BABYLON;
@@ -34,19 +35,41 @@ let _idCounter = 0;
 function _nextShaderId() { return `sh_${Date.now().toString(36)}_${++_idCounter}`; }
 
 // ── Color helpers ────────────────────────────────────────
+//
+// Contract (Blueprint §10, 2026-09-17): a ShaderEntry's `diffuseColor` hex is
+// ALWAYS sRGB. PBR materials store `albedoColor`/`baseColor` in LINEAR space
+// (Babylon binds it raw; glTF's baseColorFactor lands there unchanged), so
+// every hex↔PBR mapping below converts exactly once. Standard/unlit
+// `diffuseColor` is gamma-space by Babylon convention and is copied raw.
+// Re-exported so callers/tests share the same pure curve as the writers.
 
-function _color3ToHex(c3) {
+export { srgbToLinear01, linearToSrgb01 };
+
+/**
+ * Color3 → '#rrggbb' (sRGB). Pass `{ linear: true }` when the source is a PBR
+ * albedo so the channels are gamma-encoded first.
+ */
+function _color3ToHex(c3, { linear = false } = {}) {
   if (!c3) return FALLBACK_DIFFUSE;
-  const r = Math.round(Math.max(0, Math.min(1, c3.r)) * 255);
-  const g = Math.round(Math.max(0, Math.min(1, c3.g)) * 255);
-  const b = Math.round(Math.max(0, Math.min(1, c3.b)) * 255);
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+  const enc = (v) => Math.round(Math.max(0, Math.min(1, linear ? linearToSrgb01(v) : v)) * 255);
+  return '#' + [enc(c3.r), enc(c3.g), enc(c3.b)].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
-function _hexToColor3(hex) {
-  try { return BABYLON.Color3.FromHexString(hex); }
-  catch { return BABYLON.Color3.FromHexString(FALLBACK_DIFFUSE); }
+/**
+ * '#rrggbb' (sRGB) → Color3. Pass `{ linear: true }` for a PBR albedo target so
+ * the channels are decoded to linear space.
+ */
+function _hexToColor3(hex, { linear = false } = {}) {
+  let c;
+  try { c = BABYLON.Color3.FromHexString(hex); }
+  catch { c = BABYLON.Color3.FromHexString(FALLBACK_DIFFUSE); }
+  if (!c || typeof c.r !== 'number') c = BABYLON.Color3.FromHexString(FALLBACK_DIFFUSE);
+  return linear
+    ? new BABYLON.Color3(srgbToLinear01(c.r), srgbToLinear01(c.g), srgbToLinear01(c.b))
+    : c;
 }
+
+const LINEAR = { linear: true };
 
 // ── Material introspection / construction ────────────────
 
@@ -80,7 +103,8 @@ function _buildEntryFromMaterial(material, importCtx = {}) {
   let opacity = 1, roughness = 0.5, metallic = 0;
 
   if (type === 'pbr') {
-    diffuseColor = _color3ToHex(material.albedoColor ?? material.baseColor);
+    // Imported PBR albedo is already linear (glTF baseColorFactor) — encode once.
+    diffuseColor = _color3ToHex(material.albedoColor ?? material.baseColor, LINEAR);
     opacity      = material.alpha ?? 1;
     roughness    = material.roughness ?? 0.5;
     metallic     = material.metallic ?? 0;
@@ -127,8 +151,8 @@ function _buildEntryFromMaterial(material, importCtx = {}) {
 function _applyEntryToMaterial(mat, entry) {
   const t = entry.type;
   if (t === 'pbr') {
-    if ('albedoColor' in mat) mat.albedoColor = _hexToColor3(entry.diffuseColor);
-    if ('baseColor'   in mat) mat.baseColor   = _hexToColor3(entry.diffuseColor);
+    if ('albedoColor' in mat) mat.albedoColor = _hexToColor3(entry.diffuseColor, LINEAR);
+    if ('baseColor'   in mat) mat.baseColor   = _hexToColor3(entry.diffuseColor, LINEAR);
     if ('roughness'   in mat) mat.roughness   = entry.roughness;
     if ('metallic'    in mat) mat.metallic    = entry.metallic;
   } else {
@@ -154,11 +178,12 @@ function _setMaterialField(mat, field, value, type) {
       return;
 
     case 'diffuseColor': {
-      const c = _hexToColor3(value);
       if (type === 'pbr') {
+        const c = _hexToColor3(value, LINEAR);
         if ('albedoColor' in mat) mat.albedoColor = c;
         if ('baseColor'   in mat) mat.baseColor   = c;
       } else {
+        const c = _hexToColor3(value);
         mat.diffuseColor = c;
         if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = c;
       }

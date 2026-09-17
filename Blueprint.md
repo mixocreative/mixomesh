@@ -2096,6 +2096,21 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
 }
 ```
 
+**Colour-space contract (2026-09-17).** `diffuseColor` is **always sRGB** —
+the hex the user picks/sees and the value every exported file carries
+(MTL `Kd`, 3MF `#RRGGBBFF`, solid-PNG synthesis). Babylon binds a PBR
+material's `albedoColor` / `baseColor` **raw** to a shader that treats it as
+**linear** (the glTF loader stores the linear `baseColorFactor` there
+unchanged), so ShaderLibrary converts exactly once at every hex↔PBR seam:
+writing a record to a PBR material decodes `srgbToLinear01` per channel;
+reading an imported PBR material into a record (`registerFromContainer`)
+encodes `linearToSrgb01`; export writers read PBR colour via
+`materialSrgbColor()` (`src/core/shaders/ColorSpace.js`, pure — no Babylon
+dependency so headless tests match runtime). Standard/unlit `diffuseColor`
+is gamma-space by Babylon convention and is copied raw both ways. Never
+convert twice: a material that came from glTF is already linear; a record
+hex is already sRGB.
+
 ### UVOverride (per-mesh, stored in `state.scene.uvOverrides`)
 ```js
 { meshId, shaderId, offsetX, offsetY, scaleX, scaleY, rotation }

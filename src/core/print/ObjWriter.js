@@ -8,6 +8,7 @@
  */
 
 import { collectTextureExportData, clamp255, hex2 } from './ExportTextures.js';
+import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 
 const BABYLON = window.BABYLON;
@@ -84,7 +85,7 @@ async function _synthesizeSolidShaderTextures(meshList) {
     if (seenMaterials.has(mat)) continue;
     seenMaterials.add(mat);
     if (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture) continue;
-    const c = mat.diffuseColor || mat.albedoColor || mat.baseColor || { r: 0.8, g: 0.8, b: 0.8 };
+    const c = _mtlColor(mat);
     const r = clamp255(c.r), g = clamp255(c.g), b = clamp255(c.b);
     const a = clamp255(_safeAlpha01(mat.alpha));
     const hex = `${hex2(r)}${hex2(g)}${hex2(b)}${hex2(a)}`;
@@ -158,8 +159,10 @@ function _normalizeObjTokens(objString) {
     (_, key, name) => `${key} ${objToken(name)}`);
 }
 
+// MTL colour is sRGB: Standard `diffuseColor` raw, PBR `albedoColor` (linear)
+// gamma-encoded once via `materialSrgbColor` (Blueprint §10 colour contract).
 function _mtlColor(mat) {
-  return mat?.diffuseColor || mat?.albedoColor || mat?.baseColor || { r: 0.8, g: 0.8, b: 0.8 };
+  return materialSrgbColor(mat) || { r: 0.8, g: 0.8, b: 0.8 };
 }
 
 function _mtlLineColor(prefix, color) {

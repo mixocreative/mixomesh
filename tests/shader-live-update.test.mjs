@@ -10,7 +10,7 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 console.error = () => {};
-const { ShaderLibrary } = await import('../src/core/ShaderLibrary.js');
+const { ShaderLibrary, srgbToLinear01, linearToSrgb01 } = await import('../src/core/ShaderLibrary.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { setState, getState } = await import('../src/core/StateManager.js');
 const { ShaderConsolidateCommand } = await import('../src/core/commands/ShaderCommands.js');
@@ -136,6 +136,65 @@ await test('exact duplicate consolidation rewires all links and undo restores id
   assert.equal(getState().scene.objects.m_con_a.shaderId, canonical);
   assert.equal(getState().scene.objects.m_con_b.shaderId, duplicate);
   assert.ok(getState().scene.shaders[duplicate], 'undo recreates removed shader entry/material');
+});
+
+// ── Colour-space contract (Blueprint §10, 2026-09-17) ──────────────────────
+// Record hex is ALWAYS sRGB; PBR albedoColor is LINEAR; Standard diffuseColor raw.
+
+await test('colour: sRGB<->linear helpers round-trip every 8-bit value to 1/255', () => {
+  for (let i = 0; i < 256; i++) {
+    const back = Math.round(linearToSrgb01(srgbToLinear01(i / 255)) * 255);
+    assert.equal(back, i, `channel ${i} must survive sRGB→linear→sRGB`);
+  }
+  assert.ok(Math.abs(srgbToLinear01(128 / 255) - 0.2159) < 5e-4, '#80 → ~0.216 linear');
+});
+
+await test('colour: picked #808080 on a PBR shader lands in albedoColor as ~0.216 (linear)', () => {
+  fakeMesh('m_col_pbr');
+  seedObjects(['m_col_pbr']);
+  const shaderId = ShaderLibrary.createShader({ name: 'Grey', type: 'pbr', diffuseColor: '#808080' });
+  const mat = ShaderLibrary.getMaterialById(shaderId);
+  for (const ch of ['r', 'g', 'b']) {
+    assert.ok(Math.abs(mat.albedoColor[ch] - 0.216) < 1e-3, `albedo.${ch} linear, got ${mat.albedoColor[ch]}`);
+  }
+  // Live update path converts too.
+  ShaderLibrary.updateShader(shaderId, 'diffuseColor', '#ffffff');
+  assert.ok(Math.abs(mat.albedoColor.r - 1) < 1e-6, 'white stays 1.0 in linear');
+  ShaderLibrary.updateShader(shaderId, 'diffuseColor', '#808080');
+  assert.ok(Math.abs(mat.albedoColor.g - 0.216) < 1e-3, 'updateShader re-encodes to linear');
+  assert.equal(getState().scene.shaders[shaderId].diffuseColor, '#808080', 'record hex stays sRGB');
+});
+
+await test('colour: glTF-imported PBR albedo 0.216 registers as record hex #808080 (no double conversion)', async () => {
+  // A real-Babylon PBRMaterial is detected via instanceof; mimic that shape.
+  const mat = Object.assign(Object.create(window.BABYLON.PBRMaterial.prototype), {
+    name: 'ImportedGrey', albedoColor: { r: 0.2159, g: 0.2159, b: 0.2159 },
+    metallic: 0, roughness: 0.5, alpha: 1, albedoTexture: null, baseTexture: null,
+    dispose() {},
+  });
+  const meshA = { name: 'gltfMesh', material: mat, metadata: {} };
+  // NB: this may auto-dedupe against the picked-#808080 PBR shader above (same
+  // signature) — which is itself proof the two paths agree — so read the id
+  // via byMaterial rather than shaderIds.
+  const { byMaterial } = await ShaderLibrary.registerFromContainer({ materials: [mat], meshes: [meshA] }, {});
+  const entry = getState().scene.shaders[byMaterial.get(mat)];
+  assert.ok(entry, 'entry registered');
+  assert.equal(entry.type, 'pbr');
+  assert.equal(entry.diffuseColor, '#808080', 'linear 0.216 encodes to sRGB #808080');
+  // Round trip: applying the record back to a fresh PBR material yields the same linear value.
+  const shaderId = ShaderLibrary.createShader({ name: 'RT', type: 'pbr', diffuseColor: entry.diffuseColor });
+  const m2 = ShaderLibrary.getMaterialById(shaderId);
+  assert.ok(Math.abs(m2.albedoColor.r - 0.2159) < 2e-3, 'hex → albedo → hex → albedo is stable');
+});
+
+await test('colour: StandardMaterial diffuseColor is written raw (gamma-space, unchanged)', () => {
+  fakeMesh('m_col_std');
+  seedObjects(['m_col_std']);
+  const shaderId = ShaderLibrary.createShader({ name: 'StdGrey', type: 'standard', diffuseColor: '#808080' });
+  const mat = ShaderLibrary.getMaterialById(shaderId);
+  assert.ok(Math.abs(mat.diffuseColor.r - 128 / 255) < 1e-6, 'standard diffuse = raw 0.502');
+  ShaderLibrary.updateShader(shaderId, 'diffuseColor', '#404040');
+  assert.ok(Math.abs(mat.diffuseColor.r - 64 / 255) < 1e-6, 'live update stays raw too');
 });
 
 console.log('\n' + out.join('\n'));
