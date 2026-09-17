@@ -3,6 +3,7 @@ import { dispatch, getState, setState, subscribe } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { logicalObjectPartIds } from './LogicalObjects.js';
 import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
+import { frontFaceIsClockwise } from './print/PrintSpace.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -70,11 +71,21 @@ function _checkNonManifold(positions, indices) {
 /**
  * Inverted-winding test via signed mesh volume — one O(tris) pass, no ray
  * casts or octree (the old 64-ray heuristic was O(tris) PER ray = the heavy
- * part of validation on dense meshes). V < 0 ⇒ inward winding. Robust for
- * closed meshes; a cheap heuristic for open ones (same status as before).
- * Sign is transform-invariant, so local positions are fine.
+ * part of validation on dense meshes). Robust for closed meshes; a cheap
+ * heuristic for open ones (same status as before). Sign is transform-
+ * invariant, so local positions are fine.
+ *
+ * The sign that means "outward" depends on the mesh's effective side
+ * orientation (see PrintSpace.frontFaceIsClockwise, verified 2026-09-17):
+ * Babylon is left-handed, so a CounterClockWise-flagged mesh (native
+ * primitives, OBJ/STL/3MF imports, Boolean results) renders outward when the
+ * right-handed signed volume is NEGATIVE, while a ClockWise-flagged mesh
+ * (glTF imports) renders outward when it is POSITIVE. The old unconditional
+ * `V < 0 ⇒ inverted` was only right for ClockWise meshes and flagged every
+ * correct CounterClockWise mesh.
+ * @param {boolean} clockwise  effective front-face winding of the mesh
  */
-function _checkInvertedNormals(positions, indices) {
+function _checkInvertedNormals(positions, indices, clockwise) {
   let v6 = 0;
   for (let i = 0; i < indices.length; i += 3) {
     const i0 = indices[i] * 3, i1 = indices[i + 1] * 3, i2 = indices[i + 2] * 3;
@@ -86,7 +97,7 @@ function _checkInvertedNormals(positions, indices) {
     const crz = bx * cy - by * cx;
     v6 += ax * crx + ay * cry + az * crz;
   }
-  return v6 < 0;
+  return clockwise ? v6 < 0 : v6 > 0;
 }
 
 /**
@@ -94,19 +105,20 @@ function _checkInvertedNormals(positions, indices) {
  * positions/indices pair. Runs in a Web Worker when available so a heavy
  * print model (80k+ tris) never blocks the UI thread; falls back to the
  * inline pure-JS path (Node tests, no Worker).
+ * @param {boolean} clockwise  effective front-face winding (frontFaceIsClockwise)
  * @returns {Promise<{ badEdgeCount: number, inverted: boolean }>}
  */
-async function _topology(positions, indices) {
+async function _topology(positions, indices, clockwise = false) {
   if (isValidateWorkerSupported()) {
     try {
-      return await validateTopologyInWorker(positions, indices);
+      return await validateTopologyInWorker(positions, indices, clockwise);
     } catch {
       /* worker unavailable / crashed — fall through to inline */
     }
   }
   return {
     badEdgeCount: _checkNonManifold(positions, indices),
-    inverted: _checkInvertedNormals(positions, indices),
+    inverted: _checkInvertedNormals(positions, indices, clockwise),
   };
 }
 
@@ -323,7 +335,9 @@ export async function validateMesh(mesh) {
         }
       }
     } else {
-      const { badEdgeCount, inverted } = await _topology(positions, indices);
+      // Same orientation rule the print writers use (PrintSpace.printIndices),
+      // so "inverted" here means exactly what would come out inside-out.
+      const { badEdgeCount, inverted } = await _topology(positions, indices, frontFaceIsClockwise(mesh));
       if (badEdgeCount > 0) {
         // Warning, not error: a colored-print assembly tool works with downloaded
         // display models that are frequently non-watertight, and slicers
@@ -344,7 +358,9 @@ export async function validateMesh(mesh) {
           count: 1,
           autoFixAvailable: true,
           fixed: false,
-          message: 'Normals appear inverted (auto-fixed on export)',
+          // Nothing flips on export (audit M1) — the repair is the explicit
+          // Auto-Fix action (applyGeometryFix 'invertedNormals' = index flip).
+          message: 'Normals appear inverted — use Auto-Fix to flip',
         });
       }
     }

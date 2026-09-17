@@ -1,15 +1,19 @@
 // Topology validation in a worker (perf goal 2026-06-13: heavy print models —
 // 80k+ tris, 4096² textures — must never block the UI on import). Pure math,
-// no Babylon: receives transferable positions (Float32) + indices (Uint32),
-// returns { badEdgeCount, inverted }. The main-thread MeshValidator does the
+// no Babylon: receives transferable positions (Float32) + indices (Uint32)
+// + the mesh's effective winding flag `clockwise` (computed on the main
+// thread via PrintSpace.frontFaceIsClockwise), returns
+// { badEdgeCount, inverted }. The main-thread MeshValidator does the
 // cheap world-space bed-bounds check itself.
 //
 // Algorithms are the fast variants of the old main-thread code:
 //  - Position weld uses a NUMERIC packed key (no per-vertex string alloc).
 //  - Non-manifold edges use a NUMERIC packed key (no per-edge string alloc).
 //  - Inverted-normals uses the signed mesh volume (one O(tris) pass, no ray
-//    casts / octree) — V<0 ⇒ inward winding. Robust for closed meshes; a
-//    cheap heuristic for open ones, same as the old ray vote.
+//    casts / octree). Babylon is left-handed: a CounterClockWise-flagged mesh
+//    is outward when the right-handed signed volume is NEGATIVE, a ClockWise-
+//    flagged one (glTF) when it is POSITIVE — so inverted = clockwise ? V<0
+//    : V>0. Robust for closed meshes; a cheap heuristic for open ones.
 
 const MERGE_DISTANCE = 1e-4;   // 0.1 mm (1 BU = 1 m) — matches MeshValidator
 
@@ -62,7 +66,8 @@ function checkNonManifold(positions, indices) {
 
 // Signed volume of the triangle soup (local space — sign is transform-
 // invariant for the winding test). Sum of tetrahedra (origin, v0, v1, v2).
-function checkInvertedNormals(positions, indices) {
+// Must stay in lockstep with MeshValidator._checkInvertedNormals.
+export function checkInvertedNormals(positions, indices, clockwise) {
   let v6 = 0;   // 6× volume
   for (let i = 0; i < indices.length; i += 3) {
     const i0 = indices[i] * 3, i1 = indices[i + 1] * 3, i2 = indices[i + 2] * 3;
@@ -75,14 +80,14 @@ function checkInvertedNormals(positions, indices) {
     const crz = bx * cy - by * cx;
     v6 += ax * crx + ay * cry + az * crz;
   }
-  return v6 < 0;
+  return clockwise ? v6 < 0 : v6 > 0;
 }
 
 self.onmessage = (e) => {
-  const { id, positions, indices } = e.data;
+  const { id, positions, indices, clockwise = false } = e.data;
   try {
     const badEdgeCount = checkNonManifold(positions, indices);
-    const inverted = checkInvertedNormals(positions, indices);
+    const inverted = checkInvertedNormals(positions, indices, !!clockwise);
     self.postMessage({ id, type: 'done', badEdgeCount, inverted });
   } catch (err) {
     self.postMessage({ id, type: 'error', message: err?.message ?? String(err) });

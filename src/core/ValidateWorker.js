@@ -40,9 +40,12 @@ function _ensureWorker() {
  * Run topology checks in the worker.
  * @param {Float32Array} positions  vertex positions (xyz triples)
  * @param {Uint32Array|Int32Array|number[]} indices
+ * @param {boolean} [clockwise=false]  effective front-face winding of the mesh
+ *   (PrintSpace.frontFaceIsClockwise) — decides which signed-volume sign is
+ *   "inverted". Computed on the main thread; the worker stays Babylon-free.
  * @returns {Promise<{ badEdgeCount: number, inverted: boolean }>}
  */
-export function validateTopologyInWorker(positions, indices) {
+export function validateTopologyInWorker(positions, indices, clockwise = false) {
   return new Promise((resolve, reject) => {
     const id = ++_seq;
     _pending.set(id, { resolve, reject });
@@ -53,7 +56,7 @@ export function validateTopologyInWorker(positions, indices) {
     const pos = positions instanceof Float32Array ? positions.slice() : Float32Array.from(positions);
     const idx = indices instanceof Uint32Array ? indices.slice() : Uint32Array.from(indices);
     _ensureWorker().postMessage(
-      { id, positions: pos, indices: idx },
+      { id, positions: pos, indices: idx, clockwise: !!clockwise },
       [pos.buffer, idx.buffer],
     );
   });
