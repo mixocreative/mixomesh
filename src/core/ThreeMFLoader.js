@@ -47,11 +47,18 @@ function _hexToColor3(hex) {
   );
 }
 
-/** Parse a 3MF `<item>`/transform 12-tuple → Babylon row-major Matrix. */
-function _itemMatrix(transformStr) {
-  if (!transformStr) return null;
+/**
+ * Parse a 3MF `<item>`/transform 12-tuple → Babylon row-major Matrix.
+ * Absent attribute → null (caller treats as identity, the spec default);
+ * a present-but-malformed value (wrong count / NaN) THROWS — a placement we
+ * cannot read must not silently collapse to identity (audit F11).
+ */
+function _itemMatrix(transformStr, where = 'item') {
+  if (transformStr == null || transformStr === '') return null;
   const n = transformStr.trim().split(/\s+/).map(Number);
-  if (n.length !== 12 || n.some(x => !Number.isFinite(x))) return null;
+  if (n.length !== 12 || n.some(x => !Number.isFinite(x))) {
+    throw new Error(`3MF: malformed transform "${transformStr}" on ${where}`);
+  }
   // 3MF: row-major 4×3 (rotation/scale 3×3 then translation row).
   return BABYLON.Matrix.FromValues(
     n[0], n[1], n[2], 0,
@@ -110,8 +117,9 @@ function _componentModelPath(component) {
     || '';
 }
 
-function _matrixFor(componentOrItem) {
-  return _itemMatrix(componentOrItem?.getAttribute('transform')) ?? BABYLON.Matrix.Identity();
+function _matrixFor(componentOrItem, kind) {
+  const where = `${kind} objectid=${componentOrItem?.getAttribute('objectid')}`;
+  return _itemMatrix(componentOrItem?.getAttribute('transform'), where) ?? BABYLON.Matrix.Identity();
 }
 
 function _multiplyMatrices(a, b) {
@@ -443,11 +451,14 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     return k;
   };
 
-  const instantiateObject = async (ctx, objectId, matrix, parentNode, stack = new Set()) => {
+  // `ref` = 'item' | 'component': a dangling reference throws rather than
+  // silently dropping the part — a partial assembly is a wrong print with no
+  // notice (audit F10).
+  const instantiateObject = async (ctx, objectId, matrix, parentNode, ref, stack = new Set()) => {
     const stackKey = `${ctx?.path || 'model'}:${objectId}`;
     if (stack.has(stackKey)) throw new Error(`3MF: component cycle at object ${objectId}`);
     const obj = ctx?.objectsById.get(objectId);
-    if (!obj) return 0;
+    if (!obj) throw new Error(`3MF: ${ref} references missing object "${objectId}" in ${ctx?.path || 'model'}`);
     const nextStack = new Set(stack);
     nextStack.add(stackKey);
     const meshEl = _firstDirect(obj, 'mesh');
@@ -464,11 +475,14 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     for (const component of _directChildren(componentsEl, 'component')) {
       const childObjectId = component.getAttribute('objectid');
       const childPath = _componentModelPath(component);
-      const childCtx = childPath
-        ? await loadContext(_resolvePackagePath(childPath, ctx.path))
-        : ctx;
-      const childMatrix = _multiplyMatrices(matrix, _matrixFor(component));
-      childCount += await instantiateObject(childCtx, childObjectId, childMatrix, node, nextStack);
+      let childCtx = ctx;
+      if (childPath) {
+        const resolved = _resolvePackagePath(childPath, ctx.path);
+        childCtx = await loadContext(resolved);
+        if (!childCtx) throw new Error(`3MF: component path "${childPath}" not found in package`);
+      }
+      const childMatrix = _multiplyMatrices(matrix, _matrixFor(component, 'component'));
+      childCount += await instantiateObject(childCtx, childObjectId, childMatrix, node, 'component', nextStack);
     }
     if (!childCount) {
       container.transformNodes = container.transformNodes.filter(n => n !== node);
@@ -482,11 +496,11 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   const buildEl = rootContext.doc.getElementsByTagName('build')[0];
   const buildItems = buildEl ? _directChildren(buildEl, 'item') : [];
   const placements = buildItems.length
-    ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it) }))
+    ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it, 'item') }))
     : [...rootContext.objectsById.keys()].map(id => ({ id, matrix: BABYLON.Matrix.Identity() }));
 
   for (const placement of placements) {
-    made += await instantiateObject(rootContext, placement.id, placement.matrix, null);
+    made += await instantiateObject(rootContext, placement.id, placement.matrix, null, 'item');
   }
 
   // Hand entities to the container the way Babylon's own loaders do: detach
