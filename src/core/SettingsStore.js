@@ -38,7 +38,7 @@ const SCHEMA = [
   // `exportRatios` is per-PROJECT content (persisted in the .mixo, restored on
   // load) — NOT a per-user setting. Narrow to genuine printer prefs so it is
   // neither written to localStorage nor reset across projects.
-  { key: 'print',     path: ['print'],              fields: ['targetPrinterId', 'bedDimensions', 'minWallThickness', 'printMode', 'chordTolerance', 'objBakeSolidTextures'] },
+  { key: 'print',     path: ['print'],              fields: ['targetPrinterId', 'bedDimensions', 'minWallThickness', 'printMode', 'chordTolerance', 'objBakeSolidTextures', 'strictExport'] },
   { key: 'gizmo',     path: ['gizmo'],              fields: ['space', 'snap'] },
   { key: 'pivotMode', path: ['selection', 'pivotMode'], scalar: true },
 ];

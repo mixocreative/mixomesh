@@ -17,6 +17,7 @@ import { getState } from '../StateManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
+import { repairMesh, ensureRepairEngine } from '../repair/MeshRepair.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
@@ -89,6 +90,41 @@ function _tryCsg(mesh, ctx) {
   catch { ctx.csgSkipped.push(mesh.name); }
 }
 
+// ── repair (watertight fix on the export CLONE) ──────────
+
+/**
+ * Pre-flight repair-engine load, mirroring _ensureCSG2. Runs once per
+ * `_runExport` batch (not per target, not per mesh) so a slow/failed vendor
+ * script load produces ONE toast, not one per part. `options.repair === false`
+ * is a hard caller opt-out — never even attempts the load.
+ */
+async function _ensureRepairRuntime(options) {
+  if (options.repair === false) return false;
+  try { await ensureRepairEngine(); return true; }
+  catch (err) { console.error('Repair engine init failed:', err); return false; }
+}
+
+/**
+ * Attempt watertight repair on one export CLONE. Never throws — a failed or
+ * unavailable engine, or a still-not-watertight result, is recorded on ctx
+ * for the strict-mode gate and the post-export warning toast; the
+ * pre-existing weld/CSG prep steps must keep running regardless.
+ */
+async function _tryRepair(mesh, ctx) {
+  if (!ctx.repairReady) { ctx.repairSkipped.push(mesh.name); return; }
+  try {
+    const r = await repairMesh(mesh);
+    ctx.repairReport.push({ name: mesh.name, isWatertight: r.isWatertight });
+    if (!r.isWatertight) ctx.repairSkipped.push(mesh.name);
+  } catch (err) {
+    // Engine failure mid-batch (e.g. the triangle cap) or any other repair
+    // failure: unknown watertight status (null), never a strict-mode
+    // blocker on its own — only a CONFIRMED not-watertight result is.
+    ctx.repairReport.push({ name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
+    ctx.repairSkipped.push(mesh.name);
+  }
+}
+
 // ── weld helpers ─────────────────────────────────────────
 
 const WELD_DISTANCE = 1e-4;   // 0.1 mm at 1 BU = 1 m. Matches MeshValidator.
@@ -131,6 +167,7 @@ const PREP_STEPS = createPrepSteps({
   weld: _weld,
   isSolidColor: _isSolidColor,
   tryCsg: _tryCsg,
+  tryRepair: _tryRepair,
 });
 
 const FORMATS = createFormats({
@@ -217,6 +254,12 @@ async function _runExport(formatKey, options = {}) {
     if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
   }
 
+  // Repair runs on every format (unlike CSG, OBJ included). One pre-flight
+  // engine load for the whole batch — a slow/failed vendor script load
+  // produces ONE toast, not one per target/mesh.
+  const repairReady = await _ensureRepairRuntime(options);
+  if (options.repair !== false && !repairReady) Toast.show(t('toast.repairUnavailable'), 'warning', 4000);
+
   // One file per target ratio in print.exportRatios. Empty list = "as shown"
   // (target = referenceRatio → factor 1000). Targets are passed into
   // buildExportContext directly — no mutable global, no setExportTargetOverride.
@@ -230,7 +273,7 @@ async function _runExport(formatKey, options = {}) {
     );
     // ONE state snapshot for the whole batch (M8): a rename / selection change
     // between two save pickers must not change the second file's reference.
-    const written = await _runExportForTarget(fmt, targets[ti], options, csgReady, span, state0);
+    const written = await _runExportForTarget(fmt, targets[ti], options, csgReady, repairReady, span, state0);
     if (written === false) return;   // picker cancelled — stop the batch, don't re-prompt
   }
 }
@@ -289,7 +332,7 @@ export function getPrintReadiness(options = {}) {
   return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions });
 }
 
-async function _runExportForTarget(fmt, target, options, csgReady, progress, state = getState()) {
+async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {
   progress(0.02, 'Collecting meshes…');
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
@@ -299,7 +342,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress, sta
   // snapshotted state.print.* values (set inside buildExportContext). The
   // two stay separate so callers can't accidentally override a pref by
   // spreading their own options bag.
-  const ctx = buildExportContext({ state, units, target, csgReady, options });
+  const ctx = buildExportContext({ state, units, target, csgReady, repairReady, options });
 
   const clones = [];
   const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };
@@ -336,7 +379,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress, sta
       for (const stepKey of fmt.prep) {
         const step = PREP_STEPS[stepKey];
         if (!step) continue;
-        try { step(clone, ctx); }
+        try { await step(clone, ctx); }
         catch (e) {
           // NEVER swallow a prep failure. A flattenWorld that threw mid-way
           // leaves the clone at raw BU scale (1000× too small) and the old
@@ -361,6 +404,20 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress, sta
     ctx.meshes.push(...clones);
     ctx.cloneGroups.push(..._groupCloneEntries(clones));
 
+    // Fail closed: strictExport blocks on a CONFIRMED not-watertight clone
+    // (repair ran and reported isWatertight:false) — never on "unknown"
+    // (engine unavailable / capped), which is a repair-engine problem, not
+    // a geometry one, and is already surfaced by toast.repairUnavailable.
+    if (state.print?.strictExport) {
+      const notWatertight = ctx.repairReport.filter(r => r.isWatertight === false).map(r => r.name);
+      if (notWatertight.length) {
+        throw _exportError(
+          `Parts are not watertight: ${notWatertight.join(', ')}`,
+          notWatertight.map(name => ({ meshName: name, message: 'Not watertight after repair' })),
+        );
+      }
+    }
+
     const remaining = await _validateExportMeshes(
       clones, (d, tot) => progress(0.5 + 0.3 * (d / tot), `Validating ${d}/${tot}…`));
     if (remaining.length) throw _exportError('Validation errors remain after auto-fix.', remaining);
@@ -379,6 +436,16 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress, sta
     Toast.show(t('toast.exportedOk', { filename: out.filename ?? fmt.label }), 'success', 3000);
     if (ctx.csgSkipped.length) {
       Toast.show(t('toast.partsNotWatertight', { n: ctx.csgSkipped.length }), 'info', 5000);
+    }
+    // Non-strict export with a CONFIRMED still-not-watertight clone: one
+    // warning toast naming the part(s) (strict mode would have thrown above
+    // before reaching here — this only fires when strictExport is off).
+    const stillNotWatertight = ctx.repairReport.filter(r => r.isWatertight === false);
+    if (stillNotWatertight.length) {
+      Toast.show(
+        t('toast.exportedWithWarnings', { names: stillNotWatertight.map(r => r.name).join(', ') }),
+        'warning', 5000,
+      );
     }
     return true;
   } catch (err) {

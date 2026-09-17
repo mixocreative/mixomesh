@@ -15,6 +15,7 @@ const { StateManager } = await import('../src/core/StateManager.js');
 const { AssetLoader }  = await import('../src/core/AssetLoader.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { PrintManager } = await import('../src/core/PrintManager.js');
+const MeshRepair = await import('../src/core/repair/MeshRepair.js');
 const { Toast } = await import('../src/ui/Toast.js');
 const toasts = [];
 Toast.show = (msg, type) => { toasts.push({ msg, type }); };
@@ -40,6 +41,11 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [
     getTotalVertices() { return this._verts; },
     getVerticesData() { return new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]); },
     getIndices() { return [0, 1, 2]; },
+    // MeshRepair.arraysToMesh write-back (repair prep step) — a real repair
+    // that CHANGES geometry calls these; a fake mesh must observably record
+    // it so tests can prove repair only touched the export clone.
+    setVerticesData() { this.__repaired = true; },
+    setIndices() { this.__repaired = true; },
     getBoundingInfo() {
       return { boundingBox: { minimumWorld: v(0, 0, 0), maximumWorld: v(this._size[0], this._size[1], this._size[2]) } };
     },
@@ -324,6 +330,89 @@ await test('OBJ: never runs CSG2 (colour-safe — STL-only)', async () => {
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   assert.equal(calls.csgFrom.length, 0, 'no CSG2 on OBJ');
+});
+
+// ── Repair (export gate: watertight clones) ──────────────
+
+await test('repair: runs on the export clone only — registry mesh untouched', async () => {
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: true }),
+    repairObject: async (V, T) => ({
+      V, T: [...T, [0, 1, 2]],   // extra triangle → "changed", forces write-back
+      report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+    }),
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ();
+    assert.equal(_clones.length, 1);
+    assert.match(_clones[0].name, /__export$/, 'repair ran on the export clone');
+    assert.equal(_clones[0].__repaired, true, 'clone geometry rewritten by repair');
+    assert.equal(_registry.m1.__repaired, undefined, 'live scene mesh untouched');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+  }
+});
+
+await test('repair: options.repair === false skips the step (engine never invoked)', async () => {
+  let calledCount = 0;
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: false }),
+    repairObject: async (V, T) => { calledCount++; return { V, T, report: {} }; },
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ({ repair: false });
+    assert.equal(calledCount, 0, 'repair engine never invoked when repair:false');
+    assert.ok(!toasts.some(t => /repair/i.test(t.msg)), 'no repair-related toast when explicitly disabled');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+  }
+});
+
+await test('repair: engine unavailable → one warning toast, never throws, still exports', async () => {
+  MeshRepair.__test.setEngine(null);
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  assert.equal(calls.downloads.length, 1, 'export still produced');
+  const repairToasts = toasts.filter(t => t.type === 'warning' && /repair/i.test(t.msg));
+  assert.equal(repairToasts.length, 1, 'exactly one repair-unavailable warning for the whole batch');
+});
+
+await test('repair: strictExport true + still-not-watertight after repair → rejects listing the part, nothing downloaded', async () => {
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: false }),
+    repairObject: async (V, T) => ({ V, T, report: {} }),   // unchanged — hole survives
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true });
+    MeshValidator.validateMesh = valOK;
+    await assert.rejects(PrintManager.exportOBJ(), /not watertight/i);
+    assert.equal(calls.downloads.length, 0, 'nothing downloaded');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: false } }), { silent: true });
+  }
+});
+
+await test('repair: strictExport false + still-not-watertight after repair → exports, warning toast names the part', async () => {
+  MeshRepair.__test.setEngine({
+    diagnose: () => ({ isWatertight: false }),
+    repairObject: async (V, T) => ({ V, T, report: {} }),
+  });
+  try {
+    setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+    MeshValidator.validateMesh = valOK;
+    await PrintManager.exportOBJ();
+    assert.equal(calls.downloads.length, 1, 'export still produced');
+    assert.ok(toasts.some(t => t.type === 'warning' && /m1/.test(t.msg)), 'warning toast mentions the part');
+  } finally {
+    MeshRepair.__test.setEngine(null);
+  }
 });
 
 // ── STL ──────────────────────────────────────────────────

@@ -14,7 +14,8 @@
  *     These are set by buildExportContext and never reassigned. The returned
  *     object is Object.freeze'd (shallow) so attempts to reassign throw in
  *     strict mode.
- *   • Pipeline-managed mutables: csgReady, csgSkipped, meshes, cloneGroups.
+ *   • Pipeline-managed mutables: csgReady, csgSkipped, repairReady,
+ *     repairSkipped, repairReport, meshes, cloneGroups.
  *     The arrays live inside the frozen object but their contents are
  *     populated by PrintPipeline as it walks the clone+prep+validate stages.
  *     This is intentional — the alternative (a separate "run" object that
@@ -65,6 +66,12 @@ function _capturePrefs(state) {
  * @property {boolean} individually   Per-part output.
  * @property {boolean} csgReady       Mutated by pipeline once CSG2 init resolves.
  * @property {string[]} csgSkipped    Mutated by pipeline.
+ * @property {boolean} repairReady    Mutated by pipeline once the repair engine init resolves
+ *                                    (and false when the caller passed options.repair === false).
+ * @property {string[]} repairSkipped Mutated by pipeline: clone names the repair step could not
+ *                                    confirm watertight (engine unavailable, capped, or still open).
+ * @property {Array<{name:string, isWatertight:boolean|null, error?:string}>} repairReport
+ *                                    Mutated by pipeline: one entry per clone the repair step ran on.
  * @property {Array} meshes           Mutated by pipeline (clone entries).
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
  * @property {{objBakeSolidTextures:boolean}} prefs  Snapshotted state.print prefs (frozen).
@@ -87,9 +94,11 @@ function _capturePrefs(state) {
  * @param {number} [args.target]       Explicit target ratio; null ⇒ "as shown" (== referenceRatio).
  * @param {Object} [args.options]      Caller options bag.
  * @param {boolean} [args.csgReady]    True once CSG2 init resolved.
+ * @param {boolean} [args.repairReady] True once the repair engine init resolved (and the
+ *                                     caller did not opt out via options.repair === false).
  * @returns {ExportContext}
  */
-export function buildExportContext({ state, units, target = null, options = {}, csgReady = false }) {
+export function buildExportContext({ state, units, target = null, options = {}, csgReady = false, repairReady = false }) {
   if (!state) throw new Error('buildExportContext: state required');
   if (!Array.isArray(units) || !units.length) throw new Error('buildExportContext: units required');
   const referenceUnit = _selectReferenceUnit(units, state);
@@ -121,6 +130,9 @@ export function buildExportContext({ state, units, target = null, options = {}, 
     individually: !!options.individually,
     csgReady: !!csgReady,
     csgSkipped: [],
+    repairReady: !!repairReady,
+    repairSkipped: [],
+    repairReport: [],
     meshes: [],
     cloneGroups: [],
     prefs: _capturePrefs(state),

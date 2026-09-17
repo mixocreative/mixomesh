@@ -6,7 +6,7 @@
  * mean wrong geometry shipped to a slicer without warning.
  */
 
-export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
+export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg, tryRepair }) {
   return {
     fallbackMaterial(mesh) {
       if (mesh.material) return;
@@ -47,6 +47,11 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg }) {
 
     weld(mesh)               { weld(mesh); },
     weldSolidOnly(mesh)      { if (isSolidColor(mesh)) weld(mesh); },
+    // Watertight repair on the CLONE only (textured parts included — UVs are
+    // re-attached by nearest vertex inside repairMesh). Never throws: engine
+    // failures and still-not-watertight results are recorded on ctx by
+    // tryRepair, not surfaced as a prep-step exception.
+    repair(mesh, ctx)        { return tryRepair(mesh, ctx); },
     optimizeIndices(mesh)    { mesh.optimizeIndices?.(); },
     createNormals(mesh)      { mesh.createNormals?.(true); },
     csg(mesh, ctx)           { tryCsg(mesh, ctx); },

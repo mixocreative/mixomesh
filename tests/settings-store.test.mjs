@@ -148,6 +148,16 @@ test('exportRatios is never persisted to localStorage (per-project content)', ()
     'exportRatios must not leak into per-user settings');
 });
 
+test('print.strictExport persists per-user through pickSettings + mergeSettings', () => {
+  const s = freshState();
+  assert.equal(s.print.strictExport, false, 'factory default is off');
+  s.print.strictExport = true;
+  const picked = pickSettings(s);
+  assert.equal(picked.print.strictExport, true, 'picked into the persisted print slice');
+  const merged = mergeSettings(freshState(), picked);
+  assert.equal(merged.print.strictExport, true, 'restored onto a fresh base');
+});
+
 test('factoryState resets every persisted slice but leaves content', () => {
   const s = freshState();
   s.scene.render.exposure = 9;

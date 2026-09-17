@@ -64,7 +64,7 @@ export function init() {
 
   // Register validation modals
   Modal.register('validationErrors', _renderValidationErrorsModal);
-  Modal.register('exportWarningsConfirm', _renderExportWarningsModal);
+  Modal.register('exportGate', _renderExportGateModal);
 
   _render();
 }
@@ -456,6 +456,7 @@ function _renderReadinessSummary(readiness) {
 
 function _renderExportTab() {
   const bakeSolids = getState().print?.objBakeSolidTextures ?? false;
+  const strictExport = getState().print?.strictExport ?? false;
   const readiness = PrintManager.getPrintReadiness();
 
   let html = '<div class="pp-tab-content">';
@@ -478,6 +479,11 @@ function _renderExportTab() {
   html += '<div class="pp-checkbox">';
   html += `<input type="checkbox" id="pp-bake-solid" ${bakeSolids ? 'checked' : ''}>`;
   html += `<label for="pp-bake-solid">${escapeHtml(t('print.bakeSolids'))}</label>`;
+  html += '</div>';
+
+  html += '<div class="pp-checkbox">';
+  html += `<input type="checkbox" id="pp-strict-export" ${strictExport ? 'checked' : ''}>`;
+  html += `<label for="pp-strict-export">${escapeHtml(t('print.strictExport'))}</label>`;
   html += '</div>';
 
   html += '</div>';
@@ -525,9 +531,9 @@ function _renderExportTab() {
   };
 
   // Wire export buttons. Hard errors are handled INSIDE the export (post
-  // auto-fix); cached WARNINGS gate with a confirm first (Blueprint §12
-  // export gate, arch B6) — display models are routinely non-watertight, so
-  // the default is "export anyway".
+  // auto-fix); cached WARNINGS gate with a three-way prompt first (Blueprint
+  // §12 export gate, arch B6 + watertight-repair-and-cost task 4):
+  // Auto-fix and export / Export anyway / Cancel.
   const runExport = async (fn, opts) => {
     const currentReadiness = PrintManager.getPrintReadiness(opts);
     if (!currentReadiness.canExport) {
@@ -538,11 +544,53 @@ function _renderExportTab() {
       _render();
       return;
     }
-    if (currentReadiness.requiresAcknowledgement
-        && !(await _confirmExportWithWarnings(currentReadiness.issues))) return;
+    let exportOpts = opts;
+    let exportedAnyway = false;
+    if (currentReadiness.requiresAcknowledgement) {
+      const choice = await _confirmExportGate(currentReadiness.issues);
+      if (choice === 'autofix') {
+        const ids = _affectedObjectIds(currentReadiness.issues);
+        if (ids.length) {
+          ProgressOverlay.show(t('progress.working'));
+          try {
+            await MeshValidator.repairObjects(ids, {
+              onProgress: (frac, name) => ProgressOverlay.update(frac, name),
+            });
+          } finally {
+            ProgressOverlay.hide();
+          }
+        }
+        const afterFix = PrintManager.getPrintReadiness(opts);
+        if (!afterFix.canExport) {
+          reportError(new Error(t('print.readiness.blockedHint')), {
+            title: t('print.readiness.blocked'),
+            modal: true,
+          });
+          _render();
+          return;
+        }
+        // Explicit user click on Auto-fix IS the export consent — proceed
+        // below without re-opening the gate, even if unrelated warnings
+        // (e.g. bed-overflow) remain.
+      } else if (choice === 'export') {
+        // Clones are still repaired on export regardless (the `repair` prep
+        // step runs on every export); this only records the user's explicit
+        // "export anyway" so a caller-level repair:false can never sneak in.
+        exportOpts = { ...opts, repair: true };
+        exportedAnyway = true;
+      } else {
+        return;   // 'cancel', ESC, or backdrop dismissal
+      }
+    }
     ProgressOverlay.show(t('progress.exporting'));
     try {
-      await fn({ ...opts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
+      await fn({ ...exportOpts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
+      if (exportedAnyway) {
+        Toast.show(t('toast.exportedWithWarnings', {
+          names: currentReadiness.issues.filter(i => i.severity === 'warning')
+            .map(i => _issueLabel(i)).join('; '),
+        }), 'warning', 5000);
+      }
     } catch (err) {
       if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
@@ -559,6 +607,11 @@ function _renderExportTab() {
 
   wireToggles(el, '#pp-bake-solid', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
+    markDirty();   // print slice is persisted wholesale in .mixo (M4)
+  });
+
+  wireToggles(el, '#pp-strict-export', (_cb, on) => {
+    setState(s => ({ ...s, print: { ...s.print, strictExport: on } }), { silent: true });
     markDirty();   // print slice is persisted wholesale in .mixo (M4)
   });
 
@@ -710,28 +763,45 @@ async function _render() {
   }
 }
 
-// ── Export warning gate (A6 / B6) ────────────────────────
+// ── Export gate (A6 / B6 + watertight-repair-and-cost task 4) ────────────
 
-function _confirmExportWithWarnings(issues) {
+/**
+ * Three-way export gate shown whenever readiness has only warnings
+ * (errors keep the existing blocked modal). Resolves 'autofix' | 'export' |
+ * 'cancel' — ESC/backdrop dismissal also resolves 'cancel'.
+ */
+function _confirmExportGate(issues) {
   return new Promise(resolve => {
-    Modal.open('exportWarningsConfirm', {
+    Modal.open('exportGate', {
       issues,
-      onClose: (r) => resolve(r === 'export'),
+      onClose: (r) => resolve(r ?? 'cancel'),
     });
   });
 }
 
-function _renderExportWarningsModal({ data, close }) {
+/** Object ids Auto-fix should run MeshValidator.repairObjects on: the ones flagged by geometry warnings. */
+function _affectedObjectIds(issues) {
+  const ids = new Set();
+  for (const item of issues) {
+    if (item.severity === 'warning' && item.code === 'geometry-warning') {
+      for (const id of item.objectIds ?? []) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function _renderExportGateModal({ data, close }) {
   const warnings = data?.issues?.filter(item => item.severity === 'warning') ?? [];
   const el = document.createElement('div');
   el.innerHTML = `
     <div class="modal-content">
-      <h3>${escapeHtml(t('print.validationWarnings'))}</h3>
+      <h3>${escapeHtml(t('print.exportGate.title'))}</h3>
       <p>${escapeHtml(t('print.validationWarningsBody'))}</p>
       <ul>${warnings.map(item => `<li>${escapeHtml(_issueLabel(item))}</li>`).join('')}</ul>
       <div class="modal-actions">
-        <button class="btn" data-action="cancel">${escapeHtml(t('btn.cancel'))}</button>
-        <button class="btn btn-primary" data-action="export">${escapeHtml(t('print.exportAnyway'))}</button>
+        <button class="btn btn-primary" data-action="autofix">${escapeHtml(t('print.exportGate.fixAndExport'))}</button>
+        <button class="btn" data-action="export">${escapeHtml(t('print.exportGate.exportAnyway'))}</button>
+        <button class="btn" data-action="cancel">${escapeHtml(t('print.exportGate.cancel'))}</button>
       </div>
     </div>
   `;
