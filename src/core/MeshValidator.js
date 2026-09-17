@@ -616,6 +616,37 @@ export async function repairObject(meshId) {
 }
 
 /**
+ * Batch entry point for the "repair every selected/print-part object" UI
+ * surfaces (context menu, Print panel "Repair all") — the sequential
+ * repairObject loop lived duplicated in both call sites; this is the one
+ * shared version. Sequential (not Promise.all) so a heavy mesh doesn't
+ * contend with another for the main thread, and tolerant: a failing object
+ * is recorded in `failed` rather than aborting the rest of the batch.
+ * @param {string[]} meshIds
+ * @param {{ onProgress?: (frac: number, name: string) => void }} [opts]
+ * @returns {Promise<{ holesFilled: number, nmFixed: number, failed: Array<{ meshId: string, name: string, error: unknown }> }>}
+ */
+export async function repairObjects(meshIds, { onProgress } = {}) {
+  let holesFilled = 0;
+  let nmFixed = 0;
+  const failed = [];
+  const total = meshIds.length;
+  for (let i = 0; i < total; i++) {
+    const meshId = meshIds[i];
+    const name = getState().scene.objects[meshId]?.name ?? meshId;
+    onProgress?.(i / total, name);
+    try {
+      const res = await repairObject(meshId);
+      holesFilled += res.holesFilled;
+      nmFixed += res.nmFixed;
+    } catch (error) {
+      failed.push({ meshId, name, error });
+    }
+  }
+  return { holesFilled, nmFixed, failed };
+}
+
+/**
  * Re-apply persisted geometry fixes after a reload (M1). The `.mixo` keeps raw
  * source bytes + ratio, so the restored mesh comes back with its original
  * defects; replaying the recorded fix types reproduces the repaired geometry.
@@ -669,7 +700,7 @@ export function shouldAutoValidate(mesh) {
 
 export const MeshValidator = {
   init, invalidateAll,
-  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes, repairObject,
+  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes, repairObject, repairObjects,
   hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

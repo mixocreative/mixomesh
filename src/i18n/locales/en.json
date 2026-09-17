@@ -586,6 +586,7 @@
   "toast.validateWarnings": "⚠ {name}: {warns} warning(s)",
   "toast.validateWarningsFix": "⚠ {name}: {warns} warning(s) — click to Auto-Fix",
   "toast.repaired": "✓ {name}: {holes} hole(s) filled, {nm} non-manifold edge(s) fixed",
+  "toast.repairedBatch": "✓ Repaired {n} object(s): {holes} hole(s) filled, {nm} non-manifold edge(s) fixed",
   "toast.validateFailed": "✗ {name}: validation failed",
   "toast.hdriFailed": "HDRI \"{preset}\" failed to load",
   "toast.hdriReady": "HDRI \"{preset}\" ready",

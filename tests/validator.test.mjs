@@ -267,6 +267,54 @@ await test('repairObject: missing mesh tolerates gracefully (no throw, empty rem
   assert.deepEqual(res, { holesFilled: 0, nmFixed: 0, remaining: [] });
 });
 
+// ── repairObjects (fix round 1): shared sequential batch, tolerant ────────
+await test('repairObjects: sequential and tolerant — a failure on one object does not lose the other\'s fix', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  let call = 0;
+  R.__test.setEngine({
+    diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }),
+    repairObject: async (V, T) => {
+      call++;
+      if (call === 2) throw new Error('boom');
+      return { V, T: [...T, [1, 2, 3]], report: { holesFilled: 1 } };
+    },
+  });
+
+  const OPEN_TETRA = [[0, 2, 1], [0, 1, 3], [0, 3, 2]];   // 3 of 4 faces (open)
+  const m1 = buildMesh(OPEN_TETRA);
+  m1.metadata = { meshId: 'm1' };
+  const m2 = buildMesh(OPEN_TETRA);
+  m2.metadata = { meshId: 'm2' };
+  const meshes = { m1, m2 };
+  AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
+
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      objects: {
+        ...s.scene.objects,
+        m1: { id: 'm1', name: 'obj-one', isPrintPart: true, isGhost: false },
+        m2: { id: 'm2', name: 'obj-two', isPrintPart: true, isGhost: false },
+      },
+    },
+  }), { silent: true });
+
+  const progress = [];
+  const result = await MeshValidator.repairObjects(['m1', 'm2'], {
+    onProgress: (frac, name) => progress.push([frac, name]),
+  });
+
+  assert.ok(result.holesFilled > 0, 'holesFilled counts the successful repair (object 1)');
+  assert.equal(result.failed.length, 1, 'object 2 failure is recorded, not thrown');
+  assert.equal(result.failed[0].meshId, 'm2');
+  assert.equal(result.failed[0].name, 'obj-two');
+  assert.ok(result.failed[0].error instanceof Error, 'the underlying error is preserved');
+  assert.ok(getState().scene.objects.m1.geometryFixes?.includes('holes'), 'object 1 still recorded its fix despite object 2 failing');
+  assert.equal(getState().scene.objects.m2.geometryFixes, undefined, 'object 2 never reached the record step');
+  assert.equal(progress.length, 2, 'onProgress called once per object');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

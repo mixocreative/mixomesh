@@ -586,6 +586,7 @@
   "toast.validateWarnings": "⚠ {name}：{warns} 個警告",
   "toast.validateWarningsFix": "⚠ {name}：{warns} 個警告 — 點擊自動修復",
   "toast.repaired": "✓ {name}：已填補 {holes} 個破洞，修復 {nm} 條非流形邊",
+  "toast.repairedBatch": "✓ 已修復 {n} 個物件：填補 {holes} 個破洞，修復 {nm} 條非流形邊",
   "toast.validateFailed": "✗ {name}：驗證失敗",
   "toast.hdriFailed": "HDRI「{preset}」載入失敗",
   "toast.hdriReady": "HDRI「{preset}」就緒",

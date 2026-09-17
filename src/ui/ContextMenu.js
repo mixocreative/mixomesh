@@ -9,6 +9,7 @@ import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
+import { reportError } from './Status.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
 import { icon } from '../core/Icons.js';
@@ -397,28 +398,29 @@ async function _boolean(op) {
   push(res);
 }
 
-// Repair every selected object's geometry through the shared repairObject
-// path (same validate → autoFix → record geometryFixes → markDirty sequence
+// Repair every selected object's geometry through the shared repairObjects
+// batch (same validate → autoFix → record geometryFixes → markDirty sequence
 // as the import toast, Outliner badge, and Print panel "Repair all"), one at
 // a time under the blocking ProgressOverlay so a batch of heavy meshes can't
-// be edited mid-repair.
+// be edited mid-repair. A per-object failure is reported but never blocks
+// the rest of the selection (MeshValidator.repairObjects is tolerant).
 async function _repairGeometry() {
   const objects = getState().scene.objects;
   const ids = Selection.getSelectedIds().filter(id => objects[id] && !objects[id].isGhost);
   if (!ids.length) return;
-  let holes = 0, nm = 0;
+  let result;
   ProgressOverlay.show(t('context.repairGeometry'));
   try {
-    for (let i = 0; i < ids.length; i++) {
-      ProgressOverlay.update(i / ids.length, objects[ids[i]]?.name ?? '');
-      const res = await MeshValidator.repairObject(ids[i]);
-      holes += res.holesFilled;
-      nm += res.nmFixed;
-    }
+    result = await MeshValidator.repairObjects(ids, {
+      onProgress: (frac, name) => ProgressOverlay.update(frac, name),
+    });
   } finally {
     ProgressOverlay.hide();
   }
-  Toast.show(t('toast.repaired', { name: t('context.repairGeometry'), holes, nm }), 'success', 3000);
+  Toast.show(t('toast.repairedBatch', { n: ids.length, holes: result.holesFilled, nm: result.nmFixed }), 'success', 3000);
+  if (result.failed.length) {
+    reportError(new Error(result.failed.map(f => f.name).join(', ')), { title: t('toast.autoFixFailed') });
+  }
 }
 
 function _relink(meshId) {

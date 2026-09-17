@@ -586,6 +586,7 @@
   "toast.validateWarnings": "⚠ {name}: 警告 {warns} 件",
   "toast.validateWarningsFix": "⚠ {name}: 警告 {warns} 件 — クリックして自動修復",
   "toast.repaired": "✓ {name}: 穴 {holes} 個を埋め、非多様体エッジ {nm} 件を修復しました",
+  "toast.repairedBatch": "✓ {n} 個のオブジェクトを修復: 穴 {holes} 個を埋め、非多様体エッジ {nm} 件を修復しました",
   "toast.validateFailed": "✗ {name}: 検証に失敗しました",
   "toast.hdriFailed": "HDRI「{preset}」の読み込みに失敗しました",
   "toast.hdriReady": "HDRI「{preset}」読み込み完了",

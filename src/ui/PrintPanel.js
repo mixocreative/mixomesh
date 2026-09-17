@@ -337,17 +337,16 @@ function _renderValidationTab() {
 
   el.querySelector('#pp-repair-all')?.addEventListener('click', async () => {
     if (!fixableRows.length) return;
-    let holes = 0, nm = 0;
+    const ids = fixableRows.map(({ meshId }) => meshId);
     ProgressOverlay.show(t('print.repairAll'));
     try {
-      for (let i = 0; i < fixableRows.length; i++) {
-        const { meshId, obj } = fixableRows[i];
-        ProgressOverlay.update(i / fixableRows.length, obj.name);
-        const res = await MeshValidator.repairObject(meshId);
-        holes += res.holesFilled;
-        nm += res.nmFixed;
+      const result = await MeshValidator.repairObjects(ids, {
+        onProgress: (frac, name) => ProgressOverlay.update(frac, name),
+      });
+      Toast.show(t('toast.repairedBatch', { n: ids.length, holes: result.holesFilled, nm: result.nmFixed }), 'success', 3000);
+      if (result.failed.length) {
+        reportError(new Error(result.failed.map(f => f.name).join(', ')), { title: t('toast.autoFixFailed') });
       }
-      Toast.show(t('toast.repaired', { name: t('print.repairAll'), holes, nm }), 'success', 3000);
     } catch (err) {
       reportError(err, { title: t('toast.autoFixFailed') });
     } finally {
