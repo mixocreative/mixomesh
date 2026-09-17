@@ -12,6 +12,9 @@ const { GroupCommand } = await import('../src/core/HistoryManager.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { Selection } = await import('../src/core/Selection.js');
+const { detectCapabilities } = await import('../src/core/storage/capabilities.js');
+const { REPAIR_TRIANGLE_CAP } = await import('../src/core/repair/MeshRepair.js');
+const { DEFAULT_BOOLEAN_TRIANGLE_CAP } = await import('../src/core/BooleanService.js');
 
 SceneManager.attachToSelection = () => {};
 SceneManager.setActive = () => {};
@@ -58,6 +61,20 @@ await test('watertight-repair-and-cost task 6: every printer has ≥1 material w
 
 // (M13 cursor-scaling-on-world-rescale test removed with RescaleWorldCommand in
 // the per-object ratio redesign 2026-06-16 — there is no global scene rescale.)
+
+await test('watertight-repair-and-cost task 7: HUD triangle budget > repair cap > boolean cap, web and desktop', () => {
+  assert.ok(REPAIR_TRIANGLE_CAP > DEFAULT_BOOLEAN_TRIANGLE_CAP,
+    `repair cap (${REPAIR_TRIANGLE_CAP}) must exceed the boolean cap (${DEFAULT_BOOLEAN_TRIANGLE_CAP})`);
+  const web = detectCapabilities({ hasFSA: true, hasIDB: true });
+  const desktop = detectCapabilities({
+    desktop: true,
+    desktopCaps: { persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true },
+  });
+  assert.ok(web.triangleBudget > REPAIR_TRIANGLE_CAP,
+    `web triangle budget (${web.triangleBudget}) must exceed the repair cap (${REPAIR_TRIANGLE_CAP})`);
+  assert.ok(desktop.triangleBudget > REPAIR_TRIANGLE_CAP,
+    `desktop triangle budget (${desktop.triangleBudget}) must exceed the repair cap (${REPAIR_TRIANGLE_CAP})`);
+});
 
 await test('M17: undoing a nested group restores the Babylon parent, not scene root', () => {
   const fakeScene = { transformNodes: [] };

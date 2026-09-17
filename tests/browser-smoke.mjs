@@ -1059,10 +1059,13 @@ async function main() {
       const mesh = scene.meshes.find(m => m.metadata?.meshId === meshIds[0]);
       const mat = mesh?.material;
       const c = mat?.diffuseColor ?? mat?.albedoColor ?? null;
+      const hudEl = document.querySelector('#sb-center');
       return {
         err, found: !!mesh,
         isDefault: mat === scene.defaultMaterial,   // UNITY: same shared material
         color: c ? [+c.r.toFixed(2), +c.g.toFixed(2), +c.b.toFixed(2)] : null,
+        hudText: hudEl?.textContent ?? '',
+        hudTitle: hudEl?.getAttribute('title') ?? '',
       };
     })()`);
     assert(!stlDiag.err, `STL import threw: ${stlDiag.err}`);
@@ -1071,6 +1074,12 @@ async function main() {
       'shaderless STL was not assigned the shared scene.defaultMaterial (unity broken)');
     assert(stlDiag.color && stlDiag.color[0] === 0.4,
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
+
+    // Task 7: the status-bar centre HUD shows the scene-wide triangle budget
+    // (`tris <current> / <budget>`) unconditionally — not selection-gated —
+    // so it is already live right after this import with nothing selected.
+    assert(/tris \d/.test(stlDiag.hudText), `HUD triangle budget text missing: "${stlDiag.hudText}"`);
+    assert(stlDiag.hudTitle.length > 0, 'HUD triangle budget tooltip missing');
 
     // ── Base64 save-path worker: real-Worker output === sync codec (#3) ──
     // Manual save embeds asset bytes via the off-thread encoder; a byte

@@ -37,6 +37,10 @@ import {
 } from './AssetRegistration.js';
 import { queueThumbnail } from './AssetThumbnail.js';
 import { isLoading as isProjectLoading } from '../persist/LoadGate.js';
+import { caps } from '../storage/capabilities.js';
+import { t } from '../../i18n/index.js';
+import { Toast } from '../../ui/Toast.js';
+import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../../ui/MeshStats.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import '../ThreeMFLoader.js';
@@ -208,6 +212,23 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName);
+
+    // Triangle-budget warning (watertight-repair-and-cost task 7): the import
+    // still proceeds — this is a heads-up, not a gate — but the user should
+    // know BEFORE the tab starts feeling it. Checked against the container's
+    // own meshes since nothing here has a meshId yet (that lands below, in
+    // registerInstantiatedMeshes, after addAllToScene).
+    const budget = caps.triangleBudget;
+    if (budget > 0) {
+      const projectedTris = countSceneTriangles(scene) + countContainerTriangles(container);
+      if (projectedTris > budget) {
+        Toast.show(t('toast.triangleBudget', {
+          current: formatTriCount(projectedTris),
+          budget: formatTriCount(budget),
+        }), 'warning');
+      }
+    }
+
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 

@@ -75,9 +75,20 @@ export function init() {
   _updateRight();
 }
 
-/** Update the center segment with active object info. */
-export function setCenter(text) {
-  if (_elCenter) _elCenter.textContent = text;
+/**
+ * Update the center segment with active object info.
+ * @param {string} text
+ * @param {{ className?: string, title?: string }} [opts]
+ *   `className` toggles a single extra class (e.g. `hud-warn` / `hud-danger`)
+ *   — any previous one of those is removed first, classes only, never inline
+ *   styles. `title` sets the tooltip (e.g. the triangle-budget explainer).
+ */
+export function setCenter(text, opts = {}) {
+  if (!_elCenter) return;
+  _elCenter.textContent = text;
+  _elCenter.classList.remove('hud-warn', 'hud-danger');
+  if (opts.className) _elCenter.classList.add(opts.className);
+  _elCenter.title = opts.title ?? '';
 }
 
 /** Update the left segment with current operation hint. */

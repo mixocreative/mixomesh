@@ -215,6 +215,12 @@
 .sb-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--sp-4); }
 .sb-right  { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-5); }
 
+/* Triangle-budget HUD (watertight-repair-and-cost task 7): scene tris vs.
+   caps.triangleBudget, warn >= 70%, danger >= 90%. Classes only — never
+   inline styles — so the colour always comes from the shared status tokens. */
+.sb-center.hud-warn   { color: var(--warning); }
+.sb-center.hud-danger { color: var(--danger); font-weight: 600; }
+
 .sb-sep { color: var(--text-2); }
 
 .sb-save-icon { display: flex; align-items: center; color: var(--text-2); }

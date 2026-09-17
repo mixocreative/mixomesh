@@ -20,7 +20,18 @@
  * @property {boolean} relinkByPath    Can relink a missing asset to a user-picked file.
  * @property {boolean} watchFiles      Can watch mounted files for external changes (desktop only).
  * @property {boolean} writeFiles      Can write to a chosen location via a picker (else blob-download).
+ * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade.
  */
+
+// Triangle-budget tiering (watertight-repair-and-cost task 7). Desktop's Node-fs
+// backed shell can push more triangles through a session than a browser tab
+// before layout/GC pressure makes imports crawl or the tab crashes — same
+// reasoning as DEFAULT_BOOLEAN_TRIANGLE_CAP's desktop-raises-the-cap note and
+// the existing 100k auto-validate skip. This is a runtime-tier constant, not a
+// shell-reported capability, so it is keyed off `desktop` directly rather than
+// trusted verbatim from `desktopCaps` (Electron never injects it).
+export const WEB_TRIANGLE_BUDGET = 1_500_000;
+export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
 
 /**
  * Pure capability derivation from an environment snapshot.
@@ -29,6 +40,7 @@
  */
 export function detectCapabilities(env = {}) {
   const { hasFSA, hasIDB, desktop, desktopCaps } = env;
+  const triangleBudget = desktop ? DESKTOP_TRIANGLE_BUDGET : WEB_TRIANGLE_BUDGET;
   if (desktop && desktopCaps) {
     // Trust the desktop shell's declared capabilities (Node fs backed).
     return {
@@ -37,6 +49,7 @@ export function detectCapabilities(env = {}) {
       relinkByPath: !!desktopCaps.relinkByPath,
       watchFiles: !!desktopCaps.watchFiles,
       writeFiles: !!desktopCaps.writeFiles,
+      triangleBudget,
     };
   }
   // Web build — feature-detect. FSA gates the pickers/mount/relink/write; IDB gates
@@ -47,6 +60,7 @@ export function detectCapabilities(env = {}) {
     relinkByPath: !!hasFSA,
     writeFiles: !!hasFSA,
     watchFiles: false,
+    triangleBudget,
   };
 }
 

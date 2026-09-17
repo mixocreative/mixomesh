@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { detectCapabilities } from '../src/core/storage/capabilities.js';
+import {
+  detectCapabilities, WEB_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_BUDGET,
+} from '../src/core/storage/capabilities.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -14,6 +16,7 @@ test('web with FSA + IDB → all filesystem caps true, watch false', () => {
   assert.equal(c.writeFiles, true);
   assert.equal(c.persistAssets, true);
   assert.equal(c.watchFiles, false, 'watch is desktop-only');
+  assert.equal(c.triangleBudget, WEB_TRIANGLE_BUDGET, 'web tier gets the smaller triangle budget');
 });
 
 test('web without FSA → pickers/mount/relink/write false; persist follows IDB', () => {
@@ -35,13 +38,24 @@ test('desktop → trusts injected shell capabilities verbatim (all true incl. wa
     desktop: true,
     desktopCaps: { persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true },
   });
-  assert.deepEqual(c, { persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true });
+  assert.deepEqual(c, {
+    persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true,
+    triangleBudget: DESKTOP_TRIANGLE_BUDGET,
+  });
 });
 
 test('desktop flag without desktopCaps falls back to feature detection', () => {
   const c = detectCapabilities({ desktop: true, hasFSA: false, hasIDB: false });
   assert.equal(c.writeFiles, false);
   assert.equal(c.persistAssets, false);
+  assert.equal(c.triangleBudget, DESKTOP_TRIANGLE_BUDGET,
+    'triangle budget is a runtime tier, not a shell-reported capability — desktop keeps its budget');
+});
+
+test('watertight-repair-and-cost task 7: desktop triangle budget is 4x the web budget', () => {
+  assert.equal(DESKTOP_TRIANGLE_BUDGET, WEB_TRIANGLE_BUDGET * 4);
+  assert.equal(WEB_TRIANGLE_BUDGET, 1_500_000);
+  assert.equal(DESKTOP_TRIANGLE_BUDGET, 6_000_000);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
