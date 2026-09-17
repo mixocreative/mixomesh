@@ -48,4 +48,37 @@ await test('repairMesh uses the engine, reports holesFilled and watertight, refu
   await assert.rejects(R.repairMesh(big), /too large to repair in the browser/);
 });
 
+await test('repairMesh treats a winding-only change as changed even with an all-zero/absent report', async () => {
+  R.__test.setEngine({
+    diagnose: () => ({ boundary: 0, nonManifold: 0, windingInconsistencies: 0, oppositeWindingPairs: 0, components: 1, isWatertight: true }),
+    // Same vertices, but the first triangle's winding is flipped (last two
+    // indices swapped) and the report carries NO counters at all — a
+    // real winding-fix pass from the vendored engine looks exactly like this.
+    repairObject: async (V, T) => {
+      const T2 = T.map(t => [...t]);
+      const [a, b, c] = T2[0]; T2[0] = [a, c, b];
+      return { V, T: T2, report: {} };
+    },
+  });
+  const m = fakeMesh(OPEN_POS, OPEN_IDX);
+  const r = await R.repairMesh(m);
+  assert.equal(r.changed, true, 'data differs (winding) even though every report counter is 0/absent');
+  assert.deepEqual(m.getIndices(), [0, 1, 2, 0, 1, 3, 0, 3, 2], 'repaired (re-wound) indices were written back');
+});
+
+await test('repairMesh treats byte-identical output as unchanged and diagnoses the ORIGINAL mesh', async () => {
+  let repairedWith = null; let diagnosedWith = null;
+  R.__test.setEngine({
+    diagnose: (V) => { diagnosedWith = V; return { boundary: 0, nonManifold: 0, windingInconsistencies: 0, oppositeWindingPairs: 0, components: 1, isWatertight: true }; },
+    // Returns equal-by-value but NOT equal-by-reference arrays, so a
+    // reference-identity shortcut could not accidentally pass this test.
+    repairObject: async (V, T) => { repairedWith = V; return { V: V.map(v => [...v]), T: T.map(t => [...t]), report: {} }; },
+  });
+  const m = fakeMesh(OPEN_POS, OPEN_IDX);
+  const r = await R.repairMesh(m);
+  assert.equal(r.changed, false, 'no data difference → unchanged');
+  assert.deepEqual(m.getIndices(), OPEN_IDX, 'mesh left untouched (no write-back on unchanged)');
+  assert.equal(diagnosedWith, repairedWith, 'diagnosed the ORIGINAL V passed into repairObject, not the (discarded) repaired-output clone');
+});
+
 console.log('\n' + out.join('\n')); console.log(`\n${passed} passed, ${failed} failed\n`); process.exit(failed ? 1 : 0);

@@ -84,6 +84,10 @@ export function arraysToMesh(mesh, V, T, originalPositions, originalUvs) {
   mesh.createNormals?.(true); mesh.refreshBoundingInfo?.();
 }
 
+// Exact-hit assumption: an UNTOUCHED vertex round-trips through the engine
+// with its float32 bits unchanged, so the grid-hash lookup below finds it by
+// exact key match; the brute-force nearest-neighbour scan only runs for
+// vertices the engine actually moved or created (new hole-fill verts).
 function _nearestIndex(positions) {
   const n = positions.length / 3; const cell = 1e-4; const map = new Map();
   const key = (x, y, z) => `${Math.round(x / cell)}:${Math.round(y / cell)}:${Math.round(z / cell)}`;
@@ -102,6 +106,27 @@ export async function diagnoseMesh(mesh) {
   return { boundaryEdges: d.boundary, nonManifoldEdges: d.nonManifold, components: d.components, isWatertight: !!d.isWatertight, triangles: T.length };
 }
 
+// Element-wise comparison of two arrays of triples ([x,y,z] or [a,b,c]).
+// `tolerance` > 0 compares with float slack (positions); 0 compares exactly
+// (indices). Used to decide `changed` from the DATA, not from report field
+// names — the vendored wrapper's report only ever sets holesFilled/nmFixed/
+// merged (public/vendor/meshfix/mesh-fix-lib.js:374-411,542-544), so a
+// winding-only or self-intersection repair would report all-zero counters
+// while still returning a different mesh; gating the write-back on counter
+// names would silently discard that output.
+function _sameTriples(a, b, tolerance) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (tolerance > 0) {
+      if (Math.abs(x[0] - y[0]) > tolerance || Math.abs(x[1] - y[1]) > tolerance || Math.abs(x[2] - y[2]) > tolerance) return false;
+    } else if (x[0] !== y[0] || x[1] !== y[1] || x[2] !== y[2]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function repairMesh(mesh, opts = {}) {
   const tris = (mesh.getIndices()?.length ?? 0) / 3;
   if (tris > (opts.triangleCap ?? REPAIR_TRIANGLE_CAP)) throw new Error(`"${mesh.name}" is too large to repair in the browser (${tris} triangles > ${REPAIR_TRIANGLE_CAP})`);
@@ -110,11 +135,13 @@ export async function repairMesh(mesh, opts = {}) {
   const originalUvs = mesh.getVerticesData('uv') ? Float32Array.from(mesh.getVerticesData('uv')) : null;
   const out = await lib.repairObject(V, T, opts.onProgress, { removeSmallShells: false, repairSelfIntersections: false, ...opts.engine });
   const r = out.report ?? {};
-  const changed = (r.holesFilled | 0) + (r.nmFixed | 0) + (r.normalsFlipped | 0) + (r.merged | 0) + (r.degenerateRemoved | 0) > 0 || out.T.length !== T.length;
+  const changed = !_sameTriples(out.V, V, 1e-9) || !_sameTriples(out.T, T, 0);
   if (changed) arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs);
   // Repaired output is native (CounterClockWise) winding; a ClockWise-flagged glTF clone must be re-tagged (same rule as PrintPipeline._csgRebake).
   if (changed && mesh.sideOrientation === CLOCKWISE) mesh.sideOrientation = 1;
-  const after = lib.diagnose(out.V, out.T);
+  // Diagnose the mesh as it now IS: the written-back repair output when
+  // changed, otherwise the original (out.V/out.T were discarded, unchanged).
+  const after = changed ? lib.diagnose(out.V, out.T) : lib.diagnose(V, T);
   return { holesFilled: r.holesFilled | 0, nmFixed: r.nmFixed | 0, normalsFlipped: r.normalsFlipped | 0, merged: r.merged | 0, isWatertight: !!after.isWatertight, changed };
 }
 
