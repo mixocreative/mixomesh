@@ -457,6 +457,7 @@ function _renderReadinessSummary(readiness) {
 function _renderExportTab() {
   const bakeSolids = getState().print?.objBakeSolidTextures ?? false;
   const strictExport = getState().print?.strictExport ?? false;
+  const repairOnImport = getState().print?.repairOnImport ?? false;
   const readiness = PrintManager.getPrintReadiness();
 
   let html = '<div class="pp-tab-content">';
@@ -484,6 +485,11 @@ function _renderExportTab() {
   html += '<div class="pp-checkbox">';
   html += `<input type="checkbox" id="pp-strict-export" ${strictExport ? 'checked' : ''}>`;
   html += `<label for="pp-strict-export">${escapeHtml(t('print.strictExport'))}</label>`;
+  html += '</div>';
+
+  html += '<div class="pp-checkbox">';
+  html += `<input type="checkbox" id="pp-repair-on-import" ${repairOnImport ? 'checked' : ''}>`;
+  html += `<label for="pp-repair-on-import">${escapeHtml(t('print.repairOnImport'))}</label>`;
   html += '</div>';
 
   html += '</div>';
@@ -608,6 +614,11 @@ function _renderExportTab() {
 
   wireToggles(el, '#pp-strict-export', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, strictExport: on } }), { silent: true });
+    markDirty();   // print slice is persisted wholesale in .mixo (M4)
+  });
+
+  wireToggles(el, '#pp-repair-on-import', (_cb, on) => {
+    setState(s => ({ ...s, print: { ...s.print, repairOnImport: on } }), { silent: true });
     markDirty();   // print slice is persisted wholesale in .mixo (M4)
   });
 

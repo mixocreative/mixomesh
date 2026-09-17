@@ -9,13 +9,15 @@ ProgressOverlay.show = () => {};
 ProgressOverlay.update = () => {};
 ProgressOverlay.hide = () => {};
 
-const { StateManager } = await import('../src/core/StateManager.js');
+const { StateManager, setState } = await import('../src/core/StateManager.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
 const { dispatch } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
+const MeshRepair = await import('../src/core/repair/MeshRepair.js');
+const { queueValidation } = await import('../src/core/assets/AssetRegistration.js');
 
 MeshValidator.shouldAutoValidate = () => false;
 
@@ -66,7 +68,10 @@ function makeMesh(name, parent = null) {
     isVisible: true,
     getTotalVertices: () => 3,
     getVerticesData: () => new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    setVerticesData() {},
     getIndices: () => [0, 1, 2],
+    setIndices() {},
+    createNormals() {},
     computeWorldMatrix() {},
     getWorldMatrix: matrix,
     bakeTransformIntoVertices() {},
@@ -179,6 +184,49 @@ await test('importing a model marks the project dirty (close-without-save must p
   B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
   await AssetLoader.loadFromBlob(new Blob(['glb']), 'beverage.glb');
   assert.equal(PersistenceManager.isDirty(), true, 'import is unsaved work');
+});
+
+// Shared fake engine: an "open" mesh (fixed fake geometry above) with a
+// boundary of 3 edges, repaired by appending one triangle — same shape as
+// tests/mesh-repair.test.mjs's fake.
+const FAKE_REPAIR_ENGINE = {
+  diagnose: () => ({ boundary: 3, nonManifold: 0, windingInconsistencies: 0, oppositeWindingPairs: 0, components: 1, isWatertight: false }),
+  repairObject: async (V, T) => ({ V, T: [...T, [1, 2, 3]], report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 } }),
+};
+
+async function _importThenValidate(repairOnImport) {
+  resetState();
+  setState(s => ({ ...s, print: { ...s.print, repairOnImport } }), { silent: true });
+  MeshRepair.__test.setEngine(FAKE_REPAIR_ENGINE);
+  try {
+    B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+    // shouldAutoValidate is mocked false file-wide (see top) so loadFromBlob's
+    // own internal queueValidation call is a no-op here (toast.validateSkipped) —
+    // avoids a second, uncontrolled validation+repair pass racing this one.
+    const meshIds = await AssetLoader.loadFromBlob(new Blob(['glb']), 'beverage.glb');
+    MeshValidator.shouldAutoValidate = () => true;
+    await Promise.all(meshIds.map(id => queueValidation(id)));
+    return { meshIds, state: StateManager.getState() };
+  } finally {
+    MeshValidator.shouldAutoValidate = () => false;
+    MeshRepair.__test.setEngine(null);
+  }
+}
+
+await test('print.repairOnImport ON auto-repairs a fixable import (Task 5)', async () => {
+  const { meshIds, state } = await _importThenValidate(true);
+  for (const meshId of meshIds) {
+    assert.ok(state.scene.objects[meshId].geometryFixes?.includes('holes'),
+      `${meshId} should be auto-repaired with repairOnImport on`);
+  }
+});
+
+await test('print.repairOnImport OFF leaves a fixable import unrepaired (Task 5)', async () => {
+  const { meshIds, state } = await _importThenValidate(false);
+  for (const meshId of meshIds) {
+    assert.equal(state.scene.objects[meshId].geometryFixes, undefined,
+      `${meshId} must not be auto-repaired with repairOnImport off`);
+  }
 });
 
 console.log('\n' + out.join('\n'));

@@ -149,6 +149,7 @@
   "print.eachIndividually": "Each individually (separate files)",
   "print.bakeSolids": "Bake solid colors to texture (OBJ, Mimaki-friendly)",
   "print.strictExport": "Block export on non-watertight parts (strict)",
+  "print.repairOnImport": "Auto-repair fixable issues on import",
   "print.format": "Format",
   "print.exportObj": "Export OBJ + MTL",
   "print.export3mf": "Export 3MF (color)",

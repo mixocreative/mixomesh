@@ -44,7 +44,8 @@
     "printMode": "fdm",
     "chordTolerance": 0.05,
     "objBakeSolidTextures": false,
-    "strictExport": false
+    "strictExport": false,
+    "repairOnImport": false
   },
   "gizmo": { "space": "world", "snap": { "translate": 1.0, "rotate": 15, "scale": 0.1 } },
   "pivotMode": "active"

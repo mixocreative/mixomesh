@@ -149,6 +149,7 @@
   "print.eachIndividually": "個別に書き出し（別ファイル）",
   "print.bakeSolids": "単色をテクスチャにベイク（OBJ、Mimaki向け）",
   "print.strictExport": "非水密パーツで書き出しをブロック（厳格モード）",
+  "print.repairOnImport": "インポート時に修復可能な問題を自動修復",
   "print.format": "形式",
   "print.exportObj": "OBJ + MTL を書き出し",
   "print.export3mf": "3MF（カラー）を書き出し",

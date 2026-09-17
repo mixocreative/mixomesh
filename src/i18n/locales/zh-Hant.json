@@ -149,6 +149,7 @@
   "print.eachIndividually": "逐一匯出（個別檔案）",
   "print.bakeSolids": "將純色烘焙為貼圖（OBJ、適合 Mimaki）",
   "print.strictExport": "非密閉部件時封鎖匯出（嚴格模式）",
+  "print.repairOnImport": "匯入時自動修復可修復的問題",
   "print.format": "格式",
   "print.exportObj": "匯出 OBJ + MTL",
   "print.export3mf": "匯出 3MF（彩色）",

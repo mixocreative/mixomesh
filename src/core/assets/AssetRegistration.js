@@ -217,17 +217,42 @@ export function createCollectionFromFilename(filename, assetId) {
   return collectionId;
 }
 
-/** Queue the non-blocking post-import validation with its toast flow. */
+/**
+ * Shared repair-then-toast path: repairObject (validate → autoFix → record
+ * geometryFixes/dirty → re-validate), then the Task 3 success toast. Used by
+ * both the manual "click to fix" toast action and the opt-in
+ * print.repairOnImport auto-repair below — same recorded path either way.
+ * @param {string} meshId
+ * @param {string} name
+ * @returns {Promise<void>}
+ */
+async function _repairAndToast(meshId, name) {
+  try {
+    const { holesFilled, nmFixed } = await MeshValidator.repairObject(meshId);
+    Toast.show(t('toast.repaired', { name, holes: holesFilled, nm: nmFixed }), 'success', 3000);
+  } catch (err) {
+    reportError(err, { title: t('toast.autoFixFailed') });
+  }
+}
+
+/**
+ * Queue the non-blocking post-import validation with its toast flow. Runs
+ * only for live imports (called from AssetImport.js's loadFromBlob /
+ * instantiateAsset) — project-restore never calls this (AssetRestore.js has
+ * its own load path), so the opt-in auto-repair below never fires on load.
+ * @param {string} meshId
+ * @returns {Promise<void>} resolves once validation (and any auto-repair) settles — callers may ignore it (fire-and-forget) or await it (tests).
+ */
 export function queueValidation(meshId) {
   const mesh = getBabylonMesh(meshId);
-  if (!mesh) return;
+  if (!mesh) return Promise.resolve();
   const name = mesh.name || 'mesh';
   if (!MeshValidator.shouldAutoValidate(mesh)) {
     Toast.show(t('toast.validateSkipped', { name }), 'info', 4000);
-    return;
+    return Promise.resolve();
   }
   const toastId = Toast.show(t('toast.validating', { name }), 'loading');
-  Promise.resolve().then(async () => {
+  return Promise.resolve().then(async () => {
     try {
       const results = await MeshValidator.validateMesh(mesh);
       Toast.dismiss(toastId);
@@ -247,17 +272,16 @@ export function queueValidation(meshId) {
           : t('toast.validateErrors', { name, errs });
         Toast.show(msg, 'error', 0, { onClick });
       } else if (results.some(r => r.autoFixAvailable)) {
-        // At least one warning is one-click fixable — the toast IS the fix
-        // action (shared repairObject path, same as Outliner/context menu/
-        // Print panel), not just a link to the Validation tab.
-        const onFixClick = () => {
-          MeshValidator.repairObject(meshId)
-            .then(({ holesFilled, nmFixed }) => {
-              Toast.show(t('toast.repaired', { name, holes: holesFilled, nm: nmFixed }), 'success', 3000);
-            })
-            .catch(err => reportError(err, { title: t('toast.autoFixFailed') }));
-        };
-        Toast.show(t('toast.validateWarningsFix', { name, warns }), 'warning', 0, { onClick: onFixClick });
+        if (getState().print?.repairOnImport) {
+          // Opt-in (Task 5): skip the click-to-fix toast and just repair.
+          await _repairAndToast(meshId, name);
+        } else {
+          // At least one warning is one-click fixable — the toast IS the fix
+          // action (shared repairObject path, same as Outliner/context menu/
+          // Print panel), not just a link to the Validation tab.
+          const onFixClick = () => { _repairAndToast(meshId, name); };
+          Toast.show(t('toast.validateWarningsFix', { name, warns }), 'warning', 0, { onClick: onFixClick });
+        }
       } else {
         Toast.show(t('toast.validateWarnings', { name, warns }), 'warning', 0, { onClick });
       }

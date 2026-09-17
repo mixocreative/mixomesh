@@ -158,6 +158,16 @@ test('print.strictExport persists per-user through pickSettings + mergeSettings'
   assert.equal(merged.print.strictExport, true, 'restored onto a fresh base');
 });
 
+test('print.repairOnImport persists per-user through pickSettings + mergeSettings', () => {
+  const s = freshState();
+  assert.equal(s.print.repairOnImport, false, 'factory default is off');
+  s.print.repairOnImport = true;
+  const picked = pickSettings(s);
+  assert.equal(picked.print.repairOnImport, true, 'picked into the persisted print slice');
+  const merged = mergeSettings(freshState(), picked);
+  assert.equal(merged.print.repairOnImport, true, 'restored onto a fresh base');
+});
+
 test('factoryState resets every persisted slice but leaves content', () => {
   const s = freshState();
   s.scene.render.exposure = 9;
