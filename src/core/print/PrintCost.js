@@ -4,10 +4,12 @@
  * NO Boolean union: volumes are summed per logical unit (never subtracted),
  * and spatial overlap between units is only FLAGGED (AABB, print-space mm,
  * 0.01 mm epsilon) so the estimate is marked `approximate` rather than
- * silently wrong. Not-watertight parts (a `holes` or `nonManifold` result in
- * the validation cache) also mark the quote approximate. `total` is `null`
- * (never 0) whenever density or price is unknown — a missing price must
- * never read as "free".
+ * silently wrong (touching boxes are NOT an overlap — see _aabbOverlap).
+ * Not-watertight parts (a `holes` or `nonManifold` result in the validation
+ * cache) mark the quote approximate, and so do parts NOBODY HAS VALIDATED
+ * (no cache entry, or a stale one — an unchecked shell's signed volume is
+ * arbitrary; CIA F5). `total` is `null` (never 0) whenever density or price
+ * is unknown — a missing price must never read as "free".
  *
  * Every consumer (unitVolumesMM3, overlappingPairs, quote) takes an
  * ExportContext (see ExportContext.js) built by the caller — this module

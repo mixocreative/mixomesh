@@ -88,6 +88,19 @@ async function _tryCsg(mesh, ctx) {
   await _refreshRepairVerdict(mesh, ctx);
 }
 
+// Which repairReport entry belongs to which CLONE. Keyed on the mesh object,
+// never on `mesh.name`: Babylon names collide freely across imports (see
+// MeshValidator's own note), so two export clones can share a name — and a
+// name-keyed lookup could then move one clone's verdict onto another's entry.
+// For the strict gate that would be a FAIL-OPEN (a genuinely open part
+// inheriting a watertight verdict), which is exactly what must not happen.
+const _reportEntryFor = new WeakMap();
+
+function _recordRepairVerdict(mesh, ctx, entry) {
+  ctx.repairReport.push(entry);
+  _reportEntryFor.set(mesh, entry);
+}
+
 /**
  * Re-diagnose a clone whose geometry was REPLACED after the repair step ran
  * (CIA F10). CSG2 rebuilds the mesh wholesale from Manifold output, so the
@@ -101,9 +114,12 @@ async function _refreshRepairVerdict(mesh, ctx) {
   let verdict = null;
   try { verdict = (await diagnoseMesh(mesh)).isWatertight; }
   catch (err) { console.error(`Post-CSG diagnose failed for ${mesh.name}:`, err); }
-  const entry = ctx.repairReport.find(r => r.name === mesh.name);
+  const entry = _reportEntryFor.get(mesh);
   if (entry) { entry.isWatertight = verdict; entry.afterCsg = true; }
-  else ctx.repairReport.push({ name: mesh.name, isWatertight: verdict, afterCsg: true });
+  else _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: verdict, afterCsg: true });
+  // repairSkipped is a NAME list (it feeds a user-facing toast), so this
+  // adds/removes exactly ONE occurrence — the right count even when two
+  // clones share a name.
   const at = ctx.repairSkipped.indexOf(mesh.name);
   if (verdict === true) { if (at >= 0) ctx.repairSkipped.splice(at, 1); }
   else if (at < 0) ctx.repairSkipped.push(mesh.name);
@@ -146,18 +162,18 @@ async function _tryRepair(mesh, ctx) {
     // seam UVs through that repair.
     const d = await diagnoseMesh(mesh);
     if (d.boundaryEdges === 0 && d.nonManifoldEdges === 0 && d.isWatertight) {
-      ctx.repairReport.push({ name: mesh.name, isWatertight: true, skipped: true });
+      _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: true, skipped: true });
       return;
     }
     const r = await repairMesh(mesh);
-    ctx.repairReport.push({ name: mesh.name, isWatertight: r.isWatertight });
+    _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: r.isWatertight });
     if (!r.isWatertight) ctx.repairSkipped.push(mesh.name);
   } catch (err) {
     // Engine failure mid-batch (e.g. the triangle cap) or any other repair
     // failure: unknown watertight status (null), never a strict-mode
     // blocker on its own — only a CONFIRMED not-watertight result is.
     console.error(`Repair skipped for ${mesh.name}:`, err);
-    ctx.repairReport.push({ name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
+    _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
     ctx.repairSkipped.push(mesh.name);
   }
 }

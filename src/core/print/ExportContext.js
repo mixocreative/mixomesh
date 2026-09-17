@@ -75,12 +75,17 @@ function _capturePrefs(state) {
  *                                    (that case is a single toast.repairUnavailable, not a per-part
  *                                    listing). Drives the post-export toast.exportedWithWarnings —
  *                                    PrintPipeline is the sole place that reads/fires it.
- * @property {Array<{name:string, isWatertight:boolean|null, error?:string}>} repairReport
- *                                    Mutated by pipeline: one entry per clone the repair step actually
- *                                    ran on (repairReady true). isWatertight is false only for a
+ * @property {Array<{name:string, isWatertight:boolean|null, error?:string, skipped?:boolean, afterCsg?:boolean}>} repairReport
+ *                                    Mutated by pipeline: one entry per clone the repair step TOUCHED
+ *                                    (repairReady true). isWatertight is false only for a
  *                                    CONFIRMED still-open result — that is what the strictExport gate
  *                                    checks; null means the attempt itself failed (unknown status,
- *                                    never a strict-mode blocker on its own).
+ *                                    never a strict-mode blocker on its own). `skipped: true` marks a
+ *                                    clone that diagnosed CLOSED and was deliberately left alone
+ *                                    (review C1 — a healthy textured part must not be rewritten);
+ *                                    `afterCsg: true` marks a verdict re-taken after a CSG re-bake
+ *                                    replaced the geometry (review CIA F10), so the gate and the toast
+ *                                    describe what actually shipped.
  * @property {Array} meshes           Mutated by pipeline (clone entries).
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
  * @property {{objBakeSolidTextures:boolean}} prefs  Snapshotted state.print prefs (frozen).

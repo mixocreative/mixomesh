@@ -49,8 +49,13 @@ export function weldMesh(mesh, distance = WELD_DISTANCE) {
   if (!positions?.length || !indices?.length) return false;
 
   const cell = distance > 0 ? distance : WELD_DISTANCE;
-  const uvs = mesh.getVerticesData?.('uv') ?? null;
   const vertexCount = Math.floor(positions.length / 3);
+  // A SHORT uv buffer is treated as no UVs at all. Reading past its end would
+  // put `undefined` in the merge key, which stringifies to the same "undefined"
+  // for every such vertex — i.e. it would MERGE unrelated vertices. Babylon
+  // keeps the buffers in step, so this is a guard, not an expected path.
+  const rawUvs = mesh.getVerticesData?.('uv');
+  const uvs = rawUvs?.length >= vertexCount * 2 ? rawUvs : null;
   const keyOf = (i) => {
     const k = `${Math.round(positions[i * 3] / cell)}|`
             + `${Math.round(positions[i * 3 + 1] / cell)}|`

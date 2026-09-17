@@ -73,6 +73,7 @@ function _numberField(id, labelKey, value) {
  * @param {object} state
  */
 export function renderCostBlock(container, state) {
+  _invalidateGeometryCache();
   const materials = _materials(state);
   const material = _material(state);
   const cost = state.cost ?? {};
@@ -105,6 +106,7 @@ export function renderCostBlock(container, state) {
   const commit = (patch) => {
     setState(s => ({ ...s, cost: { ...s.cost, ...patch } }), { silent: true });
     SettingsStore.save();
+    _invalidateGeometryCache();
     _renderResult(container, getState());
   };
 
@@ -171,6 +173,17 @@ function _liveCostOverride(container, state) {
 // produces a new identity and the cache misses exactly when it should.
 let _geomCacheCtx = null;
 let _geomCache = null;
+
+/**
+ * Drop the memo. Called at the start of every render pass and on every
+ * committed change, so a cached geometry pass can never outlive the
+ * interaction it was computed for — the ctx-identity check below is then only
+ * a fast path WITHIN one keystroke burst, not the thing correctness rests on.
+ */
+function _invalidateGeometryCache() {
+  _geomCacheCtx = null;
+  _geomCache = null;
+}
 
 function _geometryFor(ctx) {
   if (_geomCacheCtx === ctx && _geomCache) return _geomCache;
