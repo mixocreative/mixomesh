@@ -2884,7 +2884,16 @@ Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
    match the paired `.mtl` entry.
 5. Mixomesh generates the MTL file so `newmtl` names match OBJ `usemtl`
    material ids and PBR/albedo materials do not depend on Babylon
-   StandardMaterial-only fields.
+   StandardMaterial-only fields. Directive arguments (`o`/`g`/`usemtl`/
+   `mtllib`/`newmtl`) are single tokens: `ObjWriter.objToken` collapses
+   whitespace to `_` on BOTH files (parsers split on whitespace; "Base
+   Color" used to lose its texture). MTL opacity is `d` only — never `Tr`
+   (parsers disagree on its sense) — and `Kd/Ka/Ks/Ke` are clamped to
+   [0,1]. Locked 2026-09-17 (Mimaki practice: OBJ+MTL+PNG is the primary
+   hand-off; textured 3MF second).
+   Winding: Babylon's serializer honours the mesh side flag and negates X
+   for the left-handed scene, which is the same rule as `PrintSpace` —
+   verified outward (+volume) in PrusaSlicer/trimesh 2026-09-17.
 6. Real diffuse/albedo/base textures are encoded as PNG blobs under
    `textures/` from `collectTextureExportData`; user-loaded and restored
    textures resolve by `texture.metadata.mixoAssetId` so export prefers the
