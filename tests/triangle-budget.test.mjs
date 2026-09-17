@@ -86,6 +86,13 @@ function makeMesh(name, parent, tris) {
     bakeTransformIntoVertices() {},
     refreshBoundingInfo() {},
     flipFaces() {},
+    // T6: the async thumbnail pass walks every imported mesh's bounds. Without
+    // this the fixture leaked a "Thumbnail failed: getBoundingInfo is not a
+    // function" stack trace into the run output on every case.
+    getBoundingInfo: () => ({ boundingBox: {
+      minimumWorld: new B.Vector3(0, 0, 0), maximumWorld: new B.Vector3(1, 1, 1),
+      extendSize: new B.Vector3(0.5, 0.5, 0.5), centerWorld: new B.Vector3(0.5, 0.5, 0.5),
+    } }),
   };
 }
 

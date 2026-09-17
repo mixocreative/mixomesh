@@ -178,6 +178,16 @@ export async function serialiseTextureImages() {
     })));
 }
 
+/**
+ * The project-data half of `state.print`. `repairOnImport` is a per-user
+ * preference (SettingsStore, localStorage) and is deliberately NOT written
+ * into the document — see the call site (I8).
+ */
+function _serialisablePrint(print = {}) {
+  const { repairOnImport, ...rest } = print;
+  return { ...rest };
+}
+
 function _serialiseSceneObjects() {
   const { objects } = getState().scene;
   return Object.values(objects).map(o => {
@@ -250,7 +260,11 @@ export async function buildDocument(opts = {}) {
       grid: { ...s.scene.grid },
       cursor3d: { ...s.scene.cursor3d },
     },
-    print: { ...s.print },
+    // I8: `repairOnImport` is a per-USER preference (SettingsStore /
+    // localStorage), exactly like the `cost` slice — a teammate opening this
+    // .mixo must not have their auto-repair-on-import setting flipped by the
+    // saver's choice. Everything else in `print` is project data.
+    print: _serialisablePrint(s.print),
     assetLibrary: await _serialiseAssetLibrary(opts),
     textureImages: await serialiseTextureImages(),
     collections: Object.values(s.scene.collections ?? {}),

@@ -13,11 +13,16 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 
-const { StateManager, dispatch } = await import('../src/core/StateManager.js');
+const { StateManager, dispatch, setState } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
+const { StatusBar } = await import('../src/ui/StatusBar.js');
 const { MeshStats } = await import('../src/ui/MeshStats.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
+
+// Capture what the HUD would render instead of touching the DOM.
+let hudText = '';
+StatusBar.setCenter = (text) => { hudText = text; };
 
 function resetState() {
   StateManager.replaceState(StateManager.freshState());
@@ -114,6 +119,57 @@ await test('countSceneTriangles counts a mesh with no live registration at all a
   const orphan = { metadata: { meshId: 'never-registered' }, geometry: {}, getTotalIndices: () => 30 };
   const scene = { meshes: [orphan] };
   assert.equal(MeshStats.countSceneTriangles(scene), 0, 'a meshId with no live registry match must not be counted');
+});
+
+// ── CIA F1: the watertight badge keys on result TYPES, not severity ──────
+// The validator never emits severity 'error' (non-manifold is deliberately a
+// warning — owner rule), so the old `hasErrors(results)` test could only ever
+// read "✓ watertight" and the badge was structurally blind.
+
+/** Minimal selected mesh with a bounding box, plus a cached validation entry. */
+function selectWithValidation(results) {
+  const B = window.BABYLON;
+  const mesh = {
+    metadata: { meshId: 'sel1' },
+    geometry: {},
+    getTotalIndices: () => 12,
+    computeWorldMatrix() {},
+    getBoundingInfo: () => ({ boundingBox: {
+      minimumWorld: new B.Vector3(0, 0, 0),
+      maximumWorld: new B.Vector3(0.01, 0.02, 0.03),
+    } }),
+  };
+  AssetLoader.bindRestoredMesh('sel1', mesh, 'asset-sel');
+  SceneManager.getScene = () => ({ meshes: [mesh] });
+  setState(s => ({
+    ...s,
+    selection: { ...s.selection, selectedIds: ['sel1'], activeId: 'sel1' },
+    scene: { ...s.scene, validation: { sel1: { results, validatedAt: Date.now(), stale: false } } },
+  }), { silent: true });
+  hudText = '';
+  dispatch(EVENTS.SELECTION_CHANGED, {});
+  return hudText;
+}
+
+await test('F1: a cached `holes` result makes the HUD read "not watertight"', () => {
+  const text = selectWithValidation([
+    { type: 'holes', severity: 'warning', count: 3, message: '3 open edges (holes)' },
+  ]);
+  assert.match(text, /not watertight/,
+    `HUD must report the open geometry, got: "${text}"`);
+});
+
+await test('F1: a nonManifold-only result also reads "not watertight"', () => {
+  const text = selectWithValidation([
+    { type: 'nonManifold', severity: 'warning', count: 2, message: '2 non-manifold edges' },
+  ]);
+  assert.match(text, /not watertight/, `got: "${text}"`);
+});
+
+await test('F1: an empty (clean) result list still reads "✓ watertight"', () => {
+  const text = selectWithValidation([]);
+  assert.match(text, /✓ watertight/, `got: "${text}"`);
+  assert.ok(!/not watertight/.test(text));
 });
 
 console.log('\n' + out.join('\n'));

@@ -8,8 +8,8 @@ import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObject
 import { MeshValidator } from '../core/MeshValidator.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
-import { Toast } from './Toast.js';
 import { reportError } from './Status.js';
+import { reportRepairResult } from './RepairFeedback.js';
 
 let _root  = null;
 let _listEl = null;
@@ -419,8 +419,7 @@ async function _repairFromOutliner(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
   try {
-    const { holesFilled, nmFixed } = await MeshValidator.repairObject(meshId);
-    Toast.show(t('toast.repaired', { name: obj.name, holes: holesFilled, nm: nmFixed }), 'success', 2500);
+    reportRepairResult(obj.name, await MeshValidator.repairObject(meshId), 2500);
   } catch (err) {
     reportError(err, { title: t('toast.autoFixFailed') });
   }

@@ -168,6 +168,38 @@ test('print.repairOnImport persists per-user through pickSettings + mergeSetting
   assert.equal(merged.print.repairOnImport, true, 'restored onto a fresh base');
 });
 
+// I8: `repairOnImport` is per-USER (this file's concern) and must therefore
+// NOT travel in the .mixo, where the load path merges `print` wholesale and
+// "file wins on open" would flip the opener's own setting.
+test('print.repairOnImport never enters the .mixo document and a doc carrying it cannot flip the setting', async () => {
+  const { __test } = await import('../src/core/PersistenceManager.js');
+  const { SceneManager } = await import('../src/core/SceneManager.js');
+  const { AssetLoader } = await import('../src/core/AssetLoader.js');
+  const { setState, getState } = await import('../src/core/StateManager.js');
+  const { __test: loaderTest } = await import('../src/core/persist/ProjectLoader.js');
+
+  SceneManager.saveCameraState = () => ({
+    alpha: 0, beta: 0, radius: 1, target: { x: 0, y: 0, z: 0 }, isOrthographic: false,
+  });
+  AssetLoader.getAssetBytes = async () => null;
+  AssetLoader.getBabylonMesh = () => null;
+
+  setState(s => ({ ...s, print: { ...s.print, repairOnImport: true, strictExport: true } }), { silent: true });
+  const doc = await __test._buildDocument({ skipEmbed: true });
+  assert.equal('repairOnImport' in doc.print, false,
+    `repairOnImport must not be serialised: ${JSON.stringify(doc.print)}`);
+  assert.equal(doc.print.strictExport, true, 'the rest of the print slice still travels');
+  assert.equal(getState().print.repairOnImport, true, 'the live per-user setting is untouched by saving');
+
+  // A document that DOES carry it (hand-written, or an older save) must be
+  // stripped on load rather than overriding the user's choice.
+  assert.equal(
+    'repairOnImport' in loaderTest._printWithoutLegacyScale({ repairOnImport: false, strictExport: true }),
+    false,
+    'the load merge strips repairOnImport from the incoming print slice',
+  );
+});
+
 test('factoryState resets every persisted slice but leaves content', () => {
   const s = freshState();
   s.scene.render.exposure = 9;

@@ -19,10 +19,14 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { StatusBar } from './StatusBar.js';
-import { hasErrors } from '../core/MeshValidator.js';
 import { getBabylonMesh } from '../core/AssetLoader.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
+
+// Result types that mean "this geometry is not a closed, correctly wound
+// solid". The validator has no 'error' severity tier (CIA F1), so the HUD
+// badge reads the types.
+const OPEN_GEOMETRY_TYPES = new Set(['holes', 'nonManifold', 'invertedNormals']);
 
 // Thresholds are ratios of caps.triangleBudget (binding: warn >= 70%, danger >= 90%).
 const WARN_RATIO = 0.7;
@@ -50,8 +54,11 @@ export function init() {
   for (const ev of [EVENTS.SELECTION_CHANGED, ...GEOMETRY_EVENTS]) subscribe(ev, _render);
 }
 
-function _meshFor(id, scene) {
-  return scene.meshes.find(m => m.metadata?.meshId === id) ?? null;
+// M4: the live mesh for an id comes from the AssetLoader registry — the old
+// scene.meshes scan could return an export clone (Mesh.clone copies the
+// metadata reference, so it carries the same meshId) instead of the real one.
+function _meshFor(id) {
+  return getBabylonMesh(id) ?? null;
 }
 
 /** Per-mesh triangle count: getTotalIndices()/3, falling back to getIndices().length/3. */
@@ -153,7 +160,7 @@ function _render() {
   const sel = getState().selection?.selectedIds ?? [];
   let selTris = 0, min = null, max = null;
   for (const id of sel) {
-    const m = _meshFor(id, scene);
+    const m = _meshFor(id);
     if (!m || !m.geometry) continue;
     selTris += _meshTriangles(m);
     m.computeWorldMatrix(true);
@@ -166,11 +173,15 @@ function _render() {
     const d = max.subtract(min).scale(1000);   // BU → mm
     const mm = (n) => Math.round(n);
 
-    // Watertight = no error-severity validation results on the active mesh.
+    // CIA F1: the validator NEVER emits severity 'error' — non-manifold
+    // geometry is deliberately a warning (owner rule), so the old
+    // `hasErrors(...)` test could only ever read "✓ watertight" and this
+    // badge was blind. The verdict keys on result TYPES instead: any
+    // holes / nonManifold / invertedNormals result means not watertight.
     const activeId = getState().selection?.activeId;
     const val = activeId ? getState().scene.validation?.[activeId] : null;
     const water = val?.results
-      ? (hasErrors(val.results) ? ' · ⚠ not watertight' : ' · ✓ watertight')
+      ? (val.results.some(r => OPEN_GEOMETRY_TYPES.has(r.type)) ? ' · ⚠ not watertight' : ' · ✓ watertight')
       : '';
 
     text += ` · sel ${formatTriCount(selTris)} · ${mm(d.x)}×${mm(d.z)}×${mm(d.y)} mm${water}`;

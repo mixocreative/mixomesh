@@ -51,11 +51,12 @@ function buildMesh(tris, extra = {}) {
   }
   return {
     name: 'unit',
-    // kind is ignored except 'uv' (no UV data in this fixture) — matches
-    // MeshRepair's meshToArrays/arraysToMesh, which read/write 'position' and
-    // 'uv' by literal string. Stateful so a repair write-back (setVerticesData/
-    // setIndices) is visible to a later getIndices()/getVerticesData() call.
-    getVerticesData: (kind) => (kind === 'uv' ? undefined : new Float32Array(positions)),
+    // Only the kinds a real mesh in this fixture carries answer: 'position'
+    // (no normals/UVs/colors here). T3: an "answer anything" stub let the
+    // shared weld believe every attribute was present and remap garbage.
+    // Stateful so a repair/weld write-back (setVerticesData/setIndices) is
+    // visible to a later getIndices()/getVerticesData() call.
+    getVerticesData: (kind = 'position') => (kind === 'position' ? new Float32Array(positions) : undefined),
     getIndices: () => indices,
     setVerticesData: (kind, data) => { if (kind === 'position') positions = Array.from(data); },
     setIndices: (data) => { indices = Array.from(data); },
@@ -209,27 +210,69 @@ await test('open mesh → holes warning with count, auto-fix available', async (
   assert.equal(m.getIndices().length, 12, 'engine closed the hole');
   assert.equal(holes.fixed, true);
 });
-await test('engine unavailable → holes still reported, autoFixAvailable false, no throw', async () => {
+// I4: the validator's own badEdgeCount is boundary edges PLUS non-manifold
+// edges, so using it as the offline `holes` count reported the very same
+// edges twice — once as nonManifold, once as holes. Offline, only
+// nonManifold speaks; `holes` requires an engine answer.
+await test('engine unavailable → NO holes result (no double-count), nonManifold still speaks', async () => {
   const R = await import('../src/core/repair/MeshRepair.js');
   R.__test.setEngine(null);
   const m = buildMesh([[0,2,1],[0,1,3],[0,3,2]]);
   const results = await MeshValidator.validateMesh(m);
-  const holes = results.find(r => r.type === 'holes');
-  assert.ok(holes); assert.equal(holes.autoFixAvailable, false);
+  assert.equal(results.find(r => r.type === 'holes'), undefined,
+    `holes must not be emitted without an engine answer: ${JSON.stringify(results)}`);
+  const open = nm(results);
+  assert.ok(open, 'nonManifold is the only open-geometry result offline');
+  assert.ok(open.count > 0);
 });
 
-await test('engine unavailable + nonManifold → autoFix falls back to the local weld, no throw', async () => {
+// I3 / CIA F6: above the repair cap the engine refuses to diagnose (I2), so
+// no Auto-Fix may be offered — a button whose only outcome is
+// "too large to repair" is not a fix — and the message says why.
+await test('above REPAIR_TRIANGLE_CAP → no Auto-Fix offered and the message says why', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  let diagnoseCalls = 0;
+  R.__test.setEngine({
+    diagnose: () => { diagnoseCalls++; return { boundary: 3, nonManifold: 0, components: 1, isWatertight: false }; },
+    repairObject: async (V, T) => ({ V, T, report: {} }),
+  });
+  // Three real (open-tetra) triangles + degenerate padding to clear the cap.
+  // Degenerate triangles are skipped by the topology pass, so badEdgeCount
+  // still reflects the three real faces.
+  const m = buildMesh([[0, 2, 1], [0, 1, 3], [0, 3, 2]]);
+  const realIndices = m.getIndices();
+  const padded = [...realIndices];
+  while (padded.length / 3 <= R.REPAIR_TRIANGLE_CAP) padded.push(0, 0, 0);
+  m.getIndices = () => padded;
+
+  const results = await MeshValidator.validateMesh(m);
+  assert.equal(diagnoseCalls, 0, 'diagnose is never even attempted above the cap');
+  assert.equal(results.find(r => r.type === 'holes'), undefined, 'no engine answer → no holes result');
+  const open = nm(results);
+  assert.ok(open, 'nonManifold still reported');
+  assert.equal(open.autoFixAvailable, false, 'Auto-Fix withheld above the repair cap');
+  assert.match(open.message, /too large to repair/);
+});
+
+// I6: the offline fallback is a REAL weld now (src/core/repair/Weld.js).
+// The old test injected a fake `mergeVerticesByDistance` — an API Babylon
+// 9.6.2 does not have — so it proved nothing about the shipped code path.
+await test('engine unavailable + nonManifold → autoFix runs the REAL shared weld, no throw', async () => {
   const R = await import('../src/core/repair/MeshRepair.js');
   R.__test.setEngine(null);
-  let mergeCalls = 0;
-  const m = buildMesh(TRIS.slice(0, 11), { mergeVerticesByDistance: () => { mergeCalls++; } });
+  const m = buildMesh(TRIS.slice(0, 11));
+  const before = m.getVerticesData('position').length / 3;
+  assert.equal(before, 33, 'fixture is fully unwelded: 11 triangles x 3 own copies');
   const results = await MeshValidator.validateMesh(m);
   const r = nm(results);
   assert.ok(r, 'expected a nonManifold result');
   assert.equal(r.autoFixAvailable, true, 'weld fallback keeps this available offline');
   await MeshValidator.autoFix(m, results);
-  assert.equal(mergeCalls, 1, 'local weld fallback ran exactly once');
   assert.equal(r.fixed, true);
+  const after = m.getVerticesData('position').length / 3;
+  assert.ok(after < before, `weld must compact the vertex buffer (${before} → ${after})`);
+  assert.equal(after, 8, 'the 11 faces of a unit cube share exactly 8 corners');
+  assert.equal(m.getIndices().length, 33, 'every triangle survives (none were degenerate)');
 });
 
 // ── repairObject (Task 3): one-click repair shared by every entry point ──
@@ -261,10 +304,98 @@ await test('repairObject: fills holes, records geometryFixes, dirties, re-valida
   assert.equal(remaining.find(r => r.type === 'holes'), undefined, 'remaining has no holes after repair');
 });
 
+// I7a: a multi-part logical object (MultiMaterial split / glTF
+// multi-primitive) validates as the welded UNION, and the union is synthetic
+// geometry no fix can be applied to — so group results carry
+// autoFixAvailable:false and the old validate→autoFix route left these
+// objects PERMANENTLY unrepairable. repairObject now walks the parts.
+await test('repairObject: a MULTI-PART object repairs every part and records fixes per part', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({
+    // 3 faces = still open; 4+ = repaired and closed.
+    diagnose: (_V, T) => ({ boundary: T.length > 3 ? 0 : 3, nonManifold: 0, components: 1, isWatertight: T.length > 3 }),
+    repairObject: async (V, T) => ({
+      V: [...V, [0, 0, 0]],
+      T: [...T, [0, 1, V.length]],
+      report: { holesFilled: 2, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+    }),
+  });
+
+  const OPEN_TETRA = [[0, 2, 1], [0, 1, 3], [0, 3, 2]];
+  const p1 = buildMesh(OPEN_TETRA); p1.metadata = { meshId: 'p1' };
+  const p2 = buildMesh(OPEN_TETRA); p2.metadata = { meshId: 'p2' };
+  const meshes = { p1, p2 };
+  AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene,
+      objects: {
+        p1: { id: 'p1', name: 'lead', isPrintPart: true, isGhost: false, logicalObjectId: 'p1' },
+        p2: { id: 'p2', name: 'part-2', isPrintPart: true, isGhost: false, logicalObjectId: 'p1', isInternalPart: true },
+      },
+    },
+  }), { silent: true });
+
+  const res = await MeshValidator.repairObject('p1');
+  assert.deepEqual(res.applied, ['holes']);
+  assert.equal(res.holesFilled, 4, "the ENGINE's own counters, summed over both parts (2 + 2) — not an edge count");
+  assert.ok(getState().scene.objects.p1.geometryFixes?.includes('holes'), 'part 1 recorded its fix');
+  assert.ok(getState().scene.objects.p2.geometryFixes?.includes('holes'), 'part 2 recorded its fix');
+  assert.equal(p1.getIndices().length, 12, 'part 1 geometry really was repaired');
+  assert.equal(p2.getIndices().length, 12, 'part 2 geometry really was repaired');
+});
+
+// I7b: a repair that changes nothing must be reported as "nothing to repair",
+// never as success — `applied` is the signal every caller keys on.
+await test('repairObject: a healthy object reports applied:[] (callers must not toast success)', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  let repairCalls = 0;
+  R.__test.setEngine({
+    diagnose: () => ({ boundary: 0, nonManifold: 0, components: 1, isWatertight: true }),
+    repairObject: async (V, T) => { repairCalls++; return { V, T, report: {} }; },
+  });
+  const m = buildMesh(TRIS);   // closed cube — nothing to fix
+  m.metadata = { meshId: 'ok1' };
+  AssetLoader.getBabylonMesh = (id) => (id === 'ok1' ? m : null);
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, objects: { ok1: { id: 'ok1', name: 'ok1', isPrintPart: true, isGhost: false } } },
+  }), { silent: true });
+
+  const res = await MeshValidator.repairObject('ok1');
+  assert.deepEqual(res.applied, [], 'nothing was applied');
+  assert.equal(res.holesFilled, 0);
+  assert.equal(repairCalls, 0, 'a healthy mesh is never handed to the repair engine');
+  assert.equal(getState().scene.objects.ok1.geometryFixes, undefined, 'no fix recorded');
+});
+
+await test('repairObjects: a batch where nothing needed fixing reports repaired:0', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({
+    diagnose: () => ({ boundary: 0, nonManifold: 0, components: 1, isWatertight: true }),
+    repairObject: async (V, T) => ({ V, T, report: {} }),
+  });
+  const a = buildMesh(TRIS); a.metadata = { meshId: 'a' };
+  const b = buildMesh(TRIS); b.metadata = { meshId: 'b' };
+  const meshes = { a, b };
+  AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, objects: {
+      a: { id: 'a', name: 'a', isPrintPart: true, isGhost: false },
+      b: { id: 'b', name: 'b', isPrintPart: true, isGhost: false },
+    } },
+  }), { silent: true });
+  const res = await MeshValidator.repairObjects(['a', 'b']);
+  assert.equal(res.repaired, 0, 'no object was changed → callers must NOT show a success toast');
+  assert.equal(res.failed.length, 0);
+});
+
 await test('repairObject: missing mesh tolerates gracefully (no throw, empty remaining)', async () => {
   AssetLoader.getBabylonMesh = () => null;
   const res = await MeshValidator.repairObject('does-not-exist');
-  assert.deepEqual(res, { holesFilled: 0, nmFixed: 0, remaining: [] });
+  assert.deepEqual(res, { holesFilled: 0, nmFixed: 0, applied: [], remaining: [] });
 });
 
 // ── repairObjects (fix round 1): shared sequential batch, tolerant ────────

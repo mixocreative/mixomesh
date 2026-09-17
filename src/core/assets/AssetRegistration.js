@@ -9,6 +9,7 @@ import { ShaderLibrary } from '../ShaderLibrary.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { Toast } from '../../ui/Toast.js';
 import { reportError } from '../../ui/Status.js';
+import { reportRepairResult } from '../../ui/RepairFeedback.js';
 import { t } from '../../i18n/index.js';
 import { newId, registerMesh, getBabylonMesh } from './MeshRegistry.js';
 
@@ -228,8 +229,7 @@ export function createCollectionFromFilename(filename, assetId) {
  */
 async function _repairAndToast(meshId, name) {
   try {
-    const { holesFilled, nmFixed } = await MeshValidator.repairObject(meshId);
-    Toast.show(t('toast.repaired', { name, holes: holesFilled, nm: nmFixed }), 'success', 3000);
+    reportRepairResult(name, await MeshValidator.repairObject(meshId));
   } catch (err) {
     reportError(err, { title: t('toast.autoFixFailed') });
   }

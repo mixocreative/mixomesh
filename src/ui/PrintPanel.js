@@ -8,6 +8,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { Toast } from './Toast.js';
 import { reportError } from './Status.js';
+import { reportBatchRepairResult } from './RepairFeedback.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
@@ -350,10 +351,7 @@ function _renderValidationTab() {
       const result = await MeshValidator.repairObjects(ids, {
         onProgress: (frac, name) => ProgressOverlay.update(frac, name),
       });
-      Toast.show(t('toast.repairedBatch', { n: ids.length, holes: result.holesFilled, nm: result.nmFixed }), 'success', 3000);
-      if (result.failed.length) {
-        reportError(new Error(result.failed.map(f => f.name).join(', ')), { title: t('toast.autoFixFailed') });
-      }
+      reportBatchRepairResult(ids.length, result);
     } catch (err) {
       reportError(err, { title: t('toast.autoFixFailed') });
     } finally {
@@ -387,7 +385,9 @@ function _renderValidationTab() {
           }, { silent: true });
           markDirty();   // persisted in .mixo (replayed on reload) — not undoable, must dirty (M4)
         }
-        Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
+        // I7b: a fix that changed nothing is never reported as success.
+        if (applied.length) Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
+        else Toast.show(t('toast.nothingToRepair', { name: obj.name }), 'info', 2500);
         _render();
       } catch (err) {
         reportError(err, { title: t('toast.autoFixFailed') });

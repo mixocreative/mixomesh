@@ -23,6 +23,7 @@ function vec(x = 0, y = 0, z = 0) {
     set(x, y, z)     { this.x = x; this.y = y; this.z = z; return this; },
     copyFrom(o)      { this.x = o.x; this.y = o.y; this.z = o.z; return this; },
     lengthSquared()  { return this.x ** 2 + this.y ** 2 + this.z ** 2; },
+    length()         { return Math.hypot(this.x, this.y, this.z); },
     normalize()      { const l = Math.hypot(this.x, this.y, this.z) || 1; this.x /= l; this.y /= l; this.z /= l; return this; },
   };
 }

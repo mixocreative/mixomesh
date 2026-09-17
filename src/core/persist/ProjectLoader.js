@@ -133,8 +133,16 @@ export function resolveLoadedExportRatios(loadedPrint = {}) {
     : [];
 }
 
+/**
+ * Strip the pre-redesign global scale fields AND the per-user
+ * `repairOnImport` preference (I8) from a loaded `print` slice. `print` is
+ * merged wholesale over the current state, so a document carrying
+ * `repairOnImport` would otherwise silently override the user's own setting
+ * ("file wins on open") — it is a per-user preference, not project data, and
+ * is excluded from the serialised document too (ProjectSerializer.js).
+ */
 function _printWithoutLegacyScale(loadedPrint = {}) {
-  const { workingRatio, targetRatio, ...rest } = loadedPrint;
+  const { workingRatio, targetRatio, repairOnImport, ...rest } = loadedPrint;
   return rest;
 }
 
@@ -508,3 +516,6 @@ export async function relinkAsset(assetId) {
   Selection.refresh();
   Toast.show(t('toast.assetRelinked'), 'success', 3000);
 }
+
+/** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
+export const __test = { _printWithoutLegacyScale };

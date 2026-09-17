@@ -4,7 +4,8 @@ import { AssetLoader } from './AssetLoader.js';
 import { logicalObjectPartIds } from './LogicalObjects.js';
 import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
 import { frontFaceIsClockwise } from './print/PrintSpace.js';
-import { diagnoseMesh, repairMesh } from './repair/MeshRepair.js';
+import { diagnoseMesh, repairMesh, REPAIR_TRIANGLE_CAP } from './repair/MeshRepair.js';
+import { weldMesh } from './repair/Weld.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -210,38 +211,93 @@ function _invertedResult(autoFixAvailable) {
   };
 }
 
-// Boundary-edge count from the MeshRepair engine, or null when the engine is
-// unavailable (validateMesh/validateGroup then fall back to their own
-// edge-count). Accepts either a live Babylon mesh (getVerticesData/
-// getIndices) OR raw positions+indices (the group union has no mesh object —
-// diagnoseMesh only ever calls those two methods, so a plain object wrapper
-// is enough).
-async function _engineBoundary(meshOrPositions, indices) {
+// Repeated "engine unavailable" / "too large" diagnoses are logged ONCE per
+// mesh+reason (they recur on every re-validation and would otherwise bury the
+// console); a REAL failure is logged every time.
+const _loggedDiagnoseFailures = new Set();
+
+/**
+ * MeshRepair diagnose for a mesh, or for a raw positions+indices pair (the
+ * group union has no mesh object — diagnoseMesh only ever calls
+ * getVerticesData/getIndices, so a duck-typed wrapper is enough).
+ *
+ * I5: never swallow silently. The reason is classified so the caller can
+ * tell "no engine" / "too large to diagnose" (both = "cannot answer", and
+ * NOT a geometry verdict) from a real engine failure, and every case is
+ * reported to the console with the mesh name.
+ *
+ * @returns {Promise<{diag: object|null, reason: null|'no-engine'|'too-large'|'failed'}>}
+ */
+async function _engineDiagnose(meshOrPositions, indices = null, name = 'mesh') {
   const target = indices
-    ? { getVerticesData: () => meshOrPositions, getIndices: () => indices }
+    ? { name, getVerticesData: () => meshOrPositions, getIndices: () => indices }
     : meshOrPositions;
   try {
-    const d = await diagnoseMesh(target);
-    return d.boundaryEdges;
-  } catch {
-    return null;
+    return { diag: await diagnoseMesh(target), reason: null };
+  } catch (err) {
+    const message = err?.message ?? String(err);
+    const reason = /no engine/i.test(message) ? 'no-engine'
+      : /too large/i.test(message) ? 'too-large'
+      : 'failed';
+    const label = target?.name ?? name;
+    const key = `${label}:${reason}`;
+    if (reason === 'failed' || !_loggedDiagnoseFailures.has(key)) {
+      _loggedDiagnoseFailures.add(key);
+      console.error(reason === 'failed'
+        ? `MeshValidator: repair-engine diagnose failed for "${label}":`
+        : `MeshValidator: repair-engine diagnose unavailable (${reason}) for "${label}":`, message);
+    }
+    return { diag: null, reason };
   }
 }
 
-// Holes = open boundary edges reported by the MeshRepair engine's diagnose()
-// (falls back to the validator's own edge-count when the engine is
-// unavailable — see validateMesh/validateGroup). Auto-Fix runs repairMesh
-// through the engine, so it is only offered when the engine actually
-// answered (repairDiag present); a group/union scope never offers it here
-// because the repair applies per part, not to the synthetic union.
-function _holesResult(count, autoFixAvailable) {
+/**
+ * Holes = open boundary edges as reported by the MeshRepair engine's
+ * diagnose(). Emitted ONLY when the engine actually answered (I4): the
+ * validator's own edge count mixes boundary AND non-manifold edges, so using
+ * it as a fallback double-reported the very same edges as both `nonManifold`
+ * and `holes`. Offline, only `nonManifold` speaks.
+ *
+ * Auto-Fix runs `repairMesh` per mesh, so it is offered only when the engine
+ * answered AND the mesh is inside the repair cap (I3). A group/union scope
+ * never offers it — the repair applies per part, not to the synthetic union
+ * — and says so instead of promising a button that is not there (CIA F6).
+ */
+function _holesResult(count, autoFixAvailable, scope = null) {
+  const edges = `${count} open edge${count === 1 ? '' : 's'} (holes)`;
   return {
     type: 'holes',
     severity: 'warning',
     count,
     autoFixAvailable,
     fixed: false,
-    message: `${count} open edge${count === 1 ? '' : 's'} (holes) — Auto-Fix fills them`,
+    message: autoFixAvailable
+      ? `${edges} — Auto-Fix fills them`
+      : scope === 'group'
+        ? `${edges} across this multi-part object — repair each part`
+        : `${edges} — too large to repair in the browser`,
+  };
+}
+
+/**
+ * Non-manifold edge count from the validator's own position-welded topology
+ * pass. `autoFixAvailable` is gated on the repair cap (I3) — offering a fix
+ * that provably throws `too large to repair` is worse than not offering one
+ * — and the message says why when it is withheld (CIA F6).
+ */
+function _nonManifoldResult(count, autoFixAvailable, extra = {}) {
+  const suffix = extra.scopeLabel ? ` across ${extra.scopeLabel}` : '';
+  return {
+    type: 'nonManifold',
+    severity: 'warning',
+    count,
+    autoFixAvailable,
+    fixed: false,
+    // Warning, not error: a colored-print assembly tool works with downloaded
+    // display models that are frequently non-watertight, and slicers
+    // (Bambu / Lychee / Cura) auto-repair these. Surfaced, never blocking.
+    message: `${count} non-manifold edge${count === 1 ? '' : 's'}${suffix} (slicer-repairable)`
+      + (autoFixAvailable || extra.scopeLabel ? '' : ' — too large to repair in the browser'),
   };
 }
 
@@ -271,20 +327,16 @@ export async function validateGroup(sourceGroupId) {
   if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
   if (badEdgeCount > 0) {
     results.push({
-      type: 'nonManifold',
-      severity: 'warning',
-      count: badEdgeCount,
-      autoFixAvailable: false,
-      fixed: false,
+      ..._nonManifoldResult(badEdgeCount, false, { scopeLabel: 'group' }),
       scope: 'group',
       sourceGroupId,
-      message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} across group (slicer-repairable)`,
     });
   }
-  const engineBoundary = await _engineBoundary(positions, indices);
-  const boundary = engineBoundary ?? badEdgeCount;
   // Repair applies per part, not to this synthetic union — never auto-fixable here.
-  if (boundary > 0) results.push({ ..._holesResult(boundary, false), scope: 'group', sourceGroupId });
+  const { diag } = await _engineDiagnose(positions, indices, `group ${sourceGroupId}`);
+  if (diag && diag.boundaryEdges > 0) {
+    results.push({ ..._holesResult(diag.boundaryEdges, false, 'group'), scope: 'group', sourceGroupId });
+  }
   return results;
 }
 
@@ -399,44 +451,33 @@ export async function validateMesh(mesh) {
         if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
         if (badEdgeCount > 0) {
           results.push({
-            type: 'nonManifold',
-            severity: 'warning',
-            count: badEdgeCount,
-            autoFixAvailable: false,
-            fixed: false,
+            ..._nonManifoldResult(badEdgeCount, false, { scopeLabel: 'object' }),
             scope: 'group',
-            message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} across object (slicer-repairable)`,
           });
         }
-        const engineBoundary = await _engineBoundary(up, ui);
-        const boundary = engineBoundary ?? badEdgeCount;
         // Repair applies per part, not to this synthetic union — never auto-fixable here.
-        if (boundary > 0) results.push({ ..._holesResult(boundary, false), scope: 'group' });
+        const { diag } = await _engineDiagnose(up, ui, mesh.name ?? 'object');
+        if (diag && diag.boundaryEdges > 0) {
+          results.push({ ..._holesResult(diag.boundaryEdges, false, 'group'), scope: 'group' });
+        }
       }
     } else {
       // Same orientation rule the print writers use (PrintSpace.printIndices),
       // so "inverted" here means exactly what would come out inside-out.
       const { badEdgeCount, inverted } = await _topology(positions, indices, frontFaceIsClockwise(mesh));
-      if (badEdgeCount > 0) {
-        // Warning, not error: a colored-print assembly tool works with downloaded
-        // display models that are frequently non-watertight, and slicers
-        // (Bambu / Lychee / Cura) auto-repair these. Surfaced, never blocking.
-        results.push({
-          type: 'nonManifold',
-          severity: 'warning',
-          count: badEdgeCount,
-          autoFixAvailable: true,
-          fixed: false,
-          message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
-        });
-      }
+      // I3: everything the engine would have to chew on is capped — an
+      // Auto-Fix button that can only throw `too large to repair` is not a fix.
+      const repairable = Math.floor(indices.length / 3) <= REPAIR_TRIANGLE_CAP;
+      if (badEdgeCount > 0) results.push(_nonManifoldResult(badEdgeCount, repairable));
       if (inverted) results.push(_invertedResult(true));
-      // Engine present ⇒ Auto-Fix can run repairMesh; engine missing ⇒ still
-      // report the open-edge count from the validator's own topology pass,
-      // just without an available fix (never throw for a missing engine).
-      const engineBoundary = await _engineBoundary(mesh);
-      const boundary = engineBoundary ?? badEdgeCount;
-      if (boundary > 0) results.push(_holesResult(boundary, engineBoundary !== null));
+      // I4: `holes` speaks only when the engine ANSWERED. Its boundary count
+      // is boundary edges only; the validator's own badEdgeCount is boundary
+      // PLUS non-manifold, so using it as a fallback reported the same edges
+      // twice (once as nonManifold, once as holes).
+      const { diag } = await _engineDiagnose(mesh);
+      if (diag && diag.boundaryEdges > 0) {
+        results.push(_holesResult(diag.boundaryEdges, repairable && diag.triangles <= REPAIR_TRIANGLE_CAP));
+      }
     }
   }
 
@@ -461,22 +502,15 @@ export async function validateMesh(mesh) {
   return results;
 }
 
-// Pre-engine 'nonManifold' fix (position weld only — cannot fill a hole).
+// Pre-engine 'nonManifold' fix (vertex weld only — cannot fill a hole).
 // Kept as the offline fallback for 'nonManifold' specifically: unlike
-// 'holes', a plain weld is a real (if weaker) fix for non-manifold edges, so
-// it stays available even when the repair engine cannot load.
+// 'holes', a weld is a real (if weaker) cleanup for non-manifold data, so it
+// stays available even when the repair engine cannot load. I6: this used to
+// probe two Babylon APIs that do not exist in 9.6.2 and always returned
+// false — the shared `weldMesh` (src/core/repair/Weld.js) does it for real,
+// and is the same weld the export prep steps run.
 function _weldLocally(mesh) {
-  if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
-    const vd = BABYLON.VertexData.ExtractFromMesh(mesh);
-    BABYLON.VertexData.MergeByDistance(vd, MERGE_DISTANCE);
-    vd.applyToMesh(mesh);
-    return true;
-  }
-  if (typeof mesh.mergeVerticesByDistance === 'function') {
-    mesh.mergeVerticesByDistance(MERGE_DISTANCE);
-    return true;
-  }
-  return false;
+  return weldMesh(mesh, MERGE_DISTANCE);
 }
 
 /**
@@ -503,11 +537,18 @@ function _weldLocally(mesh) {
  * additionally falls back to a local position-weld when the engine itself is
  * unavailable (validateMesh always offers it, unlike `holes`, whose
  * autoFixAvailable already tracks engine presence) — see `_weldLocally`.
+ * M2: `report` (optional) is filled with the engine's REAL counters
+ * (`holesFilled`, `nmFixed`, `normalsFlipped`, `merged`, `isWatertight`) so
+ * callers can toast what actually happened instead of re-using the
+ * boundary-edge COUNT as if it were a number of holes. Counters accumulate,
+ * so one report object can span a whole multi-part object or batch.
  * @param {BABYLON.Mesh} mesh
  * @param {'holes'|'nonManifold'|'invertedNormals'|'mirror-x'|'mirror-y'|'mirror-z'} type
+ * @param {{holesFilled?:number, nmFixed?:number, normalsFlipped?:number,
+ *          merged?:number, isWatertight?:boolean}|null} [report]
  * @returns {Promise<boolean>} true when the fix was applied
  */
-export async function applyGeometryFix(mesh, type) {
+export async function applyGeometryFix(mesh, type, report = null) {
   if (!mesh) return false;
   if (type === 'mirror-x' || type === 'mirror-y' || type === 'mirror-z') {
     const positions = mesh.getVerticesData?.(BABYLON.VertexBuffer.PositionKind);
@@ -531,6 +572,13 @@ export async function applyGeometryFix(mesh, type) {
   if (type === 'holes' || type === 'nonManifold') {
     try {
       const r = await repairMesh(mesh);
+      if (report) {
+        report.holesFilled = (report.holesFilled ?? 0) + r.holesFilled;
+        report.nmFixed = (report.nmFixed ?? 0) + r.nmFixed;
+        report.normalsFlipped = (report.normalsFlipped ?? 0) + r.normalsFlipped;
+        report.merged = (report.merged ?? 0) + r.merged;
+        report.isWatertight = (report.isWatertight ?? true) && r.isWatertight;
+      }
       return r.changed;
     } catch (err) {
       // 'holes' has no engine-free equivalent (local weld can't fill a hole) —
@@ -557,7 +605,7 @@ export async function applyGeometryFix(mesh, type) {
   return false;
 }
 
-export async function autoFix(mesh, results) {
+export async function autoFix(mesh, results, report = null) {
   // 'holes' and 'nonManifold' both repair through the identical repairMesh()
   // engine call (see applyGeometryFix) — when a result list carries both
   // (the same open edges can trip both checks), run the engine once and
@@ -566,53 +614,98 @@ export async function autoFix(mesh, results) {
   for (const r of results) {
     if (!r.autoFixAvailable || r.fixed) continue;
     if (r.type === 'holes' || r.type === 'nonManifold') {
-      repairOnce ??= applyGeometryFix(mesh, r.type);
+      repairOnce ??= applyGeometryFix(mesh, r.type, report);
       if (await repairOnce) r.fixed = true;
       continue;
     }
-    if (await applyGeometryFix(mesh, r.type)) r.fixed = true;
+    if (await applyGeometryFix(mesh, r.type, report)) r.fixed = true;
   }
   return results;
 }
 
 /**
+ * Record applied fix types on ONE object. Persisted in .mixo (replayed on
+ * reload via replayGeometryFixes) — not undoable, must dirty (M4).
+ */
+function _recordGeometryFixes(meshId, applied) {
+  if (!applied.length) return;
+  setState(s => {
+    const o = s.scene.objects[meshId];
+    if (!o) return s;
+    const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
+    return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
+  }, SILENT);
+  markDirty();
+}
+
+/**
+ * Repair ONE part of a logical object.
+ *
+ * `groupPart` (a multi-part logical object: MultiMaterial split or glTF
+ * multi-primitive) takes the direct engine path. I7a: group-scoped
+ * validation reports the welded UNION and never offers a per-part fix — the
+ * union is synthetic geometry no fix can be applied to — so the
+ * validate → autoFix route left multi-part objects permanently unrepairable.
+ * Each sibling is diagnosed on its own and repaired only when the engine
+ * says it actually needs it (also C1: a healthy part is never rewritten).
+ */
+async function _repairOnePart(meshId, groupPart) {
+  const mesh = AssetLoader.getBabylonMesh(meshId);
+  if (!mesh) return { holesFilled: 0, nmFixed: 0, applied: [] };
+  const report = {};
+  let applied = [];
+  if (groupPart) {
+    const { diag } = await _engineDiagnose(mesh);
+    const needsRepair = !!diag && (diag.boundaryEdges > 0 || diag.nonManifoldEdges > 0);
+    if (needsRepair && await applyGeometryFix(mesh, 'holes', report)) applied = ['holes'];
+  } else {
+    const results = await validateMesh(mesh);
+    await autoFix(mesh, results, report);
+    applied = results.filter(r => r.fixed).map(r => r.type);
+  }
+  _recordGeometryFixes(meshId, applied);
+  return { holesFilled: report.holesFilled ?? 0, nmFixed: report.nmFixed ?? 0, applied };
+}
+
+/**
  * One-click repair entry point shared by every UI surface (import toast,
  * Outliner badge, context menu, Print panel "Repair all") so applied fixes
- * are recorded identically no matter where the user triggered them — same
- * validate → autoFix → record `geometryFixes` → markDirty sequence as the
- * Print tab's per-result Auto-Fix button (PrintPanel.js), plus a final
- * re-validate so the caller can report what (if anything) is still wrong.
+ * are recorded identically no matter where the user triggered them.
+ *
+ * A multi-part logical object repairs every live part sequentially and
+ * records `geometryFixes` per part (I7a). `holesFilled`/`nmFixed` are the
+ * ENGINE's own counters (M2), not the boundary-edge count. `applied` is
+ * empty when nothing was actually changed — callers must report that as
+ * "nothing to repair", never as success (I7b), and `remaining` says what is
+ * still wrong (M3).
+ *
  * Tolerant of a missing mesh/engine: `autoFix`/`applyGeometryFix` already
  * fall back (nonManifold → local weld) or leave `holes` unfixed, so this
  * never throws for "no engine" — only a real repair failure propagates.
  * @param {string} meshId
- * @returns {Promise<{ holesFilled: number, nmFixed: number, remaining: ValidationResult[] }>}
+ * @returns {Promise<{ holesFilled: number, nmFixed: number, applied: string[],
+ *                     remaining: ValidationResult[] }>}
  */
 export async function repairObject(meshId) {
-  const mesh = AssetLoader.getBabylonMesh(meshId);
-  if (!mesh) return { holesFilled: 0, nmFixed: 0, remaining: [] };
+  const objects = getState().scene.objects;
+  const partIds = logicalObjectPartIds(meshId, objects)
+    .filter(id => objects[id] && !objects[id].isGhost && AssetLoader.getBabylonMesh(id));
+  const ids = partIds.length ? partIds : (AssetLoader.getBabylonMesh(meshId) ? [meshId] : []);
+  if (!ids.length) return { holesFilled: 0, nmFixed: 0, applied: [], remaining: [] };
 
-  const results = await validateMesh(mesh);
-  await autoFix(mesh, results);
-
-  // Same recording as PrintPanel's per-result Auto-Fix button: persisted in
-  // .mixo (replayed on reload via replayGeometryFixes) — not undoable, must
-  // dirty (M4).
-  const applied = results.filter(r => r.fixed).map(r => r.type);
-  if (applied.length) {
-    setState(s => {
-      const o = s.scene.objects[meshId];
-      if (!o) return s;
-      const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
-      return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
-    }, SILENT);
-    markDirty();
+  const groupPart = ids.length > 1;
+  let holesFilled = 0, nmFixed = 0;
+  const applied = [];
+  for (const id of ids) {
+    const part = await _repairOnePart(id, groupPart);
+    holesFilled += part.holesFilled;
+    nmFixed += part.nmFixed;
+    applied.push(...part.applied);
   }
 
-  const holesFilled = results.find(r => r.type === 'holes' && r.fixed)?.count ?? 0;
-  const nmFixed = results.find(r => r.type === 'nonManifold' && r.fixed)?.count ?? 0;
-  const remaining = await validateMesh(mesh);
-  return { holesFilled, nmFixed, remaining };
+  const lead = AssetLoader.getBabylonMesh(meshId) ?? AssetLoader.getBabylonMesh(ids[0]);
+  const remaining = lead ? await validateMesh(lead) : [];
+  return { holesFilled, nmFixed, applied: [...new Set(applied)], remaining };
 }
 
 /**
@@ -622,13 +715,17 @@ export async function repairObject(meshId) {
  * shared version. Sequential (not Promise.all) so a heavy mesh doesn't
  * contend with another for the main thread, and tolerant: a failing object
  * is recorded in `failed` rather than aborting the rest of the batch.
+ * `repaired` counts the objects where a fix was actually applied — 0 means
+ * "nothing to repair", which callers must NOT report as success (I7b/I7c).
  * @param {string[]} meshIds
  * @param {{ onProgress?: (frac: number, name: string) => void }} [opts]
- * @returns {Promise<{ holesFilled: number, nmFixed: number, failed: Array<{ meshId: string, name: string, error: unknown }> }>}
+ * @returns {Promise<{ holesFilled: number, nmFixed: number, repaired: number,
+ *                     failed: Array<{ meshId: string, name: string, error: unknown }> }>}
  */
 export async function repairObjects(meshIds, { onProgress } = {}) {
   let holesFilled = 0;
   let nmFixed = 0;
+  let repaired = 0;
   const failed = [];
   const total = meshIds.length;
   for (let i = 0; i < total; i++) {
@@ -639,11 +736,12 @@ export async function repairObjects(meshIds, { onProgress } = {}) {
       const res = await repairObject(meshId);
       holesFilled += res.holesFilled;
       nmFixed += res.nmFixed;
+      if (res.applied.length) repaired++;
     } catch (error) {
       failed.push({ meshId, name, error });
     }
   }
-  return { holesFilled, nmFixed, failed };
+  return { holesFilled, nmFixed, repaired, failed };
 }
 
 /**

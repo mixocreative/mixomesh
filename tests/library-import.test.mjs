@@ -189,9 +189,17 @@ await test('importing a model marks the project dirty (close-without-save must p
 // Shared fake engine: an "open" mesh (fixed fake geometry above) with a
 // boundary of 3 edges, repaired by appending one triangle — same shape as
 // tests/mesh-repair.test.mjs's fake.
+// The hole fill appends a NEW vertex plus a triangle referencing it, so the
+// output is well-formed for any input size — MeshRepair now rejects engine
+// output whose indices fall outside the vertex list (CIA F2), and the old
+// hard-coded `[1, 2, 3]` was out of range for this 3-vertex fixture.
 const FAKE_REPAIR_ENGINE = {
   diagnose: () => ({ boundary: 3, nonManifold: 0, windingInconsistencies: 0, oppositeWindingPairs: 0, components: 1, isWatertight: false }),
-  repairObject: async (V, T) => ({ V, T: [...T, [1, 2, 3]], report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 } }),
+  repairObject: async (V, T) => ({
+    V: [...V, [0, 0, 0]],
+    T: [...T, [0, 1, V.length]],
+    report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+  }),
 };
 
 async function _importThenValidate(repairOnImport) {

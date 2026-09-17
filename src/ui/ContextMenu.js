@@ -9,7 +9,7 @@ import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
-import { reportError } from './Status.js';
+import { reportBatchRepairResult } from './RepairFeedback.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
 import { icon } from '../core/Icons.js';
@@ -417,10 +417,7 @@ async function _repairGeometry() {
   } finally {
     ProgressOverlay.hide();
   }
-  Toast.show(t('toast.repairedBatch', { n: ids.length, holes: result.holesFilled, nm: result.nmFixed }), 'success', 3000);
-  if (result.failed.length) {
-    reportError(new Error(result.failed.map(f => f.name).join(', ')), { title: t('toast.autoFixFailed') });
-  }
+  reportBatchRepairResult(ids.length, result);
 }
 
 function _relink(meshId) {
