@@ -20,6 +20,7 @@
 // freezing the UI thread.
 
 import { signedVolume } from '../print/PrintSpace.js';
+import { vendorUrl } from '../vendorUrl.js';
 
 const CLOCKWISE = 0;         // BABYLON.Material.ClockWiseSideOrientation
 const COUNTER_CLOCKWISE = 1; // BABYLON.Material.CounterClockWiseSideOrientation
@@ -28,15 +29,6 @@ export const REPAIR_TRIANGLE_CAP = 300_000;
 export const REPAIR_TIMEOUT_MS = 60_000;
 let _engine = null;
 let _loading = null;
-
-// Absolute-from-site-root URL so both `npm run dev` and the Electron
-// `file://dist/index.html` load resolve (relative `base: './'` in
-// vite.config.js means a leading '/' would break the packaged app).
-function _vendorUrl(relPath) {
-  return (typeof document !== 'undefined' && document.baseURI)
-    ? new URL(relPath, document.baseURI).href
-    : `/${relPath}`;
-}
 
 function _loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -58,10 +50,10 @@ async function _loadEngine() {
     throw new Error('no engine: DOM unavailable');
   }
   if (typeof window.MeshFixCore === 'undefined') {
-    await _loadScript(_vendorUrl('vendor/meshfix/mesh-fix-core.js'));
+    await _loadScript(vendorUrl('vendor/meshfix/mesh-fix-core.js'));
   }
   if (typeof window.MeshFixLib === 'undefined') {
-    await _loadScript(_vendorUrl('vendor/meshfix/mesh-fix-lib.js'));
+    await _loadScript(vendorUrl('vendor/meshfix/mesh-fix-lib.js'));
   }
   if (typeof window.MeshFixLib === 'undefined') throw new Error('no engine: MeshFixLib did not register');
   const lib = new window.MeshFixLib();

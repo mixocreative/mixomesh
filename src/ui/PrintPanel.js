@@ -786,14 +786,16 @@ async function _render() {
 // ── Export gate (A6 / B6 + watertight-repair-and-cost task 4) ────────────
 
 /**
- * Three-way export gate shown whenever readiness has only warnings
- * (errors keep the existing blocked modal). Resolves 'autofix' | 'export' |
- * 'cancel' — ESC/backdrop dismissal also resolves 'cancel'.
+ * Export gate shown whenever readiness has only warnings (errors keep the
+ * existing blocked modal). Resolves 'autofix' | 'export' | 'cancel' —
+ * ESC/backdrop dismissal also resolves 'cancel'. `canAutoFix` decides whether
+ * the Auto-fix button exists at all (I12).
  */
 function _confirmExportGate(issues) {
   return new Promise(resolve => {
     Modal.open('exportGate', {
       issues,
+      canAutoFix: exportGateCanAutoFix(issues),
       onClose: (r) => resolve(r ?? 'cancel'),
     });
   });
@@ -802,7 +804,7 @@ function _confirmExportGate(issues) {
 /** Object ids Auto-fix should run MeshValidator.repairObjects on: the ones flagged by geometry warnings. */
 function _affectedObjectIds(issues) {
   const ids = new Set();
-  for (const item of issues) {
+  for (const item of issues ?? []) {
     if (item.severity === 'warning' && item.code === 'geometry-warning') {
       for (const id of item.objectIds ?? []) ids.add(id);
     }
@@ -810,21 +812,55 @@ function _affectedObjectIds(issues) {
   return [...ids];
 }
 
-function _renderExportGateModal({ data, close }) {
-  const warnings = data?.issues?.filter(item => item.severity === 'warning') ?? [];
-  const el = document.createElement('div');
-  el.innerHTML = `
+/**
+ * I12: offer "Auto-fix and export" only when there is something it can
+ * actually fix — at least one geometry-warning object whose cached results
+ * carry an unapplied `autoFixAvailable`. Otherwise the button ran a repair
+ * batch that provably could not change anything and then exported anyway,
+ * which reads as "we fixed it" for geometry nothing touched.
+ */
+export function exportGateCanAutoFix(issues, state = getState()) {
+  const ids = _affectedObjectIds(issues);
+  if (!ids.length) return false;
+  const cache = state?.scene?.validation ?? {};
+  return ids.some(id => cache[id]?.results?.some(r => r.autoFixAvailable && !r.fixed));
+}
+
+/** The gate's buttons, in the order they are rendered (first = primary). */
+export function exportGateActions(canAutoFix) {
+  return canAutoFix ? ['autofix', 'export', 'cancel'] : ['export', 'cancel'];
+}
+
+// Literal translate calls (not a key table) so scripts/i18n-check.mjs can
+// still see these keys are used and verify all three locales carry them.
+const GATE_LABELS = {
+  autofix: () => t('print.exportGate.fixAndExport'),
+  export: () => t('print.exportGate.exportAnyway'),
+  cancel: () => t('print.exportGate.cancel'),
+};
+
+/**
+ * The gate's markup. A pure string function so the button set, their order
+ * and their resolved actions are testable headlessly (CIA F7) without a DOM.
+ */
+export function exportGateHtml(issues, canAutoFix) {
+  const warnings = (issues ?? []).filter(item => item.severity === 'warning');
+  const buttons = exportGateActions(canAutoFix).map((action, i) =>
+    `<button class="btn${i === 0 ? ' btn-primary' : ''}" data-action="${action}">`
+    + `${escapeHtml(GATE_LABELS[action]())}</button>`).join('');
+  return `
     <div class="modal-content">
       <h3>${escapeHtml(t('print.exportGate.title'))}</h3>
-      <p>${escapeHtml(t('print.validationWarningsBody'))}</p>
+      <p>${escapeHtml(canAutoFix ? t('print.validationWarningsBody') : t('print.exportGate.bodyNoFix'))}</p>
       <ul>${warnings.map(item => `<li>${escapeHtml(_issueLabel(item))}</li>`).join('')}</ul>
-      <div class="modal-actions">
-        <button class="btn btn-primary" data-action="autofix">${escapeHtml(t('print.exportGate.fixAndExport'))}</button>
-        <button class="btn" data-action="export">${escapeHtml(t('print.exportGate.exportAnyway'))}</button>
-        <button class="btn" data-action="cancel">${escapeHtml(t('print.exportGate.cancel'))}</button>
-      </div>
+      <div class="modal-actions">${buttons}</div>
     </div>
   `;
+}
+
+function _renderExportGateModal({ data, close }) {
+  const el = document.createElement('div');
+  el.innerHTML = exportGateHtml(data?.issues, !!data?.canAutoFix);
   el.querySelectorAll('[data-action]').forEach(b =>
     b.addEventListener('click', () => close(b.dataset.action)));
   return el;

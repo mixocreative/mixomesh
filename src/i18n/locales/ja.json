@@ -187,6 +187,7 @@
   "print.validationWarningsBody": "これらの非ブロッキングな印刷準備の警告を確認し、自動修復して書き出すか、そのまま書き出してください。",
   "print.exportAnyway": "そのまま書き出す",
   "print.exportGate.title": "書き出し準備の警告",
+  "print.exportGate.bodyNoFix": "以下の非ブロッキングな印刷準備警告を確認してください。いずれも自動修復できません — そのままエクスポートするか、キャンセルして手動で修正してください。",
   "print.exportGate.fixAndExport": "自動修復して書き出す",
   "print.exportGate.exportAnyway": "そのまま書き出す",
   "print.exportGate.cancel": "キャンセル",

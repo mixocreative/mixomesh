@@ -40,7 +40,7 @@ import { isLoading as isProjectLoading } from '../persist/LoadGate.js';
 import { caps } from '../storage/capabilities.js';
 import { t } from '../../i18n/index.js';
 import { Toast } from '../../ui/Toast.js';
-import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../../ui/MeshStats.js';
+import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../scene/TriangleCount.js';
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import '../ThreeMFLoader.js';

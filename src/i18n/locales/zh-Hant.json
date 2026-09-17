@@ -187,6 +187,7 @@
   "print.validationWarningsBody": "請檢查這些不會阻擋匯出的列印準備警告，然後選擇自動修復並匯出，或仍然匯出。",
   "print.exportAnyway": "仍然匯出",
   "print.exportGate.title": "匯出準備警告",
+  "print.exportGate.bodyNoFix": "請檢視這些不阻擋列印的準備警告。這些都無法自動修復 — 可直接匯出，或取消後手動修正。",
   "print.exportGate.fixAndExport": "自動修復並匯出",
   "print.exportGate.exportAnyway": "仍然匯出",
   "print.exportGate.cancel": "取消",

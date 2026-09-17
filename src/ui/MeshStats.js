@@ -20,6 +20,8 @@ import { subscribe, getState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { StatusBar } from './StatusBar.js';
 import { getBabylonMesh } from '../core/AssetLoader.js';
+import { countSceneTriangles, countContainerTriangles, formatTriCount, meshTriangles }
+  from '../core/scene/TriangleCount.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
 
@@ -61,70 +63,13 @@ function _meshFor(id) {
   return getBabylonMesh(id) ?? null;
 }
 
-/** Per-mesh triangle count: getTotalIndices()/3, falling back to getIndices().length/3. */
-function _meshTriangles(mesh) {
-  if (!mesh || !mesh.geometry) return 0;
-  const total = mesh.getTotalIndices?.();
-  if (Number.isFinite(total)) return total / 3;
-  const idx = mesh.getIndices?.();
-  return Number.isFinite(idx?.length) ? idx.length / 3 : 0;
-}
-
-/**
- * Scene-wide triangle total across live print-part / imported meshes. Helper
- * overlays (3D cursor, cross-section stripe/cap, floor disc) carry no
- * `metadata.meshId` and are excluded — same rule `_meshFor` above already
- * relies on. Shared by the HUD readout (via the cache below) and the
- * pre-import budget check in AssetImport.js so there is exactly one
- * triangle-counting traversal. Called through `MeshStats.countSceneTriangles`
- * internally (not the bare function) so tests can spy on the live walk.
- *
- * Fix round 1 (2026-09-18, task 8 follow-up): a mesh carrying
- * `metadata.meshId` is not necessarily the LIVE registered mesh for that id
- * — `Mesh.clone()` copies the metadata reference, so a transient export
- * clone (`PrintPipeline`'s `${mesh.name}__export`) carries the SAME source
- * `meshId` while it exists in the scene. If a geometry event (export
- * validates its clones through the same `MeshValidator.validateMesh` →
- * `VALIDATION_COMPLETE` path a real edit uses) fires a re-walk while such a
- * clone is still alive, a naive `mesh.metadata?.meshId` filter double-counts
- * it alongside the real mesh (observed live: a 4-triangle repaired solid
- * read HUD "tris 8" — the export clone, present during its own validation
- * pass, was counted a second time). `MeshValidator.js`'s own cache-write
- * path guards the identical hazard with `AssetLoader.getBabylonMesh(meshId)
- * === mesh` (its `isLive` check) — this walk uses the same registry check
- * so only the CURRENTLY REGISTERED live mesh for an id is ever summed.
- */
-export function countSceneTriangles(scene) {
-  if (!scene?.meshes) return 0;
-  let tris = 0;
-  for (const mesh of scene.meshes) {
-    const meshId = mesh.metadata?.meshId;
-    if (!meshId || getBabylonMesh(meshId) !== mesh) continue;
-    tris += _meshTriangles(mesh);
-  }
-  return tris;
-}
-
-/**
- * Triangle total across an AssetContainer's meshes — used BEFORE
- * `addAllToScene()`, when nothing has a meshId yet, so it sums every
- * geometry-bearing mesh unconditionally.
- */
-export function countContainerTriangles(container) {
-  if (!container?.meshes) return 0;
-  let tris = 0;
-  for (const mesh of container.meshes) tris += _meshTriangles(mesh);
-  return tris;
-}
-
-/** Compact triangle-count formatting: 342 / 12.3k / 342k / 1.5M (one decimal for M). */
-export function formatTriCount(n) {
-  const v = Number.isFinite(n) ? n : 0;
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 100_000) return `${Math.round(v / 1000)}k`;
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-  return `${Math.round(v)}`;
-}
+// M5: the counting itself lives in src/core/scene/TriangleCount.js so a core
+// import path (AssetImport's pre-import budget check) no longer depends on a
+// UI module. Re-exported here because tests and callers address these through
+// MeshStats, and `_recomputeSceneTris` deliberately calls
+// `MeshStats.countSceneTriangles` (not the bare import) so a test can spy on
+// exactly how many real scene walks happen.
+export { countSceneTriangles, countContainerTriangles, formatTriCount };
 
 /** Re-walk the scene and cache the total. Only called (debounced) from geometry events. */
 function _recomputeSceneTris() {
@@ -162,7 +107,7 @@ function _render() {
   for (const id of sel) {
     const m = _meshFor(id);
     if (!m || !m.geometry) continue;
-    selTris += _meshTriangles(m);
+    selTris += meshTriangles(m);
     m.computeWorldMatrix(true);
     const bb = m.getBoundingInfo().boundingBox;
     if (!min) { min = bb.minimumWorld.clone(); max = bb.maximumWorld.clone(); }

@@ -187,6 +187,7 @@
   "print.validationWarningsBody": "Review these non-blocking print-readiness warnings, then Auto-fix and export, or export anyway.",
   "print.exportAnyway": "Export anyway",
   "print.exportGate.title": "Export readiness warnings",
+  "print.exportGate.bodyNoFix": "Review these non-blocking print-readiness warnings. None of them can be repaired automatically — export anyway, or cancel and fix them by hand.",
   "print.exportGate.fixAndExport": "Auto-fix and export",
   "print.exportGate.exportAnyway": "Export anyway",
   "print.exportGate.cancel": "Cancel",

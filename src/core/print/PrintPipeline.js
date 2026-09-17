@@ -30,6 +30,7 @@ import { serializeOBJ } from './ObjWriter.js';
 import { serializeSTL } from './StlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
+import { vendorUrl, MANIFOLD_VENDOR_DIR } from '../vendorUrl.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -38,22 +39,11 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 let _csgInitPromise = null;
 
-// Absolute-from-site-root so both `npm run dev` and the Electron
-// `file://dist/index.html` load resolve (relative `base: './'` in
-// vite.config.js means a leading '/' would break the packaged app). Babylon
-// appends '/manifold.js' to this and imports it as an ES module; that module
-// then fetches manifold.wasm relative to itself (see public/vendor/manifold-3d/manifold.js).
-function _manifoldVendorUrl() {
-  return (typeof document !== 'undefined' && document.baseURI)
-    ? new URL('vendor/manifold-3d', document.baseURI).href
-    : '/vendor/manifold-3d';
-}
-
 async function _ensureCSG2() {
   const B = window.BABYLON;
   if (!B || !B.CSG2 || typeof B.InitializeCSG2Async !== 'function') return false;
   try {
-    if (!_csgInitPromise) _csgInitPromise = B.InitializeCSG2Async({ manifoldUrl: _manifoldVendorUrl() });
+    if (!_csgInitPromise) _csgInitPromise = B.InitializeCSG2Async({ manifoldUrl: vendorUrl(MANIFOLD_VENDOR_DIR) });
     await _csgInitPromise;
     return true;
   } catch (err) {
