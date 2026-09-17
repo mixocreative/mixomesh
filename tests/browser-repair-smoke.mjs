@@ -117,6 +117,22 @@ async function main() {
           return { error: 'repairObject did not report holesFilled >= 1: ' + JSON.stringify(repair) };
         }
 
+        // Live-mesh diagnostics (fix round 1) — pins the exact scene state
+        // right after repair, independent of export: this is what caught the
+        // "HUD read tris 8 for a 4-triangle solid" defect (an export clone
+        // sharing the source meshId was double-counted; fixed in
+        // MeshStats.countSceneTriangles, not here — the live mesh itself was
+        // always correct, as this dump proves).
+        const { diagnoseMesh } = await import('/src/core/repair/MeshRepair.js');
+        const scene = mesh.getScene();
+        const meshDump = scene.meshes
+          .filter(m => m.metadata?.meshId)
+          .map(m => [m.name, m.metadata.meshId, (m.getTotalIndices?.() ?? 0) / 3]);
+        const liveTris = (mesh.getTotalIndices?.() ?? 0) / 3;
+        const liveVerts = mesh.getTotalVertices?.() ?? 0;
+        const liveDiag = await diagnoseMesh(mesh);
+        const diag = { meshDump, liveTris, liveVerts, liveDiag };
+
         // Export the REAL scene through the REAL 3MF pipeline, save picker
         // stubbed to capture bytes (same pattern as browser-export-smoke.mjs).
         let captured = null, suggested = null;
@@ -150,7 +166,7 @@ async function main() {
 
         return {
           meshId, holesFilled: repair.holesFilled, nmFixed: repair.nmFixed,
-          remaining: repair.remaining, suggested, b64: btoa(bin), hudText, costText,
+          remaining: repair.remaining, suggested, b64: btoa(bin), hudText, costText, diag,
         };
       } catch (err) {
         return { error: String(err?.stack ?? err) };
@@ -161,6 +177,21 @@ async function main() {
     assert(/_r1to1\.3mf$/.test(result.suggested ?? ''),
       `suggested filename should end _r1to1.3mf, got ${result.suggested}`);
     console.log(`repairObject: holesFilled=${result.holesFilled} nmFixed=${result.nmFixed}`);
+    console.log('live-mesh diagnostics', JSON.stringify(result.diag, null, 2));
+
+    // Root-cause pin (fix round 1): the LIVE mesh right after repair must be
+    // exactly the closed 4-triangle solid, and it must be the ONLY mesh in
+    // the scene carrying this meshId — if a second registered mesh ever
+    // appears here, something is double-registering, not just double-
+    // counting at the HUD layer.
+    assert(result.diag.meshDump.length === 1,
+      `expected exactly 1 registered mesh for this meshId, got ${result.diag.meshDump.length}: ${JSON.stringify(result.diag.meshDump)}`);
+    assert(result.diag.liveTris === 4, `live mesh should have exactly 4 triangles after repair, got ${result.diag.liveTris}`);
+    assert(result.diag.liveVerts === 4, `live mesh should have exactly 4 vertices after repair, got ${result.diag.liveVerts}`);
+    assert(result.diag.liveDiag.isWatertight === true,
+      `MeshRepair.diagnoseMesh on the live mesh should report isWatertight:true, got: ${JSON.stringify(result.diag.liveDiag)}`);
+    assert(result.diag.liveDiag.boundaryEdges === 0,
+      `live mesh should have 0 boundary edges after repair, got ${result.diag.liveDiag.boundaryEdges}`);
 
     const bytes = Buffer.from(result.b64, 'base64');
     // Optional: dump the exported 3MF for an external slicer check
@@ -216,9 +247,15 @@ async function main() {
     assert(badEdges.length === 0,
       `exported solid is not watertight — edges not used exactly twice: ${JSON.stringify(badEdges.slice(0, 10))}`);
 
-    // HUD + cost assertions.
+    // HUD + cost assertions. Exact count (fix round 1) — the scene holds
+    // exactly one 4-triangle solid at this point, post-export (export
+    // clones must be disposed by now AND must never have been counted while
+    // alive — MeshStats.countSceneTriangles fix), so the HUD's numeric
+    // prefix must be exactly 4, not the pre-fix "8" (a doubled export clone).
     console.log(`HUD text: "${result.hudText}"`);
-    assert(/tris \d/.test(result.hudText), `HUD should read "tris <n> / <budget>", got: "${result.hudText}"`);
+    const hudMatch = /^tris (\d+) \//.exec(result.hudText);
+    assert(hudMatch, `HUD should read "tris <n> / <budget>", got: "${result.hudText}"`);
+    assert(hudMatch[1] === '4', `HUD triangle count should read exactly 4, got "${hudMatch[1]}" (full text: "${result.hudText}")`);
     console.log(`cost block text: "${result.costText}"`);
     assert(result.costText && result.costText !== '—' && /\d/.test(result.costText),
       `#pp-cost-total should render a non-null number for this solid, got: "${result.costText}"`);

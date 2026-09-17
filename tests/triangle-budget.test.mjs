@@ -104,8 +104,15 @@ function makeContainer(trisList) {
 }
 
 // Pre-existing scene content (already has a meshId — a real print part).
+// Registered through AssetLoader.bindRestoredMesh (not just given a
+// metadata.meshId) so it matches what MeshStats.countSceneTriangles now
+// requires (fix round 1, task 8 follow-up): only the CURRENTLY REGISTERED
+// live mesh for an id is counted, so a real print part must actually be the
+// live-registered mesh, same as production.
 function makeSceneMesh(meshId, tris) {
-  return { metadata: { meshId }, geometry: {}, getTotalIndices: () => tris * 3 };
+  const mesh = { metadata: {}, geometry: {}, getTotalIndices: () => tris * 3 };
+  AssetLoader.bindRestoredMesh(meshId, mesh, 'test-asset');
+  return mesh;
 }
 
 let passed = 0, failed = 0;

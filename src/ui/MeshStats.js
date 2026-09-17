@@ -20,6 +20,7 @@ import { subscribe, getState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { StatusBar } from './StatusBar.js';
 import { hasErrors } from '../core/MeshValidator.js';
+import { getBabylonMesh } from '../core/AssetLoader.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
 
@@ -70,12 +71,28 @@ function _meshTriangles(mesh) {
  * pre-import budget check in AssetImport.js so there is exactly one
  * triangle-counting traversal. Called through `MeshStats.countSceneTriangles`
  * internally (not the bare function) so tests can spy on the live walk.
+ *
+ * Fix round 1 (2026-09-18, task 8 follow-up): a mesh carrying
+ * `metadata.meshId` is not necessarily the LIVE registered mesh for that id
+ * — `Mesh.clone()` copies the metadata reference, so a transient export
+ * clone (`PrintPipeline`'s `${mesh.name}__export`) carries the SAME source
+ * `meshId` while it exists in the scene. If a geometry event (export
+ * validates its clones through the same `MeshValidator.validateMesh` →
+ * `VALIDATION_COMPLETE` path a real edit uses) fires a re-walk while such a
+ * clone is still alive, a naive `mesh.metadata?.meshId` filter double-counts
+ * it alongside the real mesh (observed live: a 4-triangle repaired solid
+ * read HUD "tris 8" — the export clone, present during its own validation
+ * pass, was counted a second time). `MeshValidator.js`'s own cache-write
+ * path guards the identical hazard with `AssetLoader.getBabylonMesh(meshId)
+ * === mesh` (its `isLive` check) — this walk uses the same registry check
+ * so only the CURRENTLY REGISTERED live mesh for an id is ever summed.
  */
 export function countSceneTriangles(scene) {
   if (!scene?.meshes) return 0;
   let tris = 0;
   for (const mesh of scene.meshes) {
-    if (!mesh.metadata?.meshId) continue;
+    const meshId = mesh.metadata?.meshId;
+    if (!meshId || getBabylonMesh(meshId) !== mesh) continue;
     tris += _meshTriangles(mesh);
   }
   return tris;

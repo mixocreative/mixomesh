@@ -17,6 +17,7 @@ const { StateManager, dispatch } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { MeshStats } = await import('../src/ui/MeshStats.js');
+const { AssetLoader } = await import('../src/core/AssetLoader.js');
 
 function resetState() {
   StateManager.replaceState(StateManager.freshState());
@@ -88,6 +89,31 @@ await test('HISTORY_UNDONE / HISTORY_REDONE / VALIDATION_COMPLETE also queue a r
     await flushMicrotasks();
     assert.equal(getCalls(), 1, 'all three fired in one tick still coalesce into one walk');
   });
+});
+
+// Fix round 1 (task 8 follow-up, live-observed: HUD read "tris 8" for a
+// scene holding one 4-triangle repaired solid). `Mesh.clone()` copies the
+// metadata reference, so a transient export clone carries the SAME source
+// `meshId` as the real live mesh while both are momentarily in the scene
+// (e.g. `PrintPipeline` validates its export clones through the same
+// `MeshValidator.validateMesh` path a real edit uses, firing
+// VALIDATION_COMPLETE while the clone is still alive). A naive
+// `mesh.metadata?.meshId` filter double-counts it.
+await test('countSceneTriangles counts a meshId ONCE even when a stale/clone mesh shares it', () => {
+  const liveMesh = { metadata: { meshId: 'm1' }, geometry: {}, getTotalIndices: () => 12 };
+  AssetLoader.bindRestoredMesh('m1', liveMesh, 'asset1');
+  // A clone sharing the SAME metadata object (Babylon's Mesh.clone behaviour)
+  // — same meshId, but NOT the registered live mesh for it.
+  const exportClone = { metadata: liveMesh.metadata, geometry: {}, getTotalIndices: () => 12 };
+  const scene = { meshes: [liveMesh, exportClone] };
+  const total = MeshStats.countSceneTriangles(scene);
+  assert.equal(total, 4, `expected the live mesh's 4 triangles counted exactly once (not doubled by the clone), got ${total}`);
+});
+
+await test('countSceneTriangles counts a mesh with no live registration at all as zero', () => {
+  const orphan = { metadata: { meshId: 'never-registered' }, geometry: {}, getTotalIndices: () => 30 };
+  const scene = { meshes: [orphan] };
+  assert.equal(MeshStats.countSceneTriangles(scene), 0, 'a meshId with no live registry match must not be counted');
 });
 
 console.log('\n' + out.join('\n'));

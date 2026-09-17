@@ -2224,12 +2224,44 @@ shares the same constant as its own triangle-count gate (§12 Cost quote).
 - **PrusaSlicer 2.9.3** (`prusa-slicer-console.exe --info`) on the same
   exported file, independently: `manifold = yes`, `number_of_facets = 4`,
   `volume = 1000.000000`.
-- HUD (§13 MeshStats) read `tris 8 / 1.5M` (`/tris \d/` — passes; the
-  budget denominator is the web tier's `caps.triangleBudget`).
+- HUD (§13 MeshStats) reads `tris 4 / 1.5M` — the budget denominator is the
+  web tier's `caps.triangleBudget`.
 - Cost block (§12 Cost quote) `#pp-cost-total` read
   `1.00 cm³ · 1.1 g · 0.55 + support 0.09 = 0.64 USD` — a live, non-null
   quote for the now-watertight solid, with no `approximate` badge (the
   `holes` cache entry cleared on re-validate after repair).
+
+**Fix round 1 (2026-09-18, same-day follow-up):** the first pass of this
+probe read the HUD as `tris 8 / 1.5M` for this exact 4-triangle solid — a
+real defect, not a fixture issue. Root cause: `MeshStats.countSceneTriangles`
+(`src/ui/MeshStats.js`) summed every scene mesh carrying a truthy
+`mesh.metadata?.meshId`, but `Mesh.clone()` copies the metadata REFERENCE, so
+a transient `PrintPipeline` export clone (`${mesh.name}__export`) carries the
+SAME source `meshId` while it is briefly alive in the scene during its own
+`MeshValidator.validateMesh` pass (which the export pipeline runs on every
+clone, and which dispatches `VALIDATION_COMPLETE` — one of `MeshStats`'s
+recompute triggers) — so the live mesh's 4 triangles were counted twice.
+The live mesh itself was never wrong (`diagnoseMesh` on it confirmed
+`isWatertight: true`, `boundaryEdges: 0`, exactly 4 triangles / 4 vertices,
+and exactly ONE registered mesh existed for the id) — this was purely a
+scene-walk double-count, not a repair or export defect. Fixed by reusing the
+exact guard `MeshValidator.js`'s own cache-write path already uses for the
+identical hazard (`AssetLoader.getBabylonMesh(meshId) === mesh`, its
+`isLive` check): `countSceneTriangles` now only sums a mesh if it IS the
+currently-registered live mesh for its id, not merely a mesh that carries
+that id. Covered by two new `tests/mesh-stats.test.mjs` cases (a
+live-mesh-plus-metadata-sharing-clone scene counts the live mesh's
+triangles exactly once; an unregistered `meshId` counts as zero) and by
+tightening `tests/browser-repair-smoke.mjs` itself, which now asserts the
+HUD's numeric prefix is exactly `4` (not merely `/tris \d/`), the live mesh
+has exactly 4 triangles/vertices, exactly one mesh is registered for the
+id, and `diagnoseMesh` reports `isWatertight: true` with 0 boundary edges —
+all immediately after `repairObject`, independent of export.
+`tests/triangle-budget.test.mjs`'s synthetic "pre-existing scene mesh"
+helper was updated to register through `AssetLoader.bindRestoredMesh` (it
+was constructing a mesh with a `metadata.meshId` but never actually
+registering it as live — accidentally relying on the very bug this fix
+closes; now it matches how a real print part actually gets into the scene).
 
 ---
 
@@ -3820,6 +3852,14 @@ Single bar at bottom. Segments:
     change scene geometry (asset add/remove, undo/redo, repair-completion
     re-validate) — never on `SELECTION_CHANGED` — and a burst of geometry
     events (an N-part import) coalesces into one microtask-deferred walk.
+    The walk counts a mesh only if it IS the currently-registered live mesh
+    for its `metadata.meshId` (`AssetLoader.getBabylonMesh(meshId) === mesh`
+    — the same guard `MeshValidator.js`'s cache-write path uses), not merely
+    a mesh that carries that id — `Mesh.clone()` copies the metadata
+    reference, so a transient export clone sharing the source `meshId` would
+    otherwise be double-counted while briefly alive during its own
+    export-time validation pass (task 8 fix round 1, 2026-09-18 — live-caught
+    as a HUD reading `tris 8` for a 4-triangle solid).
   - **Selection stats — selection-driven, appended only when something is
     selected:** `· sel <selTris> · <W>×<D>×<H> mm · <watertight>` — the
     selection's own triangle count, print-space W×D×H in mm, and watertight
