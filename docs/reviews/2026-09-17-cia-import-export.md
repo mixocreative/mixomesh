@@ -102,7 +102,28 @@ Still open (LOW / by policy): missing-MTL console-only (field policy), 64-siblin
 - Concurrent shader-merge prompts: second import cancels the first with `undefined` → silent rename.
 - 3MF dangling `objectid` / malformed `transform` → part silently dropped / identity.
 - ~~Validator never emits severity `error` → export validation gate is vacuous; "auto-fixed on export" message promises a step that does not exist (`MeshValidator.js:347`, `PrintPipeline.js:325`).~~
-  **CLOSED 2026-09-18 (watertight-repair-and-cost, commits `2b92c6e..ebaa05d` + this doc pass).**
+  **CLOSED 2026-09-18 (watertight-repair-and-cost, commits `2b92c6e..ebaa05d`, fix wave `eb49e18..`, + this doc pass).**
+
+  **Stated plainly, because two consumers had quietly keyed on the opposite
+  (fix wave, CIA F1): the validator NEVER emits severity `error`. It never
+  will — non-manifold geometry is deliberately a warning (owner rule: a
+  colour-print assembly tool works with downloaded display models that are
+  routinely non-watertight, and slicers auto-repair them). The ONLY hard
+  geometry block in the app is the opt-in `print.strictExport` setting.**
+  Consequences, now enforced in code:
+  - Anything that MEANS "watertight / has geometry issues" must test result
+    TYPES (`holes` / `nonManifold` / `invertedNormals`), never
+    `severity === 'error'` or `hasErrors(results)`. The status-bar HUD badge
+    (`src/ui/MeshStats.js`) tested `hasErrors` and was therefore structurally
+    blind — it could only ever read `✓ watertight`. Fixed; three verdicts
+    pinned in `tests/mesh-stats.test.mjs`.
+  - The `severity === 'error'` branches that remain (`PrintPipeline.
+    _validateExportMeshes`, the Outliner/PrintPanel row icons, the
+    error-list modal) are for VALIDATOR CRASHES only — `_validateExportMeshes`
+    synthesises an `error` when `validateMesh` itself throws, so broken
+    validation blocks the export instead of passing it. Those branches are
+    correct as written and were deliberately left alone.
+  - No new error tier was invented.
   The promised auto-fix step now exists: `MeshValidator.js` gained a `holes`
   check (open boundary edges) whose Auto-Fix runs the vendored MeshFixLib
   engine (`src/core/repair/MeshRepair.js`, MIT, `public/vendor/meshfix/`) to
@@ -115,7 +136,9 @@ Still open (LOW / by policy): missing-MTL console-only (field policy), 64-siblin
   The three-way `exportGate` UI modal (Fix & Export / Export Anyway / Cancel)
   replaces the old two-button confirm. Live-verified end-to-end
   (`npm run test:repair`): an open tetrahedron's hole is filled
-  (`holesFilled: 3`), the exported 3MF is watertight (volume 1000.0000 mm³
+  (`holesFilled: 1` — the engine's own counter; this line read `3` until the
+  fix wave threaded the real report through instead of re-labelling the
+  boundary-edge count, review M2), the exported 3MF is watertight (volume 1000.0000 mm³
   vs. an expected +1000, 0.000% error; every edge used exactly twice), and
   PrusaSlicer 2.9.3 independently reports `manifold = yes`, `volume =
   1000.000000` on the same file. See `Blueprint.md` §9 *Watertight repair

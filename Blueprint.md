@@ -162,6 +162,11 @@ scripts/
 public/
   env/                     ← HDRI presets: studio/neutral/outdoor .env (prefiltered cube textures)
   vendor/
+    NOTICE.md              ← provenance for every vendored file: upstream URL, licence, version /
+                             commit SHA (2026-09-18, review M11). tests/hygiene.test.mjs asserts all
+                             7 vendored files exist, each .js carries an attribution header, and the
+                             only http(s) literals anywhere in them are 3MF XML NAMESPACE hosts —
+                             so a re-vendor cannot smuggle in a runtime CDN fetch
     meshfix/               ← MeshFixLib (MIT) — mesh-fix-core.js/.wasm + mesh-fix-lib.js, vendored
                              classic scripts (UMD/global-assignment, NOT ES modules); loaded by
                              script-tag injection, never a runtime CDN — see §9 Watertight repair
@@ -169,6 +174,8 @@ public/
                              InitializeCSG2Async({ manifoldUrl }) resolves offline (Boolean + CSG
                              re-bake); both vendor dirs resolve via `new URL(rel, document.baseURI)`
                              so they load under `npm run dev`, GitHub Pages, AND Electron `file://`
+                             — through the ONE helper `core/vendorUrl.js` (2026-09-18, review M1;
+                             three copies of it had drifted across MeshRepair/PrintPipeline/BooleanService)
 src/
   app/boot.ts              ← Babylon npm namespace bridge
   app/main.ts              ← app bootstrap + dependency wiring
@@ -221,12 +228,24 @@ src/
       ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
-    MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
+    vendorUrl.js           ← the ONE public/vendor/ URL resolver (document.baseURI-relative)
+    MeshValidator.js       ← what is WRONG with a mesh: topology via worker (inline fallback)
+                             + group-union + result cache. Repair orchestration lives in
+                             repair/RepairSession.js (2026-09-18, review I9) and is re-exported
+                             from here so the public API surface is unchanged
     repair/
-      MeshRepair.js        ← one-click watertight repair over vendored MeshFixLib: merge →
-                             degenerate → winding → duplicates → normals → non-manifold →
-                             hole fill; REPAIR_TRIANGLE_CAP; nearest-vertex UV re-attachment —
-                             see §9 Watertight repair
+      MeshRepair.js        ← the ENGINE seam: vendored MeshFixLib (merge → degenerate → winding →
+                             duplicates → normals → non-manifold → hole fill), REPAIR_TRIANGLE_CAP
+                             on both repair AND diagnose, REPAIR_TIMEOUT_MS, engine-output
+                             validation, corner-accurate UV re-attachment — see §9 Watertight repair
+      RepairSession.js     ← repair ORCHESTRATION: applyGeometryFix / autoFix / repairObject (walks
+                             a multi-part object's parts) / repairObjects / replayGeometryFixes
+                             + the geometryFixes bookkeeping (2026-09-18, review I9)
+      Diagnose.js          ← the ONE guarded engineDiagnose() call: classifies no-engine /
+                             too-large / real failure and logs it with the mesh name (review I5)
+      Weld.js              ← the ONE vertex weld (weldMesh): merges only vertices sharing BOTH
+                             position and UV, so the unconditional `weld` export prep step cannot
+                             tear a textured part's seams (review I6 + C1)
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
     SliceConnectorService.js ← viewport Slice & Connector geometry planning — §Slice Connector
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
@@ -323,6 +342,10 @@ src/
                              quote (§12 Cost quote); reads PrintCost.js, kept out of PrintPanel.js
     StatusBar.js
     MeshStats.js           ← status-bar centre: scene-wide triangle budget (always-on, cached) + selection tris/mm/watertight (2026-09-18)
+    RepairFeedback.js      ← the ONE repair-result → toast mapping: nothing applied → info
+                             "nothing to repair", applied-but-still-open → warning, clean →
+                             success with the ENGINE's counters; a batch with failures reports
+                             the failures INSTEAD of success (2026-09-18, review I7b/I7c)
     Toast.js
     Status.js              ← centralized error + loading policy (reportError / guard / runTask / safeAsync)
     Modal.js               ← generic modal helper
@@ -373,8 +396,15 @@ tests/                     ← headless harness — Node-native, no build (§14b
   state-shape.test.mjs     ← default state and migration invariants
   threemf-components.test.mjs ← 3MF component hierarchy import/export
   threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader contracts
-  mesh-repair.test.mjs    ← MeshRepair engine wrapper contracts (fake-engine __test seam)
-  print-cost.test.mjs     ← PrintCost volume/overlap/quote contracts
+  mesh-repair.test.mjs    ← MeshRepair engine wrapper contracts (fake-engine __test seam):
+                             seam-UV survival through a merging AND a hole-filling repair (C1),
+                             the conditional winding re-tag (I1), malformed-output rejection (F2),
+                             the diagnose cap (I2), engine defaults (M7), the timeout (F4)
+  weld.test.mjs           ← the shared weldMesh: shared edges merge, (position, uv) SEAMS never do
+  export-gate.test.mjs    ← exportGate button set/order/actions; Auto-fix absent when nothing
+                             is fixable (I12 / CIA F7)
+  print-cost.test.mjs     ← PrintCost volume/overlap/quote contracts, notValidated + touching-box
+                             epsilon (CIA F5, M6)
   mesh-stats.test.mjs     ← MeshStats HUD cache/format contracts
   triangle-budget.test.mjs ← caps.triangleBudget import-warning + gating contracts
   browser-repair-smoke.mjs ← real-Chrome CDP smoke (`test:repair`): open-tetra import →
@@ -386,7 +416,16 @@ tests/                     ← headless harness — Node-native, no build (§14b
     make-textured-quad.mjs ← generates textured-quad.glb (2×2 PNG baseColor)
     make-open-tetra.mjs    ← generates open-tetra.glb: 4-vertex tetrahedron with 3 of 4
                              faces (one open boundary loop) for the repair smoke above
+                             Both export their bytes as well as writing the file, so
+                             `hygiene.test.mjs` can assert the COMMITTED .glb still matches its
+                             generator; `npm run fixtures` regenerates both (2026-09-18, review T7)
 ```
+
+**npm test scripts.** `npm test` is the headless node:test suite ONLY — the
+browser smokes launch a real Chrome/Edge plus a Vite server, so they must
+never be reachable from it. `npm run test:all` chains them in order:
+`test && test:browser && test:export && test:repair` (2026-09-18, review
+CIA F8). `npm run fixtures` regenerates the committed `.glb` fixtures.
 
 ### 0.3b Rebuild Architecture Map
 
@@ -588,11 +627,13 @@ match what the specced responsibilities actually cost.
 | each `core/assets/*.js` | < 400 (AssetImport ≈ 380 — both live-import paths + library-GLB registration) |
 | `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
-| `MeshValidator.js` | < 460 (topology worker plumbing + group-union; pure topology lives in `workers/MeshValidate.worker.js`) |
+| `MeshValidator.js` | < 550 (topology worker plumbing + group-union + result cache; pure topology lives in `workers/MeshValidate.worker.js`, repair orchestration in `core/repair/`) |
+| each `core/repair/*.js` | < 400 (MeshRepair ≈ 385 — engine load + output validation + UV-preserving write-back; RepairSession ≈ 290; Weld ≈ 110; Diagnose ≈ 50) |
 | `PersistenceManager.js` | < 200 (thin façade + file-handle lifecycle — serialise/resolve/load/autosave/dirty all in `core/persist/`) |
 | each `core/persist/*.js` | < 400 (ProjectLoader ≈ 380 — the whole load pipeline is one cohesive sequence) |
 | `PrintManager.js` | < 80 (thin façade only — orchestrator/serializers/ctx all in `core/print/`) |
-| each `core/print/*.js` | < 350 (Pipeline ≈ 300 — STL + 3MF inline; ObjWriter ≈ 180; ExportContext ≈ 180) |
+| each `core/print/*.js` | < 600 (measured 2026-09-18: PrintPipeline ≈ 555 — orchestration + repair/CSG/weld prep helpers + 3MF dispatch; ThreeMFWriter ≈ 465; ExportContext ≈ 315; PrintCost ≈ 285; ObjWriter ≈ 210. Split the next writer out of PrintPipeline if it grows again) |
+| each `src/ui/print/*.js` | < 300 (CostBlock ≈ 230 — Export-tab cost block render + wiring + live preview) |
 | `RenderOutput.js` | < 80 (thin façade only — capture/sweep/preview/recorder in `core/render/`) |
 | each `core/render/*.js` | < 300 (FrameCapture ≈ 230 — both engines' PNG paths + offline frame renderer) |
 | `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
@@ -1089,7 +1130,9 @@ const initialState = {
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
     objBakeSolidTextures: false,
     strictExport: false,        // watertight-repair-and-cost task 4 — §9 Pre-Export Gate
-    repairOnImport: false,      // watertight-repair-and-cost task 5 — opt-in, §9 Watertight repair
+    repairOnImport: false,      // watertight-repair-and-cost task 5 — opt-in, §9 Watertight repair.
+                                // PER-USER only (SettingsStore): excluded from the .mixo document
+                                // AND from the load merge (2026-09-18, review I8)
   },
   cost: {                       // watertight-repair-and-cost task 6 — §12 Cost quote; own top-level
                                  // slot (not print.*) so its own settings-section reset is independent
@@ -1984,9 +2027,9 @@ repair* below).
 
 | Check | Severity | Method | Auto-Fix |
 |---|---|---|---|
-| Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | MeshFixLib `repairMesh` (offline: local weld by distance) |
+| Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | MeshFixLib `repairMesh`; offline → the shared `repair/Weld.js` weld. `autoFixAvailable` is gated on `REPAIR_TRIANGLE_CAP` (2026-09-18, review I3 — a button whose only outcome is "too large to repair" is not a fix), and the message then says so (review CIA F6) |
 | Inverted normals | **warning** (Phase 6) | **Signed mesh volume** (one O(tris) pass; V<0 ⇒ inward winding) — replaced the old 64-ray heuristic (O(tris) PER ray) 2026-06-13 | Flip winding |
-| Open boundary edges (`holes`) | **warning** | MeshFixLib `diagnose()` boundary-edge count (falls back to the validator's own edge-count when the engine is unavailable) | MeshFixLib `repairMesh` — hole fill; no engine-free equivalent (a local weld cannot close a hole), so `autoFixAvailable` is only offered when the engine actually answered |
+| Open boundary edges (`holes`) | **warning** | MeshFixLib `diagnose()` boundary-edge count — **emitted ONLY when the engine actually answered** (2026-09-18, review I4). There is no fallback: the validator's own `badEdgeCount` is boundary edges PLUS non-manifold edges, so using it here reported the very same edges twice, once as `nonManifold` and once as `holes`. Offline (or above the cap), only `nonManifold` speaks. | MeshFixLib `repairMesh` — hole fill; no engine-free equivalent (a weld cannot close a hole). `autoFixAvailable` requires an engine answer AND `triangles ≤ REPAIR_TRIANGLE_CAP`; a GROUP-scope result never offers it (the fix applies per part, not to the synthetic union) and says "repair each part" instead of promising a button that is not there (review CIA F6) |
 
 > **Topology runs in a Web Worker (perf goal 2026-06-13).** The non-manifold
 > + inverted-winding pass is the heavy part on dense print meshes (80k+ tris
@@ -2014,16 +2057,47 @@ Deferred to future versions: thin-wall heatmap, self-intersection, overhang anal
 ### Public API
 ```js
 MeshValidator.validateMesh(babylonMesh)            → Promise<ValidationResult[]>
-MeshValidator.autoFix(babylonMesh, results)        → Promise<ValidationResult[]>
+MeshValidator.autoFix(mesh, results, report?)      → Promise<ValidationResult[]>  // `report` collects the ENGINE's counters (review M2)
 MeshValidator.hasErrors(results)                   → boolean
 MeshValidator.hasWarnings(results)                 → boolean
 MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, ValidationResult[]>>
 MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // legacy sourceGroupId union (kept for API; validateMesh uses logical parts)
-MeshValidator.repairObject(meshId)                 → Promise<{holesFilled, nmFixed, remaining}>   // ONE-CLICK repair: validate → autoFix → record geometryFixes/dirty → re-validate
-MeshValidator.repairObjects(meshIds, {onProgress}) → Promise<{holesFilled, nmFixed, failed}>       // sequential batch over repairObject; one failure never loses the rest
-MeshValidator.applyGeometryFix(mesh, type)         → Promise<boolean>   // 'holes'/'nonManifold' → MeshFixLib.repairMesh; nonManifold falls back to a local weld offline
+MeshValidator.repairObject(meshId)                 → Promise<{holesFilled, nmFixed, applied, remaining}>  // ONE-CLICK repair; walks EVERY part of a multi-part object
+MeshValidator.repairObjects(meshIds, {onProgress}) → Promise<{holesFilled, nmFixed, repaired, failed}>      // sequential batch; one failure never loses the rest
+MeshValidator.applyGeometryFix(mesh, type, report?) → Promise<boolean>  // 'holes'/'nonManifold' → MeshFixLib.repairMesh; nonManifold falls back to the shared weld offline
 MeshValidator.replayGeometryFixes(mesh, fixes)     → Promise<void>      // re-applies persisted `geometryFixes` on `.mixo` reload
 ```
+
+**Implementation split (2026-09-18, review I9).** Everything above the line
+`repairObject` downwards lives in `src/core/repair/RepairSession.js` and is
+re-exported from `MeshValidator.js`: the validator decides what is wrong, the
+session carries out repairs. Callers and tests keep using the
+`MeshValidator.*` names.
+
+**`applied` / `repaired` are the honesty signal (review I7b/I7c).**
+`repairObject` returns `applied: string[]` (the fix types that actually
+changed geometry) and `repairObjects` returns `repaired: number` (objects
+changed). Empty/zero means **nothing to repair** — never success.
+`src/ui/RepairFeedback.js` is the ONE place that maps a result to a toast
+(info "nothing to repair" / warning "still not watertight" when `remaining`
+is still open / success with the engine's own counters), and a batch with
+`failed.length` reports the failures INSTEAD of a success toast. Every repair
+surface routes through it.
+
+**`holesFilled` / `nmFixed` are the ENGINE's counters (review M2).** They
+come from MeshFixLib's own report, threaded through the optional `report`
+argument of `applyGeometryFix`/`autoFix`. They used to be the validation
+result's boundary-edge COUNT, which is a different number entirely (the
+live-verified open tetra reports `holesFilled: 1` — one hole — where the
+old code said `3`, its three boundary edges).
+
+**Multi-part objects (review I7a).** A logical object with more than one live
+part (MultiMaterial split, glTF multi-primitive) validates as the welded
+UNION, and group-scope results carry `autoFixAvailable: false` because no fix
+can be applied to synthetic geometry — so the old validate→autoFix route left
+these objects permanently unrepairable. `repairObject` now diagnoses and
+repairs each sibling directly, skipping the healthy ones, and records
+`geometryFixes` per part.
 
 `repairObject` is the ONE shared entry point behind every repair surface in
 the app — the import toast's fix action, the Outliner row badge, the
@@ -2114,7 +2188,7 @@ Readiness is traffic-lighted, and export never silently degrades geometry:
 | State | Trigger | Behaviour |
 |---|---|---|
 | 🟢 **Green** | No cached errors or warnings on any print part | Export proceeds immediately. |
-| 🟡 **Amber** | Cached non-stale **warnings** only (`nonManifold` / `invertedNormals` / `holes`) | `exportGate` modal (`PrintPanel._renderExportGateModal`) — three buttons: **Fix & Export** (`MeshValidator.repairObjects` on the affected object ids, then export), **Export Anyway** (unchanged geometry — display models are routinely non-watertight and slicers auto-repair), **Cancel**. ESC/backdrop = Cancel. |
+| 🟡 **Amber** | Cached non-stale **warnings** only (`nonManifold` / `invertedNormals` / `holes`) | `exportGate` modal (`PrintPanel._renderExportGateModal`). **Three buttons only when something is actually fixable** (2026-09-18, review I12): **Fix & Export** appears iff `exportGateCanAutoFix(issues)` — at least one `geometry-warning` object whose cached results carry an unapplied `autoFixAvailable` — then **Export Anyway** (unchanged geometry: display models are routinely non-watertight and slicers auto-repair) and **Cancel**. Otherwise it is a TWO-way Export Anyway / Cancel with `print.exportGate.bodyNoFix` copy, because the old unconditional button ran a repair batch that provably could not change anything (a group-scope `holes` result, an over-cap mesh, a bed-overflow warning) and then exported — which reads as "we fixed it". ESC/backdrop = Cancel. The markup comes from the pure `exportGateHtml(issues, canAutoFix)` so the button set, order and resolved actions are covered headlessly by `tests/export-gate.test.mjs` (review CIA F7). |
 | 🔴 **Red** | Hard **errors** caught inside `PrintPipeline._runExport` (post auto-fix) | Blocks with the error-list modal — no export. |
 
 `print.strictExport` (Print panel checkbox, persisted via SettingsStore)
@@ -2131,8 +2205,11 @@ whether a confirmed failure blocks or just warns.
 
 ### Watertight repair (MeshFixLib)
 
-**Engine:** [MeshFixLib](https://github.com/hololocheck/meshfix-wasm) (MIT
-licence), a WASM mesh-repair library, vendored under
+**Engine:** [MeshFixLib](https://github.com/hololocheck/MeshFixLib) (MIT
+licence — the repo name was wrong here until 2026-09-18, review M11; exact
+provenance, including the upstream commit SHA and the `manifold-3d@3.4.0`
+version, is recorded in `public/vendor/NOTICE.md` and asserted by
+`tests/hygiene.test.mjs`), a WASM mesh-repair library, vendored under
 `public/vendor/meshfix/` (`mesh-fix-core.js/.wasm` + `mesh-fix-lib.js`) —
 reused rather than reinvented (task spec: "reuse not reinvent"). The files
 are classic UMD/global-assignment scripts, **not ES modules** (neither has
@@ -2169,25 +2246,93 @@ engine's output positions/indices to the input (tolerance `1e-9` on
 positions, exact on indices) — **not** from the report's counter fields
 (`holesFilled`/`nmFixed`/…), because a winding-only or self-intersection
 repair can return a different mesh while every counter stays zero; gating
-the write-back on counter names would silently discard that output. A
-repaired clone whose glTF import was flagged ClockWise is re-tagged
-CounterClockWise (native winding), the same rule `PrintPipeline._csgRebake`
-already applies.
+the write-back on counter names would silently discard that output.
 
-**UV preservation:** MeshFixLib re-indexes the mesh, so UVs are re-attached
-by NEAREST ORIGINAL vertex (a grid-hash lookup, exact float32-bit hits
-first, brute-force nearest-neighbour only for vertices the engine actually
-moved or created). An untouched vertex round-trips exactly; a filled hole's
-new triangles inherit the UV of their nearest source vertex — a texture
-smear inside the former hole is acceptable, a lost texture on the rest of
-the part is not. **Open risk (not hidden):** this is nearest-vertex, not
-exact, re-attachment — textured Mimaki parts should be repaired on the
-**export clone only** (the default; see below) unless the user deliberately
-clicks Auto-Fix on the live mesh.
+**Engine options (2026-09-18, review M7):** the engine's own static
+`defaultOptions()` is spread FIRST, then our two overrides
+(`removeSmallShells: false`, `repairSelfIntersections: false`), then the
+caller's `opts.engine` — so an upstream default this project never names
+still reaches the WASM call.
 
-**`REPAIR_TRIANGLE_CAP = 300_000`** (`MeshRepair.js`) — `repairMesh` throws
-above this rather than let the browser tab lock up; `PrintCost.quote()`
-shares the same constant as its own triangle-count gate (§12 Cost quote).
+**Winding re-tag is CONDITIONAL (2026-09-18, review I1).** A repaired clone
+whose glTF import was flagged ClockWise is re-tagged CounterClockWise (native
+engine winding, the same rule `PrintPipeline._csgRebake` applies) **only when
+the engine CONFIRMED the result watertight**. After a PARTIAL repair the
+engine guarantees nothing about winding, so the flag is derived from the
+geometry as written back: `PrintSpace.signedVolume < 0 ⇒ CounterClockWise`
+(Babylon is left-handed — see `PrintSpace.frontFaceIsClockwise`). The old
+unconditional re-tag could ship a partially-repaired part inside-out.
+
+**Engine output is validated before ANYTHING reads it (review CIA F2):**
+every coordinate finite, every index an integer in `[0, V.length)`, else
+`throw new Error('engine returned malformed geometry: …')` and the mesh is
+left untouched. Checking only at write-back time was not enough — a NaN
+compares "equal" to everything, so the `changed` comparison silently
+DISCARDED malformed output instead of reporting it.
+
+**`REPAIR_TIMEOUT_MS = 60_000` (review CIA F4):** one `repairMesh` call is
+wall-clock bounded (`opts.timeoutMs` overrides). The vendored
+`repairObject` accepts an `{ signal }` extra and checks it around the WASM
+call, so the abort actually shortens the run where the engine can honour it;
+a `Promise.race` releases the caller either way with a `/timed out/`
+rejection that the existing `reportError` / `_tryRepair` paths surface with
+the mesh name. A cancel BUTTON is still deferred.
+
+**UV preservation — corner-accurate (rewritten 2026-09-18, review C1).**
+MeshFixLib re-indexes the mesh AND (stage 1) merges duplicate positions,
+which is exactly what a UV seam is made of: two vertices at one position
+carrying different UVs. Re-attaching UVs by POSITION alone therefore
+collapsed both sides of every seam onto one UV and smeared the texture across
+the part. Two fixes, both required:
+
+1. **A healthy clone is never repaired at all.** `PrintPipeline._tryRepair`
+   diagnoses first and SKIPS the whole step when the engine reports
+   `boundaryEdges === 0 && nonManifoldEdges === 0 && isWatertight`, recording
+   `{ name, isWatertight: true, skipped: true }` on `ctx.repairReport`. A
+   hole-free textured part's geometry is not rewritten, so its UVs cannot be
+   damaged for no gain.
+2. **A repair that DOES run carries seam UVs through it.**
+   `arraysToMesh(mesh, V, T, originalPositions, originalUvs, originalTriangles)`
+   matches each OUTPUT triangle back to its original triangle by the position
+   keys of its three corners (all 3 rotations and both windings, since the
+   engine may re-wind) and gives every corner the UV of its OWN original
+   vertex; the output vertex buffer is then rebuilt per corner, de-duplicated
+   on `(output vertex, uv)`, which SPLITS a merged seam vertex back apart with
+   both UVs intact. Corners with no matching original triangle — the new
+   hole-fill triangles — keep the nearest-original-vertex UV (a smear inside
+   the former hole is acceptable; a lost texture on the rest of the part is
+   not).
+
+The same rule governs the export `weld` prep step: `repair/Weld.js` merges
+only vertices sharing BOTH position and UV (review I6), which is what makes
+it safe to run unconditionally on the textured OBJ/STL paths. This costs
+nothing in topology terms — the non-manifold check already counts edges over
+a POSITION-welded index map, so a seam duplicate was never a reported defect.
+
+**Verified end-to-end** in real Chrome by `npm run test:export`: the textured
+quad's `(position → uv)` pairing is compared between the live mesh and the
+exported 3MF's `<vertex>` / `<m:tex2coord>` lists (centroid-relative in
+print-space mm, so `optimizeIndices`' legitimate vertex reordering and the
+export translation do not matter), and the live mesh's UV buffer is asserted
+untouched. Headlessly, `tests/mesh-repair.test.mjs` pins both the
+merging-repair and the hole-filling-repair cases on a seamed textured quad.
+
+**`REPAIR_TRIANGLE_CAP = 300_000`** (`MeshRepair.js`) — BOTH `repairMesh`
+and `diagnoseMesh` reject above it rather than let the browser tab lock up.
+`diagnoseMesh` was uncapped until 2026-09-18 (review I2) even though it is a
+synchronous WASM call on the main thread that ran on EVERY validation pass;
+its rejection message says `too large to diagnose` so callers can tell
+"cannot answer" from "answered: broken", and `repair/Diagnose.js` treats it
+exactly like an unavailable engine. Both messages name the cap that was
+actually APPLIED (`opts.triangleCap`), not the module default (review M8).
+Off-thread diagnose/repair stays DEFERRED: the vendored engine is a classic
+script that registers a window global and fetches its own `.wasm` relative to
+itself, so it cannot be imported into a module Worker as-is.
+
+`PrintCost` no longer shares this constant: the cost gate is a
+UI-responsiveness limit (the quote recomputes on every keystroke), not a
+repair-engine limit, so it has its own `costTriangleCap()` tracking
+`caps.triangleBudget` (review M9, §12 Cost quote).
 
 **Entry points (all route through `MeshValidator.repairObject` /
 `repairObjects` — §9 Public API):**
@@ -2203,7 +2348,11 @@ shares the same constant as its own triangle-count gate (§12 Cost quote).
    export clone is repaired on the fly regardless of any setting; this is
    what `ctx.repairReport` / `ctx.repairSkipped` / `strictExport` gate on.
 7. `print.repairOnImport` (Print panel checkbox, opt-in, default OFF) —
-   skips the click-to-fix toast and repairs automatically on import.
+   skips the click-to-fix toast and repairs automatically on import. It is a
+   per-USER preference (SettingsStore / localStorage) and is deliberately
+   EXCLUDED from the `.mixo` document and from the load merge (2026-09-18,
+   review I8): `print` is merged wholesale on open, so a document carrying
+   this field used to flip the opener's own setting, "file wins".
 
 **Live verification (2026-09-18, `tests/browser-repair-smoke.mjs` /
 `npm run test:repair`):** an OPEN tetrahedron (3 of 4 faces,
@@ -2211,9 +2360,12 @@ shares the same constant as its own triangle-count gate (§12 Cost quote).
 `tests/fixtures/make-open-tetra.mjs`) imported through the real
 `AssetLoader.loadFromBlob` path —
 - Validation cache carried a `holes` result before repair.
-- `MeshValidator.repairObject(meshId)` → `holesFilled: 3, nmFixed: 3`
-  (MeshFixLib folded the hole-fill and the resulting non-manifold-edge
-  cleanup into one pass), closing the shell to 4 vertices / 4 triangles.
+- `MeshValidator.repairObject(meshId)` → `holesFilled: 1, nmFixed: 0` —
+  the ENGINE's own report: ONE hole filled, closing the shell to 4 vertices /
+  4 triangles. (Re-measured 2026-09-18 after review M2: this used to read
+  `holesFilled: 3, nmFixed: 3`, which was the validation result's
+  boundary-edge COUNT re-labelled as a hole count, not anything the engine
+  said.)
 - Real 3MF export (`PrintManager.exportThreeMF`), unzipped and checked with
   an INDEPENDENT signed-volume implementation in the test script (not
   `PrintSpace.js`'s own): **volume = 1000.0000 mm³ against an expected
@@ -2489,7 +2641,12 @@ Every field persisted. Restored exactly.
     "bedDimensions": {"x":508,"y":508,"z":305},
     "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05,
     "objBakeSolidTextures": false,
-    "strictExport": false, "repairOnImport": false  // watertight-repair-and-cost tasks 4/5
+    "strictExport": false                          // watertight-repair-and-cost task 4
+    /* `print.repairOnImport` is NOT in this document (2026-09-18, review I8):
+       it is a per-user preference (SettingsStore / localStorage) like the
+       `cost` slice below. `print` is merged WHOLESALE on open, so a document
+       carrying it would flip the opener's own setting, "file wins".
+       ProjectSerializer strips it on save and ProjectLoader on load. */
   },
   /* state.cost (§12 Cost quote) is NOT in this document — material price
      assumptions are a per-user SettingsStore section (localStorage), never
@@ -3126,20 +3283,33 @@ volume. Two overlapping parts are counted twice on purpose; the badge tells
 the user the number is an over-estimate rather than silently under- or
 over-correcting with a Boolean union.
 
+The epsilon EXCLUDES merely touching boxes (`a.max - eps < b.min ⇒
+separated`). Its sign was inverted until 2026-09-18 (review M6), so two
+parts placed flush against each other — the normal kitbash / bed-layout case
+— counted as an overlapping pair and marked every such quote approximate for
+nothing. Boxes must interpenetrate by more than the epsilon to count.
+
 **`approximate` reasons** (`quote(ctx, settings, material).reasons`, shown
 as the `title` on an "Approximate" badge next to the total):
 - `notWatertight:N` — N unit(s) carry an open `holes` or `nonManifold`
   result in the validation cache (`state.scene.validation`); dirty meshes
   still get a volume estimate, just a flagged one — repairing them first
   (§9 Watertight repair) both improves the number and clears the flag.
+- `notValidated:N` — N unit(s) have NO cache entry, or a STALE one
+  (2026-09-18, review CIA F5 / I11). "Never validated" was previously
+  treated as watertight, so the quote presented an exact-looking number for
+  geometry nobody had checked — and an open shell's signed volume is
+  arbitrary. Same semantics as `PrintReadiness`' `validation-pending`, and
+  its OWN reason so it is never double-counted as `notWatertight`.
 - `overlap:N` — N AABB-overlapping unit pairs (see above).
 - `noDensity` / `noPrice` — the resolved material is missing that field.
-- `tooBig` — total triangle count exceeds `REPAIR_TRIANGLE_CAP`
-  (`MeshRepair.js`'s own cap, reused here as `PrintCost`'s cheap-gate
-  threshold too); `quote()` bails out on `totalTriangles(ctx)` — an
-  index-length read only — BEFORE `unitVolumesMM3`/`overlappingPairs` ever
-  touch a vertex buffer, so a huge scene never pays for the full per-vertex
-  pass just to show "—".
+- `tooBig` — total triangle count exceeds `costTriangleCap()`, which tracks
+  `caps.triangleBudget` (review M9 — this is a UI-responsiveness limit, since
+  the quote recomputes on every keystroke, NOT the repair engine's
+  `REPAIR_TRIANGLE_CAP`, which it used to borrow by coincidence). `quote()`
+  bails out on `totalTriangles(ctx)` — an index-length read only — BEFORE
+  `unitVolumesMM3`/`overlappingPairs` ever touch a vertex buffer, so a huge
+  scene never pays for the full per-vertex pass just to show "—".
 
 **Live recompute:** `CostBlock.js` re-renders on the same Export-tab refresh
 events as the readiness block, plus an `input`-driven instant preview (reads
@@ -3271,9 +3441,10 @@ Current implementation:
 ### Export Gate
 - Re-validate all Print Parts via `MeshValidator.validateAllPrintParts()`.
 - Errors → block, show the error-list modal (red — §9 *Pre-Export Gate*).
-- Warnings only → the three-way `exportGate` modal: **Fix & Export** /
-  **Export Anyway** / **Cancel** (amber — §9 *Pre-Export Gate* has the full
-  state table and the `print.strictExport` contract).
+- Warnings only → the `exportGate` modal: **Fix & Export** (only when
+  something is actually fixable — review I12) / **Export Anyway** /
+  **Cancel** (amber — §9 *Pre-Export Gate* has the full state table and the
+  `print.strictExport` contract).
 - Bed-volume warning shown but does not block.
 
 **Export Gate repairs clones (watertight-repair-and-cost task 4/5):** every
@@ -3282,14 +3453,25 @@ three-way choice above or the `print.strictExport` setting — those only
 decide whether a CONFIRMED-still-open clone blocks the export or just warns
 after it succeeds. `ExportContext` carries two fields the pipeline mutates
 as it goes: `repairReport: Array<{name, isWatertight: boolean|null, error?}>`
-(one entry per attempted clone; `isWatertight: null` means the attempt threw
-mid-repair) and `repairSkipped: string[]` (names of clones the repair
-attempted but could not confirm watertight — a subset feeding the post-export
-`toast.exportedWithWarnings`, the SOLE owner of that toast so the "Export
-Anyway" path never double-fires it). `strictExport: true` throws BEFORE
-writing the file when any clone has `isWatertight === false` (confirmed
-open) — never on `null`/unknown, which is a repair-engine problem (engine
-unavailable, or capped by `REPAIR_TRIANGLE_CAP`), not a geometry one.
+(one entry per clone the step touched; `isWatertight: null` means the attempt
+threw mid-repair; `skipped: true` means the clone diagnosed CLOSED and was
+deliberately left alone — review C1) and `repairSkipped: string[]` (names of
+clones the repair attempted but could not confirm watertight — a subset
+feeding the post-export `toast.exportedWithWarnings`, the SOLE owner of that
+toast so the "Export Anyway" path never double-fires it). `strictExport:
+true` throws BEFORE writing the file when any clone has `isWatertight ===
+false` (confirmed open) — never on `null`/unknown, which is a repair-engine
+problem (engine unavailable, or capped by `REPAIR_TRIANGLE_CAP`), not a
+geometry one.
+
+**The verdict describes the SHIPPED geometry (2026-09-18, review CIA F10).**
+`csg` / `csgSolidOnly` run AFTER `repair` and replace the clone's geometry
+wholesale with Manifold output, so the clone is RE-DIAGNOSED after a
+successful re-bake and its `repairReport` entry (and its membership of
+`repairSkipped`) updated. Otherwise the strict gate and the post-export toast
+described pre-CSG geometry that is not what was written to the file. A
+re-diagnose that itself fails leaves the verdict `null` — warned about, never
+a strict-mode blocker, exactly like `_tryRepair`'s own error path.
 
 ---
 
@@ -3863,14 +4045,28 @@ Single bar at bottom. Segments:
   - **Selection stats — selection-driven, appended only when something is
     selected:** `· sel <selTris> · <W>×<D>×<H> mm · <watertight>` — the
     selection's own triangle count, print-space W×D×H in mm, and watertight
-    state (no error-severity validation results). With nothing selected the
-    line is just the triangle-budget half.
+    state. With nothing selected the line is just the triangle-budget half.
+    The watertight verdict keys on result TYPES — any `holes` /
+    `nonManifold` / `invertedNormals` result on the ACTIVE mesh reads
+    `⚠ not watertight` (2026-09-18, review CIA F1). It used to test
+    `hasErrors(results)`, and the validator NEVER emits severity `error`
+    (owner rule: non-manifold stays a warning), so the badge was
+    structurally blind and could only ever read `✓ watertight`. The only
+    hard geometry block in the app is `print.strictExport` (§9 *Pre-Export
+    Gate*); the validator's own results never block anything.
+    `mesh-stats.test.mjs` pins all three verdicts.
   - Full example: `tris 342k / 1.5M · sel 82k · 120×80×45 mm · ✓ watertight`.
-  - `AssetImport.js` reuses the same scene/container triangle counters
-    (`MeshStats.countSceneTriangles` / `countContainerTriangles`) for a
+  - `AssetImport.js` reuses the same scene/container triangle counters for a
     non-blocking `toast.triangleBudget` warning before both
     `container.addAllToScene()` call sites (`loadFromBlob`,
-    `instantiateAsset`) — one traversal, two consumers.
+    `instantiateAsset`) — one traversal, two consumers. The counting itself
+    lives in `src/core/scene/TriangleCount.js` (2026-09-18, review M5) so a
+    core import path no longer depends on a UI module; `MeshStats` re-exports
+    the three functions and keeps owning the cache, the HUD text, and the
+    `MeshStats.countSceneTriangles` indirection the spy test relies on.
+    Selection stats resolve their meshes through `AssetLoader.getBabylonMesh`
+    rather than a `scene.meshes` scan, for the same reason the scene walk does
+    (review M4).
 - **Right:** undo/redo labels, polycount, save state (`Circle` for dirty, `Check` for saved).
 
 Collapses non-essential segments below 1280px.
@@ -4325,7 +4521,7 @@ build history. Detailed behaviour contracts live in the module sections above.
 - **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export via the explicit OBJ / 3MF / STL format buttons.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
 - **Secondary workflows:** solid-only scenes export 3MF `<colorgroup>` for Bambu / Prusa / Orca-style slicing. Textured scenes use the 3MF Materials Extension regardless of the selected build-volume preset.
-- **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:browser`, and `npm run test:export`. Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
+- **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run i18n:check`, `npm run build`, and `npm run test:all` (= `test` → `test:browser` → `test:export` → `test:repair`). Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
 
 ### Build history
 
