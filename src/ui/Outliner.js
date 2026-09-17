@@ -5,8 +5,11 @@ import { Selection } from '../core/Selection.js';
 import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand, ReparentCommand, UnparentCommand } from '../core/HistoryManager.js';
 import { validateParentChange } from '../core/hierarchy/HierarchyIntegrity.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
+import { MeshValidator } from '../core/MeshValidator.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
+import { Toast } from './Toast.js';
+import { reportError } from './Status.js';
 
 let _root  = null;
 let _listEl = null;
@@ -297,10 +300,13 @@ function _validationBadge(meshId) {
   const e = getState().scene.validation?.[meshId];
   if (!e || !e.results.length) return '';
   const hasErr = e.results.some(r => r.severity === 'error');
+  const fixable = e.results.some(r => r.autoFixAvailable && !r.fixed);
   const name = hasErr ? 'CircleAlert' : 'AlertTriangle';
-  const cls = `ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}`;
-  const title = escapeAttr(`${e.stale ? `${t('outliner.stalePrefix')} ` : ''}${e.results[0]?.message ?? t('outliner.validationIssue')}`);
-  return `<span class="${cls}" title="${title}">${icon(name, { width: 11, height: 11 })}</span>`;
+  const cls = `ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}${fixable ? ' ol-validation-fixable' : ''}`;
+  const baseMessage = `${e.stale ? `${t('outliner.stalePrefix')} ` : ''}${e.results[0]?.message ?? t('outliner.validationIssue')}`;
+  const title = escapeAttr(fixable ? `${baseMessage} — ${t('outliner.repairHint')}` : baseMessage);
+  const dataAction = fixable ? ' data-action="repair"' : '';
+  return `<span class="${cls}" title="${title}"${dataAction}>${icon(name, { width: 11, height: 11 })}</span>`;
 }
 
 function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, typeTitle = '', isGhost, isUnlinked }) {
@@ -409,6 +415,17 @@ function _togglePrintPart(meshId) {
   beginPrintPartBatch(ids, !obj.isPrintPart);
 }
 
+async function _repairFromOutliner(meshId) {
+  const obj = getState().scene.objects[meshId];
+  if (!obj) return;
+  try {
+    const { holesFilled, nmFixed } = await MeshValidator.repairObject(meshId);
+    Toast.show(t('toast.repaired', { name: obj.name, holes: holesFilled, nm: nmFixed }), 'success', 2500);
+  } catch (err) {
+    reportError(err, { title: t('toast.autoFixFailed') });
+  }
+}
+
 function beginPrintPartBatch(ids, next) {
   beginBatch('Print Part');
   for (const id of ids) {
@@ -476,9 +493,10 @@ function _onListClick(e) {
   if (actionBtn) {
     e.stopPropagation();
     const action = actionBtn.dataset.action;
-    if (action === 'vis')   _toggleVisibility(id);
-    if (action === 'lock')  _toggleLock(id);
-    if (action === 'print') _togglePrintPart(id);
+    if (action === 'vis')    _toggleVisibility(id);
+    if (action === 'lock')   _toggleLock(id);
+    if (action === 'print')  _togglePrintPart(id);
+    if (action === 'repair') _repairFromOutliner(id);
     return;
   }
   const twirl = e.target.closest?.('.ol-twirl');

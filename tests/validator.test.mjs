@@ -11,6 +11,10 @@ import { installEnv } from './env.mjs';
 installEnv();
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { signedVolume }  = await import('../src/core/print/PrintSpace.js');
+const { AssetLoader }   = await import('../src/core/AssetLoader.js');
+const { getState, setState, dispatch } = await import('../src/core/StateManager.js');
+const { EVENTS } = await import('../src/core/events.js');
+const { PersistenceManager } = await import('../src/core/PersistenceManager.js');
 
 // Unit cube scaled to 0.1 m (under the default bed → no exceedsBed noise).
 const S = 0.1;
@@ -226,6 +230,41 @@ await test('engine unavailable + nonManifold → autoFix falls back to the local
   await MeshValidator.autoFix(m, results);
   assert.equal(mergeCalls, 1, 'local weld fallback ran exactly once');
   assert.equal(r.fixed, true);
+});
+
+// ── repairObject (Task 3): one-click repair shared by every entry point ──
+await test('repairObject: fills holes, records geometryFixes, dirties, re-validates clean', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  let repaired = false;
+  R.__test.setEngine({
+    diagnose: () => ({ boundary: repaired ? 0 : 3, nonManifold: 0, components: 1, isWatertight: repaired }),
+    repairObject: async (V, T) => { repaired = true; return { V, T: [...T, [1, 2, 3]], report: { holesFilled: 1 } }; },
+  });
+
+  const m = buildMesh([[0, 2, 1], [0, 1, 3], [0, 3, 2]]);   // 3 of 4 tetra faces (open)
+  m.metadata = { meshId: 'm1' };
+  AssetLoader.getBabylonMesh = (id) => (id === 'm1' ? m : null);
+  setState(s => ({
+    ...s,
+    scene: { ...s.scene, objects: { ...s.scene.objects, m1: { id: 'm1', name: 'm1', isPrintPart: true, isGhost: false } } },
+  }), { silent: true });
+
+  PersistenceManager.init();
+  dispatch(EVENTS.PROJECT_SAVED, {});
+  assert.equal(PersistenceManager.isDirty(), false, 'clean before repair');
+
+  const { holesFilled, remaining } = await MeshValidator.repairObject('m1');
+
+  assert.ok(holesFilled > 0, 'holesFilled reported');
+  assert.ok(getState().scene.objects.m1.geometryFixes.includes('holes'), 'geometryFixes records the applied fix');
+  assert.equal(PersistenceManager.isDirty(), true, 'repair dirties the project (M4)');
+  assert.equal(remaining.find(r => r.type === 'holes'), undefined, 'remaining has no holes after repair');
+});
+
+await test('repairObject: missing mesh tolerates gracefully (no throw, empty remaining)', async () => {
+  AssetLoader.getBabylonMesh = () => null;
+  const res = await MeshValidator.repairObject('does-not-exist');
+  assert.deepEqual(res, { holesFilled: 0, nmFixed: 0, remaining: [] });
 });
 
 console.log('\n' + out.join('\n'));

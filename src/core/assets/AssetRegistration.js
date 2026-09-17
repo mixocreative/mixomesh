@@ -246,6 +246,18 @@ export function queueValidation(meshId) {
           ? t('toast.validateErrorsWithWarnings', { name, errs, warns })
           : t('toast.validateErrors', { name, errs });
         Toast.show(msg, 'error', 0, { onClick });
+      } else if (results.some(r => r.autoFixAvailable)) {
+        // At least one warning is one-click fixable — the toast IS the fix
+        // action (shared repairObject path, same as Outliner/context menu/
+        // Print panel), not just a link to the Validation tab.
+        const onFixClick = () => {
+          MeshValidator.repairObject(meshId)
+            .then(({ holesFilled, nmFixed }) => {
+              Toast.show(t('toast.repaired', { name, holes: holesFilled, nm: nmFixed }), 'success', 3000);
+            })
+            .catch(err => reportError(err, { title: t('toast.autoFixFailed') }));
+        };
+        Toast.show(t('toast.validateWarningsFix', { name, warns }), 'warning', 0, { onClick: onFixClick });
       } else {
         Toast.show(t('toast.validateWarnings', { name, warns }), 'warning', 0, { onClick });
       }

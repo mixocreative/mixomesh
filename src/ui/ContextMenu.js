@@ -5,10 +5,12 @@ import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
+import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
 import { Modal } from './Modal.js';
+import { ProgressOverlay } from './ProgressOverlay.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -167,6 +169,8 @@ function _buildItems(info) {
     { label: t('context.rename'),         shortcut: 'F2',          action: 'rename',  iconName: 'Edit3',      cls: enabled(hasSelection) },
     { label: t('context.duplicate'),       shortcut: 'Shift+D',     action: 'duplicate', iconName: 'Copy',     cls: enabled(hasSelection) },
     'sep',
+    { label: t('context.repairGeometry'),  shortcut: '',            action: 'repair-geometry', iconName: 'AlertTriangle', cls: enabled(hasSelection) },
+    'sep',
     { label: t('context.group'),           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
     { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
     { label: t('context.unparent'),        shortcut: '',            action: 'unparent', iconName: 'GitBranch', cls: enabled(someGrouped) },
@@ -233,6 +237,7 @@ function _runAction(action, info) {
   if (action.startsWith('array-')) _array(action.split('-')[1]);
   if (action === 'mate') _mate();
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
+  if (action === 'repair-geometry') safeAsync(() => _repairGeometry());
   if (action === 'slice-connector') SliceConnectorSession.start();
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
@@ -390,6 +395,30 @@ async function _boolean(op) {
     return;
   }
   push(res);
+}
+
+// Repair every selected object's geometry through the shared repairObject
+// path (same validate → autoFix → record geometryFixes → markDirty sequence
+// as the import toast, Outliner badge, and Print panel "Repair all"), one at
+// a time under the blocking ProgressOverlay so a batch of heavy meshes can't
+// be edited mid-repair.
+async function _repairGeometry() {
+  const objects = getState().scene.objects;
+  const ids = Selection.getSelectedIds().filter(id => objects[id] && !objects[id].isGhost);
+  if (!ids.length) return;
+  let holes = 0, nm = 0;
+  ProgressOverlay.show(t('context.repairGeometry'));
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      ProgressOverlay.update(i / ids.length, objects[ids[i]]?.name ?? '');
+      const res = await MeshValidator.repairObject(ids[i]);
+      holes += res.holesFilled;
+      nm += res.nmFixed;
+    }
+  } finally {
+    ProgressOverlay.hide();
+  }
+  Toast.show(t('toast.repaired', { name: t('context.repairGeometry'), holes, nm }), 'success', 3000);
 }
 
 function _relink(meshId) {

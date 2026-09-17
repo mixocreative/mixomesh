@@ -210,3 +210,4 @@
 .ol-validation-warning { color: var(--warning); }
 .ol-validation-error   { color: var(--danger); }
 .ol-validation-stale   { opacity: 0.45; }
+.ol-validation-fixable { cursor: pointer; }

@@ -278,9 +278,14 @@ function _renderValidationTab() {
     rows.push({ meshId, obj, entry: cache[meshId] ?? null });
   }
 
+  // Repairable = at least one cached result still fixable (mirrors the
+  // per-result Auto-Fix button's own `canFix` gate below).
+  const fixableRows = rows.filter(({ entry }) => entry?.results?.some(r => r.autoFixAvailable && !r.fixed));
+
   let html = '<div class="pp-tab-content">';
   html += '<div class="pp-field-group">';
   html += `<button class="pp-export-btn" id="pp-validate-all">${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.validateAll'))}</button>`;
+  html += `<button class="pp-export-btn" id="pp-repair-all"${fixableRows.length ? '' : ' hidden'}>${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.repairAll'))}</button>`;
   html += '</div>';
 
   if (!rows.length) {
@@ -328,6 +333,27 @@ function _renderValidationTab() {
   el.querySelector('#pp-validate-all')?.addEventListener('click', async () => {
     await MeshValidator.validateAllPrintParts();   // refreshes the cache
     _render();
+  });
+
+  el.querySelector('#pp-repair-all')?.addEventListener('click', async () => {
+    if (!fixableRows.length) return;
+    let holes = 0, nm = 0;
+    ProgressOverlay.show(t('print.repairAll'));
+    try {
+      for (let i = 0; i < fixableRows.length; i++) {
+        const { meshId, obj } = fixableRows[i];
+        ProgressOverlay.update(i / fixableRows.length, obj.name);
+        const res = await MeshValidator.repairObject(meshId);
+        holes += res.holesFilled;
+        nm += res.nmFixed;
+      }
+      Toast.show(t('toast.repaired', { name: t('print.repairAll'), holes, nm }), 'success', 3000);
+    } catch (err) {
+      reportError(err, { title: t('toast.autoFixFailed') });
+    } finally {
+      ProgressOverlay.hide();
+      _render();
+    }
   });
 
   // Wire auto-fix buttons

@@ -1,5 +1,5 @@
 import { EVENTS } from './events.js';
-import { dispatch, getState, setState, subscribe } from './StateManager.js';
+import { dispatch, getState, setState, subscribe, markDirty } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { logicalObjectPartIds } from './LogicalObjects.js';
 import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
@@ -576,6 +576,46 @@ export async function autoFix(mesh, results) {
 }
 
 /**
+ * One-click repair entry point shared by every UI surface (import toast,
+ * Outliner badge, context menu, Print panel "Repair all") so applied fixes
+ * are recorded identically no matter where the user triggered them — same
+ * validate → autoFix → record `geometryFixes` → markDirty sequence as the
+ * Print tab's per-result Auto-Fix button (PrintPanel.js), plus a final
+ * re-validate so the caller can report what (if anything) is still wrong.
+ * Tolerant of a missing mesh/engine: `autoFix`/`applyGeometryFix` already
+ * fall back (nonManifold → local weld) or leave `holes` unfixed, so this
+ * never throws for "no engine" — only a real repair failure propagates.
+ * @param {string} meshId
+ * @returns {Promise<{ holesFilled: number, nmFixed: number, remaining: ValidationResult[] }>}
+ */
+export async function repairObject(meshId) {
+  const mesh = AssetLoader.getBabylonMesh(meshId);
+  if (!mesh) return { holesFilled: 0, nmFixed: 0, remaining: [] };
+
+  const results = await validateMesh(mesh);
+  await autoFix(mesh, results);
+
+  // Same recording as PrintPanel's per-result Auto-Fix button: persisted in
+  // .mixo (replayed on reload via replayGeometryFixes) — not undoable, must
+  // dirty (M4).
+  const applied = results.filter(r => r.fixed).map(r => r.type);
+  if (applied.length) {
+    setState(s => {
+      const o = s.scene.objects[meshId];
+      if (!o) return s;
+      const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
+      return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
+    }, SILENT);
+    markDirty();
+  }
+
+  const holesFilled = results.find(r => r.type === 'holes' && r.fixed)?.count ?? 0;
+  const nmFixed = results.find(r => r.type === 'nonManifold' && r.fixed)?.count ?? 0;
+  const remaining = await validateMesh(mesh);
+  return { holesFilled, nmFixed, remaining };
+}
+
+/**
  * Re-apply persisted geometry fixes after a reload (M1). The `.mixo` keeps raw
  * source bytes + ratio, so the restored mesh comes back with its original
  * defects; replaying the recorded fix types reproduces the repaired geometry.
@@ -629,7 +669,7 @@ export function shouldAutoValidate(mesh) {
 
 export const MeshValidator = {
   init, invalidateAll,
-  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes,
+  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes, repairObject,
   hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

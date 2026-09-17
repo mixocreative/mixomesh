@@ -292,6 +292,23 @@ async function main() {
       assert(item.visible, `focus target lacks visible focus style: ${item.selector}`);
     }
 
+    // ── Print panel: "Repair all" entry point (Task 3) ────────────────────
+    // Always in the DOM once the Validation tab renders — hidden (not
+    // omitted) when nothing is fixable, so presence alone is the contract.
+    const repairAllUi = await evaluate(cdp, `(async () => {
+      const { Workspace } = await import('/src/ui/Workspace.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      Workspace.setWorkspace('print');
+      await frame();
+      document.querySelector('#rp-print-body .pp-tab[data-tab="validation"]')?.click();
+      await frame();
+      const exists = !!document.querySelector('#pp-repair-all');
+      Workspace.setWorkspace('layout');
+      await frame();
+      return { exists };
+    })()`);
+    assert(repairAllUi.exists, 'Print panel Validation tab should always render #pp-repair-all (hidden when nothing is fixable)');
+
     const panelResizeA11y = await evaluate(cdp, `(() => {
       const outliner = document.getElementById('outliner');
       const handle = document.querySelector('#outliner .panel-resize-ew-right');
