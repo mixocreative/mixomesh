@@ -426,6 +426,50 @@ await test('3MF: empty scene → throws', async () => {
   await rejects(PrintManager.exportThreeMF(), /No printable meshes/);
 });
 
+await test('prep step throws → export ABORTS (no raw-BU file with a success toast)', async () => {
+  const m = mesh('m1');
+  const origClone = m.clone;
+  m.clone = (...a) => {
+    const c = origClone.apply(m, a);
+    c.optimizeIndices = () => { throw new Error('buffer not updatable'); };
+    return c;
+  };
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  MeshValidator.validateMesh = valOK;
+  await rejects(PrintManager.exportOBJ(), /Export prep "optimizeIndices" failed for "m1__export"/);
+  assert.equal(calls.downloads.length, 0, 'nothing downloaded');
+  assert.ok(!toasts.some(t => t.type === 'success'), 'no success toast');
+  assert.equal(_clones[0].__disposed, true, 'clone disposed after abort');
+});
+
+await test('save picker cancelled → "cancelled" info toast, NO success toast, batch stops', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [1, 2] } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  let pickerCalls = 0;
+  window.showSaveFilePicker = async () => { pickerCalls++; throw Object.assign(new Error('cancel'), { name: 'AbortError' }); };
+  try {
+    await PrintManager.exportOBJ();
+  } finally {
+    window.showSaveFilePicker = undefined;
+  }
+  assert.equal(pickerCalls, 1, 'second ratio target not re-prompted after a cancel');
+  assert.equal(calls.downloads.length, 0, 'no anchor fallback on cancel');
+  assert.ok(!toasts.some(t => t.type === 'success'), 'cancel must not read as "✓ Exported"');
+  assert.ok(toasts.some(t => t.type === 'info' && /cancel/i.test(t.msg)), 'cancel is surfaced');
+});
+
+await test('zip entries whose paths collide (case-insensitive) are suffixed, never overwritten', async () => {
+  setScene({ objects: { a: obj('a', { name: 'Cube' }), b: obj('b', { name: 'cube' }) },
+    registry: { a: mesh('Cube'), b: mesh('cube') } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ({ individually: true });
+  const files = zipInstances.at(-1).files;
+  assert.ok(files['Test_Cube_r1to1.obj'] && files['Test_Cube_r1to1.mtl'], 'first part kept');
+  assert.ok(files['Test_cube_r1to1_2.obj'] && files['Test_cube_r1to1_2.mtl'], 'second part suffixed, not dropped');
+  assert.equal(Object.keys(files).length, 4, 'both parts present');
+});
+
 await test('3MF: valid mesh → OPC package with model XML + colour, downloads', async () => {
   setScene({ objects: { m1: obj('m1') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
@@ -545,9 +589,15 @@ await test('3MF: no-material mesh → fallback colour, still valid package', asy
 
 await test('3MF: textured mesh skips CSG2 (preserves UVs), solid mesh re-bakes', async () => {
   const textured = mesh('tex', { color: { r: 0, g: 1, b: 0 } });
-  textured.material = { id: 'm', diffuseColor: { r: 0, g: 1, b: 0 }, diffuseTexture: { name: 't' } };
+  // Readable texture stub: texture failures now ABORT the export (fail closed).
+  textured.material = { id: 'm', diffuseColor: { r: 0, g: 1, b: 0 }, diffuseTexture: {
+    name: 't', getBaseSize() { return { width: 1, height: 1 }; },
+    readPixels() { return new Uint8Array([0, 255, 0, 255]); },
+  } };
+  const uvData = (kind) => (kind === 'uv' ? new Float32Array([0, 0, 1, 0, 0, 1]) : new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
+  textured.getVerticesData = uvData;
   const origClone = textured.clone;
-  textured.clone = (n) => { const c = origClone.call(textured, n); c.material = textured.material; return c; };
+  textured.clone = (n) => { const c = origClone.call(textured, n); c.material = textured.material; c.getVerticesData = uvData; return c; };
   setScene({
     objects: { t: obj('t'), s: obj('s') },
     registry: { t: textured, s: mesh('s', { color: { r: 0, g: 0, b: 1 } }) },

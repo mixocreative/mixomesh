@@ -17,8 +17,8 @@ load no longer leaves Ctrl+S pointing at your good file, and importing now count
 unsaved work. Safe to use for print export again. **Do next:** open one real textured
 model, export 3MF, and load it in your slicer once — the fix was proven on a
 tetrahedron, not on a production model (S15 step 5 reachability). Then work the
-OPEN list below; C2/C4/H-texture items still let a wrong file download with a
-success toast.
+OPEN list below (second pass closed C2/C4/H6/H1: export now fails closed on
+texture loss, path collisions, prep errors and picker cancel).
 
 ## Fixed this run (commit on master, tests named)
 
@@ -33,6 +33,10 @@ success toast.
 | P2 | HIGH | Import never marked the project dirty → close-without-save prompt skipped after dropping models | `markDirty()` at end of `loadFromBlob` / `instantiateAsset` | `library-import.test.mjs` dirty test |
 | L1 | HIGH | 3MF loader ignored `unit` (inch/meter files arrive 25.4×/1000× wrong, silently) | `UNIT_TO_MM`, unknown unit throws | `threemf-components.test.mjs` |
 | L2 | HIGH | 3MF loader never bounds-checked `v1/v2/v3`; NaN coords coerced to 0 | throws with object/triangle index | `threemf-components.test.mjs` |
+| C2 | CRITICAL | Texture readback failure failed OPEN: OBJ shipped without `map_Kd`, 3MF fell to colorgroup, success toast | `ExportTextures` throws (`_readTextureOrThrow`) — export aborts with the texture named | `threemf-materials-ext.test.mjs` "fail closed" |
+| C4 | CRITICAL | JSZip overwrote colliding entry paths (`Cube`/`cube`, `a/b`/`a:b`) → a part silently missing | `PrintPackaging.uniqueEntryPaths` suffixes `_2`, case-insensitive | `export.test.mjs` "paths collide" |
+| H6 | HIGH | Save-picker cancel toasted "✓ Exported"; multi-ratio batch re-prompted | `triggerDownload` returns false → info "cancelled" toast, batch stops | `export.test.mjs` "picker cancelled" |
+| H1 | HIGH | Non-`PrintPrep.` prep errors swallowed → part exported at raw BU scale | every prep error aborts the export, step + mesh named | `export.test.mjs` "prep step throws" |
 
 Live verification (headless Chrome via the app's own import + export paths, tetra fixture):
 3MF → PrusaSlicer `manifold=yes volume=1000`, z 0..20 (rests on bed); trimesh `+1000`,
@@ -42,10 +46,6 @@ Babylon apex at +Y. Cull-on screenshot = cull-off screenshot (outward).
 ## OPEN — owner decisions / next work (graded, evidence in agent reports of this run)
 
 ### CRITICAL / HIGH
-- **C2 texture failure fails OPEN into a downloadable file** — `ExportTextures.js:97-102,165-172` catch → `console.error` → OBJ ships without `map_Kd`, 3MF falls to colorgroup, "✓ Exported" toast. Mimaki job prints solid grey. Fix: collect failures, refuse the export with a modal listing the textures (fidelity lock). *Needs a decision: refuse vs. warn-and-continue.*
-- **C4 zip path collision drops a part** — `PrintPackaging.js:9` JSZip overwrites same path; `safeFilenameStem` maps `a/b`, `a:b` → `a_b`, case-insensitive on Windows. Fix: dedupe entry paths (suffix) and assert uniqueness.
-- **H6 save-picker cancel reports success** — `Download.js:16` swallows AbortError → `PrintPipeline.js:332` success toast. Fix: return `false` and skip the toast.
-- **H1 non-`PrintPrep.` prep errors swallowed** — `PrintPipeline.js:314` → mesh exported at BU scale (1000× small). Fix: rethrow all prep errors.
 - **H4 PBR albedo (linear) written as sRGB** in 3MF `<m:color>`, MTL `Kd`, synth PNG — 0.5 grey exports as `#363636`. Fix: `toGammaSpace()` for PBR materials.
 - **H5 bed-fit readiness computed in a frame no writer produces** (`PrintReadiness.js:91-99`) — "below-bed"/"overflow" warnings describe a fictional placement. Fix: route through `PrintSpace` + the writer's seating.
 - **H3 (persist) ghost assets silent at load** + project then unsaveable (`ProjectLoader.js:227,262` → ghost, success toast; `ProjectSerializer.js:151` throws on save). Fix: load summary modal listing ghosts with Relink; exclude ghosts from portable-save requirement or offer "save without".
@@ -108,6 +108,6 @@ Babylon apex at +Y. Cull-on screenshot = cull-off screenshot (outward).
 2b. VSM map: 6 System-1 seams (import, export, persist, render, boolean, UI), 3* = tests/*, 3 = state/settings/config/printers.json, 4 = Babylon loaders + slicer files, 5 = Status.js/catch policy.
 3. Full suite: ✅ `npm test` 133/133 on HEAD (this commit); `test:browser` PASS; `test:export` PASS; build ✅.
 4. Runtime walk: ✅ headless Chrome import→export→PrusaSlicer for glb/3MF/OBJ/STL; cull screenshots; ⏭ production-model slicer eyeball (owner, 1 action).
-5. Fixes applied: 9 (X1-X5, P1, P2, L1, L2) | Escalated: 12 HIGH+ listed above.
+5. Fixes applied: 13 (X1-X5, P1, P2, L1, L2, C2, C4, H6, H1) | Escalated: 8 HIGH+ listed above.
 6. Tier: Screen — elapsed ≈ 3 h.
 7. Skill score: not run (no `tools/score.py` fixture run this session).

@@ -1,3 +1,10 @@
+/**
+ * Hand a blob to the user: File System Access save picker when available,
+ * anchor download otherwise.
+ * @returns {Promise<boolean>} true when written / handed to the browser,
+ *   false when the user cancelled the picker. Callers must not report
+ *   success on false (audit 2026-09-17 H6: cancel used to toast "✓ Exported").
+ */
 export async function triggerDownload(blob, suggestedName, hint = {}) {
   if (typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function') {
     try {
@@ -11,9 +18,9 @@ export async function triggerDownload(blob, suggestedName, hint = {}) {
       const w = await handle.createWritable();
       await w.write(blob);
       await w.close();
-      return;
+      return true;
     } catch (err) {
-      if (err && err.name === 'AbortError') return;
+      if (err && err.name === 'AbortError') return false;
       console.error('Save dialog failed, falling back to anchor download:', err);
     }
   }
@@ -25,4 +32,5 @@ export async function triggerDownload(blob, suggestedName, hint = {}) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  return true;
 }

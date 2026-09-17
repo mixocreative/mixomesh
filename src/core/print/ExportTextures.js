@@ -32,6 +32,16 @@ export async function textureToBlob(texture, assetId = null) {
   return blob;
 }
 
+async function _readTextureOrThrow(tex, assetId) {
+  try {
+    return await textureToBlob(tex, assetId);
+  } catch (err) {
+    const e = new Error(`Texture "${tex?.name ?? assetId ?? 'texture'}" could not be read — export aborted so the print would not lose it (${err?.message ?? err})`);
+    e.textureExportFailure = true;
+    throw e;
+  }
+}
+
 /**
  * Find the asset ID for a texture by checking the asset library, falling back
  * to the texture's own name for container-owned instances.
@@ -94,12 +104,11 @@ export async function collectTextureExportData(meshes) {
       if (!tex) continue;
       const assetId = getAssetIdForTexture(tex);
       if (!assetId || textureMap.has(assetId)) continue;
-      try {
-        const blob = await textureToBlob(tex, assetId);
-        textureMap.set(assetId, { texture: tex, blob });
-      } catch (err) {
-        console.error(`Failed to export texture ${tex.name}:`, err);
-      }
+      // Fail CLOSED. A texture that cannot be read must abort the export —
+      // silently shipping a flat-colour OBJ with a success toast is a wrong
+      // print (fidelity lock; audit 2026-09-17 C2).
+      const blob = await _readTextureOrThrow(tex, assetId);
+      textureMap.set(assetId, { texture: tex, blob });
     }
   }
 
@@ -162,14 +171,11 @@ export async function collectMimakiTextures(meshList, BABYLON) {
     if (!path) {
       const filename = textureExportFilename(tex, assetId, usedNames);
       path = `3D/Textures/${filename}`;
-      try {
-        const blob = await textureToBlob(tex, assetId);
-        blobByPath.set(path, blob);
-        pathByAssetId.set(assetId, path);
-      } catch (err) {
-        console.error(`Texture encode failed for ${tex.name}:`, err);
-        continue;
-      }
+      // Fail CLOSED (see collectTextureExportData): a dropped texture would
+      // silently fall through to a solid colorgroup part.
+      const blob = await _readTextureOrThrow(tex, assetId);
+      blobByPath.set(path, blob);
+      pathByAssetId.set(assetId, path);
     }
     pathByMesh.set(mesh, path);
   }

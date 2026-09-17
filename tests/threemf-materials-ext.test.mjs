@@ -153,6 +153,16 @@ async function test(name, fn) {
   catch (err) { out.push(`FAIL  ${name}\n      ${err.stack || err.message}`); failed++; }
 }
 
+
+await test('texture readback fails → export ABORTS (fail closed), no colorgroup fallback, no success', async () => {
+  const positions = [0,0,0, 1,0,0, 0,1,0];
+  const m = texMesh('p', { positions, indices: [0,1,2], uvs: [0.1,0.2, 0.3,0.4, 0.5,0.6] });
+  m.material.diffuseTexture.readPixels = () => { throw new Error('GPU context lost'); };
+  setScene({ objects: { p: obj('p') }, registry: { p: m } });
+  await assert.rejects(PrintManager.exportThreeMF(), /Texture "paint" could not be read/);
+  assert.equal(zipInstances.length, 0, 'no package written');
+});
+
 // ── Content-driven 3MF flavour ────────────────────────────
 
 await test('default Mimaki target + textured mesh → Materials Extension layout', async () => {

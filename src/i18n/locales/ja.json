@@ -586,6 +586,7 @@
   "toast.pngFailed": "PNG レンダリングに失敗しました — コンソールを確認",
   "toast.nothingSelected": "何も選択されていません",
   "toast.csgUnavailable": "CSG2 が利用できません — 水密再ベイクをスキップ",
+  "toast.exportCancelled": "書き出しをキャンセルしました — {filename} は保存されていません",
   "toast.exportedOk": "✓ {filename} を書き出しました",
   "toast.partsNotWatertight": "{n, plural, other{# 個のパーツが非水密 — 再ベイクをスキップ、スライサーが自動修復します}}",
   "toast.loaded": "{name} を読み込みました",

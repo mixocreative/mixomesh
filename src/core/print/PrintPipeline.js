@@ -217,7 +217,8 @@ async function _runExport(formatKey, options = {}) {
       (ti + Math.max(0, Math.min(1, frac))) / targets.length,
       targets.length > 1 ? `[${ti + 1}/${targets.length}] ${msg}` : msg,
     );
-    await _runExportForTarget(fmt, targets[ti], options, csgReady, span);
+    const written = await _runExportForTarget(fmt, targets[ti], options, csgReady, span);
+    if (written === false) return;   // picker cancelled — stop the batch, don't re-prompt
   }
 }
 
@@ -317,12 +318,15 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress) {
         if (!step) continue;
         try { step(clone, ctx); }
         catch (e) {
-          // Contract violations from the prep layer (PrintPrep throws when its
-          // required ctx fields are missing) must NOT be swallowed — they
-          // signal a hardened invariant break and the export must abort. The
-          // surrounding finally{} disposes the clone (already pushed above).
+          // NEVER swallow a prep failure. A flattenWorld that threw mid-way
+          // leaves the clone at raw BU scale (1000× too small) and the old
+          // console.error path shipped it with a success toast (audit
+          // 2026-09-17 H1). The surrounding finally{} disposes the clone.
           if (e?.message?.startsWith('PrintPrep.')) throw e;
-          console.error(`Prep "${stepKey}" failed for ${clone.name}:`, e);
+          throw Object.assign(
+            new Error(`Export prep "${stepKey}" failed for "${clone.name}": ${e?.message ?? e}`),
+            { cause: e, prepStep: stepKey },
+          );
         }
       }
       progress(0.05 + 0.45 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
@@ -337,12 +341,19 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress) {
     progress(0.82, `Writing ${fmt.label}…`);
     const out = await fmt.serialize(ctx);
 
-    await packageAndDownload(out, fmt.label, progress);
+    const written = await packageAndDownload(out, fmt.label, progress);
+    if (!written) {
+      // User cancelled the save picker: say so, never "✓ Exported" (H6).
+      progress(1, 'Cancelled');
+      Toast.show(t('toast.exportCancelled', { filename: out.filename ?? fmt.label }), 'info', 3000);
+      return false;
+    }
     progress(1, 'Done');
     Toast.show(t('toast.exportedOk', { filename: out.filename ?? fmt.label }), 'success', 3000);
     if (ctx.csgSkipped.length) {
       Toast.show(t('toast.partsNotWatertight', { n: ctx.csgSkipped.length }), 'info', 5000);
     }
+    return true;
   } catch (err) {
     if (!err.validationErrors) console.error(`${fmt.label} export failed:`, err);
     throw err;

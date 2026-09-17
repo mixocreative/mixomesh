@@ -586,6 +586,7 @@
   "toast.pngFailed": "PNG render failed — see console",
   "toast.nothingSelected": "Nothing selected",
   "toast.csgUnavailable": "CSG2 unavailable — watertight re-bake skipped",
+  "toast.exportCancelled": "Export cancelled — {filename} was not written",
   "toast.exportedOk": "✓ Exported {filename}",
   "toast.partsNotWatertight": "{n, plural, one{1 part not watertight — re-bake skipped; slicer will auto-repair} other{# parts not watertight — re-bake skipped; slicer will auto-repair}}",
   "toast.loaded": "Loaded {name}",
