@@ -11,9 +11,14 @@
 
 const BABYLON = window.BABYLON;
 
+/** Per-job wall clock. A job that never posts back (stalled blob fetch,
+ *  pathological file) would otherwise pin `_pending` forever and queue every
+ *  later import behind it (audit F17). */
+export const WORKER_JOB_TIMEOUT_MS = 120_000;
+
 let _worker = null;
 let _seq = 0;
-const _pending = new Map();      // id → { resolve, reject, onProgress }
+const _pending = new Map();      // id → { resolve, reject, onProgress, timer }
 let _chain = Promise.resolve();  // serialize: worker swaps engine-global PreprocessUrl
 
 export function isWorkerImportSupported() {
@@ -28,7 +33,7 @@ function _ensureWorker() {
     const p = _pending.get(msg.id);
     if (!p) return;
     if (msg.type === 'progress') { p.onProgress?.(msg); return; }
-    _pending.delete(msg.id);
+    _settle(msg.id);
     if (msg.type === 'done') p.resolve(msg);
     else p.reject(new Error(msg.message ?? 'worker parse failed'));
   };
@@ -36,23 +41,60 @@ function _ensureWorker() {
     // Wholesale failure (worker bundle failed to load/execute). Reject all
     // in-flight requests and drop the worker — callers fall back, and the
     // next import retries a fresh spawn.
-    const reason = new Error(err?.message ?? 'import worker error');
-    for (const p of _pending.values()) p.reject(reason);
-    _pending.clear();
-    try { _worker.terminate(); } catch { /* already dead */ }
-    _worker = null;
+    _resetWorker(new Error(err?.message ?? 'import worker error'));
   };
   return _worker;
 }
 
-function _parseInWorker(blobUrl, ext, siblings, onProgress) {
+/** Remove a job from `_pending` and cancel its timer. Returns the entry. */
+function _settle(id) {
+  const p = _pending.get(id);
+  if (!p) return null;
+  clearTimeout(p.timer);
+  _pending.delete(id);
+  return p;
+}
+
+/**
+ * Kill the worker and fail every in-flight job with `reason`. `_chain` is
+ * reset too, so the next job starts on a fresh worker with no stale queue
+ * ahead of it (the queued closures still run, but each resolves/rejects on
+ * its own and no longer gates anything).
+ */
+function _resetWorker(reason) {
+  const jobs = [..._pending.values()];
+  _pending.clear();
+  for (const p of jobs) { clearTimeout(p.timer); p.reject(reason); }
+  const w = _worker;
+  _worker = null;
+  _chain = Promise.resolve();
+  if (w) { try { w.terminate(); } catch { /* already dead */ } }
+}
+
+function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs) {
   const run = () => new Promise((resolve, reject) => {
     const id = ++_seq;
-    _pending.set(id, { resolve, reject, onProgress });
-    _ensureWorker().postMessage({
-      id, blobUrl, ext,
-      siblings: [...(siblings ?? new Map()).entries()],
-    });
+    const timer = setTimeout(() => {
+      if (!_pending.has(id)) return;
+      const secs = Math.round(timeoutMs / 1000);
+      const reason = new Error(`OBJ worker timed out after ${secs} s — falling back to main-thread parse`);
+      // Fail THIS job with the timeout message; anything else in flight on
+      // the same (now dead) worker gets a distinct reason so its caller's
+      // fallback log says why.
+      const me = _settle(id);
+      _resetWorker(new Error(`OBJ worker restarted after another job timed out (${secs} s)`));
+      me.reject(reason);
+    }, timeoutMs);
+    _pending.set(id, { resolve, reject, onProgress, timer });
+    try {
+      _ensureWorker().postMessage({
+        id, blobUrl, ext,
+        siblings: [...(siblings ?? new Map()).entries()],
+      });
+    } catch (err) {
+      _settle(id);
+      reject(err);
+    }
   });
   const result = _chain.then(run, run);
   // Intentionally silent: only detaches the rejection from the queue chain —
@@ -141,12 +183,14 @@ function _buildContainer(scene, parsed, siblings) {
  * @param {string} blobUrl
  * @param {Map<string,string>|null} siblings  lowercase filename → object URL
  * @param {(evt:{lengthComputable:boolean,loaded:number,total:number})=>void} [onProgress]
+ * @param {{ timeoutMs?: number }} [opts]  per-job timeout (default WORKER_JOB_TIMEOUT_MS)
  * @returns {Promise<BABYLON.AssetContainer>}
  */
-export async function loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress) {
-  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress);
+export async function loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? WORKER_JOB_TIMEOUT_MS;
+  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs);
   if (!parsed.meshes?.length) throw new Error('worker returned no geometry');
   return _buildContainer(scene, parsed, siblings);
 }
 
-export const WorkerImport = { isWorkerImportSupported, loadObjContainerViaWorker };
+export const WorkerImport = { isWorkerImportSupported, loadObjContainerViaWorker, WORKER_JOB_TIMEOUT_MS };
