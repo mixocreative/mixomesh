@@ -461,6 +461,24 @@ export async function validateMesh(mesh) {
   return results;
 }
 
+// Pre-engine 'nonManifold' fix (position weld only — cannot fill a hole).
+// Kept as the offline fallback for 'nonManifold' specifically: unlike
+// 'holes', a plain weld is a real (if weaker) fix for non-manifold edges, so
+// it stays available even when the repair engine cannot load.
+function _weldLocally(mesh) {
+  if (typeof BABYLON.VertexData?.MergeByDistance === 'function') {
+    const vd = BABYLON.VertexData.ExtractFromMesh(mesh);
+    BABYLON.VertexData.MergeByDistance(vd, MERGE_DISTANCE);
+    vd.applyToMesh(mesh);
+    return true;
+  }
+  if (typeof mesh.mergeVerticesByDistance === 'function') {
+    mesh.mergeVerticesByDistance(MERGE_DISTANCE);
+    return true;
+  }
+  return false;
+}
+
 /**
  * Apply available auto-fixes for a result list.
  * @param {BABYLON.Mesh} mesh
@@ -481,7 +499,10 @@ export async function validateMesh(mesh) {
  * `holes` and `nonManifold` both repair through the MeshRepair engine
  * (repairMesh) — the same vendored pipeline (merge → winding → non-manifold
  * → hole fill), so either type closes holes AND welds non-manifold edges in
- * one pass; async because the engine load / repair run is async.
+ * one pass; async because the engine load / repair run is async. `nonManifold`
+ * additionally falls back to a local position-weld when the engine itself is
+ * unavailable (validateMesh always offers it, unlike `holes`, whose
+ * autoFixAvailable already tracks engine presence) — see `_weldLocally`.
  * @param {BABYLON.Mesh} mesh
  * @param {'holes'|'nonManifold'|'invertedNormals'|'mirror-x'|'mirror-y'|'mirror-z'} type
  * @returns {Promise<boolean>} true when the fix was applied
@@ -508,8 +529,18 @@ export async function applyGeometryFix(mesh, type) {
     return true;
   }
   if (type === 'holes' || type === 'nonManifold') {
-    const r = await repairMesh(mesh);
-    return r.changed;
+    try {
+      const r = await repairMesh(mesh);
+      return r.changed;
+    } catch (err) {
+      // 'holes' has no engine-free equivalent (local weld can't fill a hole) —
+      // only 'nonManifold' falls back, and only for the "engine missing" class
+      // of failure (ensureRepairEngine/_loadEngine's messages all start with
+      // "no engine" — see MeshRepair.js); a real failure (e.g. the triangle-cap
+      // guard) must still surface as an error, not be swallowed.
+      if (type !== 'nonManifold' || !/no engine/i.test(err?.message ?? '')) throw err;
+      return _weldLocally(mesh);
+    }
   }
   if (type === 'invertedNormals') {
     const indices = mesh.getIndices();

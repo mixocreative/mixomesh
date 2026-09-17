@@ -345,8 +345,17 @@ async function _loadProjectInner(doc, previousName) {
       // bake) so the weld's absolute MERGE_DISTANCE behaves as it did when the
       // fix was first applied (M1). Each SceneObject owns a distinct mesh here
       // (duplicates were cloned above), so this replays once per object.
+      // Fault-isolated per object: 'holes'/'nonManifold' replay through the
+      // repair engine, which can fail (engine unavailable, triangle cap) —
+      // that must not abort the rest of the load. The object's ORIGINAL
+      // geometry is already bound and stays loaded; geometryFixes is left
+      // untouched on the SceneObject so the user can re-run Auto-Fix later.
       if (Array.isArray(o.geometryFixes) && o.geometryFixes.length) {
-        await MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
+        try {
+          await MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
+        } catch (err) {
+          console.error(`Geometry-fix replay failed for "${o.name}":`, err);
+        }
       }
       applyWorld(mesh, o.transform);
       const vis = o.visible !== false;

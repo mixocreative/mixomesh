@@ -244,6 +244,14 @@ export class MirrorCommand {
     const type = `mirror-${this._axis}`;
     for (const id of this._ids) {
       const m = AssetLoader.getBabylonMesh(id);
+      // applyGeometryFix is async (holes/nonManifold now await the repair
+      // engine), but execute()/undo() here MUST stay synchronous — push()
+      // (HistoryManager.js) calls command.execute() without awaiting, and
+      // _apply()'s own setState/dispatch/markDirty below must run in the same
+      // tick as this call, not after a later microtask. Safe to not await:
+      // the mirror-x/y/z branch has no internal `await` (no engine involved),
+      // so its mutation completes synchronously before this line returns,
+      // same as before it became an async function.
       if (m) applyGeometryFix(m, type);
       setState(s => {
         const o = s.scene.objects[id];

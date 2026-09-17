@@ -1361,7 +1361,7 @@ async function main() {
       await new Promise(r=>setTimeout(r,300));
       const before = idxOf(mid);
       const mesh = sm.SceneManager.getScene().meshes.find(x=>x.metadata?.meshId===mid);
-      mv.MeshValidator.applyGeometryFix(mesh, 'invertedNormals');     // flip live winding
+      await mv.MeshValidator.applyGeometryFix(mesh, 'invertedNormals');     // flip live winding
       const fixed = idxOf(mid);
       st.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [mid]: { ...s.scene.objects[mid], geometryFixes: ['invertedNormals'] } } } }), { silent: true });
       const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));

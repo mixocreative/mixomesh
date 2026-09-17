@@ -287,6 +287,30 @@ await test('M5: tampered embedded bytes → ghost + console.error, load complete
   assert.ok(modals.find(m => m.id === 'ghostAssets'));
 });
 
+// ── geometryFixes replay fault isolation (review 2026-09-17) ──
+// A persisted 'holes'/'nonManifold' fix replays through the MeshRepair
+// engine on load (MeshValidator.replayGeometryFixes); if that engine call
+// fails (down, or the triangle cap), the failure must be isolated to the one
+// object — its ORIGINAL geometry is already bound and stays loaded (not
+// ghosted: the geometry is present, only the fix didn't re-apply) — and must
+// not abort the rest of the .mixo load.
+
+await test('geometryFixes replay failure (engine down) does not abort the load — both objects stay loaded', async () => {
+  seedCurrentScene();
+  const { __test: repairTest } = await import('../src/core/repair/MeshRepair.js');
+  repairTest.setEngine(null);
+  const doc = goodDoc('Repaired');
+  doc.sceneObjects[0] = { ...doc.sceneObjects[0], geometryFixes: ['holes'] };
+  doc.assetLibrary.push(meshAsset('a_ok2', { fileData: GLB_B64, contentHash: GLB_HASH }));
+  doc.sceneObjects.push({ ...sceneObject('o_ok2', 'a_ok2'), geometryFixes: ['holes'] });
+  await __test._loadProject(doc);
+  assert.ok(getState().scene.objects.o_ok, 'first object stays loaded');
+  assert.ok(getState().scene.objects.o_ok2, 'second object stays loaded');
+  assert.equal(getState().scene.objects.o_ok.isGhost, false, 'not ghosted — geometry is present');
+  assert.equal(getState().scene.objects.o_ok2.isGhost, false, 'not ghosted — geometry is present');
+  assert.ok(errors.some(e => /geometry-fix replay failed/i.test(e)), 'replay failure logged, not swallowed silently');
+});
+
 // ── Item 4: import ↔ load mutual exclusion (F20) ──────────
 
 await test('F20: loadProject refuses while an import is in flight', async () => {

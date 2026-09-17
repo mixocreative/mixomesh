@@ -214,6 +214,20 @@ await test('engine unavailable → holes still reported, autoFixAvailable false,
   assert.ok(holes); assert.equal(holes.autoFixAvailable, false);
 });
 
+await test('engine unavailable + nonManifold → autoFix falls back to the local weld, no throw', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine(null);
+  let mergeCalls = 0;
+  const m = buildMesh(TRIS.slice(0, 11), { mergeVerticesByDistance: () => { mergeCalls++; } });
+  const results = await MeshValidator.validateMesh(m);
+  const r = nm(results);
+  assert.ok(r, 'expected a nonManifold result');
+  assert.equal(r.autoFixAvailable, true, 'weld fallback keeps this available offline');
+  await MeshValidator.autoFix(m, results);
+  assert.equal(mergeCalls, 1, 'local weld fallback ran exactly once');
+  assert.equal(r.fixed, true);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
