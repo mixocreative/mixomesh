@@ -161,6 +161,14 @@ scripts/
   ui-screenshot.mjs        ← headless 4-workspace capture harness (PROBE=1 dumps geometry)
 public/
   env/                     ← HDRI presets: studio/neutral/outdoor .env (prefiltered cube textures)
+  vendor/
+    meshfix/               ← MeshFixLib (MIT) — mesh-fix-core.js/.wasm + mesh-fix-lib.js, vendored
+                             classic scripts (UMD/global-assignment, NOT ES modules); loaded by
+                             script-tag injection, never a runtime CDN — see §9 Watertight repair
+    manifold-3d/           ← Manifold (Apache-2.0) — manifold.js + manifold.wasm, vendored so
+                             InitializeCSG2Async({ manifoldUrl }) resolves offline (Boolean + CSG
+                             re-bake); both vendor dirs resolve via `new URL(rel, document.baseURI)`
+                             so they load under `npm run dev`, GitHub Pages, AND Electron `file://`
 src/
   app/boot.ts              ← Babylon npm namespace bridge
   app/main.ts              ← app bootstrap + dependency wiring
@@ -214,6 +222,11 @@ src/
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     MeshValidator.js       ← topology via worker (inline fallback) + bed-bounds + cache
+    repair/
+      MeshRepair.js        ← one-click watertight repair over vendored MeshFixLib: merge →
+                             degenerate → winding → duplicates → normals → non-manifold →
+                             hole fill; REPAIR_TRIANGLE_CAP; nearest-vertex UV re-attachment —
+                             see §9 Watertight repair
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
     SliceConnectorService.js ← viewport Slice & Connector geometry planning — §Slice Connector
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
@@ -247,6 +260,9 @@ src/
       ExportPlanner.js     ← pure filename math (consumed by PrintNaming)
       ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared)
       Download.js          ← save picker + anchor fallback
+      PrintCost.js         ← per-unit volume (never Boolean-unioned) × density × price +
+                             support premium; overlap = AABB flag only, never subtracted —
+                             see §12 Cost quote
     printers/              ← PrinterProfile.ts (type-only printer JSON schema)
     scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
     shaders/
@@ -302,6 +318,9 @@ src/
     AssetPanel.js
     ContextMenu.js
     PrintPanel.js
+    print/
+      CostBlock.js         ← Export tab ▸ Cost block: renders + wires the live material-cost
+                             quote (§12 Cost quote); reads PrintCost.js, kept out of PrintPanel.js
     StatusBar.js
     MeshStats.js           ← status-bar centre: scene-wide triangle budget (always-on, cached) + selection tris/mm/watertight (2026-09-18)
     Toast.js
@@ -354,6 +373,19 @@ tests/                     ← headless harness — Node-native, no build (§14b
   state-shape.test.mjs     ← default state and migration invariants
   threemf-components.test.mjs ← 3MF component hierarchy import/export
   threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader contracts
+  mesh-repair.test.mjs    ← MeshRepair engine wrapper contracts (fake-engine __test seam)
+  print-cost.test.mjs     ← PrintCost volume/overlap/quote contracts
+  mesh-stats.test.mjs     ← MeshStats HUD cache/format contracts
+  triangle-budget.test.mjs ← caps.triangleBudget import-warning + gating contracts
+  browser-repair-smoke.mjs ← real-Chrome CDP smoke (`test:repair`): open-tetra import →
+                             validator caches a `holes` result → MeshValidator.repairObject
+                             fills it → real 3MF export → independent signed-volume +
+                             edge-used-exactly-twice watertight check → HUD + cost-block
+                             live-number assertions; numbers recorded in §9
+  fixtures/
+    make-textured-quad.mjs ← generates textured-quad.glb (2×2 PNG baseColor)
+    make-open-tetra.mjs    ← generates open-tetra.glb: 4-vertex tetrahedron with 3 of 4
+                             faces (one open boundary loop) for the repair smoke above
 ```
 
 ### 0.3b Rebuild Architecture Map
@@ -1056,6 +1088,12 @@ const initialState = {
     bedDimensions: { x: 508, y: 508, z: 305 },
     minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
     objBakeSolidTextures: false,
+    strictExport: false,        // watertight-repair-and-cost task 4 — §9 Pre-Export Gate
+    repairOnImport: false,      // watertight-repair-and-cost task 5 — opt-in, §9 Watertight repair
+  },
+  cost: {                       // watertight-repair-and-cost task 6 — §12 Cost quote; own top-level
+                                 // slot (not print.*) so its own settings-section reset is independent
+    materialId: '', pricePerGram: 0, supportPricePerGram: 0, supportPercent: 0, currency: 'USD',
   },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
@@ -1939,13 +1977,16 @@ no regression.
 
 **File: `src/core/MeshValidator.js`**
 
-### Scope (v1)
-Two topology checks only. Pure JS — no WASM.
+### Scope (v1 + watertight-repair-and-cost)
+Topology is pure JS (no WASM) EXCEPT the `holes` check's Auto-Fix, which
+diagnoses/repairs through the vendored MeshFixLib WASM engine (§ *Watertight
+repair* below).
 
 | Check | Severity | Method | Auto-Fix |
 |---|---|---|---|
-| Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | Merge by distance |
+| Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | MeshFixLib `repairMesh` (offline: local weld by distance) |
 | Inverted normals | **warning** (Phase 6) | **Signed mesh volume** (one O(tris) pass; V<0 ⇒ inward winding) — replaced the old 64-ray heuristic (O(tris) PER ray) 2026-06-13 | Flip winding |
+| Open boundary edges (`holes`) | **warning** | MeshFixLib `diagnose()` boundary-edge count (falls back to the validator's own edge-count when the engine is unavailable) | MeshFixLib `repairMesh` — hole fill; no engine-free equivalent (a local weld cannot close a hole), so `autoFixAvailable` is only offered when the engine actually answered |
 
 > **Topology runs in a Web Worker (perf goal 2026-06-13).** The non-manifold
 > + inverted-winding pass is the heavy part on dense print meshes (80k+ tris
@@ -1978,7 +2019,19 @@ MeshValidator.hasErrors(results)                   → boolean
 MeshValidator.hasWarnings(results)                 → boolean
 MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, ValidationResult[]>>
 MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // legacy sourceGroupId union (kept for API; validateMesh uses logical parts)
+MeshValidator.repairObject(meshId)                 → Promise<{holesFilled, nmFixed, remaining}>   // ONE-CLICK repair: validate → autoFix → record geometryFixes/dirty → re-validate
+MeshValidator.repairObjects(meshIds, {onProgress}) → Promise<{holesFilled, nmFixed, failed}>       // sequential batch over repairObject; one failure never loses the rest
+MeshValidator.applyGeometryFix(mesh, type)         → Promise<boolean>   // 'holes'/'nonManifold' → MeshFixLib.repairMesh; nonManifold falls back to a local weld offline
+MeshValidator.replayGeometryFixes(mesh, fixes)     → Promise<void>      // re-applies persisted `geometryFixes` on `.mixo` reload
 ```
+
+`repairObject` is the ONE shared entry point behind every repair surface in
+the app — the import toast's fix action, the Outliner row badge, the
+viewport context menu's "Repair geometry" (`repairObjects` for a multi-
+selection), and the Print panel's "Repair all" button — so an applied fix is
+recorded identically (`geometryFixes` on the object, `markDirty()`, then
+persisted through `.mixo` and replayed on reload) no matter which surface
+triggered it.
 
 ### Logical-object-aware topology checks
 
@@ -2018,7 +2071,7 @@ siblings. Block / confirm-anyway semantics unchanged.
 ### ValidationResult
 ```js
 {
-  type: 'nonManifold'|'invertedNormals'|'exceedsBed',
+  type: 'nonManifold'|'invertedNormals'|'holes'|'exceedsBed',
   severity: 'error'|'warning'|'info',
   count: number,
   autoFixAvailable: boolean,
@@ -2055,12 +2108,128 @@ persisted — derived per session. Wire `MeshValidator.init()` at boot.
 Consumers: PrintPanel Validation tab (cache + "Validate All" button — no
 re-validation per render), Outliner row status badges, export warning gate.
 
-### Pre-Export Gate
-- Hard errors are caught INSIDE `PrintPipeline._runExport` (post auto-fix)
-  → block with the error-list modal.
-- Cached non-stale warnings on print parts → PrintPanel confirms
-  "Export anyway?" before invoking the export (default yes — display
-  models are routinely non-watertight and slicers auto-repair).
+### Pre-Export Gate (three-way, watertight-repair-and-cost task 4)
+Readiness is traffic-lighted, and export never silently degrades geometry:
+
+| State | Trigger | Behaviour |
+|---|---|---|
+| 🟢 **Green** | No cached errors or warnings on any print part | Export proceeds immediately. |
+| 🟡 **Amber** | Cached non-stale **warnings** only (`nonManifold` / `invertedNormals` / `holes`) | `exportGate` modal (`PrintPanel._renderExportGateModal`) — three buttons: **Fix & Export** (`MeshValidator.repairObjects` on the affected object ids, then export), **Export Anyway** (unchanged geometry — display models are routinely non-watertight and slicers auto-repair), **Cancel**. ESC/backdrop = Cancel. |
+| 🔴 **Red** | Hard **errors** caught inside `PrintPipeline._runExport` (post auto-fix) | Blocks with the error-list modal — no export. |
+
+`print.strictExport` (Print panel checkbox, persisted via SettingsStore)
+changes what counts as a hard stop: when **on**, a print-clone that a repair
+attempt CONFIRMED still not-watertight (`repairReport[].isWatertight ===
+false`) throws and blocks the export, naming the parts — never on an
+*unknown* result (repair engine unavailable, or the clone was above
+`REPAIR_TRIANGLE_CAP`), which is a repair-engine problem, not a geometry one
+(that case still surfaces via `toast.exportedWithWarnings`). When **off**
+(default), a confirmed-still-open export clone still exports, with the same
+warning toast. Every export clone is repaired on the fly regardless of this
+setting (§12 *Export Gate repairs clones*) — `strictExport` only decides
+whether a confirmed failure blocks or just warns.
+
+### Watertight repair (MeshFixLib)
+
+**Engine:** [MeshFixLib](https://github.com/hololocheck/meshfix-wasm) (MIT
+licence), a WASM mesh-repair library, vendored under
+`public/vendor/meshfix/` (`mesh-fix-core.js/.wasm` + `mesh-fix-lib.js`) —
+reused rather than reinvented (task spec: "reuse not reinvent"). The files
+are classic UMD/global-assignment scripts, **not ES modules** (neither has
+an `export` statement), so `src/core/repair/MeshRepair.js` loads them by
+injecting `<script>` tags rather than dynamic `import()`. No runtime CDN
+fetch anywhere in the repair path.
+
+**Offline CSG (related, same task set):** the local
+[Manifold](https://github.com/elalish/manifold) build (Apache-2.0) under
+`public/vendor/manifold-3d/` (`manifold.js` + `manifold.wasm`) is passed to
+Babylon's `InitializeCSG2Async({ manifoldUrl })` by both `BooleanService.js`
+(interactive Boolean) and `PrintPipeline.js` (CSG re-bake on export) — CSG2
+now works with no network access, matching the repair engine's offline
+posture.
+
+**URL resolution (works under `npm run dev`, GitHub Pages, AND Electron
+`file://dist/index.html`):** both loaders resolve their vendor path with
+`new URL(relativePath, document.baseURI).href` rather than an absolute
+`/vendor/...` URL or Vite's `import.meta.env.BASE_URL` — `vite.config.ts`'s
+`base: './'` already makes every other asset URL page-relative, and this
+keeps the two WASM loaders consistent with that. Live-verified 2026-09-18: a
+headless-Electron probe loaded `dist/index.html` over `file://` and fetched
+all five vendor files (`mesh-fix-core.js`, `mesh-fix-core.wasm`,
+`mesh-fix-lib.js`, `manifold.js`, `manifold.wasm`) through this exact
+resolution — every one returned `ok:true, status:200` — and `npm run
+test:electron` (which boots the built app the same way) passes.
+
+**`repairMesh(mesh)` pipeline (`MeshRepair.js`):** merge → degenerate
+removal → winding fix → duplicate removal → normal recompute →
+non-manifold edge/vertex fix → hole fill. Runs on the main thread inside
+the `ProgressOverlay` (capped so a tab cannot be blown — see
+`REPAIR_TRIANGLE_CAP` below). `changed` is derived by comparing the
+engine's output positions/indices to the input (tolerance `1e-9` on
+positions, exact on indices) — **not** from the report's counter fields
+(`holesFilled`/`nmFixed`/…), because a winding-only or self-intersection
+repair can return a different mesh while every counter stays zero; gating
+the write-back on counter names would silently discard that output. A
+repaired clone whose glTF import was flagged ClockWise is re-tagged
+CounterClockWise (native winding), the same rule `PrintPipeline._csgRebake`
+already applies.
+
+**UV preservation:** MeshFixLib re-indexes the mesh, so UVs are re-attached
+by NEAREST ORIGINAL vertex (a grid-hash lookup, exact float32-bit hits
+first, brute-force nearest-neighbour only for vertices the engine actually
+moved or created). An untouched vertex round-trips exactly; a filled hole's
+new triangles inherit the UV of their nearest source vertex — a texture
+smear inside the former hole is acceptable, a lost texture on the rest of
+the part is not. **Open risk (not hidden):** this is nearest-vertex, not
+exact, re-attachment — textured Mimaki parts should be repaired on the
+**export clone only** (the default; see below) unless the user deliberately
+clicks Auto-Fix on the live mesh.
+
+**`REPAIR_TRIANGLE_CAP = 300_000`** (`MeshRepair.js`) — `repairMesh` throws
+above this rather than let the browser tab lock up; `PrintCost.quote()`
+shares the same constant as its own triangle-count gate (§12 Cost quote).
+
+**Entry points (all route through `MeshValidator.repairObject` /
+`repairObjects` — §9 Public API):**
+1. Import-time toast — a warning toast with an auto-fixable result IS the
+   fix action (click repairs); see §9 *Import-time UX*.
+2. Outliner row badge — click to repair that object.
+3. Viewport context menu — "Repair geometry" on the current selection
+   (`repairObjects`, tolerant of a per-object failure).
+4. Print panel — "Repair all" button over every print part.
+5. Export Gate's "Fix & Export" button (§9 *Pre-Export Gate* above) —
+   repairs only the objects the readiness check flagged, then exports.
+6. **Export clones, always** (§12 *Export Gate repairs clones*) — every
+   export clone is repaired on the fly regardless of any setting; this is
+   what `ctx.repairReport` / `ctx.repairSkipped` / `strictExport` gate on.
+7. `print.repairOnImport` (Print panel checkbox, opt-in, default OFF) —
+   skips the click-to-fix toast and repairs automatically on import.
+
+**Live verification (2026-09-18, `tests/browser-repair-smoke.mjs` /
+`npm run test:repair`):** an OPEN tetrahedron (3 of 4 faces,
+`tests/fixtures/open-tetra.glb`, generated by
+`tests/fixtures/make-open-tetra.mjs`) imported through the real
+`AssetLoader.loadFromBlob` path —
+- Validation cache carried a `holes` result before repair.
+- `MeshValidator.repairObject(meshId)` → `holesFilled: 3, nmFixed: 3`
+  (MeshFixLib folded the hole-fill and the resulting non-manifold-edge
+  cleanup into one pass), closing the shell to 4 vertices / 4 triangles.
+- Real 3MF export (`PrintManager.exportThreeMF`), unzipped and checked with
+  an INDEPENDENT signed-volume implementation in the test script (not
+  `PrintSpace.js`'s own): **volume = 1000.0000 mm³ against an expected
+  +1000 mm³ — 0.000% error** (right tetrahedron, legs 10/20/30 mm,
+  `(1/6)·10·20·30 = 1000`).
+- Edge→face map: **6 unique edges, every one used exactly twice** (a closed
+  2-manifold; Euler check V−E+F = 4−6+4 = 2 ✓).
+- **PrusaSlicer 2.9.3** (`prusa-slicer-console.exe --info`) on the same
+  exported file, independently: `manifold = yes`, `number_of_facets = 4`,
+  `volume = 1000.000000`.
+- HUD (§13 MeshStats) read `tris 8 / 1.5M` (`/tris \d/` — passes; the
+  budget denominator is the web tier's `caps.triangleBudget`).
+- Cost block (§12 Cost quote) `#pp-cost-total` read
+  `1.00 cm³ · 1.1 g · 0.55 + support 0.09 = 0.64 USD` — a live, non-null
+  quote for the now-watertight solid, with no `approximate` badge (the
+  `holes` cache entry cleared on re-validate after repair).
 
 ---
 
@@ -2287,8 +2456,13 @@ Every field persisted. Restored exactly.
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": {"x":508,"y":508,"z":305},
     "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05,
-    "objBakeSolidTextures": false
+    "objBakeSolidTextures": false,
+    "strictExport": false, "repairOnImport": false  // watertight-repair-and-cost tasks 4/5
   },
+  /* state.cost (§12 Cost quote) is NOT in this document — material price
+     assumptions are a per-user SettingsStore section (localStorage), never
+     travel with the .mixo file, and are not FILE-WINS on open like the
+     `print` fields above. */
   "assetLibrary":  [ /* AssetEntry without container or blobUrl */ ],
   "textureImages": [ /* unique {hash,width,height,mimeType,fileData}; one per SHA-256 */ ],
   "collections":   [ /* CollectionEntry[] — outliner display buckets */ ],
@@ -2842,7 +3016,13 @@ Schema (one entry per printer, keyed by id):
   "<id>": {
     displayName: string,                          // shown in UI dropdowns
     vendor: string,
-    bed: { x: number|null, y: number|null, z: number|null }  // mm; null falls back to Mimaki default helper
+    bed: { x: number|null, y: number|null, z: number|null },  // mm; null falls back to Mimaki default helper
+    materials: [{                                 // watertight-repair-and-cost task 6 — §12 Cost quote
+      id: string, name: string,
+      densityGcm3: number, pricePerGram: number,
+      supportDensityGcm3: number, supportPricePerGram: number,
+      defaultSupportPercent: number,               // 0-100
+    }]
   }
 }
 ```
@@ -2881,6 +3061,59 @@ Ratio inputs in PrintPanel accept any positive `M:N` (or `M/N`) — both numerat
 - value `≈ 1` → `1:1`
 
 This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as well as **down** (1:72 model). Both `RescaleWorldCommand` and `exportFactor()` already operate on plain positive numbers, so no math changes are needed downstream.
+
+### Cost quote (watertight-repair-and-cost task 6)
+
+**File: `src/core/print/PrintCost.js`** (pure functions of an `ExportContext`
++ settings — never calls `getState()` itself) **+ `src/ui/print/CostBlock.js`**
+(Export tab UI, kept out of `PrintPanel.js` to bound that file's growth).
+
+**Formula:** `total = volume(cm³) × density(g/cm³) × pricePerGram +
+supportVolume × supportDensity × supportPricePerGram`, where
+`supportVolume = volume × (supportPercent / 100)`. Per-unit density/price
+resolve from the selected printer's `materials[]` row (§12 Printer
+Profiles), overridden by any non-zero `state.cost.*` field (`0` means "use
+the material default" — never "free"; see `config/default-settings.json`
+`cost` section). `total` is `null`, not `0`, whenever density or price
+cannot be resolved — a missing price must never read as free.
+
+**Volume — summed per logical unit, NEVER Boolean-unioned:**
+`unitVolumesMM3(ctx)` transforms each part's positions through its own world
+matrix (mirroring `PrintPrep.flattenWorld`'s exact bake math) into print
+space and takes the divergence-theorem signed volume (`PrintSpace.
+signedVolume`), summing a unit's parts BEFORE `Math.abs()` (consistently
+wound parts of one logical object accumulate correctly; the abs() only
+guards the unit total). No CSG subtraction runs here — that is a
+deliberate scope boundary from the task spec ("overlap = flag only, no
+Boolean").
+
+**Overlap policy:** `overlappingPairs(ctx)` flags pairs of logical units
+whose print-space AABBs intersect (0.01 mm epsilon) and marks the quote
+`approximate` with an `overlap:N` reason — it is NEVER used to subtract
+volume. Two overlapping parts are counted twice on purpose; the badge tells
+the user the number is an over-estimate rather than silently under- or
+over-correcting with a Boolean union.
+
+**`approximate` reasons** (`quote(ctx, settings, material).reasons`, shown
+as the `title` on an "Approximate" badge next to the total):
+- `notWatertight:N` — N unit(s) carry an open `holes` or `nonManifold`
+  result in the validation cache (`state.scene.validation`); dirty meshes
+  still get a volume estimate, just a flagged one — repairing them first
+  (§9 Watertight repair) both improves the number and clears the flag.
+- `overlap:N` — N AABB-overlapping unit pairs (see above).
+- `noDensity` / `noPrice` — the resolved material is missing that field.
+- `tooBig` — total triangle count exceeds `REPAIR_TRIANGLE_CAP`
+  (`MeshRepair.js`'s own cap, reused here as `PrintCost`'s cheap-gate
+  threshold too); `quote()` bails out on `totalTriangles(ctx)` — an
+  index-length read only — BEFORE `unitVolumesMM3`/`overlappingPairs` ever
+  touch a vertex buffer, so a huge scene never pays for the full per-vertex
+  pass just to show "—".
+
+**Live recompute:** `CostBlock.js` re-renders on the same Export-tab refresh
+events as the readiness block, plus an `input`-driven instant preview (reads
+uncommitted field values straight off the DOM, no `setState`/save) so typing
+a new price/support-% updates `#pp-cost-total` on every keystroke; `change`
+(blur/Enter) commits via `SettingsStore.save()`.
 
 ### OBJ + MTL Export (Primary)
 
@@ -3005,9 +3238,26 @@ Current implementation:
 
 ### Export Gate
 - Re-validate all Print Parts via `MeshValidator.validateAllPrintParts()`.
-- If errors → block, show modal listing them.
-- If warnings only → confirm "Export anyway?"
+- Errors → block, show the error-list modal (red — §9 *Pre-Export Gate*).
+- Warnings only → the three-way `exportGate` modal: **Fix & Export** /
+  **Export Anyway** / **Cancel** (amber — §9 *Pre-Export Gate* has the full
+  state table and the `print.strictExport` contract).
 - Bed-volume warning shown but does not block.
+
+**Export Gate repairs clones (watertight-repair-and-cost task 4/5):** every
+export clone is repaired on the fly during prep, REGARDLESS of the
+three-way choice above or the `print.strictExport` setting — those only
+decide whether a CONFIRMED-still-open clone blocks the export or just warns
+after it succeeds. `ExportContext` carries two fields the pipeline mutates
+as it goes: `repairReport: Array<{name, isWatertight: boolean|null, error?}>`
+(one entry per attempted clone; `isWatertight: null` means the attempt threw
+mid-repair) and `repairSkipped: string[]` (names of clones the repair
+attempted but could not confirm watertight — a subset feeding the post-export
+`toast.exportedWithWarnings`, the SOLE owner of that toast so the "Export
+Anyway" path never double-fires it). `strictExport: true` throws BEFORE
+writing the file when any clone has `isWatertight === false` (confirmed
+open) — never on `null`/unknown, which is a repair-engine problem (engine
+unavailable, or capped by `REPAIR_TRIANGLE_CAP`), not a geometry one.
 
 ---
 

@@ -101,7 +101,25 @@ Still open (LOW / by policy): missing-MTL console-only (field policy), 64-siblin
 - Multi-file drop: concurrent import failures overwrite each other's modal (`Modal.open` replaces); no "N of M imported" summary.
 - Concurrent shader-merge prompts: second import cancels the first with `undefined` → silent rename.
 - 3MF dangling `objectid` / malformed `transform` → part silently dropped / identity.
-- Validator never emits severity `error` → export validation gate is vacuous; "auto-fixed on export" message promises a step that does not exist (`MeshValidator.js:347`, `PrintPipeline.js:325`).
+- ~~Validator never emits severity `error` → export validation gate is vacuous; "auto-fixed on export" message promises a step that does not exist (`MeshValidator.js:347`, `PrintPipeline.js:325`).~~
+  **CLOSED 2026-09-18 (watertight-repair-and-cost, commits `2b92c6e..ebaa05d` + this doc pass).**
+  The promised auto-fix step now exists: `MeshValidator.js` gained a `holes`
+  check (open boundary edges) whose Auto-Fix runs the vendored MeshFixLib
+  engine (`src/core/repair/MeshRepair.js`, MIT, `public/vendor/meshfix/`) to
+  actually fill holes, not just flag them — closing "no hole filling". The
+  export gate is no longer vacuous either: every export clone is repaired on
+  the fly (`ExportContext.repairReport`/`repairSkipped`), and the opt-in
+  `print.strictExport` setting makes a CONFIRMED still-open clone a hard
+  block (`PrintPipeline.js` throws before writing the file) — the first path
+  in this pipeline that can actually fail closed on geometry, not just warn.
+  The three-way `exportGate` UI modal (Fix & Export / Export Anyway / Cancel)
+  replaces the old two-button confirm. Live-verified end-to-end
+  (`npm run test:repair`): an open tetrahedron's hole is filled
+  (`holesFilled: 3`), the exported 3MF is watertight (volume 1000.0000 mm³
+  vs. an expected +1000, 0.000% error; every edge used exactly twice), and
+  PrusaSlicer 2.9.3 independently reports `manifold = yes`, `volume =
+  1000.000000` on the same file. See `Blueprint.md` §9 *Watertight repair
+  (MeshFixLib)* and §12 *Export Gate* / *Cost quote* for the full contract.
 - Stale validation cache → silent "ready".
 - Units with no indices dropped silently (empty `<build>` possible after CSG).
 - Batch export re-reads live state per target (selection/rename mid-batch changes reference).

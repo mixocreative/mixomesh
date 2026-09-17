@@ -97,22 +97,30 @@ npm run build
 npm run test
 npm run test:browser
 npm run test:export
+npm run test:repair
 ```
 
 The browser smokes start a temporary Vite server and drive Chrome or Edge
 through the DevTools Protocol (`test:browser` covers UI + rendering output
 including a real headless turntable mp4; `test:export` is the functional
-export round-trip). `npm run test:video` is an OPTIONAL headed check — it
-opens a small visible browser window for a full-size turntable recording
-(`VIDEO_CHECK_EDGE=1` forces Edge). Add targeted manual Chrome or slicer
-checks when changing browser-only file picker flows or external export
-compatibility.
+export round-trip; `test:repair` imports an open (non-watertight) mesh,
+repairs it, exports it, and checks the result is actually watertight).
+`npm run test:video` is an OPTIONAL headed check — it opens a small visible
+browser window for a full-size turntable recording (`VIDEO_CHECK_EDGE=1`
+forces Edge). Add targeted manual Chrome or slicer checks when changing
+browser-only file picker flows or external export compatibility.
 
 ## Dependency Notes
 
 Dependencies are project-local and installed with npm. The helper script forces
 `.tmp/` and `.npm-cache/` inside this repo so global temp/cache permissions do
 not decide the install.
+
+One-click watertight repair and a live material-cost quote run on vendored,
+offline engines in `public/vendor/`: [MeshFixLib](https://github.com/hololocheck/meshfix-wasm)
+(MIT) fills holes and fixes non-manifold geometry, [Manifold](https://github.com/elalish/manifold)
+(Apache-2.0) backs the offline Boolean/CSG path — no runtime CDN, no network
+call either engine depends on.
 
 ## Status
 
