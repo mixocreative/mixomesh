@@ -1,6 +1,14 @@
 import { checkBedFit } from './BedFit.js';
+import { toPrintSpace } from './PrintSpace.js';
 
 export const EXPORT_FORMATS = Object.freeze(['obj', '3mf', 'stl']);
+
+/**
+ * Formats that ship the part where it sits in the scene. The 3MF writer
+ * re-seats the build (centred in X/Y, min z → 0), so a part dipping under
+ * the scene floor is only a problem for these.
+ */
+export const WORLD_PLACED_FORMATS = Object.freeze(['obj', 'stl']);
 
 function issue(code, severity, objectIds, data = {}) {
   return { code, severity, objectIds: [...new Set(objectIds ?? [])], data };
@@ -11,7 +19,20 @@ function partIds(parts, predicate) {
     ? part.objectIds : [part.objectId]).filter(Boolean);
 }
 
-/** Build stable, untranslated readiness records for UI and export gating. */
+/**
+ * Build stable, untranslated readiness records for UI and export gating.
+ *
+ * Bed-fit decision (audit H5, 2026-09-17): readiness is computed in the SAME
+ * frame the exporter ships. `target.bounds` are PrintSpace world mm bounds
+ * (see {@link boundsForExportContext}); {@link checkBedFit} applies the 3MF
+ * writer's placement (centre X/Y, rest on bed).
+ *   (a) `bed-overflow` — the seated X/Y footprint exceeds the bed, or the
+ *       height exceeds bed Z when a Z limit is configured. Applies to every
+ *       format: the extent is placement-independent.
+ *   (b) `below-bed`    — min print-space z < 0, i.e. the part dips under the
+ *       scene floor. Only OBJ/STL keep world placement, so the issue names
+ *       them in `data.formats`; a 3MF-only export may ignore it.
+ */
 export function buildReadiness({ parts = [], targets = [], bedDimensions } = {}) {
   const issues = [];
   if (!parts.length) {
@@ -43,11 +64,12 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions } = {})
   const targetSummaries = targets.map(target => {
     const fit = checkBedFit(target.bounds, bedDimensions);
     const objectIds = target.objectIds ?? parts.flatMap(part => part.objectIds ?? [part.objectId]);
-    if (Object.values(fit.overflowMM).some(value => value > 0)) {
+    if (!fit.fits) {
       issues.push(issue('bed-overflow', 'warning', objectIds, {
         targetRatio: target.ratio ?? null,
         targetLabel: target.label ?? null,
         overflowMM: fit.overflowMM,
+        sizeMM: fit.sizeMM,
       }));
     }
     if (fit.belowBedMM > 0) {
@@ -55,6 +77,7 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions } = {})
         targetRatio: target.ratio ?? null,
         targetLabel: target.label ?? null,
         belowBedMM: fit.belowBedMM,
+        formats: [...WORLD_PLACED_FORMATS],
       }));
     }
     return { ...target, fit };
@@ -72,14 +95,30 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions } = {})
   };
 }
 
-/** Project live Babylon world AABBs into the slicer's positive XYZ bed space. */
-export function boundsForExportContext(ctx, bedDimensions) {
+/**
+ * Union of the live Babylon world AABBs of every print part, scaled to the
+ * target ratio about the export pivot, converted to millimetres with
+ * `ctx.unitFactor` and mapped into PrintSpace (right-handed, Z-up) with the
+ * same `toPrintSpace` every writer uses. No bed placement is applied here —
+ * {@link checkBedFit} owns that — so the bounds are exactly what the STL
+ * writer ships and what the 3MF writer sees before it seats the build.
+ *
+ * `toPrintSpace` is an axis permutation with sign flips, so mapping the two
+ * AABB corners and re-sorting per axis is exact.
+ *
+ * @returns {{min:number[], max:number[]}|null} null when there is nothing
+ *   to measure (no ratio, no pivot, no live bounding boxes).
+ */
+export function boundsForExportContext(ctx) {
   const r = ctx?.ratioFactor;
   const p = ctx?.pivot;
   if (!(r > 0) || !p) return null;
+  const mm = ctx.unitFactor;
+  if (!(mm > 0)) throw new TypeError('boundsForExportContext: ctx.unitFactor missing — pass a real ExportContext');
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   let found = false;
+  const scale = (v, pivot) => ((v - pivot) * r + pivot) * mm;
   for (const unit of ctx.units ?? []) {
     for (const part of unit.parts ?? []) {
       const mesh = part.mesh;
@@ -88,19 +127,11 @@ export function boundsForExportContext(ctx, bedDimensions) {
       if (!box?.minimumWorld || !box?.maximumWorld) continue;
       const lo = box.minimumWorld;
       const hi = box.maximumWorld;
-      const projectedMin = [
-        ((lo.x - p.x) * r + p.x) * 1000 + Number(bedDimensions?.x ?? 0) / 2,
-        ((lo.z - p.z) * r + p.z) * 1000 + Number(bedDimensions?.y ?? 0) / 2,
-        ((lo.y - p.y) * r + p.y) * 1000,
-      ];
-      const projectedMax = [
-        ((hi.x - p.x) * r + p.x) * 1000 + Number(bedDimensions?.x ?? 0) / 2,
-        ((hi.z - p.z) * r + p.z) * 1000 + Number(bedDimensions?.y ?? 0) / 2,
-        ((hi.y - p.y) * r + p.y) * 1000,
-      ];
+      const a = toPrintSpace(scale(lo.x, p.x), scale(lo.y, p.y), scale(lo.z, p.z));
+      const b = toPrintSpace(scale(hi.x, p.x), scale(hi.y, p.y), scale(hi.z, p.z));
       for (let axis = 0; axis < 3; axis++) {
-        min[axis] = Math.min(min[axis], projectedMin[axis]);
-        max[axis] = Math.max(max[axis], projectedMax[axis]);
+        min[axis] = Math.min(min[axis], a[axis], b[axis]);
+        max[axis] = Math.max(max[axis], a[axis], b[axis]);
       }
       found = true;
     }
