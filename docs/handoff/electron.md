@@ -22,10 +22,12 @@ out below** — packaging/running can't be verified in a headless session.
   only at call time). `StorageAdapter.storage` swaps to it when `isDesktop()`. Headless-tested
   (browser stays active off-desktop; desktop shape ok).
 - **Electron shell** — `electron/main.cjs` (hardened `BrowserWindow`: contextIsolation on,
-  nodeIntegration off; loads `dist/index.html` or `MIXO_DEV_URL`; IPC handlers for KV → a JSON
-  file in userData, `fs:readFile/writeFile`, `dialog:open/save`) + `electron/preload.cjs`
-  (allowlisted `window.electronAPI` = capabilities + kv + fs). Additive — NOT in the Vite/TS
-  graph, so the web build is untouched.
+  nodeIntegration off; loads `dist/index.html` or `MIXO_DEV_URL`; IPC handlers for KV →
+  `electron/KvStore.cjs` (atomic temp+rename, serialised writes, corrupt-file quarantine; JSON
+  in userData), `dialog:open/save`, opaque-ref file reads) + `electron/preload.cjs`
+  (allowlisted `window.electronAPI` = capabilities + kv + refs). The unconfined
+  `fs:readFile/writeFile` pair was removed 2026-09-17 (no callers, path-traversal surface).
+  Additive — NOT in the Vite/TS graph, so the web build is untouched.
 
 ## NOT done — needs a real desktop environment (can't verify headless)
 

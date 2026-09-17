@@ -8,11 +8,11 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('node:path');
-const fs = require('node:fs/promises');
 const { createOpaqueFileRegistry } = require('./OpaqueFileRegistry.cjs');
+const { createKvStore } = require('./KvStore.cjs');
 
 const DEV_URL = process.env.MIXO_DEV_URL || '';
-let _kvPath = '';
+let _kv = null;
 const _fileRefs = createOpaqueFileRegistry();
 const _approvedClose = new WeakSet();
 
@@ -47,15 +47,11 @@ function createWindow() {
 }
 
 // ── KV persistence (JSON file in userData) — backs DesktopStorageAdapter.kv* ──
-async function _readKv() {
-  try { return JSON.parse(await fs.readFile(_kvPath, 'utf8')); } catch { return {}; }
-}
-async function _writeKv(obj) { await fs.writeFile(_kvPath, JSON.stringify(obj)); }
-
-ipcMain.handle('kv:set', async (_e, key, value) => { const o = await _readKv(); o[key] = value; await _writeKv(o); });
-ipcMain.handle('kv:get', async (_e, key) => { const o = await _readKv(); return key in o ? o[key] : null; });
-ipcMain.handle('kv:delete', async (_e, key) => { const o = await _readKv(); delete o[key]; await _writeKv(o); });
-ipcMain.handle('kv:keys', async () => Object.keys(await _readKv()));
+// Atomic temp+rename writes, serialised mutations, corrupt-file quarantine: KvStore.cjs.
+ipcMain.handle('kv:set', (_e, key, value) => _kv.set(key, value));
+ipcMain.handle('kv:get', (_e, key) => _kv.get(key));
+ipcMain.handle('kv:delete', (_e, key) => _kv.delete(key));
+ipcMain.handle('kv:keys', () => _kv.keys());
 
 // ── Mounted asset directories (opaque renderer refs) ──
 ipcMain.handle('dialog:mountDirectory', async () => {
@@ -67,12 +63,7 @@ ipcMain.handle('dialog:mountDirectory', async () => {
 ipcMain.handle('fs:listDirectoryRef', (_e, ref, parentPath) => _fileRefs.listDirectory(ref, parentPath));
 ipcMain.handle('fs:readFileRef', (_e, ref) => _fileRefs.readFile(ref));
 
-// ── Legacy project/export filesystem leaves ──
-ipcMain.handle('fs:readFile', async (_e, p) => {
-  const b = await fs.readFile(p);
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);   // ArrayBuffer
-});
-ipcMain.handle('fs:writeFile', async (_e, p, data) => fs.writeFile(p, Buffer.from(data)));
+// ── Legacy project/export dialogs (path-based fs:readFile/writeFile IPC removed — no callers) ──
 ipcMain.handle('dialog:open', async (_e, opts) => dialog.showOpenDialog(opts ?? {}));
 ipcMain.handle('dialog:save', async (_e, opts) => dialog.showSaveDialog(opts ?? {}));
 ipcMain.on('app:close-response', (event, result) => {
@@ -86,7 +77,7 @@ ipcMain.on('app:close-response', (event, result) => {
 });
 
 app.whenReady().then(() => {
-  _kvPath = path.join(app.getPath('userData'), 'mixo-kv.json');
+  _kv = createKvStore(path.join(app.getPath('userData'), 'mixo-kv.json'));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
