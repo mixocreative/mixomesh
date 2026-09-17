@@ -59,7 +59,7 @@ export function buildColorGroupEntries(meshList, options = {}) {
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
 export async function buildMaterialsExtEntries(meshList, options = {}) {
-  const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON);
+  const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON, options.state ?? undefined);
   const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options);
   const entries = [
     { path: '[Content_Types].xml', data: CONTENT_TYPES_TEXTURED },

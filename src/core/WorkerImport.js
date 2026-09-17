@@ -142,6 +142,7 @@ function _buildContainer(scene, parsed, siblings) {
     return mat;
   });
 
+  _assertParsedShape(parsed);
   for (const m of parsed.meshes) {
     const mesh = new BABYLON.Mesh(m.name, scene);
     const vd = new BABYLON.VertexData();
@@ -190,7 +191,33 @@ export async function loadObjContainerViaWorker(scene, blobUrl, siblings, onProg
   const timeoutMs = opts.timeoutMs ?? WORKER_JOB_TIMEOUT_MS;
   const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs);
   if (!parsed.meshes?.length) throw new Error('worker returned no geometry');
+  _assertParsedShape(parsed);
   return _buildContainer(scene, parsed, siblings);
 }
 
 export const WorkerImport = { isWorkerImportSupported, loadObjContainerViaWorker, WORKER_JOB_TIMEOUT_MS };
+
+// F14: the worker's `done` payload crosses a boundary; a malformed entry used
+// to build an empty/NaN mesh silently. Reject → caller falls back to the
+// main-thread parser.
+function _assertParsedShape(parsed) {
+  const bad = (why) => { throw new Error(`OBJ worker returned malformed geometry — ${why}; falling back to main-thread parse`); };
+  if (!Array.isArray(parsed?.meshes)) bad('meshes is not an array');
+  for (const m of parsed.meshes) {
+    const pos = m?.kinds?.position;
+    if (!pos || typeof pos.length !== 'number' || pos.length === 0 || pos.length % 3 !== 0) bad(`"${m?.name ?? '?'}" has no valid positions`);
+    const vcount = pos.length / 3;
+    const idx = m.indices;
+    if (idx != null) {
+      if (typeof idx.length !== 'number' || idx.length % 3 !== 0) bad(`"${m.name}" has a malformed index list`);
+      for (let i = 0; i < idx.length; i++) {
+        const v = idx[i];
+        if (!Number.isInteger(v) || v < 0 || v >= vcount) bad(`"${m.name}" index ${i} out of range`);
+      }
+    }
+    for (const key of ['position', 'rotation', 'scaling']) {
+      const arr = m[key];
+      if (arr != null && !(Array.isArray(arr) && arr.length === 3 && arr.every(Number.isFinite))) bad(`"${m.name}" ${key} is not a finite xyz triple`);
+    }
+  }
+}

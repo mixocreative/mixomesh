@@ -250,6 +250,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
 
+    // F24: a zero-byte / geometry-less file used to import "successfully"
+    // with no object and no message. (Library GLBs return earlier, above.)
+    if (!meshIds.length) throw new Error(`${filename}: no geometry found in file`);
     // Import is a non-undoable mutation of the project (assets + objects), so
     // it must count as unsaved work — otherwise "close without saving" reads
     // clean after dropping models in (audit 2026-09-17, H2).
@@ -306,6 +309,7 @@ export async function instantiateAsset(assetId, position) {
     const collectionId = createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
     const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1);
     for (const meshId of meshIds) queueValidation(meshId);
+    if (!meshIds.length) throw new Error(`${asset.displayName ?? asset.filename}: no geometry found in asset`);
     markDirty();
     return meshIds;
   } finally {

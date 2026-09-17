@@ -193,6 +193,36 @@ function _buildGroupUnion(siblings) {
  * against a synthetic union mesh adds complexity for a heuristic the slicer
  * also corrects, and split shells frequently mislead the per-mesh check.
  */
+// Nothing flips on export (audit M1) — the repair is the explicit Auto-Fix
+// action (applyGeometryFix 'invertedNormals' = index flip). Group scope
+// reports without an auto-fix: the flip must be applied per sibling.
+function _invertedResult(autoFixAvailable) {
+  return {
+    type: 'invertedNormals',
+    severity: 'warning',
+    count: 1,
+    autoFixAvailable,
+    fixed: false,
+    message: autoFixAvailable
+      ? 'Normals appear inverted — use Auto-Fix to flip'
+      : 'Normals appear inverted on this multi-part object — flip each part',
+  };
+}
+
+// Shared side orientation of a logical object's siblings (one import → one
+// flag). null when they disagree, in which case the inverted check is skipped
+// rather than guessed (a wrong flag would report a correct mesh as inverted).
+function _groupOrientation(siblings) {
+  const flags = new Set(siblings
+    .map(s => s.babylonMesh).filter(Boolean)
+    .map(m => frontFaceIsClockwise(m)));
+  if (flags.size !== 1) {
+    if (flags.size > 1) console.warn('MeshValidator: siblings disagree on side orientation — inverted check skipped');
+    return null;
+  }
+  return [...flags][0];
+}
+
 export async function validateGroup(sourceGroupId) {
   const siblings = _collectGroupSiblings(sourceGroupId);
   const results = [];
@@ -200,7 +230,9 @@ export async function validateGroup(sourceGroupId) {
   const { positions, indices } = _buildGroupUnion(siblings);
   if (!positions.length || !indices.length) return results;
 
-  const { badEdgeCount } = await _topology(positions, indices);
+  const groupClockwise = _groupOrientation(siblings);
+  const { badEdgeCount, inverted } = await _topology(positions, indices, groupClockwise ?? false);
+  if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
   if (badEdgeCount > 0) {
     results.push({
       type: 'nonManifold',
@@ -317,11 +349,14 @@ export async function validateMesh(mesh) {
 
   if (positions && indices && indices.length > 0) {
     if (isLogicalGroup) {
-      // Topology on the welded union; inverted-normals skipped on group scope.
+      // Topology on the welded union. Inverted check uses the siblings'
+      // shared side flag (one import → one flag); mixed flags → skipped.
       const siblings = partIds.map(id => ({ meshId: id, babylonMesh: AssetLoader.getBabylonMesh(id) }));
       const { positions: up, indices: ui } = _buildGroupUnion(siblings);
       if (up.length && ui.length) {
-        const { badEdgeCount } = await _topology(up, ui);
+        const groupClockwise = _groupOrientation(siblings);
+        const { badEdgeCount, inverted } = await _topology(up, ui, groupClockwise ?? false);
+        if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
         if (badEdgeCount > 0) {
           results.push({
             type: 'nonManifold',
@@ -351,18 +386,7 @@ export async function validateMesh(mesh) {
           message: `${badEdgeCount} non-manifold edge${badEdgeCount === 1 ? '' : 's'} (slicer-repairable)`,
         });
       }
-      if (inverted) {
-        results.push({
-          type: 'invertedNormals',
-          severity: 'warning',
-          count: 1,
-          autoFixAvailable: true,
-          fixed: false,
-          // Nothing flips on export (audit M1) — the repair is the explicit
-          // Auto-Fix action (applyGeometryFix 'invertedNormals' = index flip).
-          message: 'Normals appear inverted — use Auto-Fix to flip',
-        });
-      }
+      if (inverted) results.push(_invertedResult(true));
     }
   }
 

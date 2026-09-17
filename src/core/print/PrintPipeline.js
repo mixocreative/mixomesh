@@ -217,7 +217,9 @@ async function _runExport(formatKey, options = {}) {
       (ti + Math.max(0, Math.min(1, frac))) / targets.length,
       targets.length > 1 ? `[${ti + 1}/${targets.length}] ${msg}` : msg,
     );
-    const written = await _runExportForTarget(fmt, targets[ti], options, csgReady, span);
+    // ONE state snapshot for the whole batch (M8): a rename / selection change
+    // between two save pickers must not change the second file's reference.
+    const written = await _runExportForTarget(fmt, targets[ti], options, csgReady, span, state0);
     if (written === false) return;   // picker cancelled — stop the batch, don't re-prompt
   }
 }
@@ -240,6 +242,13 @@ export function getPrintReadiness(options = {}) {
       const cached = state.scene.validation?.[id];
       return cached && !cached.stale ? (cached.results ?? []) : [];
     });
+    // M3: a missing or stale cache is NOT "no warnings" — it is "not checked
+    // yet". Reported as its own readiness issue so the panel never reads
+    // "ready" for geometry nobody has validated since the last edit.
+    const validationPending = ids.some(id => {
+      const cached = state.scene.validation?.[id];
+      return !cached || cached.stale;
+    });
     const textureAvailable = ids.every(id => {
       const shader = state.scene.shaders?.[objects[id]?.shaderId];
       const textureId = shader?.diffuseTextureAssetId;
@@ -252,6 +261,7 @@ export function getPrintReadiness(options = {}) {
       unitConfirmed: asset?.unitConfirmed !== false,
       textureAvailable,
       validationResults,
+      validationPending,
     };
   });
   const explicit = exportRatiosFromState(state);
@@ -261,16 +271,15 @@ export function getPrintReadiness(options = {}) {
     return {
       ratio: ctx.targetRatio,
       requestedRatio: target,
-      bounds: boundsForExportContext(ctx, state.print.bedDimensions),
+      bounds: boundsForExportContext(ctx),
       objectIds: units.map(unit => unit.logicalId),
     };
   }).filter(target => target.bounds) : [];
   return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions });
 }
 
-async function _runExportForTarget(fmt, target, options, csgReady, progress) {
+async function _runExportForTarget(fmt, target, options, csgReady, progress, state = getState()) {
   progress(0.02, 'Collecting meshes…');
-  const state = getState();
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
   const printMeshes = _flattenPrintUnits(units);
@@ -328,6 +337,13 @@ async function _runExportForTarget(fmt, target, options, csgReady, progress) {
             { cause: e, prepStep: stepKey },
           );
         }
+      }
+      // M4: a part that lost all its triangles in prep (e.g. an empty CSG
+      // result) must not silently vanish from the file — every writer used
+      // to skip it and the build could even end up empty.
+      const triCount = clone.getIndices?.()?.length ?? 0;
+      if (!(triCount > 0)) {
+        throw new Error(`Part "${logicalName || mesh.name || meshId}" has no triangles after preparation — export aborted`);
       }
       progress(0.05 + 0.45 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
     }

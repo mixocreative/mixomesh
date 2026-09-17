@@ -2,6 +2,7 @@ import { AssetLoader } from '../core/AssetLoader.js';
 import { AssetPanel } from './AssetPanel.js';
 import { Toast } from './Toast.js';
 import { safeImport } from './ImportError.js';
+import { reportError, safeAsync } from './Status.js';
 import { t } from '../i18n/index.js';
 
 const BABYLON = window.BABYLON;
@@ -160,16 +161,41 @@ function _handleDrop(e, position) {
     return;
   }
 
-  for (const { file, handleP } of meshEntries) {
-    safeImport(async () => {
-      const h = await handleP;
-      const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
-      await AssetLoader.loadFromBlob(file, file.name, position, {
-        ...(fileHandle ? { fileHandle } : {}),
-        ...(siblingFiles.length ? { siblingFiles } : {}),
-      });
-    }, file.name);
+  const importOne = async ({ file, handleP }) => {
+    const h = await handleP;
+    const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
+    await AssetLoader.loadFromBlob(file, file.name, position, {
+      ...(fileHandle ? { fileHandle } : {}),
+      ...(siblingFiles.length ? { siblingFiles } : {}),
+    });
+  };
+
+  if (meshEntries.length === 1) {
+    safeImport(() => importOne(meshEntries[0]), meshEntries[0].file.name);
+    return;
   }
+
+  // Multi-file drop: SEQUENTIAL, in drop order (audit F1/F2/F16). Parallel
+  // imports let a second failure's modal replace the first (Modal.open swaps
+  // the live modal) and let two shader-merge prompts cancel each other; and
+  // nobody got a "3 of 5 imported" answer. One summary at the end instead.
+  safeAsync(async () => {
+    const failures = [];
+    let ok = 0;
+    for (const entry of meshEntries) {
+      try { await importOne(entry); ok++; }
+      catch (err) { failures.push({ name: entry.file.name, err }); }
+    }
+    if (!failures.length) {
+      Toast.show(t('toast.importedAll', { n: ok }), 'success', 3000);
+      return;
+    }
+    const detail = failures.map(f => `${f.name}: ${f.err?.message ?? f.err}`).join('\n');
+    reportError(new Error(detail), {
+      modal: true,
+      title: t('toast.importedPartial', { ok, n: meshEntries.length }),
+    });
+  });
 }
 
 // ── Ray-pick onto ground plane ───────────────────────────

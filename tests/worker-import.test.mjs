@@ -114,6 +114,20 @@ await test('worker-reported parse error still rejects without killing the worker
   assert.equal(w.terminated, 0, 'a parse error does not kill the worker');
 });
 
+
+await test('(F14) malformed worker payload rejects instead of building a garbage mesh', async () => {
+  const p = loadObjContainerViaWorker(scene, 'blob:bad', null, undefined, { timeoutMs: 200 });
+  await tick();
+  const bad = { ...DONE, meshes: [{ ...DONE.meshes[0], kinds: { position: new Float32Array([0, 0, 0, 1, 0]) } }] };
+  workers.at(-1).reply(bad);
+  await assert.rejects(p, /malformed geometry/);
+  const p2 = loadObjContainerViaWorker(scene, 'blob:bad2', null, undefined, { timeoutMs: 200 });
+  await tick();
+  const oob = { ...DONE, meshes: [{ ...DONE.meshes[0], indices: new Uint32Array([0, 1, 9]) }] };
+  workers.at(-1).reply(oob);
+  await assert.rejects(p2, /index 2 out of range/);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

@@ -27,7 +27,7 @@ export async function serializeOBJ(ctx) {
   const {
     blobByFilename: textureBlobs,
     textureFilenameByMaterialName,
-  } = await collectTextureExportData(meshes);
+  } = await collectTextureExportData(meshes, ctx.state);
 
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
   // so Mimaki UV-inkjet (texture-first) slicers receive an image even when

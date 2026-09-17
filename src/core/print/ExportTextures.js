@@ -46,11 +46,10 @@ async function _readTextureOrThrow(tex, assetId) {
  * Find the asset ID for a texture by checking the asset library, falling back
  * to the texture's own name for container-owned instances.
  */
-export function getAssetIdForTexture(texture) {
+export function getAssetIdForTexture(texture, state = getState()) {
   const taggedId = texture?.metadata?.mixoAssetId;
   if (typeof taggedId === 'string' && taggedId) return taggedId;
 
-  const state = getState();
   for (const [assetId, asset] of Object.entries(state.scene.assetLibrary)) {
     if (asset.kind === 'texture' && asset.babylonTextureName
         && asset.babylonTextureName === texture.name) {
@@ -60,17 +59,18 @@ export function getAssetIdForTexture(texture) {
   return texture.name || texture.uniqueId?.toString();
 }
 
-function _textureAssetEntry(assetId) {
+// `state` = the export batch's snapshot (M8); getState() only when no ctx reaches here.
+function _textureAssetEntry(assetId, state = getState()) {
   if (!assetId) return null;
-  return getState().scene.assetLibrary?.[assetId] ?? null;
+  return state.scene.assetLibrary?.[assetId] ?? null;
 }
 
 function _stripImageExtension(value) {
   return String(value || 'texture').replace(/\.[^./\\]+$/, '') || 'texture';
 }
 
-export function textureExportFilename(texture, assetId, usedNames = new Set()) {
-  const asset = _textureAssetEntry(assetId);
+export function textureExportFilename(texture, assetId, usedNames = new Set(), state = undefined) {
+  const asset = _textureAssetEntry(assetId, state);
   const sourceName = asset?.filename || asset?.name || texture?.name || assetId || 'texture';
   const base = sanitizeTextureName(_stripImageExtension(sourceName)) || 'texture';
   let filename = `${base}.png`;
@@ -87,7 +87,7 @@ export function textureExportFilename(texture, assetId, usedNames = new Set()) {
  * Extract all unique diffuse/albedo/base textures from a list of meshes and
  * convert to PNG blobs. Returns Map<filename, blob> for `textures/` entries.
  */
-export async function collectTextureExportData(meshes) {
+export async function collectTextureExportData(meshes, state = getState()) {
   const textureMap = new Map(); // assetId → { name, blob }
   const textureFilenameByMaterialName = new Map();
 
@@ -102,7 +102,7 @@ export async function collectTextureExportData(meshes) {
 
     for (const tex of textures) {
       if (!tex) continue;
-      const assetId = getAssetIdForTexture(tex);
+      const assetId = getAssetIdForTexture(tex, state);
       if (!assetId || textureMap.has(assetId)) continue;
       // Fail CLOSED. A texture that cannot be read must abort the export —
       // silently shipping a flat-colour OBJ with a success toast is a wrong
@@ -117,7 +117,7 @@ export async function collectTextureExportData(meshes) {
   const usedNames = new Set();
   const filenameByAssetId = new Map();
   for (const [assetId, { texture, blob }] of textureMap) {
-    const filename = textureExportFilename(texture, assetId, usedNames);
+    const filename = textureExportFilename(texture, assetId, usedNames, state);
     filenameByAssetId.set(assetId, filename);
     blobByFilename.set(filename, blob);
   }
@@ -126,7 +126,7 @@ export async function collectTextureExportData(meshes) {
     if (!mat) continue;
     const tex = mat.diffuseTexture || mat.albedoTexture || mat.baseTexture;
     if (!tex) continue;
-    const filename = filenameByAssetId.get(getAssetIdForTexture(tex));
+    const filename = filenameByAssetId.get(getAssetIdForTexture(tex, state));
     const matName = mat.id || mat.name || mesh.name;
     if (filename && matName) textureFilenameByMaterialName.set(String(matName), filename);
   }
@@ -150,7 +150,7 @@ export function sanitizeTextureName(name) {
  * Meshes without a texture (or with no UVs) are absent from pathByMesh and
  * the 3MF writer falls them through to the colorgroup path.
  */
-export async function collectMimakiTextures(meshList, BABYLON) {
+export async function collectMimakiTextures(meshList, BABYLON, state = getState()) {
   const blobByPath = new Map();
   const pathByMesh = new Map();
   const pathByAssetId = new Map();
@@ -166,10 +166,10 @@ export async function collectMimakiTextures(meshList, BABYLON) {
     const uvs = mesh.getVerticesData?.(BABYLON.VertexBuffer.UVKind);
     if (!uvs || uvs.length === 0) continue;
 
-    const assetId = getAssetIdForTexture(tex);
+    const assetId = getAssetIdForTexture(tex, state);
     let path = pathByAssetId.get(assetId);
     if (!path) {
-      const filename = textureExportFilename(tex, assetId, usedNames);
+      const filename = textureExportFilename(tex, assetId, usedNames, state);
       path = `3D/Textures/${filename}`;
       // Fail CLOSED (see collectTextureExportData): a dropped texture would
       // silently fall through to a solid colorgroup part.

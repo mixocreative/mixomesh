@@ -44,6 +44,8 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions } = {})
     if (missingSource.length) issues.push(issue('missing-source', 'error', missingSource));
     if (missingTexture.length) issues.push(issue('missing-texture', 'error', missingTexture));
     if (unconfirmed.length) issues.push(issue('unit-unconfirmed', 'warning', unconfirmed));
+    const pending = partIds(parts, part => part.validationPending === true);
+    if (pending.length) issues.push(issue('validation-pending', 'warning', pending));
 
     const geometryErrors = parts.filter(part => part.validationResults?.some(r => r.severity === 'error'));
     const geometryWarnings = parts.filter(part => part.validationResults?.some(r => r.severity === 'warning'));

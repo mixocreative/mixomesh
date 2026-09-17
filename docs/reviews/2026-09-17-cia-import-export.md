@@ -54,17 +54,48 @@ every `pid`, outward CCW winding, right-handed Z-up (3MF) / Y-up (OBJ), sRGB PNG
 source resolution, one texture per mesh, UVs in 0–1. UNVERIFIED: the Mimaki prep tool
 itself was not on this machine; its manual is the authority for texture caps.
 
+
+## Wave 1 (same day, 7 commits ef3a19c..c67954d) — every HIGH closed
+
+| ID | Fix | Test |
+|---|---|---|
+| F17 worker hang | per-job timeout (120 s), worker terminated + recreated, main-thread fallback | `worker-import.test.mjs` |
+| M6/M7 Electron | unconfined `fs:readFile/writeFile` IPC deleted; KV store = `electron/KvStore.cjs` (temp+rename, serialised, corrupt-file quarantine) | `kv-store.test.mjs`, Electron smoke boots |
+| H5 bed-fit frame | readiness bounds go through `PrintSpace`, seated like the 3MF writer; `below-bed` only for world-placed OBJ/STL; null bed axis = unlimited | `print-readiness`, `bed-fit` |
+| 3MF multi-material round-trip | loader groups triangles by (pid, pindex/texgroup) → one mesh per material, wrapper node + `sourceGroupId` = one logical object | `threemf-loader-materials.test.mjs` (5) |
+| Validator winding (new, found by X1) | `_checkInvertedNormals` now flag-aware (CW: V<0 inverted; CCW: V>0 inverted) — CCW meshes (native, 3MF/OBJ/STL) no longer falsely "inverted"; message no longer promises an export auto-fix | `validator.test.mjs` (11) |
+| H4 colour space | contract: record hex = sRGB; PBR albedo = linear; `ColorSpace.js` converts at every ShaderLibrary site and once in writers | `shader-live-update`, `export`, `materials-ext` |
+| persist H1 | `ProjectValidator.validateDocument` before `resetWorld`; newer major refused; corrupt JSON = clear message | `persistence-load-guards.test.mjs` |
+| persist H3 | ghosts surfaced in a `ghostAssets` modal + warning toast; ghost entries save with `ghost: true` (project no longer unsaveable) | load-guards, `portable-project` |
+| M1 saveAs | write first, bind + rename after | `persistence-saveas.test.mjs` |
+| F20 race | `LoadGate`: load refuses while importing; import refuses while loading | load-guards |
+| M2 autosave | tick skips during load/import; poisoned autosave deleted on failed recovery | load-guards |
+| M5 contentHash | embedded bytes hashed on load; mismatch → ghost, not torn load | `persistence.test.mjs` |
+| M4 dirty | `geometryFixes`, `bedDimensions`, `objBakeSolidTextures` writes mark dirty | `dirty-tracking` |
+
+Verification on c67954d: headless 138/138, lint 0, tsc clean, i18n 0 gaps, build ok, browser smoke PASS, export smoke PASS, Electron smoke PASS (headful).
+
+
+## Wave 2 (same day) — MEDIUM list closed
+
+| Item | Fix | Test |
+|---|---|---|
+| F10/F11 3MF loader | dangling `<item>`/`<component>` refs, missing `p:path` parts and malformed transforms THROW | `threemf-components` strictness test |
+| F1/F2/F16 multi-file drop | sequential in drop order; one "Imported N of M" toast or one combined failure modal; single-file path unchanged | (UI, not headless-testable; browser smoke boots) |
+| F24 empty file | `loadFromBlob`/`instantiateAsset` throw "no geometry found" when nothing was minted (library GLBs exempt) | `library-import` (unchanged path) |
+| F14 worker payload | `done` message shape validated (positions ×3, index range, finite TRS) → reject → main-thread fallback | `worker-import` F14 |
+| M8 batch state | one `getState()` snapshot per export batch, threaded into ExportTextures/writers | `export.test` "ONE state snapshot" |
+| M4 empty parts | zero-triangle clone after prep aborts the export (all formats) | `export.test` "zero triangles" |
+| M3 stale cache | readiness issue `validation-pending` (warning) for missing/stale validation; export-time validation stays the hard gate | `export.test` "validation-pending" |
+| Boolean colour | result diffuse read via `materialSrgbColor` (PBR source no longer darker) | — (browser smoke) |
+| Group inverted check | welded-union inverted check enabled with the siblings' shared side flag; mixed flags skip | `validator-group` (unchanged) |
+
+Still open (LOW / by policy): missing-MTL console-only (field policy), 64-sibling cap silent, `.mixo` old-major accepted through migrate, 3MF loader materials `backFaceCulling=false` (tolerant of foreign files), i18n-check/hygiene detectors have no zero-coverage floor, Mimaki prep tool + Bambu/Orca/Cura consumers unverified (no software on disk).
+
 ## OPEN — owner decisions / next work (graded, evidence in agent reports of this run)
 
 ### CRITICAL / HIGH
-- **H4 re-graded to LOW / partly wrong.** Babylon binds `albedoColor` raw (`pbrBaseMaterial.js:1662`, no linear conversion), and the app's colour picker stores sRGB hex → `albedoColor` → export hex is the identity of what the user picked. Only glTF-imported FLAT colours (`baseColorFactor`, linear by spec) export darker than intended; textured parts are unaffected. Fix if wanted: convert `baseColorFactor` to gamma at glTF import (ShaderLibrary), not at export.
-- **H5 bed-fit readiness computed in a frame no writer produces** (`PrintReadiness.js:91-99`) — "below-bed"/"overflow" warnings describe a fictional placement. Fix: route through `PrintSpace` + the writer's seating.
-- **H3 (persist) ghost assets silent at load** + project then unsaveable (`ProjectLoader.js:227,262` → ghost, success toast; `ProjectSerializer.js:151` throws on save). Fix: load summary modal listing ghosts with Relink; exclude ghosts from portable-save requirement or offer "save without".
-- **H1 (persist) no schema/version validation on load** (`migrate` returns doc, `version` never read; `resetWorld()` before any validation). Fix: validate shape + version before reset.
-- **F20 import racing project load / new** — no in-flight guard; import can mint objects into the next project. Fix: `_importDepth` gate in `loadProject`/`newProject` (wait or refuse).
-- **F17 worker hang has no timeout** — a stuck OBJ worker job wedges every later import behind the overlay. Fix: per-job timeout → fallback + `_importEnd`.
-- **3MF multi-mesh logical unit round-trip loses colours/UVs** — writer emits per-triangle `pid/p1..p3`, loader reads only object-level `pid` (`ThreeMFLoader.js:259,309`). Fix: per-triangle material resolution in the loader.
-- **M6 Electron unrestricted `fs:readFile/writeFile` IPC** (`electron/main.cjs:71-75`), no callers — dead attack surface. Fix: delete.
+- none open after wave 1.
 
 ### MEDIUM (selected)
 - Multi-file drop: concurrent import failures overwrite each other's modal (`Modal.open` replaces); no "N of M imported" summary.

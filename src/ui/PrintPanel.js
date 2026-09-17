@@ -389,6 +389,7 @@ function _issueActionLabel(issue) {
     'missing-source': 'print.issueAction.missing-source',
     'missing-texture': 'print.issueAction.missing-texture',
     'unit-unconfirmed': 'print.issueAction.unit-unconfirmed',
+    'validation-pending': 'print.issueAction.validation-pending',
     'bed-overflow': 'print.issueAction.bed-overflow',
     'below-bed': 'print.issueAction.below-bed',
     'geometry-error': 'print.issueAction.geometry',

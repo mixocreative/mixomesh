@@ -486,6 +486,48 @@ await test('OBJ/MTL: material ids with spaces become single tokens in BOTH files
   assert.ok(!/^Tr /m.test(files['Test_r1to1.mtl']), 'no ambiguous Tr line');
 });
 
+
+await test('prep leaves a part with zero triangles → export ABORTS (M4), not a silent drop', async () => {
+  const m = mesh('m1');
+  const origClone = m.clone;
+  m.clone = (...a) => { const c = origClone.apply(m, a); c.getIndices = () => []; return c; };
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
+  MeshValidator.validateMesh = valOK;
+  await rejects(PrintManager.exportOBJ(), /Part "m1" has no triangles after preparation/);
+  assert.equal(calls.downloads.length, 0);
+});
+
+await test('readiness: missing or stale validation cache → validation-pending warning (M3), fresh cache → none', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  let r = PrintManager.getPrintReadiness();
+  assert.ok(r.issues.some(i => i.code === 'validation-pending'), 'no cache = pending');
+  StateManager.setState(s => ({ ...s, scene: { ...s.scene, validation: { m1: { results: [], stale: true, validatedAt: 1 } } } }), { silent: true });
+  r = PrintManager.getPrintReadiness();
+  assert.ok(r.issues.some(i => i.code === 'validation-pending'), 'stale cache = pending');
+  StateManager.setState(s => ({ ...s, scene: { ...s.scene, validation: { m1: { results: [], stale: false, validatedAt: 1 } } } }), { silent: true });
+  r = PrintManager.getPrintReadiness();
+  assert.ok(!r.issues.some(i => i.code === 'validation-pending'), 'fresh cache = not pending');
+  assert.equal(r.canExport, true, 'pending is a warning, not a block');
+});
+
+await test('batch export uses ONE state snapshot (M8): a rename between pickers does not change file 2', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [1, 2] } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  let n = 0;
+  window.showSaveFilePicker = async () => {
+    n++;
+    if (n === 1) StateManager.setState(s => ({ ...s, project: { ...s.project, name: 'Renamed' } }), { silent: true });
+    return { createWritable: async () => ({ write: async () => {}, close: async () => {} }) };
+  };
+  const names = [];
+  const origShow = Toast.show;
+  Toast.show = (msg, type) => { toasts.push({ msg, type }); if (type === 'success') names.push(msg); };
+  try { await PrintManager.exportOBJ(); } finally { window.showSaveFilePicker = undefined; Toast.show = origShow; }
+  assert.equal(names.length, 2, 'two files written');
+  assert.ok(names.every(m => /Test_/.test(m) && !/Renamed/.test(m)), `both files keep the snapshot name: ${names.join(' | ')}`);
+});
+
 await test('3MF: valid mesh → OPC package with model XML + colour, downloads', async () => {
   setScene({ objects: { m1: obj('m1') },
     registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });

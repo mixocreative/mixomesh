@@ -12,6 +12,8 @@
 // operations are capped so a browser tab's memory isn't blown (a desktop build
 // raises the cap — ADR 0001 capabilities).
 
+import { materialSrgbColor } from './shaders/ColorSpace.js';
+
 /**
  * Default summed-triangle ceiling for a Boolean on the web build. Chosen below
  * the existing heavy-op thresholds (100k auto-validate skip, 500k thumbnail
@@ -157,10 +159,13 @@ export async function computeBoolean(op, meshes, opts = {}) {
     const result = acc.toMesh(name, scene);   // NOT in `made` — this is the kept output
 
     const srcMat = meshes[0].material;
-    const srcColor = srcMat && (srcMat.diffuseColor || srcMat.albedoColor);
+    // sRGB read: a PBR source keeps `albedoColor` LINEAR (Blueprint §10 colour
+    // contract); copying it raw into a StandardMaterial (gamma) made Boolean
+    // results of PBR parts render darker than their source.
+    const srcColor = srcMat ? materialSrgbColor(srcMat) : null;
     if (srcColor) {
       const mat = new B.StandardMaterial(`${name}_mat`, scene);
-      mat.diffuseColor = srcColor.clone();
+      mat.diffuseColor = new B.Color3(srcColor.r, srcColor.g, srcColor.b);
       result.material = mat;
     } else {
       result.material = scene.defaultMaterial;
