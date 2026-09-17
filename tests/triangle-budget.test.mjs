@@ -168,6 +168,39 @@ await test('toast fires BEFORE addAllToScene (incoming alone, container not yet 
   assert.equal(budgetToasts.length, 1, 'incoming-only overage still warns');
 });
 
+// Fix round 1, finding 2: instantiateAsset() re-instantiates from a cached
+// blob URL through its OWN container.addAllToScene() call site — the budget
+// check must cover it too, not just loadFromBlob's.
+await test('instantiateAsset (re-drop of an already-loaded asset) also warns over budget', async ({ capturedToasts }) => {
+  const scene = { meshes: [makeSceneMesh('existing1', 40)], defaultMaterial: { name: 'grey' } };
+  SceneManager.getScene = () => scene;
+
+  // First load: small container, under budget, just to register the asset +
+  // cache its blob URL (instantiateAsset re-reads from that cache).
+  const smallContainer = makeContainer([10]); // 40 + 10 = 50 <= 100
+  B.SceneLoader = { LoadAssetContainerAsync: async () => smallContainer };
+  await AssetLoader.loadFromBlob(new Blob(['stl']), 'reusable.stl');
+  assert.equal(capturedToasts.filter(c => c.type === 'warning').length, 0, 'initial load stayed under budget');
+
+  const assetId = Object.keys(StateManager.getState().scene.assetLibrary)[0];
+  assert.ok(assetId, 'asset registered after loadFromBlob');
+
+  // Re-instantiate at a new drop position: this container alone pushes
+  // scene(40) + incoming(70) over the 100 budget.
+  const bigContainer = makeContainer([70]);
+  B.SceneLoader = { LoadAssetContainerAsync: async () => bigContainer };
+  const meshIds = await AssetLoader.instantiateAsset(assetId, new B.Vector3(0, 0, 0));
+
+  const budgetToasts = capturedToasts.filter(c => c.type === 'warning');
+  assert.equal(budgetToasts.length, 1, 'instantiateAsset path also warns over budget');
+  assert.equal(
+    budgetToasts[0].message,
+    t('toast.triangleBudget', { current: formatTriCount(110), budget: formatTriCount(100) }),
+  );
+  assert.equal(bigContainer.added, true, 're-instantiate proceeds despite the warning');
+  assert.equal(meshIds.length, 1);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

@@ -137,6 +137,27 @@ function _applyResinDefault(container) {
 }
 
 /**
+ * Triangle-budget warning (watertight-repair-and-cost task 7): non-blocking —
+ * the import always proceeds, this only tells the user before the tab starts
+ * feeling it. Checked against the container's own meshes since nothing in it
+ * has a meshId yet (that lands later, in registerInstantiatedMeshes, after
+ * `addAllToScene()`). Shared by `loadFromBlob` AND `instantiateAsset` — both
+ * call `container.addAllToScene()` and both need the same check.
+ * @param {BABYLON.Scene} scene
+ * @param {BABYLON.AssetContainer} container
+ */
+function _warnIfOverBudget(scene, container) {
+  const budget = caps.triangleBudget;
+  if (!(budget > 0)) return;
+  const projectedTris = countSceneTriangles(scene) + countContainerTriangles(container);
+  if (projectedTris <= budget) return;
+  Toast.show(t('toast.triangleBudget', {
+    current: formatTriCount(projectedTris),
+    budget: formatTriCount(budget),
+  }), 'warning');
+}
+
+/**
  * Load an asset from a Blob/File. Used by OS drag-drop and Asset Panel drops.
  * @param {Blob} blob
  * @param {string} filename
@@ -213,22 +234,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName);
 
-    // Triangle-budget warning (watertight-repair-and-cost task 7): the import
-    // still proceeds — this is a heads-up, not a gate — but the user should
-    // know BEFORE the tab starts feeling it. Checked against the container's
-    // own meshes since nothing here has a meshId yet (that lands below, in
-    // registerInstantiatedMeshes, after addAllToScene).
-    const budget = caps.triangleBudget;
-    if (budget > 0) {
-      const projectedTris = countSceneTriangles(scene) + countContainerTriangles(container);
-      if (projectedTris > budget) {
-        Toast.show(t('toast.triangleBudget', {
-          current: formatTriCount(projectedTris),
-          budget: formatTriCount(budget),
-        }), 'warning');
-      }
-    }
-
+    _warnIfOverBudget(scene, container);
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
@@ -322,6 +328,7 @@ export async function instantiateAsset(assetId, position) {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName);
+    _warnIfOverBudget(scene, container);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;

@@ -303,7 +303,7 @@ src/
     ContextMenu.js
     PrintPanel.js
     StatusBar.js
-    MeshStats.js           ← live tris / mm dims / watertight in the status-bar centre (selection-driven)
+    MeshStats.js           ← status-bar centre: scene-wide triangle budget (always-on, cached) + selection tris/mm/watertight (2026-09-18)
     Toast.js
     Status.js              ← centralized error + loading policy (reportError / guard / runTask / safeAsync)
     Modal.js               ← generic modal helper
@@ -3560,10 +3560,27 @@ Interactions:
 ### Status Bar (`src/ui/StatusBar.js`)
 Single bar at bottom. Segments:
 - **Left:** current op hint or default shortcuts.
-- **Center:** live mesh stats for the selection (`src/ui/MeshStats.js` →
-  `StatusBar.setCenter`): `△ 82k · 120×80×45 mm · ✓ watertight` — triangle
-  count, print-space W×D×H in mm, and watertight state (no error-severity
-  validation results). Selection-driven; empties when nothing is selected.
+- **Center:** `src/ui/MeshStats.js` → `StatusBar.setCenter` (2026-09-18 —
+  watertight-repair-and-cost task 7 + fix round 1). Two independent halves:
+  - **Triangle budget — scene-wide, ALWAYS ON**, even with nothing selected:
+    `tris <scene> / <budget>` against `caps.triangleBudget` (web 1.5M /
+    desktop 6M). Gains `hud-warn` (≥70% of budget) / `hud-danger` (≥90%)
+    classes; tooltip `t('hud.triangleBudget')`. The scene-wide count is a full
+    `scene.meshes` walk, so it is CACHED and only recomputed on events that
+    change scene geometry (asset add/remove, undo/redo, repair-completion
+    re-validate) — never on `SELECTION_CHANGED` — and a burst of geometry
+    events (an N-part import) coalesces into one microtask-deferred walk.
+  - **Selection stats — selection-driven, appended only when something is
+    selected:** `· sel <selTris> · <W>×<D>×<H> mm · <watertight>` — the
+    selection's own triangle count, print-space W×D×H in mm, and watertight
+    state (no error-severity validation results). With nothing selected the
+    line is just the triangle-budget half.
+  - Full example: `tris 342k / 1.5M · sel 82k · 120×80×45 mm · ✓ watertight`.
+  - `AssetImport.js` reuses the same scene/container triangle counters
+    (`MeshStats.countSceneTriangles` / `countContainerTriangles`) for a
+    non-blocking `toast.triangleBudget` warning before both
+    `container.addAllToScene()` call sites (`loadFromBlob`,
+    `instantiateAsset`) — one traversal, two consumers.
 - **Right:** undo/redo labels, polycount, save state (`Circle` for dirty, `Check` for saved).
 
 Collapses non-essential segments below 1280px.
