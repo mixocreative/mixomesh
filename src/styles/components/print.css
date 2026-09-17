@@ -447,6 +447,20 @@
 .pp-stale { font-size: var(--fs-xs); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 4px; margin-left: 6px; }
 .pp-mesh-validation.pending { opacity: 0.7; }
 
+/* Export tab: Cost block (watertight-repair-and-cost task 6) */
+.pp-cost-sublabel { font-size: var(--fs-xs); color: var(--text-2); margin-top: var(--sp-1); }
+.pp-cost-currency { max-width: 6em; }
+.pp-approx {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+  margin-left: 6px;
+  cursor: help;
+}
+
 /* Tab clarity (field-report fix): segmented full-width tabs, active gets a
    raised surface + accent underline + weight so "where am I" is obvious. */
 .pp-tabs { background: var(--bg-1); }

@@ -18,6 +18,7 @@ import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState } from '..
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 import { wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
 import * as Selection from '../core/Selection.js';
+import { renderCostBlock } from './print/CostBlock.js';
 
 // Printer profiles maintained in `config/printers.json`; they seed build-area
 // reference dimensions only. Export format is chosen by the buttons below.
@@ -53,6 +54,12 @@ export function init() {
     EVENTS.OBJECT_REMOVED,
     EVENTS.OBJECT_RESTORED,
     EVENTS.VALIDATION_COMPLETE,   // cache updates from import auto-validate (A6)
+    // Cost block volume depends on live geometry (task 6) — undo/redo of a
+    // boolean/repair/transform command can change it without a matching
+    // OBJECT_UPDATED for every affected mesh, so listen to history directly.
+    EVENTS.HISTORY_PUSHED,
+    EVENTS.HISTORY_UNDONE,
+    EVENTS.HISTORY_REDONE,
   ];
   for (const ev of events) subscribe(ev, _render);
   // A print reset (or reset-all) rewrote print settings — re-render to show them.
@@ -455,14 +462,17 @@ function _renderReadinessSummary(readiness) {
 }
 
 function _renderExportTab() {
-  const bakeSolids = getState().print?.objBakeSolidTextures ?? false;
-  const strictExport = getState().print?.strictExport ?? false;
-  const repairOnImport = getState().print?.repairOnImport ?? false;
+  const state = getState();
+  const bakeSolids = state.print?.objBakeSolidTextures ?? false;
+  const strictExport = state.print?.strictExport ?? false;
+  const repairOnImport = state.print?.repairOnImport ?? false;
   const readiness = PrintManager.getPrintReadiness();
 
   let html = '<div class="pp-tab-content">';
 
   html += _renderReadinessSummary(readiness);
+
+  html += '<div id="pp-cost-block"></div>';
 
   html += '<div class="pp-field-group">';
   html += `<label>${escapeHtml(t('print.exportOptions'))}</label>`;
@@ -518,6 +528,9 @@ function _renderExportTab() {
 
   const el = document.createElement('div');
   el.innerHTML = html;
+
+  const costMount = el.querySelector('#pp-cost-block');
+  if (costMount) renderCostBlock(costMount, state);
 
   el.querySelectorAll('.pp-readiness-issue').forEach(row => {
     row.addEventListener('click', () => {

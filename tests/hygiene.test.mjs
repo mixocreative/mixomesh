@@ -33,10 +33,26 @@ await test('A8: subscribe(undefined event) throws in dev instead of silently dyi
   assert.throws(() => subscribe(undefined, () => {}), /unknown event/i);
 });
 
-await test('printer profiles contain build-volume reference data only', () => {
+await test('printer profiles contain build-volume reference data + a materials table only', () => {
   for (const [id, profile] of Object.entries(printers)) {
-    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'displayName', 'vendor'], id);
+    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'displayName', 'materials', 'vendor'], id);
     assert.equal(['format', 'pipeline', 'colorMode'].some(key => key in profile), false, id);
+  }
+});
+
+await test('watertight-repair-and-cost task 6: every printer has ≥1 material with a positive density', () => {
+  for (const [id, profile] of Object.entries(printers)) {
+    assert.ok(Array.isArray(profile.materials) && profile.materials.length > 0, `${id}: materials must be a non-empty array`);
+    for (const material of profile.materials) {
+      assert.equal(typeof material.id, 'string', `${id}: material.id`);
+      assert.ok(material.id.length > 0, `${id}: material.id non-empty`);
+      assert.equal(typeof material.name, 'string', `${id}: material.name`);
+      assert.ok(material.densityGcm3 > 0, `${id}/${material.id}: densityGcm3 must be positive`);
+      assert.equal(typeof material.pricePerGram, 'number', `${id}/${material.id}: pricePerGram`);
+      assert.ok(material.supportDensityGcm3 > 0, `${id}/${material.id}: supportDensityGcm3 must be positive`);
+      assert.equal(typeof material.supportPricePerGram, 'number', `${id}/${material.id}: supportPricePerGram`);
+      assert.equal(typeof material.defaultSupportPercent, 'number', `${id}/${material.id}: defaultSupportPercent`);
+    }
   }
 });
 

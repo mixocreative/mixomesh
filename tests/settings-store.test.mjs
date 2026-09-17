@@ -46,7 +46,7 @@ test('pickSettings keeps only the persisted slices, drops content + pose', () =>
   const picked = pickSettings(s);
 
   assert.deepEqual(Object.keys(picked).sort(),
-    ['gizmo', 'grid', 'overlays', 'pivotMode', 'print', 'render', 'renderOut'].sort());
+    ['cost', 'gizmo', 'grid', 'overlays', 'pivotMode', 'print', 'render', 'renderOut'].sort());
   assert.equal('pose' in picked.renderOut, false);
   assert.equal(picked.pivotMode, 'active');
   // overlays narrowed to display prefs only
@@ -179,6 +179,34 @@ test('factoryState resets every persisted slice but leaves content', () => {
   assert.equal(out.print.minWallThickness, DS.print.minWallThickness);
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);
+});
+
+test('cost: INITIAL_STATE seeds from default-settings.json', () => {
+  const s = freshState();
+  assert.deepEqual(s.cost, DS.cost);
+});
+
+test('cost: never persisted in .mixo (per-user setting only) but round-trips through pickSettings/mergeSettings', () => {
+  const s = freshState();
+  s.cost = { ...s.cost, materialId: 'pla', pricePerGram: 0.04, supportPricePerGram: 0.02, supportPercent: 20, currency: 'EUR' };
+  const picked = pickSettings(s);
+  assert.ok('cost' in picked, 'cost slice picked into per-user settings');
+  assert.deepEqual(picked.cost, s.cost);
+  const merged = mergeSettings(freshState(), picked);
+  assert.deepEqual(merged.cost, s.cost, 'restored onto a fresh base');
+});
+
+test('cost: mergeSettings rejects unknown fields on a corrupt blob', () => {
+  const merged = mergeSettings(freshState(), { cost: { materialId: 'pla', bogusField: 99 } });
+  assert.equal(merged.cost.materialId, 'pla');
+  assert.equal('bogusField' in merged.cost, false);
+});
+
+test('cost: resetSection(cost) restores factory values via applySectionToState', () => {
+  const s = freshState();
+  s.cost.pricePerGram = 9;
+  const out = applySectionToState(s, 'cost');
+  assert.equal(out.cost.pricePerGram, DS.cost.pricePerGram);
 });
 
 test('bg-controls: factory carries darkIntensity + lightIntensity at 1.0', () => {

@@ -2,46 +2,73 @@
   "mimaki-3duj-553": {
     "displayName": "Mimaki 3DUJ-553",
     "vendor": "Mimaki",
-    "bed": { "x": 508, "y": 508, "z": 305 }
+    "bed": { "x": 508, "y": 508, "z": 305 },
+    "materials": [
+      { "id": "mimaki-model", "name": "Model resin (MH-100)", "densityGcm3": 1.1, "pricePerGram": 0.5, "supportDensityGcm3": 1.1, "supportPricePerGram": 0.2, "defaultSupportPercent": 40 }
+    ]
   },
   "mimaki-3duj-2207": {
     "displayName": "Mimaki 3DUJ-2207",
     "vendor": "Mimaki",
-    "bed": { "x": 203, "y": 203, "z": 76 }
+    "bed": { "x": 203, "y": 203, "z": 76 },
+    "materials": [
+      { "id": "mimaki-model", "name": "Model resin (MH-100)", "densityGcm3": 1.1, "pricePerGram": 0.5, "supportDensityGcm3": 1.1, "supportPricePerGram": 0.2, "defaultSupportPercent": 40 }
+    ]
   },
   "bambu-x1c": {
     "displayName": "Bambu Lab X1 Carbon",
     "vendor": "Bambu Lab",
-    "bed": { "x": 256, "y": 256, "z": 256 }
+    "bed": { "x": 256, "y": 256, "z": 256 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "bambu-a1": {
     "displayName": "Bambu Lab A1",
     "vendor": "Bambu Lab",
-    "bed": { "x": 256, "y": 256, "z": 256 }
+    "bed": { "x": 256, "y": 256, "z": 256 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "bambu-a1-mini": {
     "displayName": "Bambu Lab A1 mini",
     "vendor": "Bambu Lab",
-    "bed": { "x": 180, "y": 180, "z": 180 }
+    "bed": { "x": 180, "y": 180, "z": 180 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "prusa-mk4": {
     "displayName": "Prusa MK4 / MK3S+",
     "vendor": "Prusa Research",
-    "bed": { "x": 250, "y": 210, "z": 220 }
+    "bed": { "x": 250, "y": 210, "z": 220 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "elegoo-saturn-4-ultra": {
     "displayName": "Elegoo Saturn 4 Ultra",
     "vendor": "Elegoo",
-    "bed": { "x": 218.88, "y": 122.88, "z": 220 }
+    "bed": { "x": 218.88, "y": 122.88, "z": 220 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "generic-obj-mtl-png": {
     "displayName": "Generic OBJ + MTL + textures",
     "vendor": "Generic",
-    "bed": { "x": 300, "y": 300, "z": 400 }
+    "bed": { "x": 300, "y": 300, "z": 400 },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   },
   "custom": {
     "displayName": "Custom",
     "vendor": "—",
-    "bed": { "x": null, "y": null, "z": null }
+    "bed": { "x": null, "y": null, "z": null },
+    "materials": [
+      { "id": "pla", "name": "PLA", "densityGcm3": 1.24, "pricePerGram": 0.03, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.03, "defaultSupportPercent": 15 }
+    ]
   }
 }

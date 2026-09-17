@@ -41,6 +41,10 @@ const SCHEMA = [
   { key: 'print',     path: ['print'],              fields: ['targetPrinterId', 'bedDimensions', 'minWallThickness', 'printMode', 'chordTolerance', 'objBakeSolidTextures', 'strictExport', 'repairOnImport'] },
   { key: 'gizmo',     path: ['gizmo'],              fields: ['space', 'snap'] },
   { key: 'pivotMode', path: ['selection', 'pivotMode'], scalar: true },
+  // Per-user cost inputs (Export tab ▸ Cost). Never persisted in .mixo —
+  // ProjectSerializer.buildDocument does not sweep this slice (watertight-
+  // repair-and-cost task 6).
+  { key: 'cost',      path: ['cost'],               fields: null },
 ];
 const SCHEMA_BY_KEY = Object.fromEntries(SCHEMA.map(e => [e.key, e]));
 
@@ -55,6 +59,7 @@ const SECTIONS = {
   camera:      [{ slice: 'render', fields: RENDER_CAMERA_FIELDS }],
   rendering:   [{ slice: 'renderOut' }],
   print:       [{ slice: 'print' }],
+  cost:        [{ slice: 'cost' }],
 };
 /** Section keys with a reset button (for callers / docs). */
 export const SECTION_KEYS = Object.keys(SECTIONS);

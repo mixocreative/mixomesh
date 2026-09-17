@@ -477,6 +477,48 @@ async function main() {
     assert(printReadinessUi.presetLabel === 'Build Volume Preset',
       `printer selector was not simplified to Build Volume Preset: ${printReadinessUi.presetLabel}`);
 
+    // ── Export tab ▸ Cost block renders + computes a live quote (task 6) ──
+    const costUi = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const scene = sm.SceneManager.getScene();
+      // A flat textured quad has zero enclosed volume — a good degenerate
+      // case that still exercises the real triangle/UV/material path.
+      const plane = B.MeshBuilder.CreatePlane('smoke-cost-quad', { size: 0.05 }, scene);
+      plane.metadata = { meshId: 'smoke_cost_quad' };
+      const mat = new B.StandardMaterial('smoke_cost_quad_m', scene);
+      mat.diffuseTexture = new B.DynamicTexture('smoke_cost_quad_t', { width: 4, height: 4 }, scene, false);
+      plane.material = mat;
+      al.AssetLoader.bindRestoredMesh('smoke_cost_quad', plane, 'smoke-cost-asset');
+      st.setState(s => ({
+        ...s,
+        scene: { ...s.scene, objects: { ...s.scene.objects, smoke_cost_quad: {
+          id: 'smoke_cost_quad', name: 'CostQuad', assetId: 'smoke-cost-asset', collectionId: null, parentId: null,
+          shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true,
+          sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1,
+        } } },
+      }), { silent: true });
+      document.querySelector('#rp-print-body [data-tab="export"]')?.click();
+      await frame();
+      const el = document.querySelector('#pp-cost-total');
+      const out = { exists: !!el, text: el?.textContent ?? '' };
+      plane.dispose();
+      st.setState(s => {
+        const objects = { ...s.scene.objects };
+        delete objects.smoke_cost_quad;
+        return { ...s, scene: { ...s.scene, objects } };
+      }, { silent: true });
+      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      await frame();
+      return out;
+    })()`);
+    assert(costUi.exists, 'Print panel Export tab should render #pp-cost-total');
+    assert(/0\.00\s*cm/.test(costUi.text),
+      `flat textured quad should read a 0.00 cm³ volume in the cost block, got: "${costUi.text}"`);
+
     const cursorMenu = await evaluate(cdp, `(async () => {
       const cm = await import('/src/ui/ContextMenu.js');
       cm.open({ x: 24, y: 24, source: 'viewport' });

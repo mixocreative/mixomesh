@@ -1,0 +1,167 @@
+/**
+ * Export tab ▸ Cost block (watertight-repair-and-cost task 6).
+ *
+ * Per-user material-cost quote: volume (summed per object, never Boolean-
+ * unioned) × density × price + a support-material premium. Recomputes
+ * synchronously on every field change and on the same panel-refresh events
+ * as the readiness block (PrintPanel.init's event list). `cost.*` settings
+ * of 0 mean "use the material default" (config/printers.json `materials[]`).
+ *
+ * Kept out of PrintPanel.js to keep that file's growth contained — this
+ * module owns both the render and the wiring for the block.
+ */
+
+import { getState, setState } from '../../core/StateManager.js';
+import { SettingsStore } from '../../core/SettingsStore.js';
+import { PrintManager } from '../../core/PrintManager.js';
+import { unitVolumesMM3, quote } from '../../core/print/PrintCost.js';
+import { REPAIR_TRIANGLE_CAP } from '../../core/repair/MeshRepair.js';
+import { t } from '../../i18n/index.js';
+import { escapeHtml, escapeAttr } from '../renderSafe.js';
+import { wireNumbers, wireSelects } from '../lib/fields.js';
+import printersData from '../../config/printers.json' with { type: 'json' };
+
+function _printer(state) {
+  const id = state.print?.targetPrinterId;
+  return printersData[id] ?? printersData.custom ?? null;
+}
+
+function _materials(state) {
+  return _printer(state)?.materials ?? [];
+}
+
+function _material(state) {
+  const materials = _materials(state);
+  const wanted = state.cost?.materialId;
+  return materials.find(m => m.id === wanted) ?? materials[0] ?? null;
+}
+
+/** Map a PrintCost.js reason code → a translated string for the badge title. */
+function _reasonText(reason) {
+  const nw = /^notWatertight:(\d+)$/.exec(reason);
+  if (nw) return t('print.cost.reasonNotWatertight', { n: Number(nw[1]) });
+  const ov = /^overlap:(\d+)$/.exec(reason);
+  if (ov) return t('print.cost.reasonOverlap', { n: Number(ov[1]) });
+  if (reason === 'noPrice') return t('print.cost.reasonNoPrice');
+  if (reason === 'noDensity') return t('print.cost.reasonNoDensity');
+  if (reason === 'tooBig') return t('print.cost.reasonTooBig');
+  return reason;
+}
+
+function _numberField(id, labelKey, value) {
+  return `<label class="pp-xyz" for="${id}">${escapeHtml(t(labelKey))}` +
+    `<input type="number" min="0" step="0.01" id="${id}" value="${escapeAttr(value || 0)}"></label>`;
+}
+
+/**
+ * Render + wire the Cost block into `container` (an existing empty element
+ * the Export tab appends into). `state` is the current app-state snapshot —
+ * the caller already has one from its own render pass.
+ *
+ * @param {HTMLElement} container
+ * @param {object} state
+ */
+export function renderCostBlock(container, state) {
+  const materials = _materials(state);
+  const material = _material(state);
+  const cost = state.cost ?? {};
+
+  let html = '<div class="pp-field-group pp-cost">';
+  html += `<label>${escapeHtml(t('print.cost.title'))}</label>`;
+
+  html += `<label class="pp-cost-sublabel" for="pp-cost-material">${escapeHtml(t('print.cost.material'))}</label>`;
+  html += '<select id="pp-cost-material" class="pp-preset-select">';
+  for (const m of materials) {
+    const sel = m.id === material?.id ? ' selected' : '';
+    html += `<option value="${escapeAttr(m.id)}"${sel}>${escapeHtml(m.name)}</option>`;
+  }
+  html += '</select>';
+
+  html += '<div class="pp-xyz-row">';
+  html += _numberField('pp-cost-price', 'print.cost.pricePerGram', cost.pricePerGram);
+  html += _numberField('pp-cost-support-price', 'print.cost.supportPrice', cost.supportPricePerGram);
+  html += _numberField('pp-cost-support-pct', 'print.cost.supportPercent', cost.supportPercent);
+  html += '</div>';
+
+  html += `<label class="pp-cost-sublabel" for="pp-cost-currency">${escapeHtml(t('print.cost.currency'))}</label>`;
+  html += `<input type="text" id="pp-cost-currency" class="pp-ratio-input pp-cost-currency" maxlength="4" value="${escapeAttr(cost.currency || 'USD')}">`;
+
+  html += '<div class="pp-info" id="pp-cost-total"></div>';
+  html += '</div>';
+
+  container.innerHTML = html;
+
+  const commit = (patch) => {
+    setState(s => ({ ...s, cost: { ...s.cost, ...patch } }), { silent: true });
+    SettingsStore.save();
+    _renderResult(container, getState());
+  };
+
+  // Invalid (non-finite) typed value restores the stored number in place —
+  // same convention as the Bed tab's XYZ inputs (PrintPanel._renderBedTab).
+  const restoreNumber = (key) => (inp) => { inp.value = getState().cost?.[key] ?? 0; };
+
+  wireSelects(container, '#pp-cost-material', (_sel, id) => commit({ materialId: id }));
+  wireNumbers(container, '#pp-cost-price', (_inp, v) => commit({ pricePerGram: Math.max(0, v) }),
+    { onInvalid: restoreNumber('pricePerGram') });
+  wireNumbers(container, '#pp-cost-support-price', (_inp, v) => commit({ supportPricePerGram: Math.max(0, v) }),
+    { onInvalid: restoreNumber('supportPricePerGram') });
+  wireNumbers(container, '#pp-cost-support-pct', (_inp, v) => commit({ supportPercent: Math.max(0, v) }),
+    { onInvalid: restoreNumber('supportPercent') });
+
+  const currencyInput = container.querySelector('#pp-cost-currency');
+  currencyInput?.addEventListener('change', () => {
+    const v = (currencyInput.value || 'USD').trim().slice(0, 4).toUpperCase() || 'USD';
+    currencyInput.value = v;
+    commit({ currency: v });
+  });
+
+  _renderResult(container, state);
+}
+
+function _renderResult(container, state) {
+  const el = container.querySelector('#pp-cost-total');
+  if (!el) return;
+
+  const material = _material(state);
+  const cost = state.cost ?? {};
+  const currency = cost.currency || 'USD';
+
+  const ctx = PrintManager.previewExportContext();
+  if (!ctx) {
+    el.textContent = '—';
+    return;
+  }
+
+  const vols = unitVolumesMM3(ctx);
+  const totalTriangles = [...vols.values()].reduce((sum, v) => sum + v.triangles, 0);
+  if (totalTriangles > REPAIR_TRIANGLE_CAP) {
+    el.innerHTML = `— <span class="pp-approx" title="${escapeAttr(t('print.cost.reasonTooBig'))}">` +
+      `${escapeHtml(t('print.cost.approximate'))}</span>`;
+    return;
+  }
+
+  const q = quote(ctx, {
+    pricePerGram: cost.pricePerGram || 0,
+    supportPricePerGram: cost.supportPricePerGram || 0,
+    supportPercent: cost.supportPercent || 0,
+    currency,
+  }, material);
+
+  const fmt = (v, digits) => (v == null ? '—' : v.toFixed(digits));
+  const resultText = t('print.cost.result', {
+    volume: fmt(q.volumeCM3, 2),
+    grams: fmt(q.grams, 1),
+    materialCost: fmt(q.materialCost, 2),
+    supportCost: fmt(q.supportCost, 2),
+    total: fmt(q.total, 2),
+    currency,
+  });
+
+  let html = escapeHtml(resultText);
+  if (q.approximate) {
+    const title = q.reasons.map(_reasonText).join('; ');
+    html += ` <span class="pp-approx" title="${escapeAttr(title)}">${escapeHtml(t('print.cost.approximate'))}</span>`;
+  }
+  el.innerHTML = html;
+}

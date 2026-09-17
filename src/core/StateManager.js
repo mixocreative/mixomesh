@@ -64,6 +64,9 @@ const INITIAL_STATE = {
   },
   selection: { selectedIds: [], activeId: null, pivotMode: DS.pivotMode },
   print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions }, exportRatios: [...(DS.print.exportRatios ?? [])] },
+  // Print cost inputs (Export tab ▸ Cost). Per-user setting, NEVER persisted
+  // in .mixo (ProjectSerializer.buildDocument does not sweep this slice).
+  cost: { ...DS.cost },
   ui: {
     activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
     // Workspaces (PART 13b) — per-user preference, seeded from localStorage,
