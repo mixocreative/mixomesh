@@ -11,7 +11,7 @@
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'textured-quad.glb');
 
@@ -127,5 +127,14 @@ glb.writeUInt32LE(bin.length, 20 + json.length);
 glb.writeUInt32LE(0x004E4942, 24 + json.length); // 'BIN\0'
 bin.copy(glb, 28 + json.length);
 
-writeFileSync(OUT, glb);
-console.log(`Wrote ${OUT} (${glb.length} bytes)`);
+// T7: the bytes are also EXPORTED so a hygiene test can regenerate them and
+// compare against the committed .glb — a fixture that has silently drifted
+// from its generator makes every smoke assertion about it meaningless. Only
+// a direct `node tests/fixtures/make-textured-quad.mjs` run writes the file.
+export const glbBytes = glb;
+export const outPath = OUT;
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  writeFileSync(OUT, glb);
+  console.log(`Wrote ${OUT} (${glb.length} bytes)`);
+}

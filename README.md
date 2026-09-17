@@ -92,7 +92,9 @@ your repo is named.
 ## Verify
 
 ```bash
+npm run lint
 npm run typecheck
+npm run i18n:check
 npm run build
 npm run test
 npm run test:browser
@@ -100,11 +102,21 @@ npm run test:export
 npm run test:repair
 ```
 
+`npm run test:all` chains the four test commands in that order
+(`test && test:browser && test:export && test:repair`). The browser smokes
+stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so
+the headless node:test suite must remain runnable without either.
+
 The browser smokes start a temporary Vite server and drive Chrome or Edge
 through the DevTools Protocol (`test:browser` covers UI + rendering output
 including a real headless turntable mp4; `test:export` is the functional
 export round-trip; `test:repair` imports an open (non-watertight) mesh,
 repairs it, exports it, and checks the result is actually watertight).
+`npm run fixtures` regenerates the two committed `.glb` fixtures those smokes
+import (`tests/fixtures/open-tetra.glb`, `tests/fixtures/textured-quad.glb`)
+from their generator scripts; `tests/hygiene.test.mjs` fails if a committed
+fixture has drifted from its generator.
+
 `npm run test:video` is an OPTIONAL headed check — it opens a small visible
 browser window for a full-size turntable recording (`VIDEO_CHECK_EDGE=1`
 forces Edge). Add targeted manual Chrome or slicer checks when changing
@@ -117,7 +129,7 @@ Dependencies are project-local and installed with npm. The helper script forces
 not decide the install.
 
 One-click watertight repair and a live material-cost quote run on vendored,
-offline engines in `public/vendor/`: [MeshFixLib](https://github.com/hololocheck/meshfix-wasm)
+offline engines in `public/vendor/`: [MeshFixLib](https://github.com/hololocheck/MeshFixLib)
 (MIT) fills holes and fixes non-manifold geometry, [Manifold](https://github.com/elalish/manifold)
 (Apache-2.0) backs the offline Boolean/CSG path — no runtime CDN, no network
 call either engine depends on.

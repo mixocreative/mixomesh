@@ -2,6 +2,7 @@
 //   node --import ./tests/register-hooks.mjs tests/hygiene.test.mjs
 
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { installEnv } from './env.mjs';
 import printers from '../src/config/printers.json' with { type: 'json' };
 
@@ -112,6 +113,85 @@ await test('M17: undoing a nested group restores the Babylon parent, not scene r
   assert.equal(getState().scene.objects.m1.parentId, 'gOut', 'state parent restored');
   assert.equal(m.parent, nOut,
     'Babylon parent must return to the OUTER group node, not scene root (M17)');
+});
+
+// ── M11: vendored third-party provenance + offline posture ──────────────
+// The repair engine and the CSG kernel exist under public/vendor/ precisely
+// so nothing in the export path fetches from a CDN at runtime. Both halves of
+// that are asserted here: the files are all present with their licences and
+// an attribution header, and no vendored file carries a fetchable URL.
+
+// The 7 payload files (Blueprint §0.5 / public/vendor/NOTICE.md) plus the
+// provenance record itself.
+const VENDOR_FILES = [
+  'public/vendor/meshfix/LICENSE',
+  'public/vendor/meshfix/mesh-fix-core.js',
+  'public/vendor/meshfix/mesh-fix-core.wasm',
+  'public/vendor/meshfix/mesh-fix-lib.js',
+  'public/vendor/manifold-3d/LICENSE',
+  'public/vendor/manifold-3d/manifold.js',
+  'public/vendor/manifold-3d/manifold.wasm',
+];
+const VENDOR_JS = VENDOR_FILES.filter(f => f.endsWith('.js'));
+// http(s) literals that are legitimately present: XML NAMESPACE identifiers
+// for the 3MF container format (mesh-fix-lib.js ships its own, unused, 3MF
+// writer). A namespace is an identifier, never fetched. Any other host is a
+// potential runtime network dependency and fails this test.
+const NAMESPACE_HOSTS = ['schemas.microsoft.com', 'schemas.openxmlformats.org'];
+
+await test('M11: all 7 vendored files exist, plus the NOTICE provenance record', () => {
+  assert.equal(VENDOR_FILES.length, 7);
+  for (const file of [...VENDOR_FILES, 'public/vendor/NOTICE.md']) {
+    assert.ok(existsSync(file), `${file} is missing`);
+    assert.ok(statSync(file).size > 0, `${file} is empty`);
+  }
+  const notice = readFileSync('public/vendor/NOTICE.md', 'utf8');
+  assert.match(notice, /github\.com\/hololocheck\/MeshFixLib/, 'NOTICE names the MeshFixLib repo');
+  assert.match(notice, /2377e2ef3015e628a31815eadcba7a87bda30778/, 'NOTICE pins the upstream revision');
+  assert.match(notice, /manifold-3d@3\.4\.0/, 'NOTICE pins the Manifold version');
+  assert.match(notice, /Apache-2\.0/);
+  assert.match(notice, /MIT/);
+});
+
+await test('M11: every vendored .js carries a one-line attribution header', () => {
+  for (const file of VENDOR_JS) {
+    const first = readFileSync(file, 'utf8').split('\n', 1)[0];
+    assert.match(first, /^\/\/ VENDORED THIRD-PARTY FILE/, `${file} has no attribution header`);
+    assert.match(first, /https:\/\/github\.com\//, `${file} header has no upstream URL`);
+    assert.match(first, /\b(MIT|Apache-2\.0)\b/, `${file} header has no licence`);
+    assert.match(first, /NOTICE\.md/, `${file} header does not point at the provenance record`);
+  }
+});
+
+await test('M11: no vendored file carries a fetchable URL (no runtime CDN)', () => {
+  for (const file of VENDOR_JS) {
+    const text = readFileSync(file, 'utf8');
+    const header = text.split('\n', 1)[0];
+    for (const url of text.match(/https?:\/\/[^\s"'`)\\]+/g) ?? []) {
+      if (header.includes(url)) continue;                       // our own attribution line
+      const host = url.replace(/^https?:\/\//, '').split('/')[0];
+      assert.ok(NAMESPACE_HOSTS.includes(host),
+        `${file} references ${url} — vendored code must never fetch over the network`);
+    }
+    assert.equal(/\b(?:fetch|importScripts)\(\s*["'`]https?:/.test(text), false,
+      `${file} fetches a remote URL at runtime`);
+  }
+});
+
+// ── T7: fixtures must match their generators ────────────────────────────
+// A committed .glb that has drifted from the script that produced it makes
+// every smoke assertion about it meaningless (the smoke would be measuring
+// geometry nobody can reproduce). `npm run fixtures` regenerates both.
+await test('T7: committed .glb fixtures match their generator output byte for byte', async () => {
+  for (const mod of ['./fixtures/make-open-tetra.mjs', './fixtures/make-textured-quad.mjs']) {
+    const { glbBytes, outPath } = await import(mod);
+    assert.ok(existsSync(outPath), `${outPath} is missing — run npm run fixtures`);
+    const committed = readFileSync(outPath);
+    assert.equal(committed.length, glbBytes.length,
+      `${outPath} is ${committed.length} bytes, generator produces ${glbBytes.length} — run npm run fixtures`);
+    assert.ok(committed.equals(glbBytes),
+      `${outPath} has drifted from ${mod} — run npm run fixtures`);
+  }
 });
 
 console.log('\n' + out.join('\n'));

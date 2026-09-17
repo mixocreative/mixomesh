@@ -89,6 +89,13 @@ async function main() {
         const meshIds = await AssetLoader.loadFromBlob(blob, 'textured-quad.glb');
         if (!meshIds.length) return { error: 'import produced no meshes' };
 
+        // Review C1: snapshot the LIVE UVs before the export so the exported
+        // file can be compared against them byte for byte, and so a repair
+        // that touched the live mesh (it must only ever touch clones) shows up.
+        const liveMesh = AssetLoader.getBabylonMesh(meshIds[0]);
+        const uvsBefore = Array.from(liveMesh?.getVerticesData('uv') ?? []);
+        const posBefore = Array.from(liveMesh?.getVerticesData('position') ?? []);
+
         let captured = null, suggested = null;
         window.showSaveFilePicker = async (opts) => {
           suggested = opts?.suggestedName ?? null;
@@ -109,7 +116,8 @@ async function main() {
         for (let i = 0; i < buf.length; i += CHUNK) {
           bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
         }
-        return { meshCount: meshIds.length, suggested, b64: btoa(bin) };
+        const uvsAfter = Array.from(liveMesh?.getVerticesData('uv') ?? []);
+        return { meshCount: meshIds.length, suggested, b64: btoa(bin), uvsBefore, uvsAfter, posBefore };
       } catch (err) {
         return { error: String(err?.stack ?? err) };
       }
@@ -128,6 +136,62 @@ async function main() {
     assert(modelXml, '3D/3dmodel.model missing from exported package');
     assert(/<m:texture2d /.test(modelXml), 'model XML missing m:texture2d resource');
     assert(/<m:texture2dgroup /.test(modelXml), 'model XML missing m:texture2dgroup');
+
+    // ── Review C1: a textured, HOLE-FREE part exports with byte-identical UVs.
+    // The `repair` prep step used to run unconditionally on every export clone,
+    // and MeshFixLib's stage 1 merges duplicate positions — which is exactly
+    // what a UV seam is made of — so a healthy textured part came back with
+    // collapsed seam UVs and a smeared texture. The pipeline now diagnoses
+    // first and leaves an already-closed clone alone, and re-attaches UVs per
+    // triangle CORNER when it does repair.
+    //
+    // The check is anchored on POSITION, not on buffer order: `optimizeIndices`
+    // legitimately reorders the vertex buffer, so only the (position → uv)
+    // pairing is meaningful. Positions are compared centroid-relative in
+    // print-space millimetres, which cancels the export's translation (drop
+    // position + pivot) while keeping the 1:1 ratio's 1000× BU→mm factor.
+    assert(result.uvsBefore.length === 8,
+      `fixture should carry 4 UV pairs, got ${result.uvsBefore.length / 2}`);
+    assert(JSON.stringify(result.uvsAfter) === JSON.stringify(result.uvsBefore),
+      `export mutated the LIVE mesh's UVs (clones only!): ${JSON.stringify(result.uvsBefore)}`
+      + ` -> ${JSON.stringify(result.uvsAfter)}`);
+
+    const exportedUvs = [...modelXml.matchAll(/<m:tex2coord u="([^"]+)" v="([^"]+)"\/>/g)]
+      .map(m => [parseFloat(m[1]), parseFloat(m[2])]);
+    const exportedPos = [...modelXml.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"\/>/g)]
+      .map(m => [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])]);
+    assert(exportedUvs.length === 4 && exportedPos.length === 4,
+      `expected 4 vertices with 4 UV pairs, got ${exportedPos.length} / ${exportedUvs.length}`
+      + ' — a merged UV seam or a dropped vertex');
+
+    // Same map as src/core/print/PrintSpace.toPrintSpace, times BU_TO_MM.
+    const sourcePos = [];
+    const sourceUvs = [];
+    for (let i = 0; i < 4; i++) {
+      const [x, y, z] = result.posBefore.slice(i * 3, i * 3 + 3);
+      sourcePos.push([-x * 1000, -z * 1000, y * 1000]);
+      sourceUvs.push(result.uvsBefore.slice(i * 2, i * 2 + 2));
+    }
+    const centred = (list) => {
+      const c = [0, 1, 2].map(a => list.reduce((sum, v) => sum + v[a], 0) / list.length);
+      return list.map(v => [v[0] - c[0], v[1] - c[1], v[2] - c[2]]);
+    };
+    const expCentred = centred(exportedPos);
+    const srcCentred = centred(sourcePos);
+    for (let i = 0; i < 4; i++) {
+      const near = srcCentred.findIndex(v =>
+        Math.abs(v[0] - expCentred[i][0]) < 0.01
+        && Math.abs(v[1] - expCentred[i][1]) < 0.01
+        && Math.abs(v[2] - expCentred[i][2]) < 0.01);
+      assert(near >= 0,
+        `exported vertex ${i} at ${JSON.stringify(expCentred[i])} matches no source vertex`
+        + ` (source ${JSON.stringify(srcCentred)})`);
+      assert(exportedUvs[i][0] === sourceUvs[near][0] && exportedUvs[i][1] === sourceUvs[near][1],
+        `UV at the exported corner ${JSON.stringify(expCentred[i])} is`
+        + ` ${JSON.stringify(exportedUvs[i])} but its source vertex carries`
+        + ` ${JSON.stringify(sourceUvs[near])} — the (position, uv) pairing was broken`);
+    }
+    console.log(`UV identity: 4 (position, uv) pairs exported unchanged`);
 
     const texEntries = Object.keys(zip.files).filter(p => /^3D\/Textures\/.+\.png$/.test(p));
     assert(texEntries.length === 1, `expected 1 texture PNG, got ${texEntries.length}`);

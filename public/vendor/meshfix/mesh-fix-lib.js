@@ -1,3 +1,4 @@
+// VENDORED THIRD-PARTY FILE — do not edit. MeshFixLib (JS wrapper) | https://github.com/hololocheck/MeshFixLib | MIT | v3.2, upstream 2377e2ef3015e628a31815eadcba7a87bda30778 | see public/vendor/NOTICE.md
 /**
  * 3MF Mesh Fix Library v3.2 (WASM)
  *

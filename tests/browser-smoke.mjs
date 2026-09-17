@@ -1078,7 +1078,15 @@ async function main() {
     // Task 7: the status-bar centre HUD shows the scene-wide triangle budget
     // (`tris <current> / <budget>`) unconditionally — not selection-gated —
     // so it is already live right after this import with nothing selected.
-    assert(/tris \d/.test(stlDiag.hudText), `HUD triangle budget text missing: "${stlDiag.hudText}"`);
+    // T2: assert the NUMERIC PREFIX, not just the word — this STL is one
+    // triangle and the scene holds nothing else, so the count must read
+    // exactly 1 over a positive budget. `tris \d` alone would still pass on
+    // a double-counted or zeroed walk.
+    const hudMatch = /^tris (\d+(?:\.\d+)?[kM]?) \/ (\d+(?:\.\d+)?[kM]?)/.exec(stlDiag.hudText);
+    assert(hudMatch, `HUD triangle budget text missing or malformed: "${stlDiag.hudText}"`);
+    assert(hudMatch[1] === '1',
+      `HUD should read exactly 1 triangle for this one-facet STL, got "${hudMatch[1]}" (full: "${stlDiag.hudText}")`);
+    assert(parseFloat(hudMatch[2]) > 0, `HUD budget must be positive, got "${hudMatch[2]}"`);
     assert(stlDiag.hudTitle.length > 0, 'HUD triangle budget tooltip missing');
 
     // ── Base64 save-path worker: real-Worker output === sync codec (#3) ──

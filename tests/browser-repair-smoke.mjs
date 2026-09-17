@@ -177,7 +177,9 @@ async function main() {
     assert(/_r1to1\.3mf$/.test(result.suggested ?? ''),
       `suggested filename should end _r1to1.3mf, got ${result.suggested}`);
     console.log(`repairObject: holesFilled=${result.holesFilled} nmFixed=${result.nmFixed}`);
-    console.log('live-mesh diagnostics', JSON.stringify(result.diag, null, 2));
+    // T5: the full diagnostics dump is FAILURE output, not success noise — each
+    // assertion below embeds the part of it that explains its own failure.
+    const diagDump = () => JSON.stringify(result.diag, null, 2);
 
     // Root-cause pin (fix round 1): the LIVE mesh right after repair must be
     // exactly the closed 4-triangle solid, and it must be the ONLY mesh in
@@ -185,13 +187,15 @@ async function main() {
     // appears here, something is double-registering, not just double-
     // counting at the HUD layer.
     assert(result.diag.meshDump.length === 1,
-      `expected exactly 1 registered mesh for this meshId, got ${result.diag.meshDump.length}: ${JSON.stringify(result.diag.meshDump)}`);
-    assert(result.diag.liveTris === 4, `live mesh should have exactly 4 triangles after repair, got ${result.diag.liveTris}`);
-    assert(result.diag.liveVerts === 4, `live mesh should have exactly 4 vertices after repair, got ${result.diag.liveVerts}`);
+      `expected exactly 1 registered mesh for this meshId, got ${result.diag.meshDump.length}: ${diagDump()}`);
+    assert(result.diag.liveTris === 4,
+      `live mesh should have exactly 4 triangles after repair, got ${result.diag.liveTris}: ${diagDump()}`);
+    assert(result.diag.liveVerts === 4,
+      `live mesh should have exactly 4 vertices after repair, got ${result.diag.liveVerts}: ${diagDump()}`);
     assert(result.diag.liveDiag.isWatertight === true,
-      `MeshRepair.diagnoseMesh on the live mesh should report isWatertight:true, got: ${JSON.stringify(result.diag.liveDiag)}`);
+      `MeshRepair.diagnoseMesh on the live mesh should report isWatertight:true, got: ${diagDump()}`);
     assert(result.diag.liveDiag.boundaryEdges === 0,
-      `live mesh should have 0 boundary edges after repair, got ${result.diag.liveDiag.boundaryEdges}`);
+      `live mesh should have 0 boundary edges after repair, got ${result.diag.liveDiag.boundaryEdges}: ${diagDump()}`);
 
     const bytes = Buffer.from(result.b64, 'base64');
     // Optional: dump the exported 3MF for an external slicer check
@@ -257,8 +261,22 @@ async function main() {
     assert(hudMatch, `HUD should read "tris <n> / <budget>", got: "${result.hudText}"`);
     assert(hudMatch[1] === '4', `HUD triangle count should read exactly 4, got "${hudMatch[1]}" (full text: "${result.hudText}")`);
     console.log(`cost block text: "${result.costText}"`);
-    assert(result.costText && result.costText !== '—' && /\d/.test(result.costText),
-      `#pp-cost-total should render a non-null number for this solid, got: "${result.costText}"`);
+    assert(result.costText && result.costText !== '\u2014',
+      `#pp-cost-total should render a quote for this solid, got: "${result.costText}"`);
+    // T1: this solid is exactly 1000 mm³ = 1.00 cm³ (the same number the
+    // signed-volume check above verified in the exported file), so the quote's
+    // volume must READ that — `/\d/` would pass on any stray digit.
+    assert(/1\.00\s*cm/.test(result.costText),
+      `cost quote should show 1.00 cm³ for this 1000 mm³ solid, got: "${result.costText}"`);
+    // T4: and the money must resolve. `print.cost.result` renders every
+    // unknown value as an em dash, so a "—" anywhere in the total position
+    // means density/price did not resolve and the quote is decorative.
+    // No `$` anchor: an approximate quote appends an "Approximate" badge
+    // inside the same element, so the currency is not always last.
+    const totalMatch = /=\s*([\d.]+|\u2014)\s*[A-Z]{1,4}/.exec(result.costText);
+    assert(totalMatch, `cost quote has no "= <total> <currency>" tail: "${result.costText}"`);
+    assert(totalMatch[1] !== '\u2014' && parseFloat(totalMatch[1]) > 0,
+      `cost total must be a real positive number, got "${totalMatch[1]}" in "${result.costText}"`);
 
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

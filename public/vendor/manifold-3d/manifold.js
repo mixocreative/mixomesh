@@ -1,3 +1,4 @@
+// VENDORED THIRD-PARTY FILE — do not edit. Manifold CSG kernel | https://github.com/elalish/manifold | Apache-2.0 | manifold-3d@3.4.0 | see public/vendor/NOTICE.md
 var Module = (() => {
   var _scriptName = import.meta.url;
 
