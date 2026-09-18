@@ -122,54 +122,59 @@ await test('F2: a non-finite coordinate throws before write-back', async () => {
   assert.deepEqual(Array.from(m.getVerticesData('position')), OPEN_POS, 'original positions untouched');
 });
 
-// ── I1: winding re-tag is gated on the repair actually succeeding ────────
-// A closed tetra and its flipped twin: Babylon is left-handed, so a
-// CounterClockWise-outward mesh has a NEGATIVE right-handed signed volume.
+// ── I1: written-back winding is conformed to the mesh's side flag ────────
+// Measured 2026-09-18: MeshFixLib normalises its output to a POSITIVE
+// right-handed signed volume regardless of input. Babylon is left-handed, so
+// a CounterClockWise-outward mesh has a NEGATIVE signed volume — the engine's
+// output is outward only under a ClockWise flag. The flag must stay as it
+// was and the indices must be reversed when the geometry disagrees with it.
 const TETRA_POS = [0,0,0, 10,0,0, 0,20,0, 0,0,30];
 const TETRA_POSWIND = [0,2,1, 0,1,3, 0,3,2, 1,2,3];                               // signed volume +1000
 const TETRA_NEGWIND = triples(TETRA_POSWIND).flatMap(([a, b, c]) => [a, c, b]);   // signed volume -1000
+const engineReturning = (T, isWatertight) => ({
+  diagnose: () => ({ boundary: isWatertight ? 0 : 2, nonManifold: 0, components: 1, isWatertight }),
+  repairObject: async (V) => ({ V: V.map(v => [...v]), T: triples(T), report: { holesFilled: 1 } }),
+});
 
 await test('I1: sanity — the two tetra windings have opposite signed volumes', () => {
   assert.ok(signedVolume(TETRA_POS, TETRA_NEGWIND) < 0, 'TETRA_NEGWIND is the negative-volume winding');
   assert.ok(signedVolume(TETRA_POS, TETRA_POSWIND) > 0, 'TETRA_POSWIND is the positive-volume winding');
 });
 
-await test('I1: a CONFIRMED watertight repair re-tags a ClockWise clone CounterClockWise', async () => {
-  R.__test.setEngine({
-    diagnose: () => ({ boundary: 0, nonManifold: 0, components: 1, isWatertight: true }),
-    repairObject: async (V, T) => ({ V: V.map(v => [...v]), T: [...T.map(x => [...x]), [1, 2, 3]], report: { holesFilled: 1 } }),
-  });
-  const m = fakeMesh(TETRA_POS, TETRA_NEGWIND);
+await test('I1: ClockWise (glTF) mesh + engine POSITIVE output ⇒ flag kept, indices kept (already outward)', async () => {
+  R.__test.setEngine(engineReturning(TETRA_POSWIND, true));
+  const m = fakeMesh(TETRA_POS, [0,2,1, 0,1,3, 0,3,2]);
   m.sideOrientation = CLOCKWISE;
   await R.repairMesh(m);
-  assert.equal(m.sideOrientation, COUNTER_CLOCKWISE, 'native engine winding ⇒ CounterClockWise');
+  assert.equal(m.sideOrientation, CLOCKWISE, 'side flag is never re-tagged');
+  assert.ok(signedVolume(m.getVerticesData('position'), m.getIndices()) > 0, 'ClockWise outward = positive signed volume');
 });
 
-await test('I1: a PARTIAL repair takes the winding from the output signed volume, not on faith', async () => {
-  // Engine leaves the mesh open (isWatertight false) but re-winds it to the
-  // NEGATIVE (CounterClockWise-outward) orientation → the flag must follow.
-  R.__test.setEngine({
-    diagnose: () => ({ boundary: 2, nonManifold: 0, components: 1, isWatertight: false }),
-    repairObject: async (V) => ({ V: V.map(v => [...v]), T: triples(TETRA_NEGWIND), report: {} }),
-  });
-  const ccw = fakeMesh(TETRA_POS, TETRA_POSWIND);
-  ccw.sideOrientation = CLOCKWISE;
-  await R.repairMesh(ccw);
-  assert.equal(ccw.sideOrientation, COUNTER_CLOCKWISE,
-    'partial repair whose output has NEGATIVE signed volume ⇒ CounterClockWise');
+await test('I1: CounterClockWise (native/OBJ) mesh + engine POSITIVE output ⇒ flag kept, indices REVERSED', async () => {
+  R.__test.setEngine(engineReturning(TETRA_POSWIND, true));
+  const m = fakeMesh(TETRA_POS, [0,1,2, 0,3,1, 0,2,3]);
+  m.sideOrientation = COUNTER_CLOCKWISE;
+  await R.repairMesh(m);
+  assert.equal(m.sideOrientation, COUNTER_CLOCKWISE, 'side flag is never re-tagged');
+  assert.ok(signedVolume(m.getVerticesData('position'), m.getIndices()) < 0,
+    'CounterClockWise outward = negative signed volume — the old code shipped this inside-out');
+});
 
-  // Same engine shape, but the output keeps the POSITIVE winding → the
-  // ClockWise flag must be LEFT ALONE (the old code re-tagged unconditionally
-  // and would ship this part inside-out).
-  R.__test.setEngine({
-    diagnose: () => ({ boundary: 2, nonManifold: 0, components: 1, isWatertight: false }),
-    repairObject: async (V) => ({ V: V.map(v => [...v]), T: triples(TETRA_POSWIND), report: {} }),
-  });
-  const cw = fakeMesh(TETRA_POS, TETRA_NEGWIND);
-  cw.sideOrientation = CLOCKWISE;
-  await R.repairMesh(cw);
-  assert.equal(cw.sideOrientation, CLOCKWISE,
-    'partial repair whose output has POSITIVE signed volume stays ClockWise');
+await test('I1: an engine that happens to return the flag-consistent winding is left untouched', async () => {
+  R.__test.setEngine(engineReturning(TETRA_NEGWIND, true));
+  const m = fakeMesh(TETRA_POS, [0,1,2, 0,3,1, 0,2,3]);
+  m.sideOrientation = COUNTER_CLOCKWISE;
+  await R.repairMesh(m);
+  assert.deepEqual(m.getIndices(), TETRA_NEGWIND, 'indices written back verbatim');
+});
+
+await test('I1: a PARTIAL repair is conformed by the same rule (engine still orients globally)', async () => {
+  R.__test.setEngine(engineReturning(TETRA_POSWIND, false));
+  const m = fakeMesh(TETRA_POS, [0,1,2, 0,3,1, 0,2,3]);
+  m.sideOrientation = COUNTER_CLOCKWISE;
+  const r = await R.repairMesh(m);
+  assert.equal(r.isWatertight, false);
+  assert.ok(signedVolume(m.getVerticesData('position'), m.getIndices()) < 0, 'reversed to match the CounterClockWise flag');
 });
 
 // ── M7 / M8 / I2 / CIA F4 ───────────────────────────────────────────────

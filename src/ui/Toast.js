@@ -41,6 +41,19 @@ function _render(id, message, type, onClick) {
   return el;
 }
 
+/**
+ * Dismiss every toast carrying `tag` (see show()'s opts.tag). Used to retire
+ * a stale per-object validation toast the moment that object is validated
+ * again — a "2 warning(s) — click to Auto-Fix" toast must not outlive the
+ * repair it offers (owner feedback 2026-09-18: four of them stacked up after
+ * Repair all had already fixed everything).
+ * @param {string} tag
+ */
+export function dismissTag(tag) {
+  if (!tag) return;
+  for (const [id, entry] of _active) if (entry.tag === tag) dismiss(id);
+}
+
 function _evict() {
   if (_active.size < MAX_TOASTS) return;
   const oldest = _active.keys().next().value;
@@ -52,8 +65,9 @@ function _evict() {
  * @param {string} message
  * @param {'info'|'success'|'warning'|'error'|'loading'} [type]
  * @param {number} [duration]  ms; 0 = persistent; loading type is always persistent
- * @param {{ onClick?: () => void }} [opts]  onClick makes the toast a button:
- *   click / Enter / Space dismisses it then runs the handler (B5 click-through)
+ * @param {{ onClick?: () => void, tag?: string }} [opts]  onClick makes the toast a button:
+ *   click / Enter / Space dismisses it then runs the handler (B5 click-through);
+ *   tag groups toasts for dismissTag()
  * @returns {string} toast id (pass to dismiss())
  */
 export function show(message, type = 'info', duration = 4000, opts = {}) {
@@ -66,7 +80,7 @@ export function show(message, type = 'info', duration = 4000, opts = {}) {
 
   const autoDismiss = type !== 'loading' && duration > 0;
   const timerId = autoDismiss ? setTimeout(() => dismiss(id), duration) : null;
-  _active.set(id, { el, timerId });
+  _active.set(id, { el, timerId, tag: opts.tag ?? null });
   return id;
 }
 
@@ -90,9 +104,15 @@ export function init() {
   subscribe(EVENTS.TOAST, ({ message, type = 'info', duration = 4000 }) => {
     show(message, type, duration);
   });
+  // A fresh validation result supersedes any per-object validation toast
+  // still on screen (the validator re-runs after every repair).
+  subscribe(EVENTS.VALIDATION_COMPLETE, ({ meshId }) => { if (meshId) dismissTag(validationTag(meshId)); });
 }
 
-export const Toast = { init, show, dismiss };
+/** Tag for the per-object validation toasts (import auto-validate). */
+export function validationTag(meshId) { return `validation:${meshId}`; }
+
+export const Toast = { init, show, dismiss, dismissTag, validationTag };
 
 // `safeAsync` moved to ./Status.js (centralized error/loading policy). Import it
 // from there; this re-export keeps older import paths working.

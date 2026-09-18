@@ -468,9 +468,12 @@ await test('repair: non-strict export with a confirmed not-watertight clone → 
   }
 });
 
-await test('repair: ClockWise clone re-tagged CounterClockWise on a repair write-back; registry mesh untouched', async () => {
-  // CSG2 disabled so only the repair step's own flag re-tag (repairMesh,
-  // matching _csgRebake's rule) is exercised — not CSG's.
+await test('repair: a repair write-back never re-tags the side flag; registry mesh untouched', async () => {
+  // CSG2 disabled so only the repair step's own winding rule (repairMesh
+  // _conformWinding: flag kept, INDICES reversed when the geometry disagrees)
+  // is exercised — not CSG's _csgRebake re-tag. A ClockWise glTF clone must
+  // come out of a repair still ClockWise (the old CounterClockWise re-tag
+  // shipped repaired glTF parts inside-out — measured 2026-09-18).
   const B = globalThis.window.BABYLON;
   const savedCSG = B.CSG2, savedInit = B.InitializeCSG2Async;
   B.CSG2 = undefined; B.InitializeCSG2Async = undefined;
@@ -479,8 +482,10 @@ await test('repair: ClockWise clone re-tagged CounterClockWise on a repair write
     setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { side: 0 }) } });
     MeshValidator.validateMesh = valOK;
     await PrintManager.exportOBJ();
-    assert.equal(_clones[0].sideOrientation, 1, 'repaired clone re-tagged CounterClockWise');
+    assert.equal(_clones[0].sideOrientation, 0, 'repaired clone keeps its ClockWise flag');
     assert.equal(_registry.m1.sideOrientation, 0, 'live scene mesh keeps its original ClockWise flag');
+    assert.ok(_clones[0].__repaired, 'repair wrote back to the clone');
+    assert.ok(!_registry.m1.__repaired, 'repair never wrote to the live mesh');
   } finally {
     MeshRepair.__test.setEngine(null);
     B.CSG2 = savedCSG; B.InitializeCSG2Async = savedInit;

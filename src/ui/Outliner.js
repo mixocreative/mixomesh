@@ -230,7 +230,7 @@ function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allOb
          style="padding-left:0px">
       ${twirl}
       <span class="ol-icon" title="${escapeAttr(t('outliner.typeImport'))}">${icon('Package', { width: 14, height: 14 })}</span>
-      <span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span>
+      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
       <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
@@ -333,7 +333,7 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
          style="padding-left:${indent}px">
       ${twirl}
       <span class="ol-icon" title="${escapeAttr(typeTitle)}">${icon(iconName, { width: 14, height: 14 })}</span>
-      <span class="ol-name" data-name>${_escape(name)}</span>${nameSuffix}
+      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(name)}</span>${nameSuffix}</span>
       <button class="ol-icon-btn ol-vis"  type="button" data-action="vis"  title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
       <button class="ol-icon-btn ol-lock" type="button" data-action="lock" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
       ${printBtn}

@@ -17,6 +17,7 @@ import { PrintManager } from '../../core/PrintManager.js';
 import { quote, unitVolumesMM3, overlappingPairs, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
+import { icon } from '../../core/Icons.js';
 import { wireNumbers, wireSelects } from '../lib/fields.js';
 import printersData from '../../config/printers.json' with { type: 'json' };
 
@@ -59,9 +60,17 @@ function _reasonText(reason) {
   return reason;
 }
 
-function _numberField(id, labelKey, value) {
-  return `<label class="pp-xyz" for="${id}">${escapeHtml(t(labelKey))}` +
-    `<input type="number" min="0" step="0.01" id="${id}" value="${escapeAttr(value || 0)}"></label>`;
+/**
+ * A cost field. A stored 0 means "use the material default" — that default is
+ * shown as the placeholder (and the effective value is what the quote uses),
+ * so the field never reads "0" while the quote is silently charging 0.50/g
+ * (owner feedback 2026-09-18). Clearing the field returns to the default.
+ */
+function _numberField(id, labelKey, value, fallback) {
+  const shown = value ? String(value) : '';
+  const ph = fallback != null ? String(fallback) : '0';
+  return `<label class="pp-xyz pp-cost-field" for="${id}">${escapeHtml(t(labelKey))}` +
+    `<input type="number" min="0" step="0.01" id="${id}" value="${escapeAttr(shown)}" placeholder="${escapeAttr(ph)}"></label>`;
 }
 
 /**
@@ -90,15 +99,21 @@ export function renderCostBlock(container, state) {
   html += '</select>';
 
   html += '<div class="pp-xyz-row">';
-  html += _numberField('pp-cost-price', 'print.cost.pricePerGram', cost.pricePerGram);
-  html += _numberField('pp-cost-support-price', 'print.cost.supportPrice', cost.supportPricePerGram);
-  html += _numberField('pp-cost-support-pct', 'print.cost.supportPercent', cost.supportPercent);
+  // Placeholders mirror quote()'s own fallback chain exactly: support price
+  // falls back to the material's support price, then to the EFFECTIVE model
+  // price (which includes a user override) — never to a number the quote
+  // does not actually charge.
+  const effectivePrice = cost.pricePerGram || material?.pricePerGram || 0;
+  html += _numberField('pp-cost-price', 'print.cost.pricePerGram', cost.pricePerGram, material?.pricePerGram);
+  html += _numberField('pp-cost-support-price', 'print.cost.supportPrice', cost.supportPricePerGram, material?.supportPricePerGram || effectivePrice);
+  html += _numberField('pp-cost-support-pct', 'print.cost.supportPercent', cost.supportPercent, material?.defaultSupportPercent);
   html += '</div>';
+  html += `<p class="pp-hint pp-cost-hint">${escapeHtml(t('print.cost.defaultsHint'))}</p>`;
 
   html += `<label class="pp-cost-sublabel" for="pp-cost-currency">${escapeHtml(t('print.cost.currency'))}</label>`;
   html += `<input type="text" id="pp-cost-currency" class="pp-ratio-input pp-cost-currency" maxlength="4" value="${escapeAttr(cost.currency || 'USD')}">`;
 
-  html += '<div class="pp-info" id="pp-cost-total"></div>';
+  html += '<div class="pp-cost-result" id="pp-cost-total" aria-live="polite"></div>';
   html += '</div>';
 
   container.innerHTML = html;
@@ -112,15 +127,18 @@ export function renderCostBlock(container, state) {
 
   // Invalid (non-finite) typed value restores the stored number in place —
   // same convention as the Bed tab's XYZ inputs (PrintPanel._renderBedTab).
-  const restoreNumber = (key) => (inp) => { inp.value = getState().cost?.[key] ?? 0; };
+  const restoreNumber = (key) => (inp) => { const v = getState().cost?.[key]; inp.value = v ? String(v) : ''; };
 
   wireSelects(container, '#pp-cost-material', (_sel, id) => commit({ materialId: id }));
+  // An EMPTY field is the "back to the material default" gesture (stored 0);
+  // anything else non-numeric restores the stored value in place.
+  const invalid = (key) => (inp) => { if (inp.value.trim() === '') commit({ [key]: 0 }); else restoreNumber(key)(inp); };
   wireNumbers(container, '#pp-cost-price', (_inp, v) => commit({ pricePerGram: Math.max(0, v) }),
-    { onInvalid: restoreNumber('pricePerGram') });
+    { onInvalid: invalid('pricePerGram') });
   wireNumbers(container, '#pp-cost-support-price', (_inp, v) => commit({ supportPricePerGram: Math.max(0, v) }),
-    { onInvalid: restoreNumber('supportPricePerGram') });
+    { onInvalid: invalid('supportPricePerGram') });
   wireNumbers(container, '#pp-cost-support-pct', (_inp, v) => commit({ supportPercent: Math.max(0, v) }),
-    { onInvalid: restoreNumber('supportPercent') });
+    { onInvalid: invalid('supportPercent') });
 
   const currencyInput = container.querySelector('#pp-cost-currency');
   currencyInput?.addEventListener('change', () => {
@@ -202,7 +220,7 @@ function _renderResult(container, state, override = null) {
 
   const ctx = PrintManager.previewExportContext();
   if (!ctx) {
-    el.textContent = '—';
+    el.innerHTML = `<div class="pp-cost-row pp-cost-note"><span>${escapeHtml(t('print.cost.noParts'))}</span></div>`;
     return;
   }
 
@@ -221,25 +239,29 @@ function _renderResult(container, state, override = null) {
   if (q.volumeCM3 === null) {
     // Above costTriangleCap() — quote() bailed out before computing
     // anything (PrintCost.js `totalTriangles` gate).
-    el.innerHTML = `— <span class="pp-approx" title="${escapeAttr(t('print.cost.reasonTooBig'))}">` +
-      `${escapeHtml(t('print.cost.approximate'))}</span>`;
+    el.innerHTML = `<div class="pp-cost-row pp-cost-note">${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })}` +
+      `<span>${escapeHtml(t('print.cost.reasonTooBig'))}</span></div>`;
     return;
   }
 
-  const fmt = (v, digits) => (v == null ? '—' : v.toFixed(digits));
-  const resultText = t('print.cost.result', {
-    volume: fmt(q.volumeCM3, 2),
-    grams: fmt(q.grams, 1),
-    materialCost: fmt(q.materialCost, 2),
-    supportCost: fmt(q.supportCost, 2),
-    total: fmt(q.total, 2),
-    currency,
-  });
+  const fmt = (v, digits) => (v == null ? '\u2014' : v.toFixed(digits));
+  const money = (v) => `${fmt(v, 2)} ${currency}`;
+  const row = (key, labelKey, value, cls = '') =>
+    `<div class="pp-cost-row ${cls}"><span class="pp-cost-k">${escapeHtml(t(labelKey))}</span><span class="pp-cost-v" data-cost="${key}">${escapeHtml(value)}</span></div>`;
 
-  let html = escapeHtml(resultText);
+  const pctUsed = cost.supportPercent || material?.defaultSupportPercent || 0;
+  const priceUsed = cost.pricePerGram || material?.pricePerGram || 0;
+  let html = row('volume', 'print.cost.rowVolume', `${fmt(q.volumeCM3, 2)} cm\u00b3`);
+  html += row('grams', 'print.cost.rowWeight', q.grams == null ? '\u2014'
+    : t('print.cost.weightValue', { grams: fmt(q.grams, 1), support: fmt(q.supportGrams ?? 0, 1) }));
+  html += row('material', 'print.cost.rowMaterial', q.materialCost == null ? '\u2014'
+    : t('print.cost.materialValue', { cost: money(q.materialCost), price: fmt(priceUsed, 2), currency }));
+  html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
+    : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));
+  html += row('total', 'print.cost.rowTotal', q.total == null ? '\u2014' : money(q.total), 'pp-cost-total-row');
   if (q.approximate) {
-    const title = q.reasons.map(_reasonText).join('; ');
-    html += ` <span class="pp-approx" title="${escapeAttr(title)}">${escapeHtml(t('print.cost.approximate'))}</span>`;
+    html += `<div class="pp-cost-row pp-cost-note">${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })}` +
+      `<span><strong>${escapeHtml(t('print.cost.approximate'))}</strong> \u00b7 ${escapeHtml(q.reasons.map(_reasonText).join('; '))}</span></div>`;
   }
   el.innerHTML = html;
 }

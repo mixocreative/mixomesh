@@ -19,11 +19,9 @@
 // REPAIR_TRIANGLE_CAP (I2) so a huge mesh reports "too large" instead of
 // freezing the UI thread.
 
-import { signedVolume } from '../print/PrintSpace.js';
+import { signedVolume, frontFaceIsClockwise } from '../print/PrintSpace.js';
 import { vendorUrl } from '../vendorUrl.js';
 
-const CLOCKWISE = 0;         // BABYLON.Material.ClockWiseSideOrientation
-const COUNTER_CLOCKWISE = 1; // BABYLON.Material.CounterClockWiseSideOrientation
 export const REPAIR_TRIANGLE_CAP = 300_000;
 /** Wall-clock budget for ONE repairMesh call (CIA F4). Override per call with `opts.timeoutMs`. */
 export const REPAIR_TIMEOUT_MS = 60_000;
@@ -305,23 +303,37 @@ function _withTimeout(run, timeoutMs, name) {
 }
 
 /**
- * Re-tag the effective winding after a repair (I1).
+ * Conform the written-back winding to the mesh's side flag (I1, corrected
+ * 2026-09-18).
  *
- * A COMPLETED repair returns geometry in the engine's native
- * (CounterClockWise) winding, so a ClockWise-flagged glTF clone must be
- * re-tagged or PrintSpace.printIndices ships it inside-out (same rule as
- * PrintPipeline._csgRebake). A PARTIAL repair guarantees nothing, so the
- * flag is derived from the geometry as written back instead: Babylon is
- * left-handed, so an outward-facing CounterClockWise mesh has a NEGATIVE
- * right-handed signed volume (PrintSpace.signedVolume / frontFaceIsClockwise).
+ * Measured, not assumed: MeshFixLib normalises its output to a POSITIVE
+ * right-handed signed volume whatever the input winding was (it flipped
+ * every face of a negative-wound tetra, kept every face of a positive one).
+ * Babylon is left-handed, so an outward CounterClockWise mesh has a NEGATIVE
+ * right-handed signed volume (PrintSpace.frontFaceIsClockwise) — the engine's
+ * native output is therefore outward only under a ClockWise flag. The old
+ * rule re-tagged ClockWise glTF meshes CounterClockWise after a completed
+ * repair and left CounterClockWise meshes alone: both ended up inside-out
+ * (live tetra rendered back-face, validator flagged "inverted normals").
+ *
+ * The flag is left as it was — other code keys on it (cross-section cap,
+ * PrintSpace.printIndices) — and the INDICES are reversed when the geometry
+ * disagrees with it. A zero signed volume (sheet, degenerate) is no evidence
+ * either way, so nothing is touched.
  */
-function _retagWinding(mesh, after) {
-  if (mesh.sideOrientation !== CLOCKWISE) return;
-  if (after?.isWatertight === true) { mesh.sideOrientation = COUNTER_CLOCKWISE; return; }
+function _conformWinding(mesh) {
   const positions = mesh.getVerticesData?.('position');
   const indices = mesh.getIndices?.();
-  if (!positions?.length || !indices?.length) return;
-  mesh.sideOrientation = signedVolume(positions, indices) < 0 ? COUNTER_CLOCKWISE : CLOCKWISE;
+  if (!positions?.length || !indices?.length) return false;
+  const v = signedVolume(positions, indices);
+  if (!(Math.abs(v) > 0)) return false;
+  const outwardIsNegative = !frontFaceIsClockwise(mesh);   // CCW outward ⇒ negative
+  if ((v < 0) === outwardIsNegative) return false;
+  const rev = new Uint32Array(indices.length);
+  for (let i = 0; i < indices.length; i += 3) { rev[i] = indices[i]; rev[i + 1] = indices[i + 2]; rev[i + 2] = indices[i + 1]; }
+  mesh.setIndices(rev, null, true);
+  mesh.createNormals?.(true);
+  return true;
 }
 
 /**
@@ -366,7 +378,7 @@ export async function repairMesh(mesh, opts = {}) {
   const after = changed ? lib.diagnose(out.V, out.T) : lib.diagnose(V, T);
   if (changed) {
     arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);
-    _retagWinding(mesh, after);
+    _conformWinding(mesh);
   }
   return { holesFilled: r.holesFilled | 0, nmFixed: r.nmFixed | 0, normalsFlipped: r.normalsFlipped | 0, merged: r.merged | 0, isWatertight: !!after.isWatertight, changed };
 }

@@ -53,7 +53,15 @@
 .ol-list.ol-drop-root { outline: 1px dashed var(--accent); outline-offset: -3px; }
 .ol-row.ol-hidden .ol-name,
 .ol-row.ol-hidden .ol-icon { opacity: 0.45; }
-.ol-row.ol-locked .ol-lock { color: var(--warning); }
+/* Toggled-ON lock / print buttons: filled pill + reversed icon colour so
+   the state reads at a glance (a colour-only change on a 13 px icon was
+   invisible against the washi background — owner feedback 2026-09-18). */
+.ol-row.ol-locked .ol-lock,
+.ol-row.ol-locked .ol-lock:hover {
+  background: var(--warning);
+  color: var(--bg-0);
+}
+.ol-row .ol-lock:hover { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning); }
 .ol-row.ol-ghost .ol-icon { color: var(--danger); }
 
 .ol-twirl {
@@ -76,10 +84,23 @@
   background: var(--bg-0);
   color: var(--text-0);
 }
+/* Name + any trailing badges (count / validation) share ONE grid cell.
+   The row grid has exactly six columns; a badge as a sibling of .ol-name
+   used to take the lock/print column and push the print button onto a
+   second grid row (visible as a stray printer icon under every row). */
+.ol-name-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
 .ol-name {
+  flex: 1 1 auto;
+  min-width: 0;          /* flex item: without this the name never shrinks and the ellipsis never engages */
   font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ol-icon-btn {
   background: transparent;
@@ -165,8 +186,12 @@
 /* ── Outliner: isPrintPart icon ───────────────────────── */
 .ol-row { grid-template-columns: 14px 16px 1fr 22px 22px 22px; }
 .ol-print { color: var(--text-2); }
-.ol-print.ol-print-on { color: var(--accent); }
-.ol-print.ol-print-on:hover { color: var(--accent-hi); }
+.ol-print.ol-print-on,
+.ol-print.ol-print-on:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.ol-print.ol-print-on:hover { background: var(--accent-hi); }
 .ol-print-placeholder { pointer-events: none; visibility: hidden; }
 
 

@@ -6,9 +6,7 @@ import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
-import { Toast } from './Toast.js';
 import { reportError } from './Status.js';
-import { reportBatchRepairResult } from './RepairFeedback.js';
 import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
@@ -63,6 +61,12 @@ export function init() {
     EVENTS.HISTORY_REDONE,
   ];
   for (const ev of events) subscribe(ev, _render);
+  // The Validation tab's last outcome line describes the scene it ran on —
+  // a new import or a removed object makes it stale, so drop it (the scene
+  // summary line below it stays live either way).
+  for (const ev of [EVENTS.ASSET_INSTANTIATED, EVENTS.OBJECT_REMOVED]) {
+    subscribe(ev, () => { if (_valStatus.kind === 'done') { _valStatus = { kind: 'idle' }; _render(); } });
+  }
   // A print reset (or reset-all) rewrote print settings — re-render to show them.
   subscribe(EVENTS.SETTINGS_RESET, _render);
 
@@ -196,19 +200,20 @@ function _renderScaleTab() {
   // When there are no printable parts, render an em-dash placeholder rather
   // than "0.00" (which looks broken, not empty).
   if (preview) {
-    html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> ${preview.factor.toFixed(2)} ${escapeHtml(t('print.exportScaleUnit'))}</div>`;
-
+    // The internal BU→mm factor used to be printed here ("1000.00 (scene BU
+    // -> exported mm)") — an implementation constant that meant nothing to
+    // the user (owner feedback 2026-09-18). What they need is the size the
+    // reference object will actually come out at.
     // Example dimensions — show the export reference object so the queried mesh
     // and export factor agree even when the active selection is not printable.
     const exampleId = referenceId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
     if (exampleId && state.scene.objects[exampleId]) {
       const dims = PrintManager.getExportedDimensions(exampleId, preview);
       if (dims) {
-        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exampleActiveLabel'))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
+        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportedSizeLabel', { name: state.scene.objects[exampleId].name }))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
       }
     }
   } else {
-    html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportScaleLabel'))}</strong> —</div>`;
     html += `<p class="pp-empty">${escapeHtml(t('print.noPrintParts'))}</p>`;
   }
 
@@ -268,12 +273,19 @@ function _renderScaleTab() {
 // Reads the A6 cache (state.scene.validation) instead of re-running topology
 // checks on every render (review M11). "Validate All" refreshes explicitly;
 // imports auto-validate already.
+//
+// Status strip (owner feedback 2026-09-18): the tab itself shows what is
+// happening and what it found — an inline progress bar while a validate /
+// repair runs, then the outcome (repaired counts, failures) next to a scene
+// summary ("N parts · M still with issues") so "did it work, and is the
+// scene clean now?" never needs a toast.
 
-function _renderValidationTab() {
-  const state = getState();
+/** @type {{kind:'idle'}|{kind:'running',frac:number,label:string}|{kind:'done',tone:'success'|'warning'|'error',text:string}} */
+let _valStatus = { kind: 'idle' };
+
+/** The rows the Validation tab lists: one per print part (split-group siblings collapsed). */
+function _validationRows(state) {
   const cache = state.scene.validation ?? {};
-
-  // One row per print part; split-group siblings collapse to one display row.
   const rows = [];
   const seenGroups = new Set();
   for (const [meshId, obj] of Object.entries(state.scene.objects)) {
@@ -285,15 +297,115 @@ function _renderValidationTab() {
     }
     rows.push({ meshId, obj, entry: cache[meshId] ?? null });
   }
+  return rows;
+}
+
+/** Scene-level summary from the cache: counts feeding the status strip. */
+function _validationSummary(rows) {
+  let unchecked = 0, withIssues = 0, fixable = 0;
+  for (const { entry } of rows) {
+    const results = entry?.results ?? null;
+    if (!results || entry?.stale) unchecked++;
+    if (results?.length) withIssues++;
+    if (results?.some(r => r.autoFixAvailable && !r.fixed)) fixable++;
+  }
+  return { total: rows.length, unchecked, withIssues, fixable };
+}
+
+function _renderValidationStatus(summary) {
+  if (_valStatus.kind === 'running') {
+    const pct = Math.round(Math.max(0, Math.min(1, _valStatus.frac)) * 100);
+    return `<div class="pp-val-status running" role="status" aria-live="polite">` +
+      `<div class="pp-val-label"><span class="pp-val-spin">${icon('Loader2', { class: 'inline', width: 14, height: 14 })}</span><span id="pp-val-progress-label">${escapeHtml(_valStatus.label)}</span></div>` +
+      `<div class="pp-val-bar" aria-hidden="true"><div class="pp-val-bar-fill" id="pp-val-progress-fill" style="width:${pct}%"></div></div>` +
+      `</div>`;
+  }
+  let sceneLine;
+  let tone;
+  if (!summary.total) { sceneLine = t('print.noPrintParts'); tone = 'neutral'; }
+  else if (summary.withIssues) {
+    sceneLine = summary.fixable
+      ? t('print.valSummary.issuesFixable', { n: summary.total, issues: summary.withIssues, fixable: summary.fixable })
+      : t('print.valSummary.issues', { n: summary.total, issues: summary.withIssues });
+    tone = 'warning';
+  } else if (summary.unchecked) { sceneLine = t('print.valSummary.unchecked', { n: summary.total, unchecked: summary.unchecked }); tone = 'neutral'; }
+  else { sceneLine = t('print.valSummary.clean', { n: summary.total }); tone = 'success'; }
+
+  let html = `<div class="pp-val-status ${_valStatus.kind === 'done' ? _valStatus.tone : tone}" role="status" aria-live="polite">`;
+  if (_valStatus.kind === 'done') {
+    const ic = _valStatus.tone === 'success' ? 'CheckCircle' : _valStatus.tone === 'error' ? 'XCircle' : 'AlertTriangle';
+    html += `<div class="pp-val-label pp-val-result">${icon(ic, { class: 'inline', width: 14, height: 14 })}<span>${escapeHtml(_valStatus.text)}</span></div>`;
+  }
+  const sceneIcon = tone === 'success' ? 'CheckCircle' : tone === 'warning' ? 'AlertTriangle' : 'Circle';
+  html += `<div class="pp-val-label pp-val-scene">${icon(sceneIcon, { class: 'inline', width: 14, height: 14 })}<span>${escapeHtml(sceneLine)}</span></div>`;
+  html += '</div>';
+  return html;
+}
+
+/** Live progress: patch the bar in place (no full re-render mid-run). */
+function _setValidationProgress(frac, label) {
+  _valStatus = { kind: 'running', frac, label };
+  const fill = _bodyEl?.querySelector('#pp-val-progress-fill');
+  const lab = _bodyEl?.querySelector('#pp-val-progress-label');
+  if (fill && lab) {
+    fill.style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
+    lab.textContent = label;
+  } else {
+    _render();
+  }
+}
+
+/** Run a validate/repair action with the tab's inline progress + outcome. */
+async function _runValidationAction(label, fn) {
+  if (_valStatus.kind === 'running') return;
+  _setValidationProgress(0, label);
+  try {
+    _valStatus = await fn((frac, name) => _setValidationProgress(frac, name ? `${label} — ${name}` : label));
+  } catch (err) {
+    _valStatus = { kind: 'done', tone: 'error', text: t('print.valResult.failed', { error: err?.message ?? String(err) }) };
+    reportError(err, { title: t('toast.autoFixFailed') });
+  } finally {
+    _render();
+  }
+}
+
+/**
+ * The status strip IS the feedback for tab-initiated repairs (no success /
+ * nothing-to-repair toast on top of it — review finding 2026-09-18). Only a
+ * per-object failure still goes through reportError, because the strip
+ * carries the names but not the error detail the modal shows.
+ */
+function _reportRepairFailures(result) {
+  if (!result?.failed?.length) return;
+  const err = new Error(result.failed.map(f => `${f.name}: ${f.error?.message ?? f.error ?? 'unknown error'}`).join('\n'));
+  reportError(err, { title: t('toast.autoFixFailed') });
+}
+
+/** Outcome line for a batch repair, from RepairSession.repairObjects' result. */
+function _repairOutcome(count, result, summaryAfter) {
+  if (result?.failed?.length) {
+    return { kind: 'done', tone: 'error', text: t('print.valResult.repairFailed', { names: result.failed.map(f => f.name).join(', ') }) };
+  }
+  if (!result?.repaired) return { kind: 'done', tone: 'warning', text: t('toast.nothingToRepairBatch', { n: count }) };
+  const text = t('print.valResult.repaired', { n: result.repaired, holes: result.holesFilled ?? 0, nm: result.nmFixed ?? 0 });
+  return { kind: 'done', tone: summaryAfter.withIssues ? 'warning' : 'success', text };
+}
+
+function _renderValidationTab() {
+  const state = getState();
+  const rows = _validationRows(state);
+  const summary = _validationSummary(rows);
+  const running = _valStatus.kind === 'running';
 
   // Repairable = at least one cached result still fixable (mirrors the
   // per-result Auto-Fix button's own `canFix` gate below).
   const fixableRows = rows.filter(({ entry }) => entry?.results?.some(r => r.autoFixAvailable && !r.fixed));
 
   let html = '<div class="pp-tab-content">';
+  html += _renderValidationStatus(summary);
   html += '<div class="pp-field-group">';
-  html += `<button class="pp-export-btn" id="pp-validate-all">${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.validateAll'))}</button>`;
-  html += `<button class="pp-export-btn" id="pp-repair-all"${fixableRows.length ? '' : ' hidden'}>${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.repairAll'))}</button>`;
+  html += `<button class="pp-export-btn" id="pp-validate-all"${running || !rows.length ? ' disabled' : ''}>${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.validateAll'))}</button>`;
+  html += `<button class="pp-export-btn pp-repair-all" id="pp-repair-all"${fixableRows.length ? '' : ' hidden'}${running ? ' disabled' : ''}>${icon('Wrench', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.repairAllN', { n: fixableRows.length }))}</button>`;
   html += '</div>';
 
   if (!rows.length) {
@@ -315,14 +427,16 @@ function _renderValidationTab() {
 
       if (!results) {
         html += `<p class="pp-hint">${escapeHtml(t('print.notValidated'))}</p>`;
-      } else if (results.length > 0) {
+      } else if (results.length === 0) {
+        html += `<p class="pp-hint pp-hint-ok">${escapeHtml(t('print.partClean'))}</p>`;
+      } else {
         html += '<ul class="pp-result-list">';
         for (const result of results) {
           const canFix = result.autoFixAvailable && !result.fixed;
           html += `<li class="pp-result ${escapeAttr(result.severity)}">`;
           html += `<span>${escapeHtml(result.message)}</span>`;
           if (canFix) {
-            html += `<button class="pp-autofix-btn" data-mesh-id="${escapeAttr(meshId)}" data-result-type="${escapeAttr(result.type)}">${escapeHtml(t('print.autoFix'))}</button>`;
+            html += `<button class="pp-autofix-btn" data-mesh-id="${escapeAttr(meshId)}" data-result-type="${escapeAttr(result.type)}"${running ? ' disabled' : ''}>${escapeHtml(t('print.autoFix'))}</button>`;
           }
           html += '</li>';
         }
@@ -338,60 +452,47 @@ function _renderValidationTab() {
   const el = document.createElement('div');
   el.innerHTML = html;
 
-  el.querySelector('#pp-validate-all')?.addEventListener('click', async () => {
-    await MeshValidator.validateAllPrintParts();   // refreshes the cache
-    _render();
-  });
+  el.querySelector('#pp-validate-all')?.addEventListener('click', () =>
+    _runValidationAction(t('print.validating'), async (progress) => {
+      const ids = rows.map(r => r.meshId);
+      for (let i = 0; i < ids.length; i++) {
+        const mesh = AssetLoader.getBabylonMesh(ids[i]);
+        progress(i / ids.length, getState().scene.objects[ids[i]]?.name ?? '');
+        if (mesh) await MeshValidator.validateMesh(mesh);   // refreshes the cache
+      }
+      const after = _validationSummary(_validationRows(getState()));
+      return {
+        kind: 'done',
+        tone: after.withIssues ? 'warning' : 'success',
+        text: after.withIssues
+          ? t('print.valResult.validatedIssues', { n: after.total, issues: after.withIssues })
+          : t('print.valResult.validatedClean', { n: after.total }),
+      };
+    }));
 
-  el.querySelector('#pp-repair-all')?.addEventListener('click', async () => {
+  el.querySelector('#pp-repair-all')?.addEventListener('click', () => {
     if (!fixableRows.length) return;
     const ids = fixableRows.map(({ meshId }) => meshId);
-    ProgressOverlay.show(t('print.repairAll'));
-    try {
-      const result = await MeshValidator.repairObjects(ids, {
-        onProgress: (frac, name) => ProgressOverlay.update(frac, name),
-      });
-      reportBatchRepairResult(ids.length, result);
-    } catch (err) {
-      reportError(err, { title: t('toast.autoFixFailed') });
-    } finally {
-      ProgressOverlay.hide();
-      _render();
-    }
+    _runValidationAction(t('print.repairing'), async (progress) => {
+      const result = await MeshValidator.repairObjects(ids, { onProgress: progress });
+      _reportRepairFailures(result);
+      return _repairOutcome(ids.length, result, _validationSummary(_validationRows(getState())));
+    });
   });
 
-  // Wire auto-fix buttons
+  // Wire auto-fix buttons — same shared repair path as Repair all / the
+  // Outliner badge / the import toast, one object at a time.
   el.querySelectorAll('.pp-autofix-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const meshId = btn.dataset.meshId;
       const obj = getState().scene.objects[meshId];
       if (!obj) return;
-      const mesh = AssetLoader.getBabylonMesh(meshId);
-      if (!mesh) return;
-
-      try {
-        const results = await MeshValidator.validateMesh(mesh);
-        await MeshValidator.autoFix(mesh, results);
-        // Record applied fixes so they survive .mixo reload (M1): the file
-        // keeps raw source bytes + ratio, so without this the restored mesh
-        // comes back with its original defects. Persistence replays them.
-        const applied = results.filter(r => r.fixed).map(r => r.type);
-        if (applied.length) {
-          setState(s => {
-            const o = s.scene.objects[meshId];
-            if (!o) return s;
-            const fixes = [...new Set([...(o.geometryFixes ?? []), ...applied])];
-            return { ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { ...o, geometryFixes: fixes } } } };
-          }, { silent: true });
-          markDirty();   // persisted in .mixo (replayed on reload) — not undoable, must dirty (M4)
-        }
-        // I7b: a fix that changed nothing is never reported as success.
-        if (applied.length) Toast.show(t('toast.fixed', { name: obj.name }), 'success', 2000);
-        else Toast.show(t('toast.nothingToRepair', { name: obj.name }), 'info', 2500);
-        _render();
-      } catch (err) {
-        reportError(err, { title: t('toast.autoFixFailed') });
-      }
+      _runValidationAction(t('print.repairing'), async (progress) => {
+        progress(0, obj.name);
+        const result = await MeshValidator.repairObjects([meshId], { onProgress: progress });
+        _reportRepairFailures(result);
+        return _repairOutcome(1, result, _validationSummary(_validationRows(getState())));
+      });
     });
   });
 

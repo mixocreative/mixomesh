@@ -6,6 +6,7 @@ import { EVENTS } from '../events.js';
 import { dispatch, setState, getState } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { getContainer } from './MeshRegistry.js';
+import { withRenderLock } from '../render/RenderLock.js';
 
 const BABYLON = window.BABYLON;
 
@@ -30,7 +31,9 @@ async function _generateThumbnailFor(assetId) {
 
   let dataUrl;
   try {
-    dataUrl = await _renderThumbnail(meshes);
+    // Serialised: a second thumbnail starting mid-capture corrupts the
+    // engine's render-size override for good (RenderLock.js).
+    dataUrl = await withRenderLock(() => _renderThumbnail(meshes));
   } catch (err) {
     console.error('Thumbnail failed:', err);
     return;

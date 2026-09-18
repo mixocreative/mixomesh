@@ -10,6 +10,7 @@ import { createSweepRig } from './SweepRig.js';
 import {
   createFrameTarget, renderSceneToTarget, flipRows, waitReady, hideFurniture,
 } from './FrameCapture.js';
+import { withRenderLock } from './RenderLock.js';
 
 let _recording = false;
 let _abortRecord = null;   // (reason) => void while a recording is in flight
@@ -50,7 +51,9 @@ export async function recordTurntable(opts = {}) {
   if (opts.pose) SceneManager.restoreCameraState(opts.pose);
   let projectSwitched = false;
   try {
-    return await _recordOffline(opts, () => { projectSwitched = true; });
+    // Whole sweep under the off-screen render lock: an asset thumbnail
+    // starting mid-recording would corrupt the engine-size override (RenderLock.js).
+    return await withRenderLock(() => _recordOffline(opts, () => { projectSwitched = true; }));
   } finally {
     // Project switch: the new project's camera wins, never the stale pose.
     if (navPose && !projectSwitched) SceneManager.restoreCameraState(navPose);

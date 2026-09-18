@@ -81,6 +81,20 @@ function _detectType(material) {
   return 'standard';
 }
 
+/**
+ * User-facing shader name for an imported material. Babylon's glTF loader
+ * names the material it synthesises for material-less primitives
+ * "__GLTFLoader._default" — an internal token that surfaced verbatim in the
+ * shader library (owner sweep 2026-09-18). Loader-internal names map to a
+ * plain "Default"; everything else keeps the file's own material name.
+ */
+export function _importedMaterialName(material) {
+  const raw = String(material?.name ?? '').trim();
+  if (!raw) return 'Material';
+  if (/^__GLTFLoader\._default$/i.test(raw) || /^__/.test(raw)) return 'Default';
+  return raw;
+}
+
 function _createBabylonMaterial(type, name, scene) {
   if (type === 'pbr') {
     const m = new BABYLON.PBRMaterial(name, scene);
@@ -123,7 +137,7 @@ function _buildEntryFromMaterial(material, importCtx = {}) {
 
   return {
     id: _nextShaderId(),
-    name: material.name || 'Material',
+    name: _importedMaterialName(material),
     type,
     diffuseColor,
     diffuseTextureAssetId,
@@ -316,7 +330,7 @@ function _findNameConflicts(container, importCtx = {}) {
   for (const mat of container.materials) {
     if (seen.has(mat)) continue;
     seen.add(mat);
-    const name = mat.name || 'Material';
+    const name = _importedMaterialName(mat);
     const existingId = existingByName.get(name);
     if (!existingId) continue;
     // Content match → auto-dedupe silently in _doRegister; no modal needed.

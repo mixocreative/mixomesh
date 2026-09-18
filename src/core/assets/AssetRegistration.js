@@ -270,7 +270,7 @@ export function queueValidation(meshId) {
         const msg = warns
           ? t('toast.validateErrorsWithWarnings', { name, errs, warns })
           : t('toast.validateErrors', { name, errs });
-        Toast.show(msg, 'error', 0, { onClick });
+        Toast.show(msg, 'error', 0, { onClick, tag: Toast.validationTag(meshId) });
       } else if (results.some(r => r.autoFixAvailable)) {
         if (getState().print?.repairOnImport) {
           // Opt-in (Task 5): skip the click-to-fix toast and just repair.
@@ -280,10 +280,10 @@ export function queueValidation(meshId) {
           // action (shared repairObject path, same as Outliner/context menu/
           // Print panel), not just a link to the Validation tab.
           const onFixClick = () => { _repairAndToast(meshId, name); };
-          Toast.show(t('toast.validateWarningsFix', { name, warns }), 'warning', 0, { onClick: onFixClick });
+          Toast.show(t('toast.validateWarningsFix', { name, warns }), 'warning', 0, { onClick: onFixClick, tag: Toast.validationTag(meshId) });
         }
       } else {
-        Toast.show(t('toast.validateWarnings', { name, warns }), 'warning', 0, { onClick });
+        Toast.show(t('toast.validateWarnings', { name, warns }), 'warning', 0, { onClick, tag: Toast.validationTag(meshId) });
       }
     } catch (err) {
       Toast.dismiss(toastId);

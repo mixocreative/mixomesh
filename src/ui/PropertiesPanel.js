@@ -929,6 +929,7 @@ function _renderPrintPartSection(obj) {
       <div class="pp-row pp-row-inline">
         <button type="button" class="pp-toggle${isPrintPart ? ' pp-toggle-on' : ''}" id="pp-is-print-part" aria-pressed="${isPrintPart ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>${_escape(t('properties.exportPrintPart'))}</button>
       </div>
+      <p class="pp-hint">${_escape(t('properties.exportPrintPartHint'))}</p>
     </section>
   `;
 }

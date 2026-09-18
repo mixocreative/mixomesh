@@ -1936,6 +1936,19 @@ back to the normal GLB scene path.
 Export-time rescaling from `workingRatio` to `targetRatio` happens in `PrintManager` — see §12.
 
 ### Thumbnail Generation
+**Off-screen captures are serialised (`src/core/render/RenderLock.js`,
+2026-09-18).** Babylon's `CreateScreenshotUsingRenderTarget` and
+`FrameCapture.renderSceneToTarget` both temporarily override
+`engine.getRenderWidth/Height` and restore the PREVIOUS function when
+done. Two captures in flight nest the overrides: A saves the real function,
+B saves A's override, A restores the real one, B "restores" A's override —
+and the engine reports A's capture size forever. Seen live: two files
+dropped together queued two 128×128 thumbnails and the whole viewport
+rendered into a 128×128 corner of the canvas until reload. Every capture
+(asset thumbnails, `capturePng`, `captureFrameRGBA`, the turntable
+recording, the save-time recent-projects thumbnail via `capturePng`) runs
+through `withRenderLock(fn)` — one promise chain, errors never break it.
+Any NEW off-screen render must go through the same lock.
 ```js
 import * as BABYLON from 'babylonjs';
 
@@ -2254,14 +2267,26 @@ the write-back on counter names would silently discard that output.
 caller's `opts.engine` — so an upstream default this project never names
 still reaches the WASM call.
 
-**Winding re-tag is CONDITIONAL (2026-09-18, review I1).** A repaired clone
-whose glTF import was flagged ClockWise is re-tagged CounterClockWise (native
-engine winding, the same rule `PrintPipeline._csgRebake` applies) **only when
-the engine CONFIRMED the result watertight**. After a PARTIAL repair the
-engine guarantees nothing about winding, so the flag is derived from the
-geometry as written back: `PrintSpace.signedVolume < 0 ⇒ CounterClockWise`
-(Babylon is left-handed — see `PrintSpace.frontFaceIsClockwise`). The old
-unconditional re-tag could ship a partially-repaired part inside-out.
+**Winding is CONFORMED to the side flag, never re-tagged (2026-09-18,
+corrects review I1).** Measured, not assumed: MeshFixLib normalises its
+output to a POSITIVE right-handed signed volume whatever the input winding
+was (it flipped every face of a negative-wound tetra and kept every face of
+a positive one). Babylon is left-handed, so an outward CounterClockWise mesh
+has a NEGATIVE signed volume (`PrintSpace.frontFaceIsClockwise`) — the
+engine's native output is outward only under a ClockWise flag. The earlier
+rule ("completed repair ⇒ re-tag ClockWise clones CounterClockWise, leave
+CounterClockWise alone") therefore shipped BOTH kinds inside-out: the live
+repaired tetra rendered back-face and the validator flagged "inverted
+normals" right after a "successful" repair. `MeshRepair._conformWinding`
+now leaves `mesh.sideOrientation` exactly as it was (other code keys on it:
+the cross-section cap, `PrintSpace.printIndices`) and REVERSES THE INDICES
+when the written-back geometry's signed-volume sign disagrees with that
+flag (`createNormals` re-run after). A zero signed volume (sheet /
+degenerate) is no evidence and leaves the geometry untouched. Applies to
+partial repairs by the same rule (the engine orients globally either way).
+Pinned by `tests/mesh-repair.test.mjs` "I1" cases + the live
+`npm run test:repair` (validator reports no `invertedNormals` after repair,
+print-space volume positive).
 
 **Engine output is validated before ANYTHING reads it (review CIA F2):**
 every coordinate finite, every index an integer in `[0, V.length)`, else
@@ -2448,6 +2473,11 @@ ShaderLibrary.rebuildLinkedIndex()                     // on project load
   linkedMeshIds: [],                    // maintained at runtime, rebuilt on load
 }
 ```
+`name` for an imported material is `ShaderLibrary._importedMaterialName`:
+the file's own material name, except loader-internal tokens — Babylon's
+glTF loader names the material it synthesises for material-less primitives
+`__GLTFLoader._default` (any `__`-prefixed name) — which become `Default`.
+That token used to appear verbatim in the Shader Library (2026-09-18).
 
 **Colour-space contract (2026-09-17).** `diffuseColor` is **always sRGB** —
 the hex the user picks/sees and the value every exported file carries
@@ -3257,6 +3287,17 @@ This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as we
 + settings — never calls `getState()` itself) **+ `src/ui/print/CostBlock.js`**
 (Export tab UI, kept out of `PrintPanel.js` to bound that file's growth).
 
+**Export-tab presentation (2026-09-18).** A breakdown card, not a one-line
+sentence: Volume · Weight (model g + support g) · Material (cost, with the
+price/g actually used) · Support (cost, with the % used) · **Estimated
+total**, then an "Approximate · <reasons>" note VISIBLE in the card (the
+reasons were a tooltip nobody hovered). Price / support-price / support-%
+fields show the material default as their PLACEHOLDER when the stored value
+is 0 and render blank — a field reading "0" while the quote charged 0.50/g
+from the material default was the confusion; clearing a field returns to
+the default (stores 0). `#pp-cost-total [data-cost="total"]` is the smoke
+probe. No print parts ⇒ a plain "no print parts to quote" note.
+
 **Formula:** `total = volume(cm³) × density(g/cm³) × pricePerGram +
 supportVolume × supportDensity × supportPricePerGram`, where
 `supportVolume = volume × (supportPercent / 100)`. Per-unit density/price
@@ -3496,7 +3537,16 @@ otherwise the panel falls back to its placeholder icon.
   Collection or Group row selects its live descendant Objects.
 - Row icons use `Icons.icon(name, attrs)` — see Part 2. Validation status
   badges (warning/error, stale-dimmed) read the §9 A6 cache and render as
-  trusted markup after the escaped name.
+  trusted markup after the escaped name, INSIDE the `.ol-name-cell` wrapper:
+  the row is a six-column grid (twirl · icon · name-cell · eye · lock ·
+  print) and a badge rendered as a sibling of `.ol-name` used to take the
+  lock/print column and push the print button onto a second grid row.
+- Lock / print toggles read at a glance when ON: a filled pill (warning
+  colour for lock, accent for print) with the icon in the reversed colour.
+  A colour-only change on a 13 px icon was invisible on the washi ground
+  (owner feedback 2026-09-18). The Properties ▸ Print Export section carries
+  the same flag ("Include in print export") plus a hint line saying what
+  off means (stays in the scene, left out of export / validation / cost).
 - Drag-to-reparent: Object and Group rows are draggable hierarchy sources.
   Dropping on a Group row pushes `ReparentCommand(sourceId, groupId)`;
   dropping on empty Outliner space pushes `UnparentCommand(sourceId)`.
@@ -3719,6 +3769,30 @@ Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Repla
 ### Print Panel (`src/ui/PrintPanel.js`)
 Tabs: Scale / Validation / Bed / Export (Thickness + Orientation future).
 Validation reads the §9 A6 cache with an explicit "Validate All".
+
+**Validation tab status strip (2026-09-18).** The tab reports on itself
+rather than through toasts: a strip above the buttons shows (a) while a
+Validate All / Repair all / per-result Auto-Fix runs — an inline progress
+bar + "Repairing… — <name>" patched in place from the `onProgress`
+callback (no full re-render mid-run, buttons disabled); (b) afterwards —
+the outcome line ("Repaired N object(s): H hole(s) filled, M non-manifold
+edge(s) fixed" / "Repair failed for: …" / "Validated N part(s): K with
+issues") in success / warning / error tone; and (c) always — the live scene
+summary from the cache ("All N print part(s) clean — watertight and ready
+to export" / "N parts · K with issues · F auto-fixable" / "K not validated
+yet"). The outcome line is dropped on the next import or object removal
+(it described a scene that no longer exists); the summary stays live. Every
+button routes through `RepairSession.repairObjects` (one shared path;
+`geometryFixes` recording + `markDirty` live in `RepairSession`, not the
+panel). "Repair all (N)" carries its fixable count and is hidden — really
+hidden: `.pp-export-btn[hidden]{display:none}`, the class's `inline-flex`
+used to beat the attribute — when nothing is fixable. Per-object
+validation toasts carry `tag: validationTag(meshId)` and `Toast` dismisses
+that tag on every `VALIDATION_COMPLETE` for the object, so a "click to
+Auto-Fix" toast never outlives the repair it offered.
+
+The Scale tab shows the export reference object's exported size in mm; the
+internal BU→mm factor is not user-facing and is no longer printed.
 Display modes (print-preview matte, wireframe edges + colour) live in the
 viewport toggles under the NavCube — see Viewport Toggles below — so they
 work from every workspace; there is no Preview tab.

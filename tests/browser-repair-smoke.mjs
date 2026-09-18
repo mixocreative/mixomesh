@@ -163,10 +163,11 @@ async function main() {
         document.querySelector('#rp-print-body [data-tab="export"]')?.click();
         await frame();
         const costText = document.querySelector('#pp-cost-total')?.textContent ?? '';
+        const costTotal = document.querySelector('#pp-cost-total [data-cost="total"]')?.textContent ?? '';
 
         return {
           meshId, holesFilled: repair.holesFilled, nmFixed: repair.nmFixed,
-          remaining: repair.remaining, suggested, b64: btoa(bin), hudText, costText, diag,
+          remaining: repair.remaining, suggested, b64: btoa(bin), hudText, costText, costTotal, diag,
         };
       } catch (err) {
         return { error: String(err?.stack ?? err) };
@@ -177,6 +178,14 @@ async function main() {
     assert(/_r1to1\.3mf$/.test(result.suggested ?? ''),
       `suggested filename should end _r1to1.3mf, got ${result.suggested}`);
     console.log(`repairObject: holesFilled=${result.holesFilled} nmFixed=${result.nmFixed}`);
+    // Winding regression (2026-09-18): the engine emits positive-signed-volume
+    // winding; under this glTF part's ClockWise flag that is outward, so the
+    // LIVE mesh must validate clean — the old CounterClockWise re-tag left it
+    // inside-out and the validator flagged "inverted normals" right after a
+    // "successful" repair.
+    const remainingTypes = (result.remaining ?? []).map(r => r.type);
+    assert(!remainingTypes.includes('invertedNormals'),
+      `live mesh reports inverted normals after repair (winding/flag mismatch): ${remainingTypes.join(', ')}`);
     // T5: the full diagnostics dump is FAILURE output, not success noise — each
     // assertion below embeds the part of it that explains its own failure.
     const diagDump = () => JSON.stringify(result.diag, null, 2);
@@ -268,19 +277,17 @@ async function main() {
     // volume must READ that — `/\d/` would pass on any stray digit.
     assert(/1\.00\s*cm/.test(result.costText),
       `cost quote should show 1.00 cm³ for this 1000 mm³ solid, got: "${result.costText}"`);
-    // T4: and the money must resolve. `print.cost.result` renders every
-    // unknown value as an em dash, so a "—" anywhere in the total position
-    // means density/price did not resolve and the quote is decorative.
-    // No `$` anchor: an approximate quote appends an "Approximate" badge
-    // inside the same element, so the currency is not always last.
-    const totalMatch = /=\s*([\d.]+|\u2014)\s*[A-Z]{1,4}/.exec(result.costText);
-    assert(totalMatch, `cost quote has no "= <total> <currency>" tail: "${result.costText}"`);
-    assert(totalMatch[1] !== '\u2014' && parseFloat(totalMatch[1]) > 0,
-      `cost total must be a real positive number, got "${totalMatch[1]}" in "${result.costText}"`);
+    // T4: and the money must resolve. The breakdown card renders every
+    // unknown value as an em dash, so a "—" in the total row means
+    // density/price did not resolve and the quote is decorative.
+    const totalMatch = /^([\d.]+|—)\s*[A-Z]{1,4}$/.exec(result.costTotal.trim());
+    assert(totalMatch, `cost total row should read "<total> <currency>", got: "${result.costTotal}"`);
+    assert(totalMatch[1] !== '—' && parseFloat(totalMatch[1]) > 0,
+      `cost total must be a real positive number, got "${totalMatch[1]}" (card: "${result.costText}")`);
 
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
-    console.log(`PASS browser repair smoke — holesFilled=${result.holesFilled}, volume=${volume.toFixed(2)}mm^3, watertight, HUD "${result.hudText}", cost "${result.costText}"`);
+    console.log(`PASS browser repair smoke — holesFilled=${result.holesFilled}, volume=${volume.toFixed(2)}mm^3, watertight, HUD "${result.hudText}", cost total "${result.costTotal}"`);
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);

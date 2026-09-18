@@ -143,13 +143,22 @@ await test('M4: PrintPanel source routes every persisted print/geometryFixes wri
   const lines = src.split(/\r?\n/);
   assert.match(src, /import \{[^}]*\bmarkDirty\b[^}]*\} from '\.\.\/core\/StateManager\.js'/,
     'PrintPanel imports markDirty');
-  const writes = ['geometryFixes: fixes', 'bedDimensions: next.dims', 'objBakeSolidTextures: on'];
+  // geometryFixes writes moved out of PrintPanel into RepairSession
+  // (_recordGeometryFixes) when the per-result Auto-Fix button joined the
+  // shared repairObjects path (2026-09-18) — guarded there below.
+  const writes = ['bedDimensions: next.dims', 'objBakeSolidTextures: on'];
   for (const w of writes) {
     const at = lines.findIndex(l => l.includes(w));
     assert.ok(at >= 0, `write site present: ${w}`);
     const win = lines.slice(at, at + 6).join('\n');
     assert.match(win, /markDirty\(\)/, `markDirty() follows the ${w} write`);
   }
+  assert.ok(!src.includes('geometryFixes: fixes'), 'PrintPanel no longer writes geometryFixes itself');
+  const rs = readFileSync(new URL('../src/core/repair/RepairSession.js', import.meta.url), 'utf8');
+  const rlines = rs.split(/\r?\n/);
+  const at = rlines.findIndex(l => l.includes('geometryFixes: fixes'));
+  assert.ok(at >= 0, 'RepairSession records geometryFixes');
+  assert.match(rlines.slice(at, at + 6).join('\n'), /markDirty\(\)/, 'markDirty() follows the RepairSession geometryFixes write');
 });
 
 console.log('\n' + out.join('\n'));

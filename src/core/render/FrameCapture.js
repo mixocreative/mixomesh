@@ -19,6 +19,7 @@
 import { getState } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { clampDimension } from './RenderMath.js';
+import { withRenderLock } from './RenderLock.js';
 
 const BABYLON = window.BABYLON;
 
@@ -29,7 +30,11 @@ const BABYLON = window.BABYLON;
  *           pose?: object|null }} opts
  * @returns {Promise<Blob>}
  */
-export async function capturePng({ width, height, transparent = false, pose = null } = {}) {
+export function capturePng(opts = {}) {
+  return withRenderLock(() => _capturePng(opts));
+}
+
+async function _capturePng({ width, height, transparent = false, pose = null } = {}) {
   const engine = SceneManager.getEngine();
   const scene  = SceneManager.getScene();
   if (!engine || !scene) throw new Error('Scene not ready');
@@ -104,7 +109,11 @@ async function _capturePngWebGPU(scene, engine, cam, w, h, transparent) {
  * black frames would still have plausible bytes; this catches it.
  * @returns {Promise<Uint8Array>}
  */
-export async function captureFrameRGBA({ width = 256, height = 256 } = {}) {
+export function captureFrameRGBA(opts = {}) {
+  return withRenderLock(() => _captureFrameRGBA(opts));
+}
+
+async function _captureFrameRGBA({ width = 256, height = 256 } = {}) {
   const engine = SceneManager.getEngine();
   const scene  = SceneManager.getScene();
   if (!engine || !scene) throw new Error('Scene not ready');
