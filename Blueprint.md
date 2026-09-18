@@ -3347,6 +3347,26 @@ from the material default was the confusion; clearing a field returns to
 the default (stores 0). `#pp-cost-total [data-cost="total"]` is the smoke
 probe. No print parts ⇒ a plain "no print parts to quote" note.
 
+**Material presets live in an EDITABLE FILE, never the bundle (2026-09-18,
+`src/core/print/MaterialPresets.js`).** Web/dev: `public/config/materials.json`
+(fetched at boot from `<base>/config/materials.json`, `cache: no-store`).
+Desktop: `<userData>/config/materials.json`, seeded from the shipped copy on
+first run by `electron/main.cjs` `config:read` (allowlisted names only;
+`preload.readUserConfig`). The Cost block shows the resolved path with a copy
+button and says which action applies (reload page / restart app). Values typed
+into the panel change `state.cost` only and are never written back. The file
+is validated (`parseMaterialPresets`: unique ids, density > 0, numeric
+prices); a missing or malformed file loads a one-entry built-in fallback, logs
+the reason and shows it under the path — never silent. Presets carry
+`process` (FDM / Resin / SLS / Full-colour / Custom → `<optgroup>`), a `note`
+(shown under the select) and the usual density / price / support fields.
+`config/printers.json` no longer carries `materials[]` — only a
+`defaultMaterialId` that must name a preset (`tests/hygiene.test.mjs`). The
+shipped list: PLA, PLA+, PETG, ABS, ASA, TPU 95A, Nylon, CF blends, standard /
+tough / water-washable / 8K resin, PA12 SLS, Mimaki MH-100 (placeholder
+price — dealer-quoted), Custom; reference prices from a 2026 web survey are in
+the file's `_readme`.
+
 **Formula:** `total = volume(cm³) × density(g/cm³) × pricePerGram +
 supportVolume × supportDensity × supportPricePerGram`, where
 `supportVolume = volume × (supportPercent / 100)`. Per-unit density/price

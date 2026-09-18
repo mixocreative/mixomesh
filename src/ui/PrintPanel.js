@@ -59,6 +59,7 @@ export function init() {
     EVENTS.HISTORY_PUSHED,
     EVENTS.HISTORY_UNDONE,
     EVENTS.HISTORY_REDONE,
+    EVENTS.MATERIALS_LOADED,      // presets file (re)loaded — Cost block select
   ];
   for (const ev of events) subscribe(ev, _render);
   // The Validation tab's last outcome line describes the scene it ran on —

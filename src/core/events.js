@@ -44,6 +44,9 @@ export const EVENTS = {
   VISIBILITY_CHANGED:      'hierarchy:visibilityChanged',
   LOCK_CHANGED:            'hierarchy:lockChanged',
 
+  // Material presets (config/materials.json) finished loading at boot
+  MATERIALS_LOADED:        'materials:loaded',
+
   // Collections (file-import display buckets in the outliner)
   COLLECTION_CREATED:      'collection:created',
   COLLECTION_REMOVED:      'collection:removed',

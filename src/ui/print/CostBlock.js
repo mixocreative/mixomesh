@@ -5,7 +5,9 @@
  * unioned) × density × price + a support-material premium. Recomputes
  * synchronously on every field change and on the same panel-refresh events
  * as the readiness block (PrintPanel.init's event list). `cost.*` settings
- * of 0 mean "use the material default" (config/printers.json `materials[]`).
+ * of 0 mean "use the material default" (the preset from the editable
+ * config/materials.json — see MaterialPresets.js; printers.json only names
+ * a `defaultMaterialId`).
  *
  * Kept out of PrintPanel.js to keep that file's growth contained — this
  * module owns both the render and the wiring for the block.
@@ -18,6 +20,8 @@ import { quote, unitVolumesMM3, overlappingPairs, totalTriangles, costTriangleCa
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
+import { Toast } from '../Toast.js';
+import { getMaterialPresets, getMaterialPresetsSource } from '../../core/print/MaterialPresets.js';
 import { wireNumbers, wireSelects } from '../lib/fields.js';
 import printersData from '../../config/printers.json' with { type: 'json' };
 
@@ -26,24 +30,40 @@ function _printer(state) {
   return printersData[id] ?? printersData.custom ?? null;
 }
 
-function _materials(state) {
-  return _printer(state)?.materials ?? [];
+/** Presets from the editable file (MaterialPresets.js), not per printer. */
+function _materials() {
+  return getMaterialPresets();
 }
 
 function _material(state) {
-  const materials = _materials(state);
+  const materials = _materials();
   const wanted = state.cost?.materialId;
   const found = materials.find(m => m.id === wanted);
   if (found) return found;
-  // CIA F13: falling back to materials[0] without recording it meant the
-  // quote silently used a different material than `cost.materialId` names
-  // (e.g. after a printer switch dropped the selected material). Commit the
-  // fallback so the select, the quote and the persisted setting agree.
-  const fallback = materials[0] ?? null;
+  // CIA F13: falling back without recording it meant the quote silently used
+  // a different material than `cost.materialId` names. The fallback is the
+  // printer profile's `defaultMaterialId` when the presets carry it, else the
+  // first preset; either way it is committed so the select, the quote and
+  // the persisted setting agree.
+  const printerDefault = _printer(state)?.defaultMaterialId;
+  const fallback = materials.find(m => m.id === printerDefault) ?? materials[0] ?? null;
   if (fallback && wanted !== fallback.id) {
     setState(st => ({ ...st, cost: { ...st.cost, materialId: fallback.id } }), { silent: true });
   }
   return fallback;
+}
+
+/** The "edit the presets here" line: file path (+ load error when any). */
+function _presetsSourceHtml() {
+  const src = getMaterialPresetsSource();
+  const where = src.kind === 'desktop' ? t('print.cost.presetsDesktop') : t('print.cost.presetsWeb');
+  let html = `<p class="pp-hint pp-cost-presets">${escapeHtml(t('print.cost.presetsFrom'))} <code class="pp-cost-path" title="${escapeAttr(src.path ?? '')}">${escapeHtml(src.path ?? '')}</code>` +
+    `<button type="button" class="pp-mini-btn" id="pp-cost-copy-path" title="${escapeAttr(t('print.cost.copyPath'))}">${icon('Copy', { width: 11, height: 11 })}</button>` +
+    `<br>${escapeHtml(where)} ${escapeHtml(t('print.cost.presetsLiveNote'))}</p>`;
+  if (src.error) {
+    html += `<p class="pp-hint pp-cost-presets-error">${icon('AlertTriangle', { class: 'inline', width: 12, height: 12 })} ${escapeHtml(t('print.cost.presetsError', { error: src.error }))}</p>`;
+  }
+  return html;
 }
 
 /** Map a PrintCost.js reason code → a translated string for the badge title. */
@@ -83,7 +103,7 @@ function _numberField(id, labelKey, value, fallback) {
  */
 export function renderCostBlock(container, state) {
   _invalidateGeometryCache();
-  const materials = _materials(state);
+  const materials = _materials();
   const material = _material(state);
   const cost = state.cost ?? {};
 
@@ -92,11 +112,24 @@ export function renderCostBlock(container, state) {
 
   html += `<label class="pp-cost-sublabel" for="pp-cost-material">${escapeHtml(t('print.cost.material'))}</label>`;
   html += '<select id="pp-cost-material" class="pp-preset-select">';
+  // Grouped by process (FDM / Resin / SLS / Full-colour / Custom) in file order.
+  const byProcess = new Map();
   for (const m of materials) {
-    const sel = m.id === material?.id ? ' selected' : '';
-    html += `<option value="${escapeAttr(m.id)}"${sel}>${escapeHtml(m.name)}</option>`;
+    const key = m.process || 'Custom';
+    if (!byProcess.has(key)) byProcess.set(key, []);
+    byProcess.get(key).push(m);
+  }
+  for (const [process, list] of byProcess) {
+    html += `<optgroup label="${escapeAttr(process)}">`;
+    for (const m of list) {
+      const sel = m.id === material?.id ? ' selected' : '';
+      html += `<option value="${escapeAttr(m.id)}"${sel} title="${escapeAttr(m.note ?? '')}">${escapeHtml(m.name)}</option>`;
+    }
+    html += '</optgroup>';
   }
   html += '</select>';
+  if (material?.note) html += `<p class="pp-hint pp-cost-note-line">${escapeHtml(material.note)}</p>`;
+  html += _presetsSourceHtml();
 
   html += '<div class="pp-xyz-row">';
   // Placeholders mirror quote()'s own fallback chain exactly: support price
@@ -139,6 +172,12 @@ export function renderCostBlock(container, state) {
     { onInvalid: invalid('supportPricePerGram') });
   wireNumbers(container, '#pp-cost-support-pct', (_inp, v) => commit({ supportPercent: Math.max(0, v) }),
     { onInvalid: invalid('supportPercent') });
+
+  container.querySelector('#pp-cost-copy-path')?.addEventListener('click', async () => {
+    const path = getMaterialPresetsSource().path ?? '';
+    try { await navigator.clipboard.writeText(path); Toast.show(t('print.cost.pathCopied'), 'success', 1500); }
+    catch { Toast.show(path, 'info', 6000); }
+  });
 
   const currencyInput = container.querySelector('#pp-cost-currency');
   currencyInput?.addEventListener('change', () => {

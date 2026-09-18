@@ -46,6 +46,43 @@ function createWindow() {
   }
 }
 
+// ── User-editable config files (materials.json) ──
+// Lives OUTSIDE the app bundle so the user can edit it with any text editor:
+// <userData>/config/<name>. Seeded from the shipped copy (dist/config in a
+// packaged build, public/config in dev) the first time it is asked for. Only
+// a fixed allowlist of names can be read — never an arbitrary path.
+const USER_CONFIG_FILES = new Set(['materials.json']);
+ipcMain.handle('config:read', async (_e, name) => {
+  if (!USER_CONFIG_FILES.has(name)) return { error: `config "${name}" is not a user-editable file` };
+  const fs = require('node:fs/promises');
+  const dir = path.join(app.getPath('userData'), 'config');
+  const target = path.join(dir, name);
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    try {
+      return { text: await fs.readFile(target, 'utf8'), path: target };
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+    }
+    const shipped = [
+      path.join(__dirname, '..', 'dist', 'config', name),
+      path.join(__dirname, '..', 'public', 'config', name),
+    ];
+    for (const src of shipped) {
+      try {
+        const text = await fs.readFile(src, 'utf8');
+        await fs.writeFile(target, text, 'utf8');
+        return { text, path: target };
+      } catch (err) {
+        if (err?.code !== 'ENOENT') throw err;
+      }
+    }
+    return { error: `${name}: no shipped copy found to seed ${target}`, path: target };
+  } catch (err) {
+    return { error: `${name}: ${err?.message ?? err}`, path: target };
+  }
+});
+
 // ── KV persistence (JSON file in userData) — backs DesktopStorageAdapter.kv* ──
 // Atomic temp+rename writes, serialised mutations, corrupt-file quarantine: KvStore.cjs.
 ipcMain.handle('kv:set', (_e, key, value) => _kv.set(key, value));

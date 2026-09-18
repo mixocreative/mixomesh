@@ -37,27 +37,39 @@ await test('A8: subscribe(undefined event) throws in dev instead of silently dyi
   assert.throws(() => subscribe(undefined, () => {}), /unknown event/i);
 });
 
-await test('printer profiles contain build-volume reference data + a materials table only', () => {
+await test('printer profiles contain build-volume reference data + a default material id only', () => {
   for (const [id, profile] of Object.entries(printers)) {
-    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'displayName', 'materials', 'vendor'], id);
-    assert.equal(['format', 'pipeline', 'colorMode'].some(key => key in profile), false, id);
+    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'defaultMaterialId', 'displayName', 'vendor'], id);
+    assert.equal(['format', 'pipeline', 'colorMode', 'materials'].some(key => key in profile), false, id);
   }
 });
 
-await test('watertight-repair-and-cost task 6: every printer has ≥1 material with a positive density', () => {
-  for (const [id, profile] of Object.entries(printers)) {
-    assert.ok(Array.isArray(profile.materials) && profile.materials.length > 0, `${id}: materials must be a non-empty array`);
-    for (const material of profile.materials) {
-      assert.equal(typeof material.id, 'string', `${id}: material.id`);
-      assert.ok(material.id.length > 0, `${id}: material.id non-empty`);
-      assert.equal(typeof material.name, 'string', `${id}: material.name`);
-      assert.ok(material.densityGcm3 > 0, `${id}/${material.id}: densityGcm3 must be positive`);
-      assert.equal(typeof material.pricePerGram, 'number', `${id}/${material.id}: pricePerGram`);
-      assert.ok(material.supportDensityGcm3 > 0, `${id}/${material.id}: supportDensityGcm3 must be positive`);
-      assert.equal(typeof material.supportPricePerGram, 'number', `${id}/${material.id}: supportPricePerGram`);
-      assert.equal(typeof material.defaultSupportPercent, 'number', `${id}/${material.id}: defaultSupportPercent`);
-    }
+// Material presets moved to the user-editable public/config/materials.json
+// (owner ask 2026-09-18). The shipped file must parse through the same
+// validator the app uses, every printer's defaultMaterialId must exist in it,
+// and every entry must be quotable (positive density, numeric prices).
+await test('materials.json presets parse, are complete, and every printer default exists', async () => {
+  const { parseMaterialPresets } = await import('../src/core/print/MaterialPresets.js');
+  const raw = JSON.parse(readFileSync(new URL('../public/config/materials.json', import.meta.url), 'utf8'));
+  const list = parseMaterialPresets(raw);
+  assert.ok(list.length >= 10, 'ships a useful set of presets');
+  for (const m of list) {
+    assert.ok(m.densityGcm3 > 0, `${m.id}: densityGcm3 > 0`);
+    assert.ok(m.supportDensityGcm3 > 0, `${m.id}: supportDensityGcm3 > 0`);
+    assert.equal(typeof m.pricePerGram, 'number', `${m.id}: pricePerGram`);
+    assert.equal(typeof m.supportPricePerGram, 'number', `${m.id}: supportPricePerGram`);
+    assert.equal(typeof m.defaultSupportPercent, 'number', `${m.id}: defaultSupportPercent`);
+    assert.ok(['FDM', 'Resin', 'SLS', 'Full-colour', 'Custom'].includes(m.process), `${m.id}: known process`);
   }
+  const ids = new Set(list.map(m => m.id));
+  for (const [pid, profile] of Object.entries(printers)) {
+    assert.ok(ids.has(profile.defaultMaterialId), `${pid}: defaultMaterialId "${profile.defaultMaterialId}" must be a preset`);
+  }
+  // The validator is not decorative: duplicates, bad density and non-numeric prices are rejected.
+  assert.throws(() => parseMaterialPresets({ materials: [{ id: 'a', densityGcm3: 1 }, { id: 'a', densityGcm3: 1 }] }), /duplicate id/);
+  assert.throws(() => parseMaterialPresets({ materials: [{ id: 'a', densityGcm3: 0 }] }), /densityGcm3/);
+  assert.throws(() => parseMaterialPresets({ materials: [{ id: 'a', densityGcm3: 1, pricePerGram: 'cheap' }] }), /pricePerGram/);
+  assert.throws(() => parseMaterialPresets({ materials: [] }), /non-empty/);
 });
 
 // (M13 cursor-scaling-on-world-rescale test removed with RescaleWorldCommand in

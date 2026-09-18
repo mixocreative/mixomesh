@@ -556,3 +556,11 @@
   line-height: 1.4;
 }
 .pp-cost-note svg { flex-shrink: 0; margin-top: 1px; }
+
+/* Cost presets source line */
+.pp-cost-presets { margin: 4px 0 0; line-height: 1.5; }
+.pp-cost-path { font-size: var(--fs-xs); background: var(--bg-3); padding: 0 4px; border-radius: var(--r-xs); word-break: break-all; }
+.pp-mini-btn { background: transparent; border: 1px solid var(--border); border-radius: var(--r-xs); color: var(--text-2); cursor: pointer; padding: 0 4px; margin-left: 4px; vertical-align: middle; line-height: 1.2; }
+.pp-mini-btn:hover { color: var(--text-0); border-color: var(--border-strong); }
+.pp-cost-presets-error { color: #b45309; margin: 2px 0 0; }
+.pp-cost-note-line { margin: 2px 0 0; }

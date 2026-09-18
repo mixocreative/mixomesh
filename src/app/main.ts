@@ -20,6 +20,7 @@ import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
+import { loadMaterialPresets } from '../core/print/MaterialPresets.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
 import { Workspace } from '../ui/Workspace.js';
@@ -76,6 +77,10 @@ async function bootstrap() {
   PropertiesPanel.init();
   ShaderPanel.init();
   ScenePanel.init();
+  // Material presets come from an editable file (public/config/materials.json
+  // on the web, <userData>/config/materials.json on desktop) — loaded before
+  // the Print panel first renders its Cost block.
+  await loadMaterialPresets();
   PrintPanel.init();
   ContextMenu.init();
   AssetPanel.init();

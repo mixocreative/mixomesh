@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mountDirectory: () => ipcRenderer.invoke('dialog:mountDirectory'),
   listDirectory: (ref, parentPath) => ipcRenderer.invoke('fs:listDirectoryRef', ref, parentPath),
   readFileRef: (ref) => ipcRenderer.invoke('fs:readFileRef', ref),
+  // User-editable config files (materials.json): <userData>/config/<name>,
+  // seeded from the shipped copy on first run. Returns { text, path } or { error }.
+  readUserConfig: (name) => ipcRenderer.invoke('config:read', name),
   // Legacy project/export dialogs; migrate separately behind descriptors.
   pickOpen: (opts) => ipcRenderer.invoke('dialog:open', opts),
   pickSave: (opts) => ipcRenderer.invoke('dialog:save', opts),

@@ -1,0 +1,32 @@
+{
+  "_readme": [
+    "MIXOMESH material presets — the list the Print ▸ Export ▸ Cost 'Material' menu offers.",
+    "Edit this file to add, remove or re-price presets, then restart the app (web: reload; desktop: this is",
+    "the copy in your user data folder — the path is shown under the Material menu).",
+    "Values typed into the Cost panel change the CURRENT setting only; they are never written back here.",
+    "Fields: id (unique, stable), name, process (FDM | Resin | SLS | Full-colour), densityGcm3,",
+    "pricePerGram (currency-free number, pair with the Currency field), supportDensityGcm3,",
+    "supportPricePerGram, defaultSupportPercent (support volume as % of model volume), note.",
+    "Reference prices (USD, 2026 retail, web survey 2026-09-18): PLA 15–30 USD/kg, PETG 20–30, ABS/ASA 25–35,",
+    "TPU 18–42, Nylon 30–60, standard 405 nm resin 20–35 USD/L, tough/ABS-like resin 40–60 USD/L,",
+    "PA12 SLS powder 70–200 USD/kg. Full-colour inkjet (Mimaki 3DUJ) ink pricing is dealer-quoted — the",
+    "0.50 USD/g below is a placeholder to replace with your own quote."
+  ],
+  "materials": [
+    { "id": "pla",          "name": "PLA",                    "process": "FDM",  "densityGcm3": 1.24, "pricePerGram": 0.022, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.022, "defaultSupportPercent": 15, "note": "General purpose, easiest to print." },
+    { "id": "pla-plus",     "name": "PLA+ / Tough PLA",       "process": "FDM",  "densityGcm3": 1.24, "pricePerGram": 0.027, "supportDensityGcm3": 1.24, "supportPricePerGram": 0.027, "defaultSupportPercent": 15, "note": "Impact-modified PLA." },
+    { "id": "petg",         "name": "PETG",                   "process": "FDM",  "densityGcm3": 1.27, "pricePerGram": 0.025, "supportDensityGcm3": 1.27, "supportPricePerGram": 0.025, "defaultSupportPercent": 15, "note": "Tougher than PLA, some temperature resistance." },
+    { "id": "abs",          "name": "ABS",                    "process": "FDM",  "densityGcm3": 1.04, "pricePerGram": 0.028, "supportDensityGcm3": 1.04, "supportPricePerGram": 0.028, "defaultSupportPercent": 15, "note": "Needs an enclosure; sandable, acetone-smoothable." },
+    { "id": "asa",          "name": "ASA",                    "process": "FDM",  "densityGcm3": 1.07, "pricePerGram": 0.030, "supportDensityGcm3": 1.07, "supportPricePerGram": 0.030, "defaultSupportPercent": 15, "note": "UV-stable ABS alternative for outdoor parts." },
+    { "id": "tpu-95a",      "name": "TPU 95A (flexible)",     "process": "FDM",  "densityGcm3": 1.21, "pricePerGram": 0.030, "supportDensityGcm3": 1.21, "supportPricePerGram": 0.030, "defaultSupportPercent": 10, "note": "Flexible; supports are hard to remove, keep them minimal." },
+    { "id": "nylon-pa",     "name": "Nylon (PA6 / PA12)",     "process": "FDM",  "densityGcm3": 1.14, "pricePerGram": 0.045, "supportDensityGcm3": 1.14, "supportPricePerGram": 0.045, "defaultSupportPercent": 15, "note": "Strong, wear-resistant; dry before printing." },
+    { "id": "pla-cf",       "name": "PLA-CF / PETG-CF",       "process": "FDM",  "densityGcm3": 1.22, "pricePerGram": 0.040, "supportDensityGcm3": 1.22, "supportPricePerGram": 0.040, "defaultSupportPercent": 15, "note": "Carbon-fibre filled; hardened nozzle required." },
+    { "id": "resin-std",    "name": "Standard resin (405 nm)", "process": "Resin", "densityGcm3": 1.10, "pricePerGram": 0.027, "supportDensityGcm3": 1.10, "supportPricePerGram": 0.027, "defaultSupportPercent": 25, "note": "Hobby LCD/MSLA resin; ~25–30 USD per litre." },
+    { "id": "resin-tough",  "name": "Tough / ABS-like resin",  "process": "Resin", "densityGcm3": 1.12, "pricePerGram": 0.045, "supportDensityGcm3": 1.12, "supportPricePerGram": 0.045, "defaultSupportPercent": 25, "note": "Impact-resistant engineering resin." },
+    { "id": "resin-water",  "name": "Water-washable resin",   "process": "Resin", "densityGcm3": 1.10, "pricePerGram": 0.030, "supportDensityGcm3": 1.10, "supportPricePerGram": 0.030, "defaultSupportPercent": 25, "note": "No IPA wash; slightly more brittle." },
+    { "id": "resin-mini",   "name": "8K / miniature resin",   "process": "Resin", "densityGcm3": 1.10, "pricePerGram": 0.040, "supportDensityGcm3": 1.10, "supportPricePerGram": 0.040, "defaultSupportPercent": 30, "note": "Low-shrink, fine detail; heavy support use on figures." },
+    { "id": "pa12-sls",     "name": "PA12 nylon (SLS powder)", "process": "SLS",  "densityGcm3": 0.95, "pricePerGram": 0.090, "supportDensityGcm3": 0.95, "supportPricePerGram": 0.000, "defaultSupportPercent": 0,  "note": "Powder bed needs no supports; density is the sintered part, not the powder." },
+    { "id": "mimaki-model", "name": "Mimaki 3DUJ model ink (MH-100)", "process": "Full-colour", "densityGcm3": 1.10, "pricePerGram": 0.500, "supportDensityGcm3": 1.05, "supportPricePerGram": 0.200, "defaultSupportPercent": 40, "note": "Placeholder price — replace with your dealer quote. Water-soluble support." },
+    { "id": "custom",       "name": "Custom (type your own)", "process": "Custom", "densityGcm3": 1.00, "pricePerGram": 0.000, "supportDensityGcm3": 1.00, "supportPricePerGram": 0.000, "defaultSupportPercent": 0,  "note": "Density 1.0; fill in price / support in the panel." }
+  ]
+}
