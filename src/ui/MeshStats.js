@@ -53,7 +53,7 @@ let _recomputeScheduled = false;
 
 export function init() {
   for (const ev of GEOMETRY_EVENTS) subscribe(ev, _queueRecompute);
-  for (const ev of [EVENTS.SELECTION_CHANGED, ...GEOMETRY_EVENTS]) subscribe(ev, _render);
+  for (const ev of [EVENTS.SELECTION_CHANGED, ...GEOMETRY_EVENTS, EVENTS.LOCALE_CHANGED]) subscribe(ev, _render);
 }
 
 // M4: the live mesh for an id comes from the AssetLoader registry — the old
@@ -100,7 +100,7 @@ function _render() {
   const ratio = budget > 0 ? _cachedSceneTris / budget : 0;
   const hudClass = ratio >= DANGER_RATIO ? 'hud-danger' : ratio >= WARN_RATIO ? 'hud-warn' : '';
 
-  let text = `tris ${formatTriCount(_cachedSceneTris)} / ${formatTriCount(budget)}`;
+  let text = `${t('hud.tris')} ${formatTriCount(_cachedSceneTris)} / ${formatTriCount(budget)}`;
 
   const sel = getState().selection?.selectedIds ?? [];
   let selTris = 0, min = null, max = null;
@@ -126,10 +126,10 @@ function _render() {
     const activeId = getState().selection?.activeId;
     const val = activeId ? getState().scene.validation?.[activeId] : null;
     const water = val?.results
-      ? (val.results.some(r => OPEN_GEOMETRY_TYPES.has(r.type)) ? ' · ⚠ not watertight' : ' · ✓ watertight')
+      ? (val.results.some(r => OPEN_GEOMETRY_TYPES.has(r.type)) ? ` · ${t('hud.notWatertight')}` : ` · ${t('hud.watertight')}`)
       : '';
 
-    text += ` · sel ${formatTriCount(selTris)} · ${mm(d.x)}×${mm(d.z)}×${mm(d.y)} mm${water}`;
+    text += ` · ${t('hud.sel')} ${formatTriCount(selTris)} · ${mm(d.x)}×${mm(d.z)}×${mm(d.y)} mm${water}`;
   }
 
   StatusBar.setCenter(text, { className: hudClass, title: t('hud.triangleBudget') });

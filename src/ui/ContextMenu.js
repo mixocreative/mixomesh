@@ -86,13 +86,17 @@ export function open(info) {
   _isOpen = true;
   _ignoreNextClose = true;
   setTimeout(() => { _ignoreNextClose = false; }, 0);
-  // Edge clamp after the browser lays it out.
-  requestAnimationFrame(() => {
+  // Edge clamp. getBoundingClientRect forces layout synchronously, so no
+  // rAF is needed — and a rAF never fires in a background tab, which left a
+  // 30-item menu hanging off the bottom of the window (sweep 2026-09-18).
+  // The CSS max-height + overflow-y is the fallback for a window shorter
+  // than the menu itself.
+  {
     const r = _root.getBoundingClientRect();
     const vpW = window.innerWidth, vpH = window.innerHeight;
     if (r.right > vpW)  _root.style.left = `${Math.max(0, vpW - r.width - 4)}px`;
     if (r.bottom > vpH) _root.style.top  = `${Math.max(0, vpH - r.height - 4)}px`;
-  });
+  }
 
   _root.querySelectorAll('[data-action]').forEach(el => {
     const run = () => {

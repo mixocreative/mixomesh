@@ -3793,6 +3793,14 @@ Auto-Fix" toast never outlives the repair it offered.
 
 The Scale tab shows the export reference object's exported size in mm; the
 internal BU→mm factor is not user-facing and is no longer printed.
+
+Sweep extras (2026-09-18): the status-bar HUD segment is localised
+(`hud.tris` / `hud.sel` / `hud.watertight` / `hud.notWatertight`, re-rendered
+on `LOCALE_CHANGED`; English values stay `tris` / `sel` so the smoke pins
+hold); `.modal-content` carries its own padding (the shell has none — the
+export-gate, validation-errors and import-error modals sat flush on the
+edge); the context menu clamps to the window synchronously (a rAF clamp
+never fires in a background tab) with a `max-height` + scroll fallback.
 Display modes (print-preview matte, wireframe edges + colour) live in the
 viewport toggles under the NavCube — see Viewport Toggles below — so they
 work from every workspace; there is no Preview tab.

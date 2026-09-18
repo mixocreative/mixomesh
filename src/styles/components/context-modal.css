@@ -7,6 +7,8 @@
   box-shadow: var(--shadow-md);
   padding: var(--sp-2);
   min-width: 200px;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
   z-index: 2000;
   font-size: var(--fs-sm);
   color: var(--text-0);
