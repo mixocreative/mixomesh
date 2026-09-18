@@ -3,10 +3,10 @@ import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
 import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
+import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, SplitToPartsCommand, JoinCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
-import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
+import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject, canonicalObjectId } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
 import { repairWithOverlay } from './RepairFeedback.js';
 import { Modal } from './Modal.js';
@@ -67,8 +67,11 @@ export function init() {
  * Open the context menu at viewport coordinates (x, y).
  * @param {{ x:number, y:number, source:'viewport'|'outliner', targetId?:string, targetKind?:string }} info
  */
+let _lastInfo = null;
+
 export function open(info) {
   if (!_root) return;
+  _lastInfo = info;
   const items = _buildItems(info);
   _root.innerHTML = items
     .map(i => i === 'sep' ? `<div class="cm-sep"></div>` : _renderItem(i))
@@ -174,6 +177,12 @@ function _buildItems(info) {
     'sep',
     { label: t('context.repairGeometry'),  shortcut: '',            action: 'repair-geometry', iconName: 'AlertTriangle', cls: enabled(hasSelection) },
     'sep',
+    // Split / Join (owner decision 2026-09-18): explicit, undoable, geometry untouched.
+    { label: t('context.splitToParts'),    shortcut: '',            action: 'split-parts', iconName: 'Scissors',
+      cls: enabled(!!info.targetId && logicalObjectPartIds(info.targetId, objs).length > 1) },
+    { label: t('context.join'),            shortcut: '',            action: 'join',        iconName: 'Combine',
+      cls: enabled(new Set(selIds.map(id => canonicalObjectId(id, objs))).size > 1) },
+    'sep',
     { label: t('context.group'),           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
     { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
     { label: t('context.unparent'),        shortcut: '',            action: 'unparent', iconName: 'GitBranch', cls: enabled(someGrouped) },
@@ -241,6 +250,8 @@ function _runAction(action, info) {
   if (action === 'mate') _mate();
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'repair-geometry') safeAsync(() => _repairGeometry());
+  if (action === 'split-parts') _splitToParts(_lastInfo?.targetId);
+  if (action === 'join') _join();
   if (action === 'slice-connector') SliceConnectorSession.start();
   if (action === 'sel-to-cursor') CursorTools.selectionToCursor();
   if (action === 'cursor-to-sel') CursorTools.cursorToSelection();
@@ -406,6 +417,28 @@ async function _boolean(op) {
 // a time under the blocking ProgressOverlay so a batch of heavy meshes can't
 // be edited mid-repair. A per-object failure is reported but never blocks
 // the rest of the selection (MeshValidator.repairObjects is tolerant).
+function _splitToParts(targetId) {
+  const objects = getState().scene.objects;
+  const leadId = canonicalObjectId(targetId ?? Selection.getSelectedIds()[0], objects);
+  if (!leadId) return;
+  const cmd = new SplitToPartsCommand(leadId);
+  push(cmd);
+  if (!cmd.applied) return;
+  // Every part is now its own object — show them all selected, lead active.
+  const group = Object.values(getState().scene.groups).find(g => (g.childIds ?? []).includes(leadId));
+  Selection.set(group ? group.childIds : [leadId], leadId);
+}
+
+function _join() {
+  const ids = Selection.getSelectedIds();
+  const cmd = new JoinCommand(ids, { leadId: Selection.getActiveId?.() ?? ids[0] });
+  push(cmd);
+  if (!cmd.applied) return;
+  const objects = getState().scene.objects;
+  const leadId = canonicalObjectId(cmd._leadId ?? ids[0], objects);
+  Selection.set([leadId], leadId);
+}
+
 async function _repairGeometry() {
   const objects = getState().scene.objects;
   const ids = Selection.getSelectedIds().filter(id => objects[id] && !objects[id].isGhost);

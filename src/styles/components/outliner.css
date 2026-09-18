@@ -245,3 +245,11 @@
   color: var(--text-2);
   opacity: 0.8;
 }
+
+/* Internal-parts toggle + read-only part rows */
+.ol-header { justify-content: space-between; align-items: center; }
+.ol-parts-toggle { width: 20px; height: 20px; }
+.ol-parts-toggle.ol-parts-on { background: var(--accent); color: var(--accent-fg); }
+.ol-row-part { color: var(--text-2); font-style: italic; cursor: default; }
+.ol-row-part .ol-icon { color: var(--text-2); }
+.ol-row-part:hover { background: var(--bg-1); color: var(--text-1); }

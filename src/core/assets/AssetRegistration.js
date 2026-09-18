@@ -51,7 +51,10 @@ export function uniqueHierarchyName(baseName) {
 }
 
 function _logicalDisplayName(mesh) {
-  const partSuffix = /__part\d+$/.exec(String(mesh?.name ?? ''));
+  // Both loader-made part suffixes are dropped from the OBJECT's name: the
+  // MultiMaterial split's `__part<N>` and Babylon's glTF `_primitive<N>`
+  // (a scanned bowl showed as "bowl.ar_primitive0" — sweep 2026-09-18).
+  const partSuffix = /(?:__part|_primitive)\d+$/.exec(String(mesh?.name ?? ''));
   const sourceName = mesh?.metadata?.sourceMeshName ?? mesh?.metadata?.gltf?.extras?.name;
   if (sourceName) return String(sourceName);
   if (partSuffix) return String(mesh.name).slice(0, -partSuffix[0].length) || 'mesh';

@@ -172,6 +172,11 @@ function _buildGroupUnion(siblings) {
     const pos = _getPositions(babylonMesh);
     const idx = _getIndices(babylonMesh);
     if (!pos || !idx) continue;
+    // Force a fresh world matrix: right after import the cached one is the
+    // PRE-bake matrix (root reflection × unit scale) — with one sibling
+    // refreshed by a render tick and the other not, the parts landed in two
+    // different spaces and every seam read as a hole (smoke 2026-09-18).
+    babylonMesh.computeWorldMatrix?.(true);
     const wm = babylonMesh.getWorldMatrix?.() ?? null;
     const vCount = pos.length / 3;
     for (let i = 0; i < vCount; i++) {

@@ -13,6 +13,12 @@ let _root  = null;
 let _listEl = null;
 let _onContextMenu = null;
 let _searchQuery = '';
+// "Show internal parts": read-only rows for the parts of a multi-material
+// object under their lead (owner decision 2026-09-18). Per-user, never in
+// the .mixo.
+const PARTS_KEY = 'mx-outliner-parts-v1';
+let _showParts = false;
+try { _showParts = localStorage.getItem(PARTS_KEY) === '1'; } catch { /* private mode */ }
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -54,6 +60,9 @@ export function init() {
   _root.innerHTML = `
     <div class="ol-header">
       <span class="ol-title" data-i18n-key="panel.outliner.title">Outliner</span>
+      <button type="button" class="ol-icon-btn ol-parts-toggle${_showParts ? ' ol-parts-on' : ''}" id="ol-show-parts"
+              aria-pressed="${_showParts ? 'true' : 'false'}" title="${escapeAttr(t('outliner.showParts'))}"
+              aria-label="${escapeAttr(t('outliner.showParts'))}">${icon('Layers', { width: 13, height: 13 })}</button>
     </div>
     <input class="ol-search" id="ol-search" type="search"
            placeholder="${escapeAttr(t('outliner.searchPlaceholder'))}"
@@ -61,6 +70,13 @@ export function init() {
     <div class="ol-list" id="ol-list" role="tree" data-i18n-aria-label="outliner.sceneObjects"></div>
   `;
   _listEl = _root.querySelector('#ol-list');
+  _root.querySelector('#ol-show-parts').addEventListener('click', (e) => {
+    _showParts = !_showParts;
+    e.currentTarget.classList.toggle('ol-parts-on', _showParts);
+    e.currentTarget.setAttribute('aria-pressed', _showParts ? 'true' : 'false');
+    try { localStorage.setItem(PARTS_KEY, _showParts ? '1' : '0'); } catch { /* private mode */ }
+    _render();
+  });
   _root.querySelector('#ol-search').addEventListener('input', event => {
     _searchQuery = event.target.value;
     _render();
@@ -286,6 +302,31 @@ function _renderObjectRow(obj, depth, fileName = null) {
   const fileBadge = fileName
     ? `<span class="ol-file-badge" title="${escapeAttr(t('outliner.fromFile', { file: fileName }))}">${icon('Package', { width: 11, height: 11 })}</span>`
     : '';
+  let html = _renderObjectRowOnly(obj, depth, fileBadge);
+  if (_showParts) {
+    const objects = getState().scene.objects;
+    for (const partId of logicalObjectPartIds(obj.id, objects)) {
+      if (partId === obj.id) continue;
+      const part = objects[partId];
+      if (!part) continue;
+      html += `
+    <div class="ol-row ol-row-part" data-id="${escapeAttr(partId)}" data-kind="part" data-lead="${escapeAttr(obj.id)}"
+         role="treeitem" tabindex="-1" draggable="false" aria-selected="false"
+         title="${escapeAttr(t('outliner.internalPart', { name: obj.name }))}"
+         style="padding-left:${(depth + 1) * 14}px">
+      <span class="ol-twirl ol-twirl-empty"></span>
+      <span class="ol-icon">${icon('Box', { width: 14, height: 14 })}</span>
+      <span class="ol-name-cell"><span class="ol-name">${_escape(part.name)}</span></span>
+      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
+      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
+      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
+    </div>`;
+    }
+  }
+  return html;
+}
+
+function _renderObjectRowOnly(obj, depth, fileBadge) {
   return _renderRow({
     id: obj.id,
     kind: 'object',
@@ -496,6 +537,13 @@ function _rowFromEvent(e) {
 function _onListClick(e) {
   const row = _rowFromEvent(e);
   if (!row) return;
+  // A read-only internal-part row selects its LEAD; parts are not selectable.
+  if (row.dataset.kind === 'part') {
+    e.stopPropagation();
+    const lead = row.dataset.lead;
+    if (lead) Selection.set([lead], lead);
+    return;
+  }
   const id = row.dataset.id;
   const actionBtn = e.target.closest?.('[data-action]');
   if (actionBtn) {
@@ -518,7 +566,7 @@ function _onListClick(e) {
 
 function _onListDblClick(e) {
   const row = _rowFromEvent(e);
-  if (!row) return;
+  if (!row || row.dataset.kind === 'part') return;   // parts are read-only
   const nameEl = row.querySelector('[data-name]');
   if (!nameEl?.contains(e.target)) return;
   _beginRename(row, row.dataset.id, row.dataset.kind);
@@ -527,8 +575,9 @@ function _onListDblClick(e) {
 function _onListContextMenu(e) {
   const row = _rowFromEvent(e);
   if (!row) return;
-  const id = row.dataset.id;
-  const kind = row.dataset.kind;
+  // A part row acts as its lead object for the menu.
+  const id = row.dataset.kind === 'part' ? row.dataset.lead : row.dataset.id;
+  const kind = row.dataset.kind === 'part' ? 'object' : row.dataset.kind;
   e.preventDefault();
   e.stopPropagation();
   if (kind === 'object' && !Selection.getSelectedIds().includes(id)) {

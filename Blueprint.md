@@ -3608,6 +3608,22 @@ outside that range. Pinned by `tests/validator.test.mjs`.
   the row is a six-column grid (twirl · icon · name-cell · eye · lock ·
   print) and a badge rendered as a sibling of `.ol-name` used to take the
   lock/print column and push the print button onto a second grid row.
+- **Parts vs objects; Split to parts / Join (2026-09-18).** A multi-material
+  import is ONE logical object made of several `SceneObject` parts (lead +
+  `isInternalPart` siblings linked by `logicalObjectId`); the Outliner shows
+  the lead only and its name drops the loader's `_primitive<N>` / `__part<N>`
+  suffix. Separation is explicit and undoable, never automatic (Blender
+  Separate/Join, PrusaSlicer Split to parts): context menu **Split to parts**
+  (`SplitToPartsCommand`) makes every part an independent object under a new
+  group named after the lead (nested under the lead's previous parent), parts
+  named `<lead>.<n>`; **Join into one object** (`JoinCommand`) makes the
+  active object the lead and every other selected object — with its own parts
+  — an internal part, meshes and transforms untouched. Neither command touches
+  geometry, shaders or `geometryFixes`; both only change the linkage flags
+  (and, for Split, the Outliner parent). The header toggle **Show internal
+  parts** (per-user, `localStorage` `mx-outliner-parts-v1`) lists a lead's
+  parts as read-only rows (`data-kind="part"`): click selects the lead,
+  right-click acts on the lead, no rename / drag / buttons.
 - Lock / print toggles read at a glance when ON: a filled pill (warning
   colour for lock, accent for print) with the icon in the reversed colour.
   A colour-only change on a 13 px icon was invisible on the washi ground

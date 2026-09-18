@@ -6,7 +6,7 @@ import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
-import { logicalObjectCommandIds } from '../LogicalObjects.js';
+import { logicalObjectCommandIds, canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { directSubgroupIds, validateParentChange } from '../hierarchy/HierarchyIntegrity.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteNodeTransform, findGroupNode,
@@ -366,3 +366,170 @@ export class UngroupCommand {
     });
   }
 }
+
+// ── Split to parts / Join (owner decision 2026-09-18) ─────────────────
+//
+// A multi-material import is ONE logical object made of several SceneObject
+// parts (lead + `isInternalPart` siblings linked by `logicalObjectId`).
+// Separation is an explicit, undoable user action — never automatic
+// (Blender "Separate / Join", PrusaSlicer "Split to parts"). Geometry,
+// shaders and geometryFixes are untouched by both commands; only the
+// linkage flags, names and (for Split) the Outliner parent change.
+
+function _uniqueNameIn(baseName, objects) {
+  const taken = new Set(Object.values(objects).map(o => o?.name));
+  if (!taken.has(baseName)) return baseName;
+  const m = baseName.match(/^(.*)\.(\d{3,})$/);
+  const stem = m ? m[1] : baseName;
+  for (let i = 1; i < 999; i++) {
+    const candidate = `${stem}.${String(i).padStart(3, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${baseName}.dup`;
+}
+
+const LINK_FIELDS = ['name', 'isInternalPart', 'logicalObjectId', 'sourceGroupId', 'isPrintPart'];
+
+function _snapshotLink(obj) {
+  const out = {};
+  for (const k of LINK_FIELDS) out[k] = obj[k];
+  return out;
+}
+
+function _applyLinkPatches(patches) {
+  setState(state => {
+    const objects = { ...state.scene.objects };
+    for (const [id, patch] of Object.entries(patches)) {
+      if (!objects[id]) continue;
+      objects[id] = { ...objects[id], ...patch };
+    }
+    return { ...state, scene: { ...state.scene, objects } };
+  }, SILENT);
+  for (const id of Object.keys(patches)) dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
+}
+
+/**
+ * Turn the internal parts of ONE logical object into independent objects
+ * under a new group named after the lead. No-op (`applied === false`) on a
+ * single-part object.
+ */
+export class SplitToPartsCommand {
+  constructor(leadId) {
+    this._leadId = leadId;
+    this._before = null;        // id → link snapshot
+    this._after = null;         // id → link patch
+    this._group = null;         // CreateGroupCommand
+    this._reparent = null;      // ReparentCommand (group under the lead's old parent)
+    this.applied = false;
+    this.label = 'Split to parts';
+  }
+  _plan() {
+    if (this._before) return true;
+    const objects = getState().scene.objects;
+    const ids = logicalObjectCommandIds([this._leadId], objects);
+    if (ids.length < 2) return false;
+    const leadId = ids[0];
+    const lead = objects[leadId];
+    if (!lead || lead.isGhost) return false;
+    const before = {}, after = {};
+    const draft = { ...objects };
+    ids.forEach((id, i) => {
+      const obj = objects[id];
+      before[id] = _snapshotLink(obj);
+      const name = i === 0 ? obj.name : _uniqueNameIn(`${lead.name}.${i + 1}`, draft);
+      after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+      draft[id] = { ...obj, ...after[id] };
+    });
+    this._ids = ids;
+    this._before = before;
+    this._after = after;
+    this._leadParentId = lead.parentId ?? null;
+    return true;
+  }
+  execute() {
+    if (!this._plan()) { this.applied = false; return; }
+    _applyLinkPatches(this._after);
+    // Group AFTER the flags are cleared so the group command sees N plain
+    // objects (its id expansion would otherwise re-collapse them).
+    this._group ??= new CreateGroupCommand(this._ids, getState().scene.objects[this._ids[0]].name);
+    this._group.execute();
+    if (this._leadParentId) {
+      this._reparent ??= new ReparentCommand(this._group._groupId, this._leadParentId);
+      this._reparent.execute();
+    }
+    this.applied = true;
+    markDirty();
+  }
+  undo() {
+    if (!this.applied) return;
+    this._reparent?.undo();
+    this._group?.undo();
+    _applyLinkPatches(this._before);
+    this.applied = false;
+  }
+}
+
+/**
+ * Merge two or more displayable objects into ONE logical object: the first
+ * (or `opts.leadId`) becomes the lead, every other object — and each of its
+ * existing parts — becomes an internal part. Meshes keep their transforms
+ * and Babylon parents. No-op (`applied === false`) with fewer than two
+ * distinct objects.
+ */
+export class JoinCommand {
+  constructor(ids, opts = {}) {
+    this._requested = ids ?? [];
+    this._leadHint = opts.leadId ?? null;
+    this._before = null;
+    this._after = null;
+    this.applied = false;
+    this.label = 'Join';
+  }
+  _plan() {
+    if (this._before) return true;
+    const objects = getState().scene.objects;
+    const { canonicalObjectId, logicalObjectPartIds } = _logical();
+    const leads = [...new Set(this._requested.map(id => canonicalObjectId(id, objects)))]
+      .filter(id => objects[id] && !objects[id].isGhost && !objects[id].isInternalPart);
+    if (leads.length < 2) return false;
+    const leadId = this._leadHint && leads.includes(canonicalObjectId(this._leadHint, objects))
+      ? canonicalObjectId(this._leadHint, objects) : leads[0];
+    const lead = objects[leadId];
+    const before = {}, after = {};
+    before[leadId] = _snapshotLink(lead);
+    after[leadId] = { isInternalPart: false, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+    // The lead's own existing parts stay parts, re-pointed at the lead id.
+    for (const id of logicalObjectPartIds(leadId, objects)) {
+      if (id === leadId) continue;
+      before[id] = _snapshotLink(objects[id]);
+      after[id] = { isInternalPart: true, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+    }
+    for (const other of leads) {
+      if (other === leadId) continue;
+      for (const id of logicalObjectPartIds(other, objects)) {
+        before[id] = _snapshotLink(objects[id]);
+        after[id] = { isInternalPart: true, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+      }
+    }
+    this._leadId = leadId;
+    this._before = before;
+    this._after = after;
+    return true;
+  }
+  execute() {
+    if (!this._plan()) { this.applied = false; return; }
+    _applyLinkPatches(this._after);
+    this.applied = true;
+    markDirty();
+  }
+  undo() {
+    if (!this.applied) return;
+    _applyLinkPatches(this._before);
+    this.applied = false;
+  }
+}
+
+// LogicalObjects is imported at the top for logicalObjectCommandIds; the two
+// extra helpers are pulled through one accessor so the import line stays the
+// single place that names the module.
+function _logical() { return { canonicalObjectId, logicalObjectPartIds }; }

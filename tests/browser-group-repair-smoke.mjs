@@ -114,6 +114,8 @@ async function main() {
 
         const closed = await load('ClosedCube', I.slice(18));
         const closedBefore = types(await MeshValidator.validateMesh(AssetLoader.getBabylonMesh(closed.lead)));
+        const closedInfo = Object.values(getState().scene.objects).map(o => ({ name: o.name, lid: o.logicalObjectId, ip: !!o.isInternalPart, sg: o.sourceGroupId ?? null }));
+        const closedMeshes = closed.parts.map(id => { const m = AssetLoader.getBabylonMesh(id); const p = m.getVerticesData('position'); let mx = 0; for (const v of p) mx = Math.max(mx, Math.abs(v)); return { name: m.name, tris: m.getIndices().length / 3, maxAbs: mx }; });
 
         const open = await load('OpenCube', I.slice(18, 33));   // drop the last face (in part B)
         const openBefore = types(await MeshValidator.validateMesh(AssetLoader.getBabylonMesh(open.lead)));
@@ -134,13 +136,14 @@ async function main() {
         const buf = new Uint8Array(captured.arrayBuffer ? await captured.arrayBuffer() : captured);
         let bin = ''; const CHUNK = 0x8000;
         for (let i = 0; i < buf.length; i += CHUNK) bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
-        return { closedBefore, openBefore, repair: { holesFilled: repair.holesFilled, applied: repair.applied, remaining: repair.remaining.map(r => r.type) }, openAfter, partTris, fixes, parts: open.parts.length, b64: btoa(bin) };
+        return { closedInfo, closedMeshes, closedBefore, openBefore, repair: { holesFilled: repair.holesFilled, applied: repair.applied, remaining: repair.remaining.map(r => r.type) }, openAfter, partTris, fixes, parts: open.parts.length, b64: btoa(bin) };
       } catch (err) {
         return { error: String(err?.stack ?? err) };
       }
     })()`);
 
     if (result?.error) throw new Error(`In-page group repair failed: ${result.error}`);
+    console.log(`closed split cube objects: ${JSON.stringify(result.closedInfo)} meshes: ${JSON.stringify(result.closedMeshes)}`);
     console.log(`closed split cube validates: [${result.closedBefore.join(', ')}]`);
     assert(result.closedBefore.length === 0,
       `a CLOSED split cube must validate clean (seams are not holes), got: ${result.closedBefore.join(', ')}`);
