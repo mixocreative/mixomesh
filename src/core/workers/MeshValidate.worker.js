@@ -25,18 +25,25 @@ function weldedIndexMap(positions) {
   const n = positions.length / 3;
   const remap = new Int32Array(n);
   const canonical = new Map();   // packedKey(number) → canonical index
-  // Quantized coords land in a bounded integer range for real print models
-  // (~±metres / 0.1 mm ⇒ ±~1e5). Bias to non-negative and pack base-2^21 so
-  // three components stay < 2^53 (exact JS number). Out-of-range coords still
-  // produce a unique-ish key (collisions only cost a missed weld, never
-  // corruption).
-  const BIAS = 1 << 20;          // 1,048,576 — covers ±~100 m at 0.1 mm
-  const BASE = 1 << 21;          // 2,097,152
+  // Quantized coords are packed into ONE exact JS number. The previous
+  // packing used 3 × 21 bits = 63 bits — past the 53-bit exact-integer
+  // range — so the low ~10 bits (the whole z component for anything under
+  // ~10 cm) were rounded away and vertices that differed only in z welded
+  // together: a perfectly closed 10 mm cube reported a non-manifold edge,
+  // and every real model's count was garbage (measured 2026-09-18). 3 × 17
+  // bits = 51 bits stays exact; ±2^16 quanta = ±6.5 m at 0.1 mm covers any
+  // print model, and a coordinate outside that range falls back to a string
+  // key (slow but correct) instead of colliding.
+  const BIAS = 1 << 16;          // 65,536 — covers ±6.5 m at 0.1 mm
+  const BASE = 1 << 17;          // 131,072
+  const LIMIT = BASE - 1;
   for (let i = 0; i < n; i++) {
-    const qx = (Math.round(positions[i * 3]     / eps) + BIAS) | 0;
-    const qy = (Math.round(positions[i * 3 + 1] / eps) + BIAS) | 0;
-    const qz = (Math.round(positions[i * 3 + 2] / eps) + BIAS) | 0;
-    const key = (qx * BASE + qy) * BASE + qz;
+    const qx = Math.round(positions[i * 3]     / eps) + BIAS;
+    const qy = Math.round(positions[i * 3 + 1] / eps) + BIAS;
+    const qz = Math.round(positions[i * 3 + 2] / eps) + BIAS;
+    const key = (qx >= 0 && qx <= LIMIT && qy >= 0 && qy <= LIMIT && qz >= 0 && qz <= LIMIT)
+      ? (qx * BASE + qy) * BASE + qz
+      : `${qx}|${qy}|${qz}`;
     let c = canonical.get(key);
     if (c === undefined) { c = i; canonical.set(key, c); }
     remap[i] = c;

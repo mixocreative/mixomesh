@@ -17,6 +17,8 @@
 
 import { Toast } from './Toast.js';
 import { reportError } from './Status.js';
+import { ProgressOverlay } from './ProgressOverlay.js';
+import { MeshValidator } from '../core/MeshValidator.js';
 import { t } from '../i18n/index.js';
 
 const OPEN_TYPES = new Set(['holes', 'nonManifold']);
@@ -62,4 +64,36 @@ export function reportBatchRepairResult(count, result) {
     t('toast.repairedBatch', { n: result.repaired, holes: result.holesFilled, nm: result.nmFixed }),
     'success', 3000,
   );
+}
+
+/**
+ * Repair `meshIds` under the BLOCKING progress overlay (title, percentage,
+ * current object) — the one runner every non-Print-panel surface uses
+ * (status-bar badge, Outliner badge, context menu). Owner ask 2026-09-18:
+ * while a repair runs the screen is blocked and shows status + percentage;
+ * afterwards the outcome is reported (reportBatchRepairResult). Resolves to
+ * the RepairSession result; never throws — a failure is reported and
+ * `{ failed: [...] }`-shaped result comes back so callers can re-render.
+ * @param {string[]} meshIds
+ * @param {{ title?: string, onProgress?: (frac:number, name:string) => void }} [opts]
+ */
+export async function repairWithOverlay(meshIds, opts = {}) {
+  const title = opts.title ?? t('print.repairing');
+  ProgressOverlay.show(title);
+  try {
+    const result = await MeshValidator.repairObjects(meshIds, {
+      onProgress: (frac, name) => {
+        ProgressOverlay.update(frac, name ?? '');
+        opts.onProgress?.(frac, name);
+      },
+    });
+    ProgressOverlay.update(1, t('progress.done'));
+    reportBatchRepairResult(meshIds.length, result);
+    return result;
+  } catch (err) {
+    reportError(err, { title: t('toast.autoFixFailed') });
+    return { holesFilled: 0, nmFixed: 0, repaired: 0, failed: [{ meshId: null, name: '', error: err }] };
+  } finally {
+    ProgressOverlay.hide();
+  }
 }

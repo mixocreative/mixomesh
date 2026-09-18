@@ -177,7 +177,7 @@ await test('validateMesh routes by metadata.meshId, not Babylon mesh name', asyn
 // holes are always reported with autoFixAvailable: false.
 const holes = (results) => results.find(r => r.type === 'holes');
 
-await test('validateGroup: open group union → holes reported, never auto-fixable', async () => {
+await test('validateGroup: open group union → holes reported, auto-fixable AS ONE SOLID', async () => {
   const R = await import('../src/core/repair/MeshRepair.js');
   R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }) });
   const lo = buildHalfMesh('lo', LO_TRIS);
@@ -186,12 +186,37 @@ await test('validateGroup: open group union → holes reported, never auto-fixab
   const r = holes(results);
   assert.ok(r, 'open group union should report holes');
   assert.equal(r.count, 3);
-  assert.equal(r.autoFixAvailable, false, 'repair applies per part, not to the union');
+  // 2026-09-18: a multi-part object is repaired on its welded union
+  // (GroupRepair), so the fix IS offered — the old "repair each part" advice
+  // capped every material seam.
+  assert.equal(r.autoFixAvailable, true, 'group results are fixable through GroupRepair');
+  assert.match(r.message, /one solid/);
   assert.equal(r.scope, 'group');
   assert.equal(r.sourceGroupId, 'grp_holes');
 });
 
-await test('validateMesh isLogicalGroup branch → holes reported on the union, never auto-fixable', async () => {
+await test('validateGroup: the union is WELDED before the engine sees it — a closed split cube has no holes', async () => {
+  // The engine fake reports exactly what it is handed: boundary edges =
+  // edges used by one triangle. Unwelded, every seam edge between the two
+  // halves counted as a hole (16 on this cube, measured live 2026-09-18).
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({ diagnose: (V, T) => {
+    const use = new Map();
+    for (const [a, b, c] of T) for (const [x, y] of [[a, b], [b, c], [c, a]]) { const k = x < y ? `${x}-${y}` : `${y}-${x}`; use.set(k, (use.get(k) ?? 0) + 1); }
+    const boundary = [...use.values()].filter(n => n === 1).length;
+    return { boundary, nonManifold: 0, components: 1, isWatertight: boundary === 0 };
+  } });
+  const lo = buildHalfMesh('lo', LO_TRIS);
+  const hi = buildHalfMesh('hi', HI_TRIS);
+  seedState([
+    { id: 'lo', sourceGroupId: 'grp_welded', mesh: lo },
+    { id: 'hi', sourceGroupId: 'grp_welded', mesh: hi },
+  ]);
+  const results = await MeshValidator.validateGroup('grp_welded');
+  assert.equal(holes(results), undefined, 'closed split cube must report NO holes: seams are not boundaries');
+});
+
+await test('validateMesh isLogicalGroup branch → holes reported on the union, auto-fixable as one solid', async () => {
   const R = await import('../src/core/repair/MeshRepair.js');
   R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }) });
   const lo = buildHalfMesh('lo', LO_TRIS);
@@ -203,7 +228,8 @@ await test('validateMesh isLogicalGroup branch → holes reported on the union, 
   const results = await MeshValidator.validateMesh(lo);
   const r = holes(results);
   assert.ok(r, 'broken multi-part object should report holes via the group path');
-  assert.equal(r.autoFixAvailable, false);
+  assert.equal(r.autoFixAvailable, true, 'GroupRepair repairs the welded union (2026-09-18)');
+  assert.equal(r.scope, 'group');
 });
 
 console.log('\n' + out.join('\n'));

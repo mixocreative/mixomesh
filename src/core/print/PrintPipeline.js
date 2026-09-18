@@ -18,6 +18,7 @@ import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { repairMesh, diagnoseMesh, ensureRepairEngine } from '../repair/MeshRepair.js';
+import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits } from './ExportContext.js';
@@ -175,6 +176,33 @@ async function _tryRepair(mesh, ctx) {
     console.error(`Repair skipped for ${mesh.name}:`, err);
     _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
     ctx.repairSkipped.push(mesh.name);
+  }
+}
+
+/**
+ * Repair the CLONES of one multi-part unit as ONE solid (GroupRepair on the
+ * welded union) and record a verdict per clone. Per-clone repair capped
+ * every material seam of a split object — the exported file grew an
+ * internal wall along each seam (2026-09-18). Clones are already flattened
+ * to one space by the time this runs, so no matrices are involved. Same
+ * never-throws posture as _tryRepair.
+ */
+async function _tryRepairGroup(clones, ctx, name) {
+  if (!ctx.repairReady) return;
+  const parts = clones.map(mesh => ({ mesh }));
+  try {
+    const d = await diagnoseGroup(parts);
+    if (d.boundaryEdges === 0 && d.nonManifoldEdges === 0 && d.isWatertight) {
+      for (const mesh of clones) _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: true, skipped: true });
+      return;
+    }
+    const r = await repairGroup(parts, { name });
+    for (const mesh of clones) _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: r.isWatertight });
+    if (!r.isWatertight) ctx.repairSkipped.push(name);
+  } catch (err) {
+    console.error(`Repair skipped for ${name}:`, err);
+    for (const mesh of clones) _recordRepairVerdict(mesh, ctx, { name: mesh.name, isWatertight: null, error: err?.message ?? String(err) });
+    ctx.repairSkipped.push(name);
   }
 }
 
@@ -397,6 +425,31 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
 
   try {
     const N = printMeshes.length;
+    // The `repair` step is UNIT-scoped: a multi-part unit is repaired once on
+    // the welded union of its clones (_tryRepairGroup), so the per-clone
+    // prep is split around it — everything before `repair` per clone, then
+    // the repair per unit, then everything after per clone.
+    const repairAt = fmt.prep.indexOf('repair');
+    const preSteps = repairAt < 0 ? fmt.prep : fmt.prep.slice(0, repairAt);
+    const postSteps = repairAt < 0 ? [] : fmt.prep.slice(repairAt + 1);
+    const runSteps = async (clone, steps) => {
+      for (const stepKey of steps) {
+        const step = PREP_STEPS[stepKey];
+        if (!step) continue;
+        try { await step(clone, ctx); }
+        catch (e) {
+          // NEVER swallow a prep failure. A flattenWorld that threw mid-way
+          // leaves the clone at raw BU scale (1000× too small) and the old
+          // console.error path shipped it with a success toast (audit
+          // 2026-09-17 H1). The surrounding finally{} disposes the clone.
+          if (e?.message?.startsWith('PrintPrep.')) throw e;
+          throw Object.assign(
+            new Error(`Export prep "${stepKey}" failed for "${clone.name}": ${e?.message ?? e}`),
+            { cause: e, prepStep: stepKey },
+          );
+        }
+      }
+    };
     for (let i = 0; i < N; i++) {
       const { mesh, meshId, logicalId, logicalName } = printMeshes[i];
       // Keep the parent so the clone's world matrix includes group/ancestor
@@ -424,22 +477,33 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
         name: mesh.name || `mesh_${meshId}`,
         logicalName: logicalName || mesh.name || `mesh_${meshId}`,
       });
-      for (const stepKey of fmt.prep) {
-        const step = PREP_STEPS[stepKey];
-        if (!step) continue;
-        try { await step(clone, ctx); }
-        catch (e) {
-          // NEVER swallow a prep failure. A flattenWorld that threw mid-way
-          // leaves the clone at raw BU scale (1000× too small) and the old
-          // console.error path shipped it with a success toast (audit
-          // 2026-09-17 H1). The surrounding finally{} disposes the clone.
-          if (e?.message?.startsWith('PrintPrep.')) throw e;
-          throw Object.assign(
-            new Error(`Export prep "${stepKey}" failed for "${clone.name}": ${e?.message ?? e}`),
-            { cause: e, prepStep: stepKey },
-          );
+      await runSteps(clone, preSteps);
+      progress(0.05 + 0.25 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
+    }
+    const multiPart = new Set();   // clone meshes that belong to a >1-part unit
+    if (repairAt >= 0) {
+      const byUnit = _groupCloneEntries(clones);
+      for (let u = 0; u < byUnit.length; u++) {
+        const unit = byUnit[u];
+        if (unit.meshes.length > 1) {
+          for (const e of unit.meshes) multiPart.add(e.mesh);
+          await _tryRepairGroup(unit.meshes.map(e => e.mesh), ctx, unit.name);
+        } else {
+          await PREP_STEPS.repair(unit.meshes[0].mesh, ctx);
         }
+        progress(0.30 + 0.10 * ((u + 1) / byUnit.length), `Repairing ${u + 1}/${byUnit.length}…`);
       }
+    }
+    // A part of a multi-part unit is an OPEN patch by design (its seams are
+    // interior edges of the union), so the per-clone CSG re-bake cannot run
+    // on it — Manifold rejects a non-manifold input and every part would
+    // land in csgSkipped with a spurious "not watertight" toast (review
+    // finding 2026-09-18). The union was already repaired as one solid.
+    const CSG_STEPS = new Set(['csg', 'csgSolidOnly']);
+    for (let i = 0; i < N; i++) {
+      const { mesh, meshId, logicalName } = printMeshes[i];
+      const clone = clones[i].mesh;
+      await runSteps(clone, multiPart.has(clone) ? postSteps.filter(k => !CSG_STEPS.has(k)) : postSteps);
       // M4: a part that lost all its triangles in prep (e.g. an empty CSG
       // result) must not silently vanish from the file — every writer used
       // to skip it and the build could even end up empty.
@@ -447,7 +511,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
       if (!(triCount > 0)) {
         throw new Error(`Part "${logicalName || mesh.name || meshId}" has no triangles after preparation — export aborted`);
       }
-      progress(0.05 + 0.45 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
+      progress(0.40 + 0.10 * ((i + 1) / N), `Finishing ${i + 1}/${N}…`);
     }
     ctx.meshes.push(...clones);
     ctx.cloneGroups.push(..._groupCloneEntries(clones));

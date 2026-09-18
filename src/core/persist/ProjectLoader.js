@@ -21,6 +21,7 @@ import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
 import { validateDocument } from './ProjectValidator.js';
 import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
+import { canonicalObjectId } from '../LogicalObjects.js';
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
@@ -397,6 +398,25 @@ async function _loadProjectInner(doc, previousName) {
     };
   }
   setState(s => ({ ...s, scene: { ...s.scene, objects: objMap } }), SILENT);
+
+  // Multi-part repairs replay ONCE per logical object, and only now — the
+  // welded union needs every sibling bound with its transform applied
+  // (RepairSession.replayGeometryFixes skips 'groupRepair' per mesh for this
+  // reason). `record:false`: the fix types are already on the objects and a
+  // load must not dirty the project. Fault-isolated like the per-mesh replay.
+  const groupReplayed = new Set();
+  for (const o of data.sceneObjects || []) {
+    const obj = objMap[o.id];
+    if (!obj || obj.isGhost || !obj.geometryFixes?.includes('groupRepair')) continue;
+    const lead = canonicalObjectId(o.id, objMap);
+    if (groupReplayed.has(lead)) continue;
+    groupReplayed.add(lead);
+    try {
+      await MeshValidator.repairObject(lead, { record: false });
+    } catch (err) {
+      console.error(`Multi-part geometry-fix replay failed for "${obj.name}":`, err);
+    }
+  }
 
   for (const o of data.sceneObjects || []) {
     const obj = objMap[o.id];

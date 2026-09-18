@@ -2288,6 +2288,43 @@ Pinned by `tests/mesh-repair.test.mjs` "I1" cases + the live
 `npm run test:repair` (validator reports no `invertedNormals` after repair,
 print-space volume positive).
 
+**Multi-part objects are repaired as ONE solid (`src/core/repair/GroupRepair.js`,
+2026-09-18).** A glTF multi-primitive / MultiMaterial-split import is one
+surface cut into parts along material seams; every part is open along those
+seams by construction. The previous rule ("group-scoped validation reports
+the welded union; repair each part") capped every seam: a perfectly closed
+cube split into two materials came back as 12 + 4 triangles with an internal
+wall, and the export pipeline's per-clone `repair` step did the same to the
+shipped file — this is what the owner saw as "still not watertight after the
+fix" on a scanned bowl. `repairGroup(parts)` welds the parts into one union
+(lead-local space via `toLead` = W_part · W_lead⁻¹, identity for glTF
+primitives; export clones are already in one space), diagnoses it
+(closed + manifold ⇒ untouched), runs the engine once, decides the WINDING
+ONCE on the whole union (a part's partial signed volume has an arbitrary
+sign — conforming per part re-wound seams inconsistently), then hands every
+output triangle back to its part: original triangles by corner-key match
+(any rotation / winding, union indices), fill triangles to the majority
+owner of their corners (nearest original vertex for new ones). Each part is
+rewritten through `arraysToMesh` with ITS OWN UVs; materials never mix. A
+part that would end up empty aborts the whole repair before anything is
+written. Recorded as the `groupRepair` fix type on every part; `ProjectLoader`
+replays it ONCE per logical object after every part is bound (per-mesh
+replay skips it; `record:false` keeps a load clean). Live path:
+`RepairSession.repairObject` → `_repairGroupParts`; export path:
+`PrintPipeline._tryRepairGroup` — the per-clone prep loop is split around
+the `repair` step (pre-steps per clone → repair per UNIT → post-steps per
+clone; the per-clone `csg`/`csgSolidOnly` post-steps are SKIPPED for a
+multi-part unit — its parts are open patches by design and Manifold would
+reject them, landing every part in csgSkipped with a spurious "not
+watertight" toast). `MeshValidator._validateUnion` (shared by `validateGroup` and the
+`validateMesh` logical-object branch — they used to be two copies) WELDS the
+union (`Weld.weldArrays`) before the engine diagnose: unwelded, every seam
+counted as a hole (a closed split cube reported 16). Group results now carry
+`autoFixAvailable` (engine answered + union under the cap) and the Print
+panel / Repair all / status-bar Fix route them through `repairObjects`.
+Proof: `npm run test:group` (real Chrome: closed split cube validates clean,
+open split cube → 7 + 5 = 12 triangles, exported 3MF watertight, +1000 mm³).
+
 **Engine output is validated before ANYTHING reads it (review CIA F2):**
 every coordinate finite, every index an integer in `[0, V.length)`, else
 `throw new Error('engine returned malformed geometry: …')` and the mesh is
@@ -3528,6 +3565,24 @@ from persisted project data are only rendered when they validate as
 `data:image/png`, `data:image/jpeg`, or `data:image/webp` base64 URLs;
 otherwise the panel falls back to its placeholder icon.
 
+### Import bake: shared vertex buffers (2026-09-18)
+A glTF mesh whose primitives share a POSITION accessor (one vertex list,
+several index lists — one per material) comes out of Babylon's loader as
+separate Geometry objects on ONE shared VertexBuffer. `bakeImportTransform`
+then baked that buffer once per primitive: unit scale applied twice (a
+10 mm split cube imported at 0.01 mm) and the RH→LH reflection applied twice.
+`_unshareVertexBuffers` copies every attribute of the second and later
+sharers before the bake, so each bake touches its own data exactly once.
+
+### Validation worker: exact weld keys (2026-09-18)
+`MeshValidate.worker.js` packs the quantised position into one number. The
+old packing used 3 × 21 bits = 63 bits — past JS's 53-bit exact integers —
+so the low bits (the whole z component for anything under ~10 cm) were
+rounded away and vertices differing only in z welded together: a closed cube
+reported a non-manifold edge and every real model's `nonManifold` count was
+garbage. Now 3 × 17 bits (±6.5 m at 0.1 mm) with a string-key fallback
+outside that range. Pinned by `tests/validator.test.mjs`.
+
 ### Outliner (`src/ui/Outliner.js`)
 - Renders unified tree from `state.scene.objects` + `state.scene.groups` + `state.scene.collections`.
 - Row type is explicit: Collection/import provenance uses `Package`, a real
@@ -3793,6 +3848,16 @@ Auto-Fix" toast never outlives the repair it offered.
 
 The Scale tab shows the export reference object's exported size in mm; the
 internal BU→mm factor is not user-facing and is no longer printed.
+
+Repair feedback (2026-09-18, owner ask): every repair — Validate All /
+Repair all / per-result Auto-Fix in the tab, the Outliner badge, the context
+menu and the status-bar Fix button — runs under the BLOCKING
+`ProgressOverlay` with title, percentage and current object
+(`RepairFeedback.repairWithOverlay` for the non-tab surfaces; the tab also
+patches its inline strip), and reports the outcome afterwards (tab strip /
+`reportBatchRepairResult`). The status-bar "not watertight" badge carries a
+`Fix` action (`StatusBar.setCenter({ action })`) whenever a cached result is
+auto-fixable; it repairs the selection's logical objects.
 
 Sweep extras (2026-09-18): the status-bar HUD segment is localised
 (`hud.tris` / `hud.sel` / `hud.watertight` / `hud.notWatertight`, re-rendered

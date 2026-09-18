@@ -5,11 +5,9 @@ import { Selection } from '../core/Selection.js';
 import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand, ReparentCommand, UnparentCommand } from '../core/HistoryManager.js';
 import { validateParentChange } from '../core/hierarchy/HierarchyIntegrity.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
-import { MeshValidator } from '../core/MeshValidator.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
-import { reportError } from './Status.js';
-import { reportRepairResult } from './RepairFeedback.js';
+import { repairWithOverlay } from './RepairFeedback.js';
 
 let _root  = null;
 let _listEl = null;
@@ -418,11 +416,9 @@ function _togglePrintPart(meshId) {
 async function _repairFromOutliner(meshId) {
   const obj = getState().scene.objects[meshId];
   if (!obj) return;
-  try {
-    reportRepairResult(obj.name, await MeshValidator.repairObject(meshId), 2500);
-  } catch (err) {
-    reportError(err, { title: t('toast.autoFixFailed') });
-  }
+  // Blocking overlay + percentage + outcome, same runner as the status-bar
+  // Fix button and the context menu.
+  await repairWithOverlay([meshId], { title: t('print.repairing') });
 }
 
 function beginPrintPartBatch(ids, next) {

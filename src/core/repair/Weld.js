@@ -111,3 +111,40 @@ export function weldMesh(mesh, distance = WELD_DISTANCE) {
   mesh.refreshBoundingInfo?.();
   return true;
 }
+
+/**
+ * Position-only weld of bare arrays (no UVs, no mesh) — the topology view a
+ * multi-part object's welded UNION needs (MeshValidator.validateGroup,
+ * GroupRepair). Two vertices in the same position cell become one; triangles
+ * degenerate after the merge are dropped. Returns compacted arrays plus the
+ * per-input-vertex remap so callers can trace a welded vertex back.
+ * @param {ArrayLike<number>} positions flat xyz
+ * @param {ArrayLike<number>} indices
+ * @param {number} [cell]
+ * @returns {{positions: Float32Array, indices: Uint32Array, remap: Int32Array}}
+ *   `remap[i]` = welded index of input vertex i (or -1 when no kept
+ *   triangle references it).
+ */
+export function weldArrays(positions, indices, cell = WELD_DISTANCE) {
+  const vertexCount = Math.floor(positions.length / 3);
+  const canonical = new Map();
+  const remap = new Int32Array(vertexCount);
+  const outPos = [];
+  for (let i = 0; i < vertexCount; i++) {
+    const k = `${Math.round(positions[i * 3] / cell)}|${Math.round(positions[i * 3 + 1] / cell)}|${Math.round(positions[i * 3 + 2] / cell)}`;
+    let c = canonical.get(k);
+    if (c === undefined) {
+      c = outPos.length / 3;
+      canonical.set(k, c);
+      outPos.push(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+    }
+    remap[i] = c;
+  }
+  const kept = [];
+  for (let i = 0; i + 2 < indices.length; i += 3) {
+    const a = remap[indices[i]], b = remap[indices[i + 1]], c = remap[indices[i + 2]];
+    if (a === b || b === c || c === a) continue;
+    kept.push(a, b, c);
+  }
+  return { positions: Float32Array.from(outPos), indices: Uint32Array.from(kept), remap };
+}

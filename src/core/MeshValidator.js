@@ -6,6 +6,7 @@ import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateW
 import { frontFaceIsClockwise } from './print/PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from './repair/MeshRepair.js';
 import { engineDiagnose } from './repair/Diagnose.js';
+import { weldArrays } from './repair/Weld.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -218,10 +219,10 @@ function _invertedResult(autoFixAvailable) {
  * it as a fallback double-reported the very same edges as both `nonManifold`
  * and `holes`. Offline, only `nonManifold` speaks.
  *
- * Auto-Fix runs `repairMesh` per mesh, so it is offered only when the engine
- * answered AND the mesh is inside the repair cap (I3). A group/union scope
- * never offers it — the repair applies per part, not to the synthetic union
- * — and says so instead of promising a button that is not there (CIA F6).
+ * Auto-Fix is offered only when the engine answered AND the geometry is
+ * inside the repair cap (I3). A group/union scope is repaired AS ONE SOLID
+ * (GroupRepair.repairGroup on the welded union, 2026-09-18) — the old
+ * "repair each part" advice capped every material seam.
  */
 function _holesResult(count, autoFixAvailable, scope = null) {
   const edges = `${count} open edge${count === 1 ? '' : 's'} (holes)`;
@@ -232,10 +233,8 @@ function _holesResult(count, autoFixAvailable, scope = null) {
     autoFixAvailable,
     fixed: false,
     message: autoFixAvailable
-      ? `${edges} — Auto-Fix fills them`
-      : scope === 'group'
-        ? `${edges} across this multi-part object — repair each part`
-        : `${edges} — too large to repair in the browser`,
+      ? (scope === 'group' ? `${edges} across this multi-part object — Auto-Fix repairs it as one solid` : `${edges} — Auto-Fix fills them`)
+      : `${edges}${scope === 'group' ? ' across this multi-part object' : ''} — too large to repair in the browser`,
   };
 }
 
@@ -275,29 +274,49 @@ function _groupOrientation(siblings) {
   return [...flags][0];
 }
 
-export async function validateGroup(sourceGroupId) {
-  const siblings = _collectGroupSiblings(sourceGroupId);
+/**
+ * Topology verdict for the parts of ONE multi-part object, on their WELDED
+ * union. Shared by validateGroup (sourceGroupId siblings) and validateMesh's
+ * logical-object branch (glTF multi-primitive) — the two used to carry
+ * separate copies of this and only one of them got fixed.
+ *
+ * The parts of a material-split object share their seam vertices only by
+ * POSITION (each part carries its own copy), so the unwelded concatenation
+ * showed every seam as an open boundary: a perfectly closed cube split into
+ * two materials reported "16 holes" (measured live 2026-09-18). _topology
+ * welds internally already; the engine diagnose did not.
+ *
+ * Auto-Fix on a group result = GroupRepair on the welded union (one solid),
+ * offered only when the engine answered and the union is inside the cap.
+ */
+async function _validateUnion(siblings, label) {
   const results = [];
-  if (siblings.length === 0) return results;
-  const { positions, indices } = _buildGroupUnion(siblings);
-  if (!positions.length || !indices.length) return results;
+  const raw = _buildGroupUnion(siblings);
+  if (!raw.positions.length || !raw.indices.length) return results;
+  const { positions, indices } = weldArrays(raw.positions, raw.indices);
+  const fixable = indices.length / 3 <= REPAIR_TRIANGLE_CAP;
 
   const groupClockwise = _groupOrientation(siblings);
   const { badEdgeCount, inverted } = await _topology(positions, indices, groupClockwise ?? false);
   if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
+  const { diag } = await engineDiagnose(positions, indices, label);
+  const canFix = fixable && !!diag;
   if (badEdgeCount > 0) {
     results.push({
-      ..._nonManifoldResult(badEdgeCount, false, { scopeLabel: 'group' }),
+      ..._nonManifoldResult(badEdgeCount, canFix, { scopeLabel: 'this multi-part object' }),
       scope: 'group',
-      sourceGroupId,
     });
   }
-  // Repair applies per part, not to this synthetic union — never auto-fixable here.
-  const { diag } = await engineDiagnose(positions, indices, `group ${sourceGroupId}`);
   if (diag && diag.boundaryEdges > 0) {
-    results.push({ ..._holesResult(diag.boundaryEdges, false, 'group'), scope: 'group', sourceGroupId });
+    results.push({ ..._holesResult(diag.boundaryEdges, canFix, 'group'), scope: 'group' });
   }
   return results;
+}
+
+export async function validateGroup(sourceGroupId) {
+  const siblings = _collectGroupSiblings(sourceGroupId);
+  if (siblings.length === 0) return [];
+  return (await _validateUnion(siblings, `group ${sourceGroupId}`)).map(r => ({ ...r, sourceGroupId }));
 }
 
 // ── Validation result cache (arch A6) ────────────────────
@@ -401,26 +420,9 @@ export async function validateMesh(mesh) {
 
   if (positions && indices && indices.length > 0) {
     if (isLogicalGroup) {
-      // Topology on the welded union. Inverted check uses the siblings'
-      // shared side flag (one import → one flag); mixed flags → skipped.
+      // Topology on the WELDED union — one shared routine with validateGroup.
       const siblings = partIds.map(id => ({ meshId: id, babylonMesh: AssetLoader.getBabylonMesh(id) }));
-      const { positions: up, indices: ui } = _buildGroupUnion(siblings);
-      if (up.length && ui.length) {
-        const groupClockwise = _groupOrientation(siblings);
-        const { badEdgeCount, inverted } = await _topology(up, ui, groupClockwise ?? false);
-        if (groupClockwise !== null && inverted) results.push(_invertedResult(false));
-        if (badEdgeCount > 0) {
-          results.push({
-            ..._nonManifoldResult(badEdgeCount, false, { scopeLabel: 'object' }),
-            scope: 'group',
-          });
-        }
-        // Repair applies per part, not to this synthetic union — never auto-fixable here.
-        const { diag } = await engineDiagnose(up, ui, mesh.name ?? 'object');
-        if (diag && diag.boundaryEdges > 0) {
-          results.push({ ..._holesResult(diag.boundaryEdges, false, 'group'), scope: 'group' });
-        }
-      }
+      results.push(...await _validateUnion(siblings, mesh.name ?? 'object'));
     } else {
       // Same orientation rule the print writers use (PrintSpace.printIndices),
       // so "inverted" here means exactly what would come out inside-out.

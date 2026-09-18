@@ -359,12 +359,20 @@ function _setValidationProgress(frac, label) {
 async function _runValidationAction(label, fn) {
   if (_valStatus.kind === 'running') return;
   _setValidationProgress(0, label);
+  // Blocking overlay WITH the inline strip (owner ask 2026-09-18): the
+  // screen is blocked while the engine runs, with title + percentage +
+  // current object; the strip then keeps the outcome on screen afterwards.
+  ProgressOverlay.show(label);
   try {
-    _valStatus = await fn((frac, name) => _setValidationProgress(frac, name ? `${label} — ${name}` : label));
+    _valStatus = await fn((frac, name) => {
+      _setValidationProgress(frac, name ? `${label} — ${name}` : label);
+      ProgressOverlay.update(frac, name ?? '');
+    });
   } catch (err) {
     _valStatus = { kind: 'done', tone: 'error', text: t('print.valResult.failed', { error: err?.message ?? String(err) }) };
     reportError(err, { title: t('toast.autoFixFailed') });
   } finally {
+    ProgressOverlay.hide();
     _render();
   }
 }

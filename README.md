@@ -100,10 +100,11 @@ npm run test
 npm run test:browser
 npm run test:export
 npm run test:repair
+npm run test:group
 ```
 
-`npm run test:all` chains the four test commands in that order
-(`test && test:browser && test:export && test:repair`). The browser smokes
+`npm run test:all` chains the five test commands in that order
+(`test && test:browser && test:export && test:repair && test:group`). The browser smokes
 stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so
 the headless node:test suite must remain runnable without either.
 

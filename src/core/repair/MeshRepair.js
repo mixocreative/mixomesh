@@ -81,7 +81,7 @@ export function meshToArrays(mesh) {
 // 1 BU = 1 m) so "same position" means the same thing everywhere.
 const POS_CELL = 1e-4;
 
-function _posKey(x, y, z) {
+export function posKey(x, y, z) {
   return `${Math.round(x / POS_CELL)}:${Math.round(y / POS_CELL)}:${Math.round(z / POS_CELL)}`;
 }
 
@@ -158,7 +158,7 @@ export function arraysToMesh(mesh, V, T, originalPositions, originalUvs, origina
  * (the engine may re-wind a triangle while leaving its corners in place).
  */
 function _originalTriangleCorners(originalPositions, originalTriangles) {
-  const keyOf = (i) => _posKey(originalPositions[i * 3], originalPositions[i * 3 + 1], originalPositions[i * 3 + 2]);
+  const keyOf = (i) => posKey(originalPositions[i * 3], originalPositions[i * 3 + 1], originalPositions[i * 3 + 2]);
   const map = new Map();
   const put = (a, b, c) => {
     const k = `${keyOf(a)}|${keyOf(b)}|${keyOf(c)}`;
@@ -176,13 +176,13 @@ function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTrian
   const cornerMap = originalTriangles?.length
     ? _originalTriangleCorners(originalPositions, originalTriangles)
     : null;
-  const nearest = _nearestIndex(originalPositions);
+  const nearest = nearestIndex(originalPositions);
   const uvCount = originalUvs.length / 2;
   const uvAt = (i) => {
     const j = (i >= 0 && i < uvCount) ? i : 0;
     return [originalUvs[j * 2] ?? 0, originalUvs[j * 2 + 1] ?? 0];
   };
-  const vKeys = V.map(v => _posKey(v[0], v[1], v[2]));
+  const vKeys = V.map(v => posKey(v[0], v[1], v[2]));
 
   const posOut = []; const uvOut = [];
   const ind = new Uint32Array(T.length * 3);
@@ -215,11 +215,11 @@ function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTrian
 // with its float32 bits unchanged, so the grid-hash lookup below finds it by
 // exact key match; the brute-force nearest-neighbour scan only runs for
 // vertices the engine actually moved or created (new hole-fill verts).
-function _nearestIndex(positions) {
+export function nearestIndex(positions) {
   const n = positions.length / 3; const map = new Map();
-  for (let i = 0; i < n; i++) map.set(_posKey(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]), i);
+  for (let i = 0; i < n; i++) map.set(posKey(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]), i);
   return ([x, y, z]) => {
-    const hit = map.get(_posKey(x, y, z)); if (hit !== undefined) return hit;
+    const hit = map.get(posKey(x, y, z)); if (hit !== undefined) return hit;
     let best = 0, bd = Infinity;
     for (let i = 0; i < n; i++) { const dx = positions[i * 3] - x, dy = positions[i * 3 + 1] - y, dz = positions[i * 3 + 2] - z; const d = dx * dx + dy * dy + dz * dz; if (d < bd) { bd = d; best = i; } }
     return best;
@@ -321,7 +321,7 @@ function _withTimeout(run, timeoutMs, name) {
  * disagrees with it. A zero signed volume (sheet, degenerate) is no evidence
  * either way, so nothing is touched.
  */
-function _conformWinding(mesh) {
+export function conformWinding(mesh) {
   const positions = mesh.getVerticesData?.('position');
   const indices = mesh.getIndices?.();
   if (!positions?.length || !indices?.length) return false;
@@ -351,9 +351,30 @@ export async function repairMesh(mesh, opts = {}) {
   // M8: name the cap that was actually APPLIED, not the module default — a
   // caller-lowered cap used to report the 300k number it did not enforce.
   if (tris > cap) throw new Error(`"${mesh.name}" is too large to repair in the browser (${tris} triangles > ${cap})`);
-  const lib = await ensureRepairEngine(); const { V, T } = meshToArrays(mesh);
+  const { V, T } = meshToArrays(mesh);
   const originalPositions = Float32Array.from(mesh.getVerticesData('position'));
   const originalUvs = mesh.getVerticesData('uv') ? Float32Array.from(mesh.getVerticesData('uv')) : null;
+  const out = await repairArrays(V, T, { ...opts, name: mesh.name ?? 'mesh' });
+  if (out.changed) {
+    arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);
+    conformWinding(mesh);
+  }
+  const r = out.report;
+  return { holesFilled: r.holesFilled | 0, nmFixed: r.nmFixed | 0, normalsFlipped: r.normalsFlipped | 0, merged: r.merged | 0, isWatertight: !!out.after.isWatertight, changed: out.changed };
+}
+
+/**
+ * The engine call on bare arrays — shared by `repairMesh` (one mesh) and
+ * `GroupRepair.repairGroup` (the welded union of a multi-part object).
+ * Loads the engine, runs it under the wall-clock guard, validates the
+ * output (CIA F2) and diagnoses the result. Never writes to a mesh.
+ * @param {number[][]} V
+ * @param {number[][]} T
+ * @param {{name?:string, timeoutMs?:number, onProgress?:Function, engine?:object}} [opts]
+ * @returns {Promise<{V:number[][], T:number[][], report:object, after:object, changed:boolean}>}
+ */
+export async function repairArrays(V, T, opts = {}) {
+  const lib = await ensureRepairEngine();
   const engineOptions = {
     ..._engineDefaults(lib),
     removeSmallShells: false, repairSelfIntersections: false,
@@ -362,7 +383,7 @@ export async function repairMesh(mesh, opts = {}) {
   const out = await _withTimeout(
     (signal) => lib.repairObject(V, T, opts.onProgress, engineOptions, signal ? { signal } : null),
     opts.timeoutMs ?? REPAIR_TIMEOUT_MS,
-    mesh.name ?? 'mesh',
+    opts.name ?? 'mesh',
   );
   // CIA F2: validate the engine's output BEFORE anything reads it. Checking
   // only inside arraysToMesh was not enough — a NaN coordinate compares
@@ -370,17 +391,11 @@ export async function repairMesh(mesh, opts = {}) {
   // out false and the malformed output was silently discarded instead of
   // reported.
   _assertWellFormed(out.V, out.T);
-  const r = out.report ?? {};
   const changed = !_sameTriples(out.V, V, 1e-9) || !_sameTriples(out.T, T, 0);
   // Diagnose the mesh as it now IS: the repair output when changed, otherwise
-  // the original (out.V/out.T are discarded, unchanged). Taken BEFORE the
-  // write-back so the winding re-tag can consult it (I1).
+  // the original (out.V/out.T are discarded, unchanged).
   const after = changed ? lib.diagnose(out.V, out.T) : lib.diagnose(V, T);
-  if (changed) {
-    arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);
-    _conformWinding(mesh);
-  }
-  return { holesFilled: r.holesFilled | 0, nmFixed: r.nmFixed | 0, normalsFlipped: r.normalsFlipped | 0, merged: r.merged | 0, isWatertight: !!after.isWatertight, changed };
+  return { V: out.V, T: out.T, report: out.report ?? {}, after, changed };
 }
 
 // Test-only seam: __test.setEngine(fake) makes ensureRepairEngine() resolve

@@ -76,6 +76,33 @@ function _materializeInstanceMeshes(container) {
 }
 
 /**
+ * Give every geometry mesh its OWN vertex buffers before the bake below.
+ *
+ * A glTF mesh whose primitives share a POSITION accessor (one vertex list,
+ * several index lists — one per material) comes out of Babylon's loader as
+ * separate Geometry objects on ONE shared VertexBuffer. The per-mesh
+ * `bakeTransformIntoVertices` then ran on that same buffer once per
+ * primitive: unit scale applied twice (a 10 mm split cube imported at
+ * 0.01 mm) and the RH→LH reflection applied twice (mirrored back). Measured
+ * live 2026-09-18. Copying every attribute of the second and later sharers
+ * makes each bake touch its own data exactly once.
+ */
+function _unshareVertexBuffers(meshes) {
+  const seen = new Set();
+  for (const m of meshes) {
+    const vb = m.getVertexBuffer?.('position');
+    if (!vb) continue;
+    const backing = vb.getBuffer?.() ?? vb;
+    if (!seen.has(backing)) { seen.add(backing); continue; }
+    for (const kind of m.getVerticesDataKinds?.() ?? []) {
+      const data = m.getVerticesData(kind);
+      if (!data) continue;
+      m.setVerticesData(kind, Float32Array.from(data), true);
+    }
+  }
+}
+
+/**
  * The one unit/ratio scale used by the import-normalization seam: source-unit
  * conversion × (model's own ratio / scene working ratio). Both the fresh-load
  * and project-restore paths feed this into {@link bakeImportTransform} so the
@@ -143,6 +170,7 @@ export function bakeImportTransform(container, factor, position) {
   if (unbakeable) {
     throw new Error(`Unsupported imported geometry node: ${unbakeable.name || 'unnamed'} cannot be normalized.`);
   }
+  _unshareVertexBuffers(geo);
   const groupNodes = container.transformNodes.filter(n => n?.metadata?.groupId);
   const groupSet = new Set(groupNodes);
   const nearestGroupAncestor = (node) => {

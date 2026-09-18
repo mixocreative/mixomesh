@@ -175,11 +175,46 @@ await test('ValidateWorker request carries the clockwise flag', async () => {
   assert.ok(posted[0].positions instanceof Float32Array && posted[0].indices instanceof Uint32Array);
 });
 
+let _workerOnMessage = null;
+await test('worker weld key is exact: a closed 10 mm cube has 0 non-manifold edges (was 1 from 63-bit key overflow)', async () => {
+  // Regression 2026-09-18: the packed weld key used 3 × 21 bits (63 bits),
+  // past JS's 53-bit exact integers, so vertices differing only in z by
+  // < ~10 cm collided and welded — a closed cube read as non-manifold and
+  // every real model's count was garbage.
+  const prevSelf = globalThis.self;
+  const sent = [];
+  globalThis.self = { postMessage: (m) => sent.push(m) };
+  try {
+    await import('../src/core/workers/MeshValidate.worker.js');
+    // The module binds self.onmessage ONCE at first import — keep it for
+    // the orientation test below, which runs on the same cached module.
+    _workerOnMessage = globalThis.self.onmessage;
+    const s = 0.01;   // 10 mm in BU
+    const positions = Float32Array.from([0,0,0, s,0,0, s,s,0, 0,s,0, 0,0,s, s,0,s, s,s,s, 0,s,s]);
+    const indices = Uint32Array.from([0,2,1,0,3,2, 4,5,6,4,6,7, 0,5,4,0,1,5, 1,6,5,1,2,6, 2,7,6,2,3,7, 3,4,7,3,0,4]);
+    globalThis.self.onmessage({ data: { id: 1, positions, indices, clockwise: false } });
+    assert.equal(sent[0].type, 'done');
+    assert.equal(sent[0].badEdgeCount, 0, 'closed cube must have 0 bad edges');
+    // Two vertices that differ ONLY in z by 10 mm must stay distinct: an
+    // open quad on top of a closed cube's face would otherwise weld into it.
+    const p2 = Float32Array.from([0,0,0, s,0,0, 0,s,0, 0,0,s, s,0,s, 0,s,s]);
+    const i2 = Uint32Array.from([0,1,2, 3,4,5]);
+    globalThis.self.onmessage({ data: { id: 2, positions: p2, indices: i2, clockwise: false } });
+    assert.equal(sent[1].badEdgeCount, 6, 'two separate open triangles = 6 boundary edges, none welded away');
+    // Far-away coordinates (outside ±6.5 m) still work via the string-key fallback.
+    const p3 = Float32Array.from(positions.map(v => v + 20));
+    globalThis.self.onmessage({ data: { id: 3, positions: p3, indices, clockwise: false } });
+    assert.equal(sent[2].badEdgeCount, 0, 'out-of-range coordinates: closed cube still 0 bad edges');
+  } finally {
+    globalThis.self = prevSelf;
+  }
+});
+
 await test('worker pure function applies the same orientation rule', async () => {
   // The worker module binds self.onmessage at import; give it a stub `self`.
   const prevSelf = globalThis.self;
   const sent = [];
-  globalThis.self = { postMessage: (m) => sent.push(m) };
+  globalThis.self = { postMessage: (m) => sent.push(m), onmessage: _workerOnMessage };
   try {
     const { checkInvertedNormals } = await import('../src/core/workers/MeshValidate.worker.js');
     const m = buildMesh(TRIS);
@@ -309,21 +344,30 @@ await test('repairObject: fills holes, records geometryFixes, dirties, re-valida
 // geometry no fix can be applied to — so group results carry
 // autoFixAvailable:false and the old validate→autoFix route left these
 // objects PERMANENTLY unrepairable. repairObject now walks the parts.
-await test('repairObject: a MULTI-PART object repairs every part and records fixes per part', async () => {
+await test('repairObject: a MULTI-PART object is repaired as ONE solid on its welded union, each part keeps its own triangles', async () => {
   const R = await import('../src/core/repair/MeshRepair.js');
   R.__test.setEngine({
-    // 3 faces = still open; 4+ = repaired and closed.
-    diagnose: (_V, T) => ({ boundary: T.length > 3 ? 0 : 3, nonManifold: 0, components: 1, isWatertight: T.length > 3 }),
+    // Boundary edges = edges used once. The open tetra (3 faces) has 3;
+    // the engine "fix" adds the missing 4th face and closes it.
+    diagnose: (_V, T) => {
+      const use = new Map();
+      for (const [a, b, c] of T) for (const [x, y] of [[a, b], [b, c], [c, a]]) { const k = x < y ? `${x}-${y}` : `${y}-${x}`; use.set(k, (use.get(k) ?? 0) + 1); }
+      const boundary = [...use.values()].filter(n => n === 1).length;
+      return { boundary, nonManifold: 0, components: 1, isWatertight: boundary === 0 };
+    },
     repairObject: async (V, T) => ({
-      V: [...V, [0, 0, 0]],
-      T: [...T, [0, 1, V.length]],
-      report: { holesFilled: 2, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+      V: V.map(v => [...v]),
+      T: [...T.map(t => [...t]), [1, 2, 3]],
+      report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
     }),
   });
 
-  const OPEN_TETRA = [[0, 2, 1], [0, 1, 3], [0, 3, 2]];
-  const p1 = buildMesh(OPEN_TETRA); p1.metadata = { meshId: 'p1' };
-  const p2 = buildMesh(OPEN_TETRA); p2.metadata = { meshId: 'p2' };
+  // One open tetra split across two "material" parts: p1 owns two faces,
+  // p2 owns one. Per-part repair would have capped BOTH parts' seams
+  // (two closed shells with an internal wall); the union repair adds the
+  // one missing face only.
+  const p1 = buildMesh([[0, 2, 1], [0, 1, 3]]); p1.metadata = { meshId: 'p1' };
+  const p2 = buildMesh([[0, 3, 2]]);            p2.metadata = { meshId: 'p2' };
   const meshes = { p1, p2 };
   AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
   setState(s => ({
@@ -338,12 +382,13 @@ await test('repairObject: a MULTI-PART object repairs every part and records fix
   }), { silent: true });
 
   const res = await MeshValidator.repairObject('p1');
-  assert.deepEqual(res.applied, ['holes']);
-  assert.equal(res.holesFilled, 4, "the ENGINE's own counters, summed over both parts (2 + 2) — not an edge count");
-  assert.ok(getState().scene.objects.p1.geometryFixes?.includes('holes'), 'part 1 recorded its fix');
-  assert.ok(getState().scene.objects.p2.geometryFixes?.includes('holes'), 'part 2 recorded its fix');
-  assert.equal(p1.getIndices().length, 12, 'part 1 geometry really was repaired');
-  assert.equal(p2.getIndices().length, 12, 'part 2 geometry really was repaired');
+  assert.deepEqual(res.applied, ['groupRepair']);
+  assert.equal(res.holesFilled, 1, "the ENGINE's own counter for the ONE union repair — not summed per part");
+  assert.ok(getState().scene.objects.p1.geometryFixes?.includes('groupRepair'), 'part 1 recorded the group fix');
+  assert.ok(getState().scene.objects.p2.geometryFixes?.includes('groupRepair'), 'part 2 recorded the group fix');
+  const t1 = p1.getIndices().length / 3, t2 = p2.getIndices().length / 3;
+  assert.equal(t1 + t2, 4, `union has exactly 4 faces after the repair (no seam caps), got ${t1} + ${t2}`);
+  assert.ok(t1 >= 2 && t2 >= 1, 'every part kept its own original triangles');
 });
 
 // I7b: a repair that changes nothing must be reported as "nothing to repair",

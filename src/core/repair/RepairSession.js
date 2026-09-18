@@ -19,7 +19,7 @@ import { AssetLoader } from '../AssetLoader.js';
 import { logicalObjectPartIds } from '../LogicalObjects.js';
 import { validateMesh } from '../MeshValidator.js';
 import { repairMesh } from './MeshRepair.js';
-import { engineDiagnose } from './Diagnose.js';
+import { repairGroup, toLeadMatrix } from './GroupRepair.js';
 import { weldMesh, WELD_DISTANCE } from './Weld.js';
 
 const BABYLON = window.BABYLON;
@@ -144,6 +144,10 @@ export async function autoFix(mesh, results, report = null) {
   let repairOnce = null;
   for (const r of results) {
     if (!r.autoFixAvailable || r.fixed) continue;
+    // A group-scoped result describes the welded UNION of a multi-part
+    // object; per-mesh fixes do not apply to it — repairObject() routes those
+    // through GroupRepair. Never cap a single part here on its behalf.
+    if (r.scope === 'group') continue;
     if (r.type === 'holes' || r.type === 'nonManifold') {
       repairOnce ??= applyGeometryFix(mesh, r.type, report);
       if (await repairOnce) r.fixed = true;
@@ -170,32 +174,39 @@ function _recordGeometryFixes(meshId, applied) {
 }
 
 /**
- * Repair ONE part of a logical object.
- *
- * `groupPart` (a multi-part logical object: MultiMaterial split or glTF
- * multi-primitive) takes the direct engine path. I7a: group-scoped
- * validation reports the welded UNION and never offers a per-part fix — the
- * union is synthetic geometry no fix can be applied to — so the
- * validate → autoFix route left multi-part objects permanently unrepairable.
- * Each sibling is diagnosed on its own and repaired only when the engine
- * says it actually needs it (also C1: a healthy part is never rewritten).
+ * Repair ONE single-part logical object: validate → autoFix (every fixable
+ * result type) → record.
  */
-async function _repairOnePart(meshId, groupPart) {
+async function _repairSinglePart(meshId, { record = true } = {}) {
   const mesh = AssetLoader.getBabylonMesh(meshId);
   if (!mesh) return { holesFilled: 0, nmFixed: 0, applied: [] };
   const report = {};
-  let applied = [];
-  if (groupPart) {
-    const { diag } = await engineDiagnose(mesh);
-    const needsRepair = !!diag && (diag.boundaryEdges > 0 || diag.nonManifoldEdges > 0);
-    if (needsRepair && await applyGeometryFix(mesh, 'holes', report)) applied = ['holes'];
-  } else {
-    const results = await validateMesh(mesh);
-    await autoFix(mesh, results, report);
-    applied = results.filter(r => r.fixed).map(r => r.type);
-  }
-  _recordGeometryFixes(meshId, applied);
+  const results = await validateMesh(mesh);
+  await autoFix(mesh, results, report);
+  const applied = results.filter(r => r.fixed).map(r => r.type);
+  if (record) _recordGeometryFixes(meshId, applied);
   return { holesFilled: report.holesFilled ?? 0, nmFixed: report.nmFixed ?? 0, applied };
+}
+
+/**
+ * Repair a MULTI-PART logical object (MultiMaterial split / glTF
+ * multi-primitive) as ONE solid — GroupRepair.repairGroup on the welded
+ * union of its parts, each part written back with its own triangles and
+ * UVs. The previous per-part path capped every material seam (a closed
+ * split cube came back with an internal wall) — see GroupRepair.js.
+ * Records the `groupRepair` fix type on EVERY part so a reload replays it
+ * once for the whole object (ProjectLoader).
+ */
+async function _repairGroupParts(ids, { record = true, onProgress } = {}) {
+  const meshes = ids.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
+  if (!meshes.length) return { holesFilled: 0, nmFixed: 0, applied: [] };
+  const lead = meshes[0];
+  const parts = meshes.map(mesh => ({ mesh, toLead: toLeadMatrix(mesh, lead) }));
+  const name = getState().scene.objects[ids[0]]?.name ?? lead.name;
+  const r = await repairGroup(parts, { name, onProgress });
+  const applied = r.changed ? ['groupRepair'] : [];
+  if (record && applied.length) for (const id of ids) _recordGeometryFixes(id, applied);
+  return { holesFilled: r.holesFilled, nmFixed: r.nmFixed, applied };
 }
 
 /**
@@ -217,22 +228,16 @@ async function _repairOnePart(meshId, groupPart) {
  * @returns {Promise<{ holesFilled: number, nmFixed: number, applied: string[],
  *                     remaining: ValidationResult[] }>}
  */
-export async function repairObject(meshId) {
+export async function repairObject(meshId, { record = true, onProgress } = {}) {
   const objects = getState().scene.objects;
   const partIds = logicalObjectPartIds(meshId, objects)
     .filter(id => objects[id] && !objects[id].isGhost && AssetLoader.getBabylonMesh(id));
   const ids = partIds.length ? partIds : (AssetLoader.getBabylonMesh(meshId) ? [meshId] : []);
   if (!ids.length) return { holesFilled: 0, nmFixed: 0, applied: [], remaining: [] };
 
-  const groupPart = ids.length > 1;
-  let holesFilled = 0, nmFixed = 0;
-  const applied = [];
-  for (const id of ids) {
-    const part = await _repairOnePart(id, groupPart);
-    holesFilled += part.holesFilled;
-    nmFixed += part.nmFixed;
-    applied.push(...part.applied);
-  }
+  const { holesFilled, nmFixed, applied } = ids.length > 1
+    ? await _repairGroupParts(ids, { record, onProgress })
+    : await _repairSinglePart(ids[0], { record });
 
   const lead = AssetLoader.getBabylonMesh(meshId) ?? AssetLoader.getBabylonMesh(ids[0]);
   const remaining = lead ? await validateMesh(lead) : [];
@@ -264,7 +269,17 @@ export async function repairObjects(meshIds, { onProgress } = {}) {
     const name = getState().scene.objects[meshId]?.name ?? meshId;
     onProgress?.(i / total, name);
     try {
-      const res = await repairObject(meshId);
+      // The engine's own progress for THIS object, scaled into its slice of
+      // the batch, so a long single repair still moves the bar.
+      const inner = (a, b) => {
+        // The vendored engine's progress callback shape is not pinned by its
+        // API: accept a 0..1 or 0..100 number in either argument, or an
+        // object with a `progress` field; anything else counts as 0.
+        let f = typeof a === 'number' ? a : typeof b === 'number' ? b : (typeof a?.progress === 'number' ? a.progress : 0);
+        if (f > 1) f /= 100;
+        onProgress?.((i + Math.max(0, Math.min(1, f))) / total, name);
+      };
+      const res = await repairObject(meshId, { onProgress: inner });
       holesFilled += res.holesFilled;
       nmFixed += res.nmFixed;
       if (res.applied.length) repaired++;
@@ -287,5 +302,7 @@ export async function repairObjects(meshIds, { onProgress } = {}) {
  */
 export async function replayGeometryFixes(mesh, types) {
   if (!mesh?.geometry || !Array.isArray(types)) return;
-  for (const type of types) await applyGeometryFix(mesh, type);
+  // 'groupRepair' is replayed ONCE per logical object by ProjectLoader after
+  // every part is bound (the union needs all of them) — never per mesh here.
+  for (const type of types) if (type !== 'groupRepair') await applyGeometryFix(mesh, type);
 }

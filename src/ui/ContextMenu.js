@@ -5,13 +5,11 @@ import { getState, setState, dispatch } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
-import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
-import { reportBatchRepairResult } from './RepairFeedback.js';
+import { repairWithOverlay } from './RepairFeedback.js';
 import { Modal } from './Modal.js';
-import { ProgressOverlay } from './ProgressOverlay.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -412,16 +410,7 @@ async function _repairGeometry() {
   const objects = getState().scene.objects;
   const ids = Selection.getSelectedIds().filter(id => objects[id] && !objects[id].isGhost);
   if (!ids.length) return;
-  let result;
-  ProgressOverlay.show(t('context.repairGeometry'));
-  try {
-    result = await MeshValidator.repairObjects(ids, {
-      onProgress: (frac, name) => ProgressOverlay.update(frac, name),
-    });
-  } finally {
-    ProgressOverlay.hide();
-  }
-  reportBatchRepairResult(ids.length, result);
+  await repairWithOverlay(ids, { title: t('context.repairGeometry') });
 }
 
 function _relink(meshId) {

@@ -438,3 +438,18 @@ body:not([data-workspace="shade"]) #rp-properties { flex: 1 1 0 !important; }
 .ws-btn svg { flex-shrink: 0; }
 .ws-btn:hover  { background: var(--bg-3); color: var(--text-0); }
 .ws-btn.active { background: var(--accent); color: var(--accent-fg); }
+
+/* Status-bar inline action (e.g. "Fix" next to "not watertight") */
+.sb-action {
+  margin-left: var(--sp-2);
+  padding: 1px 8px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+.sb-action:hover { background: var(--accent-hi); }

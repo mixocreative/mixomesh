@@ -24,6 +24,8 @@ import { countSceneTriangles, countContainerTriangles, formatTriCount, meshTrian
   from '../core/scene/TriangleCount.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
+import { canonicalObjectId } from '../core/LogicalObjects.js';
+import { repairWithOverlay } from './RepairFeedback.js';
 
 // Result types that mean "this geometry is not a closed, correctly wound
 // solid". The validator has no 'error' severity tier (CIA F1), so the HUD
@@ -101,6 +103,7 @@ function _render() {
   const hudClass = ratio >= DANGER_RATIO ? 'hud-danger' : ratio >= WARN_RATIO ? 'hud-warn' : '';
 
   let text = `${t('hud.tris')} ${formatTriCount(_cachedSceneTris)} / ${formatTriCount(budget)}`;
+  let action = null;
 
   const sel = getState().selection?.selectedIds ?? [];
   let selTris = 0, min = null, max = null;
@@ -125,14 +128,20 @@ function _render() {
     // holes / nonManifold / invertedNormals result means not watertight.
     const activeId = getState().selection?.activeId;
     const val = activeId ? getState().scene.validation?.[activeId] : null;
-    const water = val?.results
-      ? (val.results.some(r => OPEN_GEOMETRY_TYPES.has(r.type)) ? ` · ${t('hud.notWatertight')}` : ` · ${t('hud.watertight')}`)
-      : '';
+    const open = !!val?.results?.some(r => OPEN_GEOMETRY_TYPES.has(r.type));
+    const water = val?.results ? (open ? ` · ${t('hud.notWatertight')}` : ` · ${t('hud.watertight')}`) : '';
 
     text += ` · ${t('hud.sel')} ${formatTriCount(selTris)} · ${mm(d.x)}×${mm(d.z)}×${mm(d.y)} mm${water}`;
+    // "not watertight" is actionable right here (owner ask 2026-09-18): the
+    // badge carries a Fix button that repairs the selected objects under the
+    // blocking overlay. Only when a cached result says something is fixable.
+    if (open && val.results.some(r => r.autoFixAvailable && !r.fixed)) {
+      const ids = [...new Set(sel.map(id => canonicalObjectId(id, getState().scene.objects)))];
+      action = { label: t('hud.fixNow'), title: t('hud.fixNowTitle'), onClick: () => { repairWithOverlay(ids); } };
+    }
   }
 
-  StatusBar.setCenter(text, { className: hudClass, title: t('hud.triangleBudget') });
+  StatusBar.setCenter(text, { className: hudClass, title: t('hud.triangleBudget'), action });
 }
 
 export const MeshStats = { init, countSceneTriangles, countContainerTriangles, formatTriCount };

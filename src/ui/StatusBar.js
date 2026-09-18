@@ -89,6 +89,17 @@ export function setCenter(text, opts = {}) {
   _elCenter.classList.remove('hud-warn', 'hud-danger');
   if (opts.className) _elCenter.classList.add(opts.className);
   _elCenter.title = opts.title ?? '';
+  // Optional inline action (e.g. "Fix" next to "not watertight") — a real
+  // button so it is keyboard-reachable; the text stays plain textContent.
+  if (opts.action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sb-action';
+    btn.textContent = opts.action.label;
+    if (opts.action.title) btn.title = opts.action.title;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.action.onClick?.(); });
+    _elCenter.appendChild(btn);
+  }
 }
 
 /** Update the left segment with current operation hint. */
