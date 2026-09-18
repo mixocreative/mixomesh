@@ -502,7 +502,19 @@ Import path:
    nodes with geometry descendants (Blender Collections exported with "Full
    Collection Hierarchy", manual Empty parents, or 3MF component assemblies),
    `ImportHierarchy` captures those nodes as Outliner groups before
-   import-transform baking. The bake folds loader/unit/reflection transforms
+   import-transform baking — **only nodes with two or more structural
+   children** (logical objects, a multi-primitive mesh counting once, and/or
+   surviving sub-groups; decided deepest-first). A single-child wrapper (the
+   glTF node that merely holds one mesh, or a chain of empties around one
+   assembly) collapses, so a scan is one Outliner row, not file → node → mesh
+   (owner decision 2026-09-18; one row per object, hierarchy only where it
+   was authored with several objects). Multi-primitive siblings are keyed on
+   their authored ORIGIN node (`hierarchy.originNodeKey(mesh)`), never on the
+   Outliner group, so same-named primitives of different nodes never merge.
+   In the Outliner a file that yielded exactly one object renders as that
+   object at top level with a file badge (provenance stays on the SceneObject
+   for relink); files with several objects keep their collection row.
+   The bake folds loader/unit/reflection transforms
    into mesh vertices, then keeps only the promoted group nodes as clean
    identity `TransformNode` parents and reparents baked meshes under them, so
    the runtime hierarchy is editable instead of state-only.
