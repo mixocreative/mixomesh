@@ -103,6 +103,7 @@
   "outliner.sceneObjects": "シーンオブジェクト",
   "outliner.empty": "開始するには3Dファイルをビューポートにドロップしてください。",
   "outliner.itemCount": "{n, plural, other{# 件}}",
+  "outliner.fromFile": "元ファイル：{file}",
   "outliner.mixed": "混在",
   "outliner.emptyGroup": "空",
   "outliner.typeImport": "インポートコレクション（表示のみ）",

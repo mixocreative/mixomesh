@@ -155,7 +155,11 @@ await test('double-clicking a library child instantiates only that child object'
   assert.match(obj.name, /ColaMesh/);
 });
 
-await test('normal GLB import preserves empty node hierarchy as outliner groups', async () => {
+await test('normal GLB import keeps the assembly group and collapses the single-child wrapper above it', async () => {
+  // Beverages → Mug → { Body, Handle }. Mug holds two objects → a real
+  // assembly, kept as a group. Beverages holds only Mug → a single-child
+  // wrapper, collapsed (owner decision 2026-09-18: hierarchy only where it
+  // means something; a scan used to show as file → node → mesh).
   const container = makeHierarchyContainer();
   B.SceneLoader = { LoadAssetContainerAsync: async () => container };
 
@@ -166,9 +170,9 @@ await test('normal GLB import preserves empty node hierarchy as outliner groups'
   const groups = Object.values(state.scene.groups);
   const beverages = groups.find(g => g.name === 'Beverages');
   const mug = groups.find(g => g.name === 'Mug');
-  assert.ok(beverages, 'top-level empty node becomes a group');
-  assert.ok(mug, 'nested empty node becomes a group');
-  assert.equal(mug.parentId, beverages.id, 'nested empty hierarchy is preserved');
+  assert.equal(beverages, undefined, 'single-child wrapper does not become a group');
+  assert.ok(mug, 'the assembly node becomes a group');
+  assert.equal(mug.parentId, null, 'the assembly sits at the top');
   assert.deepEqual(
     Object.values(state.scene.objects).map(o => [o.name, o.parentId]).sort(),
     [['Body', mug.id], ['Handle', mug.id]],

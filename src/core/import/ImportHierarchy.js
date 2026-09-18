@@ -67,10 +67,53 @@ function _uniqueLocalName(baseName, usedNames) {
  */
 export function buildImportHierarchy(container, makeId, uniqueName) {
   const meshes = (container?.meshes ?? []).filter(_isGeometryMesh);
-  const candidates = (container?.transformNodes ?? [])
+  const allCandidates = (container?.transformNodes ?? [])
     .filter(node => node && !_isSyntheticRoot(node))
     .filter(node => meshes.some(mesh => _isDescendantOf(mesh, node)))
     .sort((a, b) => _nodeDepth(a) - _nodeDepth(b));
+
+  // Origin node of every mesh, captured BEFORE the bake detaches it: the
+  // logical-object key in AssetRegistration groups `<stem>_primitive<N>`
+  // siblings by (origin node, stem), so two different nodes that happen to
+  // carry same-named primitives never merge into one object.
+  const originKeyByMesh = new Map();
+  for (const mesh of meshes) {
+    const parent = mesh.parent ?? null;
+    originKeyByMesh.set(mesh, parent ? `n${parent.uniqueId ?? parent.name ?? ''}` : 'root');
+  }
+
+  // A wrapper node becomes an Outliner GROUP only when it has two or more
+  // structural children — logical objects (a multi-primitive mesh counts
+  // once) and/or surviving sub-groups. Single-child wrappers (the glTF node
+  // that merely holds one mesh, or a chain of empties around one assembly)
+  // collapse: they carried nothing the user could act on and showed every
+  // single-object scan as three rows (owner decision 2026-09-18; matches
+  // Blender / PrusaSlicer: one row per object, hierarchy only when authored
+  // with several objects). Decided deepest-first so a parent sees its
+  // children's verdicts.
+  const survivors = new Set(allCandidates);
+  const nearestSurvivor = (node) => {
+    let current = node?.parent ?? null;
+    while (current) {
+      if (survivors.has(current)) return current;
+      current = current.parent ?? null;
+    }
+    return null;
+  };
+  const stemOf = (mesh) => {
+    const m = /^(.*)_primitive\d+$/.exec(String(mesh?.name ?? ''));
+    return m ? m[1] : `#${mesh?.uniqueId ?? mesh?.name ?? ''}`;
+  };
+  for (const node of [...allCandidates].sort((a, b) => _nodeDepth(b) - _nodeDepth(a))) {
+    const logical = new Set();
+    for (const mesh of meshes) {
+      if (nearestSurvivor(mesh) === node) logical.add(`${originKeyByMesh.get(mesh)}|${stemOf(mesh)}`);
+    }
+    let subgroups = 0;
+    for (const other of survivors) if (other !== node && nearestSurvivor(other) === node) subgroups++;
+    if (logical.size + subgroups < 2) survivors.delete(node);
+  }
+  const candidates = allCandidates.filter(node => survivors.has(node));
 
   const groupNodes = new Set(candidates);
   const groupIdByNode = new Map();
@@ -107,6 +150,10 @@ export function buildImportHierarchy(container, makeId, uniqueName) {
     groupIdByNode,
     groupIdForMesh(mesh) {
       return groupIdByMesh.get(mesh) ?? _nearestGroupForMesh(mesh, groupIdByNode);
+    },
+    /** Stable key of the node the mesh was authored under (pre-bake). */
+    originNodeKey(mesh) {
+      return originKeyByMesh.get(mesh) ?? null;
     },
   };
 }

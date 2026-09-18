@@ -123,7 +123,11 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
       logicalKey = `sg:${sourceGroupId}`;
     } else {
       const prim = /^(.*)_primitive\d+$/.exec(mesh.name || '');
-      if (prim) logicalKey = `pp:${parentId ?? ''}:${prim[1]}`;
+      // Keyed on the ORIGIN node (pre-bake), not the Outliner group: a
+      // single-child wrapper no longer becomes a group, so parentId would be
+      // null for every collapsed node and same-stem primitives of different
+      // nodes would merge into one object.
+      if (prim) logicalKey = `pp:${hierarchy?.originNodeKey?.(mesh) ?? parentId ?? ''}:${prim[1]}`;
     }
 
     let logicalObjectId = null;

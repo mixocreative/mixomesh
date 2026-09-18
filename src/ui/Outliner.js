@@ -128,6 +128,14 @@ function _render() {
     const memberGroups = groupsByCol.get(col.id) ?? [];
     const memberObjs   = objsByCol.get(col.id)   ?? [];
     if (!memberGroups.length && !memberObjs.length) continue;     // hide empty collection
+    // A file that yielded ONE object is that object: one top-level row with
+    // a file badge (provenance stays on the SceneObject for relink), not a
+    // folder row above it (owner decision 2026-09-18). Files with several
+    // objects keep their collection row.
+    if (!memberGroups.length && memberObjs.length === 1) {
+      parts.push(_renderObjectRow(memberObjs[0], 0, col.name));
+      continue;
+    }
     parts.push(_renderCollectionBranch(col, memberGroups, memberObjs, groups, objects, collapsed));
   }
   // Mixed-collection groups render at outliner root with a [Mixed] badge.
@@ -163,7 +171,9 @@ function _applySearchFilter(objects, groups, collections) {
     }
   };
   for (const object of Object.values(objects)) {
-    if (!shouldDisplayObject(object) || !String(object.name ?? '').toLocaleLowerCase().includes(query)) continue;
+    if (!shouldDisplayObject(object)) continue;
+    const fileName = String(collections[object.collectionId]?.name ?? '').toLocaleLowerCase();
+    if (!String(object.name ?? '').toLocaleLowerCase().includes(query) && !fileName.includes(query)) continue;
     visibleIds.add(object.id);
     if (object.collectionId) visibleIds.add(object.collectionId);
     addGroupPath(object.parentId);
@@ -272,12 +282,15 @@ function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth, mixe
   return html;
 }
 
-function _renderObjectRow(obj, depth) {
+function _renderObjectRow(obj, depth, fileName = null) {
+  const fileBadge = fileName
+    ? `<span class="ol-file-badge" title="${escapeAttr(t('outliner.fromFile', { file: fileName }))}">${icon('Package', { width: 11, height: 11 })}</span>`
+    : '';
   return _renderRow({
     id: obj.id,
     kind: 'object',
     name: obj.name,
-    nameSuffix: _validationBadge(obj.id),
+    nameSuffix: fileBadge + _validationBadge(obj.id),
     visible: obj.visible !== false,
     locked: !!obj.locked,
     isPrintPart: !!obj.isPrintPart,

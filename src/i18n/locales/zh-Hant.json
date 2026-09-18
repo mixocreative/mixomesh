@@ -103,6 +103,7 @@
   "outliner.sceneObjects": "場景物件",
   "outliner.empty": "將 3D 檔案拖到視窗以開始。",
   "outliner.itemCount": "{n, plural, other{# 個項目}}",
+  "outliner.fromFile": "來源檔案：{file}",
   "outliner.mixed": "混合",
   "outliner.emptyGroup": "空白",
   "outliner.typeImport": "匯入集合（僅供顯示）",

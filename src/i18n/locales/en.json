@@ -103,6 +103,7 @@
   "outliner.sceneObjects": "Scene objects",
   "outliner.empty": "Drop a 3D file on the viewport to begin.",
   "outliner.itemCount": "{n, plural, one{1 item} other{# items}}",
+  "outliner.fromFile": "From file: {file}",
   "outliner.mixed": "Mixed",
   "outliner.emptyGroup": "Empty",
   "outliner.typeImport": "Import collection (display only)",

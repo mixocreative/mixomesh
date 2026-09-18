@@ -236,3 +236,12 @@
 .ol-validation-error   { color: var(--danger); }
 .ol-validation-stale   { opacity: 0.45; }
 .ol-validation-fixable { cursor: pointer; }
+
+/* Single-object file: the object sits at top level with a file badge */
+.ol-file-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--text-2);
+  opacity: 0.8;
+}
