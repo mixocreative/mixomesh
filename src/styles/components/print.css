@@ -564,3 +564,4 @@
 .pp-mini-btn:hover { color: var(--text-0); border-color: var(--border-strong); }
 .pp-cost-presets-error { color: #b45309; margin: 2px 0 0; }
 .pp-cost-note-line { margin: 2px 0 0; }
+.pp-cost-package-row { margin-top: 3px; padding-top: var(--sp-2); border-top: 1px dashed var(--border); }

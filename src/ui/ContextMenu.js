@@ -14,6 +14,7 @@ import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { Outliner } from './Outliner.js';
+import { PrintPanel } from './PrintPanel.js';
 import { SliceConnectorSession } from './SliceConnectorSession.js';
 
 let _root = null;
@@ -48,6 +49,26 @@ export function init() {
 
   // Bake-or-cancel gate for combining textured objects (ADR 0002): Boolean drops
   // UVs, so the user must consciously downgrade to a solid colour.
+  // 匯出所選物件… — pick a format, then the Print panel's shared gate/overlay
+  // path exports the current selection as its own file (flag ignored).
+  Modal.register('exportSelected', ({ close }) => {
+    const el = document.createElement('div');
+    el.className = 'modal-content';
+    el.innerHTML = `
+      <h3>${escapeHtml(t('print.exportSelected.title'))}</h3>
+      <p>${escapeHtml(t('print.exportSelected.body'))}</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" data-f="3mf">${escapeHtml(t('print.export3mf'))}</button>
+        <button class="btn" data-f="obj">${escapeHtml(t('print.exportObj'))}</button>
+        <button class="btn" data-f="stl">${escapeHtml(t('print.exportStl'))}</button>
+        <button class="btn" data-f="">${escapeHtml(t('btn.cancel'))}</button>
+      </div>`;
+    el.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
+      const f = b.dataset.f; close();
+      if (f) safeAsync(() => PrintPanel.exportSelected(f));
+    }));
+    return el;
+  });
   Modal.register('booleanTextureBake', ({ close }) => {
     const el = document.createElement('div');
     el.className = 'pm-modal';
@@ -176,6 +197,7 @@ function _buildItems(info) {
     { label: t('context.duplicate'),       shortcut: 'Shift+D',     action: 'duplicate', iconName: 'Copy',     cls: enabled(hasSelection) },
     'sep',
     { label: t('context.repairGeometry'),  shortcut: '',            action: 'repair-geometry', iconName: 'AlertTriangle', cls: enabled(hasSelection) },
+    { label: t('context.exportSelected'),  shortcut: '',            action: 'export-selected', iconName: 'Download',      cls: enabled(hasSelection) },
     'sep',
     // Split / Join (owner decision 2026-09-18): explicit, undoable, geometry untouched.
     { label: t('context.splitToParts'),    shortcut: '',            action: 'split-parts', iconName: 'Scissors',
@@ -250,6 +272,7 @@ function _runAction(action, info) {
   if (action === 'mate') _mate();
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'repair-geometry') safeAsync(() => _repairGeometry());
+  if (action === 'export-selected') Modal.open('exportSelected', {});
   if (action === 'split-parts') _splitToParts(_lastInfo?.targetId);
   if (action === 'join') _join();
   if (action === 'slice-connector') SliceConnectorSession.start();

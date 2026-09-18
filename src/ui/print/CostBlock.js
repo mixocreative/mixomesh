@@ -21,6 +21,8 @@ import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
 import { Toast } from '../Toast.js';
+import { boundsForExportContext } from '../../core/print/PrintReadiness.js';
+import { withRestTransform } from '../../core/scene/ImportBounce.js';
 import { getMaterialPresets, getMaterialPresetsSource } from '../../core/print/MaterialPresets.js';
 import { wireNumbers, wireSelects } from '../lib/fields.js';
 import printersData from '../../config/printers.json' with { type: 'json' };
@@ -298,6 +300,14 @@ function _renderResult(container, state, override = null) {
   html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
     : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));
   html += row('total', 'print.cost.rowTotal', q.total == null ? '\u2014' : money(q.total), 'pp-cost-total-row');
+  // Packaging (owner ask 2026-09-18): the combined bounding box of every
+  // exported object at the export ratio, W×D×H in mm — the number you need
+  // to pick a mailing box. Same bounds the readiness card / bed fit use.
+  const bounds = withRestTransform(() => boundsForExportContext(ctx));
+  if (bounds) {
+    const dims = bounds.max.map((v, i) => Math.max(0, v - bounds.min[i]));
+    html += row('package', 'print.cost.rowPackage', t('print.cost.packageValue', { w: dims[0].toFixed(1), d: dims[1].toFixed(1), h: dims[2].toFixed(1) }), 'pp-cost-package-row');
+  }
   if (q.approximate) {
     html += `<div class="pp-cost-row pp-cost-note">${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })}` +
       `<span><strong>${escapeHtml(t('print.cost.approximate'))}</strong> \u00b7 ${escapeHtml(q.reasons.map(_reasonText).join('; '))}</span></div>`;

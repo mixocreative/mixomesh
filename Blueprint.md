@@ -3389,7 +3389,10 @@ This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as we
 **Export-tab presentation (2026-09-18).** A breakdown card, not a one-line
 sentence: Volume · Weight (model g + support g) · Material (cost, with the
 price/g actually used) · Support (cost, with the % used) · **Estimated
-total**, then an "Approximate · <reasons>" note VISIBLE in the card (the
+total** · **Packaging (W×D×H)** — the combined bounding box of every exported
+object at the export ratio in print-space mm (`boundsForExportContext`, the
+same bounds the readiness card and bed fit use; read at rest transform), so
+the user can pick a mailing box — then an "Approximate · <reasons>" note VISIBLE in the card (the
 reasons were a tooltip nobody hovered). Price / support-price / support-%
 fields show the material default as their PLACEHOLDER when the stored value
 is 0 and render blank — a field reading "0" while the quote charged 0.50/g
@@ -3967,6 +3970,16 @@ never fires in a background tab) with a `max-height` + scroll fallback.
 Display modes (print-preview matte, wireframe edges + colour) live in the
 viewport toggles under the NavCube — see Viewport Toggles below — so they
 work from every workspace; there is no Preview tab.
+
+**What the Export tab writes is the 列印匯出 flag, and only that (owner
+decision 2026-09-18).** The former "Selected only" checkbox is gone: it was
+a second, transient answer to "what gets exported" that silently overrode
+the flag while the readiness card and cost quote above it still described
+the flagged set. A one-off export of the selection is the context menu's
+**匯出所選物件…** (format chooser modal → `PrintPanel.exportSelected(format)`
+→ the shared `_runExport` gate/overlay with `{ selectedOnly: true }`);
+`collectPrintUnits(state, true)` then takes the selection AS the intent and
+ignores the flag. Readiness and cost always match the file the tab produces.
 
 The Bed tab labels printer choices **Build Volume Preset**: choosing one only
 seeds `print.bedDimensions` and the viewport volume. The Export tab always

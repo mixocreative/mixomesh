@@ -170,8 +170,11 @@ export function collectPrintUnits(state, selectedOnly) {
   const units = [];
   for (const leadId of logicalObjectLeadIds(objects)) {
     const leadObj = objects[leadId];
-    if (!leadObj || leadObj.isGhost || !leadObj.isPrintPart) continue;
-    if (selectedOnly && !selected.has(leadId)) continue;
+    if (!leadObj || leadObj.isGhost) continue;
+    // selectedOnly = an explicit one-off export of the selection (context
+    // menu 匯出所選物件…): the selection IS the intent, the 列印匯出 flag
+    // does not filter it. Otherwise the flag is the one truth.
+    if (selectedOnly ? !selected.has(leadId) : !leadObj.isPrintPart) continue;
     const parts = [];
     for (const meshId of logicalObjectPartIds(leadId, objects)) {
       const obj = objects[meshId];

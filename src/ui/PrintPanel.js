@@ -588,11 +588,6 @@ function _renderExportTab() {
   html += `<label>${escapeHtml(t('print.exportOptions'))}</label>`;
 
   html += '<div class="pp-checkbox">';
-  html += '<input type="checkbox" id="pp-selected-only" data-option="selectedOnly">';
-  html += `<label for="pp-selected-only">${escapeHtml(t('print.selectedOnly'))}</label>`;
-  html += '</div>';
-
-  html += '<div class="pp-checkbox">';
   html += '<input type="checkbox" id="pp-individually" data-option="individually">';
   html += `<label for="pp-individually">${escapeHtml(t('print.eachIndividually'))}</label>`;
   html += '</div>';
@@ -653,17 +648,29 @@ function _renderExportTab() {
   });
 
   // Collect options
-  const getOptions = () => {
-    const selectedOnly = el.querySelector('#pp-selected-only').checked;
-    const individually = el.querySelector('#pp-individually').checked;
-    return { selectedOnly, individually };
-  };
+  // "Selected only" is gone from this tab (owner decision 2026-09-18): the
+  // 列印匯出 flag is the ONE truth for what the Export tab writes, so the
+  // readiness card and cost quote above always describe the file you get.
+  // A one-off export of the selection is the context menu's 匯出所選物件…
+  // (exportSelected below).
+  const getOptions = () => ({ individually: el.querySelector('#pp-individually').checked });
 
   // Wire export buttons. Hard errors are handled INSIDE the export (post
   // auto-fix); cached WARNINGS gate with a three-way prompt first (Blueprint
   // §12 export gate, arch B6 + watertight-repair-and-cost task 4):
   // Auto-fix and export / Export anyway / Cancel.
-  const runExport = async (fn, opts) => {
+  _wireExportTabControls(el, _runExport, getOptions);
+  return el;
+}
+
+/**
+ * Run one export through the gate: blocked readiness → modal; cached
+ * warnings → three-way prompt (Auto-fix and export / Export anyway /
+ * Cancel); then the pipeline under the progress overlay. Shared by the
+ * Export tab buttons and the context menu's export-selected action.
+ */
+async function _runExport(fn, opts) {
+  {
     const currentReadiness = PrintManager.getPrintReadiness(opts);
     if (!currentReadiness.canExport) {
       reportError(new Error(t('print.readiness.blockedHint')), {
@@ -728,8 +735,10 @@ function _renderExportTab() {
     } finally {
       ProgressOverlay.hide();
     }
-  };
+  }
+}
 
+function _wireExportTabControls(el, runExport, getOptions) {
   wireToggles(el, '#pp-bake-solid', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
     markDirty();   // print slice is persisted wholesale in .mixo (M4)
@@ -753,8 +762,20 @@ function _renderExportTab() {
 
   el.querySelector('.pp-export-stl').addEventListener('click', () =>
     runExport(PrintManager.exportSTL, getOptions()));
+}
 
-  return el;
+const EXPORTERS = { obj: () => PrintManager.exportOBJ, '3mf': () => PrintManager.exportThreeMF, stl: () => PrintManager.exportSTL };
+
+/**
+ * One-off export of the CURRENT SELECTION as its own file (context menu
+ * 匯出所選物件…). Ignores the 列印匯出 flag — the selection is the explicit
+ * intent — and changes no state. Same gate/overlay as the Export tab.
+ * @param {'obj'|'3mf'|'stl'} format
+ */
+export function exportSelected(format) {
+  const fn = EXPORTERS[format]?.();
+  if (!fn) return Promise.resolve();
+  return _runExport(fn, { selectedOnly: true });
 }
 
 function _routeReadinessIssue(code) {
@@ -1000,4 +1021,4 @@ function _renderValidationErrorsModal({ data, close }) {
   return el;
 }
 
-export const PrintPanel = { init };
+export const PrintPanel = { init, exportSelected };
