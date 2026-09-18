@@ -73,7 +73,7 @@ function _weldLocally(mesh) {
  *          merged?:number, isWatertight?:boolean}|null} [report]
  * @returns {Promise<boolean>} true when the fix was applied
  */
-export async function applyGeometryFix(mesh, type, report = null) {
+export async function applyGeometryFix(mesh, type, report = null, opts = {}) {
   if (!mesh) return false;
   if (type === 'mirror-x' || type === 'mirror-y' || type === 'mirror-z') {
     const positions = mesh.getVerticesData?.(BABYLON.VertexBuffer.PositionKind);
@@ -96,7 +96,7 @@ export async function applyGeometryFix(mesh, type, report = null) {
   }
   if (type === 'holes' || type === 'nonManifold') {
     try {
-      const r = await repairMesh(mesh);
+      const r = await repairMesh(mesh, { onProgress: opts.onProgress });
       if (report) {
         report.holesFilled = (report.holesFilled ?? 0) + r.holesFilled;
         report.nmFixed = (report.nmFixed ?? 0) + r.nmFixed;
@@ -137,7 +137,7 @@ export async function applyGeometryFix(mesh, type, report = null) {
  * @param {object|null} [report] see applyGeometryFix (M2)
  * @returns {Promise<ValidationResult[]>} the same list, with `fixed` flags set
  */
-export async function autoFix(mesh, results, report = null) {
+export async function autoFix(mesh, results, report = null, opts = {}) {
   // 'holes' and 'nonManifold' both repair through the identical repairMesh()
   // engine call (see applyGeometryFix) — when a result list carries both
   // (the same open edges can trip both checks), run the engine once and
@@ -150,11 +150,11 @@ export async function autoFix(mesh, results, report = null) {
     // through GroupRepair. Never cap a single part here on its behalf.
     if (r.scope === 'group') continue;
     if (r.type === 'holes' || r.type === 'nonManifold') {
-      repairOnce ??= applyGeometryFix(mesh, r.type, report);
+      repairOnce ??= applyGeometryFix(mesh, r.type, report, opts);
       if (await repairOnce) r.fixed = true;
       continue;
     }
-    if (await applyGeometryFix(mesh, r.type, report)) r.fixed = true;
+    if (await applyGeometryFix(mesh, r.type, report, opts)) r.fixed = true;
   }
   return results;
 }
@@ -178,12 +178,12 @@ function _recordGeometryFixes(meshId, applied) {
  * Repair ONE single-part logical object: validate → autoFix (every fixable
  * result type) → record.
  */
-async function _repairSinglePart(meshId, { record = true } = {}) {
+async function _repairSinglePart(meshId, { record = true, onProgress } = {}) {
   const mesh = AssetLoader.getBabylonMesh(meshId);
   if (!mesh) return { holesFilled: 0, nmFixed: 0, applied: [] };
   const report = {};
   const results = await validateMesh(mesh);
-  await autoFix(mesh, results, report);
+  await autoFix(mesh, results, report, { onProgress });
   const applied = results.filter(r => r.fixed).map(r => r.type);
   if (record) _recordGeometryFixes(meshId, applied);
   return { holesFilled: report.holesFilled ?? 0, nmFixed: report.nmFixed ?? 0, applied };
@@ -240,7 +240,7 @@ export async function repairObject(meshId, { record = true, onProgress } = {}) {
 
   const runOnce = () => (ids.length > 1
     ? _repairGroupParts(ids, { record, onProgress })
-    : _repairSinglePart(ids[0], { record }));
+    : _repairSinglePart(ids[0], { record, onProgress }));
   let { holesFilled, nmFixed, applied } = await runOnce();
 
   const lead = AssetLoader.getBabylonMesh(meshId) ?? AssetLoader.getBabylonMesh(ids[0]);
