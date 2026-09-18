@@ -16,6 +16,7 @@
  * never builds one itself, so it stays a pure function of ctx + settings.
  */
 
+import { withRestTransform } from '../scene/ImportBounce.js';
 import { positionsToPrintSpace, printIndices, signedVolume, toPrintSpace } from './PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from '../repair/MeshRepair.js';
 import { caps } from '../storage/capabilities.js';
@@ -119,6 +120,11 @@ function _isValidated(state, unit) {
  * @returns {Map<string, {volumeMM3:number, triangles:number, watertight:boolean, validated:boolean}>}
  */
 export function unitVolumesMM3(ctx) {
+  // World matrices at REST — the import pop must not scale the quote.
+  return withRestTransform(() => _unitVolumesMM3Now(ctx));
+}
+
+function _unitVolumesMM3Now(ctx) {
   const out = new Map();
   for (const unit of ctx.units ?? []) {
     let vol = 0;
@@ -198,6 +204,10 @@ function _aabbOverlap(a, b, eps) {
  * @returns {Array<[string, string]>} logicalId pairs
  */
 export function overlappingPairs(ctx) {
+  return withRestTransform(() => _overlappingPairsNow(ctx));
+}
+
+function _overlappingPairsNow(ctx) {
   const boxes = (ctx.units ?? [])
     .map(unit => ({ id: unit.logicalId, box: _unitBoundsMM(ctx, unit) }))
     .filter(entry => entry.box);

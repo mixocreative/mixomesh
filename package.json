@@ -17,6 +17,7 @@
     "test:export": "node tests/browser-export-smoke.mjs",
     "test:repair": "node tests/browser-repair-smoke.mjs",
     "test:group": "node tests/browser-group-repair-smoke.mjs",
+    "probe:scans": "node tests/scan-probe.mjs",
     "test:video": "node tests/browser-video-check.mjs",
     "test:webgpu": "node tests/browser-webgpu-check.mjs",
     "test:electron": "node tests/electron-smoke.mjs",

@@ -103,6 +103,12 @@ npm run test:repair
 npm run test:group
 ```
 
+`npm run probe:scans [dir]` (not part of `test:all`) runs every model in
+`tests/fixtures/real-scans/` (git-ignored — drop your own scans there) through
+import → validate → repair → re-validate → 3MF export and prints one row per
+file with the manifold/volume verdict; see the header of
+`tests/scan-probe.mjs` for the `PROBE_*` switches.
+
 `npm run test:all` chains the five test commands in that order
 (`test && test:browser && test:export && test:repair && test:group`). The browser smokes
 stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so

@@ -19,6 +19,7 @@ import { t } from '../../i18n/index.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { repairMesh, diagnoseMesh, ensureRepairEngine } from '../repair/MeshRepair.js';
 import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
+import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportRatiosFromState } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits } from './ExportContext.js';
@@ -410,6 +411,7 @@ export function getPrintReadiness(options = {}) {
 
 async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {
   progress(0.02, 'Collecting meshes…');
+  settleImportBounce();   // flattenWorld bakes world matrices — never a mid-pop scale
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
   const printMeshes = _flattenPrintUnits(units);

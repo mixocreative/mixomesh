@@ -9,3 +9,4 @@
 # Node
 node_modules/
 dist/
+tests/fixtures/real-scans/

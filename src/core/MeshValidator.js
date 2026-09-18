@@ -7,6 +7,7 @@ import { frontFaceIsClockwise } from './print/PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from './repair/MeshRepair.js';
 import { engineDiagnose } from './repair/Diagnose.js';
 import { weldArrays } from './repair/Weld.js';
+import { withRestTransform } from './scene/ImportBounce.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -155,6 +156,16 @@ function _collectGroupSiblings(sourceGroupId) {
  * which sub-material side each triangle originated on.
  */
 function _buildGroupUnion(siblings) {
+  // The import bounce-in animates mesh.scaling for ~260 ms after an import;
+  // read mid-pop, sibling parts sit at DIFFERENT scales (each part starts
+  // its pop when it is instantiated) and the world-space union tears open
+  // along every seam — the import-time validation of every multi-part scan
+  // reported hundreds of bogus holes (measured 2026-09-18). Read at REST
+  // (the pop is put back afterwards, so the animation is not cut short).
+  return withRestTransform(() => _buildGroupUnionNow(siblings));
+}
+
+function _buildGroupUnionNow(siblings) {
   let totalVerts = 0;
   let totalIndices = 0;
   for (const { babylonMesh } of siblings) {

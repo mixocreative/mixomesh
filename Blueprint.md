@@ -2337,6 +2337,56 @@ panel / Repair all / status-bar Fix route them through `repairObjects`.
 Proof: `npm run test:group` (real Chrome: closed split cube validates clean,
 open split cube → 7 + 5 = 12 triangles, exported 3MF watertight, +1000 mm³).
 
+**Real-scan hardening (12 photogrammetry scans, 2026-09-18 —
+`node tests/scan-probe.mjs [dir]` runs import → validate → repair →
+re-validate → 3MF → manifold/volume check per file and prints one row each;
+`PROBE_ONLY`, `PROBE_DIAG=1`, `PROBE_SHOT=<dir>`, `PROBE_ENGINE_OPTS`,
+`PROBE_PASSES` steer it; the scans live outside git under
+`tests/fixtures/real-scans/`).** Every one of these was measured, not
+guessed:
+- **Write-back carries every vertex attribute.** Scans carry normals (often
+  tangents, uv2, colour); the fixtures carried none, so `arraysToMesh` left
+  `normal` at the OLD vertex count and Babylon threw "Invalid typed array
+  length" on the first render/export. uv / uv2 / colour follow the same
+  original-vertex mapping; normals are recomputed; tangents dropped.
+- **Ownership by nearest original centroid** (grid-hashed) for triangles
+  the engine re-cut — "first part that touched the vertex" starved a small
+  part of every triangle and the repair aborted.
+- **Repair runs PER CONNECTED COMPONENT** (`repairArraysByComponent`,
+  position-welded connectivity so a UV seam does not split a shell): handed a
+  multi-shell mesh the WASM core discards shells whatever the options say (a
+  54-shell union came back as its largest shell, 17,252 → 6,426 triangles).
+  Per shell the engine has nothing to choose between; a shell it returns
+  empty keeps its original triangles.
+- **Fresh WASM instance per repair call** (`createRepairEngine`): cheap, and
+  removes the engine's own cross-call state from the equation.
+- **Leftover boundary loops are capped** (`CapLoops.capBoundaryLoops`, fan
+  from the loop centroid, winding from the owning triangle, position-welded
+  topology): what the engine declined were the unscanned undersides / rims
+  (300–750-edge loops) and stray 3-edge holes, whatever `holeAreaMultiplier`
+  / `oversizeMultiplier` said. The cap is what a slicer would otherwise guess
+  at; its texture is nearest-vertex smear on a face that sits on the bed.
+- **Automatic second pass** in `repairObject` when pass 1 changed geometry
+  but left open / non-manifold edges (the engine converges in two passes on
+  scans; a cap gives it something to weld).
+- **Geometry is read at REST transform** (`ImportBounce.withRestTransform`)
+  in the validator's union, the repair's part→lead matrices, and the cost
+  quote's volumes; the export pipeline settles the pop outright. The 260 ms
+  bounce-in animates `mesh.scaling`, sibling parts start their pops at
+  different instants, and every reader inside that window (import
+  auto-validate, my smokes) saw parts at DIFFERENT scales: hundreds of bogus
+  holes on every multi-part import, and a repair whose union had one part
+  shrunk by 2.3 %. Settling on every read would cut the animation short
+  (the Print panel re-renders on import), hence read-at-rest.
+- **One import validation flow per logical object** (`queueValidation` skips
+  internal parts): toasting / auto-repairing each primitive duplicated every
+  message and ran the group repair once per part.
+Result on the 12 scans: 9 fully watertight (holes 4,619 → 0 on the worst),
+3 with 1–3 non-manifold edges and no holes; volumes positive; exports
+manifold except those edges; textures intact along atlas seams (eyeballed
+from above and below). Remaining non-manifold edges are reported honestly
+("slicer-repairable") and never block export.
+
 **Engine output is validated before ANYTHING reads it (review CIA F2):**
 every coordinate finite, every index an integer in `[0, V.length)`, else
 `throw new Error('engine returned malformed geometry: …')` and the mesh is

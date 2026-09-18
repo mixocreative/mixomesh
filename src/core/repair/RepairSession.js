@@ -20,6 +20,7 @@ import { logicalObjectPartIds } from '../LogicalObjects.js';
 import { validateMesh } from '../MeshValidator.js';
 import { repairMesh } from './MeshRepair.js';
 import { repairGroup, toLeadMatrix } from './GroupRepair.js';
+import { withRestTransform } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from './Weld.js';
 
 const BABYLON = window.BABYLON;
@@ -201,7 +202,9 @@ async function _repairGroupParts(ids, { record = true, onProgress } = {}) {
   const meshes = ids.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
   if (!meshes.length) return { holesFilled: 0, nmFixed: 0, applied: [] };
   const lead = meshes[0];
-  const parts = meshes.map(mesh => ({ mesh, toLead: toLeadMatrix(mesh, lead) }));
+  // Part → lead matrices at REST: a mid-bounce scale must never leak into
+  // the union (see MeshValidator._buildGroupUnion).
+  const parts = withRestTransform(() => meshes.map(mesh => ({ mesh, toLead: toLeadMatrix(mesh, lead) })));
   const name = getState().scene.objects[ids[0]]?.name ?? lead.name;
   const r = await repairGroup(parts, { name, onProgress });
   const applied = r.changed ? ['groupRepair'] : [];
@@ -235,12 +238,23 @@ export async function repairObject(meshId, { record = true, onProgress } = {}) {
   const ids = partIds.length ? partIds : (AssetLoader.getBabylonMesh(meshId) ? [meshId] : []);
   if (!ids.length) return { holesFilled: 0, nmFixed: 0, applied: [], remaining: [] };
 
-  const { holesFilled, nmFixed, applied } = ids.length > 1
-    ? await _repairGroupParts(ids, { record, onProgress })
-    : await _repairSinglePart(ids[0], { record });
+  const runOnce = () => (ids.length > 1
+    ? _repairGroupParts(ids, { record, onProgress })
+    : _repairSinglePart(ids[0], { record }));
+  let { holesFilled, nmFixed, applied } = await runOnce();
 
   const lead = AssetLoader.getBabylonMesh(meshId) ?? AssetLoader.getBabylonMesh(ids[0]);
-  const remaining = lead ? await validateMesh(lead) : [];
+  let remaining = lead ? await validateMesh(lead) : [];
+  // One more pass when the first changed the geometry but left open /
+  // non-manifold edges: on real scans the engine converges in two passes
+  // (a cap from pass 1 gives pass 2 something to weld — measured 2026-09-18).
+  const openLeft = (rs) => rs.some(r => r.type === 'holes' || r.type === 'nonManifold');
+  if (applied.length && openLeft(remaining)) {
+    const second = await runOnce();
+    holesFilled += second.holesFilled; nmFixed += second.nmFixed;
+    applied = [...applied, ...second.applied];
+    remaining = lead ? await validateMesh(lead) : [];
+  }
   return { holesFilled, nmFixed, applied: [...new Set(applied)], remaining };
 }
 

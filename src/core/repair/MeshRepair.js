@@ -20,6 +20,7 @@
 // freezing the UI thread.
 
 import { signedVolume, frontFaceIsClockwise } from '../print/PrintSpace.js';
+import { capBoundaryLoops } from './CapLoops.js';
 import { vendorUrl } from '../vendorUrl.js';
 
 export const REPAIR_TRIANGLE_CAP = 300_000;
@@ -54,6 +55,25 @@ async function _loadEngine() {
     await _loadScript(vendorUrl('vendor/meshfix/mesh-fix-lib.js'));
   }
   if (typeof window.MeshFixLib === 'undefined') throw new Error('no engine: MeshFixLib did not register');
+  const lib = new window.MeshFixLib();
+  await lib.init();
+  return lib;
+}
+
+/**
+ * A FRESH engine instance (new WASM instantiation) for one repair run.
+ *
+ * Measured on real scans 2026-09-18: the vendored WASM core keeps state
+ * between calls — the same open mesh repaired alone came back watertight,
+ * repaired right after a large broken scan it came back with 590 boundary
+ * edges — so every repair run starts from a clean instance. The vendored
+ * scripts stay loaded (ensureRepairEngine did that once); only the WASM is
+ * re-instantiated, tens of milliseconds. Diagnose keeps using the shared
+ * instance (read-only).
+ */
+export async function createRepairEngine() {
+  const shared = await ensureRepairEngine();   // scripts present, or the "no engine" reason thrown
+  if (_injected || typeof window?.MeshFixLib !== 'function') return shared;   // test fake / no factory
   const lib = new window.MeshFixLib();
   await lib.init();
   return lib;
@@ -139,15 +159,43 @@ function _assertWellFormed(V, T) {
  */
 export function arraysToMesh(mesh, V, T, originalPositions, originalUvs, originalTriangles = null) {
   _assertWellFormed(V, T);
+  // Every OTHER per-vertex attribute the mesh carries must end up at the
+  // new vertex count too. Real scans carry normals, often tangents and a
+  // second UV set; the test fixtures carried none — so the old write-back
+  // left `normal` at the OLD length and Babylon threw "Invalid typed array
+  // length" on the first createNormals / render (12 real scans, 2026-09-18).
+  // uv2 / color ride along by the same original-vertex mapping as uv;
+  // normals are recomputed; tangents are dropped (recomputed by the material
+  // when a normal map needs them).
+  const origCount = originalPositions ? originalPositions.length / 3 : (mesh.getVerticesData?.('position')?.length ?? 0) / 3;
+  const extras = [];
+  for (const [kind, stride] of [['uv2', 2], ['color', 4]]) {
+    const d = mesh.getVerticesData?.(kind);
+    if (d && d.length >= origCount * stride) extras.push([kind, stride, Float32Array.from(d)]);
+  }
   if (originalUvs && originalPositions) {
-    _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTriangles);
+    _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTriangles, extras);
   } else {
     const pos = new Float32Array(V.length * 3);
     for (let i = 0; i < V.length; i++) { pos[i * 3] = V[i][0]; pos[i * 3 + 1] = V[i][1]; pos[i * 3 + 2] = V[i][2]; }
     const ind = new Uint32Array(T.length * 3);
     for (let i = 0; i < T.length; i++) { ind[i * 3] = T[i][0]; ind[i * 3 + 1] = T[i][1]; ind[i * 3 + 2] = T[i][2]; }
     mesh.setVerticesData('position', pos, true);
+    if (extras.length && originalPositions) {
+      const nearest = nearestIndex(originalPositions);
+      const src = V.map(v => nearest(v));
+      for (const [kind, stride, data] of extras) {
+        const out = new Float32Array(V.length * stride);
+        for (let i = 0; i < V.length; i++) for (let c = 0; c < stride; c++) out[i * stride + c] = data[src[i] * stride + c] ?? 0;
+        mesh.setVerticesData(kind, out, true);
+      }
+    } else {
+      for (const [kind] of extras) mesh.removeVerticesData?.(kind);
+    }
     mesh.setIndices(ind, null, true);
+  }
+  for (const kind of ['normal', 'tangent']) {
+    if (mesh.isVerticesDataPresent?.(kind)) mesh.removeVerticesData?.(kind);
   }
   mesh.createNormals?.(true); mesh.refreshBoundingInfo?.();
 }
@@ -172,7 +220,7 @@ function _originalTriangleCorners(originalPositions, originalTriangles) {
   return map;
 }
 
-function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTriangles) {
+function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTriangles, extras = []) {
   const cornerMap = originalTriangles?.length
     ? _originalTriangleCorners(originalPositions, originalTriangles)
     : null;
@@ -183,8 +231,18 @@ function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTrian
     return [originalUvs[j * 2] ?? 0, originalUvs[j * 2 + 1] ?? 0];
   };
   const vKeys = V.map(v => posKey(v[0], v[1], v[2]));
+  // Nearest-original lookups are memoised per output vertex: on a scan the
+  // engine moves/creates thousands of vertices and the brute-force scan is
+  // O(n) each — once per vertex, not once per corner.
+  const nearestMemo = new Map();
+  const nearestOf = (vi) => {
+    let hit = nearestMemo.get(vi);
+    if (hit === undefined) { hit = nearest(V[vi]); nearestMemo.set(vi, hit); }
+    return hit;
+  };
 
   const posOut = []; const uvOut = [];
+  const extraOut = extras.map(() => []);
   const ind = new Uint32Array(T.length * 3);
   const emitted = new Map();   // `${outputVertex}#${u},${v}` → new index
 
@@ -193,13 +251,18 @@ function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTrian
     const orig = cornerMap?.get(`${vKeys[tri[0]]}|${vKeys[tri[1]]}|${vKeys[tri[2]]}`) ?? null;
     for (let c = 0; c < 3; c++) {
       const vi = tri[c];
-      const [u, w] = uvAt(orig ? orig[c] : nearest(V[vi]));
+      const src = orig ? orig[c] : nearestOf(vi);
+      const [u, w] = uvAt(src);
       const key = `${vi}#${u},${w}`;
       let ni = emitted.get(key);
       if (ni === undefined) {
         ni = posOut.length / 3;
         posOut.push(V[vi][0], V[vi][1], V[vi][2]);
         uvOut.push(u, w);
+        for (let e = 0; e < extras.length; e++) {
+          const [, stride, data] = extras[e];
+          for (let k = 0; k < stride; k++) extraOut[e].push(data[src * stride + k] ?? 0);
+        }
         emitted.set(key, ni);
       }
       ind[ti * 3 + c] = ni;
@@ -208,6 +271,7 @@ function _writeUvAware(mesh, V, T, originalPositions, originalUvs, originalTrian
 
   mesh.setVerticesData('position', Float32Array.from(posOut), true);
   mesh.setVerticesData('uv', Float32Array.from(uvOut), true);
+  for (let e = 0; e < extras.length; e++) mesh.setVerticesData(extras[e][0], Float32Array.from(extraOut[e]), true);
   mesh.setIndices(ind, null, true);
 }
 
@@ -354,7 +418,7 @@ export async function repairMesh(mesh, opts = {}) {
   const { V, T } = meshToArrays(mesh);
   const originalPositions = Float32Array.from(mesh.getVerticesData('position'));
   const originalUvs = mesh.getVerticesData('uv') ? Float32Array.from(mesh.getVerticesData('uv')) : null;
-  const out = await repairArrays(V, T, { ...opts, name: mesh.name ?? 'mesh' });
+  const out = await repairArraysByComponent(V, T, { ...opts, name: mesh.name ?? 'mesh' });
   if (out.changed) {
     arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);
     conformWinding(mesh);
@@ -373,11 +437,17 @@ export async function repairMesh(mesh, opts = {}) {
  * @param {{name?:string, timeoutMs?:number, onProgress?:Function, engine?:object}} [opts]
  * @returns {Promise<{V:number[][], T:number[][], report:object, after:object, changed:boolean}>}
  */
+// Tooling / probe seam: engine option overrides applied to EVERY repair
+// (after the app's own defaults, before the caller's `opts.engine`).
+let _engineOverrides = {};
+export function setEngineOverrides(o) { _engineOverrides = { ...(o ?? {}) }; }
+
 export async function repairArrays(V, T, opts = {}) {
-  const lib = await ensureRepairEngine();
+  const lib = opts.lib ?? await createRepairEngine();
   const engineOptions = {
     ..._engineDefaults(lib),
     removeSmallShells: false, repairSelfIntersections: false,
+    ..._engineOverrides,
     ...opts.engine,
   };
   const out = await _withTimeout(
@@ -401,10 +471,122 @@ export async function repairArrays(V, T, opts = {}) {
 // Test-only seam: __test.setEngine(fake) makes ensureRepairEngine() resolve
 // the fake without touching the network; setEngine(null) makes it reject
 // with /no engine/ (rejection pre-caught so no unhandled-rejection warning).
+let _injected = false;
 export const __test = {
   setEngine(e) {
     _engine = e;
+    _injected = !!e;
     _loading = e ? Promise.resolve(e) : Promise.reject(new Error('no engine (test)'));
     _loading.catch(() => {});
   },
 };
+
+/**
+ * Vertex-connected components of a triangle list (union-find). Returns one
+ * array of triangle indices per component, largest first.
+ * @param {number} vertexCount
+ * @param {number[][]} T
+ */
+export function triangleComponents(vertexCount, T, V = null) {
+  const parent = new Int32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i++) parent[i] = i;
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const unite = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+  // Connectivity is by POSITION: a UV seam is two vertices at one position
+  // and must not split a shell in two (the engine merges such duplicates).
+  if (V) {
+    const canon = new Map();
+    for (let i = 0; i < vertexCount; i++) {
+      const k = posKey(V[i][0], V[i][1], V[i][2]);
+      const c = canon.get(k);
+      if (c === undefined) canon.set(k, i); else unite(i, c);
+    }
+  }
+  for (const [a, b, c] of T) { unite(a, b); unite(b, c); }
+  const byRoot = new Map();
+  for (let i = 0; i < T.length; i++) {
+    const r = find(T[i][0]);
+    let list = byRoot.get(r); if (!list) { list = []; byRoot.set(r, list); }
+    list.push(i);
+  }
+  return [...byRoot.values()].sort((x, y) => y.length - x.length);
+}
+
+/**
+ * Engine repair applied PER CONNECTED COMPONENT, outputs re-assembled.
+ *
+ * Measured on 12 photogrammetry scans (2026-09-18): handed a multi-shell
+ * mesh, the WASM core discards shells whatever the options say — a 54-shell
+ * union came back as its single largest shell (17,252 → 6,426 triangles),
+ * whole pieces of the scan gone. Repairing each shell on its own removes
+ * that choice from the engine: every fragment is closed in place and kept.
+ * A component the engine returns empty or malformed keeps its original
+ * triangles (reported in `keptOriginal`). Same contract as repairArrays.
+ *
+ * @param {number[][]} V
+ * @param {number[][]} T
+ * @param {{name?:string, timeoutMs?:number, onProgress?:Function, engine?:object}} [opts]
+ * @returns {Promise<{V:number[][], T:number[][], report:object, after:object, changed:boolean, components:number, keptOriginal:number}>}
+ */
+export async function repairArraysByComponent(V, T, opts = {}) {
+  const comps = triangleComponents(V.length, T, V);
+  const lib = await ensureRepairEngine();   // diagnose only (read-only)
+  if (comps.length <= 1) {
+    const one = await repairArrays(V, T, opts);
+    let capped = 0, oneV = one.V, oneT = one.T, changed = one.changed;
+    const report = { ...one.report };
+    if (one.after?.boundary > 0) {
+      const cap = capBoundaryLoops(oneV, oneT);
+      if (cap.capped > 0) { oneV = cap.V; oneT = cap.T; capped = cap.capped; changed = true; report.holesFilled = (report.holesFilled | 0) + cap.capped; }
+    }
+    const after = capped ? lib.diagnose(oneV, oneT) : one.after;
+    return { V: oneV, T: oneT, report, after, changed, components: comps.length, keptOriginal: 0, capped };
+  }
+  const outV = [], outT = [];
+  const report = { holesFilled: 0, nmFixed: 0, normalsFlipped: 0, merged: 0 };
+  let changed = false, keptOriginal = 0;
+  for (let ci = 0; ci < comps.length; ci++) {
+    const triIdx = comps[ci];
+    // Local re-index of this component.
+    const local = new Map(); const lv = []; const lt = [];
+    for (const ti of triIdx) {
+      const tri = T[ti].map(vi => { let li = local.get(vi); if (li === undefined) { li = lv.length; local.set(vi, li); lv.push([...V[vi]]); } return li; });
+      lt.push(tri);
+    }
+    let res = null;
+    try {
+      res = await repairArrays(lv, lt, {
+        ...opts,
+        name: `${opts.name ?? 'mesh'} [shell ${ci + 1}/${comps.length}]`,
+        onProgress: opts.onProgress ? (f) => opts.onProgress((ci + (typeof f === 'number' ? Math.min(1, Math.max(0, f > 1 ? f / 100 : f)) : 0)) / comps.length) : undefined,
+      });
+    } catch (err) {
+      // One bad shell must not sink the others (the engine can reject a
+      // degenerate sliver outright); it stays as it was.
+      console.warn(`Repair: shell ${ci + 1}/${comps.length} of "${opts.name ?? 'mesh'}" kept as-is:`, err?.message ?? err);
+    }
+    const useV = res && res.T.length ? res.V : lv;
+    const useT = res && res.T.length ? res.T : lt;
+    if (!res || !res.T.length) keptOriginal++;
+    else if (res.changed) {
+      changed = true;
+      const r = res.report ?? {};
+      report.holesFilled += r.holesFilled | 0; report.nmFixed += r.nmFixed | 0;
+      report.normalsFlipped += r.normalsFlipped | 0; report.merged += r.merged | 0;
+    }
+    const off = outV.length;
+    for (const v of useV) outV.push(v);
+    for (const t of useT) outT.push([t[0] + off, t[1] + off, t[2] + off]);
+  }
+  // Whatever loops the engine declined (measured: large open undersides /
+  // rims, and stray 3-edge holes) are closed by a flat fan cap so the part
+  // is actually printable — a slicer would otherwise guess or refuse.
+  let capV = outV, capT = outT, capped = 0;
+  const pre = lib.diagnose(outV, outT);
+  if (pre.boundary > 0) {
+    const cap = capBoundaryLoops(outV, outT);
+    if (cap.capped > 0) { capV = cap.V; capT = cap.T; capped = cap.capped; changed = true; report.holesFilled += cap.capped; }
+  }
+  const after = lib.diagnose(capV, capT);
+  return { V: capV, T: capT, report, after, changed, components: comps.length, keptOriginal, capped };
+}

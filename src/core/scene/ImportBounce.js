@@ -114,3 +114,33 @@ function _bounce(meshId) {
     });
   }
 }
+
+/**
+ * Run `fn` with every in-flight bounce temporarily at its RESTING scale,
+ * then put the pop back — so geometry readers (validation, repair, cost)
+ * see the true transform without stopping the animation. Nested calls are
+ * fine (the inner one finds nothing to swap). Synchronous only: the pops
+ * are restored before this returns, so a caller must read world matrices
+ * inside `fn`, never after.
+ * @template T
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withRestTransform(fn) {
+  const swapped = [];
+  for (const anim of _active.values()) {
+    if (anim.mesh.isDisposed?.() || _scalingDiverged(anim.mesh, anim.lastApplied)) continue;
+    swapped.push([anim, anim.mesh.scaling.clone()]);
+    anim.mesh.scaling.copyFrom(anim.orig);
+    anim.mesh.computeWorldMatrix?.(true);
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [anim, pop] of swapped) {
+      anim.mesh.scaling.copyFrom(pop);
+      anim.lastApplied = pop.clone();
+      anim.mesh.computeWorldMatrix?.(true);
+    }
+  }
+}

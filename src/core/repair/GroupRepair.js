@@ -35,7 +35,7 @@
  */
 
 import {
-  repairArrays, arraysToMesh, posKey, nearestIndex,
+  repairArraysByComponent, arraysToMesh, posKey, nearestIndex,
   ensureRepairEngine, REPAIR_TRIANGLE_CAP,
 } from './MeshRepair.js';
 import { WELD_DISTANCE } from './Weld.js';
@@ -131,6 +131,47 @@ function _buildUnion(parts) {
 }
 
 /**
+ * Grid-hashed nearest-original-triangle-centroid lookup → owning part index.
+ * Cells are sized to the union's extent; the search widens ring by ring and
+ * gives up (−1) after a few rings so a stray far-away triangle never scans
+ * the whole mesh.
+ */
+function _centroidOwnerLookup(V, T, triOwner) {
+  if (!T.length) return () => -1;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const v of V) { if (v[0] < minX) minX = v[0]; if (v[1] < minY) minY = v[1]; if (v[2] < minZ) minZ = v[2]; if (v[0] > maxX) maxX = v[0]; if (v[1] > maxY) maxY = v[1]; if (v[2] > maxZ) maxZ = v[2]; }
+  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+  const cell = extent / 64;
+  const cells = new Map();
+  const cx = new Float64Array(T.length), cy = new Float64Array(T.length), cz = new Float64Array(T.length);
+  const keyOf = (x, y, z) => `${Math.floor((x - minX) / cell)}|${Math.floor((y - minY) / cell)}|${Math.floor((z - minZ) / cell)}`;
+  for (let i = 0; i < T.length; i++) {
+    const [a, b, c] = T[i];
+    cx[i] = (V[a][0] + V[b][0] + V[c][0]) / 3; cy[i] = (V[a][1] + V[b][1] + V[c][1]) / 3; cz[i] = (V[a][2] + V[b][2] + V[c][2]) / 3;
+    const k = keyOf(cx[i], cy[i], cz[i]);
+    let list = cells.get(k); if (!list) { list = []; cells.set(k, list); }
+    list.push(i);
+  }
+  return (x, y, z) => {
+    const gx = Math.floor((x - minX) / cell), gy = Math.floor((y - minY) / cell), gz = Math.floor((z - minZ) / cell);
+    let best = -1, bd = Infinity;
+    for (let ring = 0; ring <= 3; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) for (let dz = -ring; dz <= ring; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== ring) continue;   // shell only
+        const list = cells.get(`${gx + dx}|${gy + dy}|${gz + dz}`);
+        if (!list) continue;
+        for (const i of list) {
+          const d = (cx[i] - x) ** 2 + (cy[i] - y) ** 2 + (cz[i] - z) ** 2;
+          if (d < bd) { bd = d; best = i; }
+        }
+      }
+      if (best >= 0) return triOwner[best];
+    }
+    return -1;
+  };
+}
+
+/**
  * Diagnose the welded union of `parts` (no repair, no write).
  * @param {GroupPart[]} parts
  * @param {{triangleCap?:number}} [opts]
@@ -169,7 +210,7 @@ export async function repairGroup(parts, opts = {}) {
     return { holesFilled: 0, nmFixed: 0, isWatertight: true, changed: false, partsWritten: 0 };
   }
 
-  const out = await repairArrays(V, T, { ...opts, name });
+  const out = await repairArraysByComponent(V, T, { ...opts, name });
   if (!out.changed) {
     return { holesFilled: 0, nmFixed: 0, isWatertight: !!out.after.isWatertight, changed: false, partsWritten: 0 };
   }
@@ -213,6 +254,13 @@ export async function repairGroup(parts, opts = {}) {
     outUnion[i] = hit === undefined ? -1 : hit;
     outOwner[i] = owner[hit === undefined ? nearest(v) : hit];
   }
+  // Spatial fallback for triangles the engine re-cut: the part whose
+  // ORIGINAL triangle centroid is nearest. The earlier "first part that
+  // touched the vertex" rule handed every seam-adjacent fill to the first
+  // part and, on a scan whose parts the engine re-triangulated wholesale,
+  // left a small second part with no triangles at all (real scans,
+  // 2026-09-18).
+  const nearestOriginalOwner = _centroidOwnerLookup(V, T, union.triOwner);
   const perPart = partData.map(() => ({ tris: [], vmap: new Map(), verts: [] }));
   for (const [a, b, c] of out.T) {
     let pi = -1;
@@ -222,7 +270,11 @@ export async function repairGroup(parts, opts = {}) {
       if (hit !== undefined) pi = hit;
     }
     if (pi < 0) {
-      // Majority owner of the corners; ties → the first corner's owner.
+      const va = out.V[a], vb = out.V[b], vc = out.V[c];
+      pi = nearestOriginalOwner((va[0] + vb[0] + vc[0]) / 3, (va[1] + vb[1] + vc[1]) / 3, (va[2] + vb[2] + vc[2]) / 3);
+    }
+    if (pi < 0) {
+      // No original triangle anywhere near (should not happen): majority owner of the corners.
       const oa = outOwner[a], ob = outOwner[b], oc = outOwner[c];
       pi = (ob === oc && ob !== oa) ? ob : oa;
     }

@@ -448,11 +448,17 @@ await test('repairObjects: sequential and tolerant — a failure on one object d
   const R = await import('../src/core/repair/MeshRepair.js');
   let call = 0;
   R.__test.setEngine({
-    diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }),
+    // Honest diagnose: 3 faces = open, 4+ = closed — otherwise repairObject's
+    // automatic second pass (2026-09-18) would spend the "boom" call on
+    // object 1 instead of object 2.
+    diagnose: (_V, T) => ({ boundary: T.length > 3 ? 0 : 3, nonManifold: 0, components: 1, isWatertight: T.length > 3 }),
     repairObject: async (V, T) => {
       call++;
       if (call === 2) throw new Error('boom');
-      return { V, T: [...T, [1, 2, 3]], report: { holesFilled: 1 } };
+      // buildMesh is an unwelded soup (tri k owns vertices 3k..3k+2); the
+      // missing face C1-C2-C3 in those indices is (2, 1, 5) — a REAL closing
+      // triangle, so the written mesh validates clean and no second pass runs.
+      return { V, T: [...T, [2, 1, 5]], report: { holesFilled: 1 } };
     },
   });
 

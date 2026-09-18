@@ -253,7 +253,14 @@ async function _repairAndToast(meshId, name) {
 export function queueValidation(meshId) {
   const mesh = getBabylonMesh(meshId);
   if (!mesh) return Promise.resolve();
-  const name = mesh.name || 'mesh';
+  // One flow per LOGICAL object: an internal part of a multi-material
+  // import validates as the union anyway, and toasting / auto-repairing it
+  // separately duplicated every message and ran the group repair once per
+  // part (real scans 2026-09-18). The object's display name, not the
+  // loader's `_primitive0`.
+  const obj = getState().scene.objects[meshId];
+  if (obj?.isInternalPart) return Promise.resolve();
+  const name = obj?.name || mesh.name || 'mesh';
   if (!MeshValidator.shouldAutoValidate(mesh)) {
     Toast.show(t('toast.validateSkipped', { name }), 'info', 4000);
     return Promise.resolve();
