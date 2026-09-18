@@ -290,6 +290,7 @@ function _onContextMenuRMB(info) {
     const normal = pick?.hit ? pick.getNormal?.(true) : null;
     _onContextMenu({
       x: ev.clientX, y: ev.clientY, source: 'viewport',
+      hit: !!id,   // false = empty space under the cursor (scene menu)
       faceNormal: normal ? { x: normal.x, y: normal.y, z: normal.z } : null,
     });
   }

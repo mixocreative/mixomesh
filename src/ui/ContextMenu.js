@@ -6,6 +6,7 @@ import { EVENTS } from '../core/events.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, SplitToPartsCommand, JoinCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { ViewportDrop } from './ViewportDrop.js';
 import { logicalObjectCommandIds, logicalObjectPartIds, shouldDisplayObject, canonicalObjectId } from '../core/LogicalObjects.js';
 import { safeAsync, Toast } from './Toast.js';
 import { repairWithOverlay } from './RepairFeedback.js';
@@ -166,6 +167,25 @@ function _buildItems(info) {
 
   const selIds = Selection.getSelectedIds();
   const hasSelection = selIds.length > 0;
+  // Right-click on EMPTY viewport space (nothing under the cursor): a short
+  // scene menu instead of thirty greyed-out object actions (owner ask
+  // 2026-09-19). With a selection the object actions follow below it.
+  if (info.source === 'viewport' && info.hit === false) {
+    const emptyItems = [
+      { label: t('context.importModel'), shortcut: '', action: 'import-model', iconName: 'FilePlus', cls: '' },
+      { label: t('context.openProject'), shortcut: 'Ctrl+O', action: 'open-project', iconName: 'FolderOpen', cls: '' },
+      'sep',
+      { label: t('context.frameAll'), shortcut: '', action: 'frame-all', iconName: 'Focus', cls: '' },
+      { label: t('context.cursorToWorldOrigin'), shortcut: '', action: 'cursor-to-origin', iconName: 'Crosshair', cls: '' },
+    ];
+    if (!hasSelection) return emptyItems;
+    return [...emptyItems, 'sep', ..._objectItems(info, selIds)];
+  }
+  return _objectItems(info, selIds);
+}
+
+function _objectItems(info, selIds) {
+  const hasSelection = selIds.length > 0;
   const multi = selIds.length > 1;
   const someGrouped = selIds.some(id => !!getState().scene.objects[id]?.parentId);
   const enabled = (cond) => cond ? '' : 'cm-disabled';
@@ -273,6 +293,9 @@ function _runAction(action, info) {
   if (action.startsWith('bool-'))  safeAsync(() => _boolean(action.slice(5)));
   if (action === 'repair-geometry') safeAsync(() => _repairGeometry());
   if (action === 'export-selected') Modal.open('exportSelected', {});
+  if (action === 'import-model') safeAsync(() => ViewportDrop.promptImport());
+  if (action === 'open-project') safeAsync(() => PersistenceManager.open());
+  if (action === 'frame-all') SceneManager.frameAll();
   if (action === 'split-parts') _splitToParts(_lastInfo?.targetId);
   if (action === 'join') _join();
   if (action === 'slice-connector') SliceConnectorSession.start();

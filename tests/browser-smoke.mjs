@@ -532,8 +532,22 @@ async function main() {
         cursorToSelection: !!cursorToSelection,
       };
       cm.close();
+      // Empty-space right-click (hit:false, nothing selected) → the short
+      // scene menu: import / open / frame all / cursor→origin, no object
+      // actions (owner ask 2026-09-19).
+      const { Selection } = await import('/src/core/Selection.js');
+      const keep = Selection.getSelectedIds();
+      Selection.set([], null);
+      cm.open({ x: 24, y: 24, source: 'viewport', hit: false });
+      await new Promise(r => requestAnimationFrame(r));
+      out.emptyItems = [...document.querySelectorAll('.context-menu [data-action]')].map(e => e.dataset.action);
+      cm.close();
+      Selection.set(keep, keep[0] ?? null);
       return out;
     })()`);
+    assert(Array.isArray(cursorMenu.emptyItems), 'empty-space menu rendered');
+    assert(JSON.stringify(cursorMenu.emptyItems) === JSON.stringify(['import-model', 'open-project', 'frame-all', 'cursor-to-origin']),
+      `empty-space context menu should be the short scene menu, got ${JSON.stringify(cursorMenu.emptyItems)}`);
     assert(cursorMenu.worldOrigin, 'context menu missing enabled Cursor → World Origin action');
     assert(cursorMenu.selectionToCursor && cursorMenu.cursorToSelection,
       'context menu missing selection cursor snap actions');

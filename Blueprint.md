@@ -3922,6 +3922,14 @@ does not maintain its own extension table.
 ### Context Menu (`src/ui/ContextMenu.js`)
 Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.). Cursor actions include selection-dependent `Selection → Cursor` and `Cursor → Selection`, plus always-enabled `Cursor → World Origin` for the global cursor reset. All visible menu labels use `context.*` i18n keys so the menu renders in the active locale each time it opens.
 
+**Empty-space right-click (2026-09-19).** The canvas suppresses Chrome's own
+menu (`InputManager` `contextmenu` preventDefault). When nothing is under the
+cursor (`info.hit === false`, set by `InputManager._onContextMenuRMB` from the
+mesh pick) the menu is the short SCENE menu — 匯入模型… (`ViewportDrop.
+promptImport`), 開啟專案…, 聚焦全部, 游標→世界原點 — not thirty greyed-out
+object actions; with a selection the object actions follow under a
+separator. Pinned by `tests/browser-smoke.mjs`.
+
 ### Print Panel (`src/ui/PrintPanel.js`)
 Tabs: Scale / Validation / Bed / Export (Thickness + Orientation future).
 Validation reads the §9 A6 cache with an explicit "Validate All".
