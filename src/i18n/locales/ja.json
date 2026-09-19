@@ -213,6 +213,8 @@
   "print.cost.pricePerGram": "1gあたりの価格",
   "print.cost.supportPrice": "サポート材の1gあたりの価格",
   "print.cost.supportPercent": "サポート %",
+  "print.cost.setupFee": "基本料金 / 件",
+  "print.cost.rowSetup": "基本料金",
   "print.cost.currency": "通貨",
   "print.cost.approximate": "概算",
   "print.cost.presetsFrom": "プリセットの出所",

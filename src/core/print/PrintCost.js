@@ -233,7 +233,7 @@ function _overlappingPairsNow(ctx) {
  * live `input` preview recomputes only the money that way.
  *
  * @param {import('./ExportContext.js').ExportContext} ctx
- * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, currency?:string}} s
+ * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, setupFee?:number, currency?:string}} s
  * @param {{densityGcm3?:number, pricePerGram?:number, supportDensityGcm3?:number, supportPricePerGram?:number, defaultSupportPercent?:number}|null} material
  * @param {{vols?:Map, pairs?:Array}|null} [geometry] pre-computed geometry for this ctx
  */
@@ -246,7 +246,7 @@ export function quote(ctx, s, material, geometry = null) {
   if (totalTriangles(ctx) > costTriangleCap()) {
     return {
       volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
-      supportCost: null, total: null, currency, approximate: true, overlaps: 0,
+      supportCost: null, setupFee: 0, total: null, currency, approximate: true, overlaps: 0,
       reasons: ['tooBig'],
     };
   }
@@ -278,7 +278,10 @@ export function quote(ctx, s, material, geometry = null) {
 
   const materialCost = grams != null && price ? grams * price : null;
   const supportCost = supportGrams != null && sPrice ? supportGrams * sPrice : null;
-  const total = materialCost != null && supportCost != null ? materialCost + supportCost : null;
+  // Flat per-job charge (setup / handling) — a service's minimum that a
+  // per-gram figure alone hides on small parts. 0 in settings = preset's.
+  const setupFee = s?.setupFee || material?.setupFee || 0;
+  const total = materialCost != null && supportCost != null ? materialCost + supportCost + setupFee : null;
 
   return {
     volumeCM3,
@@ -286,6 +289,7 @@ export function quote(ctx, s, material, geometry = null) {
     materialCost,
     supportGrams,
     supportCost,
+    setupFee,
     total,
     currency,
     approximate: reasons.length > 0,

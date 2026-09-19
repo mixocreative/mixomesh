@@ -49,5 +49,5 @@
   },
   "gizmo": { "space": "world", "snap": { "translate": 1.0, "rotate": 15, "scale": 0.1 } },
   "pivotMode": "active",
-  "cost": { "materialId": "", "pricePerGram": 0, "supportPricePerGram": 0, "supportPercent": 0, "currency": "USD" }
+  "cost": { "materialId": "", "pricePerGram": 0, "supportPricePerGram": 0, "supportPercent": 0, "setupFee": 0, "currency": "USD" }
 }

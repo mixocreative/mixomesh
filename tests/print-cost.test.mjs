@@ -259,7 +259,7 @@ await test('M9: quote above costTriangleCap() short-circuits before any volume c
     { densityGcm3: 1.1 });
   assert.deepEqual(q, {
     volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
-    supportCost: null, total: null, currency: 'USD', approximate: true, overlaps: 0,
+    supportCost: null, setupFee: 0, total: null, currency: 'USD', approximate: true, overlaps: 0,
     reasons: ['tooBig'],
   });
 });

@@ -18,7 +18,7 @@ import { EVENTS } from '../events.js';
 
 const FILE_NAME = 'materials.json';
 
-/** @typedef {{id:string,name:string,process?:string,densityGcm3:number,pricePerGram:number,supportDensityGcm3?:number,supportPricePerGram?:number,defaultSupportPercent?:number,note?:string}} MaterialPreset */
+/** @typedef {{id:string,name:string,process?:string,densityGcm3:number,pricePerGram:number,supportDensityGcm3?:number,supportPricePerGram?:number,defaultSupportPercent?:number,setupFee?:number,note?:string}} MaterialPreset */
 
 const FALLBACK = [
   { id: 'generic', name: 'Generic (presets file missing)', process: 'Custom', densityGcm3: 1.0, pricePerGram: 0, supportDensityGcm3: 1.0, supportPricePerGram: 0, defaultSupportPercent: 0 },
@@ -59,6 +59,7 @@ export function parseMaterialPresets(doc) {
       supportDensityGcm3: num('supportDensityGcm3', densityGcm3),
       supportPricePerGram: num('supportPricePerGram', num('pricePerGram', 0)),
       defaultSupportPercent: num('defaultSupportPercent', 0),
+      setupFee: num('setupFee', 0),
       note: typeof m.note === 'string' ? m.note : '',
     };
   });

@@ -213,6 +213,8 @@
   "print.cost.pricePerGram": "Price per gram",
   "print.cost.supportPrice": "Support price per gram",
   "print.cost.supportPercent": "Support %",
+  "print.cost.setupFee": "Setup fee / job",
+  "print.cost.rowSetup": "Setup",
   "print.cost.currency": "Currency",
   "print.cost.approximate": "Approximate",
   "print.cost.presetsFrom": "Presets from",

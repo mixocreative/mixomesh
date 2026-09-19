@@ -213,6 +213,8 @@
   "print.cost.pricePerGram": "每公克價格",
   "print.cost.supportPrice": "支撐材每公克價格",
   "print.cost.supportPercent": "支撐 %",
+  "print.cost.setupFee": "每單基本費",
+  "print.cost.rowSetup": "基本費",
   "print.cost.currency": "幣別",
   "print.cost.approximate": "約略值",
   "print.cost.presetsFrom": "預設值來自",

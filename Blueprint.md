@@ -3417,8 +3417,17 @@ the reason and shows it under the path — never silent. Presets carry
 `defaultMaterialId` that must name a preset (`tests/hygiene.test.mjs`). The
 shipped list: PLA, PLA+, PETG, ABS, ASA, TPU 95A, Nylon, CF blends, standard /
 tough / water-washable / 8K resin, PA12 SLS, Mimaki MH-100 (placeholder
-price — dealer-quoted), Custom; reference prices from a 2026 web survey are in
-the file's `_readme`.
+price — dealer-quoted), Custom.
+
+**Pricing basis = conservative PRINT-SERVICE rates (owner decision
+2026-09-19: "as a printer I must not lose money").** Not raw spool/litre
+cost — that is 5–10× lower and is kept in each preset's `note` for reference.
+Upper-middle of the 2026 survey: FDM 0.10–0.30 USD/g + 3–10 USD setup, nylon
+/ CF +50–100 %, resin 0.20–0.50 USD/g + setup, SLS PA12 ~0.40 USD/g, full
+colour 1–10 USD/cm³ at bureaus. Each preset also carries a **`setupFee`**
+(flat per export job, added to the total, shown as its own row) — the
+service minimum that a per-gram figure hides on small parts; `cost.setupFee`
+in settings overrides it like the other fields (0 = preset's).
 
 **Formula:** `total = volume(cm³) × density(g/cm³) × pricePerGram +
 supportVolume × supportDensity × supportPricePerGram`, where

@@ -143,6 +143,9 @@ export function renderCostBlock(container, state) {
   html += _numberField('pp-cost-support-price', 'print.cost.supportPrice', cost.supportPricePerGram, material?.supportPricePerGram || effectivePrice);
   html += _numberField('pp-cost-support-pct', 'print.cost.supportPercent', cost.supportPercent, material?.defaultSupportPercent);
   html += '</div>';
+  html += '<div class="pp-xyz-row">';
+  html += _numberField('pp-cost-setup', 'print.cost.setupFee', cost.setupFee, material?.setupFee);
+  html += '</div>';
   html += `<p class="pp-hint pp-cost-hint">${escapeHtml(t('print.cost.defaultsHint'))}</p>`;
 
   html += `<label class="pp-cost-sublabel" for="pp-cost-currency">${escapeHtml(t('print.cost.currency'))}</label>`;
@@ -174,6 +177,8 @@ export function renderCostBlock(container, state) {
     { onInvalid: invalid('supportPricePerGram') });
   wireNumbers(container, '#pp-cost-support-pct', (_inp, v) => commit({ supportPercent: Math.max(0, v) }),
     { onInvalid: invalid('supportPercent') });
+  wireNumbers(container, '#pp-cost-setup', (_inp, v) => commit({ setupFee: Math.max(0, v) }),
+    { onInvalid: invalid('setupFee') });
 
   container.querySelector('#pp-cost-copy-path')?.addEventListener('click', async () => {
     const path = getMaterialPresetsSource().path ?? '';
@@ -196,7 +201,7 @@ export function renderCostBlock(container, state) {
   // I10: money-only. The geometry pass (per-vertex volume + AABB overlap) is
   // memoised per ExportContext, so a keystroke never re-walks the scene.
   const livePreview = () => _renderResult(container, getState(), _liveCostOverride(container, getState()));
-  for (const sel of ['#pp-cost-price', '#pp-cost-support-price', '#pp-cost-support-pct', '#pp-cost-currency']) {
+  for (const sel of ['#pp-cost-price', '#pp-cost-support-price', '#pp-cost-support-pct', '#pp-cost-setup', '#pp-cost-currency']) {
     container.querySelector(sel)?.addEventListener('input', livePreview);
   }
 
@@ -215,6 +220,7 @@ function _liveCostOverride(container, state) {
     pricePerGram: num('#pp-cost-price', cost.pricePerGram || 0),
     supportPricePerGram: num('#pp-cost-support-price', cost.supportPricePerGram || 0),
     supportPercent: num('#pp-cost-support-pct', cost.supportPercent || 0),
+    setupFee: num('#pp-cost-setup', cost.setupFee || 0),
     currency: (currencyRaw || 'USD').trim().slice(0, 4).toUpperCase() || 'USD',
   };
 }
@@ -274,6 +280,7 @@ function _renderResult(container, state, override = null) {
     pricePerGram: cost.pricePerGram || 0,
     supportPricePerGram: cost.supportPricePerGram || 0,
     supportPercent: cost.supportPercent || 0,
+    setupFee: cost.setupFee || 0,
     currency,
   }, material, geometry);
 
@@ -299,6 +306,7 @@ function _renderResult(container, state, override = null) {
     : t('print.cost.materialValue', { cost: money(q.materialCost), price: fmt(priceUsed, 2), currency }));
   html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
     : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));
+  if (q.setupFee) html += row('setup', 'print.cost.rowSetup', money(q.setupFee));
   html += row('total', 'print.cost.rowTotal', q.total == null ? '\u2014' : money(q.total), 'pp-cost-total-row');
   // Packaging (owner ask 2026-09-18): the combined bounding box of every
   // exported object at the export ratio, W×D×H in mm — the number you need
