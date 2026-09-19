@@ -18,7 +18,7 @@ import { installEnv } from './env.mjs';
 installEnv();
 
 const { StateManager } = await import('../src/core/StateManager.js');
-const { unitVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap } =
+const { unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap } =
   await import('../src/core/print/PrintCost.js');
 const { setCapabilities } = await import('../src/core/storage/capabilities.js');
 
@@ -208,6 +208,36 @@ await test('I10: quote accepts pre-computed geometry and does no per-vertex work
     { densityGcm3: 1.1 }, geometry);
   assert.ok(Math.abs(q.volumeCM3 - 1) < 1e-6, 'same volume, from the cached pass');
   assert.ok(Math.abs(q.materialCost - 0.55) < 1e-6, 'money recomputed from the new settings');
+});
+
+// Volume basis toggle (owner ask 2026-09-19): 'bbox' bills the object's own
+// print-space box (10×20×30 = 6000 mm³ for the tetra), 'mesh' its enclosed
+// volume (1000 mm³). Same settings, same ctx — only the basis moves.
+await test('quote volumeMode: bbox = per-unit AABB volume, mesh = enclosed volume, cache carries both', () => {
+  setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }]);
+  const box = unitBoxVolumesMM3(ctx).get('a');
+  assert.ok(Math.abs(box.volumeMM3 - 6000) < 1e-6, `tetra AABB 10×20×30, got ${box.volumeMM3}`);
+  assert.equal(box.triangles, 4);
+  const s = { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' };
+  const mesh = quote(ctx, { ...s, volumeMode: 'mesh' }, { densityGcm3: 1 });
+  const bbox = quote(ctx, { ...s, volumeMode: 'bbox' }, { densityGcm3: 1 });
+  assert.equal(mesh.volumeMode, 'mesh');
+  assert.equal(bbox.volumeMode, 'bbox');
+  assert.ok(Math.abs(mesh.volumeCM3 - 1) < 1e-6);
+  assert.ok(Math.abs(bbox.volumeCM3 - 6) < 1e-6);
+  assert.ok(Math.abs(bbox.total - 3) < 1e-6, '6 cm³ × 1 g/cm³ × 0.5 = 3');
+  assert.equal(bbox.approximate, false, 'a box needs no watertight mesh');
+  // Ratio scales the box like the mesh: ×8 at ratio 2.
+  const ctx2 = ctxWith([{ id: 'a', mesh: fakeMesh(tetra) }], { target: 2 });
+  assert.ok(Math.abs(unitBoxVolumesMM3(ctx2).get('a').volumeMM3 - 48000) < 1e-3);
+  // Pre-computed geometry: bbox mode reads volsBox, never re-walks the scene.
+  const geometry = { vols: unitVolumesMM3(ctx), volsBox: unitBoxVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
+  ctx.units[0].parts[0].mesh.getVerticesData = () => { throw new Error('re-walked the scene'); };
+  const cached = quote(ctx, { ...s, volumeMode: 'bbox' }, { densityGcm3: 1 }, geometry);
+  assert.ok(Math.abs(cached.volumeCM3 - 6) < 1e-6);
+  // Unknown / absent mode = mesh (the default in default-settings.json).
+  assert.equal(quote(ctx, { ...s, volumeMode: 'nonsense' }, { densityGcm3: 1 }, geometry).volumeMode, 'mesh');
 });
 
 await test('quote: grams = cm³ × density; support premium; overlap flagged not subtracted', () => {

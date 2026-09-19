@@ -3448,6 +3448,23 @@ guards the unit total). No CSG subtraction runs here — that is a
 deliberate scope boundary from the task spec ("overlap = flag only, no
 Boolean").
 
+**Volume basis toggle (`cost.volumeMode`, 2026-09-19):** a two-button
+segmented control above the result card switches the quote between
+**`mesh`** (default — the enclosed volume above, what the printer actually
+deposits) and **`bbox`** (each logical unit's own print-space AABB, W×D×H,
+summed — how SLS / MJF nesting and many full-colour bureaus bill build
+space). `unitBoxVolumesMM3(ctx)` reuses `_unitBoundsMM` (same pivot / ratio
+/ unit math as the packaging row) and returns the same map shape as
+`unitVolumesMM3` so `quote()` swaps them on `s.volumeMode`; the geometry
+cache in CostBlock carries both (`vols` + `volsBox`) so the switch is
+instant and never re-walks vertices. A box needs no watertight mesh, so
+`bbox` reports `watertight`/`validated` true and never adds those reasons;
+the overlap flag still applies (two boxes that interpenetrate are counted
+twice, on purpose, like meshes). The Volume row relabels to "Volume
+(bounding box)" and `quote()` returns `volumeMode` so the card can say
+which basis produced the number. Per-user setting like the other cost
+fields (SettingsStore), never written to `materials.json`.
+
 **Overlap policy:** `overlappingPairs(ctx)` flags pairs of logical units
 whose print-space AABBs intersect (0.01 mm epsilon) and marks the quote
 `approximate` with an `overlap:N` reason — it is NEVER used to subtract

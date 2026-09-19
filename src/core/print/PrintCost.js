@@ -124,6 +124,30 @@ export function unitVolumesMM3(ctx) {
   return withRestTransform(() => _unitVolumesMM3Now(ctx));
 }
 
+/**
+ * Bounding-box volume per logical unit (print-space mm³): the unit's own
+ * AABB at the export ratio, W×D×H. The way many bureaus (SLS / MJF nesting,
+ * some full-colour services) actually bill — space in the build, not
+ * material. Same shape as unitVolumesMM3 so quote() can swap them
+ * (`volumeMode: 'bbox'`, owner ask 2026-09-19). A box is a box: watertight /
+ * validated are reported true because they do not affect this number.
+ * @param {import('./ExportContext.js').ExportContext} ctx
+ * @returns {Map<string, {volumeMM3:number, triangles:number, watertight:boolean, validated:boolean}>}
+ */
+export function unitBoxVolumesMM3(ctx) {
+  return withRestTransform(() => {
+    const out = new Map();
+    for (const unit of ctx.units ?? []) {
+      const b = _unitBoundsMM(ctx, unit);
+      const vol = b ? Math.max(0, b.max[0] - b.min[0]) * Math.max(0, b.max[1] - b.min[1]) * Math.max(0, b.max[2] - b.min[2]) : 0;
+      let tris = 0;
+      for (const part of unit.parts ?? []) tris += (part.mesh?.getIndices?.()?.length ?? 0) / 3;
+      out.set(unit.logicalId, { volumeMM3: vol, triangles: tris, watertight: true, validated: true });
+    }
+    return out;
+  });
+}
+
 function _unitVolumesMM3Now(ctx) {
   const out = new Map();
   for (const unit of ctx.units ?? []) {
@@ -233,9 +257,9 @@ function _overlappingPairsNow(ctx) {
  * live `input` preview recomputes only the money that way.
  *
  * @param {import('./ExportContext.js').ExportContext} ctx
- * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, setupFee?:number, currency?:string}} s
+ * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, setupFee?:number, currency?:string, volumeMode?:'mesh'|'bbox'}} s
  * @param {{densityGcm3?:number, pricePerGram?:number, supportDensityGcm3?:number, supportPricePerGram?:number, defaultSupportPercent?:number}|null} material
- * @param {{vols?:Map, pairs?:Array}|null} [geometry] pre-computed geometry for this ctx
+ * @param {{vols?:Map, volsBox?:Map, pairs?:Array}|null} [geometry] pre-computed geometry for this ctx (`volsBox` = unitBoxVolumesMM3, read in 'bbox' mode)
  */
 export function quote(ctx, s, material, geometry = null) {
   const currency = s?.currency || 'USD';
@@ -251,7 +275,8 @@ export function quote(ctx, s, material, geometry = null) {
     };
   }
 
-  const vols = geometry?.vols ?? unitVolumesMM3(ctx);
+  const boxMode = s?.volumeMode === 'bbox';
+  const vols = boxMode ? (geometry?.volsBox ?? unitBoxVolumesMM3(ctx)) : (geometry?.vols ?? unitVolumesMM3(ctx));
   const pairs = geometry?.pairs ?? overlappingPairs(ctx);
   const volumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
 
@@ -284,6 +309,7 @@ export function quote(ctx, s, material, geometry = null) {
   const total = materialCost != null && supportCost != null ? materialCost + supportCost + setupFee : null;
 
   return {
+    volumeMode: boxMode ? 'bbox' : 'mesh',
     volumeCM3,
     grams,
     materialCost,

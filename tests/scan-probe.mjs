@@ -435,7 +435,6 @@ async function waitFor(fn, timeoutMs, label) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-function assert(value, message) { if (!value) throw new Error(message); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function removeTempDir(dir) {

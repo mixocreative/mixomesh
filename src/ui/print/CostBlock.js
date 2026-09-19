@@ -16,7 +16,7 @@
 import { getState, setState } from '../../core/StateManager.js';
 import { SettingsStore } from '../../core/SettingsStore.js';
 import { PrintManager } from '../../core/PrintManager.js';
-import { quote, unitVolumesMM3, overlappingPairs, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
+import { quote, unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
@@ -151,6 +151,16 @@ export function renderCostBlock(container, state) {
   html += `<label class="pp-cost-sublabel" for="pp-cost-currency">${escapeHtml(t('print.cost.currency'))}</label>`;
   html += `<input type="text" id="pp-cost-currency" class="pp-ratio-input pp-cost-currency" maxlength="4" value="${escapeAttr(cost.currency || 'USD')}">`;
 
+  // Volume basis (owner ask 2026-09-19): mesh volume (material) vs the
+  // object's bounding box (build space, how many bureaus bill). Instant
+  // switch, persisted per user like the other cost fields.
+  const mode = cost.volumeMode === 'bbox' ? 'bbox' : 'mesh';
+  html += `<div class="pp-cost-mode" role="group" aria-label="${escapeAttr(t('print.cost.volumeMode'))}">`;
+  html += `<span class="pp-cost-sublabel">${escapeHtml(t('print.cost.volumeMode'))}</span>`;
+  html += `<div class="pp-seg">`;
+  html += `<button type="button" class="pp-seg-btn${mode === 'mesh' ? ' active' : ''}" data-mode="mesh" aria-pressed="${mode === 'mesh'}" title="${escapeAttr(t('print.cost.volumeMeshTitle'))}">${escapeHtml(t('print.cost.volumeMesh'))}</button>`;
+  html += `<button type="button" class="pp-seg-btn${mode === 'bbox' ? ' active' : ''}" data-mode="bbox" aria-pressed="${mode === 'bbox'}" title="${escapeAttr(t('print.cost.volumeBoxTitle'))}">${escapeHtml(t('print.cost.volumeBox'))}</button>`;
+  html += '</div></div>';
   html += '<div class="pp-cost-result" id="pp-cost-total" aria-live="polite"></div>';
   html += '</div>';
 
@@ -179,6 +189,12 @@ export function renderCostBlock(container, state) {
     { onInvalid: invalid('supportPercent') });
   wireNumbers(container, '#pp-cost-setup', (_inp, v) => commit({ setupFee: Math.max(0, v) }),
     { onInvalid: invalid('setupFee') });
+
+  container.querySelectorAll('.pp-seg-btn[data-mode]').forEach(btn => btn.addEventListener('click', () => {
+    const next = btn.dataset.mode === 'bbox' ? 'bbox' : 'mesh';
+    container.querySelectorAll('.pp-seg-btn[data-mode]').forEach(b => { const on = b.dataset.mode === next; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+    commit({ volumeMode: next });
+  }));
 
   container.querySelector('#pp-cost-copy-path')?.addEventListener('click', async () => {
     const path = getMaterialPresetsSource().path ?? '';
@@ -221,6 +237,7 @@ function _liveCostOverride(container, state) {
     supportPricePerGram: num('#pp-cost-support-price', cost.supportPricePerGram || 0),
     supportPercent: num('#pp-cost-support-pct', cost.supportPercent || 0),
     setupFee: num('#pp-cost-setup', cost.setupFee || 0),
+    volumeMode: cost.volumeMode === 'bbox' ? 'bbox' : 'mesh',
     currency: (currencyRaw || 'USD').trim().slice(0, 4).toUpperCase() || 'USD',
   };
 }
@@ -253,7 +270,7 @@ function _invalidateGeometryCache() {
 function _geometryFor(ctx) {
   if (_geomCacheCtx === ctx && _geomCache) return _geomCache;
   _geomCacheCtx = ctx;
-  _geomCache = { vols: unitVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
+  _geomCache = { vols: unitVolumesMM3(ctx), volsBox: unitBoxVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
   return _geomCache;
 }
 
@@ -281,6 +298,7 @@ function _renderResult(container, state, override = null) {
     supportPricePerGram: cost.supportPricePerGram || 0,
     supportPercent: cost.supportPercent || 0,
     setupFee: cost.setupFee || 0,
+    volumeMode: cost.volumeMode === 'bbox' ? 'bbox' : 'mesh',
     currency,
   }, material, geometry);
 
@@ -299,7 +317,7 @@ function _renderResult(container, state, override = null) {
 
   const pctUsed = cost.supportPercent || material?.defaultSupportPercent || 0;
   const priceUsed = cost.pricePerGram || material?.pricePerGram || 0;
-  let html = row('volume', 'print.cost.rowVolume', `${fmt(q.volumeCM3, 2)} cm\u00b3`);
+  let html = row('volume', q.volumeMode === 'bbox' ? 'print.cost.rowVolumeBox' : 'print.cost.rowVolume', `${fmt(q.volumeCM3, 2)} cm\u00b3`);
   html += row('grams', 'print.cost.rowWeight', q.grams == null ? '\u2014'
     : t('print.cost.weightValue', { grams: fmt(q.grams, 1), support: fmt(q.supportGrams ?? 0, 1) }));
   html += row('material', 'print.cost.rowMaterial', q.materialCost == null ? '\u2014'

@@ -164,10 +164,19 @@ async function main() {
         await frame();
         const costText = document.querySelector('#pp-cost-total')?.textContent ?? '';
         const costTotal = document.querySelector('#pp-cost-total [data-cost="total"]')?.textContent ?? '';
+        // Volume-basis toggle: bounding box of this 10×30×20 mm solid = 6.00 cm³,
+        // switching back must restore the enclosed 1.00 cm³ (and the setting).
+        document.querySelector('.pp-seg-btn[data-mode="bbox"]')?.click();
+        await frame();
+        const costBoxVolume = document.querySelector('#pp-cost-total [data-cost="volume"]')?.textContent ?? '';
+        document.querySelector('.pp-seg-btn[data-mode="mesh"]')?.click();
+        await frame();
+        const costMeshVolume = document.querySelector('#pp-cost-total [data-cost="volume"]')?.textContent ?? '';
 
         return {
           meshId, holesFilled: repair.holesFilled, nmFixed: repair.nmFixed,
           remaining: repair.remaining, suggested, b64: btoa(bin), hudText, costText, costTotal, diag,
+          costBoxVolume, costMeshVolume,
         };
       } catch (err) {
         return { error: String(err?.stack ?? err) };
@@ -280,6 +289,11 @@ async function main() {
     // T4: and the money must resolve. The breakdown card renders every
     // unknown value as an em dash, so a "—" in the total row means
     // density/price did not resolve and the quote is decorative.
+    assert(/6\.00\s*cm/.test(result.costBoxVolume),
+      `bbox volume mode should show 6.00 cm³ (10×30×20 box), got: "${result.costBoxVolume}"`);
+    assert(/1\.00\s*cm/.test(result.costMeshVolume),
+      `switching back to mesh mode should show 1.00 cm³ again, got: "${result.costMeshVolume}"`);
+    console.log(`volume basis toggle: bbox "${result.costBoxVolume}" → mesh "${result.costMeshVolume}"`);
     const totalMatch = /^([\d.]+|—)\s*[A-Z]{1,4}$/.exec(result.costTotal.trim());
     assert(totalMatch, `cost total row should read "<total> <currency>", got: "${result.costTotal}"`);
     assert(totalMatch[1] !== '—' && parseFloat(totalMatch[1]) > 0,

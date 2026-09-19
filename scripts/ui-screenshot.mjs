@@ -91,6 +91,12 @@ async function main() {
       await evaluate(cdp, `(async () => {
         const { Workspace } = await import('/src/ui/Workspace.js');
         Workspace.setWorkspace('${ws}');
+        if ('${ws}' === 'print') {
+          // Export tab + scroll the cost card into view so the shot shows it.
+          document.querySelector('#rp-print-body [data-tab="export"]')?.click();
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+          document.querySelector('.pp-cost-mode')?.scrollIntoView({ block: 'center' });
+        }
       })()`);
       await sleep(400);
       if (process.env.PROBE) {

@@ -565,3 +565,10 @@
 .pp-cost-presets-error { color: #b45309; margin: 2px 0 0; }
 .pp-cost-note-line { margin: 2px 0 0; }
 .pp-cost-package-row { margin-top: 3px; padding-top: var(--sp-2); border-top: 1px dashed var(--border); }
+
+/* Cost: volume-basis segmented toggle */
+.pp-cost-mode { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-top: var(--sp-2); }
+.pp-seg { display: inline-flex; background: var(--bg-0); border-radius: var(--r-md); padding: 2px; gap: 2px; }
+.pp-seg-btn { border: none; background: transparent; color: var(--text-1); font: inherit; font-size: var(--fs-xs); padding: 2px 10px; border-radius: var(--r-sm); cursor: pointer; }
+.pp-seg-btn:hover { background: var(--bg-2); }
+.pp-seg-btn.active { background: var(--ctl-bg-active); color: var(--text-0); font-weight: 600; }
