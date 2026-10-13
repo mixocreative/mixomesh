@@ -99,6 +99,30 @@ function _groupMeshes(node) {
 }
 
 /**
+ * True when the object/group itself, or any ancestor group, is locked
+ * (lock cascades DOWN, overhaul 2.5). Object ids resolve through their
+ * logical-object lead, so locking either the lead or a part counts.
+ * @param {string|null|undefined} id
+ */
+export function isEffectivelyLocked(id) {
+  if (!id) return false;
+  const { objects, groups } = getState().scene;
+  const seen = new Set();
+  const own = objects[id];
+  if (own) {
+    const lead = objects[canonicalObjectId(id, objects)];
+    if (own.locked || lead?.locked) return true;
+  } else if (groups[id]?.locked) return true;
+  let cur = own?.parentId ?? groups[id]?.parentId ?? null;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    if (groups[cur]?.locked) return true;
+    cur = groups[cur]?.parentId ?? null;
+  }
+  return false;
+}
+
+/**
  * Transform targets of the current selection (overhaul 2.2), in selection
  * order: every material part mesh of each selected object (`id` = part
  * meshId) and each selected group's TransformNode (`id` = groupId). Not
@@ -109,13 +133,17 @@ function _groupMeshes(node) {
  * @returns {{ targets: { id: string, node: any, kind: 'object'|'group' }[],
  *             activeNode: any|null, activeGeometry: any[] }}
  */
-export function getTransformTargets() {
+export function getTransformTargets({ includeLocked = false } = {}) {
   const { selectedIds, activeId } = getState().selection;
   const objects = getState().scene.objects;
   const targets = [];
   let activeNode = null;
   let activeGeometry = [];
+  let lockedSkipped = 0;
   for (const id of selectedIds) {
+    // Lock = transform-lock (overhaul 2.5, Decision 9): locked nodes stay
+    // selectable/outlined but never go under the pivot or the G/R/S modal.
+    if (!includeLocked && isEffectivelyLocked(id)) { lockedSkipped++; continue; }
     if (objects[id]) {
       const parts = _resolveObjectMeshes([id]);
       for (const r of parts) targets.push({ id: r.id, node: r.mesh, kind: 'object' });
@@ -130,17 +158,20 @@ export function getTransformTargets() {
     targets.push(r);
     if (id === activeId) { activeNode = r.node; activeGeometry = [r.node]; }
   }
-  return { targets, activeNode, activeGeometry };
+  return { targets, activeNode, activeGeometry, lockedSkipped };
 }
 
 function _applyVisuals() {
   const { activeId, pivotMode } = getState().selection;
-  const { targets, activeNode, activeGeometry } = getTransformTargets();
+  // Outline everything selected (locked included); only the pivot is filtered.
+  const { targets, activeGeometry: outlineGeometry } = getTransformTargets({ includeLocked: true });
+  const tf = getTransformTargets();
+  const activeNode = tf.activeNode, activeGeometry = tf.activeGeometry;
   // Outline: object parts directly; a selected group outlines its member
   // meshes. The ACTIVE entry (multi-part object or group) gets the active tint.
   const activeSet = new Set();
   for (const t of targets) {
-    if (t.kind === 'object' && activeGeometry.includes(t.node)) activeSet.add(t.node);
+    if (t.kind === 'object' && outlineGeometry.includes(t.node)) activeSet.add(t.node);
     if (t.kind === 'group' && t.id === activeId) for (const m of _groupMeshes(t.node)) activeSet.add(m);
   }
   const others = new Set();
@@ -152,7 +183,7 @@ function _applyVisuals() {
   SceneManager.setActive([...activeSet]);
   SceneManager.setSelected([...others]);
   // Group nodes go under the pivot as a whole → rigid group transforms (2.2).
-  SceneManager.attachToSelection(targets.map(t => t.node), pivotMode, activeNode, activeGeometry);
+  SceneManager.attachToSelection(tf.targets.map(t => t.node), pivotMode, activeNode, activeGeometry);
 }
 
 /**
@@ -322,5 +353,5 @@ export const Selection = {
   set, add, remove, toggle, setActive, clear, selectAll,
   setPivotMode, cyclePivotMode, refresh,
   getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
-  getTransformTargets,
+  getTransformTargets, isEffectivelyLocked,
 };

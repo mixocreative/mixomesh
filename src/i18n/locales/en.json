@@ -286,6 +286,7 @@
   "properties.name": "Name",
   "properties.visible": "Visible",
   "properties.locked": "Locked",
+  "properties.lockedTransformTitle": "Locked — unlock to edit the transform",
   "properties.copyTransformTitle": "Copy active's position / rotation / scale to other selected meshes",
   "properties.sizeMm": "Size (mm)",
   "properties.posMm": "Pos (mm)",
@@ -677,6 +678,7 @@
   "toast.pngRendered": "PNG rendered ({width} × {height})",
   "toast.pngFailed": "PNG render failed — see console",
   "toast.nothingSelected": "Nothing selected",
+  "toast.lockedNoTransform": "Locked items can't be moved, rotated or scaled — unlock first",
   "toast.csgUnavailable": "CSG2 unavailable — watertight re-bake skipped",
   "toast.exportCancelled": "Export cancelled — {filename} was not written",
   "toast.importedAll": "Imported {n} files",
@@ -714,5 +716,8 @@
   "print.issue.thin-feature": "{n} object(s) may have walls thinner than this printer can print (estimate)",
   "print.issueAction.thin-feature": "Thicken the thin section, or print larger. This is a rough estimate, not a full wall check.",
   "print.issue.watertight-required": "{n} object(s) are not watertight, which this printer requires",
-  "print.issueAction.watertight-required": "Open Validation and run Auto-Fix to close the holes."
+  "print.issueAction.watertight-required": "Open Validation and run Auto-Fix to close the holes.",
+  "context.deleteLockedTitle": "Delete locked items?",
+  "context.deleteLockedBody": "The selection includes locked objects or groups. Delete them anyway?",
+  "context.deleteLockedConfirm": "Delete"
 }

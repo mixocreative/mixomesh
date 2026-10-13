@@ -182,14 +182,25 @@ function _wireObjectSection(obj) {
 
 // ── Transform section ────────────────────────────────────
 
+/**
+ * Transform fields are read-only when ANY selected item is effectively locked
+ * (it, or an ancestor group, is locked — overhaul 2.5).
+ * @param {string[]} ids
+ */
+export function isTransformReadOnly(ids) {
+  return (ids ?? []).some(id => Selection.isEffectivelyLocked(id));
+}
+
 function _renderTransformSection(mesh, multi, resolved = []) {
   if (!mesh) return '';
+  const readOnly = isTransformReadOnly(Selection.getSelectedIds());
   const xform = _readTransform(mesh);
   // mm and deg view for the user.
   const posMM = { x: xform.position.x * BU_TO_MM, y: xform.position.y * BU_TO_MM, z: xform.position.z * BU_TO_MM };
   const rotDeg = _quatToEulerDeg(xform.rotation);
   const sc = xform.scaling;
-  const dis = multi ? 'disabled' : '';
+  const dis = (multi || readOnly) ? 'disabled' : '';
+  const roTitle = readOnly ? ` title="${escapeAttr(t('properties.lockedTransformTitle'))}"` : '';
 
   // Print-space size from world AABB. The number to compare against the real
   // model spec on the box — "1:35 hull should be ~245 mm long".
@@ -208,32 +219,32 @@ function _renderTransformSection(mesh, multi, resolved = []) {
     : '';
 
   return `
-    <section class="pp-section" data-section="transform">
+    <section class="pp-section" data-section="transform"${roTitle}>
       <header class="pp-section-header">${sectionIcon('Move')}<span data-i18n-key="section.transform">Transform</span>${copyBtn}</header>
-      ${_renderRatioRow()}
+      ${_renderRatioRow(readOnly)}
       <div class="pp-grid3">
         <label>${_escape(t('properties.sizeMm'))}</label>
-        <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
-        <input type="number" step="0.1" min="0.001" data-size-axis="y" value="${sizeMM ? _fmt(sizeMM.y) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
-        <input type="number" step="0.1" min="0.001" data-size-axis="z" value="${sizeMM ? _fmt(sizeMM.z) : ''}" ${dis || (sizeMM ? '' : 'disabled')}>
+        <input type="number" step="0.1" min="0.001" data-size-axis="x" value="${sizeMM ? _fmt(sizeMM.x) : ''}" ${dis || (sizeMM ? '' : 'disabled')}${roTitle}>
+        <input type="number" step="0.1" min="0.001" data-size-axis="y" value="${sizeMM ? _fmt(sizeMM.y) : ''}" ${dis || (sizeMM ? '' : 'disabled')}${roTitle}>
+        <input type="number" step="0.1" min="0.001" data-size-axis="z" value="${sizeMM ? _fmt(sizeMM.z) : ''}" ${dis || (sizeMM ? '' : 'disabled')}${roTitle}>
       </div>
       <div class="pp-grid3">
         <label>${_escape(t('properties.posMm'))}</label>
-        <input type="number" step="0.1" data-xform="position" data-axis="x" value="${_fmt(posMM.x)}" ${dis}>
-        <input type="number" step="0.1" data-xform="position" data-axis="y" value="${_fmt(posMM.y)}" ${dis}>
-        <input type="number" step="0.1" data-xform="position" data-axis="z" value="${_fmt(posMM.z)}" ${dis}>
+        <input type="number" step="0.1" data-xform="position" data-axis="x" value="${_fmt(posMM.x)}" ${dis}${roTitle}>
+        <input type="number" step="0.1" data-xform="position" data-axis="y" value="${_fmt(posMM.y)}" ${dis}${roTitle}>
+        <input type="number" step="0.1" data-xform="position" data-axis="z" value="${_fmt(posMM.z)}" ${dis}${roTitle}>
       </div>
       <div class="pp-grid3">
         <label>${_escape(t('properties.rotDeg'))}</label>
-        <input type="number" step="0.1" data-xform="rotation" data-axis="x" value="${_fmt(rotDeg.x)}" ${dis}>
-        <input type="number" step="0.1" data-xform="rotation" data-axis="y" value="${_fmt(rotDeg.y)}" ${dis}>
-        <input type="number" step="0.1" data-xform="rotation" data-axis="z" value="${_fmt(rotDeg.z)}" ${dis}>
+        <input type="number" step="0.1" data-xform="rotation" data-axis="x" value="${_fmt(rotDeg.x)}" ${dis}${roTitle}>
+        <input type="number" step="0.1" data-xform="rotation" data-axis="y" value="${_fmt(rotDeg.y)}" ${dis}${roTitle}>
+        <input type="number" step="0.1" data-xform="rotation" data-axis="z" value="${_fmt(rotDeg.z)}" ${dis}${roTitle}>
       </div>
       <div class="pp-grid3 pp-scale-row ${lockedCls}">
         <label>${_escape(t('properties.scale'))}</label>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}>
+        <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}${roTitle}>
+        <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}${roTitle}>
+        <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}${roTitle}>
       </div>
       <div class="pp-row pp-row-inline">
         <button class="pp-icon-btn pp-scale-lock" data-action="scaleLock" title="${escapeAttr(t(scaleLocked ? 'properties.unlockScaleTitle' : 'properties.lockScaleTitle'))}">${icon(lockIcon, { width: 13, height: 13 })}</button>
@@ -247,7 +258,7 @@ function _renderTransformSection(mesh, multi, resolved = []) {
 // the selection, or "—" when mixed. Applying drives RescaleObjectCommand over
 // every selected object expanded to its logical-object parts (finding E), as
 // one undoable step.
-function _renderRatioRow() {
+function _renderRatioRow(readOnly = false) {
   const ids = Selection.getSelectedIds();
   const objects = getState().scene.objects;
   const ratios = ids.map(id => objectRatio(objects[id]));
@@ -261,11 +272,11 @@ function _renderRatioRow() {
     <div class="pp-row pp-ratio-row">
       <label title="${escapeAttr(t('properties.objectRatioTitle'))}">${_escape(t('properties.objectRatio'))}</label>
       <div class="pp-ratio-select">
-        <select data-ratio-preset class="pp-preset-select">
+        <select data-ratio-preset class="pp-preset-select"${readOnly ? " disabled" : ""}>
           <option value="">${mixed ? '—' : _escape(t('print.custom'))}</option>
           ${presetOpts}
         </select>
-        <input type="text" data-ratio-input class="pp-ratio-input" value="${escapeAttr(mixed ? '' : formatScaleRatio(current))}" placeholder="${mixed ? '—' : '1:1'}">
+        <input type="text" data-ratio-input class="pp-ratio-input" value="${escapeAttr(mixed ? '' : formatScaleRatio(current))}" placeholder="${mixed ? '—' : '1:1'}"${readOnly ? " disabled" : ""}>
       </div>
     </div>
   `;

@@ -97,6 +97,7 @@ function _restoreGroups(groupDefs, objMap) {
       id: g.id, name: g.name, parentId: g.parentId ?? null,
       childIds: [...(g.childIds ?? [])],
       origin: g.origin,
+      ...(g.locked ? { locked: true } : {}),
     });
   }
   setState(s => ({ ...s, scene: { ...s.scene, groups: groupsState } }), SILENT);

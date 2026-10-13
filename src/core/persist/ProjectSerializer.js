@@ -305,6 +305,7 @@ function _serialiseGroups() {
       id: g.id, name: g.name, parentId: g.parentId ?? null,
       childIds: [...(g.childIds ?? [])],
       origin: g.origin === 'import' ? 'import' : 'user',
+      ...(g.locked ? { locked: true } : {}),   // 2.5: group lock cascades to descendants
       transform: node ? decompose(node) : null,
     };
   });

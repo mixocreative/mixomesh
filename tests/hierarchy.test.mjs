@@ -346,7 +346,9 @@ await test('group rotation+scale+position and child world positions round-trip s
   const wm = worldPos(m), wo = worldPos(o), wg = worldPos(node);
   const gq = node.rotationQuaternion.clone();
 
+  StateManager.setState(st => ({ ...st, scene: { ...st.scene, groups: { ...st.scene.groups, [gid]: { ...st.scene.groups[gid], locked: true } } } }), { silent: true });
   const saved = JSON.parse(JSON.stringify(Serializer.__test._serialiseGroups()));
+  assert.equal(saved.find(g => g.id === gid)?.locked, true, '2.5: group lock is saved');
   const savedObjs = Object.fromEntries([m, o].map(x => [x.metadata.meshId, JSON.parse(JSON.stringify(Serializer.decompose(x)))]));
   const groupsState = structuredClone(s().groups);
 
@@ -356,6 +358,7 @@ await test('group rotation+scale+position and child world positions round-trip s
   for (const id of ['m', 'o']) Serializer.applyWorld(meshes.get(id), savedObjs[id]);
   Loader.__test._restoreGroups(saved, s().objects);
 
+  assert.equal(s().groups[gid]?.locked, true, '2.5: group lock restored');
   const node2 = findNode(gid);
   assert.ok(node2, 'group node restored');
   closeVec(worldPos(node2), wg, 'group position');

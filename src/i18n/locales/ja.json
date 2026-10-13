@@ -283,6 +283,7 @@
   "properties.name": "名前",
   "properties.visible": "表示",
   "properties.locked": "ロック",
+  "properties.lockedTransformTitle": "ロック中 — 変形を編集するにはロックを解除",
   "properties.copyTransformTitle": "アクティブの位置 / 回転 / スケールを他の選択メッシュへコピー",
   "properties.sizeMm": "サイズ (mm)",
   "properties.posMm": "位置 (mm)",
@@ -674,6 +675,7 @@
   "toast.pngRendered": "PNG を出力しました ({width} × {height})",
   "toast.pngFailed": "PNG レンダリングに失敗しました — コンソールを確認",
   "toast.nothingSelected": "何も選択されていません",
+  "toast.lockedNoTransform": "ロック中のアイテムは移動・回転・拡縮できません。先にロックを解除してください",
   "toast.csgUnavailable": "CSG2 が利用できません — 水密再ベイクをスキップ",
   "toast.exportCancelled": "書き出しをキャンセルしました — {filename} は保存されていません",
   "toast.importedAll": "{n} 個のファイルを読み込みました",
@@ -714,5 +716,8 @@
   "print.issue.thin-feature": "{n} 個のオブジェクトに、このプリンターで造形できない薄い壁がある可能性があります（推定）",
   "print.issueAction.thin-feature": "薄い部分を厚くするか、大きいサイズで出力してください。簡易推定であり、厳密な肉厚チェックではありません。",
   "print.issue.watertight-required": "{n} 個のオブジェクトが水密ではありません（このプリンターでは必須）",
-  "print.issueAction.watertight-required": "検証パネルを開き、自動修復で穴を塞いでください。"
+  "print.issueAction.watertight-required": "検証パネルを開き、自動修復で穴を塞いでください。",
+  "context.deleteLockedTitle": "ロックされた項目を削除しますか？",
+  "context.deleteLockedBody": "選択にロックされたオブジェクトまたはグループが含まれています。それでも削除しますか？",
+  "context.deleteLockedConfirm": "削除"
 }

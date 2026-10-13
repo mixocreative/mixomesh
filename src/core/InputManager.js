@@ -2,7 +2,8 @@ import { undo, redo, push, TransformCommand, VisibilityCommand, LockCommand, Del
 import { SceneManager, setCameraPreset } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
-import { getState } from './StateManager.js';
+import { getState, dispatch } from './StateManager.js';
+import { EVENTS } from './events.js';
 import { logicalObjectCommandIds } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
@@ -339,9 +340,9 @@ function _placeCursorAtPick() {
 // ── Modal G / R / S ──────────────────────────────────────
 
 function _enterModal(op) {
-  const { targets, activeNode, activeGeometry } = Selection.getTransformTargets();
+  const { targets, activeNode, activeGeometry, lockedSkipped } = Selection.getTransformTargets();
   if (!targets.length) {
-    Toast.show(t('toast.nothingSelected'), 'info', 2000);
+    Toast.show(t(lockedSkipped ? 'toast.lockedNoTransform' : 'toast.nothingSelected'), 'info', 2000);
     return;
   }
   // Detach gizmo pivot so nodes are in their canonical parents during the op
@@ -738,17 +739,34 @@ function _unhideAll() {
 
 function _lockToggleSelected() {
   const objects = getState().scene.objects;
-  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
+  const groups = getState().scene.groups;
+  const sel = Selection.getSelectedIds();
+  // Objects (expanded to all parts) AND selected groups toggle together.
+  const ids = [...logicalObjectCommandIds(sel, objects), ...sel.filter(id => !objects[id] && groups[id])];
   if (!ids.length) return;
+  const isLocked = id => !!(objects[id] ?? groups[id])?.locked;
   const prev = {};
-  for (const id of ids) prev[id] = !!objects[id]?.locked;
-  const anyUnlocked = ids.some(id => !objects[id]?.locked);
+  for (const id of ids) prev[id] = isLocked(id);
+  const anyUnlocked = ids.some(id => !isLocked(id));
   push(new LockCommand(ids, prev, anyUnlocked));
 }
 
 function _deleteSelected() {
   const ids = Selection.getSelectedIds();
   if (!ids.length) return;
+  // Lock = transform-lock; Delete ASKS (Decision 9): a selection that holds a
+  // locked object/group (or anything inside a locked group) needs a confirm.
+  if (ids.some(id => Selection.isEffectivelyLocked(id))) {
+    dispatch(EVENTS.MODAL_OPEN, {
+      id: 'confirmAction',
+      title: t('context.deleteLockedTitle'),
+      body: t('context.deleteLockedBody'),
+      confirmLabel: t('context.deleteLockedConfirm'),
+      danger: true,
+      onClose: (r) => { if (r === 'confirm') push(new DeleteCommand(ids)); },
+    });
+    return;
+  }
   push(new DeleteCommand(ids));
 }
 
@@ -875,5 +893,7 @@ export const InputManager = {
     hasHandler: (shortcut, context) => _handlers.has(`${shortcut}::${context}`),
     clearHandlers: () => _handlers.clear(),
     setCanvas: (c) => { _canvas = c; },
+    deleteSelected: _deleteSelected,
+    lockToggleSelected: _lockToggleSelected,
   },
 };

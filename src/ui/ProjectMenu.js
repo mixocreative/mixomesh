@@ -275,6 +275,22 @@ function _registerModals() {
     return el;
   });
 
+  // Generic confirm (Decision 9 delete-locked, reusable): data = { title, body,
+  // confirmLabel, danger }; closes with 'confirm' | 'cancel'.
+  Modal.register('confirmAction', ({ data, close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${_esc(data?.title ?? '')}</h2>
+      <p class="pm-modal-body">${_esc(data?.body ?? '')}</p>
+      <div class="pm-modal-actions">
+        <button class="btn" data-r="cancel">${_esc(t('btn.cancel'))}</button>
+        <button class="btn ${data?.danger ? 'btn-danger' : 'btn-primary'}" data-r="confirm">${_esc(data?.confirmLabel ?? t('btn.ok'))}</button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => close(b.dataset.r)));
+    return el;
+  });
+
   Modal.register('resetSettingsConfirm', ({ close }) => {
     const el = document.createElement('div');
     el.className = 'pm-modal';

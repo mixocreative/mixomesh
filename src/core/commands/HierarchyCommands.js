@@ -88,7 +88,7 @@ function _setVisible(meshId, visible) {
   dispatch(EVENTS.VISIBILITY_CHANGED, { meshId, visible });
 }
 
-/** Set the `locked` flag on objects. */
+/** Set the `locked` flag on objects and/or groups (ids may mix both). */
 export class LockCommand {
   constructor(meshIds, prev, next) {
     this._ids = meshIds.slice();
@@ -105,8 +105,17 @@ export class LockCommand {
   }
 }
 
-function _setLocked(meshId, locked) {
-  patchSceneObject(meshId, { locked });
+function _setLocked(id, locked) {
+  const meshId = id;
+  if (!getState().scene.objects[id] && getState().scene.groups[id]) {
+    // Groups carry their own `locked` flag (cascades to descendants, 2.5).
+    setState(state => ({
+      ...state,
+      scene: { ...state.scene, groups: { ...state.scene.groups, [id]: { ...state.scene.groups[id], locked } } },
+    }), SILENT);
+  } else {
+    patchSceneObject(meshId, { locked });
+  }
   dispatch(EVENTS.LOCK_CHANGED, { meshId, locked });
 }
 

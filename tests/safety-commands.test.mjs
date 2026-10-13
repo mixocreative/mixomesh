@@ -222,6 +222,89 @@ await test('0.3: Tab unbound; F2/Ctrl+I/Home/L registered; Ctrl+S/N/O stubs gone
   assert.equal(T.hasHandler('Ctrl+Z', 'global'), true);
 });
 
+// ── 2.5: lock enforcement ────────────────────────────────────────────────
+
+const lockFixture = () => {
+  const mk = (id) => ({ id, name: id, assetId: null, isGhost: false, visible: true, locked: false, parentId: null, isPrintPart: true });
+  const objs = { lo1: mk('lo1'), lo2: mk('lo2'), lc: { ...mk('lc'), parentId: 'gL' }, lf: mk('lf') };
+  objs.lo1.locked = true;
+  for (const id of Object.keys(objs)) meshes.set(id, { name: id, metadata: { meshId: id }, parent: null, setParent(p) { this.parent = p; }, setEnabled() {}, dispose() {}, isDisposed: () => false });
+  const gNode = { name: 'gL', metadata: { groupId: 'gL' }, parent: null };
+  SceneManager.getScene = () => ({ transformNodes: [gNode] });
+  setState(s => ({
+    ...s,
+    scene: {
+      ...s.scene, objects: objs,
+      groups: { gL: { id: 'gL', name: 'gL', parentId: null, childIds: ['lc'], locked: true } },
+    },
+    selection: { ...s.selection, selectedIds: [], activeId: null },
+  }), { silent: true });
+  return gNode;
+};
+const select = (ids) => setState(s => ({ ...s, selection: { ...s.selection, selectedIds: ids, activeId: ids[ids.length - 1] ?? null } }), { silent: true });
+
+await test('2.5: locked object is selectable but never a transform target', () => {
+  lockFixture();
+  select(['lo1', 'lo2']);
+  const r = Selection.getTransformTargets();
+  assert.deepEqual(r.targets.map(x => x.id), ['lo2']);
+  assert.equal(r.lockedSkipped, 1);
+  assert.equal(Selection.getTransformTargets({ includeLocked: true }).targets.length, 2, 'outline still sees locked');
+});
+
+await test('2.5: locked group + its children are not transformable (cascade down)', () => {
+  lockFixture();
+  assert.equal(Selection.isEffectivelyLocked('gL'), true);
+  assert.equal(Selection.isEffectivelyLocked('lc'), true, 'child of locked group');
+  assert.equal(Selection.isEffectivelyLocked('lf'), false);
+  select(['gL', 'lc', 'lf']);
+  const r = Selection.getTransformTargets();
+  assert.deepEqual(r.targets.map(x => x.id), ['lf']);
+  assert.equal(r.lockedSkipped, 2);
+});
+
+await test('2.5: Properties transform read-only helper follows effective lock', async () => {
+  lockFixture();
+  const { isTransformReadOnly } = await import('../src/ui/PropertiesPanel.js');
+  assert.equal(isTransformReadOnly(['lo1']), true);
+  assert.equal(isTransformReadOnly(['lc']), true);
+  assert.equal(isTransformReadOnly(['lf', 'lo2']), false);
+  assert.equal(isTransformReadOnly(['lf', 'lo1']), true, 'any locked item makes it read-only');
+});
+
+await test('2.5 / Decision 9: Delete of locked items ASKS — cancel keeps, confirm deletes', async () => {
+  lockFixture();
+  const { InputManager } = await import('../src/core/InputManager.js');
+  const { subscribe } = await import('../src/core/StateManager.js');
+  const { EVENTS } = await import('../src/core/events.js');
+  let answer = 'cancel', asked = 0;
+  const off = subscribe(EVENTS.MODAL_OPEN, p => { if (p?.id === 'confirmAction') { asked++; p.onClose?.(answer); } });
+  try {
+    select(['lo1', 'lo2']);
+    InputManager.__test.deleteSelected();
+    assert.equal(asked, 1, 'confirm shown for a locked selection');
+    assert.ok(getState().scene.objects.lo1 && getState().scene.objects.lo2, 'cancel keeps the locked items');
+    select(['lc']);
+    answer = 'confirm';
+    InputManager.__test.deleteSelected();
+    assert.equal(asked, 2, 'child of a locked group also asks');
+    const H = await import('../src/core/HistoryManager.js');
+    assert.ok(/delete/i.test(H.getUndoLabel() ?? ''), `confirm pushes a Delete (undo label: ${H.getUndoLabel()})`);
+  } finally { off(); }
+});
+
+await test('2.5: L toggles lock on a group and undo restores', async () => {
+  lockFixture();
+  const { InputManager } = await import('../src/core/InputManager.js');
+  const { undo } = await import('../src/core/HistoryManager.js');
+  setState(s => ({ ...s, scene: { ...s.scene, groups: { gL: { ...s.scene.groups.gL, locked: false } } } }), { silent: true });
+  select(['gL']);
+  InputManager.__test.lockToggleSelected();
+  assert.equal(getState().scene.groups.gL.locked, true);
+  undo();
+  assert.equal(getState().scene.groups.gL.locked, false);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
