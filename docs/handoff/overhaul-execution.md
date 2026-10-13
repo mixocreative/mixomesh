@@ -43,6 +43,10 @@ Then read the plan section for the next task. Update this file at every safe bou
 
 - Partial staging of shared files (Blueprint.md): scratchpad helper must pipe the patch as BYTES — Python text-mode stdin on Windows turns LF→CRLF and `git apply --cached` fails.
 - Verify COMMITTED state while agents edit the tree: clean worktree `<scratchpad>/wt-head` (node_modules = junction to repo's); `git -C <wt> checkout -q --detach <sha>` then `npm test` there. Never gate a commit on `grep` succeeding — require `# fail 0`.
+- `browser-export-smoke` flaked once with a zlib stream error (passed on rerun) — rerun before investigating.
+- Python heredoc anchors with `\n` sometimes fail to match `console.log('
+' + out.join('
+'))` in tests — insert by line number with `sed -i "<N>r file"` instead.
 - Parallel agents: give each disjoint files; agents never touch Blueprint/locales unless the task owns them — they report lines, main applies.
 
 - Stitch capture: **production build only** (`npm run build` → `npx vite preview --host 127.0.0.1 --port 5180 --strictPort`).
@@ -89,7 +93,7 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | done 8bdfaca | owner eyeball checklist in commit/agent report: Bambu Studio + PrusaSlicer |
 | 1.6 PLY + WRL writers | opus | done 5c5a24c | trimesh +1000 mm³ both |
 | 1.7 OBJ through PrintSpace w/ per-printer axis | opus | done ba786e6 | Y-up identical to old OBJExport; owner eyeball in Mimaki tool |
-| 1.8 Gate tightening | sonnet | todo | PrintPipeline/PrintPanel — after 1.5/1.6 |
+| 1.8 Gate tightening | sonnet | doing | |
 | 1.9 Texture colour-space check | sonnet | done fc71135 | conversion export-readback only (capture raw) |
 | 1.10 Dead export/scale code removal | sonnet | done 498f444 | dead keys also stripped from old .mixo on load |
 | 1.11 Bambu/Orca 3MF flavour | opus | done 8446ac3 | owner eyeball checklist (Bambu Studio/Orca) before `verified` |
@@ -98,8 +102,8 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.14 Rescale about own origin | sonnet | done e7fed24 | |
 | 1.15 Explicit export reference + mixed-scale note | opus | done 1d7864f | UI row lands in 1.3 |
 | 1.16 Effective scale | sonnet | done f4c8d88 | logic; Properties line waits on 1.13 mockup |
-| 1.17 Typed print sizes + filename tokens | opus | doing | opus agent |
-| 1.18 Per-target cost lines | sonnet | todo | after 1.17 |
+| 1.17 Typed print sizes + filename tokens | opus | done 55bd4f6 | bundled w/ 2.7 (shared ProjectLoader/PrintPanel); editor UI → 1.3 |
+| 1.18 Per-target cost lines | sonnet | doing | |
 
 ### Phase 2 — Hierarchy core (7)
 | Task | Tier | Status | Notes |
@@ -110,7 +114,7 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | todo | after 2.2 (InputManager) + 2.7 (HierarchyCommands) |
 | 2.5 Lock enforcement | sonnet | todo | after 2.2/2.4 |
 | 2.6 Logical-object edge cases | sonnet | todo | after 2.3/2.7 (ParentCommands, MeshValidator) |
-| 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | doing | |
+| 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | done 55bd4f6 | legacy seed in ProjectLoader + test |
 
 ### Phases 3–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
@@ -137,3 +141,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 1.1 2e47d4c, 1.9 fc71135, 1.14 e7fed24, 1.6+0.12 5c5a24c, 1.15 1d7864f. Phase 0 ungated complete. Batch D running: 1.4, 1.5 (opus), 1.7 (opus), 1.16. Then 1.10, 1.8, 1.11, 1.17, 1.18, 1.12.
 - 2026-10-14 (cont.) — 1.16 f4c8d88, 1.4 4aabce3, 1.7 ba786e6 (amended: 1.5 tests had leaked in), 1.5 8bdfaca. Full tree green incl. browser/export/ELECTRON smokes. Pending follow-up for 1.3: ExportContext._capturePrefs must carry objAxis + splitByMaterial (+exportFormat, threeMFFlavour). Batch E: 1.10, 1.11. Then 1.8, 1.17, 1.18, 1.12.
 - 2026-10-14 (cont.) — 1.10 498f444, 1.11 8446ac3, 2.1 d7843e5 (worktree green 170/170). Running: 1.17 (opus), 2.2 (opus), 2.7. Next: 1.8, 1.18, 1.12; 2.3-2.6 sequenced per table.
+- 2026-10-14 (cont.) — 1.17+2.7 55bd4f6 (worktree 173/173 + both smokes). Running: 2.2 (opus), 1.8, 1.18. Then 1.12 (Phase 1 close), 2.3 → 2.4 → 2.5 → 2.6.
