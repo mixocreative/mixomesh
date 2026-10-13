@@ -246,6 +246,7 @@ const ALLOWED = {
   'core/idb.js': 'the IndexedDB implementation the browser adapter wraps',
   'core/storage/StorageAdapter.js': 'BrowserStorageAdapter — the one FSA/idb owner',
   'core/storage/capabilities.js': 'feature detection only (no calls)',
+  'core/storage/OpfsStorageAdapter.js': 'OpfsStorageAdapter (task 8.2) — the OPFS tier owner',
   // Owned by task 3.1 this wave; its `putHandle` is reachable only for callers that
   // pass `fileHandle` — every routed site now passes `fileHandleKey` instead.
   'core/assets/AssetImport.js': 'task 3.1 file; legacy fileHandle option, no remaining caller',

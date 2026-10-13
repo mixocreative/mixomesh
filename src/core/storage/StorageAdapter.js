@@ -7,7 +7,8 @@
 //
 // Boot picks the impl by runtime; app code branches on `storage.caps.*` FLAGS,
 // never on ad-hoc "is Electron" checks. The desktop impl (Node fs via Electron IPC)
-// is injected in Phase 2 — until then the browser impl is the only one.
+// is injected in Phase 2. Task 8.2 adds the OPFS tier (OpfsStorageAdapter.js) for
+// WebKit (Safari / iPadOS / iOS): no FSA pickers, projects in the origin-private FS.
 //
 // Directory mounting/listing/reading, cross-session KV and the asset-ref surface
 // (task 4.2: resolveAsset / persistRef / restoreRef / deleteRef / findMoved) are
@@ -21,9 +22,10 @@
 // ('embedded' | 'linked' | 'changed' | 'missing') — it never scans (Decision 3).
 // `findMoved` is the only hash walk and is user-invoked only.
 
-import { caps, isDesktop, setCapabilities, storageUnavailable } from './capabilities.js';
+import { caps, setCapabilities, storageTier, storageUnavailable } from './capabilities.js';
 import { FILE_TYPES } from '../persist/constants.js';
 import { DesktopStorageAdapter } from './DesktopStorageAdapter.js';
+import { OpfsStorageAdapter } from './OpfsStorageAdapter.js';
 import {
   ASSET_STATUS, FIND_MOVED_LIMIT, extOfName, fileHandleAtPath, normalizeSource,
   resolveVia, stableKeyFor, walkForHash,
@@ -33,7 +35,7 @@ import {
 
 /**
  * @typedef {Object} StorageAdapter
- * @property {'browser'|'desktop'} kind
+ * @property {'browser'|'desktop'|'opfs'} kind
  * @property {Capabilities} caps
  * Cross-session key/value (autosave / recent / settings):
  * @property {(key:string, value:any)=>Promise<void>} kvSet
@@ -310,10 +312,21 @@ export const BrowserStorageAdapter = {
 
 export { ASSET_STATUS };
 
+/** Adapter per tier (`detectStorageTier`, capabilities.js). */
+export const ADAPTERS = Object.freeze({
+  desktop: DesktopStorageAdapter,
+  browser: BrowserStorageAdapter,
+  opfs: OpfsStorageAdapter,
+});
+
 /**
- * The active StorageAdapter for this runtime: DesktopStorageAdapter inside the
- * Electron shell (`window.electronAPI` present), BrowserStorageAdapter otherwise.
- * Boot awaits `storage.ready()` before any UI uses it (src/app/main.ts).
+ * The active StorageAdapter for this runtime (`storageTier`): Desktop inside the
+ * Electron shell (`window.electronAPI`), Browser when File System Access pickers
+ * exist (Chrome/Edge), OPFS when they do not but `navigator.storage.getDirectory`
+ * does (Safari / iOS / iPadOS — task 8.2), Browser otherwise (its `ready()` then
+ * blocks with "Browser not supported"). Boot awaits `storage.ready()` before
+ * any UI uses it (src/app/main.ts).
  * @type {StorageAdapter}
  */
-export const storage = isDesktop() ? DesktopStorageAdapter : BrowserStorageAdapter;
+export const storage = ADAPTERS[storageTier] ?? BrowserStorageAdapter;
+export { OpfsStorageAdapter, storageTier };

@@ -34,8 +34,33 @@ export const WEB_TRIANGLE_BUDGET = 1_500_000;
 export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
 
 /**
+ * @typedef {{hasFSA?:boolean, hasIDB?:boolean, hasOPFS?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>}} StorageEnv
+ * @typedef {'desktop'|'browser'|'opfs'} StorageTier
+ */
+
+/**
+ * Which StorageAdapter impl this runtime gets (task 8.2). Pure, like
+ * `detectCapabilities`:
+ * - `desktop` — Electron shell (`window.electronAPI`).
+ * - `browser` — File System Access pickers present (Chrome / Edge desktop).
+ * - `opfs`    — no FSA pickers but Origin Private File System
+ *   (`navigator.storage.getDirectory`) exists: Safari / every iOS + iPadOS
+ *   browser (all WebKit). NOTE Firefox also lands here (OPFS, no FSA); the
+ *   boot gate (task 8.1), not this function, decides which engines may boot.
+ * - neither → `browser`, whose `ready()` blocks with "Browser not supported".
+ * @param {StorageEnv} [env]
+ * @returns {StorageTier}
+ */
+export function detectStorageTier(env = {}) {
+  if (env.desktop) return 'desktop';
+  if (env.hasFSA) return 'browser';
+  if (env.hasOPFS) return 'opfs';
+  return 'browser';
+}
+
+/**
  * Pure capability derivation from an environment snapshot.
- * @param {{hasFSA?:boolean, hasIDB?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>}} [env]
+ * @param {StorageEnv} [env]
  * @returns {Capabilities}
  */
 export function detectCapabilities(env = {}) {
@@ -49,6 +74,18 @@ export function detectCapabilities(env = {}) {
       relinkByPath: !!desktopCaps.relinkByPath,
       watchFiles: !!desktopCaps.watchFiles,
       writeFiles: !!desktopCaps.writeFiles,
+      triangleBudget,
+    };
+  }
+  if (detectStorageTier(env) === 'opfs') {
+    // OPFS tier (task 8.2): projects are written into the origin-private file
+    // system (no picker, but in-place saves work); no live folder links at all.
+    return {
+      persistAssets: !!hasIDB,
+      mountDirectory: false,
+      relinkByPath: false,
+      watchFiles: false,
+      writeFiles: true,
       triangleBudget,
     };
   }
@@ -69,13 +106,19 @@ function _snapshotEnv() {
   return {
     hasFSA: !!w && 'showOpenFilePicker' in w,
     hasIDB: typeof indexedDB !== 'undefined',
+    hasOPFS: typeof globalThis.navigator?.storage?.getDirectory === 'function',
     desktop: !!w && !!w.electronAPI,
     desktopCaps: w?.electronAPI?.capabilities,
   };
 }
 
+const _env = _snapshotEnv();
+
 /** Live capability singleton for the current runtime. Read `caps.writeFiles` etc. */
-export const caps = detectCapabilities(_snapshotEnv());
+export const caps = detectCapabilities(_env);
+
+/** Adapter tier picked for this runtime at load (`detectStorageTier`). */
+export const storageTier = detectStorageTier(_env);
 
 /** True when running inside the Electron desktop shell. */
 export function isDesktop() {

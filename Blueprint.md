@@ -3317,6 +3317,62 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 
 ---
 
+### OPFS tier — Safari / iPadOS / iOS (overhaul 8.2)
+
+Target: Blueprint §11, after **Routing + boot gate (task 4.4)**; ADR 0001 addendum (tier list).
+
+**OPFS tier (task 8.2).** Third StorageAdapter impl, `storage/OpfsStorageAdapter.js`
+(`kind:'opfs'`), for WebKit (Safari; every iOS/iPadOS browser): no File System
+Access pickers / `getAsFileSystemHandle`, but OPFS + IndexedDB. Selection is
+pure: `detectStorageTier(env)` (capabilities.js) → `desktop` (Electron
+`window.electronAPI`) > `browser` (FSA `showOpenFilePicker` present: Chrome/Edge)
+> `opfs` (`navigator.storage.getDirectory` present) > `browser` (its `ready()`
+blocks "Browser not supported"). Live `storageTier` + `ADAPTERS[tier]` pick
+`storage`. Firefox also has OPFS-without-FSA and so maps to `opfs`; which
+engines may boot is the 8.1 gate's call, not the tier detector's.
+Caps (opfs): `mountDirectory/relinkByPath/watchFiles:false`, `writeFiles:true`
+(in-place OPFS writes, no picker), `persistAssets = IndexedDB opens`.
+
+- Projects live in OPFS `Projects/*.mixo`. `pickSaveProject(name)` has no OS
+  dialog: optional in-app name hook `setSaveNamePrompt(fn)` (answer string |
+  `{name, overwrite:true}` | null=cancel; no hook = suggested name), name
+  sanitised (`sanitizeProjectName`), collision → `Name (2).mixo`, `(3)`…; the
+  name is reserved immediately (empty file, hidden by `listProjects`).
+- `listProjects()` → `[{name, ref, size, lastModified}]` newest first (.mixo,
+  non-empty) for the in-app chooser; `pickOpenProject({ref}|{name})` opens one;
+  `pickOpenProject()` (no target) = hidden `<input type=file accept=.mixo>`,
+  the picked file is COPIED into Projects/ (`importProjectFile(file, name?)`,
+  collision-safe) and the OPFS copy becomes the save target. `deleteProject(refOrName)`.
+- Imports: hidden `<input type=file multiple>` (`cancel` event = []); refs are
+  the picked `File`s — read-only (`writeFile` refuses), `persistRef` throws
+  (callers already treat that as embedded-only). `refForDrop` → null.
+- Exports: `saveExport` uses the Web Share sheet (`navigator.share({files})`)
+  when `canShare({files})` and the device is touch Apple (iPhone/iPad incl.
+  iPadOS "MacIntel"+touch UA) — else anchor download (object URL revoked after
+  60 s for iOS). `hint.share` true/false forces; `forceDownload` skips share.
+  Share AbortError → false (cancel); any other share error → download.
+- Links: none. `resolveAsset` always `{status:'embedded', blob:null}`;
+  `findMoved` → `{source:null, blob:null, scanned:0}`; `mountDirectory` throws.
+- Refs: OPFS handles only. Key = `stableKeyFor(kind, ['opfs', ...opfsPath])`
+  (path via `root.resolve(handle)`), record `{opfs:1, kind, path}` in the IDB
+  `handles` store; `restoreRef` re-walks the path (null when gone/denied);
+  `hasRef` = record stored.
+- `writeFile`: `createWritable()` (atomic) when present; older WebKit without
+  main-thread createWritable → `workers/OpfsWrite.worker.js`
+  (`createSyncAccessHandle`, truncate+write+flush — NOT atomic).
+- `ready()`: no OPFS → "Browser not supported"; OPFS/Projects open fails →
+  "Storage unavailable" (Private Browsing); then `navigator.storage.persist()`
+  best-effort (OPFS is the only copy; WebKit evicts idle origins) and the
+  5 s IndexedDB probe (failure → `persistAssets=false`, non-blocking).
+- Tests: `tests/storage-adapter.test.mjs` runs the shared conformance suite as
+  `[opfs]` (live-link cases gated by `{liveLinks:false}`, replaced by an
+  embedded-only case) over `tests/opfs-stub.mjs` (in-memory OPFS + input/
+  anchor/share stubs); `tests/opfs-storage-adapter.test.mjs` covers tier
+  mapping, listProjects, collisions, open-fallback import, share-vs-download,
+  embedded-only resolve, worker write path.
+- NOT verified on a real device: WebKit `cancel` event on file inputs,
+  share-sheet user-activation after long exports, sync-access-handle worker.
+
 ## PART 11b — IDB (IndexedDB Layer)
 
 **File: `src/core/idb.js`**

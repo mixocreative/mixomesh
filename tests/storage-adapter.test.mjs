@@ -7,6 +7,8 @@ import { isStableKey } from '../src/core/storage/AssetSource.js';
 import { __reset as resetIdb } from './idb-stub.mjs';
 import { DesktopStorageAdapter } from '../src/core/storage/DesktopStorageAdapter.js';
 import { directoryRefFacade } from '../src/core/assets/DirMounts.js';
+import { OpfsStorageAdapter } from '../src/core/storage/OpfsStorageAdapter.js';
+import { createOpfsRoot, installOpfsEnv } from './opfs-stub.mjs';
 
 let passed = 0, failed = 0;
 async function test(name, fn) {
@@ -309,7 +311,35 @@ function desktopHarness() {
   };
 }
 
-async function conformance(label, makeHarness) {
+// OPFS tier (task 8.2): real OpfsStorageAdapter over the idb stub + an
+// in-memory OPFS whose root is `C:` (so ROOT/OTHER are folders INSIDE it) and
+// stubbed file input / name prompt. No live links in this tier.
+function opfsHarness() {
+  resetIdb();
+  const fs = makeFs();
+  seed(fs);
+  const denied = new Set();
+  const { root, dirHandle, fileHandle } = createOpfsRoot(fs, 'C:', { denied });
+  const env = installOpfsEnv({ root });
+  const fileOf = p => new File([fs.get(p).bytes], base(p));
+  return {
+    fs, adapter: OpfsStorageAdapter,
+    mount: p => dirHandle(p),
+    fileRef: p => fileHandle(p),
+    denyRead() { denied.add(ROOT); },
+    restart() { /* OPFS + IndexedDB (stub) persist; refs re-walk the stored path */ },
+    // The in-app name step answers this file's name (null = cancelled).
+    answerSave(p) { OpfsStorageAdapter.setSaveNamePrompt(async () => (p ? base(p) : null)); },
+    answerOpen(paths) { env.setAnswer(() => (paths ? paths.map(fileOf) : null)); },
+    cleanup() {
+      OpfsStorageAdapter.setSaveNamePrompt(null);
+      env.restore();
+      resetIdb();
+    },
+  };
+}
+
+async function conformance(label, makeHarness, { liveLinks = true } = {}) {
   const run = (name, fn) => test(`[${label}] ${name}`, async () => {
     const h = makeHarness();
     try { await fn(h, h.adapter); } finally { h.cleanup(); }
@@ -351,7 +381,7 @@ async function conformance(label, makeHarness) {
     assert.equal(await a.restoreRef(key), null);
   });
 
-  await run('resolveAsset: no source → embedded; matching hash → linked', async (h, a) => {
+  if (liveLinks) await run('resolveAsset: no source → embedded; matching hash → linked', async (h, a) => {
     assert.deepEqual(await a.resolveAsset(null, { contentHash: hullHash }), { status: ASSET_STATUS.EMBEDDED, blob: null });
     const key = await a.persistRef(h.mount(ROOT));
     h.restart();
@@ -360,7 +390,7 @@ async function conformance(label, makeHarness) {
     assert.deepEqual(await bytesOfBlob(r.blob), [1, 2, 3, 4]);
   });
 
-  await run('resolveAsset: bytes differ from contentHash → changed (with the disk bytes)', async (h, a) => {
+  if (liveLinks) await run('resolveAsset: bytes differ from contentHash → changed (with the disk bytes)', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.fs.write(`${ROOT}/parts/hull.glb`, [1, 2, 3, 4, 5]);
     const r = await a.resolveAsset(folderSource(key), { contentHash: hullHash });
@@ -368,7 +398,7 @@ async function conformance(label, makeHarness) {
     assert.deepEqual(await bytesOfBlob(r.blob), [1, 2, 3, 4, 5]);
   });
 
-  await run('resolveAsset: moved file → missing, never scans (Decision 3)', async (h, a) => {
+  if (liveLinks) await run('resolveAsset: moved file → missing, never scans (Decision 3)', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.fs.move(`${ROOT}/parts/hull.glb`, `${ROOT}/renamed/hull-v2.glb`);
     assert.deepEqual(await a.resolveAsset(folderSource(key), { contentHash: hullHash }), { status: 'missing', blob: null });
@@ -376,7 +406,7 @@ async function conformance(label, makeHarness) {
     assert.equal((await a.resolveAsset(folderSource(key), { contentHash: hullHash })).status, 'missing');
   });
 
-  await run('resolveAsset: a path escaping the folder is refused → missing', async (h, a) => {
+  if (liveLinks) await run('resolveAsset: a path escaping the folder is refused → missing', async (h, a) => {
     h.fs.write('C:/vault/secret.glb', [1, 2, 3, 4]);
     const key = await a.persistRef(h.mount(ROOT));
     for (const path of ['../secret.glb', 'parts/../../secret.glb', 'C:/vault/secret.glb', '/secret.glb']) {
@@ -385,7 +415,7 @@ async function conformance(label, makeHarness) {
     }
   });
 
-  await run('single-file source: linked, then missing once deleted', async (h, a) => {
+  if (liveLinks) await run('single-file source: linked, then missing once deleted', async (h, a) => {
     const key = await a.persistRef(h.fileRef(`${ROOT}/loose.stl`));
     assert.ok(key.startsWith('file_'));
     h.restart();
@@ -396,7 +426,7 @@ async function conformance(label, makeHarness) {
     assert.equal((await a.resolveAsset(src, {})).status, 'missing');
   });
 
-  await run('findMoved: explicit walk finds the moved file, reports progress, ext-filtered', async (h, a) => {
+  if (liveLinks) await run('findMoved: explicit walk finds the moved file, reports progress, ext-filtered', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.restart();
     h.fs.move(`${ROOT}/parts/hull.glb`, `${ROOT}/zz/renamed.glb`);
@@ -410,7 +440,7 @@ async function conformance(label, makeHarness) {
     assert.equal(after.status, 'linked', 'the returned source resolves');
   });
 
-  await run('findMoved: can search another persisted folder; no match → source null', async (h, a) => {
+  if (liveLinks) await run('findMoved: can search another persisted folder; no match → source null', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.fs.move(`${ROOT}/parts/hull.glb`, `${OTHER}/deep/hull.glb`);
     const otherKey = await a.persistRef(h.mount(OTHER));
@@ -421,6 +451,18 @@ async function conformance(label, makeHarness) {
     assert.equal(none.source, null);
     assert.equal(none.blob, null);
   });
+
+  if (!liveLinks) {
+    await run('no live links: every source resolves to the embedded copy; findMoved never walks', async (h, a) => {
+      const key = await a.persistRef(h.mount(ROOT));
+      const fileKey = await a.persistRef(h.fileRef(`${ROOT}/loose.stl`));
+      assert.ok(fileKey.startsWith('file_'));
+      for (const src of [null, folderSource(key), { kind: 'file', refKey: fileKey, path: 'loose.stl' }]) {
+        assert.deepEqual(await a.resolveAsset(src, { contentHash: hullHash }), { status: ASSET_STATUS.EMBEDDED, blob: null });
+      }
+      assert.deepEqual(await a.findMoved(folderSource(key), { contentHash: hullHash }), { source: null, blob: null, scanned: 0 });
+    });
+  }
 
   // ── Project / import I/O (task 4.4) ──
   const textOf = async blob => new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()));
@@ -472,7 +514,7 @@ async function conformance(label, makeHarness) {
     assert.deepEqual(await bytesOfBlob(await a.readFile(picked[1].ref)), [1, 2, 3, 4]);
   });
 
-  await run('findMoved honours the file limit', async (h, a) => {
+  if (liveLinks) await run('findMoved honours the file limit', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.fs.move(`${ROOT}/parts/hull.glb`, `${ROOT}/zz/renamed.glb`);
     const r = await a.findMoved(folderSource(key), { contentHash: hullHash, limit: 1 });
@@ -483,6 +525,7 @@ async function conformance(label, makeHarness) {
 
 await conformance('browser', browserHarness);
 await conformance('desktop', desktopHarness);
+await conformance('opfs', opfsHarness, { liveLinks: false });
 
 await test('[desktop] import + mount refs are read-only; a failed write leaves the file intact', async () => {
   const h = desktopHarness();
