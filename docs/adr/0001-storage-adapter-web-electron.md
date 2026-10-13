@@ -247,3 +247,36 @@ token; writable tokens come only from project dialogs or their persisted recents
 concessions: `'unsafe-eval'` for the Embind glue of the vendored WASM libraries (until rebuilt
 with `DYNAMIC_EXECUTION=0`), and `fs:registerDropped` trusting a preload-supplied path
 (read-only), because Electron offers no main-side drop verification.
+
+## Addendum 2026-10-14 (Phase 8 — WebKit / OPFS tier, responsive + touch)
+
+**Decision.** The "Chrome/Edge only" stance is relaxed for WebKit. All iOS and iPadOS browsers
+are WebKit, so Safari support is the only way to reach iPad and iPhone. AGENTS rule 5 now reads:
+Chrome/Edge = full app; Safari/WebKit = supported through a third storage tier; Firefox and other
+engines stay blocked at boot (`capabilities.js detectEngine` + `engineGate`, task 8.1).
+
+**Third tier: `OpfsStorageAdapter` (task 8.2).** Same adapter surface; picked by
+`detectStorageTier` when there are no File System Access pickers but OPFS exists, and never for
+blocked engines. What changes for the user:
+- Projects live in the browser (OPFS `Projects/`), listed in an in-app chooser; Save needs no OS
+  dialog. Opening an outside `.mixo` copies it in (`importProjectFile`).
+- Imports come from `<input type=file multiple>`; refs are read-only `File`s, so bytes are always
+  embedded.
+- Exports go to the share sheet on touch Apple devices ("Save to Files"), else a download.
+- No live links: `mountDirectory`, `relinkByPath` and `watchFiles` are false; `resolveAsset`
+  always reports `embedded`; `findMoved` never finds. The capability flags hide those controls,
+  as the UI capability-gating map above already requires.
+
+**Form factors (tasks 8.3–8.6).** iPad gets the full app: touch camera and selection, larger gizmo
+handles plus a numeric Transform sheet on coarse pointers, and slide-over or bottom panel sheets
+below 1280 px. Below 768 px the app is a read-only viewer (`ViewerMode.js`): it opens files, lists
+objects and shows name, size and scale, with editing blocked at the input layer. Layout tiers come
+from one pure function (`ViewerModel.layoutModeForWidth`) mirrored by the CSS breakpoints.
+
+**PWA (task 8.7).** Manifest + service worker on the hosted https build only (never the dev
+server, never Electron), so an iPad can install the app and open it offline.
+
+**Consequences.** `.mixo` stays the interop format across all three tiers; a project saved on an
+iPad opens on desktop with every byte embedded. WebKit coverage rests on unit tests, emulated
+touch and narrow-width smokes; real-device testing (iPad, iPhone) is an owner check. WebKit was
+never run in CI.
