@@ -7,6 +7,7 @@
 
 import { getState, setState, dispatch } from '../StateManager.js';
 import { EVENTS } from '../events.js';
+import { gizmoSnapDistances } from '../SnapUnits.js';
 
 const BABYLON = window.BABYLON;
 
@@ -24,6 +25,7 @@ let _currentPivotMode   = 'median';
 let _dragSnapshot       = null;
 let _bodyDragOriginPivot = null; // pivot world position at body-drag start
 let _onTransformCommit  = null; // injected by src/app/main.ts to avoid circular imports
+let _gizmoSnapOn        = false; // Ctrl held → gizmo drags snap (overhaul 5.6)
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -73,7 +75,37 @@ function _wireGizmoObservers() {
 function _enabledGizmoChanged() {
   // Babylon recreates the sub-gizmos when modes toggle. Re-attach observers.
   _wireGizmoObservers();
+  _applyGizmoSnap();
 }
+
+// Push the current Ctrl-snap state into every live sub-gizmo. Babylon's
+// `snapDistance` is in the gizmo's own units: position = BU, rotation =
+// radians, scale = multiplier; 0 = free drag. Steps come from
+// state.gizmo.snap (translate in mm) via SnapUnits.
+function _applyGizmoSnap() {
+  const g = _gizmos?.gizmos;
+  if (!g) return;
+  const d = gizmoSnapDistances(getState().gizmo?.snap, _gizmoSnapOn);
+  if (g.positionGizmo) g.positionGizmo.snapDistance = d.translate;
+  if (g.rotationGizmo) g.rotationGizmo.snapDistance = d.rotate;
+  if (g.scaleGizmo)    g.scaleGizmo.snapDistance    = d.scale;
+}
+
+/**
+ * Gizmo Ctrl-snap (overhaul 5.6, plan §4.7): while `on`, gizmo drags snap to
+ * the same steps as the G/R/S modal (translate mm, rotate deg, scale ×).
+ * Driven by InputManager from Ctrl keydown/keyup and live pointer modifiers.
+ * @param {boolean} on
+ */
+export function setGizmoSnap(on) {
+  const next = !!on;
+  if (next === _gizmoSnapOn) return;
+  _gizmoSnapOn = next;
+  _applyGizmoSnap();
+}
+
+/** @returns {boolean} gizmo Ctrl-snap currently engaged. */
+export function isGizmoSnapOn() { return _gizmoSnapOn; }
 
 /**
  * @param {'translate'|'rotate'|'scale'|'none'} mode

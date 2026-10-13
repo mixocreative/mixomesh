@@ -8,9 +8,13 @@ import { storage } from '../core/storage/StorageAdapter.js';
 // Decision 16: new-file imports go through the "already in this project" check.
 import { importWithDedupe } from '../core/assets/AssetImport.js';
 import { SESSION_KEY } from '../core/assets/DirMounts.js';   // one shared constant (4.9)
+import { MM_PER_BU } from '../core/scene/SceneConstants.js';
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
+// Multi-file drops/picks are staggered along +X so N files don't land stacked
+// on one point (overhaul 5.6, plan §4.7 "Drops"). Gap between neighbours, mm.
+const STAGGER_GAP_MM = 10;
 // Mesh-extension support is owned by AssetLoader (single source of truth —
 // `.3mf` etc. extend there, not here).
 
@@ -73,15 +77,59 @@ export async function promptImport(position = BABYLON.Vector3.Zero()) {
     Toast.show(t('toast.dropNeedsMesh'), 'info', 5000);
     return;
   }
+  let at = position;
   for (const { file, ref } of meshes) {
-    await safeImport(async () => {
+    const ids = await safeImport(async () => {
       const fileHandleKey = await _persistedKey(ref);
-      return importWithDedupe(file, file.name, position, {
+      return importWithDedupe(file, file.name, at, {
         ...(fileHandleKey ? { fileHandleKey } : {}),
         ...(siblingFiles.length ? { siblingFiles } : {}),
       });
     }, file.name);
+    at = _nextStaggerPosition(at, ids);
   }
+}
+
+/**
+ * Next drop position after an import placed `meshIds`: to the +X side of the
+ * just-placed object, one gap plus half its width further (the next object is
+ * assumed to be centred on its drop point — exact for most models, a heuristic
+ * for off-centre origins). Unchanged when nothing was placed (cancelled
+ * dedupe prompt / failed import).
+ * @param {any} at   BABYLON.Vector3 drop point just used
+ * @param {string[]|undefined} meshIds
+ * @returns {any} BABYLON.Vector3
+ */
+function _nextStaggerPosition(at, meshIds) {
+  const b = _boundsX(meshIds);
+  if (!b) return at;
+  const next = at.clone();
+  next.x = staggerNextX(b.minX, b.maxX, STAGGER_GAP_MM / MM_PER_BU);
+  return next;
+}
+
+/**
+ * Pure stagger rule (unit-tested): next centre X = placed max X + gap + half
+ * the placed width.
+ * @param {number} minX @param {number} maxX @param {number} gap  all BU
+ */
+export function staggerNextX(minX, maxX, gap) {
+  return maxX + gap + Math.max(0, maxX - minX) / 2;
+}
+
+// World X extent of the live meshes for `meshIds`, or null when none resolve.
+function _boundsX(meshIds) {
+  if (!Array.isArray(meshIds) || !meshIds.length) return null;
+  let minX = Infinity, maxX = -Infinity;
+  for (const id of meshIds) {
+    const m = AssetLoader.getBabylonMesh?.(id);
+    if (!m?.getBoundingInfo) continue;
+    m.computeWorldMatrix?.(true);
+    const bb = m.getBoundingInfo().boundingBox;
+    minX = Math.min(minX, bb.minimumWorld.x);
+    maxX = Math.max(maxX, bb.maximumWorld.x);
+  }
+  return Number.isFinite(minX) ? { minX, maxX } : null;
 }
 
 /** Opaque ref → stable adapter key so a loose file stays linked; null = embedded-only. */
@@ -166,9 +214,9 @@ function _handleDrop(e, position) {
     return;
   }
 
-  const importOne = async ({ file, refP }) => {
+  const importOne = async ({ file, refP }, at = position) => {
     const fileHandleKey = await _persistedKey(await refP);
-    await importWithDedupe(file, file.name, position, {
+    return importWithDedupe(file, file.name, at, {
       ...(fileHandleKey ? { fileHandleKey } : {}),
       ...(siblingFiles.length ? { siblingFiles } : {}),
     });
@@ -186,8 +234,9 @@ function _handleDrop(e, position) {
   safeAsync(async () => {
     const failures = [];
     let ok = 0;
+    let at = position;   // staggered along +X per placed file (overhaul 5.6)
     for (const entry of meshEntries) {
-      try { await importOne(entry); ok++; }
+      try { at = _nextStaggerPosition(at, await importOne(entry, at)); ok++; }
       catch (err) { failures.push({ name: entry.file.name, err }); }
     }
     if (!failures.length) {
@@ -228,4 +277,4 @@ function _extOf(filename) {
   return i === -1 ? '' : filename.slice(i).toLowerCase();
 }
 
-export const ViewportDrop = { attach, promptImport };
+export const ViewportDrop = { attach, promptImport, staggerNextX };

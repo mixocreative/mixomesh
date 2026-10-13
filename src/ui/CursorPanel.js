@@ -15,6 +15,14 @@ import { MM_PER_BU } from '../core/scene/SceneConstants.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { escEnter } from './lib/fields.js';
 import { Toast } from './Toast.js';
+import { Modal } from './Modal.js';
+import { escapeHtml, escapeAttr } from './renderSafe.js';
+
+// Array dialog bounds (overhaul 5.6): copies incl. the source, and the
+// centre-to-centre spacing in mm (negative = toward −axis).
+const ARRAY_COUNT_MIN = 2;
+const ARRAY_COUNT_MAX = 100;
+const ARRAY_COUNT_DEFAULT = 3;
 
 let _root = null;
 let _open = false;
@@ -52,6 +60,8 @@ export function init() {
     const btn = e.target.closest('[data-place]');
     if (btn) _runPlacement(btn.dataset.place);
   });
+
+  Modal.register('arrayDialog', _renderArrayDialog);
 
   InputManager.register('Shift+N', 'global', toggle);
   subscribe(EVENTS.CURSOR_CHANGED, () => { _refreshInputs(); _syncButtons(); });
@@ -118,16 +128,82 @@ function _runPlacement(place) {
   } else if (place.startsWith('mirror-')) {
     push(new MirrorCommand(ids, place.split('-')[1]));
   } else if (place.startsWith('array-')) {
-    const axis = place.split('-')[1];
-    const m = activeId && AssetLoader.getBabylonMesh(activeId);
-    if (!m) return;
-    m.computeWorldMatrix(true);
-    const bb = m.getBoundingInfo().boundingBox;
-    const width = Math.abs(bb.maximumWorld[axis] - bb.minimumWorld[axis]) || 0.1;
-    push(new ArrayCommand(activeId, 3, axis, width));
+    _openArrayDialog(activeId, place.split('-')[1]);
   } else if (place === 'mate') {
     if (ids.length > 1 && activeId) push(new MateCommand(ids, activeId));
   }
+}
+
+// ── Array dialog (overhaul 5.6, plan §4.6 / A10 row 151) ──
+// Array X/Y/Z opens a Count + Spacing (mm) dialog instead of a fixed ×3.
+// Spacing defaults to the object's own extent on that axis (copies touch).
+
+/**
+ * Validate the dialog's raw field values. Pure (unit-tested).
+ * @param {string|number} countRaw @param {string|number} spacingRaw  mm
+ * @returns {{ count: number, spacingMM: number } | null}  null = invalid
+ */
+export function parseArrayInput(countRaw, spacingRaw) {
+  const count = Number(countRaw);
+  const spacingMM = Number(spacingRaw);
+  if (!Number.isInteger(count) || count < ARRAY_COUNT_MIN || count > ARRAY_COUNT_MAX) return null;
+  if (!Number.isFinite(spacingMM) || spacingMM === 0) return null;
+  return { count, spacingMM };
+}
+
+function _openArrayDialog(activeId, axis) {
+  const m = activeId && AssetLoader.getBabylonMesh(activeId);
+  if (!m) return;
+  m.computeWorldMatrix(true);
+  const bb = m.getBoundingInfo().boundingBox;
+  const extentMM = Math.abs(bb.maximumWorld[axis] - bb.minimumWorld[axis]) * MM_PER_BU;
+  const spacingMM = Math.round((extentMM || 100) * 10) / 10;
+  Modal.open('arrayDialog', {
+    axis,
+    spacingMM,
+    onClose: (r) => {
+      if (!r || r.action !== 'apply') return;
+      push(new ArrayCommand(activeId, r.count, axis, r.spacingMM / MM_PER_BU));
+    },
+  });
+}
+
+function _renderArrayDialog({ data, close }) {
+  const el = document.createElement('div');
+  el.className = 'pm-modal';
+  const axis = String(data?.axis ?? 'x').toUpperCase();
+  el.innerHTML = `
+    <h2 class="pm-modal-title">${escapeHtml(t('placement.arrayTitle', { axis }))}</h2>
+    <p class="pm-modal-body">
+      <label>${escapeHtml(t('placement.arrayCount'))}
+        <input class="pp-ratio-input" type="number" data-f="count" min="${ARRAY_COUNT_MIN}" max="${ARRAY_COUNT_MAX}" step="1" value="${ARRAY_COUNT_DEFAULT}">
+      </label>
+    </p>
+    <p class="pm-modal-body">
+      <label>${escapeHtml(t('placement.arraySpacingMm'))}
+        <input class="pp-ratio-input" type="number" data-f="spacing" step="0.1" value="${escapeAttr(String(data?.spacingMM ?? 10))}">
+      </label>
+    </p>
+    <div class="pm-modal-actions">
+      <button class="btn" data-r="cancel">${escapeHtml(t('btn.cancel'))}</button>
+      <button class="btn btn-primary" data-r="apply">${escapeHtml(t('btn.apply'))}</button>
+    </div>`;
+  const countEl = /** @type {HTMLInputElement} */ (el.querySelector('[data-f="count"]'));
+  const spacingEl = /** @type {HTMLInputElement} */ (el.querySelector('[data-f="spacing"]'));
+  const applyBtn = /** @type {HTMLButtonElement} */ (el.querySelector('[data-r="apply"]'));
+  const parsed = () => parseArrayInput(countEl.value, spacingEl.value);
+  const sync = () => { applyBtn.disabled = !parsed(); };
+  const apply = () => { const p = parsed(); if (p) close({ action: 'apply', ...p }); };
+  countEl.addEventListener('input', sync);
+  spacingEl.addEventListener('input', sync);
+  for (const input of [countEl, spacingEl]) {
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+  }
+  el.querySelector('[data-r="cancel"]')?.addEventListener('click', () => close());
+  applyBtn.addEventListener('click', apply);
+  // Land in the Count field (Modal focuses the first focusable synchronously).
+  queueMicrotask(() => { countEl.focus(); countEl.select?.(); });
+  return el;
 }
 
 function _retranslate(root) {
@@ -185,4 +261,4 @@ function _syncButtons() {
   if (showCb) showCb.checked = SceneManager.isCursorVisible();
 }
 
-export const CursorPanel = { init, toggle };
+export const CursorPanel = { init, toggle, parseArrayInput };

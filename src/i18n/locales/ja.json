@@ -787,5 +787,11 @@
   "history.replaceWithActive": "アクティブに置き換え",
   "history.replaceWithActiveCount": "アクティブに置き換え ({n})",
   "history.copyPlacementFromActive": "配置をコピー",
-  "history.copyPlacementFromActiveCount": "配置をコピー ({n})"
+  "history.copyPlacementFromActiveCount": "配置をコピー ({n})",
+  "toolbar.pivot.title": "ピボットポイント",
+  "toolbar.follow.title": "カメラ追従",
+  "toolbar.pivot.individual": "個別の原点",
+  "placement.arrayTitle": "{axis} 方向に配列",
+  "placement.arrayCount": "個数（元を含む）",
+  "placement.arraySpacingMm": "間隔（mm、中心間）"
 }

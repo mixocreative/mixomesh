@@ -14,6 +14,12 @@
 // — never on SELECTION_CHANGED, which fires constantly during interaction.
 // Recomputes from a burst of geometry events (an N-part import) are coalesced
 // into a single microtask-deferred walk.
+//
+// Overhaul 5.6 (plan §4.7 "Measurement"): the selection W×D×H + tris also
+// refresh on TRANSFORM_COMMITTED (a move/scale used to leave stale dims until
+// the next selection change), and cover every part of a multi-part object and
+// every member of a selected group. The cached scene total also drives the
+// hover-highlight perf gate (off at ≥ 70 % of the budget, Decision 22).
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState } from '../core/StateManager.js';
@@ -24,7 +30,8 @@ import { countSceneTriangles, countContainerTriangles, formatTriCount, meshTrian
   from '../core/scene/TriangleCount.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
-import { canonicalObjectId } from '../core/LogicalObjects.js';
+import { canonicalObjectId, logicalObjectPartIds, isGroupId } from '../core/LogicalObjects.js';
+import { Hover } from '../core/Hover.js';
 import { repairWithOverlay } from './RepairFeedback.js';
 
 // Result types that mean "this geometry is not a closed, correctly wound
@@ -55,7 +62,7 @@ let _recomputeScheduled = false;
 
 export function init() {
   for (const ev of GEOMETRY_EVENTS) subscribe(ev, _queueRecompute);
-  for (const ev of [EVENTS.SELECTION_CHANGED, ...GEOMETRY_EVENTS, EVENTS.LOCALE_CHANGED]) subscribe(ev, _render);
+  for (const ev of [EVENTS.SELECTION_CHANGED, EVENTS.TRANSFORM_COMMITTED, ...GEOMETRY_EVENTS, EVENTS.LOCALE_CHANGED]) subscribe(ev, _render);
 }
 
 // M4: the live mesh for an id comes from the AssetLoader registry — the old
@@ -63,6 +70,30 @@ export function init() {
 // metadata reference, so it carries the same meshId) instead of the real one.
 function _meshFor(id) {
   return getBabylonMesh(id) ?? null;
+}
+
+/**
+ * Live meshes behind the selection: every logical part of a selected object,
+ * every object mesh under a selected group's node. Deduped; ghosts skipped.
+ * @param {string[]} sel
+ * @returns {any[]}
+ */
+function _selectionMeshes(sel) {
+  const { objects = {}, groups = {} } = getState().scene ?? {};
+  const out = new Set();
+  for (const id of sel) {
+    if (!objects[id] && isGroupId(id, groups)) {
+      const node = (SceneManager.getScene?.()?.transformNodes ?? []).find(n => n?.metadata?.groupId === id);
+      for (const m of node?.getChildMeshes?.(false) ?? []) if (m?.metadata?.meshId) out.add(m);
+      continue;
+    }
+    const partIds = objects[id] ? logicalObjectPartIds(id, objects) : [id];
+    for (const pid of partIds.length ? partIds : [id]) {
+      const m = _meshFor(pid);
+      if (m) out.add(m);
+    }
+  }
+  return [...out];
 }
 
 // M5: the counting itself lives in src/core/scene/TriangleCount.js so a core
@@ -80,6 +111,8 @@ function _recomputeSceneTris() {
   // spy on `MeshStats.countSceneTriangles` and observe exactly how many real
   // walks happen.
   _cachedSceneTris = scene ? MeshStats.countSceneTriangles(scene) : 0;
+  const budget = caps.triangleBudget || 0;
+  Hover.setBudgetExceeded(budget > 0 && _cachedSceneTris / budget >= WARN_RATIO);
 }
 
 /** Coalesce a burst of geometry events (e.g. an N-part import) into ONE walk. */
@@ -107,9 +140,8 @@ function _render() {
 
   const sel = getState().selection?.selectedIds ?? [];
   let selTris = 0, min = null, max = null;
-  for (const id of sel) {
-    const m = _meshFor(id);
-    if (!m || !m.geometry) continue;
+  for (const m of _selectionMeshes(sel)) {
+    if (!m.geometry) continue;
     selTris += meshTriangles(m);
     m.computeWorldMatrix(true);
     const bb = m.getBoundingInfo().boundingBox;

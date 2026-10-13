@@ -787,5 +787,11 @@
   "history.replaceWithActive": "Replace with active",
   "history.replaceWithActiveCount": "Replace with active ({n})",
   "history.copyPlacementFromActive": "Copy placement from active",
-  "history.copyPlacementFromActiveCount": "Copy placement from active ({n})"
+  "history.copyPlacementFromActiveCount": "Copy placement from active ({n})",
+  "toolbar.pivot.title": "Pivot point",
+  "toolbar.follow.title": "Camera follow",
+  "toolbar.pivot.individual": "Individual origins",
+  "placement.arrayTitle": "Array along {axis}",
+  "placement.arrayCount": "Count (incl. original)",
+  "placement.arraySpacingMm": "Spacing (mm, centre to centre)"
 }

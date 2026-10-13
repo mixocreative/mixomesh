@@ -9,6 +9,9 @@ import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
 import { BU_TO_MM } from './PrintManager.js';
+import { Hover } from './Hover.js';
+import { setGizmoSnap } from './scene/PivotSession.js';
+import { translateSnapBU, rotateSnapRad, scaleSnapStep, snapToStep, nudgeStepMM, nudgeDirection } from './SnapUnits.js';
 
 const BABYLON = window.BABYLON;
 const PointerEventTypes = BABYLON.PointerEventTypes;
@@ -87,6 +90,9 @@ function _isViewportKeyTarget(el) {
 // ── Dispatcher ───────────────────────────────────────────
 
 function _handleKeyDown(e) {
+  // Gizmo Ctrl-snap (overhaul 5.6): holding Ctrl snaps gizmo drags to the
+  // same mm / deg / × steps as the G/R/S modal. Pointer events re-sync it.
+  if (e.key === 'Control' || e.key === 'Meta') setGizmoSnap(true);
   if (_isTypingTarget(document.activeElement) && e.key !== 'Escape') return;
 
   if (_modal) {
@@ -110,6 +116,7 @@ function _handleKeyDown(e) {
 }
 
 function _handleKeyUp(e) {
+  if (e.key === 'Control' || e.key === 'Meta') setGizmoSnap(false);
   if (_modal && (e.key === 'Control' || e.key === 'Meta')) {
     _modal.snap = false;
     _reapplyModal();
@@ -126,9 +133,12 @@ export function init(scene) {
   _scene = scene;
   _canvas = scene.getEngine().getRenderingCanvas();
   BoxSelect.init(scene);
+  Hover.init(scene);
   _registerAll();
   document.addEventListener('keydown', _handleKeyDown);
   document.addEventListener('keyup',   _handleKeyUp);
+  // A Ctrl released while the window is unfocused never sends keyup.
+  window.addEventListener?.('blur', () => setGizmoSnap(false));
   scene.onPointerObservable.add(_onPointer);
 
   if (_canvas) {
@@ -185,6 +195,10 @@ function _onPointer(info) {
     return;
   }
 
+  // Keep gizmo Ctrl-snap in sync with the live modifier state (covers a Ctrl
+  // pressed while focus was elsewhere, e.g. in another window).
+  if (!_modal) setGizmoSnap(!!(ev.ctrlKey || ev.metaKey));
+
   if (info.type === PointerEventTypes.POINTERMOVE) {
     if (_rmbPending) {
       const dx = ev.clientX - _rmbPending.x;
@@ -196,10 +210,14 @@ function _onPointer(info) {
     if (_modal)        _onModalMouseMove(ev);
     else if (_bodyDrag) _onBodyDragMove();
     else if (BoxSelect.isActive()) BoxSelect.update(_scene.pointerX, _scene.pointerY);
+    // Hover highlight (overhaul 5.6): throttled to ≤1 pick per frame inside
+    // Hover; any held button (drag / orbit / pan / marquee) clears it.
+    else Hover.request(_scene.pointerX, _scene.pointerY, ev.buttons ?? 0);
     return;
   }
 
   if (info.type === PointerEventTypes.POINTERDOWN) {
+    Hover.clear();
     if (_modal) {
       if (ev.button === 0)      _commitModal();
       else if (ev.button === 2) _cancelModal();
@@ -423,6 +441,7 @@ function _enterModal(op) {
   };
 
   document.body.classList.add(`modal-${op}`);
+  Hover.setSuspended(true);
   _updateHint();
 }
 
@@ -452,6 +471,7 @@ function _exitModal() {
   if (!_modal) return;
   document.body.classList.remove('modal-translate', 'modal-rotate', 'modal-scale');
   _modal = null;
+  Hover.setSuspended(false);
   StatusBar.setHint(_defaultHint());
   Selection.refresh();
 }
@@ -621,8 +641,8 @@ function _applyScale(dx, _dy) {
   let factor = typed != null ? typed : 1 + (dx * SCALE_PX_SENS);
   if (factor < 0.001) factor = 0.001;
   if (m.snap) {
-    const step = getState().gizmo.snap.scale;
-    factor = Math.max(step, Math.round(factor / step) * step);
+    const step = scaleSnapStep(getState().gizmo.snap);
+    factor = Math.max(step, snapToStep(factor, step));
   }
 
   const axisMask = m.axis
@@ -649,12 +669,14 @@ function _applyScale(dx, _dy) {
   }
 }
 
+// Snap steps are persisted in user units (translate mm, rotate deg, scale ×)
+// and converted to scene units in SnapUnits.js (overhaul 5.6).
 function _maybeSnap(value, kind) {
   if (!_modal?.snap) return value;
   const snaps = getState().gizmo.snap;
-  if (kind === 'translate') return Math.round(value / snaps.translate) * snaps.translate;
-  if (kind === 'rotate')    return Math.round(value / (snaps.rotate * Math.PI / 180)) * (snaps.rotate * Math.PI / 180);
-  if (kind === 'scale')     return Math.round(value / snaps.scale) * snaps.scale;
+  if (kind === 'translate') return snapToStep(value, translateSnapBU(snaps));
+  if (kind === 'rotate')    return snapToStep(value, rotateSnapRad(snaps));
+  if (kind === 'scale')     return snapToStep(value, scaleSnapStep(snaps));
   return value;
 }
 
@@ -836,6 +858,46 @@ function _ungroupSelected() {
   push(new UngroupCommand(groupIds));
 }
 
+// ── Arrow-key nudge (overhaul 5.6, plan §4.7) ───────────
+// Arrows move the selection 1 mm (Shift 10 mm, Alt 0.1 mm) along the world
+// axis nearest the view direction; Ctrl+Up/Down moves vertically. Locked items
+// are skipped (Decision 9) and the selection already respects the click-depth
+// scope. One undoable TransformCommand per press.
+function _nudge(e) {
+  if (_modal || _bodyDrag || BoxSelect.isActive()) return;
+  // The Outliner owns arrow keys while a row has focus (expand / collapse).
+  if (document.activeElement?.closest?.('#outliner')) return;
+  const cam = _scene?.activeCamera;
+  if (!cam) return;
+  const dir = nudgeDirection(e.key, !!(e.ctrlKey || e.metaKey), {
+    right:   cam.getDirection(BABYLON.Vector3.Right()),
+    forward: cam.getDirection(BABYLON.Vector3.Forward()),
+    up:      cam.getDirection(BABYLON.Vector3.Up()),
+  });
+  if (!dir) return;
+  const { targets, lockedSkipped } = Selection.getTransformTargets();
+  if (!targets.length) {
+    if (lockedSkipped) Toast.show(t('toast.lockedNoTransform'), 'info', 2000);
+    return;
+  }
+  // Detach the gizmo pivot so nodes sit in their canonical parents, then drop
+  // anything covered by a selected ancestor (no double move).
+  SceneManager.attachToSelection([], 'median', null);
+  const top = SceneManager.topmostTransformTargets(targets, en => en.node);
+  const d = nudgeStepMM(e) / BU_TO_MM;
+  const prev = {}, next = {};
+  for (const { id, node } of top) {
+    const snap = _snapshotMesh(node);
+    prev[id] = snap;
+    next[id] = {
+      position: { x: snap.position.x + dir.x * d, y: snap.position.y + dir.y * d, z: snap.position.z + dir.z * d },
+      rotation: { ...snap.rotation },
+      scaling:  { ...snap.scaling },
+    };
+  }
+  push(new TransformCommand(prev, next));   // applyTransforms re-attaches the pivot
+}
+
 function _toggleOrtho() {
   // In-place projection toggle preserving the current view direction (L25).
   SceneManager.toggleOrthographic();
@@ -926,6 +988,14 @@ function _registerAll() {
   register('`',   'viewport', _toggleGizmoSpace);  // `~` shares key with backtick
   register('~',   'viewport', _toggleGizmoSpace);
   register('.',   'viewport', () => Selection.cyclePivotMode());
+
+  // ── Viewport: arrow-key nudge (overhaul 5.6) ──
+  for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
+    for (const mod of ['', 'Shift+', 'Alt+']) register(`${mod}${key}`, 'viewport', _nudge);
+  }
+  for (const key of ['ArrowUp', 'ArrowDown']) {
+    for (const mod of ['Ctrl+', 'Ctrl+Shift+', 'Ctrl+Alt+']) register(`${mod}${key}`, 'viewport', _nudge);
+  }
 }
 
 export const InputManager = {
@@ -946,5 +1016,6 @@ export const InputManager = {
     setScene: (sc) => { _scene = sc; },
     setNow: (fn) => { _now = typeof fn === 'function' ? fn : () => performance.now(); },
     resetClick: () => { _lastClick = null; },
+    nudge: _nudge,
   },
 };

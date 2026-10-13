@@ -787,5 +787,11 @@
   "history.replaceWithActive": "取代為使用中項目",
   "history.replaceWithActiveCount": "取代為使用中項目 ({n})",
   "history.copyPlacementFromActive": "複製配置",
-  "history.copyPlacementFromActiveCount": "複製配置 ({n})"
+  "history.copyPlacementFromActiveCount": "複製配置 ({n})",
+  "toolbar.pivot.title": "樞紐點",
+  "toolbar.follow.title": "攝影機跟隨",
+  "toolbar.pivot.individual": "各自原點",
+  "placement.arrayTitle": "沿 {axis} 陣列",
+  "placement.arrayCount": "數量（含原件）",
+  "placement.arraySpacingMm": "間距（mm，中心到中心）"
 }

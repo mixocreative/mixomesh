@@ -43,6 +43,11 @@ let _cachedFollowMode = 'free';
 let _cachedActiveId   = null;
 let _cachedActivePartIds = [];   // active object's logical parts (event-cached, not per-frame)
 let _followSuspended = false;    // set by RenderOutput during offline render/capture
+// Zoom to cursor (overhaul 5.6, plan §4.7 "Camera"): wheel zoom dollies toward
+// the point under the pointer. Default ON; inactive in follow modes (the
+// target is re-locked every frame there, so the zoom pan would just fight it).
+let _zoomToCursor = true;
+let _wheelZoomed  = false;       // a wheel step moved the target this frame (ortho auto-revert must ignore it)
 
 /** Suspend the per-frame follow-target hook (offline render drives target itself). */
 export function suspendFollow(on) { _followSuspended = !!on; }
@@ -78,6 +83,7 @@ export function initCameraRig(scene, canvas) {
     _cachedPreset     = st.scene.camera?.preset ?? 'perspective';
     _cachedFollowMode = st.scene.camera?.followMode ?? 'free';
     _setCachedActive(st.selection?.activeId ?? null);
+    _syncZoomToCursor();
   });
   subscribe(EVENTS.SELECTION_CHANGED, ({ activeId } = {}) => _setCachedActive(activeId ?? null));
   subscribe(EVENTS.ACTIVE_OBJECT_CHANGED, ({ activeId } = {}) => _setCachedActive(activeId ?? null));
@@ -100,6 +106,7 @@ export function initCameraRig(scene, canvas) {
     _cachedPreset = 'perspective';
     _cachedFollowMode = 'free';
     _cachedActiveId = null;
+    _syncZoomToCursor();
   });
 
   return _camera;
@@ -154,6 +161,18 @@ function _setupCamera() {
     wheel.wheelPrecisionY      = 60;
   }
   _camera.wheelPrecision = 50;
+  _syncZoomToCursor();
+  // Zoom-to-cursor bookkeeping, in the CAPTURE phase so it runs before
+  // Babylon's own wheel listener: (1) refresh the wheel input's hit plane —
+  // Babylon only updates it while inertial motion runs, and our custom
+  // orbit/pan move the camera without any, so the plane would be stale after
+  // every orbit; (2) flag the step so the ortho auto-revert ignores the
+  // target shift it causes.
+  _canvas.addEventListener('wheel', () => {
+    if (!wheel?.zoomToMouseLocation) return;
+    wheel['_updateHitPlane']?.();
+    _wheelZoomed = true;
+  }, { capture: true, passive: true });
 
   // Zero panning + orbit inertia kills "ice-skating" coast-after-release — both
   // become 1:1 with cursor, which CAD tools expect.
@@ -166,6 +185,24 @@ function _setupCamera() {
   _canvas.addEventListener('auxclick',  _preventMmbDefault);
   _scene.onPointerObservable.add(_onCameraPointer);
 }
+
+function _syncZoomToCursor() {
+  const wheel = _camera?.inputs?.attached?.mousewheel;
+  if (wheel) wheel.zoomToMouseLocation = _zoomToCursor && _cachedFollowMode === 'free';
+}
+
+/**
+ * Turn wheel zoom-to-cursor on/off (default on). Follow modes always zoom to
+ * the locked target regardless.
+ * @param {boolean} on
+ */
+export function setZoomToCursor(on) {
+  _zoomToCursor = !!on;
+  _syncZoomToCursor();
+}
+
+/** @returns {boolean} the zoom-to-cursor preference. */
+export function isZoomToCursor() { return _zoomToCursor; }
 
 function _preventMmbDefault(e) {
   if (e.button === 1) e.preventDefault();
@@ -467,6 +504,7 @@ export function restoreCameraState(state) {
 export function setFollowMode(mode) {
   if (!['free', 'followActive', 'worldOrigin'].includes(mode)) return;
   _cachedFollowMode = mode;
+  _syncZoomToCursor();
   setState(s => ({
     ...s,
     scene: { ...s.scene, camera: { ...s.scene.camera, followMode: mode } },
@@ -490,6 +528,12 @@ function _applyFollowTarget() {
   // (target diverges), orbit (alpha/beta diverge), or zoom-then-orbit — flips
   // the preset back to 'perspective'. Captures both halves of the NavCube
   // face-click UX: "until user pans OR rotates".
+  // A zoom-to-cursor wheel step pans the target too (camera.update ran
+  // before this hook): that is a zoom, not a pan — re-base instead of reverting.
+  if (_wheelZoomed) {
+    _wheelZoomed = false;
+    if (_lastAppliedTarget && !_animating) _lastAppliedTarget.copyFrom(_camera.target);
+  }
   if (!_animating && _lastAppliedTarget && _camera.mode === BABYLON.Camera.ORTHOGRAPHIC_CAMERA) {
     if (_cachedPreset && _cachedPreset !== 'perspective') {
       const dx = _camera.target.x - _lastAppliedTarget.x;

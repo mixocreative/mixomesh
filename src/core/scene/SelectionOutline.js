@@ -31,6 +31,7 @@ let _outlineActive = false;        // pass + mask RTT gated on a non-empty selec
 let _selMaskRTT          = null;   // RenderTargetTexture
 let _selMaskMatActive    = null;   // override for active mesh — full intensity
 let _selMaskMatSelected  = null;   // override for selected non-active — dim
+let _selMaskMatHover     = null;   // override for the hovered item — mask .b (overhaul 5.6)
 let _outlinePass         = null;
 const _maskMeshes  = new Set();
 
@@ -38,6 +39,11 @@ const _maskMeshes  = new Set();
 // Selection.js, so we accumulate and refresh once.
 let _activeForOutline   = null;
 let _selectedForOutline = [];
+let _hoverForOutline    = [];   // hover channel (overhaul 5.6, Decision 22)
+
+// Hover ring weight relative to the selected ring — "subtle" (plan §4.7): it
+// reuses the selected tint at under half strength, so no new colour token.
+const HOVER_WEIGHT = 0.45;
 
 /** Build mask materials, mask RTT, and the fullscreen outline pass. */
 export function initSelectionOutline(scene, engine, camera) {
@@ -63,6 +69,14 @@ export function initSelectionOutline(scene, engine, camera) {
   _selMaskMatSelected.disableLighting = true;
   _selMaskMatSelected.backFaceCulling = false;
 
+  // Third channel (overhaul 5.6): the hovered item → mask .b, drawn as a faint
+  // selected-tint ring only where no active/selected ring already sits.
+  _selMaskMatHover = new BABYLON.StandardMaterial('mx-sel-mask-hover', scene);
+  _selMaskMatHover.emissiveColor   = new BABYLON.Color3(0, 0, 1);   // hover → B
+  _selMaskMatHover.diffuseColor    = new BABYLON.Color3(0, 0, 0);
+  _selMaskMatHover.disableLighting = true;
+  _selMaskMatHover.backFaceCulling = false;
+
   // Full-res + 4× MSAA so the silhouette edge is ANTI-ALIASED: the mask renders
   // ONLY the selected meshes (not the whole scene), so full resolution is cheap,
   // and MSAA gives sub-pixel edge coverage the outline pass inherits as a smooth
@@ -87,7 +101,7 @@ export function initSelectionOutline(scene, engine, camera) {
   // (WebGPU) twin and pick by engine, so WebGPU needs NO glslang/twgsl CDN
   // transpiler. Same logic in both: 16 angles × 4 radii = 64 taps, ring =
   // dilated mask minus the silhouette so the glow sits only OUTSIDE the mesh.
-  // Mask .r carries intensity (1.0 active, 0.5 selected, 0 empty).
+  // Mask channels: .r = active, .g = selected, .b = hover (overhaul 5.6).
   const isWGPU = !!engine?.isWebGPU;
   if (!isWGPU && !BABYLON.Effect.ShadersStore['mxOutlineFragmentShader']) {
     BABYLON.Effect.ShadersStore['mxOutlineFragmentShader'] = `
@@ -101,12 +115,13 @@ export function initSelectionOutline(scene, engine, camera) {
       uniform float outlineRadiusPx;
       uniform float outlineIntensity;
       uniform float lightMode;   // 1 = alpha-blend (light bg), 0 = additive (dark bg)
+      uniform float hoverWeight;
 
       void main() {
         vec4 scene  = texture2D(textureSampler, vUV);
-        vec2 center = texture2D(maskSampler, vUV).rg;  // r=active, g=selected
+        vec3 center = texture2D(maskSampler, vUV).rgb;  // r=active, g=selected, b=hover
 
-        vec2 ring = vec2(0.0);
+        vec3 ring = vec3(0.0);
         const float TAU = 6.2831853;
         for (int i = 0; i < 16; i++) {
           float a = TAU * (float(i) + 0.5) / 16.0;
@@ -115,19 +130,20 @@ export function initSelectionOutline(scene, engine, camera) {
             float t = float(j) / 4.0;
             float w = 1.0 - t * 0.45;
             vec2 off = dir * outlineRadiusPx * t * texelSize;
-            ring = max(ring, texture2D(maskSampler, vUV + off).rg * w);
+            ring = max(ring, texture2D(maskSampler, vUV + off).rgb * w);
           }
         }
 
-        ring = max(vec2(0.0), ring - center);
+        ring = max(vec3(0.0), ring - center);
         float ringR = ring.r;
         float ringS = ring.g * (1.0 - ringR);
-        vec3 add = activeColor * ringR + selectedColor * ringS;
+        float ringH = ring.b * (1.0 - ringR) * (1.0 - ringS) * hoverWeight;
+        vec3 add = activeColor * ringR + selectedColor * (ringS + ringH);
         if (lightMode > 0.5) {
           // Alpha-blend dark outline OVER light scene — visible because we
           // REPLACE toward outline color, not add (additive would saturate).
-          float a = clamp((ringR + ringS) * outlineIntensity, 0.0, 1.0);
-          float w = max(ringR + ringS, 0.0001);
+          float a = clamp((ringR + ringS + ringH) * outlineIntensity, 0.0, 1.0);
+          float w = max(ringR + ringS + ringH, 0.0001);
           vec3 col = add / w;
           gl_FragColor = vec4(mix(scene.rgb, col, a), scene.a);
         } else {
@@ -152,13 +168,14 @@ export function initSelectionOutline(scene, engine, camera) {
       uniform outlineRadiusPx: f32;
       uniform outlineIntensity: f32;
       uniform lightMode: f32;
+      uniform hoverWeight: f32;
 
       @fragment
       fn main(input: FragmentInputs) -> FragmentOutputs {
         var scene: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
-        var center: vec2f = textureSample(maskSampler, maskSamplerSampler, input.vUV).rg;
+        var center: vec3f = textureSample(maskSampler, maskSamplerSampler, input.vUV).rgb;
 
-        var ring: vec2f = vec2f(0.0);
+        var ring: vec3f = vec3f(0.0);
         let TAU: f32 = 6.2831853;
         for (var i: i32 = 0; i < 16; i = i + 1) {
           let a: f32 = TAU * (f32(i) + 0.5) / 16.0;
@@ -167,17 +184,18 @@ export function initSelectionOutline(scene, engine, camera) {
             let t: f32 = f32(j) / 4.0;
             let w: f32 = 1.0 - t * 0.45;
             let off: vec2f = dir * uniforms.outlineRadiusPx * t * uniforms.texelSize;
-            ring = max(ring, textureSample(maskSampler, maskSamplerSampler, input.vUV + off).rg * w);
+            ring = max(ring, textureSample(maskSampler, maskSamplerSampler, input.vUV + off).rgb * w);
           }
         }
 
-        ring = max(vec2f(0.0), ring - center);
+        ring = max(vec3f(0.0), ring - center);
         let ringR: f32 = ring.r;
         let ringS: f32 = ring.g * (1.0 - ringR);
-        let add: vec3f = uniforms.activeColor * ringR + uniforms.selectedColor * ringS;
+        let ringH: f32 = ring.b * (1.0 - ringR) * (1.0 - ringS) * uniforms.hoverWeight;
+        let add: vec3f = uniforms.activeColor * ringR + uniforms.selectedColor * (ringS + ringH);
         if (uniforms.lightMode > 0.5) {
-          let a: f32 = clamp((ringR + ringS) * uniforms.outlineIntensity, 0.0, 1.0);
-          let w: f32 = max(ringR + ringS, 0.0001);
+          let a: f32 = clamp((ringR + ringS + ringH) * uniforms.outlineIntensity, 0.0, 1.0);
+          let w: f32 = max(ringR + ringS + ringH, 0.0001);
           let col: vec3f = add / w;
           fragmentOutputs.color = vec4f(mix(scene.rgb, col, a), scene.a);
         } else {
@@ -188,7 +206,7 @@ export function initSelectionOutline(scene, engine, camera) {
   }
 
   _outlinePass = new BABYLON.PostProcess('mxOutline', 'mxOutline', {
-    uniforms: ['activeColor', 'selectedColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity', 'lightMode'],
+    uniforms: ['activeColor', 'selectedColor', 'texelSize', 'outlineRadiusPx', 'outlineIntensity', 'lightMode', 'hoverWeight'],
     samplers: ['maskSampler'],
     size: 1.0,
     camera,
@@ -206,6 +224,7 @@ export function initSelectionOutline(scene, engine, camera) {
     eff.setFloat('outlineRadiusPx',  OUTLINE_RADIUS_PX);
     eff.setFloat('outlineIntensity', OUTLINE_INTENSITY);
     eff.setFloat('lightMode',        _lightMode);
+    eff.setFloat('hoverWeight',      HOVER_WEIGHT);
     eff.setTexture('maskSampler', _selMaskRTT);
   };
 
@@ -249,7 +268,9 @@ function _setMaskMeshes(entries) {
   // Apply per-mesh override based on kind ('active' vs 'selected').
   for (const { mesh, kind } of entries) {
     if (!(mesh instanceof BABYLON.Mesh)) continue;
-    const mat = kind === 'active' ? _selMaskMatActive : _selMaskMatSelected;
+    const mat = kind === 'active' ? _selMaskMatActive
+      : kind === 'hover' ? _selMaskMatHover
+      : _selMaskMatSelected;
     _selMaskRTT.renderList.push(mesh);
     try { _selMaskRTT.setMaterialForRendering(mesh, mat); } catch { /* ignore */ }
     _maskMeshes.add(mesh);
@@ -298,13 +319,40 @@ export function setSelected(meshes) {
   _refreshOutlineSet();
 }
 
-function _refreshOutlineSet() {
-  const active = new Set(_activeForOutline);
+/**
+ * Hover channel (overhaul 5.6, Decision 22): outline `meshes` faintly as the
+ * item under the pointer. A mesh already active/selected keeps its selection
+ * tint (one mask material per mesh). Empty list clears the hover.
+ * @param {any[]} meshes
+ */
+export function setHover(meshes) {
+  const next = (meshes ?? []).filter(Boolean);
+  if (next.length === _hoverForOutline.length && next.every((m, i) => m === _hoverForOutline[i])) return;
+  _hoverForOutline = next;
+  if (_selMaskRTT) _refreshOutlineSet();
+}
+
+/**
+ * Pure mask-entry builder: active first, then selected, then hover — each
+ * mesh once, in its strongest role.
+ * @param {any[]} active @param {any[]} selected @param {any[]} hover
+ * @returns {{ mesh: any, kind: 'active'|'selected'|'hover' }[]}
+ */
+export function outlineEntries(active, selected, hover) {
+  const seen = new Set();
   const entries = [];
-  for (const m of _activeForOutline) entries.push({ mesh: m, kind: 'active' });
-  for (const m of _selectedForOutline) {
-    if (!active.has(m)) entries.push({ mesh: m, kind: 'selected' });
+  for (const [list, kind] of [[active, 'active'], [selected, 'selected'], [hover, 'hover']]) {
+    for (const m of list ?? []) {
+      if (!m || seen.has(m)) continue;
+      seen.add(m);
+      entries.push({ mesh: m, kind });
+    }
   }
+  return entries;
+}
+
+function _refreshOutlineSet() {
+  const entries = outlineEntries(_activeForOutline, _selectedForOutline, _hoverForOutline);
   _setMaskMeshes(entries);
   _setOutlineEnabled(entries.length > 0);
 }

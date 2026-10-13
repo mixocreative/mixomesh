@@ -227,6 +227,8 @@ src/
       MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
     Selection.js           ← selection set + active id + pivot mode (§4b)
     BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
+    Hover.js               ← hover highlight driver: ≤1 pick/frame, click-depth target, budget gate, cursor (§6 Mouse, §7 outline)
+    SnapUnits.js           ← snap steps in mm/deg/× → BU/rad, gizmo snap distances, arrow-nudge step + direction (§6)
     SettingsStore.js       ← per-user PANEL settings: localStorage persist + seed + per-section/all reset (§ Settings persistence)
     AssetLoader.js         ← mesh-asset façade + release/remove/reset lifecycle (impl in assets/)
     import/
@@ -416,6 +418,9 @@ tests/                     ← headless harness — Node-native, no build (§14b
   print-cost.test.mjs     ← PrintCost volume/overlap/quote contracts, notValidated + touching-box
                              epsilon (CIA F5, M6)
   mesh-stats.test.mjs     ← MeshStats HUD cache/format contracts
+  snap-units.test.mjs     ← mm snap steps → BU, gizmo snap distances, arrow-nudge step/direction,
+                             drop stagger + Array-dialog parsing (overhaul 5.6)
+  box-select.test.mjs     ← marquee hit-test + hover target/meshes/cursor + outline mask roles
   triangle-budget.test.mjs ← caps.triangleBudget import-warning + gating contracts
   browser-repair-smoke.mjs ← real-Chrome CDP smoke (`test:repair`): open-tetra import →
                              validator caches a `holes` result → MeshValidator.repairObject
@@ -1178,7 +1183,9 @@ const initialState = {
     // a force-show override that defeats every workspace preset.
     panelCollapsed: {},
   },
-  gizmo: { mode: 'translate', space: 'world', snap: { translate: 1.0, rotate: 15, scale: 0.1 } },
+  // snap units (overhaul 5.6): translate = MILLIMETRES (default 1 mm), rotate = degrees,
+  // scale = × step. Converted to BU only in src/core/SnapUnits.js.
+  gizmo: { mode: 'translate', space: 'world', snap: { translate: 1, rotate: 15, scale: 0.1 } },
 };
 ```
 
@@ -1465,6 +1472,16 @@ Shift+D        → duplicate
 Delete / X     → delete (confirm)
 ~              → toggle gizmo space (world/local)
 . (period)     → cycle pivot mode (world → median → active → individual → cursor)
+Arrow keys     → nudge selection 1 mm; Shift = 10 mm; Alt = 0.1 mm (overhaul 5.6).
+                 Left/Right follow the camera's right vector, Up/Down move away
+                 from / toward the viewer on the bed (camera forward; camera up
+                 in a straight-down view) — each snapped to the dominant world
+                 axis. Ctrl+Up/Down = world ±Y. Locked items skipped (toast when
+                 everything is locked); selection already respects the click-
+                 depth scope; one undoable TransformCommand per press; ignored
+                 while an Outliner row has focus (its arrows expand/collapse),
+                 during a modal op, body drag or marquee. Pure step/direction
+                 rules: `src/core/SnapUnits.js` (`nudgeStepMM`, `nudgeDirection`).
 ```
 
 **Laptop fallback:** If keyboard has no numpad, the user can use `Alt+1/3/7` etc. as alternates. Register both.
@@ -1477,6 +1494,12 @@ Delete / X     → delete (confirm)
 5. `Esc` / RMB → restore snapshots, no history push.
 6. `Enter` / LMB → push one `BatchCommand` containing one `TransformCommand` per affected mesh.
 7. Status bar shows live delta: `Grab X: 14.2 mm`.
+8. Ctrl held → snap. Steps come from `state.gizmo.snap` in user units —
+   translate **mm** (factory 1 mm, `config/default-settings.json`), rotate
+   degrees, scale × step — converted once in `src/core/SnapUnits.js`
+   (`translateSnapBU`, `rotateSnapRad`, `scaleSnapStep`, `snapToStep`). The
+   pre-5.6 translate step was in BU (1.0 = 1 m) and never snapped usefully.
+   Gizmo drags use the same steps (PART 7 *Gizmo*).
 
 ### Mouse
 ```
@@ -1507,7 +1530,10 @@ RMB during body drag → cancel (pivot snaps back, no history push)
 RMB click            → context menu (deferred to UP; suppressed if drag > 4 px)
 RMB drag             → pan camera target
 MMB drag             → orbit
-Wheel                → dolly zoom
+Wheel                → zoom TO CURSOR (default on; CameraRig `setZoomToCursor`)
+Hover (no button)    → subtle outline on the item a click would select + cursor
+                       `move` (draggable) / `pointer` (locked) — `core/Hover.js`,
+                       ≤1 pick per frame, off ≥ 70 % triangle budget (PART 7)
 Shift+RMB            → place 3D cursor at hit point
 Shift+N              → toggle the 3D-cursor N-panel (plain N = right-panel toggle, taken)
 Ctrl+C / Ctrl+V      → copy / paste with an aspect chooser (Object/Location/Rotation/Scale/Loc+Rot/All)
@@ -1611,11 +1637,11 @@ SceneManager.pickMeshIdAt(x, y)               → meshId | null  (filters out gi
 - **Adaptive resolution (`scene/AdaptiveResolution.js`, perf 2026-06-13):** the engine does NOT use raw `adaptToDeviceRatio` — full devicePixelRatio on a 2×/4K display is 4× the fragments and tanks heavy 4096²/high-poly print scenes. `initAdaptiveResolution(engine)` sets a CAPPED base hardware-scaling level (effective DPR ≤ 1.5) and runs a safety-valve controller on `onEndFrameObservable`: rolling-avg frame time > 45 ms for a window steps scaling UP (fewer pixels, clamp ≤ 2.0 = half-res/axis); < 28 ms eases back toward base. Exports/turntable render into their own RTT at an explicit size (`CreateScreenshotUsingRenderTarget` overrides the engine render size), so canvas scaling never affects output quality.
 - **Viewport texture cap + export-from-source (`assets/TextureSource.js` + `assets/TextureCap.js`, perf 2026-06-13):** the one lever left for genuinely large texture counts. THE LOCK it works around: Mimaki export reads pixels off the LIVE GPU texture (`print/ExportTextures.js` → `TextureReadback.readTextureRGBA`), so any viewport-side texture downscale would silently degrade the export. The fix decouples the two. **Capture:** at the texture-asset registration seam (`TextureAssets.js` — user-loaded, imported, and restored paths all schedule it at idle) `captureAndCap(assetId, texture)` freezes the full-res, export-ready PNG into `TextureSource` via the SAME `textureToPngBlob()` the export uses — so it is orientation/encoding identical by construction (the glTF↔3MF Y-flip lives only in `TextureReadback.EXPORT_FLIP_Y`). Capture happens BEFORE any downscale. **Cap:** `applyCapToTexture` re-decodes the stored source to a canvas at `min(capPx, srcMax)` and `Texture.updateURL`s the GPU copy (same instance, so material bindings + the export assetId→texture map stay valid; raising the cap restores detail from source — a downscale is never permanent). **Export:** `ExportTextures.textureToBlob(tex, assetId)` returns the captured source blob verbatim when present (full-res, regardless of the viewport cap), falling back to a live GPU readback only when no source was captured. A failed capture sets a runtime `captureFailed` flag (`TextureCap.hasCaptureFailed`, never persisted): with the cap Off the readback is full-res and allowed; with the cap On export ABORTS naming the texture rather than print a downscaled copy (task 0.8). State: `scene.render.textureCapPx` (0 = off/full, default; 4096/2048/1024), persisted with the render look; the Scene ▸ Environment ▸ Performance select writes it and calls `AssetLoader.recapAllTextures(px)`. Default OFF — opt-in VRAM relief. Pinned by `tests/texture-source.test.mjs` (first-writer-wins capture, export-prefers-source, GPU fallback) and the export Y-flip smoke (source path is byte-correct).
 - **Texture colour space (task 1.9):** exported texture PNGs are sRGB. Captured full-res source bytes are exported byte-for-byte (no conversion), and source CAPTURE stays raw because the viewport cap re-uploads those bytes (converting a linear normal/roughness map would corrupt it). Only the export GPU-readback fallback (`textureToPngBlob(tex, { toSrgb: true })`, called by `ExportTextures.textureToBlob`) converts a texture flagged `gammaSpace === false` through the exact sRGB OETF per RGB channel (alpha untouched); sRGB textures, incl. `_useSRGBBuffer` ones, pass unchanged. Helpers in `shaders/ColorSpace.js` (`linearToSrgbByte`, `linearRgbaToSrgbInPlace`, `isLinearTexture`); pinned by `tests/color-space.test.mjs`.
-- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`). Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
+- Camera: `BABYLON.ArcRotateCamera` with `mode` switched between `PERSPECTIVE_CAMERA` and `ORTHOGRAPHIC_CAMERA`. Babylon's pointer orbit/pan is fully DISABLED (`buttons=[]`, `panningSensibility=0`); custom orbit/pan lives in `_onCameraPointer`, wheel zoom is percentage-based (`wheelDeltaPercentage=0.08`) and **zooms to the cursor** (overhaul 5.6): Babylon's `ArcRotateCameraMouseWheelInput.zoomToMouseLocation`, ON by default (`setZoomToCursor(on)` / `isZoomToCursor()`), forced off in follow modes (the target is re-locked every frame there). A capture-phase canvas `wheel` listener refreshes the input's hit plane before each step (Babylon only refreshes it during inertial motion, and the custom orbit/pan have none) and flags the step so the ortho face-preset auto-revert re-bases `_lastAppliedTarget` instead of treating the zoom's target shift as a pan. Ortho bounds recompute from `camera.radius` + aspect every frame the camera is orthographic.
 - Numpad face presets route through `setCameraPreset` (animated, bbox-fit — see *Camera Presets* below). Numpad5 toggles projection IN PLACE via `toggleOrthographic()`, preserving the current view direction.
-- **Selection silhouette (`scene/SelectionOutline.js`):** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive override material, then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `colour × ring` to the scene. By construction the ring exists only outside the mesh. **Two-tone (2026-06-14):** the mask is TWO-CHANNEL — the ACTIVE object writes emissive `(1,0,0)` (carries in R), the other SELECTED objects write `(0,1,0)` (carries in G). The shader dilates both channels and tints R→`OUTLINE_ACTIVE_HEX` (`#c2410c`, darker orange), G→`OUTLINE_SELECTED_HEX` (`#f59e0b`, amber), active drawn over selected where rings overlap — so the active object reads apart from the rest of the selection. A single intensity channel couldn't carry which-is-which without a threshold that misfires on the dilation fringe; the GLSL **and** WGSL twins both consume `activeColor`/`selectedColor`. Dials in `scene/SceneConstants.js`: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `OUTLINE_ACTIVE_HEX`, `OUTLINE_SELECTED_HEX`. **Gated (perf 2026-06-13):** the mask RTT and the 64-tap fullscreen pass are DETACHED whenever the selection is empty (`_setOutlineEnabled`) — they were running every frame for zero benefit, a real cost at 4K over heavy scenes; re-attached on the first selection. Browser smoke pins detach-when-empty / attach-when-selected.
+- **Selection silhouette (`scene/SelectionOutline.js`):** custom mask render-target + post-process — NOT `HighlightLayer`. HL's stencil mask leaks onto PBR mesh faces on any material reporting an alpha mode. The replacement renders selected meshes into a half-res RTT with an emissive override material, then a fullscreen shader dilates the mask, subtracts the silhouette, and adds `colour × ring` to the scene. By construction the ring exists only outside the mesh. **Two-tone (2026-06-14):** the mask is TWO-CHANNEL — the ACTIVE object writes emissive `(1,0,0)` (carries in R), the other SELECTED objects write `(0,1,0)` (carries in G). The shader dilates both channels and tints R→`OUTLINE_ACTIVE_HEX` (`#c2410c`, darker orange), G→`OUTLINE_SELECTED_HEX` (`#f59e0b`, amber), active drawn over selected where rings overlap — so the active object reads apart from the rest of the selection. A single intensity channel couldn't carry which-is-which without a threshold that misfires on the dilation fringe; the GLSL **and** WGSL twins both consume `activeColor`/`selectedColor`. Dials in `scene/SceneConstants.js`: `OUTLINE_RADIUS_PX = 4.5`, `OUTLINE_INTENSITY = 2.0`, `OUTLINE_ACTIVE_HEX`, `OUTLINE_SELECTED_HEX`. **Gated (perf 2026-06-13):** the mask RTT and the 64-tap fullscreen pass are DETACHED whenever the selection is empty (`_setOutlineEnabled`) — they were running every frame for zero benefit, a real cost at 4K over heavy scenes; re-attached on the first selection. Browser smoke pins detach-when-empty / attach-when-selected. **Hover channel (overhaul 5.6, Decision 22):** a third mask channel — the hovered item's meshes write `(0,0,1)` (B); the shader draws it as the SELECTED tint at `HOVER_WEIGHT = 0.45` and only where no active/selected ring sits (`setHover(meshes)`; `outlineEntries` gives each mesh ONE role, active > selected > hover). The pass is attached whenever any of the three lists is non-empty. Driver: `src/core/Hover.js` — pointer moves only record the latest position, the pick runs once in `onBeforeRenderObservable` (≤1 pick/frame); target = the item a click would select (`hoverTarget`: click-depth scope, outside-scope → root item); any held button, a modal G/R/S op (`setSuspended`), pointer-leave, or a scene at ≥ 70 % of `caps.triangleBudget` (`setBudgetExceeded`, fed by MeshStats' cached total) clears it; geometry/project/scope/visibility/lock events clear it. Canvas cursor `move` over a draggable item, `pointer` over a locked one; the hovered id is mirrored as `canvas.dataset.hoverId` (smoke flag).
 - **Wireframe edges (`scene/EdgeOverlay.js`):** `SceneManager.setOverlay('wireframeEdges', on)` builds a per-mesh CLONE sharing the source geometry, drawn with a wireframe emissive `StandardMaterial` (`zOffset −1`) over the textured base — `enableEdgesRendering` at any epsilon only showed sharp creases (field report). Clones carry `metadata.edgeOverlay` so they never pick, cast, or register. `setWireframeEdgeColor(hex)` live-updates the shared material.
-- **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot (`PivotSession`) that parents the selected **transform nodes** — object meshes and, since overhaul 2.2, whole user-group `TransformNode`s. A group node is parented as one unit, so the group moves/rotates/scales rigidly and its children keep their local transforms; any node with a selected ancestor is dropped (`topmostTransformTargets`, evaluated after detaching so parents are canonical). Drag snapshots are keyed by node id (meshId / groupId). Pivot position (`computePivotPosition`, also used by the keyboard G/R/S modal): `world` = origin; `cursor` = 3D cursor (`getCursorPosition`); `median` = centre of the union of world AABBs of every enabled mesh under the selected nodes; `active` = AABB centre of the active entry's geometry (`activeGeometry`: all parts of the active object, or the active group's member meshes); `individual` = centroid of the selected nodes' own origins (a group contributes its group node origin). Geometry-less selections fall back to the origin centroid / active origin. `local` gizmo space copies the active node's world rotation (group node when a group is active).
+- **Gizmo:** `BABYLON.GizmoManager(scene)` with a temporary `TransformNode` pivot (`PivotSession`) that parents the selected **transform nodes** — object meshes and, since overhaul 2.2, whole user-group `TransformNode`s. A group node is parented as one unit, so the group moves/rotates/scales rigidly and its children keep their local transforms; any node with a selected ancestor is dropped (`topmostTransformTargets`, evaluated after detaching so parents are canonical). Drag snapshots are keyed by node id (meshId / groupId). Pivot position (`computePivotPosition`, also used by the keyboard G/R/S modal): `world` = origin; `cursor` = 3D cursor (`getCursorPosition`); `median` = centre of the union of world AABBs of every enabled mesh under the selected nodes; `active` = AABB centre of the active entry's geometry (`activeGeometry`: all parts of the active object, or the active group's member meshes); `individual` = centroid of the selected nodes' own origins (a group contributes its group node origin). Geometry-less selections fall back to the origin centroid / active origin. `local` gizmo space copies the active node's world rotation (group node when a group is active). **Gizmo Ctrl-snap (overhaul 5.6):** `PivotSession.setGizmoSnap(on)` writes Babylon `snapDistance` on the position (BU), rotation (rad) and scale (×) gizmos from `state.gizmo.snap` via `SnapUnits.gizmoSnapDistances` (0 = free), re-applied whenever sub-gizmos are recreated; InputManager drives it from Ctrl/Meta keydown/keyup, live pointer-event modifiers, and window blur (off).
 - **Multi-control state sync rule (2026-06-14):** any state with MORE THAN ONE UI control or entry point MUST dispatch an event on change — a silent `setState` only stays consistent when a single owner re-reads it. Concretely: `Selection.setPivotMode` → `PIVOT_MODE_CHANGED` (toolbar pivot group ↔ N-panel "Use Cursor as Pivot"); `PivotSession.setGizmoMode`/`setGizmoSpace` → `GIZMO_CHANGED` (toolbar World/Local button ↔ the `` ` ``/`~` space-toggle hotkey + G/R/S); `Cursor3D.setCursor` → `CURSOR_CHANGED` (N-panel XYZ inputs + Show/Hide button ↔ Shift+RMB placement + context-menu snap ops). `ViewportToolbar` subscribes `PIVOT_MODE_CHANGED` + `GIZMO_CHANGED`; `CursorPanel` subscribes `CURSOR_CHANGED` + `PIVOT_MODE_CHANGED`. Overlays need no such event because each overlay has exactly ONE control surface (shading-mode/wireframe/inverted = `ViewportToggles`, grid/axes = `ScenePanel`, bedPreview = `PrintPanel`); `followMode` is toolbar-only. Drag-start snapshots absolute transforms; drag-end snapshots again and the bridge in `src/app/main.ts` pushes one `TransformCommand` with `{ alreadyApplied: true }`.
 - **Axes overlay:** three `MeshBuilder.CreateLines` meshes (red X, green Y, blue Z) at length `0.05` BU. 1-pixel GL line stroke, no arrowheads. Toggled via `mesh.isVisible`.
 - **Bed (grid):** ground plane footprint = the printer bed XY (`state.print.bedDimensions.x` × `.y`, mm → BU; default Mimaki 3DUJ-553 508 × 508 mm), rectangular. Lines drawn with `BABYLON.GridMaterial`, styled from `state.scene.grid` (`cellMM` minor cell size, `subdivisions` minor cells per major line; default 10 mm / 10). `SceneManager.rebuildBed()` resizes the floor when bed dimensions change (called from Print ▸ Bed); `SceneManager.setGrid({cellMM,subdivisions})` re-skins the lines (called from Properties ▸ Scene). The single flat `FRONT` tag sits at the `+Z` bed edge and scales with `min(width,depth)`. Old v3.1 saves with a scalar `scene.gridSize` are ignored; `scene.grid` falls back to the 10/10 default.
@@ -4354,6 +4380,10 @@ Drop position:
 - Prefer ray intersection with the `grid` mesh.
 - Fallback to analytic intersection with the `y = 0` plane.
 - If the ray is parallel or behind the camera, use `BABYLON.Vector3.Zero()`.
+- Multi-file drops and multi-file Import picks are **staggered along +X**
+  (overhaul 5.6): file N+1 lands at `placedMaxX + 10 mm + placedWidth/2`
+  (`staggerNextX`) — exact for models centred on their origin, a heuristic
+  otherwise. A cancelled/failed file does not advance the position.
 
 All async **import** work runs through `safeImport` (`src/ui/ImportError.js`) —
 a `safeAsync` variant that, on failure, opens the `importError` detail modal
@@ -4739,9 +4769,9 @@ All of it writes `state.scene.render` (silent) and applies via
 Fusion 360-style floating pill anchored bottom-centre of the `#viewport` element. Always visible, always above the canvas. Four groups, divider between each:
 
 - **Group A — Gizmo mode.** Move / Rotate / Scale. Click → `SceneManager.setGizmoMode('translate'|'rotate'|'scale')`.
-- **Group B — Pivot mode.** Active / Median / Cursor / World (in display order). Default = `'active'` so transforms pivot around the selected object out of the box. Click → `Selection.setPivotMode(...)`. `'world'` pivots at `(0,0,0)`; `'cursor'` pivots at `state.scene.cursor3d`.
+- **Group B — Pivot mode.** Dropdown (`<select class="pp-preset-select">`, overhaul 5.6 — functional swap, restyle is mockup-gated later): Active / Median / Cursor / World (in display order); `'individual'` (reachable via `.`) shows as an extra selected option. Default = `'active'` so transforms pivot around the selected object out of the box. Change → `Selection.setPivotMode(...)`. `'world'` pivots at `(0,0,0)`; `'cursor'` pivots at `state.scene.cursor3d`.
 - **Group ~ — Orientation.** Single toggle button. Click flips `state.gizmo.space` between `'world'` and `'local'` via `SceneManager.setGizmoSpace`. Label reads the current state.
-- **Group C — Camera mode.** Free / Follow Active / World Origin. Click → `SceneManager.setFollowMode(...)`. See §7 *Camera Follow Modes*.
+- **Group C — Camera mode.** Dropdown (same control): Free / Follow Active / World Origin. Change → `SceneManager.setFollowMode(...)`. See §7 *Camera Follow Modes*.
 
 Active button highlighted with `--accent`. Subscribes to `SELECTION_CHANGED`, `ACTIVE_OBJECT_CHANGED`, `CAMERA_PRESET_CHANGED`, `PROJECT_LOADED` so the active highlight stays in sync.
 
@@ -4785,6 +4815,10 @@ Single bar at bottom. Segments:
     selected:** `· sel <selTris> · <W>×<D>×<H> mm · <watertight>` — the
     selection's own triangle count, print-space W×D×H in mm, and watertight
     state. With nothing selected the line is just the triangle-budget half.
+    Overhaul 5.6: the selection half also re-renders on `TRANSFORM_COMMITTED`
+    (dims follow moves/scales) and measures every logical part of a selected
+    object and every object mesh under a selected group. The cached scene
+    total also feeds `Hover.setBudgetExceeded` (hover off at ≥ 70 %).
     The watertight verdict keys on result TYPES — any `holes` /
     `nonManifold` / `invertedNormals` result on the ACTIVE mesh reads
     `⚠ not watertight` (2026-09-18, review CIA F1). It used to test
@@ -5450,7 +5484,11 @@ subset. `MateCommand` = snap-abut to the active object (auto axis/side). `AlignC
 `cloneMeshAsNewObject`, soft-hide undo) · `MirrorCommand` (UV-preserving geometry reflection +
 winding + recompute-normals, recorded as a `mirror-<axis>` geometryFix so it **persists** via the
 M1 replay; self-inverse undo; ContextMenu Mirror X/Y/Z; single-part only). Browser-smoke verified.
-Array count/spacing dialog + align min/max UI + face-mate tracked in `docs/handoff/placement.md`.
+**Array dialog (overhaul 5.6):** Array X/Y/Z opens a modal (`arrayDialog`, registered by
+CursorPanel) with Count (integer 2–100, default 3) and Spacing in mm (centre-to-centre, non-zero,
+default = the active object's extent on that axis so copies touch); `parseArrayInput` validates,
+Enter applies, Apply is disabled while invalid → one `ArrayCommand`. Align min/max UI + face-mate
+tracked in `docs/handoff/placement.md`.
 
 **Bed placement (2026-08-03).** `BedPlacementCommand` expands logical objects,
 skips locked objects, and records one absolute-transform snapshot for the whole

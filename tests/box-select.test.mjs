@@ -93,3 +93,65 @@ test('drops meshes the projector rejects (behind camera → null)', () => {
   const ids = meshIdsInRect(meshes, { sx: 10, sy: 10, ex: 60, ey: 60 }, cull);
   assert.deepEqual(ids, ['a']);
 });
+
+// ── Hover highlight (overhaul 5.6, Decision 22) ──────────────────────────
+// Hover follows the SAME click-depth rule as LMB / marquee: the item a click
+// would select. Pure helpers only; the pick throttle + outline are live.
+const { hoverTarget, hoverMeshes, hoverCursor } = await import('../src/core/Hover.js');
+const { outlineEntries } = await import('../src/core/scene/SelectionOutline.js');
+
+// Scene state: group G holds object a (parts a, a2) and subgroup S holding b;
+// c is a bare root object.
+const HOVER_SCENE = {
+  objects: {
+    a:  { id: 'a',  parentId: 'G', logicalObjectId: 'a' },
+    a2: { id: 'a2', parentId: 'G', logicalObjectId: 'a' },
+    b:  { id: 'b',  parentId: 'S' },
+    c:  { id: 'c',  parentId: null },
+  },
+  groups: {
+    G: { id: 'G', parentId: null, childIds: ['a', 'a2'] },
+    S: { id: 'S', parentId: 'G', childIds: ['b'] },
+  },
+};
+
+test('hover at root targets the top-level group / bare object', () => {
+  assert.equal(hoverTarget('a2', HOVER_SCENE, null), 'G');
+  assert.equal(hoverTarget('b', HOVER_SCENE, null), 'G');
+  assert.equal(hoverTarget('c', HOVER_SCENE, null), 'c');
+  assert.equal(hoverTarget(null, HOVER_SCENE, null), null);
+});
+
+test('hover inside a scope targets one level deeper; outside the scope → root item', () => {
+  assert.equal(hoverTarget('a2', HOVER_SCENE, 'G'), 'a');   // part → lead
+  assert.equal(hoverTarget('b', HOVER_SCENE, 'G'), 'S');
+  assert.equal(hoverTarget('c', HOVER_SCENE, 'G'), 'c');    // click there exits to root
+});
+
+test('hoverMeshes collects every part / member of the item, skipping hidden + unpickable', () => {
+  const meshes = [
+    fakeMesh('a', 0, 0), fakeMesh('a2', 0, 0), fakeMesh('b', 0, 0), fakeMesh('c', 0, 0),
+    fakeMesh('b', 0, 0, { enabled: false }), fakeMesh('a', 0, 0, { isPickable: false }),
+    fakeMesh(null, 0, 0),
+  ];
+  const at = (scope) => (id) => hoverTarget(id, HOVER_SCENE, scope);
+  assert.equal(hoverMeshes('G', meshes, at(null)).length, 3);          // a, a2, b
+  assert.deepEqual(hoverMeshes('a', meshes, at('G')).map(m => m.metadata.meshId), ['a', 'a2']);
+  assert.deepEqual(hoverMeshes('c', meshes, at(null)).map(m => m.metadata.meshId), ['c']);
+  assert.deepEqual(hoverMeshes(null, meshes, at(null)), []);
+});
+
+test('hover cursor: move over a draggable body, pointer over a locked one, none off content', () => {
+  const locked = new Set(['c']);
+  assert.equal(hoverCursor('G', id => locked.has(id)), 'move');
+  assert.equal(hoverCursor('c', id => locked.has(id)), 'pointer');
+  assert.equal(hoverCursor(null, () => false), '');
+});
+
+test('outline mask entries: each mesh once, strongest role wins (active > selected > hover)', () => {
+  const m1 = {}, m2 = {}, m3 = {};
+  const entries = outlineEntries([m1], [m1, m2], [m2, m3, null]);
+  assert.deepEqual(entries.map(e => e.kind), ['active', 'selected', 'hover']);
+  assert.equal(entries[2].mesh, m3);
+  assert.deepEqual(outlineEntries([], [], []), []);
+});

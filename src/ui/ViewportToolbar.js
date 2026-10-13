@@ -10,10 +10,14 @@ import { t } from '../i18n/index.js';
  * Floating Fusion 360-style toolbar anchored bottom-centre of the viewport.
  *
  * Groups:
- *   A. Gizmo mode      — Move / Rotate / Scale
- *   B. Pivot mode      — World / Median / Active / Cursor
+ *   A. Gizmo mode      — Move / Rotate / Scale (buttons)
+ *   B. Pivot mode      — dropdown: Active / Median / Cursor / World (`.` cycles)
  *   ~. Orientation     — Local ↔ World (toggle)
- *   C. Camera mode     — Free / Follow Active / World Origin
+ *   C. Camera mode     — dropdown: Free / Follow Active / World Origin
+ *
+ * Overhaul 5.6 (plan A9 rows 134/136): pivot + camera follow are native
+ * <select>s reusing the panel select style (`pp-preset-select`) — a
+ * functional swap only; the toolbar restyle is mockup-gated and comes later.
  */
 
 let _root = null;
@@ -66,7 +70,7 @@ function _render() {
     </div>
     <div class="vt-sep"></div>
     <div class="vt-group" data-group="pivot">
-      ${PIVOT_MODES.map(m => _btn(m, m.id === pivot, 'pivot')).join('')}
+      ${_select('pivot', PIVOT_MODES, pivot, 'toolbar.pivot.title', 'Crosshair')}
     </div>
     <div class="vt-sep"></div>
     <div class="vt-group" data-group="space">
@@ -77,7 +81,7 @@ function _render() {
     </div>
     <div class="vt-sep"></div>
     <div class="vt-group" data-group="follow">
-      ${FOLLOW_MODES.map(m => _btn(m, m.id === follow, 'follow')).join('')}
+      ${_select('follow', FOLLOW_MODES, follow, 'toolbar.follow.title', 'Orbit')}
     </div>
   `;
   _wire();
@@ -91,14 +95,36 @@ function _btn(mode, active, kind) {
   `;
 }
 
+// Labelled dropdown: a leading icon (visual anchor, not interactive) + a
+// native <select>. A mode outside the list (e.g. 'individual' reached via
+// the `.` cycle) still shows, as an extra selected option, so the control
+// never lies about the live state.
+function _select(kind, modes, current, titleKey, iconName) {
+  const known = modes.some(m => m.id === current);
+  const extra = known ? '' : `<option value="${escapeAttr(current)}" selected>${escapeHtml(t(`toolbar.${kind}.${current}`))}</option>`;
+  return `
+    <span class="vt-label" aria-hidden="true">${icon(iconName, { width: 14, height: 14 })}</span>
+    <select class="pp-preset-select" data-select="${escapeAttr(kind)}" title="${escapeAttr(t(titleKey))}" aria-label="${escapeAttr(t(titleKey))}">
+      ${modes.map(m => `<option value="${escapeAttr(m.id)}" ${m.id === current ? 'selected' : ''}>${escapeHtml(t(m.labelKey))}</option>`).join('')}
+      ${extra}
+    </select>
+  `;
+}
+
 function _wire() {
+  _root.querySelectorAll('select[data-select]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const value = /** @type {HTMLSelectElement} */ (sel).value;
+      if (sel.dataset.select === 'pivot')  Selection.setPivotMode(value);
+      if (sel.dataset.select === 'follow') SceneManager.setFollowMode(value);
+      _render();
+    });
+  });
   _root.querySelectorAll('[data-kind]').forEach(btn => {
     btn.addEventListener('click', () => {
       const kind = btn.dataset.kind;
       const mode = btn.dataset.mode;
       if (kind === 'gizmoMode') SceneManager.setGizmoMode(mode);
-      if (kind === 'pivot')     Selection.setPivotMode(mode);
-      if (kind === 'follow')    SceneManager.setFollowMode(mode);
       if (kind === 'space') {
         const cur = getState().gizmo?.space ?? 'world';
         SceneManager.setGizmoSpace(cur === 'world' ? 'local' : 'world');
