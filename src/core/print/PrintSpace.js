@@ -1,6 +1,7 @@
 /**
  * PrintSpace — the ONE axis + winding seam between Babylon and every print
- * file format (3MF, STL, OBJ-via-Babylon, and the 3MF loader).
+ * file format (3MF, STL, OBJ, PLY, WRL, and the 3MF loader). OBJ may add
+ * the {@link zUpToYUp} rotation on top (per-printer `export.obj.axis`).
  *
  * Babylon scene: LEFT-handed, Y-up. Print formats (3MF Core §3, STL, slicer
  * beds): RIGHT-handed, Z-up, millimetres (PrintPrep already bakes mm).
@@ -98,6 +99,38 @@ export function positionsToPrintSpace(positions) {
   const out = new Float32Array(positions.length);
   for (let i = 0; i + 2 < positions.length; i += 3) {
     const [x, y, z] = toPrintSpace(positions[i], positions[i + 1], positions[i + 2]);
+    out[i] = x; out[i + 1] = y; out[i + 2] = z;
+  }
+  return out;
+}
+
+/** Determinant of {@link zUpToYUp}. Always +1 (a proper rotation, no mirror). */
+export const Z_UP_TO_Y_UP_DET = 1;
+
+/**
+ * Print space (right-handed, Z-up) → right-handed Y-up: a −90° rotation about
+ * +X, (x, y, z) → (x, z, −y). Proper (det +1), so chirality and triangle
+ * winding are preserved — indices from {@link printIndices} stay
+ * counter-clockwise-outward. Used for OBJ when the printer profile's
+ * `export.obj.axis` is 'y-up' (Wavefront convention; the Mimaki default).
+ * Being orthogonal, it maps normals with the same formula.
+ *
+ * Composed with {@link toPrintSpace}: Babylon (x, y, z) → (−x, y, z) — the
+ * exact map Babylon's own OBJ serializer applied in a left-handed scene.
+ */
+export function zUpToYUp(x, y, z) {
+  return [x, z, 0 - y];
+}
+
+/**
+ * Apply {@link zUpToYUp} to a print-space xyz buffer.
+ * @param {ArrayLike<number>} values print-space xyz triples (positions or normals)
+ * @returns {Float32Array} Y-up xyz triples (new buffer)
+ */
+export function bufferZUpToYUp(values) {
+  const out = new Float32Array(values.length);
+  for (let i = 0; i + 2 < values.length; i += 3) {
+    const [x, y, z] = zUpToYUp(values[i], values[i + 1], values[i + 2]);
     out[i] = x; out[i + 1] = y; out[i + 2] = z;
   }
   return out;

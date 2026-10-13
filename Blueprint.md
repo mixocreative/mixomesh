@@ -611,7 +611,7 @@ Before writing custom logic, check if Babylon provides it. **Required uses:**
 
 | Need | Use this |
 |---|---|
-| OBJ + MTL export | `BABYLON.OBJExport.OBJ(meshes, materials, matlibname)` |
+| OBJ + MTL export | `print/ObjWriter.encodeOBJ` (own writer through `PrintSpace` + per-printer axis, task 1.7). `BABYLON.OBJExport` RETIRED 2026-10-14: it could not take the per-printer Y-up/Z-up choice and wrote `usemtl undefined` for id-less materials; Y-up output proven identical to it (`tests/scan-probe.mjs --writers`) |
 | STL export | `print/StlWriter.js` (own little-endian binary writer through `PrintSpace`). `BABYLON.STLExport` REJECTED 2026-09-17: it applies its own Y/Z swap (a mirror) and the call shipped `isLittleEndian=false` — slicers read a garbage triangle count |
 | Selection outline | custom mask-RTT silhouette (`scene/SelectionOutline.js`) — HighlightLayer REJECTED: its stencil leaks onto PBR faces reporting any alpha mode (§7) |
 | Asset thumbnails | `BABYLON.Tools.CreateScreenshotUsingRenderTarget(engine, camera, size, cb)` |
@@ -3603,7 +3603,18 @@ a new price/support-% updates `#pp-cost-total` on every keystroke; `change`
 
 ### OBJ + MTL Export (Primary)
 
-**Use `BABYLON.OBJExport.OBJ()`.** Do not write a custom OBJ serializer.
+**OBJ geometry is written by `ObjWriter.encodeOBJ` (task 1.7) — no Babylon OBJExport.**
+It goes through PrintSpace like every writer: `positionsToPrintSpace` +
+`printIndices` (right-handed, Z-up, mm, CCW-outward), then, when the resolved
+axis is `'y-up'`, `PrintSpace.zUpToYUp` ((x,y,z) → (x, z, −y); proper rotation,
+det +1, so winding/chirality preserved). Normals use the same maps; UVs raw
+(bottom-left origin). Axis = `ctx.prefs.objAxis` ∈ {'y-up','z-up'}, else
+`getPrinterProfile(targetPrinterId).export.obj.axis`, else `'y-up'`
+(`ObjWriter.resolveObjAxis`). For Y-up the composed Babylon→file map is
+(−x, y, z) — identical to the former OBJExport output (verified against the
+real serializer + trimesh +1000 mm³ for both axes). The file carries a
+`# mixomesh export: millimetres, right-handed, <axis>` comment; `usemtl` uses
+the same `objToken` name as the MTL `newmtl`; empty meshes are skipped.
 
 Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
 `print/ObjWriter.js`):
@@ -3613,9 +3624,8 @@ Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
 2. Each clone gets `makeGeometryUnique()` before prep.
 3. Format prep runs: `fallbackMaterial`, `flattenWorld`, `weld`,
    `optimizeIndices`, `createNormals`.
-4. `ObjWriter.serializeOBJ(ctx)` calls `BABYLON.OBJExport.OBJ(meshes, true,
-   baseName, true)` for geometry and rewrites the emitted `mtllib` to exactly
-   match the paired `.mtl` entry.
+4. `ObjWriter.serializeOBJ(ctx)` calls `encodeOBJ(meshEntries, {axis, mtllib})`
+   (see above); `mtllib` names exactly the paired `.mtl` entry.
 5. Mixomesh generates the MTL file so `newmtl` names match OBJ `usemtl`
    material ids and PBR/albedo materials do not depend on Babylon
    StandardMaterial-only fields. Directive arguments (`o`/`g`/`usemtl`/
@@ -3625,9 +3635,8 @@ Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
    (parsers disagree on its sense) — and `Kd/Ka/Ks/Ke` are clamped to
    [0,1]. Locked 2026-09-17 (Mimaki practice: OBJ+MTL+PNG is the primary
    hand-off; textured 3MF second).
-   Winding: Babylon's serializer honours the mesh side flag and negates X
-   for the left-handed scene, which is the same rule as `PrintSpace` —
-   verified outward (+volume) in PrusaSlicer/trimesh 2026-09-17.
+   Winding: `printIndices` (same rule as STL/3MF/PLY) — verified outward
+   (+volume) in trimesh for both axes (2026-10-14).
 6. Real diffuse/albedo/base textures are encoded as PNG blobs under
    `textures/` from `collectTextureExportData`; user-loaded and restored
    textures resolve by `texture.metadata.mixoAssetId` so export prefers the

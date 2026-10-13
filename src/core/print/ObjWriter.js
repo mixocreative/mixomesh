@@ -3,16 +3,25 @@
  *
  * Format-specific code that used to sit inside PrintManager. The orchestrator
  * (PrintPipeline) calls `serializeOBJ(ctx)` and gets back the entries to
- * package; everything OBJ-shaped — MTL writing, solid PNG fallback, mtllib
- * line rewrite — lives here.
+ * package; everything OBJ-shaped — geometry text, MTL writing, solid PNG
+ * fallback — lives here.
+ *
+ * Geometry goes through PrintSpace like every other writer
+ * (positionsToPrintSpace + printIndices: right-handed, Z-up, mm, outward),
+ * then — when the axis is 'y-up' (Wavefront convention, the Mimaki default)
+ * — through the proper rotation PrintSpace.zUpToYUp. Axis source:
+ * `ctx.prefs.objAxis`, else the target printer's `export.obj.axis`, else
+ * 'y-up'. UVs are written raw (bottom-left origin, TextureReadback
+ * contract); MTL / texture packaging is axis-independent.
  */
 
 import { collectTextureExportData, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { positionsToPrintSpace, printIndices, bufferZUpToYUp } from './PrintSpace.js';
+import { getPrinterProfile, PRINTER_OBJ_AXES } from './PrinterProfiles.js';
 
-const BABYLON = window.BABYLON;
-if (!BABYLON) throw new Error('Babylon.js failed to load');
+const DEFAULT_OBJ_AXIS = 'y-up';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
@@ -44,25 +53,88 @@ export async function serializeOBJ(ctx) {
     ...synth.filenameByMaterialName,
   ]);
 
+  const axis = resolveObjAxis(ctx);
   const entries = [];
   if (ctx.individually) {
     for (const unit of ctx.cloneGroups) {
-      const meshesForUnit = unit.meshes.map(e => e.mesh);
       const base = perMeshBaseName(ctx, unit.name);
-      const objData = BABYLON.OBJExport.OBJ(meshesForUnit, true, base, true);
-      entries.push({ path: `${base}.obj`, data: _rewriteObjMtllib(objData, base) });
+      entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base }) });
       entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, filenameByMaterialName) });
     }
   } else {
     const base = exportBaseName(ctx);
-    const objData = BABYLON.OBJExport.OBJ(meshes, true, base, true);
-    entries.push({ path: `${base}.obj`, data: _rewriteObjMtllib(objData, base) });
+    entries.push({ path: `${base}.obj`, data: encodeOBJ(ctx.meshes, { axis, mtllib: base }) });
     entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(ctx.meshes, filenameByMaterialName) });
   }
 
   for (const [filename, blob] of textureBlobs) entries.push({ path: `textures/${filename}`, data: blob });
   for (const [filename, blob] of synth.blobByName) entries.push({ path: `textures/${filename}`, data: blob });
   return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
+}
+
+/**
+ * OBJ up-axis for this export: `ctx.prefs.objAxis`, else the target
+ * printer profile's `export.obj.axis`, else 'y-up'. Unknown values fall
+ * through to the next source.
+ * @param {ExportContext} ctx
+ * @returns {'y-up'|'z-up'}
+ */
+export function resolveObjAxis(ctx) {
+  const pref = ctx?.prefs?.objAxis;
+  if (PRINTER_OBJ_AXES.includes(pref)) return pref;
+  const profileAxis = getPrinterProfile(ctx?.state?.print?.targetPrinterId ?? null)?.export?.obj?.axis;
+  if (PRINTER_OBJ_AXES.includes(profileAxis)) return profileAxis;
+  return DEFAULT_OBJ_AXIS;
+}
+
+/**
+ * Encode meshes as ONE Wavefront OBJ text (positions in mm, flattened world).
+ * One `o` block per mesh; `v`/`vt`/`vn` share each mesh's vertex indexing.
+ * @param {Array<{mesh:object}>} meshEntries
+ * @param {{axis?:'y-up'|'z-up', mtllib?:string}} [opts]
+ * @returns {string}
+ */
+export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null } = {}) {
+  const yUp = axis !== 'z-up';
+  const lines = [];
+  if (mtllib != null) lines.push(`mtllib ${objToken(mtllib)}.mtl`);
+  lines.push(`# mixomesh export: millimetres, right-handed, ${yUp ? 'Y-up' : 'Z-up'}`);
+  let vBase = 0, vtBase = 0;
+  meshEntries.forEach(({ mesh }, j) => {
+    const raw = mesh.getVerticesData?.('position');
+    const idx = printIndices(mesh);
+    if (!raw || !idx.length) return;
+    const count = raw.length / 3;
+    for (const i of idx) {
+      if (!(i >= 0 && i < count)) throw new Error(`ObjWriter: triangle index out of range in "${mesh.name ?? '?'}"`);
+    }
+    const zPos = positionsToPrintSpace(raw);
+    const pos = yUp ? bufferZUpToYUp(zPos) : zPos;
+    const nRaw = mesh.getVerticesData?.('normal');
+    const zNrm = nRaw && nRaw.length === count * 3 ? positionsToPrintSpace(nRaw) : null;
+    const nrm = zNrm && yUp ? bufferZUpToYUp(zNrm) : zNrm;
+    const uvRaw = mesh.getVerticesData?.('uv');
+    const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
+
+    lines.push(`o ${objToken(mesh.name || `mesh${j}`)}`);
+    if (mesh.material) lines.push(`usemtl ${_objMaterialName(mesh)}`);
+    for (let i = 0; i < pos.length; i += 3) lines.push(`v ${pos[i]} ${pos[i + 1]} ${pos[i + 2]}`);
+    if (uv) for (let i = 0; i < uv.length; i += 2) lines.push(`vt ${uv[i]} ${uv[i + 1]}`);
+    if (nrm) for (let i = 0; i < nrm.length; i += 3) lines.push(`vn ${nrm[i]} ${nrm[i + 1]} ${nrm[i + 2]}`);
+    const corner = (i) => {
+      const v = vBase + i + 1;
+      if (uv && nrm) return `${v}/${vtBase + i + 1}/${v}`;
+      if (uv) return `${v}/${vtBase + i + 1}`;
+      if (nrm) return `${v}//${v}`;
+      return `${v}`;
+    };
+    for (let t = 0; t + 2 < idx.length; t += 3) {
+      lines.push(`f ${corner(idx[t])} ${corner(idx[t + 1])} ${corner(idx[t + 2])}`);
+    }
+    vBase += count;
+    if (uv) vtBase += count;
+  });
+  return `${lines.join('\n')}\n`;
 }
 
 // ── solid-colour PNG synthesis ─────────────────────────────
@@ -151,14 +223,6 @@ export function objToken(name) {
   return t || 'material';
 }
 
-// Babylon's serializer writes `o <mesh.name>` and `usemtl <mat.id>` raw; the
-// MTL side is ours (objToken'd). Normalise the OBJ side to the same tokens so
-// the two files agree and no directive carries an embedded space.
-function _normalizeObjTokens(objString) {
-  return String(objString).replace(/^(o|g|usemtl)[ \t]+(.+?)\s*$/gm,
-    (_, key, name) => `${key} ${objToken(name)}`);
-}
-
 // MTL colour is sRGB: Standard `diffuseColor` raw, PBR `albedoColor` (linear)
 // gamma-encoded once via `materialSrgbColor` (Blueprint §10 colour contract).
 function _mtlColor(mat) {
@@ -199,11 +263,4 @@ function _buildOBJMtl(meshEntries, filenameByMaterialName) {
     blocks.push(lines.join('\n'));
   }
   return `${blocks.join('\n\n')}\n`;
-}
-
-function _rewriteObjMtllib(objString, base) {
-  const desired = `mtllib ${objToken(base)}.mtl`;
-  const text = _normalizeObjTokens(objString);
-  if (/^mtllib\s+.+$/m.test(text)) return text.replace(/^mtllib\s+.+$/m, desired);
-  return `${desired}\n${text}`;
 }

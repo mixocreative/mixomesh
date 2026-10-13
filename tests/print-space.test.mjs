@@ -16,6 +16,7 @@ installEnv();
 const {
   toPrintSpace, fromPrintSpace, printIndices, signedVolume,
   positionsToPrintSpace, PRINT_MAP_DET, frontFaceIsClockwise,
+  zUpToYUp, bufferZUpToYUp, Z_UP_TO_Y_UP_DET,
 } = await import('../src/core/print/PrintSpace.js');
 const { encodeBinarySTL } = await import('../src/core/print/StlWriter.js');
 
@@ -127,6 +128,35 @@ await test('encodeBinarySTL: little-endian layout, 50 bytes per facet, print-spa
   const xs = pos.filter((_, i) => i % 3 === 0), zs = pos.filter((_, i) => i % 3 === 2);
   assert.equal(Math.max(...xs), 10, 'x extent matches the Prusa fixture (not mirrored)');
   assert.equal(Math.max(...zs), 20, 'glTF +Y (20 mm) is STL +Z (up), not -Z');
+});
+
+await test('zUpToYUp is a proper rotation (det +1, orthonormal) mapping +Z up to +Y up', () => {
+  const m = matrixOf(zUpToYUp);
+  assert.equal(det3(m), 1);
+  assert.equal(Z_UP_TO_Y_UP_DET, 1);
+  // Orthonormal: M · Mᵀ = I (so normals use the same formula).
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const dot = m[r * 3] * m[c * 3] + m[r * 3 + 1] * m[c * 3 + 1] + m[r * 3 + 2] * m[c * 3 + 2];
+      assert.equal(dot, r === c ? 1 : 0);
+    }
+  }
+  assert.deepEqual(zUpToYUp(0, 0, 30), [0, 30, 0], 'print +Z (up) → +Y (up)');
+  assert.deepEqual(zUpToYUp(10, 0, 0), [10, 0, 0], 'x unchanged (no mirror)');
+  assert.deepEqual(zUpToYUp(0, 20, 0), [0, 0, -20], 'print +Y (back) → -Z');
+  assert.ok(!Object.is(zUpToYUp(0, 0, 0)[2], -0), 'no -0 in the file');
+});
+
+await test('toPrintSpace then zUpToYUp equals the pre-1.7 Babylon OBJ map (-x, y, z) and keeps winding outward', () => {
+  for (const v of [[1, 2, 3], [-4, 0.5, 9], [0, 0, 0]]) {
+    assert.deepEqual(zUpToYUp(...toPrintSpace(...v)).map(n => n + 0), [-v[0], v[1], v[2]].map(n => n + 0));
+  }
+  const m = { name: 'tet', sideOrientation: 0, material: {}, getIndices: () => GLTF_TETRA_IDX,
+    getVerticesData: () => GLTF_TETRA_BABYLON_POS };
+  const yUp = bufferZUpToYUp(positionsToPrintSpace(GLTF_TETRA_BABYLON_POS));
+  assert.ok(Math.abs(signedVolume(yUp, printIndices(m)) - 1000) < 1e-6, 'rotation keeps +1000 mm³');
+  // Y-up output reproduces the glTF-space source vertices exactly (no mirror).
+  assert.deepEqual(Array.from(yUp).map(n => n + 0), GLTF_TETRA_SOURCE_POS);
 });
 
 console.log('\n' + out.join('\n'));

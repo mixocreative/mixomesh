@@ -6,7 +6,7 @@
 // timings. Exit 1 when any file fails a hard check.
 //
 //   node tests/scan-probe.mjs [dir]
-//   node tests/scan-probe.mjs --writers   (PLY/WRL writer check, no browser)
+//   node tests/scan-probe.mjs --writers   (PLY/WRL/OBJ writer check, no browser)
 //
 
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -293,7 +293,7 @@ async function main() {
   }
 }
 
-// ── PLY / WRL writer probe (no browser) ─────────────────
+// ── PLY / WRL / OBJ writer probe (no browser) ─────────────────
 //
 //   node tests/scan-probe.mjs --writers      (or PROBE_WRITERS=1)
 //
@@ -313,6 +313,8 @@ async function writersProbe() {
   window.BABYLON = B;
   const { encodeBinaryPLY, decodeImageRGBA } = await import('../src/core/print/PlyWriter.js');
   const { encodeVRML } = await import('../src/core/print/WrlWriter.js');
+  const { encodeOBJ } = await import('../src/core/print/ObjWriter.js');
+  const { OBJExport } = await import('@babylonjs/serializers/OBJ/objSerializer.js');
 
   const engine = new B.NullEngine();
   const scene = new B.Scene(engine);
@@ -359,9 +361,78 @@ async function writersProbe() {
       writeFileSync(wrlJson, JSON.stringify({ points, faces }));
       files.push({ label, plyPath, wrlJson, rgb });
     }
+    // OBJ (task 1.7): real Babylon meshes — the native box and a glTF-style
+    // twin (reversed indices + ClockWise flag), plus an asymmetric glTF-style
+    // tetra (source (0,0,0) (10,0,0) (0,20,0) (0,0,30), Babylon x negated) so
+    // up/mirror is checkable from bounds. Y-up output must equal what Babylon's
+    // own OBJExport wrote before 1.7 (positions + face order), and both axes
+    // must be outward in trimesh.
+    const objCases = [];
+    const realMesh = (name, positions, indices, side, extra = {}) => {
+      const m = new B.Mesh(name, scene);
+      const vd = new B.VertexData();
+      vd.positions = positions; vd.indices = indices;
+      if (extra.normals) vd.normals = extra.normals;
+      if (extra.uvs) vd.uvs = extra.uvs;
+      vd.applyToMesh(m);
+      m.sideOrientation = side;
+      m.material = new B.StandardMaterial(`${name}-mat`, scene);
+      return m;
+    };
+    box.material = new B.StandardMaterial('cube10-mat', scene);
+    const objMeshes = [
+      ['obj-native-box', box, null],
+      ['obj-gltf-box', realMesh('gltfBox', pos, reversed, B.Material.ClockWiseSideOrientation, { normals: nrm, uvs: uv }), null],
+      ['obj-gltf-tetra', realMesh('gltfTetra', [0, 0, 0, -10, 0, 0, 0, 20, 0, 0, 0, 30],
+        [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2], B.Material.ClockWiseSideOrientation), { 'y-up': 'y', 'z-up': 'z' }],
+    ];
+    const parseObj = (text) => {
+      const v = [], f = [];
+      for (const line of text.split('\n')) {
+        const p = line.trim().split(/\s+/);
+        if (p[0] === 'v') v.push(p.slice(1, 4).map(Number));
+        if (p[0] === 'f') f.push(p.slice(1).map(c => parseInt(c, 10)));
+      }
+      return { v, f };
+    };
+    for (const [label, mesh, upCheck] of objMeshes) {
+      const legacy = parseObj(OBJExport.OBJ([mesh], false, '', true));
+      const ours = parseObj(encodeOBJ([{ mesh }], { axis: 'y-up' }));
+      const same = legacy.v.length === ours.v.length
+        && legacy.v.every((p, i) => p.every((c, k) => Math.abs(c - ours.v[i][k]) < 1e-6))
+        && JSON.stringify(legacy.f) === JSON.stringify(ours.f);
+      console.log(`${same ? '✓' : '✗'} ${label} | y-up OBJ ${same ? 'IDENTICAL to' : 'DIFFERS from'} Babylon OBJExport (${ours.v.length} v, ${ours.f.length} f)`);
+      if (!same) throw new Error(`${label}: y-up OBJ differs from the pre-1.7 Babylon OBJExport output`);
+      for (const axis of ['y-up', 'z-up']) {
+        const objPath = join(outDir, `${label}.${axis}.obj`);
+        writeFileSync(objPath, encodeOBJ([{ mesh }], { axis }));
+        objCases.push([`${label}.${axis}`, objPath, upCheck ? upCheck[axis] : null]);
+      }
+    }
+
     const py = resolveCommand('python') ?? resolveCommand('python3');
     const has = py && spawnSync(py, ['-c', 'import trimesh'], { stdio: 'ignore' }).status === 0;
     if (!has) { console.log('WRITERS PROBE SKIPPED — python trimesh not installed'); return; }
+    const objScript = [
+      'import json, sys, trimesh',
+      'out = []',
+      'for label, path, up in json.loads(sys.argv[1]):',
+      '    m = trimesh.load(path, force="mesh", process=False)',
+      '    out.append({"label": label, "up": up, "vol": float(m.volume), "watertight": bool(trimesh.Trimesh(vertices=m.vertices, faces=m.faces, process=True).is_watertight), "min": m.bounds[0].tolist(), "max": m.bounds[1].tolist()})',
+      'print(json.dumps(out))',
+    ].join('\n');
+    const objRes = spawnSync(py, ['-c', objScript, JSON.stringify(objCases)], { encoding: 'utf8' });
+    if (objRes.status !== 0) throw new Error(`trimesh OBJ probe failed:\n${objRes.stderr}`);
+    const objHard = [];
+    for (const r of JSON.parse(objRes.stdout.trim().split('\n').pop())) {
+      // Tetra: glTF +Y apex (20 mm) must be the file's up axis, x not mirrored (max x 10).
+      const upOk = !r.up || (r.up === 'y' ? r.max[1] === 20 && r.min[2] === 0 && r.max[2] === 30
+        : r.max[2] === 20 && r.min[1] === -30 && r.max[1] === 0) && r.max[0] === 10 && r.min[0] === 0;
+      const ok = Math.abs(r.vol - 1000) < 1 && upOk;
+      if (!ok) objHard.push(r.label);
+      console.log(`${ok ? '✓' : '✗'} ${r.label} | OBJ vol ${r.vol.toFixed(2)} mm³ watertight ${r.watertight} bounds ${JSON.stringify(r.min)}..${JSON.stringify(r.max)}`);
+    }
+    if (objHard.length) throw new Error(`OBJ writer probe failures: ${objHard.join(', ')}`);
     const script = [
       'import json, sys, trimesh',
       'out = []',

@@ -104,6 +104,12 @@ function obj(id, over = {}) {
   };
 }
 
+// OBJ is written by ObjWriter.encodeOBJ (no Babylon OBJExport since task
+// 1.7): count the OBJ files / `o` blocks the export actually zipped.
+const objTexts = () => zipInstances.flatMap(z => Object.entries(z.files))
+  .filter(([n]) => n.endsWith('.obj')).map(([, d]) => String(d));
+const objBlocks = (text) => (text.match(/^o /gm) || []).length;
+
 const stlInfo = (bytes) => {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
@@ -198,7 +204,8 @@ await test('OBJ: valid mesh → auto-fix runs on a clone, exports, downloads', a
   assert.equal(_clones[0].__worldBaked, true, 'world matrix baked into the clone, not the scene');
   assert.equal(_registry.m1.__optimized, undefined, 'live scene mesh untouched');
   assert.equal(_registry.m1.__worldBaked, undefined, 'live scene geometry untouched');
-  assert.equal(calls.objExportOBJ.length, 1);
+  assert.equal(objTexts().length, 1);
+  assert.equal(calls.objExportOBJ.length, 0, 'ObjWriter owns OBJ text, not Babylon OBJExport.OBJ');
   assert.equal(calls.objExportMTL.length, 0, 'PrintManager owns MTL generation, not Babylon OBJExport.MTL');
   const files = zipInstances.at(-1).files;
   assert.match(files['Test_r1to1.obj'], /^mtllib Test_r1to1\.mtl/m);
@@ -216,7 +223,7 @@ await test('OBJ: error that survives auto-fix → blocks with err.validationErro
     assert.match(err.validationErrors[0].message, /non-manifold/);
     return true;
   });
-  assert.equal(calls.objExportOBJ.length, 0, 'no OBJ written');
+  assert.equal(objTexts().length, 0, 'no OBJ written');
   assert.equal(calls.downloads.length, 0, 'no download');
 });
 
@@ -224,7 +231,7 @@ await test('OBJ: error the auto-fix RESOLVES → exports, no error list', async 
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
   MeshValidator.validateMesh = valErrUnlessFixed;   // cleared once createNormals runs
   await PrintManager.exportOBJ();
-  assert.equal(calls.objExportOBJ.length, 1, 'exported because fix cleared the error');
+  assert.equal(objTexts().length, 1, 'exported because fix cleared the error');
   assert.equal(calls.downloads.length, 1);
 });
 
@@ -236,7 +243,7 @@ await test('OBJ: mesh with no material → gets fallback, still exports', async 
   setScene({ objects: { m1: obj('m1') }, registry: { m1: m } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.objExportOBJ.length, 1);
+  assert.equal(objTexts().length, 1);
   assert.equal(calls.objExportMTL.length, 0);
   assert.ok(_clones[0].material, 'fallback material assigned to clone');
 });
@@ -265,7 +272,7 @@ await test('OBJ: warnings only → still exports', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
   MeshValidator.validateMesh = valWarnOnly;
   await PrintManager.exportOBJ();
-  assert.equal(calls.objExportOBJ.length, 1);
+  assert.equal(objTexts().length, 1);
   assert.equal(calls.downloads.length, 1);
 });
 
@@ -276,15 +283,15 @@ await test('OBJ: selectedOnly exports just the selected mesh', async () => {
   });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ({ selectedOnly: true });
-  assert.equal(calls.objExportOBJ.length, 1);
-  assert.equal(calls.objExportOBJ[0].count, 1);
+  assert.equal(objTexts().length, 1);
+  assert.equal(objBlocks(objTexts()[0]), 1);
 });
 
 await test('OBJ: individually → one OBJ call per mesh', async () => {
   setScene({ objects: { m1: obj('m1'), m2: obj('m2') }, registry: { m1: mesh('m1'), m2: mesh('m2') } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ({ individually: true });
-  assert.equal(calls.objExportOBJ.length, 2);
+  assert.equal(objTexts().length, 2);
 });
 
 await test('OBJ: all-meshes mode → single OBJ call with every mesh', async () => {
@@ -292,8 +299,8 @@ await test('OBJ: all-meshes mode → single OBJ call with every mesh', async () 
     registry: { m1: mesh('m1'), m2: mesh('m2'), m3: mesh('m3') } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.objExportOBJ.length, 1);
-  assert.equal(calls.objExportOBJ[0].count, 3);
+  assert.equal(objTexts().length, 1);
+  assert.equal(objBlocks(objTexts()[0]), 3);
 });
 
 await test('OBJ: split logical object exports once in individual mode', async () => {
@@ -308,8 +315,8 @@ await test('OBJ: split logical object exports once in individual mode', async ()
 
   await PrintManager.exportOBJ({ individually: true });
 
-  assert.equal(calls.objExportOBJ.length, 1, 'one OBJ entry for the logical Blender object');
-  assert.equal(calls.objExportOBJ[0].count, 2, 'entry contains every internal material split');
+  assert.equal(objTexts().length, 1, 'one OBJ entry for the logical Blender object');
+  assert.equal(objBlocks(objTexts()[0]), 2, 'entry contains every internal material split');
   const files = zipInstances.at(-1).files;
   assert.ok(files['Test_Mug_r1to1.obj'], 'per-object OBJ uses the visible object name');
   assert.ok(!files['Test_Mug__part1_r1to1.obj'], 'internal split name must not leak as its own OBJ');
@@ -1485,6 +1492,110 @@ await test('WRL: solid-only export → single .wrl with Material diffuseColor', 
   const wrl = zipInstances.at(-1).files['Test_m1_r1to1.wrl'];
   assert.match(wrl, /Material \{ diffuseColor 1 0 0 transparency 0 \}/);
   assert.doesNotMatch(wrl, /ImageTexture|texCoord/);
+});
+
+// ── OBJ axis (task 1.7: OBJ through PrintSpace + per-printer axis) ──────
+
+const { encodeOBJ, resolveObjAxis } = await import('../src/core/print/ObjWriter.js');
+const { signedVolume } = await import('../src/core/print/PrintSpace.js');
+
+// Asymmetric tetra as the app holds it after a glTF import (see
+// tests/print-space.test.mjs): Babylon xyz, ClockWise-flagged, outward.
+// glTF source vertices (0,0,0) (10,0,0) (0,20,0) (0,0,30): +Y (20 mm) is up.
+const TETRA_POS = [0, 0, 0, -10, 0, 0, 0, 20, 0, 0, 0, 30];
+const TETRA_IDX = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2];
+const tetraMesh = (side = 0) => ({
+  name: 'tet', sideOrientation: side, material: { id: 'm' },
+  getIndices: () => TETRA_IDX,
+  getVerticesData: (k) => (k === 'position' ? TETRA_POS : k === 'uv' ? [0, 0, 1, 0, 0, 1, 1, 1] : null),
+});
+const parseObj = (text) => {
+  const pos = [], idx = [];
+  for (const line of text.split('\n')) {
+    const p = line.trim().split(/\s+/);
+    if (p[0] === 'v') pos.push(+p[1], +p[2], +p[3]);
+    if (p[0] === 'f') idx.push(...p.slice(1).map(c => parseInt(c, 10) - 1));
+  }
+  return { pos, idx };
+};
+// The map Babylon's OBJExport.OBJ applied before 1.7 (left-handed scene,
+// node_modules/@babylonjs/serializers/OBJ/objSerializer.js): v = (-x, y, z);
+// faces reversed when the effective side orientation is ClockWise.
+const legacyBabylonObj = (pos, idx, side) => {
+  const p = [];
+  for (let i = 0; i < pos.length; i += 3) p.push(-pos[i], pos[i + 1], pos[i + 2]);
+  const f = [];
+  for (let i = 0; i < idx.length; i += 3) f.push(...(side === 0 ? [idx[i], idx[i + 2], idx[i + 1]] : [idx[i], idx[i + 1], idx[i + 2]]));
+  return { pos: p, idx: f };
+};
+
+await test('OBJ axis: y-up output is geometrically identical to the pre-1.7 Babylon OBJExport output (positions + winding)', () => {
+  for (const side of [0, 1]) {
+    const got = parseObj(encodeOBJ([{ mesh: tetraMesh(side) }], { axis: 'y-up' }));
+    const legacy = legacyBabylonObj(TETRA_POS, TETRA_IDX, side);
+    assert.deepEqual(got.pos.map(v => v + 0), legacy.pos.map(v => v + 0), `positions side=${side}`);
+    assert.deepEqual(got.idx, legacy.idx, `winding side=${side}`);
+  }
+});
+
+await test('OBJ axis: known vertex — glTF apex (0,20,0) is +Y in y-up and +Z in z-up; x not mirrored', () => {
+  const y = parseObj(encodeOBJ([{ mesh: tetraMesh() }], { axis: 'y-up' })).pos;
+  const z = parseObj(encodeOBJ([{ mesh: tetraMesh() }], { axis: 'z-up' })).pos;
+  assert.deepEqual(y.slice(6, 9).map(v => v + 0), [0, 20, 0], 'y-up apex');
+  assert.deepEqual(z.slice(6, 9).map(v => v + 0), [0, 0, 20], 'z-up apex (matches STL/3MF/PLY)');
+  assert.deepEqual(y.slice(3, 6).map(v => v + 0), [10, 0, 0], 'y-up x extent +10 (glTF source x)');
+  assert.deepEqual(z.slice(3, 6).map(v => v + 0), [10, 0, 0], 'z-up x extent +10');
+  assert.deepEqual(y.slice(9, 12).map(v => v + 0), [0, 0, 30], 'y-up: glTF +Z stays +Z');
+  assert.deepEqual(z.slice(9, 12).map(v => v + 0), [0, -30, 0], 'z-up: glTF +Z → -Y (PrintSpace)');
+});
+
+await test('OBJ axis: both axis options are outward (signed volume +1000 mm³) for glTF- and native-flagged meshes', () => {
+  for (const axis of ['y-up', 'z-up']) {
+    const gltf = parseObj(encodeOBJ([{ mesh: tetraMesh(0) }], { axis }));
+    const vol = signedVolume(gltf.pos, gltf.idx);
+    assert.ok(Math.abs(vol - 1000) < 1e-6, `${axis} glTF: expected +1000, got ${vol}`);
+    // Babylon-native outward fixture: negative raw volume, CounterClockWise flag.
+    const nIdx = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+    const native = { name: 'n', sideOrientation: 1, material: { id: 'm' }, getIndices: () => nIdx,
+      getVerticesData: (k) => (k === 'position' ? TETRA_POS : null) };
+    const { pos, idx } = parseObj(encodeOBJ([{ mesh: native }], { axis }));
+    assert.ok(signedVolume(pos, idx) > 0, `${axis} native: outward`);
+  }
+});
+
+await test('OBJ axis: face corners reference v/vt and normals are rotated with positions', () => {
+  const m = tetraMesh();
+  m.getVerticesData = (k) => (k === 'position' ? TETRA_POS : k === 'normal' ? [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]
+    : k === 'uv' ? [0, 0, 1, 0, 0, 1, 1, 1] : null);
+  const y = encodeOBJ([{ mesh: m }], { axis: 'y-up', mtllib: 'T' });
+  const z = encodeOBJ([{ mesh: m }], { axis: 'z-up', mtllib: 'T' });
+  assert.match(y, /^mtllib T\.mtl$/m);
+  assert.match(y, /^usemtl m$/m);
+  assert.match(y, /^vn 0 1 0$/m, 'Babylon +Y normal stays +Y in y-up');
+  assert.match(z, /^vn 0 0 1$/m, 'Babylon +Y normal is +Z in z-up');
+  assert.match(y, /^vt 1 1$/m, 'UVs written raw');
+  assert.match(y, /^f 1\/1\/1 3\/3\/3 2\/2\/2$/m, 'v/vt/vn corners, ClockWise mesh reversed');
+});
+
+await test('OBJ axis: resolveObjAxis — ctx.prefs.objAxis wins, then printer profile, then y-up', () => {
+  assert.equal(resolveObjAxis({ prefs: { objAxis: 'z-up' }, state: { print: { targetPrinterId: 'mimaki-3duj-553' } } }), 'z-up');
+  assert.equal(resolveObjAxis({ prefs: {}, state: { print: { targetPrinterId: 'mimaki-3duj-553' } } }), 'y-up');
+  assert.equal(resolveObjAxis({ prefs: {}, state: { print: { targetPrinterId: 'bambu-x1c' } } }), 'z-up');
+  assert.equal(resolveObjAxis({ prefs: { objAxis: 'sideways' }, state: { print: { targetPrinterId: 'bambu-x1c' } } }), 'z-up');
+  assert.equal(resolveObjAxis({ prefs: {}, state: { print: { targetPrinterId: 'no-such-printer' } } }), 'y-up', 'unknown printer → Mimaki default profile');
+});
+
+await test('OBJ axis: pipeline export for the default Mimaki target writes Y-up', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'mimaki-3duj-553' } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  assert.match(objTexts()[0], /^# mixomesh export: millimetres, right-handed, Y-up$/m);
+  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'bambu-x1c' } }), { silent: true });
+  zipInstances.length = 0;
+  await PrintManager.exportOBJ();
+  assert.match(objTexts()[0], /^# mixomesh export: millimetres, right-handed, Z-up$/m);
+  StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'mimaki-3duj-553' } }), { silent: true });
 });
 
 // ── Report ───────────────────────────────────────────────
