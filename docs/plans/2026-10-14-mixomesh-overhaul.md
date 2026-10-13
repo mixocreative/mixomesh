@@ -1,9 +1,9 @@
 # MIXOMESH overhaul — the authoritative plan
 
-**Date:** 2026-10-14 (merged edition) · **Status:** proposal for owner review · **Branch:** master (solo, no feature branches)
+**Date:** 2026-10-14 (merged edition) · **Status:** APPROVED — owner accepted ALL decisions 1–33 on 2026-10-14; execution tracked in `docs/handoff/overhaul-execution.md` · **Branch:** master (solo, no feature branches)
 **This file is authoritative.** It merges the UX/asset/grouping overhaul, the whole-software expansion (printers, export settings, risk register, function inventory), and the scale/ratio deep-dive into one reconciled plan. Appendices A (function inventory) and B (risk register) are part of this file.
 **Scope of change:** `docs/superpowers/specs/2026-08-03-editor-asset-hierarchy-ux-design.md` §"Scene hierarchy" is overturned by Decision 1; its asset-index, shader-identity and readiness decisions stand. `docs/superpowers/specs/2026-06-16-per-object-ratio-design.md` is refined, not replaced (§3).
-**Authority:** `AGENTS.md` rules 1–8 apply to every task; rule 6 and the printer paragraph are amended per **Decision 32 (RESOLVED by the owner)** in the same commit as task 1.1; rule 7 is amended per **Decision 33 (open)** in the same commit as 2.7. The plan does not claim compliance with the current text of either rule. Every contract change updates `Blueprint.md` in the same commit.
+**Authority:** `AGENTS.md` rules 1–8 apply to every task; rule 6 and the printer paragraph are amended per **Decision 32 (RESOLVED by the owner)** in the same commit as task 1.1; rule 7 is amended per **Decision 33 (accepted 2026-10-14)** in the same commit as 2.7. The plan does not claim compliance with the current text of either rule. Every contract change updates `Blueprint.md` in the same commit.
 
 > **Blueprint rule (AGENTS):** every task below that changes a contract updates the relevant `Blueprint.md` section **in its own commit**; tasks 1.12, 3.7, 4.10, 5.10 and 6.7 are review-only consistency passes and never carry new contract text.
 
