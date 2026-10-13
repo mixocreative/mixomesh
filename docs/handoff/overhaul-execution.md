@@ -43,7 +43,7 @@ Then read the plan section for the next task. Update this file at every safe bou
 
 - Partial staging of shared files (Blueprint.md): scratchpad helper must pipe the patch as BYTES — Python text-mode stdin on Windows turns LF→CRLF and `git apply --cached` fails.
 - Verify COMMITTED state while agents edit the tree: clean worktree `<scratchpad>/wt-head` (node_modules = junction to repo's); `git -C <wt> checkout -q --detach <sha>` then `npm test` there. Never gate a commit on `grep` succeeding — require `# fail 0`.
-- WATCH (flaky, passed on rerun): browser-smoke `glTF restore AABB != fresh import` (ratio ~1.6 — suspect import-bounce timing, memory audit_2026-06-16); browser-export-smoke `Inspected target navigated or closed`. If either repeats twice in a row, investigate.
+- WATCH (flaky, passed on rerun; export smoke now dumps Vite output on failure — suspect Vite dep re-optimisation reload): browser-smoke `glTF restore AABB != fresh import` (ratio ~1.6 — suspect import-bounce timing, memory audit_2026-06-16); browser-export-smoke `Inspected target navigated or closed`. If either repeats twice in a row, investigate.
 - `browser-export-smoke` flaked once with a zlib stream error (passed on rerun) — rerun before investigating.
 - Python heredoc anchors with `\n` sometimes fail to match `console.log('
 ' + out.join('
@@ -112,8 +112,8 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 2.1 Selection accepts group ids | opus | done d7843e5 | |
 | 2.2 Pivot attaches group nodes rigidly | opus | done 29667e2 | median/active pivot now bbox centre; Properties/CursorTools/Swab still mesh-only (2.4/3.6) |
 | 2.3 Group creation semantics + persistence | sonnet | done 2b9c0e4 | Ctrl+G selects new group; Blueprint text in c4351f1 |
-| 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | doing | |
-| 2.5 Lock enforcement | sonnet | todo | after 2.2/2.4 |
+| 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | done 6fcd5ee | group duplicate nudged +10 mm like objects |
+| 2.5 Lock enforcement | sonnet | done a242b9b | Delete ASKS (main fixed agent's refusal → Decision 9); group lock persisted |
 | 2.6 Logical-object edge cases | sonnet | todo | after 2.3/2.7 (ParentCommands, MeshValidator) |
 | 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | done 55bd4f6 | legacy seed in ProjectLoader + test |
 
@@ -122,8 +122,8 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 ### Phase 4 — Asset model + name clashes (10)
 | Task | Tier | Status | Notes |
 |---|---|---|---|
-| 4.1 Schema 3.4 + real migrate() | opus | doing | ratioSource hook left for 1.13 (gated) |
-| 4.2 Adapter resolveAsset/persistRef/restoreRef/findMoved | opus | doing | |
+| 4.1 Schema 3.4 + real migrate() | opus | done 39ae3e4 | ratioSource hook left for 1.13 (gated) |
+| 4.2 Adapter resolveAsset/persistRef/restoreRef/findMoved | opus | done 1210b7f | load-time scan + 'changed' live bytes still on → 4.3/4.5 switch off and update persistence.test priority 1/2 cases |
 | 4.3 Explicit Find moved file | sonnet | todo | after 4.2 |
 | 4.4 Route remaining FSA/idb + boot gate | opus | todo | after 4.2 |
 | 4.5 RelinkAssetCommand | sonnet | todo | after 4.2 |
@@ -161,3 +161,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 1.17+2.7 55bd4f6 (worktree 173/173 + both smokes). Running: 2.2 (opus), 1.8, 1.18. Then 1.12 (Phase 1 close), 2.3 → 2.4 → 2.5 → 2.6.
 - 2026-10-14 (cont.) — 1.18 5faaac5, 2.2 29667e2, 1.8 0ce3ce4 + smoke ack fix. Phase 1 ungated complete except 1.12 (Blueprint pass, next). Then 2.3 → 2.4 → 2.5 → 2.6.
 - 2026-10-14 (cont.) — 2.3 2b9c0e4, 1.12 c4351f1 → Phase 1 ungated DONE (remaining 1.2/1.3/1.13 gated). Running: 2.4, 4.1 (opus), 4.2 (opus).
+- 2026-10-14 (cont.) — 2.4 6fcd5ee, 4.1 39ae3e4, 2.5 a242b9b, 4.2 1210b7f. Full tree: unit 174/174, browser + electron smokes green; export smoke flaky (3 clean reruns). Next: 2.6; 4.3 + 4.5 (+switch off load scan), 4.4, 4.8 logic, 4.9.
