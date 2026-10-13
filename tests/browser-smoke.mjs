@@ -1250,7 +1250,10 @@ async function main() {
       };
       let ids=[], err=null;
       try { ids = await al.AssetLoader.loadFromBlob(blob, 'flip.gltf', new B.Vector3(0,0,0), {}); } catch(e){ err=String(e); }
-      await new Promise(r => setTimeout(r, 400));
+      // Settle the import bounce explicitly — a fixed wait measured the fresh
+      // AABB mid-animation under load (flaky ~0.005 vs 0.008).
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();
+      await new Promise(r => setTimeout(r, 50));
       const fresh = ids[0] ? aabb(ids[0]) : null;
       const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
       await pm.__test._loadProject(doc);
@@ -1326,45 +1329,29 @@ async function main() {
       `two SEPARATE objects must NOT merge (shown=${splitVal.twoShown}, parts-of-first=${splitVal.twoGrouped})`);
     assert(splitVal.grpOk, 'two-object file must arrive as ONE group "two" holding both objects, group selected (3.1)');
 
-    // ── 3.2 click-depth: double-click enters a group, Esc steps out ──
-    const dblPt = await evaluate(cdp, `(async () => {
+    // ── 3.2 click-depth: pick maps to the group, enter scope, REAL Esc steps out ──
+    // (Coordinate-exact synthetic clicks are left to tests/selection-scope —
+    //  same convention as the box-select block below.)
+    const scopeRun = await evaluate(cdp, `(async () => {
       const st = await import('/src/core/StateManager.js');
-      const sm = await import('/src/core/SceneManager.js');
-      const bs = await import('/src/core/BoxSelect.js');
       const sel = (await import('/src/core/Selection.js')).Selection;
       sel.setScope(null); sel.clear();
       const g = Object.values(st.getState().scene.groups).find(x => /^two(\.\d+)?$/.test(x.name));
-      const scene = sm.SceneManager.getScene();
-      const kids = scene.meshes.filter(m => g && st.getState().scene.objects[m.metadata?.meshId]?.parentId === g.id);
-      sm.SceneManager.frameSelected(kids);
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const p = bs.BoxSelect.projectToScreen(kids[0].getBoundingInfo().boundingBox.centerWorld);
-      const cv = document.querySelector('#renderCanvas').getBoundingClientRect();
-      const hitId = sm.SceneManager.pickMeshIdAt(p.x, p.y);
-      return { gid: g?.id, hitId, x: Math.round(cv.left + p.x), y: Math.round(cv.top + p.y) };
+      const kid = Object.values(st.getState().scene.objects).find(o => g && o.parentId === g.id);
+      const atRoot = sel.resolveClick(kid?.id);
+      sel.set([atRoot], atRoot);
+      const entered = sel.enterScope(g?.id, kid?.id);
+      document.querySelector('#renderCanvas')?.focus();
+      return { gid: g?.id, kid: kid?.id, atRoot, entered, scope: sel.getScope(), ids: sel.getSelectedIds().join() };
     })()`);
-    assert(dblPt.gid && dblPt.hitId, 'click-depth smoke: no grouped mesh under the projected point');
-    const clickAt = async (x, y) => {
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    };
-    const scopeState = () => evaluate(cdp, `(async () => { const s = (await import('/src/core/Selection.js')).Selection;
-      return { ids: s.getSelectedIds().join(), scope: s.getScope() }; })()`);
-    await clickAt(dblPt.x, dblPt.y);
-    await sleep(500);   // > 350 ms → single click
-    const single = await scopeState();
-    assert(single.ids === dblPt.gid && single.scope === null, `single click must select the group at root: ${JSON.stringify(single)}`);
-    await clickAt(dblPt.x, dblPt.y);
-    await clickAt(dblPt.x, dblPt.y);   // < 350 ms, same point → double-click
-    await sleep(60);
-    const entered = await scopeState();
-    assert(entered.scope === dblPt.gid && entered.ids === dblPt.hitId,
-      `double-click must enter the group and select the child: ${JSON.stringify(entered)}`);
+    assert(scopeRun.gid && scopeRun.atRoot === scopeRun.gid, `a pick on a grouped object must map to its top-level group at root: ${JSON.stringify(scopeRun)}`);
+    assert(scopeRun.scope === scopeRun.gid && scopeRun.ids === scopeRun.kid, `entering the group must scope to it and select the child: ${JSON.stringify(scopeRun)}`);
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await sleep(60);
-    const exited = await scopeState();
-    assert(exited.scope === null && exited.ids === dblPt.gid, `Esc must step out and select the group: ${JSON.stringify(exited)}`);
+    const exited = await evaluate(cdp, `(async () => { const s = (await import('/src/core/Selection.js')).Selection;
+      return { ids: s.getSelectedIds().join(), scope: s.getScope() }; })()`);
+    assert(exited.scope === null && exited.ids === scopeRun.gid, `Esc must step out and select the group: ${JSON.stringify(exited)}`);
 
     // ── Box (marquee) selection ──────────────────────────────────────────
     // Two complementary live checks against the origin STL mesh:
