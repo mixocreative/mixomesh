@@ -2969,7 +2969,7 @@ PrintManager.exportPLY(options)                  → Promise<void>  // binary LE
 PrintManager.exportWRL(options)                  → Promise<void>  // VRML 2.0 + ImageTexture
 PrintManager.exportThreeMF(options)              → Promise<void>  // content-selected 3MF sub-flavor
 PrintManager.previewExportContext(options)       → ExportContext|null  // UI preview entry — single source of truth
-PrintManager.getExportReference(options)         → {logicalId, ratio}  // active printable unit, else first printable unit
+PrintManager.getExportReference(options)         → {logicalId, ratio}  // print.referenceObjectId unit, else first printable unit (never the selection — 1.15)
 PrintManager.getExportedDimensions(meshId, ctx?) → {x,y,z} in mm  // accepts a preview ctx to avoid rebuild
 PrintManager.SCALE_PRESETS                       → scale-presets.json passthrough
 
@@ -3271,7 +3271,8 @@ DISPLAY : object shown at its own ratio; mixed ratios look correct automatically
 EDIT    : ratio R_old→R_new ⇒ rescale ×(R_old/R_new) about the object's own origin, bake, store ratio   [RescaleObjectCommand]
 EXPORT  : ratioFactor = referenceRatio / T,   unitFactor = BU_TO_MM (1000),
           factor      = ratioFactor * unitFactor
-          referenceRatio = (active printable unit, else first printable unit).ratio
+          referenceRatio = (print.referenceObjectId unit, else first printable unit).ratio
+            — explicit per-project state, NEVER the selection (task 1.15 / Decision 25)
             — built into ctx.referenceRatio by ExportContext.buildExportContext;
             consumed by PrintNaming.exportBaseName(ctx) + PrintPrep.flattenWorld(ctx)
             + ObjWriter.serializeOBJ(ctx) + ThreeMFWriter so factor / filename / pivot
@@ -3355,8 +3356,17 @@ stay on the node and are saved directly — never baked.**
 
 **RESOLVED 2026-06-17:** the former "as shown" target/reference split is gone
 from the export path. Export, filename suffixes, Print panel scale preview, and
-`PrintManager.getExportedDimensions` all use the active printable reference
-unit, falling back to the first printable unit if the active object is excluded.
+`PrintManager.getExportedDimensions` all use the export reference unit.
+**Changed 2026-10-14 (task 1.15, Decision 25):** the reference is the saved
+per-project `print.referenceObjectId` (default `null` in
+`config/default-settings.json`, persisted in the `.mixo` `print` slice, NOT a
+per-user setting), matched by logical id or part mesh id, falling back to the
+first printable unit when unset or not exported — never the active selection,
+so one project always exports the same sizes and filenames. A dangling id is
+dropped on load and on save. Readiness adds an `info` issue `mixed-scales`
+(`data: { referenceId, referenceRatio, ratios }`) when printable objects
+differ in scale; info never changes status or needs acknowledgement. The
+"Reference: … [change]" UI lands with task 1.3.
 
 **RESOLVED 2026-06-18 (structural restructure):** the three competing export-
 factor sources of truth (PrintManager inline, PrintScale adapter, PrintPanel

@@ -706,5 +706,7 @@
   "status.nothingToRedo": "沒有可重做的動作",
   "toast.geometryFixReplayFailed": "無法對「{name}」重新套用修復 — 請再次執行修復",
   "print.exportPly": "匯出 PLY（頂點顏色）",
-  "print.exportWrl": "匯出 VRML (WRL)"
+  "print.exportWrl": "匯出 VRML (WRL)",
+  "print.issue.mixed-scales": "物件比例不一致",
+  "print.issueAction.mixed-scales": "其他物件會保持相對於參考物件的大小（依畫面所示）。"
 }

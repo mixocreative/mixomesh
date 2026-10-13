@@ -193,6 +193,8 @@ export async function serialiseTextureImages() {
  */
 function _serialisablePrint(print = {}) {
   const { repairOnImport, ...rest } = print;
+  // 1.15: never persist a reference to an object that no longer exists.
+  if (rest.referenceObjectId && !getState().scene.objects[rest.referenceObjectId]) rest.referenceObjectId = null;
   return { ...rest };
 }
 

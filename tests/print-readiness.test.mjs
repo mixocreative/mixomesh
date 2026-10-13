@@ -118,3 +118,18 @@ assert.deepEqual(
   ['obj', '3mf', 'stl', 'ply', 'wrl'],
   'printer identity never changes format availability',
 );
+
+// 1.15: mixed scales → one info note naming the explicit reference; never blocks.
+const mixed = buildReadiness({
+  parts: [part({ ratio: 35 }), part({ objectId: 'part_b', objectIds: ['part_b'], ratio: 72 })],
+  targets: [target(35)],
+  bedDimensions: bed,
+  reference: { logicalId: 'part_b', ratio: 72 },
+});
+assert.equal(find(mixed, 'mixed-scales')?.severity, 'info');
+assert.equal(find(mixed, 'mixed-scales')?.data.referenceId, 'part_b');
+assert.deepEqual(find(mixed, 'mixed-scales')?.data.ratios, [35, 72]);
+assert.equal(mixed.status, 'ready', 'info never changes status');
+assert.equal(mixed.requiresAcknowledgement, false);
+const same = buildReadiness({ parts: [part({ ratio: 72 }), part({ objectId: 'part_b', objectIds: ['part_b'], ratio: 72 })], targets: [target(72)], bedDimensions: bed });
+assert.equal(find(same, 'mixed-scales'), undefined);

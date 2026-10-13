@@ -706,5 +706,7 @@
   "status.nothingToRedo": "Nothing to redo",
   "toast.geometryFixReplayFailed": "Couldn’t re-apply the repair to “{name}” — run Repair again",
   "print.exportPly": "Export PLY (vertex colour)",
-  "print.exportWrl": "Export VRML (WRL)"
+  "print.exportWrl": "Export VRML (WRL)",
+  "print.issue.mixed-scales": "Objects at different scales",
+  "print.issueAction.mixed-scales": "Other objects keep their size relative to the reference object (as shown)."
 }

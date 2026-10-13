@@ -706,5 +706,7 @@
   "status.nothingToRedo": "やり直す操作はありません",
   "toast.geometryFixReplayFailed": "「{name}」に修復を再適用できませんでした — もう一度修復してください",
   "print.exportPly": "PLY を書き出し（頂点カラー）",
-  "print.exportWrl": "VRML (WRL) を書き出し"
+  "print.exportWrl": "VRML (WRL) を書き出し",
+  "print.issue.mixed-scales": "スケールの異なるオブジェクトがあります",
+  "print.issueAction.mixed-scales": "ほかのオブジェクトは基準オブジェクトに対する大きさを保ちます（表示どおり）。"
 }

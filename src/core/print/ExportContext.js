@@ -294,10 +294,17 @@ export function getExportedDimensions(meshId, ctx = null) {
 
 // ── internals ────────────────────────────────────────────
 
+// The export reference is explicit per-project state (`print.referenceObjectId`,
+// task 1.15 / Decision 25) — NEVER the transient selection, so the same project
+// always exports the same sizes and filenames whatever was clicked last. Falls
+// back to the first printable unit when unset or no longer exported. Matches a
+// unit by its logical id or any of its part mesh ids.
 function _selectReferenceUnit(units, state) {
-  const activeId = state.selection?.activeId ?? null;
-  const activeUnit = activeId ? units.find(u => u.logicalId === activeId) : null;
-  return activeUnit ?? units[0] ?? null;
+  const refId = state.print?.referenceObjectId ?? null;
+  const refUnit = refId
+    ? units.find(u => u.logicalId === refId || u.parts?.some(p => p.meshId === refId))
+    : null;
+  return refUnit ?? units[0] ?? null;
 }
 
 function _referencePivot(unit) {

@@ -155,6 +155,24 @@ await test('buildExportContext: pivot defaults to reference unit origin', () => 
   assert.equal(ctx.pivot.z, 0);
 });
 
+await test('1.15: export reference = print.referenceObjectId, never the selection', () => {
+  const units = [unit('a', 72), unit('b', 35)];
+  const base = { ...FAKE_STATE, scene: { objects: { a: { id: 'a', ratio: 72 }, b: { id: 'b', ratio: 35 } } } };
+  const pick = (selection, print) => ExportContext.buildExportContext({ state: { ...base, selection, print }, units, target: 144 });
+  // Explicit reference wins whatever is active.
+  for (const activeId of ['a', 'b', null]) {
+    const ctx = pick({ activeId, selectedIds: activeId ? [activeId] : [] }, { referenceObjectId: 'b' });
+    assert.equal(ctx.referenceRatio, 35, `reference stays b with active=${activeId}`);
+  }
+  // Unset → first printable unit, still independent of the selection.
+  for (const activeId of ['a', 'b']) {
+    const ctx = pick({ activeId, selectedIds: [activeId] }, { referenceObjectId: null });
+    assert.equal(ctx.referenceRatio, 72, `fallback is the first unit with active=${activeId}`);
+  }
+  // A reference that is not exported falls back too.
+  assert.equal(pick({ activeId: 'b', selectedIds: ['b'] }, { referenceObjectId: 'gone' }).referenceRatio, 72);
+});
+
 await test('buildExportContext: throws on empty units list', () => {
   assert.throws(() => ExportContext.buildExportContext({
     state: FAKE_STATE, units: [], target: null,

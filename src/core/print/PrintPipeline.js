@@ -21,8 +21,8 @@ import { repairMesh, diagnoseMesh, ensureRepairEngine } from '../repair/MeshRepa
 import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
 import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
-import { exportRatiosFromState } from '../scale/ScaleMath.js';
-import { buildExportContext, collectPrintUnits } from './ExportContext.js';
+import { exportRatiosFromState, objectRatio } from '../scale/ScaleMath.js';
+import { buildExportContext, collectPrintUnits, getExportReference } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
@@ -397,6 +397,7 @@ export function getPrintReadiness(options = {}) {
       textureAvailable,
       validationResults,
       validationPending,
+      ratio: objectRatio(obj),
     };
   });
   const explicit = exportRatiosFromState(state);
@@ -410,7 +411,8 @@ export function getPrintReadiness(options = {}) {
       objectIds: units.map(unit => unit.logicalId),
     };
   }).filter(target => target.bounds) : [];
-  return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions });
+  const reference = units.length ? getExportReference(options) : null;
+  return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions, reference });
 }
 
 async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {

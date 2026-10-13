@@ -458,6 +458,13 @@ async function _loadProjectInner(doc, previousId) {
   SceneManager.setScaleLock(getState().ui.scaleLocked !== false);
   ShaderLibrary.rebuildLinkedIndex();
 
+  // 1.15: an export reference whose object did not load (deleted, ghost-free
+  // file edit) falls back to the first printable unit — drop the dangling id.
+  const refId = getState().print?.referenceObjectId;
+  if (refId && !getState().scene.objects[refId]) {
+    setState(s => ({ ...s, print: { ...s.print, referenceObjectId: null } }), SILENT);
+  }
+
   dispatch(EVENTS.PROJECT_LOADED, {});                       // SceneManager restores camera from state
   const fm = getState().scene.camera.followMode;
   if (fm) SceneManager.setFollowMode(fm);

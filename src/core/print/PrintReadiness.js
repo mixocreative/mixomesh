@@ -33,7 +33,7 @@ function partIds(parts, predicate) {
  *       scene floor. Only OBJ/STL keep world placement, so the issue names
  *       them in `data.formats`; a 3MF-only export may ignore it.
  */
-export function buildReadiness({ parts = [], targets = [], bedDimensions } = {}) {
+export function buildReadiness({ parts = [], targets = [], bedDimensions, reference = null } = {}) {
   const issues = [];
   if (!parts.length) {
     issues.push(issue('no-print-parts', 'error', []));
@@ -84,6 +84,18 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions } = {})
     }
     return { ...target, fit };
   });
+
+  // 1.15 (Decision 25): parts at different scales print uniformly relative to
+  // the explicit export reference — say so once (info: never blocks, never
+  // needs acknowledgement).
+  const ratios = [...new Set(parts.map(part => part.ratio).filter(r => r > 0))];
+  if (ratios.length > 1) {
+    issues.push(issue('mixed-scales', 'info', [], {
+      referenceId: reference?.logicalId ?? null,
+      referenceRatio: reference?.ratio ?? null,
+      ratios: ratios.sort((a, b) => a - b),
+    }));
+  }
 
   const hasErrors = issues.some(item => item.severity === 'error');
   const hasWarnings = issues.some(item => item.severity === 'warning');
