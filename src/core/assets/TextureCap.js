@@ -21,6 +21,12 @@ import { storeTextureImage, updateTextureImageDimensions } from './TextureImageS
 import { textureViewFromBabylon } from './TextureView.js';
 
 const _capUrls = new Map();   // assetId → object URL currently applied (for revoke)
+const _captureFailed = new Set();   // assetIds whose full-res source capture failed
+
+/** True when full-res source capture failed for this asset (export must not trust a capped GPU copy). */
+export function hasCaptureFailed(assetId) { return _captureFailed.has(assetId); }
+export function markCaptureFailed(assetId) { if (assetId) _captureFailed.add(assetId); }
+export function clearCaptureFailed(assetId) { if (assetId) _captureFailed.delete(assetId); }
 
 /** Active cap in px (0 / undefined = off, full resolution). */
 export function currentCapPx() {
@@ -36,8 +42,9 @@ function _maxDim(texture) {
 /**
  * Capture the full-res export source (once) then apply the active cap to the
  * GPU texture. Called from the texture-asset registration seam after the
- * texture is ready. Failures are swallowed — a missing source just means this
- * texture can't be capped (export still reads the GPU as before).
+ * texture is ready. A failure sets the captureFailed flag (and warns): the
+ * texture is then never capped, and export aborts if the cap is On (see
+ * ExportTextures.textureToBlob) rather than ship a downscaled readback.
  * @param {string} assetId
  * @param {BABYLON.BaseTexture} texture
  */
@@ -46,7 +53,9 @@ export async function captureAndCap(assetId, texture) {
   try {
     if (!getTextureSource(assetId)) {
       const blob = await textureToPngBlob(texture);   // export-ready, full res
+      if (!blob) markCaptureFailed(assetId);
       if (blob) {
+        clearCaptureFailed(assetId);
         const s = texture.getSize?.() ?? {};
         const current = getState().scene.assetLibrary[assetId];
         const imageContentHash = current?.imageContentHash
@@ -74,6 +83,7 @@ export async function captureAndCap(assetId, texture) {
       }
     }
   } catch (err) {
+    markCaptureFailed(assetId);
     console.warn(`Texture source capture failed for ${assetId}:`, err);
   }
   await applyCapToTexture(assetId, texture, currentCapPx());
@@ -126,12 +136,14 @@ export async function applyCapToTexture(assetId, texture, capPx) {
 
 /** Forget an asset's cap URL (texture released). */
 export function clearCapUrl(assetId) {
+  clearCaptureFailed(assetId);
   const url = _capUrls.get(assetId);
   if (url) { URL.revokeObjectURL(url); _capUrls.delete(assetId); }
 }
 
 /** Revoke all cap URLs (reset). */
 export function clearCapUrls() {
+  _captureFailed.clear();
   for (const url of _capUrls.values()) URL.revokeObjectURL(url);
   _capUrls.clear();
 }

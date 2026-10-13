@@ -1183,6 +1183,54 @@ await test('OBJ synthesis: textured shader is NOT synthesised (real PNG path own
     'no synth map_Kd line for textured material');
 });
 
+await test('texture export names are unique case-insensitively; MTL + 3MF reference the final entries', async () => {
+  const mkTex = (id) => ({ name: id, metadata: { mixoAssetId: id }, getBaseSize: () => ({ width: 2, height: 2 }), readPixels: () => new Uint8Array(16) });
+  const mkTexMesh = (id, tex) => {
+    const m = mesh(id);
+    m.material = { id: `mat-${id}`, diffuseColor: { r: 1, g: 1, b: 1 }, diffuseTexture: tex };
+    m.getVerticesData = (k) => k === 'uv' ? new Float32Array([0,0, 1,0, 0,1]) : new Float32Array([0,0,0, 1,0,0, 0,1,0]);
+    const oc = m.clone;
+    m.clone = (n) => { const c = oc.call(m, n); c.material = m.material; c.getVerticesData = m.getVerticesData; return c; };
+    return m;
+  };
+  setScene({
+    objects: { m1: obj('m1'), m2: obj('m2') },
+    registry: { m1: mkTexMesh('m1', mkTex('tA')), m2: mkTexMesh('m2', mkTex('ta')) },
+  });
+  StateManager.setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: {
+      tA: { kind: 'texture', filename: 'A.png' },
+      ta: { kind: 'texture', filename: 'a.png' },
+    } },
+  }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+
+  const { textureExportFilename } = await import('../src/core/print/ExportTextures.js');
+  const used = new Set();
+  const n1 = textureExportFilename({}, 'tA', used, StateManager.getState());
+  const n2 = textureExportFilename({}, 'ta', used, StateManager.getState());
+  assert.equal(n1, 'A.png', 'first keeps its casing');
+  assert.notEqual(n1.toLowerCase(), n2.toLowerCase());
+
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  const texEntries = Object.keys(files).filter(k => k.startsWith('textures/'));
+  assert.equal(texEntries.length, 2, 'two texture entries');
+  assert.equal(new Set(texEntries.map(k => k.toLowerCase())).size, 2, 'distinct case-insensitively');
+  const mtl = files['Test_r1to1.mtl'];
+  const refs = [...mtl.matchAll(/map_Kd (\S+)/g)].map(m => m[1]);
+  assert.deepEqual([...refs].sort(), [...texEntries].sort(), 'MTL references exactly the packaged entries');
+
+  await PrintManager.exportThreeMF();
+  const tmf = zipInstances.at(-1).files;
+  const tPaths = Object.keys(tmf).filter(k => k.startsWith('3D/Textures/'));
+  assert.equal(tPaths.length, 2);
+  assert.equal(new Set(tPaths.map(k => k.toLowerCase())).size, 2);
+  const rels = tmf['3D/_rels/3dmodel.model.rels'] + tmf['3D/3dmodel.model'];
+  for (const p of tPaths) assert.ok(rels.includes(p) || rels.includes('/' + p), `3MF references ${p}`);
+});
+
 await test('OBJ synthesis: individually → each per-mesh MTL gets its own map_Kd', async () => {
   setScene({
     objects: { m1: obj('m1'), m2: obj('m2') },
@@ -1244,6 +1292,35 @@ await test('getExportedDimensions: missing mesh → null', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: {} });
   assert.equal(PrintManager.getExportedDimensions('m1'), null);
   assert.equal(PrintManager.getExportedDimensions('nope'), null);
+});
+
+// ── Download.js FSA failure handling (task 0.2) ──────────
+
+await test('triggerDownload: FSA write failure aborts the writable, toasts, falls back to anchor', async () => {
+  const { triggerDownload } = await import('../src/core/print/Download.js');
+  let aborted = 0;
+  window.showSaveFilePicker = async () => ({
+    createWritable: async () => ({
+      write: async () => { throw new DOMException('denied', 'SecurityError'); },
+      close: async () => {}, abort: async () => { aborted++; },
+    }),
+  });
+  resetCalls(); toasts.length = 0;
+  try { assert.equal(await triggerDownload({ type: 'text/plain' }, 'a.txt'), true); }
+  finally { window.showSaveFilePicker = undefined; }
+  assert.equal(aborted, 1, 'writable aborted');
+  assert.equal(calls.downloads.length, 1, 'anchor fallback ran');
+  assert.ok(toasts.some(x => x.type === 'warning' && /denied/.test(x.msg)), 'user told about the failure');
+});
+
+await test('triggerDownload: picker AbortError (user cancel) stays silent, returns false, no fallback', async () => {
+  const { triggerDownload } = await import('../src/core/print/Download.js');
+  window.showSaveFilePicker = async () => { throw new DOMException('cancelled', 'AbortError'); };
+  resetCalls(); toasts.length = 0;
+  try { assert.equal(await triggerDownload({ type: 'text/plain' }, 'a.txt'), false); }
+  finally { window.showSaveFilePicker = undefined; }
+  assert.equal(toasts.length, 0, 'no toast');
+  assert.equal(calls.downloads.length, 0, 'no anchor download');
 });
 
 // ── Report ───────────────────────────────────────────────

@@ -23,6 +23,7 @@ import {
   loadProject, resetWorld, relinkAsset, isLoading, assertNoImportInFlight,
   migrate, resolveLoadedExportRatios, arrToMap,
 } from './persist/ProjectLoader.js';
+import { isDesktop } from './storage/capabilities.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
 import { startAutosave, stopAutosave, recoverAutosave } from './persist/Autosave.js';
 import { isDirty, clearDirty, confirmDirty, init } from './persist/DirtyTracker.js';
@@ -55,8 +56,27 @@ export async function save() {
 
 async function _writeTo(handle, text) {
   const w = await handle.createWritable();
-  await w.write(text);
-  await w.close();
+  try {
+    await w.write(text);
+    await w.close();
+  } catch (err) {
+    // abort() discards the swap file so a half-written .mixo is never committed.
+    try { await w.abort(); } catch { /* already closed / aborted */ }
+    throw err;
+  }
+}
+
+// Ask the browser to exempt origin storage (IndexedDB recents / autosave) from
+// eviction — once, on the first successful save, web only (Electron's storage is
+// not evictable). Fire-and-forget: never blocks or fails the save.
+let _persistRequested = false;
+function _requestPersistentStorage() {
+  if (_persistRequested || isDesktop()) return;
+  _persistRequested = true;
+  try {
+    const p = globalThis.navigator?.storage?.persist?.();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch { /* unsupported — best effort */ }
 }
 
 // Post-write bookkeeping shared by save / saveAs: runs only once bytes are on
@@ -67,10 +87,18 @@ async function _afterWrite(staleName = null) {
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});
   const name = getState().project.name;
-  await pushRecent(name, _fileHandle);
-  await kvDelete(`${AUTOSAVE_PREFIX}${name}`);
-  if (staleName && staleName !== name) await kvDelete(`${AUTOSAVE_PREFIX}${staleName}`);
+  _requestPersistentStorage();
   Toast.show(t('toast.projectSaved'), 'success', 2000);
+  // The bytes are on disk: bookkeeping failures (recents list, autosave key
+  // cleanup) are reported but must never reject save().
+  try {
+    await pushRecent(name, _fileHandle);
+    await kvDelete(`${AUTOSAVE_PREFIX}${name}`);
+    if (staleName && staleName !== name) await kvDelete(`${AUTOSAVE_PREFIX}${staleName}`);
+  } catch (err) {
+    console.error('Post-save bookkeeping failed (file was saved):', err);
+    Toast.show(`${t('toast.operationFailed')}: ${err?.message ?? err}`, 'warning', 4000);
+  }
 }
 
 /**

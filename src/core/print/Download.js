@@ -1,3 +1,6 @@
+import { Toast } from '../../ui/Toast.js';
+import { t } from '../../i18n/index.js';
+
 /**
  * Hand a blob to the user: File System Access save picker when available,
  * anchor download otherwise.
@@ -16,12 +19,18 @@ export async function triggerDownload(blob, suggestedName, hint = {}) {
         types: [{ description: hint.description || `${ext.toUpperCase()} file`, accept }],
       });
       const w = await handle.createWritable();
-      await w.write(blob);
-      await w.close();
+      try {
+        await w.write(blob);
+        await w.close();
+      } catch (err) {
+        try { await w.abort(); } catch { /* already closed / aborted */ }   // no half-written file
+        throw err;
+      }
       return true;
     } catch (err) {
       if (err && err.name === 'AbortError') return false;
       console.error('Save dialog failed, falling back to anchor download:', err);
+      Toast.show(`${t('toast.operationFailed')}: ${err?.message ?? err}`, 'warning', 4000);
     }
   }
   const url = URL.createObjectURL(blob);

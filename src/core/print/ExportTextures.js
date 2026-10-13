@@ -5,6 +5,7 @@
 import { getState } from '../StateManager.js';
 import { textureToPngBlob } from '../assets/TextureReadback.js';
 import { getTextureSource } from '../assets/TextureSource.js';
+import { hasCaptureFailed, currentCapPx } from '../assets/TextureCap.js';
 
 export function clamp255(c) { return Math.max(0, Math.min(255, Math.round((c ?? 0) * 255))); }
 export function hex2(n) { return n.toString(16).padStart(2, '0').toUpperCase(); }
@@ -26,6 +27,11 @@ export async function textureToBlob(texture, assetId = null) {
   if (assetId) {
     const src = getTextureSource(assetId);
     if (src?.blob) return src.blob;
+    // Source capture failed at import: a GPU readback is only full-res if the
+    // viewport cap is Off. With the cap On it may be downscaled — never ship it.
+    if (hasCaptureFailed(assetId) && currentCapPx() > 0) {
+      throw new Error(`Texture "${texture?.name ?? assetId}" has no full-resolution source (capture failed) and the viewport texture cap is On — export aborted so a downscaled texture is not printed. Turn the texture cap Off and retry.`);
+    }
   }
   const blob = await textureToPngBlob(texture);
   if (!blob) throw new Error(`Texture readback failed for ${texture?.name ?? 'texture'}`);
@@ -75,11 +81,14 @@ export function textureExportFilename(texture, assetId, usedNames = new Set(), s
   const base = sanitizeTextureName(_stripImageExtension(sourceName)) || 'texture';
   let filename = `${base}.png`;
   let counter = 0;
-  while (usedNames.has(filename)) {
+  // Uniqueness is decided on the LOWER-CASED name (Windows/macOS file systems
+  // and many zip tools are case-insensitive: `A.png` and `a.png` would
+  // collide). The set stores lower-cased keys; the first name keeps its casing.
+  while (usedNames.has(filename.toLowerCase())) {
     counter++;
     filename = `${base}_${counter}.png`;
   }
-  usedNames.add(filename);
+  usedNames.add(filename.toLowerCase());
   return filename;
 }
 
