@@ -3018,6 +3018,29 @@ exist). The explicit "Find moved file..." action (asset card + Properties) calls
 command). TRANSITIONAL until 4.5: Refresh of a `changed` asset is not yet
 wired. AssetResolver no longer touches FSA/idb directly.
 
+**Routing + boot gate (task 4.4).** Every renderer picker, file write, ref and
+KV operation goes through `storage.*`; direct File System Access / IndexedDB
+lives only in `storage/StorageAdapter.js` and `idb.js`
+(`tests/adapter-routing.test.mjs` scans `src/` against an allowlist). Added on
+both impls: `ready()`, `hasRef(key)`, `pickOpenProject()`,
+`pickSaveProject(name)`, `writeFile(ref, data)` (atomic: browser
+createWritable + abort; desktop temp file + rename in main),
+`pickImportAssets({multiple})`, `saveExport(blob, name, hint)` (browser falls
+back to an anchor download; desktop has no fallback), `refForDrop(item)`
+(synchronous in the drop event; desktop preload `webUtils.getPathForFile` →
+read-only token). PersistenceManager keeps an opaque `_fileRef`; recents store
+`persistRef(projectRef)` (stable `file_` key; replaced entries `deleteRef`);
+openRecent = `hasRef` → `restoreRef` → `readFile` with distinct "lost" vs
+"permission denied" toasts. Desktop: main opens every dialog and returns only
+`{ref,name}`; project open/save tokens are WRITABLE (flag persists for
+recents), import/mount/drop tokens read-only; `fs:writeFileRef` refuses
+read-only/unknown tokens and > 1 GiB. Boot gate (`main.ts`): `await
+storage.ready()` before UI init — browser without FSA → blocking "Browser not
+supported"; IndexedDB not open in 5 s → continue with `persistAssets=false`;
+desktop bridge missing methods or `storage:ready` > 10 s → blocking "Desktop
+storage unavailable". `MIXO_SMOKE=save` (unpackaged only) exercises a real
+save in the Electron smoke.
+
 | # | Tier | Condition | Live? | Source |
 |---|---|---|---|---|
 | 1 | Live exact path | `directoryHandleKey` granted **and** file exists at `originalPath` | yes | file on disk |
@@ -5232,7 +5255,7 @@ the same one the export re-bake uses (`PrintPipeline`).
 `@babylonjs/core/Meshes/csg2.d.ts`; the export path already skips CSG2 for textured meshes,
 `PrintPrep.csgSolidOnly`). So a Boolean runs only on solid-colour operands. A textured operand
 (any of: `diffuseTexture`, `albedoTexture`, `normalTexture`, `bumpTexture`, `emissiveTexture`,
-`opacityTexture`, `specularTexture`, `reflectionTexture`, `lightmapTexture`, `detailMap`,
+`opacityTexture`, `specularTexture`, `lightmapTexture`, `detailMap`,
 `occlusionTexture`, `metallicTexture`, `reflectanceTexture`, `sheenTexture`, `anisotropyTexture`)
 triggers a **bake-to-solid-or-cancel modal** — NEVER a silent texture drop (the Mimaki colour moat).
 

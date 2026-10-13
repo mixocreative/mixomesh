@@ -65,20 +65,16 @@ test('default cap constant is exported and applied when no cap passed', () => {
   assert.equal(r.triangleCap, 50_000);
 });
 
-test('a mesh with only a normal map is treated as textured (not solid)', () => {
-  const onlyNormalMap = { id: 'nm', triangles: 100, solidColor: false, partCount: 1 };
-  const r = evaluateBooleanEligibility([solid('a'), onlyNormalMap]);
-  assert.equal(r.ok, true);
-  assert.equal(r.reason, 'needs-texture-bake', 'normal map alone triggers texture bake gate');
-  assert.deepEqual(r.texturedIds, ['nm']);
-});
-
-test('a mesh with only an emissive texture is treated as textured (not solid)', () => {
-  const onlyEmissive = { id: 'em', triangles: 100, solidColor: false, partCount: 1 };
-  const r = evaluateBooleanEligibility([solid('a'), onlyEmissive]);
-  assert.equal(r.ok, true);
-  assert.equal(r.reason, 'needs-texture-bake', 'emissive texture alone triggers texture bake gate');
-  assert.deepEqual(r.texturedIds, ['em']);
+test('6.3: every UV texture slot counts as textured; the environment reflection map does not', async () => {
+  const { _isMaterialTextured } = await import('../src/core/commands/BooleanCommands.js');
+  const tex = { name: 't' };
+  assert.equal(_isMaterialTextured({ normalTexture: tex }), true, 'normal map alone is textured');
+  assert.equal(_isMaterialTextured({ bumpTexture: tex }), true, 'bump map alone is textured');
+  assert.equal(_isMaterialTextured({ emissiveTexture: tex }), true, 'emissive alone is textured');
+  assert.equal(_isMaterialTextured({ albedoTexture: tex }), true);
+  assert.equal(_isMaterialTextured({ reflectionTexture: tex }), false, 'PBR env reflection map is NOT a UV texture');
+  assert.equal(_isMaterialTextured({}), false);
+  assert.equal(_isMaterialTextured(null), false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

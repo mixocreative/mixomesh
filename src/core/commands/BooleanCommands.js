@@ -13,7 +13,7 @@ import { evaluateBooleanEligibility, computeBoolean } from '../BooleanService.js
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 
-function _isMaterialTextured(mat) {
+export function _isMaterialTextured(mat) {   // exported for tests
   if (!mat) return false;
   // Check all texture slots on StandardMaterial and PBRMaterial that Babylon exposes.
   // A material is textured if ANY of these slots has a texture.
@@ -25,7 +25,8 @@ function _isMaterialTextured(mat) {
     'emissiveTexture',        // Both
     'opacityTexture',         // StandardMaterial
     'specularTexture',        // StandardMaterial
-    'reflectionTexture',      // StandardMaterial
+    // NOT reflectionTexture: on PBR it is the scene environment cube map, not a
+    // UV texture — counting it made every lit mesh "textured" (6.3 regression).
     'lightmapTexture',        // Both
     'detailMap',              // Both
     'occlusionTexture',       // PBRMaterial
