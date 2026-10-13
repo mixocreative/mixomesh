@@ -46,8 +46,7 @@ export function init() {
     if (act === 'saveas') safeAsync(() => _runProjectSave(() => PersistenceManager.saveAs()));
     if (act === 'recent') _toggleRecent();
     if (act === 'reset-settings') {
-      SettingsStore.resetAll();
-      Toast.show(t('toast.settingsReset'), 'info', 2000);
+      Modal.open('resetSettingsConfirm', {});
     }
   });
 
@@ -272,6 +271,27 @@ function _registerModals() {
           row?.remove();
           if (!el.querySelectorAll('.pm-asset-row').length) close('ok');
         });
+      }));
+    return el;
+  });
+
+  Modal.register('resetSettingsConfirm', ({ close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${_esc(t('project.resetSettingsConfirmTitle'))}</h2>
+      <p class="pm-modal-body">${_esc(t('project.resetSettingsConfirmBody'))}</p>
+      <div class="pm-modal-actions">
+        <button class="btn" data-r="cancel">${_esc(t('btn.cancel'))}</button>
+        <button class="btn btn-danger" data-r="confirm">${_esc(t('project.resetSettingsConfirm'))}</button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b =>
+      b.addEventListener('click', () => {
+        if (b.dataset.r === 'confirm') {
+          SettingsStore.resetAll();
+          Toast.show(t('toast.settingsReset'), 'info', 2000);
+        }
+        close(b.dataset.r);
       }));
     return el;
   });

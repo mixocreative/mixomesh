@@ -692,8 +692,8 @@ function _modalIsNoop(prev, next) {
 // ── Status hint ──────────────────────────────────────────
 
 function _defaultHint() {
-  // Matches the implemented CAD scheme (§7): RMB orbit, MMB pan.
-  return 'RMB: Orbit · MMB: Pan · Scroll: Zoom · G/R/S: Transform · F: Frame · Ctrl+G: Group';
+  // Single source: locale key (RMB orbit, MMB pan — the implemented CAD scheme, §7).
+  return t('status.defaultHint');
 }
 
 function _updateHint() {

@@ -473,7 +473,7 @@ function _renderEditor(sh) {
         <span class="sp-uv-cell"><label>${_escape(t('shader.vOff'))}</label><input type="number" step="0.01" id="sp-uv-oy" value="${_fmt(sh.uvBase.offsetY, 3)}"></span>
         <span class="sp-uv-cell"><label>${_escape(t('shader.uScale'))}</label><input type="number" step="0.1" id="sp-uv-sx" value="${_fmt(sh.uvBase.scaleX, 3)}"></span>
         <span class="sp-uv-cell"><label>${_escape(t('shader.vScale'))}</label><input type="number" step="0.1" id="sp-uv-sy" value="${_fmt(sh.uvBase.scaleY, 3)}"></span>
-        <span class="sp-uv-cell"><label>${_escape(t('shader.rotRad'))}</label><input type="number" step="0.1" id="sp-uv-rot" value="${_fmt(sh.uvBase.rotation, 3)}"></span>
+        <span class="sp-uv-cell"><label>${_escape(t('shader.rotRad'))}</label><input type="number" step="1" id="sp-uv-rot" value="${_fmt(sh.uvBase.rotation * 180 / Math.PI, 2)}"></span>
       </div>
 
       <div class="sp-actions">
@@ -542,7 +542,9 @@ function _wireEditor(shaderId) {
     ['sp-uv-rot', 'rotation'],
   ];
   for (const [elId, key] of uvFields) {
-    wireNumbers(_bodyEl, `#${elId}`, (_el, n) => {
+    wireNumbers(_bodyEl, `#${elId}`, (_el, nIn) => {
+      // UI shows degrees for rotation; stored state stays in radians.
+      const n = key === 'rotation' ? nIn * Math.PI / 180 : nIn;
       const prevUV = { ...getState().scene.shaders[shaderId].uvBase };
       if (Math.abs(prevUV[key] - n) < 1e-9) return;
       const nextUV = { ...prevUV, [key]: n };

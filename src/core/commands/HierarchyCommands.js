@@ -365,7 +365,7 @@ export class PrintPartCommand {
     this._meshId = meshId;
     this._prev = !!prev;
     this._next = !!next;
-    this.label = this._next ? 'Mark as Print Part' : 'Unmark as Print Part';
+    this.label = this._next ? 'Mark to print' : 'Unmark as Print Part';
   }
   execute() {
     _setPrintPart(this._meshId, this._next);
@@ -393,7 +393,7 @@ export class SmartReplaceCommand {
     this._targets  = (meshIds ?? []).filter(id => id !== activeId);
     this._executed = false;
     this._pairs    = [];   // [{ oldId, oldObj, oldMesh, oldParent, newId, newMesh }]
-    this.label = this._targets.length === 1 ? 'Smart Replace' : `Smart Replace (${this._targets.length})`;
+    this.label = this._targets.length === 1 ? 'Replace with active' : `Replace with active (${this._targets.length})`;
   }
   execute() {
     if (this._executed) {                       // redo

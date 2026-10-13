@@ -439,6 +439,29 @@ body:not([data-workspace="shade"]) #rp-properties { flex: 1 1 0 !important; }
 .ws-btn:hover  { background: var(--bg-3); color: var(--text-0); }
 .ws-btn.active { background: var(--accent); color: var(--accent-fg); }
 
+/* Status-bar undo/redo buttons */
+.sb-btn {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sb-btn:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.sb-btn:focus-visible { outline: 2px solid var(--ring-focus); }
+.sb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--text-2);
+}
+
 /* Status-bar inline action (e.g. "Fix" next to "not watertight") */
 .sb-action {
   margin-left: var(--sp-2);

@@ -95,7 +95,7 @@ function _markup() {
         <div class="np-place-grid">
           ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="mirror-${a}" data-i18n-title="placement.mirror"><span data-i18n-key="placement.mirror">Mirror</span> ${a.toUpperCase()}</button>`).join('')}
           ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" data-i18n-title="placement.array"><span data-i18n-key="placement.array">Array</span> ${a.toUpperCase()}</button>`).join('')}
-          <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate"><span data-i18n-key="context.mate">Mate to Active</span></button>
+          <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate"><span data-i18n-key="context.mate">Snap to active</span></button>
         </div>
       </div>
     </div>

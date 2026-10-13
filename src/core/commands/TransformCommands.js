@@ -63,7 +63,7 @@ export class TransformSwabCommand {
       this._prev[id] = captureWorld(m);
       this._next[id] = { position: { ...src.position }, rotation: { ...src.rotation }, scaling: { ...src.scaling } };
     }
-    this.label = this._targets.length === 1 ? 'Transform Swab' : `Transform Swab (${this._targets.length})`;
+    this.label = this._targets.length === 1 ? 'Copy placement from active' : `Copy placement from active (${this._targets.length})`;
   }
   execute() { applyTransforms(this._next); markDirty(); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) }); }
   undo()    { applyTransforms(this._prev); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) }); }

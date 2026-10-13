@@ -421,7 +421,7 @@ export class SplitToPartsCommand {
     this._group = null;         // CreateGroupCommand
     this._reparent = null;      // ReparentCommand (group under the lead's old parent)
     this.applied = false;
-    this.label = 'Split to parts';
+    this.label = 'Separate by material';
   }
   _plan() {
     if (this._before) return true;

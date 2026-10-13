@@ -1,6 +1,6 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe } from '../core/StateManager.js';
-import { getUndoLabel, getRedoLabel } from '../core/HistoryManager.js';
+import { getUndoLabel, getRedoLabel, undo, redo } from '../core/HistoryManager.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -14,6 +14,8 @@ let _leftDefault = true;
 function _updateRight() {
   const undoLabel = getUndoLabel();
   const redoLabel = getRedoLabel();
+  const canUndo = undoLabel !== null;
+  const canRedo = redoLabel !== null;
 
   const undoPart = undoLabel
     ? `<span class="sb-label">${escapeHtml(t('status.undo'))}: <span>${escapeHtml(undoLabel)}</span></span>`
@@ -27,7 +29,18 @@ function _updateRight() {
   const saveIconName = _isDirty ? 'Circle' : 'Check';
   const savePart = `<span class="sb-save-icon ${escapeAttr(saveClass)}">${icon(saveIconName, { width: 12, height: 12 })}</span>`;
 
-  _elRight.innerHTML = `${undoPart}${redoPart ? `<span class="sb-sep">·</span>${redoPart}` : ''}<span class="sb-sep">·</span>${savePart}`;
+  const undoTitle = canUndo ? `${t('status.undo')}: ${undoLabel} (Ctrl+Z)` : t('status.nothingToUndo');
+  const redoTitle = canRedo ? `${t('status.redo')}: ${redoLabel} (Ctrl+Shift+Z)` : t('status.nothingToRedo');
+
+  _elRight.innerHTML = `
+    <button id="status-undo" class="sb-btn" ${canUndo ? '' : 'disabled'} title="${escapeAttr(undoTitle)}">${icon('RotateCcw', { width: 14, height: 14 })}</button>
+    <button id="status-redo" class="sb-btn" ${canRedo ? '' : 'disabled'} title="${escapeAttr(redoTitle)}">${icon('RotateCw', { width: 14, height: 14 })}</button>
+    <span class="sb-sep">·</span>
+    ${undoPart}${redoPart ? `<span class="sb-sep">·</span>${redoPart}` : ''}<span class="sb-sep">·</span>${savePart}
+  `;
+
+  _elRight.querySelector('#status-undo')?.addEventListener('click', e => { e.stopPropagation(); undo(); });
+  _elRight.querySelector('#status-redo')?.addEventListener('click', e => { e.stopPropagation(); redo(); });
 }
 
 function _onHistoryChange() {

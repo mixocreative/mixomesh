@@ -49,8 +49,8 @@ await test('three buttons in order when something is fixable', () => {
   const html = exportGateHtml(issues, true);
   assert.deepEqual(actionsInHtml(html), ['autofix', 'export', 'cancel'],
     'Auto-fix is first (primary), then Export anyway, then Cancel');
-  assert.match(html, /data-action="autofix">[^<]*Auto/i);
-  assert.ok(html.includes(t('print.exportGate.fixAndExport')));
+  assert.match(html, /data-action="autofix">[^<]*Repair/i);
+  assert.ok(html.includes(t('print.exportGate.fixAndExport').replace(/&/g, '&amp;')));
   assert.ok(html.includes(t('print.exportGate.exportAnyway')));
   assert.ok(html.includes(t('print.exportGate.cancel')));
   assert.equal((html.match(/class="btn btn-primary"/g) ?? []).length, 1,
@@ -70,7 +70,7 @@ await test('I12: nothing fixable → a TWO-way gate, Auto-fix absent', () => {
   const html = exportGateHtml(issues, false);
   assert.deepEqual(actionsInHtml(html), ['export', 'cancel']);
   assert.ok(!html.includes('data-action="autofix"'), 'no Auto-fix button at all');
-  assert.ok(!html.includes(t('print.exportGate.fixAndExport')));
+  assert.ok(!html.includes(t('print.exportGate.fixAndExport').replace(/&/g, '&amp;')));
 });
 
 await test('I12: an already-applied fix is not "fixable" again', () => {

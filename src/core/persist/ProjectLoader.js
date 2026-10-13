@@ -367,7 +367,7 @@ async function _loadProjectInner(doc, previousName) {
         } catch (err) {
           console.error(`Geometry-fix replay failed for "${o.name}":`, err);
           replayFailed.add(o.id);
-          Toast.show(`${t('toast.operationFailed')}: ${o.name}`, 'warning', 5000);
+          Toast.show(t('toast.geometryFixReplayFailed', { name: o.name }), 'warning', 5000);
         }
       }
       applyWorld(mesh, o.transform);

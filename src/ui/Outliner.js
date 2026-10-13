@@ -476,7 +476,7 @@ async function _repairFromOutliner(meshId) {
 }
 
 function beginPrintPartBatch(ids, next) {
-  beginBatch('Print Part');
+  beginBatch('Print');
   for (const id of ids) {
     const obj = getState().scene.objects[id];
     if (!obj) continue;

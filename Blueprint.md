@@ -53,7 +53,7 @@ only). Export format selection is deliberately button-driven in the UI: OBJ,
 - **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
   `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
   stamping `sourceGroupId` on each SceneObject. One sibling is the visible
-  logical object; the rest are internal parts used by shader/export code.
+  logical object; the rest are material parts used by shader/export code.
   Validator + exporter re-union the siblings by logical object.
 - **A multi-shader object is ONE logical object** regardless of how it arrives.
   Two cases get the same `logicalObjectId` (`_registerInstantiatedMeshes`):
@@ -62,7 +62,7 @@ only). Export format selection is deliberately button-driven in the UI: OBJ,
   parents them under one node, so they share a stem + `parentId`. Most
   multi-shader models export as case 2. **Separate objects are distinct nodes
   with no `_primitive` name → never merged** (regression-tested with a 2-object
-  glTF). The lead part is the visible object; the rest are internal parts.
+  glTF). The lead part is the visible object; the rest are material parts.
 - **Validation runs at import time, non-blocking.** Re-runs blocking before
   export. Topology is **logical-object-aware**: a mesh whose
   `logicalObjectPartIds` has >1 part is validated as the **welded union** of
@@ -916,7 +916,7 @@ map below.
 
 Identity map (each unique):
 - **Right-panel top-level** (index.html inline): Properties=`SlidersHorizontal`, Shader Library=`Palette`, Scene=`Boxes`, Print=`Printer`
-- **Properties sections**: Object=`Shapes`, Transform=`Move`, Authored Scale=`Ruler`, Shader=`Brush`, UV Override=`Map`, Print Part=`Tag`
+- **Properties sections**: Object=`Shapes`, Transform=`Move`, Imported scale=`Ruler`, Shader=`Brush`, UV Override=`Map`, Print=`Tag`
 - **Shader sections**: Scene Shaders=`Layers`, Editor=`Edit3`, Swatches=`Swatches`
 - **Scene sections**: Grid=`Grid3x3`, Environment=`Sun`, Camera=`Camera`, Cross Section=`Scissors`, Rendering=`Clapperboard`
 - **Scene sub-groups**: HDRI=`Globe`, Grade=`Wand2`, Floor=`FloorPlane`, Lights=`Lightbulb`, Ambient occlusion=`Aperture`, Performance=`Gauge`, Still=`ImageDown`, Turntable=`Disc3`
@@ -1265,9 +1265,9 @@ Phase 5 implementations:
 
 Phase 6+ implementations:
 - `SmartReplaceCommand`, `TransformSwabCommand` — fully implemented (context
-  menu "Smart Replace" / "Transform Swab").
+  menu "Replace with active" / "Copy placement from active").
 - `SourceUnitCommand` — per-asset unit re-bake (inverse-factor undo), pushed
-  by Properties ▸ Source Unit (review M12).
+  by Properties ▸ File units (review M12).
 - `RenameCollectionCommand` — undoable outliner collection rename (L30).
 
 ### Rules
@@ -1884,7 +1884,7 @@ Four numbers drive the math:
 
 Runtime code exposes these with clearer architecture names in
 `src/core/scale/ScaleMath.js`: `sourceUnit` + `modelRatio` form
-**Authored Scale**, `workingRatio` is **Scene Scale**, and `targetRatio` is
+**Imported scale**, `workingRatio` is **Scene Scale**, and `targetRatio` is
 **Print Scale**. The persisted `.mixo` schema keeps the v3.1 names until a
 deliberate schema migration is introduced.
 
@@ -2056,11 +2056,11 @@ no regression.
 **File: `src/core/MeshValidator.js`**
 
 ### Scope (v1 + watertight-repair-and-cost)
-Topology is pure JS (no WASM) EXCEPT the `holes` check's Auto-Fix, which
+Topology is pure JS (no WASM) EXCEPT the `holes` check's Repair, which
 diagnoses/repairs through the vendored MeshFixLib WASM engine (§ *Watertight
 repair* below).
 
-| Check | Severity | Method | Auto-Fix |
+| Check | Severity | Method | Repair |
 |---|---|---|---|
 | Non-manifold edges | **warning** (Phase 6) | Edge-face count map over **position-welded** indices (Phase 6 — raw indices false-flag unwelded imports); flag edges with count ≠ 2 | MeshFixLib `repairMesh`; offline → the shared `repair/Weld.js` weld. `autoFixAvailable` is gated on `REPAIR_TRIANGLE_CAP` (2026-09-18, review I3 — a button whose only outcome is "too large to repair" is not a fix), and the message then says so (review CIA F6) |
 | Inverted normals | **warning** (Phase 6) | **Signed mesh volume** (one O(tris) pass; V<0 ⇒ inward winding) — replaced the old 64-ray heuristic (O(tris) PER ray) 2026-06-13 | Flip winding |
@@ -2391,7 +2391,7 @@ guessed:
   shrunk by 2.3 %. Settling on every read would cut the animation short
   (the Print panel re-renders on import), hence read-at-rest.
 - **One import validation flow per logical object** (`queueValidation` skips
-  internal parts): toasting / auto-repairing each primitive duplicated every
+  material parts): toasting / auto-repairing each primitive duplicated every
   message and ran the group repair once per part.
 Result on the 12 scans: 9 fully watertight (holes 4,619 → 0 on the worst),
 3 with 1–3 non-manifold edges and no holes; volumes positive; exports
@@ -3289,7 +3289,7 @@ replays only what is reconstructable from state. So a transform survives reload
 |---|---|---|
 | Position / Rotation / Scale / Size (mm) (`TransformCommand`) | node transform → saved `_decompose` | ✅ yes |
 | Ratio dropdown (`RescaleObjectCommand`) | baked, but the `ratio` number replays it | ✅ yes |
-| Source Unit change (`SourceUnitCommand`) | `asset.sourceUnit` → restore seed | ✅ yes |
+| File units change (`SourceUnitCommand`) | `asset.sourceUnit` → restore seed | ✅ yes |
 
 **RESOLVED 2026-06-16:** the former "Apply Scale / Apply Rotation"
 (`BakeTransformCommand`) baked a user transform into vertices and zeroed the
@@ -3640,7 +3640,7 @@ Current implementation:
    texture-preserving output.
 
 ### Export Gate
-- Re-validate all Print Parts via `MeshValidator.validateAllPrintParts()`.
+- Re-validate every object set to print via `MeshValidator.validateAllPrintParts()`.
 - Errors → block, show the error-list modal (red — §9 *Pre-Export Gate*).
 - Warnings only → the `exportGate` modal: **Fix & Export** (only when
   something is actually fixable — review I12) / **Export Anyway** /
@@ -3719,19 +3719,19 @@ outside that range. Pinned by `tests/validator.test.mjs`.
   the row is a six-column grid (twirl · icon · name-cell · eye · lock ·
   print) and a badge rendered as a sibling of `.ol-name` used to take the
   lock/print column and push the print button onto a second grid row.
-- **Parts vs objects; Split to parts / Join (2026-09-18).** A multi-material
+- **Parts vs objects; Separate by material / Merge (2026-09-18).** A multi-material
   import is ONE logical object made of several `SceneObject` parts (lead +
   `isInternalPart` siblings linked by `logicalObjectId`); the Outliner shows
   the lead only and its name drops the loader's `_primitive<N>` / `__part<N>`
   suffix. Separation is explicit and undoable, never automatic (Blender
-  Separate/Join, PrusaSlicer Split to parts): context menu **Split to parts**
+  Separate/Join, PrusaSlicer Split to parts): context menu **Separate by material**
   (`SplitToPartsCommand`) makes every part an independent object under a new
   group named after the lead (nested under the lead's previous parent), parts
-  named `<lead>.<n>`; **Join into one object** (`JoinCommand`) makes the
+  named `<lead>.<n>`; **Merge into one object** (`JoinCommand`) makes the
   active object the lead and every other selected object — with its own parts
-  — an internal part, meshes and transforms untouched. Neither command touches
+  — a material part, meshes and transforms untouched. Neither command touches
   geometry, shaders or `geometryFixes`; both only change the linkage flags
-  (and, for Split, the Outliner parent). The header toggle **Show internal
+  (and, for Separate, the Outliner parent). The header toggle **Show material
   parts** (per-user, `localStorage` `mx-outliner-parts-v1`) lists a lead's
   parts as read-only rows (`data-kind="part"`): click selects the lead,
   right-click acts on the lead, no rename / drag / buttons.
@@ -3801,10 +3801,10 @@ Hierarchy drops are a separate MIME payload from shader drops.
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 1. **Object** — name, visible, locked
 2. **Transform** — per-object **Ratio** dropdown (scale ratio, `RescaleObjectCommand`), Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand` (node transform — never baked, so it stays editable + persists). On multi-select, fields show `—` when values differ; editing applies delta. Editable **Size (mm)** row derived from world AABB (so a wrong-unit import is visible). (The old "Apply Rotation/Scale" bake-to-vertices buttons were removed 2026-06-16 — they destroyed the editable, persisted transform and were lost on reload.) **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`).
-3. **Source Unit** — dropdown + `AlertTriangle` if unconfirmed + "Confirm" button.
+3. **File units** — dropdown + `AlertTriangle` if unconfirmed + "Looks right" button.
 4. **Shader** (Phase 4, binding-only) — Lists distinct shaders bound to current selection as **slots**. Active mesh's shader appears first. Multi-selection across meshes with different shaders → one slot per shader. Per-slot UI: texture thumbnail chip or color preview, shader name, linked mesh-count badge, combined `<select>` with optgroup "Replace with → [list of all scene shaders]" + synthetic action "Duplicate in place". Click chip/name area → Library `focus(shaderId)`. **No color picker, sliders, or UV inputs here** — those live only in the Shader Library. Properties Shader is binding-only.
 5. **UV Override** — offset/scale/rotation inputs per-mesh; "Reset to Default" button. Mesh-specific UI.
-6. **Print Part** — export toggle.
+6. **Print** — export toggle.
    (Validation results are NOT a Properties section — they live in the
    Print ▸ Validation tab + Outliner row badges, both fed by the §9 cache.)
 
@@ -3839,7 +3839,7 @@ also owns the section collapse-toggle, so each copy click handler calls
 `e.stopPropagation()` to keep the section open. CSS: `.pp-copy-btn` in
 `src/styles/components.css` (transparent, border, accent on hover).
 
-The earlier "Source Unit" copy variant was dropped — Source Unit edits
+The earlier "File units" copy variant was dropped — File units edits
 bake into vertex data per-asset, not per-mesh, so a copy-from-active makes
 no sense at the Properties level.
 
@@ -3958,7 +3958,7 @@ entry points use it: `ViewportDrop` (OS drop + Session/folder drag) and
 does not maintain its own extension table.
 
 ### Context Menu (`src/ui/ContextMenu.js`)
-Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Smart Replace/Transform Swab/Set Shader/etc.). Cursor actions include selection-dependent `Selection → Cursor` and `Cursor → Selection`, plus always-enabled `Cursor → World Origin` for the global cursor reset. All visible menu labels use `context.*` i18n keys so the menu renders in the active locale each time it opens.
+Triggered by RMB. Items per Part 12 of v3.0 (Group/Ungroup/Duplicate/Replace with active/Copy placement from active/Set Shader/etc.). Cursor actions include selection-dependent `Selection → Cursor` and `Cursor → Selection`, plus always-enabled `Cursor → World Origin` for the global cursor reset. All visible menu labels use `context.*` i18n keys so the menu renders in the active locale each time it opens.
 
 **Empty-space right-click (2026-09-19).** The canvas suppresses Chrome's own
 menu (`InputManager` `contextmenu` preventDefault). When nothing is under the
@@ -3974,7 +3974,7 @@ Validation reads the §9 A6 cache with an explicit "Validate All".
 
 **Validation tab status strip (2026-09-18).** The tab reports on itself
 rather than through toasts: a strip above the buttons shows (a) while a
-Validate All / Repair all / per-result Auto-Fix runs — an inline progress
+Validate All / Repair all / per-result Repair runs — an inline progress
 bar + "Repairing… — <name>" patched in place from the `onProgress`
 callback (no full re-render mid-run, buttons disabled); (b) afterwards —
 the outcome line ("Repaired N object(s): H hole(s) filled, M non-manifold
@@ -3991,13 +3991,13 @@ hidden: `.pp-export-btn[hidden]{display:none}`, the class's `inline-flex`
 used to beat the attribute — when nothing is fixable. Per-object
 validation toasts carry `tag: validationTag(meshId)` and `Toast` dismisses
 that tag on every `VALIDATION_COMPLETE` for the object, so a "click to
-Auto-Fix" toast never outlives the repair it offered.
+Repair" toast never outlives the repair it offered.
 
 The Scale tab shows the export reference object's exported size in mm; the
 internal BU→mm factor is not user-facing and is no longer printed.
 
 Repair feedback (2026-09-18, owner ask): every repair — Validate All /
-Repair all / per-result Auto-Fix in the tab, the Outliner badge, the context
+Repair all / per-result Repair in the tab, the Outliner badge, the context
 menu and the status-bar Fix button — runs under the BLOCKING
 `ProgressOverlay` with title, percentage and current object
 (`RepairFeedback.repairWithOverlay` for the non-tab surfaces; the tab also
@@ -4371,7 +4371,7 @@ Single bar at bottom. Segments:
     Selection stats resolve their meshes through `AssetLoader.getBabylonMesh`
     rather than a `scene.meshes` scan, for the same reason the scene walk does
     (review M4).
-- **Right:** undo/redo labels, polycount, save state (`Circle` for dirty, `Check` for saved).
+- **Right:** undo/redo labels, polycount, save state (`Circle` for dirty, `Check` for saved). Status bar right side has Undo/Redo icon buttons (`#status-undo`/`#status-redo`, disabled when the stack is empty) beside the undo/redo labels; Project menu ▸ Reset settings asks for confirmation first.
 
 Collapses non-essential segments below 1280px.
 
@@ -4470,10 +4470,10 @@ This is **not** a full dockable/floating-panel system (Blender's `Area`/`Region`
 
 | Workspace | Outliner | Properties | Scene Panel | Shader Library | Asset Panel | Print Panel |
 |---|---|---|---|---|---|---|
-| **Layout** (default — import & arrange) | visible 260px | visible, task-filtered: Object / Transform / Source Unit / Print Part (Shader + UV hidden) | hidden | hidden | visible at default 220px (drop target focus) | hidden |
-| **Shading** (id `shade` — texture / shader / UV) | visible 220px (narrow) | visible, task-filtered: Object / Shader / UV Override (Transform + Source Unit + Print Part hidden) | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
+| **Layout** (default — import & arrange) | visible 260px | visible, task-filtered: Object / Transform / File units / Print (Shader + UV hidden) | hidden | hidden | visible at default 220px (drop target focus) | hidden |
+| **Shading** (id `shade` — texture / shader / UV) | visible 220px (narrow) | visible, task-filtered: Object / Shader / UV Override (Transform + File units + Print hidden) | hidden | **visible, expanded — primary edit surface** | hidden | hidden |
 | **Scene** (grid / environment / camera / Rendering output) | visible 220px (narrow) | **hidden** (scene-wide, not object work) | **visible** | hidden | hidden | hidden |
-| **Print** (validate + export) | visible 220px (narrow) | **hidden** (per-object Print Part toggle lives in Layout; selective export via Print ▸ Export "selected only") | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
+| **Print** (validate + export) | visible 220px (narrow) | **hidden** (per-object Print toggle lives in Layout; selective export via Print ▸ Export "selected only") | hidden | hidden | hidden | **visible at full height** (Scale / Validation / Bed / Export) |
 
 Properties section filtering is pure CSS (`body[data-workspace]` +
 `.pp-section[data-section]`, layout.css) — the panel renders everything,

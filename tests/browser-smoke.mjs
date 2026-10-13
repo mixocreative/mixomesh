@@ -1903,6 +1903,32 @@ async function main() {
     assert(shaderConsolidation.restored.every(Boolean),
       'undo should restore consolidated shader identities');
 
+    // Task 0.9: the status-bar Undo button reverts a Duplicate.
+    const undoButton = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const B = window.BABYLON;
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const stl = ['solid u','facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 20 0 0','vertex 0 20 0','endloop','endfacet','endsolid u',''].join('\\n');
+      const ids = await al.AssetLoader.loadFromBlob(new Blob([stl], { type: 'model/stl' }), 'undo-btn.stl', new B.Vector3(0,0,0), {});
+      await frame();
+      const before = Object.keys(getState().scene.objects).length;
+      hm.push(new hm.DuplicateCommand([ids[0]]));
+      await frame();
+      const afterDup = Object.keys(getState().scene.objects).length;
+      const btn = document.getElementById('status-undo');
+      const enabled = !!btn && !btn.disabled;
+      btn?.click();
+      await frame();
+      const afterUndo = Object.keys(getState().scene.objects).length;
+      return { before, afterDup, afterUndo, enabled, hasRedo: !!document.getElementById('status-redo') };
+    })()`);
+    assert(undoButton.enabled, 'status-bar Undo button missing or disabled after Duplicate');
+    assert(undoButton.hasRedo, 'status-bar Redo button missing');
+    assert(undoButton.afterDup === undoButton.before + 1, `Duplicate should add one object (${undoButton.before} -> ${undoButton.afterDup})`);
+    assert(undoButton.afterUndo === undoButton.before, `Undo button should revert the Duplicate (${undoButton.afterUndo} vs ${undoButton.before})`);
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

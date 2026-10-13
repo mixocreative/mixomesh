@@ -25,7 +25,7 @@ export class SourceUnitCommand {
     this._next = nextUnit;
     const a = getState().scene.assetLibrary[assetId];
     this._prevConfirmed = a ? a.unitConfirmed !== false : true;
-    this.label = `Source Unit (${nextUnit})`;
+    this.label = `File units (${nextUnit})`;
   }
   execute() {
     _applySourceUnit(this._assetId, this._prev, this._next, /*confirmed*/ false);
