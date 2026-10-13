@@ -156,6 +156,8 @@ package.json               ← npm scripts, runtime deps, Vite deps
 .npmrc                     ← local npm cache and install policy
 vite.config.ts             ← Vite dev/build config
 tsconfig.json              ← TypeScript migration config
+DESIGN.md                  ← UI design reference for Stitch mockups (mirrors tokens.css + blender.css; CSS wins)
+docs/design/stitch-capture.md ← Stitch capture recipe (prod build on :5180, fixture scenes only, owner OK to bind/upload)
 scripts/
   install-deps.mjs         ← dependency bootstrap with local cache/temp paths
   ui-screenshot.mjs        ← headless 4-workspace capture harness (PROBE=1 dumps geometry)

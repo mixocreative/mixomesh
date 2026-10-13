@@ -206,6 +206,14 @@ await test('T7: committed .glb fixtures match their generator output byte for by
   }
 });
 
+// ── Stitch local state ignores ────────────────────────────────────────────────
+// Google Stitch design-tool artifacts and configuration must not be version-controlled.
+await test('Stitch local state (.stitch/ and .stitch.json) is ignored', () => {
+  const gitignore = readFileSync('.gitignore', 'utf8');
+  assert.ok(gitignore.includes('.stitch/'), '.gitignore must ignore .stitch/ directory');
+  assert.ok(gitignore.includes('.stitch.json'), '.gitignore must ignore .stitch.json file');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

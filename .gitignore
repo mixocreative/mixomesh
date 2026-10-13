@@ -6,6 +6,10 @@
 .tmp/
 .npm-cache/
 
+# Google Stitch design-tool local state
+.stitch/
+.stitch.json
+
 # Node
 node_modules/
 dist/
