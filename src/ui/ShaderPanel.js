@@ -735,6 +735,7 @@ function _wireSwatches() {
       const sh = getState().scene.shaders[_editingId];
       if (!sh || hex.toLowerCase() === sh.diffuseColor.toLowerCase()) return;
       push(new ColorApplyCommand(_editingId, sh.diffuseColor, hex));
+      Toast.show(t('toast.swatchApplied', { hex: hex.toUpperCase() }), 'success', 1500, { tag: 'swatch' });
     });
   });
 
@@ -754,12 +755,18 @@ function _addUserSwatch(name, hex) {
   // these are personal presets, not project state. Persistence will land
   // alongside autosave in Phase 6.
   const id = `usw_${Date.now().toString(36)}`;
+  const existing = getState().scene.userSwatches ?? [];
+  if (existing.some(u => String(u.hex).toLowerCase() === String(hex).toLowerCase())) {
+    Toast.show(t('toast.swatchExists', { hex: String(hex).toUpperCase() }), 'info', 2000);
+    return;
+  }
   const swatch = { id, name, hex, category: 'User' };
   setState(s => ({
     ...s,
     scene: { ...s.scene, userSwatches: [...(s.scene.userSwatches ?? []), swatch] },
   }), { silent: true });
   _render();
+  Toast.show(t('toast.swatchSaved', { name }), 'success', 2000);
 }
 
 function _groupByCategory(swatches) {
@@ -792,7 +799,14 @@ export function focus(shaderId) {
   // The Library section only exists in the Shade workspace (sections are
   // per-workspace, no repeats) — focusing from Properties / ContextMenu in
   // another workspace must bring it on screen first.
-  if (document.body.dataset.workspace !== 'shade') Workspace.setWorkspace('shade');
+  if (document.body.dataset.workspace !== 'shade') {
+    const prev = document.body.dataset.workspace;
+    Workspace.setWorkspace('shade');
+    if (prev && prev !== 'shade') {
+      Toast.show(t('toast.workspaceSwitched', { name: t('workspace.shade'), back: t(`workspace.${prev}`) }),
+        'info', 4000, { tag: 'workspace', onClick: () => Workspace.setWorkspace(prev) });
+    }
+  }
   document.getElementById('rp-shaders')?.classList.remove('collapsed');
   _render();
 }

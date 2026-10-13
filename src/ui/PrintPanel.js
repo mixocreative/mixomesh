@@ -11,6 +11,7 @@ import { icon, sectionIcon } from '../core/Icons.js';
 import { Modal } from './Modal.js';
 import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
+import { Toast } from './Toast.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
 import { formatScaleRatio, parseScaleRatioText, exportTargetsFromState } from '../core/scale/ScaleMath.js';
@@ -89,7 +90,12 @@ export function init() {
  * collapse, expand the section if the user folded it, then activate the tab.
  */
 function _focusValidation() {
+  const prev = getState().ui.workspace;
   Workspace.setWorkspace('print');
+  if (prev && prev !== 'print') {
+    Toast.show(t('toast.workspaceSwitched', { name: t('workspace.print'), back: t(`workspace.${prev}`) }),
+      'info', 4000, { tag: 'workspace', onClick: () => Workspace.setWorkspace(prev) });
+  }
   if (getState().ui.panelCollapsed?.right === true) Workspace.togglePanel('right');
   const sec = document.getElementById('rp-print');
   if (sec?.classList.contains('collapsed')) {
@@ -799,6 +805,10 @@ const EXPORTERS = {
 export function exportSelected(format) {
   const fn = EXPORTERS[format]?.();
   if (!fn) return Promise.resolve();
+  if (!(getState().selection?.selectedIds?.length)) {
+    Toast.show(t('toast.exportSelectedNone'), 'info', 2500);
+    return Promise.resolve();
+  }
   return _runExport(fn, { selectedOnly: true });
 }
 
