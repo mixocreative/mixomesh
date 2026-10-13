@@ -215,4 +215,140 @@ await check('listing / mounting / restoring the same folder twice yields the SAM
   assert.deepEqual((await reg.listDirectory(sub.ref, 'sub')).map(e => e.ref), [], 'empty child folder lists cleanly');
 });
 
-assert.equal(cases, 5);
+// ── Task 6.2: dialog descriptors + write rules ──────────────────────────────
+
+const {
+  sanitizeSuggestedName, exportDialogOptions, withExtension, EXPORT_EXTENSIONS, MAX_WRITE_BYTES,
+} = require('../electron/OpaqueFileRegistry.cjs');
+
+await check('suggestedName: folders, drives, reserved/control chars and device names never reach the dialog', async () => {
+  assert.equal(sanitizeSuggestedName('Robot.mixo', 'F'), 'Robot.mixo');
+  assert.equal(sanitizeSuggestedName('C:\\Users\\me\\..\\evil.mixo', 'F'), 'evil.mixo');
+  assert.equal(sanitizeSuggestedName('../../etc/passwd', 'F'), 'passwd');
+  assert.equal(sanitizeSuggestedName('\\\\server\\share\\x.zip', 'F'), 'x.zip');
+  assert.equal(sanitizeSuggestedName('C:evil.mixo', 'F'), 'evil.mixo');
+  assert.equal(sanitizeSuggestedName('a<b>c:d"e|f?g*h.stl', 'F'), 'abcdefgh.stl');
+  assert.equal(sanitizeSuggestedName('tab\there\u0000.obj', 'F'), 'tabhere.obj');
+  assert.equal(sanitizeSuggestedName('  ..hidden.  ', 'F'), 'hidden');
+  for (const bad of ['', '   ', '..', '/', 'C:\\', 'CON', 'con.mixo', 'LPT1.zip', 'nul', null, undefined, 42, {}]) {
+    assert.equal(sanitizeSuggestedName(bad, 'F'), 'F', String(bad));
+  }
+  assert.equal(sanitizeSuggestedName('x'.repeat(5000), 'F').length, 200);
+});
+
+await check('export descriptor: only whitelisted extensions; description is plain capped text', async () => {
+  for (const ext of EXPORT_EXTENSIONS) {
+    const o = exportDialogOptions({ suggestedName: `part.${ext}`, ext, description: 'Model' });
+    assert.equal(o.ext, ext);
+    assert.equal(o.defaultName, `part.${ext}`);
+    assert.deepEqual(o.filters, [{ name: 'Model', extensions: [ext] }]);
+  }
+  const norm = exportDialogOptions({ suggestedName: 'C:\\secret\\Robot', ext: '.3MF', description: 'Bad\nLabel' + 'x'.repeat(200) });
+  assert.equal(norm.ext, '3mf');
+  assert.equal(norm.defaultName, 'Robot.3mf', 'folder stripped, extension appended');
+  assert.equal(norm.filters[0].name.includes('\n'), false);
+  assert.equal(norm.filters[0].name.length, 80);
+  assert.equal(exportDialogOptions({ ext: 'stl' }).defaultName, 'export.stl');
+  assert.equal(exportDialogOptions({ ext: 'png', description: '' }).filters[0].name, 'PNG file');
+  for (const bad of ['exe', 'bat', 'lnk', 'js', 'html', 'mixo', 'stl;exe', '', '*', null, undefined]) {
+    assert.throws(() => exportDialogOptions({ suggestedName: 'x', ext: bad }), /not allowed/, String(bad));
+  }
+  assert.throws(() => exportDialogOptions(null), /not allowed/);
+  assert.equal(withExtension('a.MIXO', 'mixo'), 'a.MIXO');
+  assert.equal(withExtension('a.zip', 'mixo'), 'a.zip.mixo');
+  assert.equal(MAX_WRITE_BYTES, 1024 * 1024 * 1024, '1 GiB cap');
+});
+
+/** Write-capturing fs: every temp write + rename lands in `disk`. */
+function writeFs() {
+  const fsm = memFs();
+  const disk = new Map();
+  const temps = new Map();
+  const deps = {
+    ...fsm.deps,
+    writeFile: async (p, bytes) => { temps.set(p, Buffer.from(bytes)); },
+    rename: async (from, to) => { disk.set(to, temps.get(from)); temps.delete(from); },
+    unlink: async p => { temps.delete(p); },
+  };
+  return { fsm, disk, temps, deps };
+}
+
+await check('writes: only project-dialog tokens are writable; import/mount/drop tokens stay read-only', async () => {
+  const { fsm, disk, deps } = writeFs();
+  fsm.dir('C:\\p');
+  fsm.file('C:\\p\\scene.mixo', [1]);
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore() });
+  // Imported / dropped first (read-only)…
+  const imported = reg.registerFile('C:\\p\\scene.mixo');
+  await assert.rejects(() => reg.writeFile(imported.ref, 'x'), /read-only/);
+  // …then the user picks the SAME path in the project save dialog.
+  const saved = reg.registerFile('C:\\p\\scene.mixo', 'scene.mixo', { writable: true });
+  assert.notEqual(saved.ref, imported.ref, 'a dialog grant mints its own token');
+  await assert.rejects(() => reg.writeFile(imported.ref, 'x'), /read-only/, 'the earlier read-only token is NOT upgraded');
+  assert.equal(await reg.writeFile(saved.ref, 'hello'), true);
+  assert.equal(disk.get('C:\\p\\scene.mixo').toString(), 'hello', 'atomic temp + rename onto the target');
+  assert.equal(reg.registerFile('c:\\P\\scene.mixo', 'scene.mixo', { writable: true }).ref, saved.ref,
+    'repeat grant reuses the writable token');
+  // Mount-listing tokens are read-only.
+  const mount = reg.registerMount('C:\\p');
+  const [child] = await reg.listDirectory(mount.ref, '');
+  await assert.rejects(() => reg.writeFile(child.ref, 'x'), /read-only/);
+  // Unknown / forged / directory tokens.
+  for (const bad of ['ref_forged', 'C:\\p\\scene.mixo', mount.ref, '', null]) {
+    await assert.rejects(() => reg.writeFile(bad, 'x'), /Unknown/, String(bad));
+  }
+  await assert.rejects(() => reg.writeFile(saved.ref, { not: 'bytes' }), /expects text or bytes/);
+  await assert.rejects(() => reg.writeFile(saved.ref, 42), /expects text or bytes/);
+});
+
+await check('writes: size cap refuses oversize payloads before touching disk', async () => {
+  const { disk, temps, deps } = writeFs();
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore(), maxWriteBytes: 8 });
+  const { ref } = reg.registerFile('C:\\p\\a.mixo', 'a.mixo', { writable: true });
+  assert.equal(await reg.writeFile(ref, new Uint8Array(8)), true, 'exactly at the cap is fine');
+  await assert.rejects(() => reg.writeFile(ref, new Uint8Array(9)), /too large/);
+  await assert.rejects(() => reg.writeFile(ref, 'x'.repeat(9)), /too large/);
+  await assert.rejects(() => reg.writeDialogTarget('C:\\p\\e.stl', new ArrayBuffer(9)), /too large/);
+  assert.equal(temps.size, 0);
+  assert.equal(disk.size, 1);
+});
+
+await check('export writes (writeDialogTarget) mint no token and need an absolute main-chosen path', async () => {
+  const { fsm, disk, deps } = writeFs();
+  fsm.file('C:\\p\\part.stl', [1]);
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore() });
+  const imported = reg.registerFile('C:\\p\\part.stl');
+  assert.equal(await reg.writeDialogTarget('C:\\p\\part.stl', new Uint8Array([9])), true);
+  assert.deepEqual([...disk.get('C:\\p\\part.stl')], [9]);
+  await assert.rejects(() => reg.writeFile(imported.ref, 'x'), /read-only/,
+    'exporting over a file does not make its token writable');
+  for (const bad of ['part.stl', '..\\x.stl', '', null, 7]) {
+    await assert.rejects(() => reg.writeDialogTarget(bad, 'x'), /Invalid save target/, String(bad));
+  }
+});
+
+await check('recents: the writable grant persists, survives restart, and a read-only persist never strips it', async () => {
+  const { fsm, deps } = writeFs();
+  fsm.dir('C:\\p');
+  fsm.file('C:\\p\\scene.mixo', [1]);
+  const store = createMemoryStore();
+  const reg = createOpaqueFileRegistry({ ...deps, store });
+  const saved = reg.registerFile('C:\\p\\scene.mixo', 'scene.mixo', { writable: true });
+  const key = await reg.persistRef(saved.ref);
+  assert.equal((await store.get(key)).writable, true);
+  // Persisting a read-only token of the same file keeps the earlier grant.
+  assert.equal(await reg.persistRef(reg.registerFile('C:\\p\\scene.mixo').ref), key);
+  assert.equal((await store.get(key)).writable, true);
+  const reg2 = createOpaqueFileRegistry({ ...deps, store });
+  const token = await reg2.restoreRef(key);
+  assert.match(token, /^ref_/);
+  assert.equal(await reg2.writeFile(token, 'again'), true, 'restored project key is writable');
+  // A file only ever persisted read-only restores read-only.
+  fsm.file('C:\\p\\tex.png', [2]);
+  const texKey = await reg.persistRef(reg.registerFile('C:\\p\\tex.png').ref);
+  assert.equal((await store.get(texKey)).writable, undefined);
+  const texToken = await reg2.restoreRef(texKey);
+  await assert.rejects(() => reg2.writeFile(texToken, 'x'), /read-only/);
+});
+
+assert.equal(cases, 11);

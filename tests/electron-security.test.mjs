@@ -1,0 +1,189 @@
+// Task 6.1 (Decision 19): Electron hardening + Content-Security-Policy, checked
+// statically and through the pure predicates in electron/WindowSecurity.cjs.
+// The live counterpart is `npm run test:electron` (MIXO_SMOKE=1 security probe).
+
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const {
+  SECURE_WEB_PREFERENCES, appEntryUrl, isAppUrl, guardWebContents, denyAllPermissions,
+  isPermissionAllowed, isTrustedSender,
+} = require('../electron/WindowSecurity.cjs');
+
+const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+const preloadSource = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
+const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+// The exact policy (index.html meta). Changing it means updating BLUEPRINT §11
+// "Electron security" with the reason for every added source.
+const EXPECTED_CSP = {
+  'default-src': ["'self'"],
+  'script-src': ["'self'", "'wasm-unsafe-eval'", "'unsafe-eval'"],
+  'style-src': ["'self'"],
+  'style-src-attr': ["'unsafe-inline'"],
+  'img-src': ["'self'", 'data:', 'blob:'],
+  'connect-src': ["'self'", 'data:', 'blob:'],
+  'worker-src': ["'self'", 'blob:'],
+  'object-src': ["'none'"],
+  'base-uri': ["'self'"],
+  'form-action': ["'none'"],
+};
+
+let cases = 0;
+async function check(name, fn) {
+  try { await fn(); cases++; } catch (err) { err.message = `${name}: ${err.message}`; throw err; }
+}
+
+await check('webPreferences: sandbox + contextIsolation, no Node, no webview', () => {
+  assert.equal(SECURE_WEB_PREFERENCES.sandbox, true);
+  assert.equal(SECURE_WEB_PREFERENCES.contextIsolation, true);
+  assert.equal(SECURE_WEB_PREFERENCES.nodeIntegration, false);
+  assert.equal(SECURE_WEB_PREFERENCES.webviewTag, false);
+  assert.equal(SECURE_WEB_PREFERENCES.webSecurity, true);
+  assert.equal(SECURE_WEB_PREFERENCES.allowRunningInsecureContent, false);
+  assert.ok(Object.isFrozen(SECURE_WEB_PREFERENCES));
+  assert.match(mainSource, /webPreferences:\s*\{\s*\.\.\.SECURE_WEB_PREFERENCES,\s*preload:/);
+  assert.doesNotMatch(mainSource, /sandbox:\s*false|nodeIntegration:\s*true|contextIsolation:\s*false|webSecurity:\s*false/);
+});
+
+await check('main wires every guard: navigation, window-open, permissions, IPC sender', () => {
+  assert.match(mainSource, /app\.on\('web-contents-created'[\s\S]*?guardWebContents\(contents, ENTRY_URL/);
+  assert.match(mainSource, /denyAllPermissions\(session\.defaultSession\)/);
+  // ipcMain.handle appears exactly once — inside the sender-checking `handle` wrapper.
+  assert.equal(mainSource.match(/ipcMain\.handle\(/g)?.length, 1);
+  assert.match(mainSource, /function handle\(channel, fn\)[\s\S]*?isTrustedSender\(event, ENTRY_URL\)/);
+  assert.match(mainSource, /ipcMain\.on\('app:close-response', \(event, result\) => \{\s*if \(!isTrustedSender\(event, ENTRY_URL\)\) return;/);
+  assert.equal(mainSource.match(/ipcMain\.on\(/g)?.length, 1, 'every ipcMain.on listener checks its sender');
+});
+
+await check('preload stays sandbox-compatible: requires only electron', () => {
+  const requires = [...preloadSource.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]);
+  assert.deepEqual(requires, ['electron']);
+  for (const api of ['contextBridge', 'ipcRenderer', 'webUtils']) assert.match(preloadSource, new RegExp(`\\b${api}\\b`));
+});
+
+await check('isAppUrl: built app = exactly dist/index.html; dev = the dev server origin', () => {
+  const indexPath = process.platform === 'win32' ? 'C:\\App\\dist\\index.html' : '/app/dist/index.html';
+  const fileEntry = appEntryUrl({ indexPath });
+  assert.equal(fileEntry, pathToFileURL(indexPath).href);
+  assert.equal(isAppUrl(fileEntry, fileEntry), true);
+  assert.equal(isAppUrl(`${fileEntry}?x=1#frag`, fileEntry), true, 'query/hash ignored');
+  if (process.platform === 'win32') assert.equal(isAppUrl('file:///c:/app/DIST/index.html', fileEntry), true, 'win32 case-insensitive');
+  for (const other of [
+    pathToFileURL(indexPath.replace('index.html', 'other.html')).href,
+    pathToFileURL(indexPath.replace('dist', 'evil')).href,
+    'file:///C:/Windows/System32/drivers/etc/hosts',
+    'https://example.com/', 'http://127.0.0.1:5173/', 'javascript:alert(1)', 'data:text/html,hi',
+    'about:blank', '', 'not a url', null,
+  ]) assert.equal(isAppUrl(other, fileEntry), false, String(other));
+
+  const devEntry = appEntryUrl({ devUrl: 'http://127.0.0.1:5173', indexPath });
+  assert.equal(isAppUrl('http://127.0.0.1:5173/', devEntry), true);
+  assert.equal(isAppUrl('http://127.0.0.1:5173/index.html?reload', devEntry), true);
+  for (const other of ['http://127.0.0.1:5174/', 'http://localhost:5173/', 'https://127.0.0.1:5173/',
+    'http://127.0.0.1.evil.com:5173/', fileEntry, 'ws://127.0.0.1:5173/']) {
+    assert.equal(isAppUrl(other, devEntry), false, other);
+  }
+  assert.equal(isAppUrl('http://x/', 'not a url'), false);
+});
+
+await check('guardWebContents: foreign navigation/redirect cancelled, popups + webviews denied', () => {
+  const entry = 'http://127.0.0.1:5173/';
+  const handlers = {};
+  let openHandler = null;
+  const contents = {
+    on: (name, fn) => { handlers[name] = fn; },
+    setWindowOpenHandler: fn => { openHandler = fn; },
+  };
+  const blocked = [];
+  guardWebContents(contents, entry, { onBlocked: (kind, url) => blocked.push(`${kind}:${url}`) });
+  const nav = (name, url) => { let prevented = false; handlers[name]({ preventDefault: () => { prevented = true; } }, url); return prevented; };
+  assert.equal(nav('will-navigate', 'https://evil.example/'), true);
+  assert.equal(nav('will-navigate', 'file:///C:/x.html'), true);
+  assert.equal(nav('will-navigate', 'http://127.0.0.1:5173/index.html'), false, 'own document may reload');
+  assert.equal(nav('will-redirect', 'https://evil.example/'), true);
+  let webviewPrevented = false;
+  handlers['will-attach-webview']({ preventDefault: () => { webviewPrevented = true; } });
+  assert.equal(webviewPrevented, true);
+  assert.deepEqual(openHandler({ url: 'https://example.com/' }), { action: 'deny' });
+  assert.deepEqual(openHandler({ url: entry }), { action: 'deny' }, 'even the app URL never opens a second window');
+  assert.ok(blocked.includes('navigate:https://evil.example/') && blocked.includes('window-open:https://example.com/'));
+  // A throwing reporter never weakens the guard.
+  guardWebContents(contents, entry, { onBlocked: () => { throw new Error('boom'); } });
+  assert.equal(nav('will-navigate', 'https://evil.example/'), true);
+});
+
+await check('permissions: deny-all except clipboard write', () => {
+  let request = null;
+  let checkFn = null;
+  let device = null;
+  denyAllPermissions({
+    setPermissionRequestHandler: fn => { request = fn; },
+    setPermissionCheckHandler: fn => { checkFn = fn; },
+    setDevicePermissionHandler: fn => { device = fn; },
+  });
+  const ask = permission => { let answer = null; request({}, permission, v => { answer = v; }); return answer; };
+  for (const p of ['media', 'geolocation', 'notifications', 'openExternal', 'fullscreen', 'clipboard-read',
+    'pointerLock', 'midi', 'hid', 'serial', 'usb', 'fileSystem', 'display-capture', 'unknown']) {
+    assert.equal(ask(p), false, p);
+    assert.equal(checkFn({}, p), false, p);
+  }
+  assert.equal(ask('clipboard-sanitized-write'), true);
+  assert.equal(checkFn({}, 'clipboard-sanitized-write'), true);
+  assert.equal(isPermissionAllowed('clipboard-sanitized-write'), true);
+  assert.equal(device(), false);
+});
+
+await check('isTrustedSender: only the app top frame', () => {
+  const entry = 'http://127.0.0.1:5173/';
+  assert.equal(isTrustedSender({ senderFrame: { url: 'http://127.0.0.1:5173/index.html', parent: null } }, entry), true);
+  assert.equal(isTrustedSender({ senderFrame: { url: 'http://127.0.0.1:5173/', parent: {} } }, entry), false, 'child frame');
+  assert.equal(isTrustedSender({ senderFrame: { url: 'https://evil.example/', parent: null } }, entry), false);
+  assert.equal(isTrustedSender({ senderFrame: null }, entry), false, 'destroyed frame');
+  assert.equal(isTrustedSender({}, entry), false);
+  assert.equal(isTrustedSender(null, entry), false);
+});
+
+function parseCsp(html) {
+  const metas = [...html.matchAll(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"\s*>/gi)];
+  assert.equal(metas.length, 1, 'exactly one CSP meta tag');
+  const map = {};
+  for (const part of metas[0][1].split(';').map(p => p.trim()).filter(Boolean)) {
+    const [name, ...sources] = part.split(/\s+/);
+    assert.equal(map[name], undefined, `duplicate directive ${name}`);
+    map[name] = sources;
+  }
+  return map;
+}
+
+await check('CSP meta: the exact policy, no inline script, Decision 19 baseline', () => {
+  const csp = parseCsp(indexHtml);
+  assert.deepEqual(csp, EXPECTED_CSP);
+  assert.equal(csp['script-src'].includes("'unsafe-inline'"), false);
+  assert.equal((csp['style-src'] ?? []).includes("'unsafe-inline'"), false, 'inline <style> elements stay blocked');
+  // Decision 19 baseline directives are all present verbatim.
+  assert.deepEqual(csp['default-src'], ["'self'"]);
+  for (const s of ["'self'", 'data:', 'blob:']) assert.ok(csp['img-src'].includes(s));
+  for (const s of ["'self'", 'blob:']) assert.ok(csp['worker-src'].includes(s));
+  // The meta must precede every script/stylesheet so it governs them.
+  const metaAt = indexHtml.search(/<meta\s+http-equiv="Content-Security-Policy"/i);
+  const firstResource = Math.min(...['<script', '<link rel="stylesheet"'].map(t => indexHtml.indexOf(t)).filter(i => i >= 0));
+  assert.ok(metaAt >= 0 && metaAt < firstResource, 'CSP meta comes before any script or stylesheet');
+});
+
+await check('index.html: no inline scripts or event-handler attributes', () => {
+  const scripts = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+  assert.ok(scripts.length >= 1);
+  for (const [, attrs, body] of scripts) {
+    assert.match(attrs, /\bsrc="[^"]+"/, `script without src: ${attrs}`);
+    assert.match(attrs, /\btype="module"/);
+    assert.equal(body.trim(), '', 'script tags carry no inline code');
+  }
+  assert.doesNotMatch(indexHtml, /\son[a-z]+\s*=\s*["']/i, 'no inline on* handlers');
+  assert.doesNotMatch(indexHtml, /javascript:/i);
+});
+
+assert.equal(cases, 9);

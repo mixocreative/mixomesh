@@ -2,6 +2,13 @@
 // Node — a narrow, allowlisted `window.electronAPI`. contextIsolation is on, so the
 // renderer never sees ipcRenderer/require directly.
 //
+// SANDBOXED (task 6.1, `sandbox: true`): a sandboxed preload may only require
+// 'electron' (contextBridge / ipcRenderer / webUtils are all available there)
+// and a few polyfilled built-ins — never Node's fs/path. Keep it that way: all
+// file work happens in main behind opaque tokens. Save dialogs take only a
+// DESCRIPTOR ({suggestedName} / {suggestedName, ext, description}); main
+// sanitises it and owns the path (task 6.2).
+//
 // `capabilities` is read by src/core/storage/capabilities.js → the app detects a
 // desktop runtime with full filesystem support and swaps in DesktopStorageAdapter.
 

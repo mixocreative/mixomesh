@@ -3069,6 +3069,31 @@ desktop bridge missing methods or `storage:ready` > 10 s → blocking "Desktop
 storage unavailable". `MIXO_SMOKE=save` (unpackaged only) exercises a real
 save in the Electron smoke.
 
+**Electron security (tasks 6.1/6.2, Decision 19).** BrowserWindow uses
+`SECURE_WEB_PREFERENCES` (`electron/WindowSecurity.cjs`: sandbox,
+contextIsolation, no nodeIntegration/webview, webSecurity). Every
+webContents: `will-navigate`/`will-redirect` cancelled unless `isAppUrl`
+(exactly `dist/index.html` or the `MIXO_DEV_URL` origin);
+`setWindowOpenHandler` → deny; webviews prevented. Session permissions denied
+except `clipboard-sanitized-write`. Every IPC handler requires
+`isTrustedSender` (the app's top frame). CSP = `index.html` meta tag (web +
+desktop): `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'
+'unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src
+'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:;
+object-src 'none'; base-uri 'self'; form-action 'none'` ('unsafe-eval' =
+Embind `new Function` in the vendored manifold/meshfix glue — droppable after a
+`-sDYNAMIC_EXECUTION=0` rebuild; `style-src-attr` = template `style=`
+attributes). No inline scripts (`src/app/entry.js`). CSG2 initialises only
+via `initCsg2(B)` (`vendorUrl.js`: dynamic import + `manifoldInstance`;
+Babylon's `manifoldUrl` path injects an inline module the CSP blocks). Save
+dialogs take descriptors only: `sanitizeSuggestedName` (bare, Windows-safe)
+and `exportDialogOptions` (extensions 3mf obj stl ply wrl zip png mp4 webm).
+Writability is part of token identity (a dialog grant never upgrades a
+read-only token); export writes go through main-only `writeDialogTarget`
+(no token). `MIXO_SMOKE=1` runs a security probe; any CSP violation fails
+the Electron smoke. Known gap: `fs:registerDropped` trusts the preload's
+drop path (read-only; Electron offers no main-side verification).
+
 | # | Tier | Condition | Live? | Source |
 |---|---|---|---|---|
 | 1 | Live exact path | `directoryHandleKey` granted **and** file exists at `originalPath` | yes | file on disk |

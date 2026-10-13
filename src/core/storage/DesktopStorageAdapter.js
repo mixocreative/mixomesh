@@ -10,6 +10,10 @@
 // `{ref,name}` tokens (never a path). Project tokens are writable (`writeFile` →
 // atomic temp+rename in main); import tokens are read-only; `saveExport` hands the
 // bytes to main, which writes the user-chosen file and answers true/false.
+// Dialogs take DESCRIPTORS only (task 6.2): `{suggestedName}` for a project save,
+// `{suggestedName, ext, description}` for an export. Main strips folders / drive /
+// reserved characters from the name, accepts only whitelisted export extensions
+// (3mf obj stl ply wrl zip png mp4 webm) and mints no token for an export.
 // `ready()` is the boot-gate handshake: the bridge must expose every method this
 // adapter calls and main must answer `storage:ready`.
 //
@@ -161,7 +165,7 @@ export const DesktopStorageAdapter = {
   async saveExport(blob, suggestedName, hint = {}) {
     // No browser download manager to fall back to: a failed native save is final.
     if (hint.forceDownload) throw new Error('The export could not be saved');
-    const ext = hint.ext || (suggestedName.split('.').pop() || '');
+    const ext = String(hint.ext || (suggestedName.split('.').pop() || '')).replace(/^\./, '').toLowerCase();
     return !!(await _requireApi('saveExport').saveExport(
       { suggestedName, ext, description: hint.description || `${ext.toUpperCase()} file` },
       await _bytesOf(blob),

@@ -13,7 +13,7 @@
 // raises the cap — ADR 0001 capabilities).
 
 import { materialSrgbColor } from './shaders/ColorSpace.js';
-import { vendorUrl, MANIFOLD_VENDOR_DIR } from './vendorUrl.js';
+import { initCsg2 } from './vendorUrl.js';
 
 /**
  * Default summed-triangle ceiling for a Boolean on the web build. Chosen below
@@ -89,7 +89,7 @@ async function _ensureCsg2() {
   const B = window.BABYLON;
   if (!B?.InitializeCSG2Async || !B?.CSG2) throw new Error('CSG2 unavailable in this runtime');
   if (!_csgInit) {
-    _csgInit = B.InitializeCSG2Async({ manifoldUrl: vendorUrl(MANIFOLD_VENDOR_DIR) }).catch(err => { _csgInit = null; throw err; });
+    _csgInit = initCsg2(B).catch(err => { _csgInit = null; throw err; });
   }
   await _csgInit;
 }

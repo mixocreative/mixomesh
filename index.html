@@ -3,6 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Content-Security-Policy (task 6.1, Decision 19). The ONE policy for the
+       built web app and the Electron desktop shell (file:// has no response
+       headers, so the meta tag is the delivery). `vite serve` widens it for
+       HMR only (vite.config.ts mixoCsp). Directive rationale: BLUEPRINT §11
+       "Electron security"; tests/electron-security.test.mjs pins it. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>MIXOMESH</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/src/styles/tokens.css">
@@ -19,15 +25,6 @@
   <link rel="stylesheet" href="/src/styles/components/project.css">
   <link rel="stylesheet" href="/src/styles/components/progress.css">
   <link rel="stylesheet" href="/src/styles/blender.css">
-  <script>
-    window.addEventListener('error', function () {
-      var boot = document.getElementById('boot-status');
-      if (!boot) return;
-      boot.textContent = 'Failed to initialise MIXOMESH. Check DevTools for details.';
-      boot.classList.add('boot-status-error');
-      boot.hidden = false;
-    });
-  </script>
 </head>
 <body>
   <noscript>
@@ -120,15 +117,6 @@
     <span data-i18n-key="app.workspaceTooNarrowBody">Use Chrome or Edge at 900 px or wider to keep the 3D viewport, panels, and export controls usable.</span>
   </div>
 
-  <script type="module">
-    import('/src/app/boot.ts').catch(function (err) {
-      var boot = document.getElementById('boot-status');
-      if (!boot) return;
-      console.error('MIXOMESH boot module failed:', err);
-      boot.textContent = 'MIXOMESH must be served by Vite. Run npm run dev and open http://127.0.0.1:5173/index.html.';
-      boot.classList.add('boot-status-error');
-      boot.hidden = false;
-    });
-  </script>
+  <script type="module" src="/src/app/entry.js"></script>
 </body>
 </html>

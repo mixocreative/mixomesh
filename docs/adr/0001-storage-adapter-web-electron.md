@@ -236,3 +236,14 @@ Every asset entry carries an optional `source: {kind: 'folder'|'file', refKey, p
 ### Summary
 
 The StorageAdapter seam is a domain-level interface (opaque refs, no FSA/idb primitives leaking to renderer). Asset resolution is tiered (live path → file handle → embedded → ghost) but load never scans. Persistence is by stable key, with desktop main-process registry (`mixo-refs.json`) keeping absolute paths invisible to the renderer. The boot gate ensures storage is available before UI init. All calls (project open/save, import, export, KV, asset resolution) route through the adapter; direct File System Access and IndexedDB live only in `StorageAdapter.js` and `idb.js`.
+
+## Addendum 2026-10-14 (tasks 6.1/6.2 — security hardening)
+
+Phase 3's security hardening landed ahead of the installer: sandboxed, isolated renderer;
+navigation and popups locked to the app document; permissions denied except clipboard write;
+IPC sender frames validated; one meta-tag CSP shared by web and desktop. Dialogs are
+descriptor-only (sanitised in main, export extension whitelist); export writes mint no renderer
+token; writable tokens come only from project dialogs or their persisted recents keys. Known
+concessions: `'unsafe-eval'` for the Embind glue of the vendored WASM libraries (until rebuilt
+with `DYNAMIC_EXECUTION=0`), and `fs:registerDropped` trusting a preload-supplied path
+(read-only), because Electron offers no main-side drop verification.

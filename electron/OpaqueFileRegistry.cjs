@@ -7,8 +7,70 @@ const fsConstants = require('node:fs').constants;
 const STABLE_KEY_RE = /^(dir|file)_[0-9a-f]{32}$/;
 const DEFAULT_FIND_LIMIT = 4000;
 const MAX_FIND_LIMIT = 20000;
-// Upper bound for one renderer-initiated write (project save) — task 4.4.
+// Upper bound for one renderer-initiated write (project save / export) — task 4.4.
 const MAX_WRITE_BYTES = 1024 * 1024 * 1024;
+
+// ── Dialog descriptors (task 6.2) ──
+// The renderer describes a save dialog with `{suggestedName, ext?, description?}`
+// ONLY; main sanitises every field before it reaches the native dialog.
+/** Extensions an export save dialog may offer (PrintPackaging + Scene renders). */
+const EXPORT_EXTENSIONS = Object.freeze(['3mf', 'obj', 'stl', 'ply', 'wrl', 'zip', 'png', 'mp4', 'webm']);
+const MAX_NAME_CHARS = 200;
+const MAX_DESCRIPTION_CHARS = 80;
+// Windows reserved device names (with or without an extension).
+const RESERVED_NAME_RE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/g;
+const RESERVED_CHARS_RE = /[<>:"|?*]/g;
+
+/**
+ * Renderer-suggested file name → a bare, Windows-safe file name. Directory
+ * parts (either separator), drive prefixes, control and reserved characters
+ * are dropped; leading/trailing dots and spaces trimmed; device names and
+ * empty results fall back. The result can never steer the dialog to a folder.
+ */
+function sanitizeSuggestedName(name, fallback) {
+  if (typeof name !== 'string') return fallback;
+  const last = name.split(/[\\/]/).pop() ?? '';
+  const cleaned = last
+    .replace(/^[a-zA-Z]:/, '')
+    .replace(CONTROL_CHARS_RE, '')
+    .replace(RESERVED_CHARS_RE, '')
+    .slice(0, MAX_NAME_CHARS)
+    .replace(/^[\s.]+|[\s.]+$/g, '');
+  if (!cleaned || RESERVED_NAME_RE.test(cleaned)) return fallback;
+  return cleaned;
+}
+
+/** `name` ending in `.ext` (case-insensitive); appended when missing. */
+function withExtension(name, ext) {
+  return name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`;
+}
+
+/**
+ * Export save-dialog descriptor → `{ext, defaultName, filters}`. The extension
+ * must be on EXPORT_EXTENSIONS (anything else throws — main never offers an
+ * arbitrary file type); the description is plain text, capped.
+ */
+function exportDialogOptions(opts) {
+  const ext = typeof opts?.ext === 'string' ? opts.ext.trim().replace(/^\./, '').toLowerCase() : '';
+  if (!EXPORT_EXTENSIONS.includes(ext)) throw new Error(`Export type ".${ext}" is not allowed`);
+  const rawDesc = typeof opts?.description === 'string' ? opts.description : '';
+  const description = rawDesc.replace(CONTROL_CHARS_RE, '').trim().slice(0, MAX_DESCRIPTION_CHARS)
+    || `${ext.toUpperCase()} file`;
+  return {
+    ext,
+    defaultName: withExtension(sanitizeSuggestedName(opts?.suggestedName, 'export'), ext),
+    filters: [{ name: description, extensions: [ext] }],
+  };
+}
+
+/** text | ArrayBuffer | view → Buffer, or null for anything else. */
+function toWriteBuffer(data) {
+  if (typeof data === 'string') return Buffer.from(data, 'utf8');
+  if (data instanceof ArrayBuffer) return Buffer.from(new Uint8Array(data));
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  return null;
+}
 
 /** In-memory store with the KvStore surface (tests / no persistence configured). */
 function createMemoryStore() {
@@ -27,12 +89,15 @@ function createMemoryStore() {
  *
  * deps (all optional, injectable for tests): randomUUID, readdir, readFile,
  * writeFile, rename, unlink, stat, access, platform, store ({get,set,delete} —
- * KvStore in production).
+ * KvStore in production), maxWriteBytes.
  *
- * WRITABLE tokens (task 4.4): only files the MAIN process registered with
+ * WRITABLE tokens (task 4.4 / 6.2): only files the MAIN process registered with
  * `{writable:true}` — the project open/save dialogs, or a restored key that was
- * persisted from such a token — accept `writeFile`. Asset files reached through
- * a mount listing / import dialog are read-only to the renderer.
+ * persisted from such a token — accept `writeFile`. Writability is part of a
+ * token's identity: choosing a path in a project dialog mints a SEPARATE
+ * writable token and never upgrades a read-only token the renderer already
+ * holds for that path (import / mount listing / drop stay read-only). Export
+ * saves mint no token at all (`writeDialogTarget`, main-only).
  */
 function createOpaqueFileRegistry(deps = {}) {
   const makeId = deps.randomUUID ?? randomUUID;
@@ -45,6 +110,7 @@ function createOpaqueFileRegistry(deps = {}) {
   const access = deps.access ?? fs.access;
   const platform = deps.platform ?? process.platform;
   const store = deps.store ?? createMemoryStore();
+  const maxWriteBytes = deps.maxWriteBytes ?? MAX_WRITE_BYTES;
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const refs = new Map();       // token → {kind, absolutePath, name, writable}
   const tokenByPath = new Map(); // `${kind}\0${normalisedPath}` → token (bounded re-registration)
@@ -55,13 +121,10 @@ function createOpaqueFileRegistry(deps = {}) {
   };
 
   function register(kind, absolutePath, name, prefix = 'ref', writable = false) {
-    const identity = `${kind}\0${normalise(absolutePath)}`;
+    // Writability is part of the identity: a read-only token is never upgraded.
+    const identity = `${kind}\0${writable ? 'w' : 'r'}\0${normalise(absolutePath)}`;
     const existing = tokenByPath.get(identity);
-    if (existing && refs.has(existing)) {
-      // The user just chose this exact path in a project dialog → it may be written.
-      if (writable) refs.get(existing).writable = true;
-      return existing;
-    }
+    if (existing && refs.has(existing)) return existing;
     const ref = `${prefix}_${makeId()}`;
     refs.set(ref, { kind, absolutePath, name, writable: !!writable });
     tokenByPath.set(identity, ref);
@@ -110,6 +173,22 @@ function createOpaqueFileRegistry(deps = {}) {
     return target;
   }
 
+  /** Atomic temp-file + rename write, size-capped. Main-only callers. */
+  async function writeAtomic(absolutePath, data) {
+    const bytes = toWriteBuffer(data);
+    if (!bytes) throw new TypeError('writeFile expects text or bytes');
+    if (bytes.byteLength > maxWriteBytes) throw new Error('File is too large to write');
+    const tmp = `${absolutePath}.${makeId()}.tmp`;
+    try {
+      await writeFileFs(tmp, bytes);
+      await rename(tmp, absolutePath);
+    } catch (err) {
+      try { await unlink(tmp); } catch { /* temp never created / already moved */ }
+      throw err;
+    }
+    return true;
+  }
+
   async function readPayload(absolutePath, name) {
     const bytes = await readFile(absolutePath);
     const copy = Uint8Array.from(bytes);
@@ -137,21 +216,17 @@ function createOpaqueFileRegistry(deps = {}) {
     async writeFile(ref, data) {
       const file = requireRef(ref, 'file');
       if (!file.writable) throw new Error('This file is read-only to the app');
-      const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8')
-        : data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data))
-          : ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-            : null;
-      if (!bytes) throw new TypeError('writeFile expects text or bytes');
-      if (bytes.byteLength > MAX_WRITE_BYTES) throw new Error('File is too large to write');
-      const tmp = `${file.absolutePath}.${makeId()}.tmp`;
-      try {
-        await writeFileFs(tmp, bytes);
-        await rename(tmp, file.absolutePath);
-      } catch (err) {
-        try { await unlink(tmp); } catch { /* temp never created / already moved */ }
-        throw err;
-      }
-      return true;
+      return writeAtomic(file.absolutePath, data);
+    },
+
+    /**
+     * MAIN-ONLY (never wired to an IPC channel that takes a path): write the
+     * file the user just chose in an export save dialog. No token is minted,
+     * so the renderer gains no write access to that path.
+     */
+    async writeDialogTarget(absolutePath, data) {
+      if (typeof absolutePath !== 'string' || !pathApi.isAbsolute(absolutePath)) throw new Error('Invalid save target');
+      return writeAtomic(absolutePath, data);
     },
 
     async listDirectory(ref, parentPath = '') {
@@ -184,9 +259,14 @@ function createOpaqueFileRegistry(deps = {}) {
       const entry = requireRef(ref);
       const digest = createHash('sha256').update(normalise(entry.absolutePath)).digest('hex').slice(0, 32);
       const key = `${entry.kind === 'directory' ? 'dir' : 'file'}_${digest}`;
+      // Persisting a read-only token for the same file keeps an earlier
+      // project-dialog grant (recents must reopen writable); it never adds one.
+      const prev = await store.get(key);
+      const writable = entry.writable || (prev?.writable === true && prev.kind === entry.kind
+        && typeof prev.absolutePath === 'string' && normalise(prev.absolutePath) === normalise(entry.absolutePath));
       await store.set(key, {
         kind: entry.kind, absolutePath: entry.absolutePath, name: entry.name,
-        ...(entry.writable ? { writable: true } : {}),
+        ...(writable ? { writable: true } : {}),
       });
       return key;
     },
@@ -264,4 +344,12 @@ function createOpaqueFileRegistry(deps = {}) {
   };
 }
 
-module.exports = { createOpaqueFileRegistry, createMemoryStore, MAX_WRITE_BYTES };
+module.exports = {
+  createOpaqueFileRegistry,
+  createMemoryStore,
+  MAX_WRITE_BYTES,
+  EXPORT_EXTENSIONS,
+  sanitizeSuggestedName,
+  exportDialogOptions,
+  withExtension,
+};

@@ -36,7 +36,7 @@ import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { getTextureDimensions } from './ExportTextures.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
-import { vendorUrl, MANIFOLD_VENDOR_DIR } from '../vendorUrl.js';
+import { initCsg2 } from '../vendorUrl.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -49,7 +49,7 @@ async function _ensureCSG2() {
   const B = window.BABYLON;
   if (!B || !B.CSG2 || typeof B.InitializeCSG2Async !== 'function') return false;
   try {
-    if (!_csgInitPromise) _csgInitPromise = B.InitializeCSG2Async({ manifoldUrl: vendorUrl(MANIFOLD_VENDOR_DIR) });
+    if (!_csgInitPromise) _csgInitPromise = initCsg2(B);
     await _csgInitPromise;
     return true;
   } catch (err) {
