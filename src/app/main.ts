@@ -19,6 +19,7 @@ import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
+import { shouldGuardUnload } from '../core/UnloadGuard.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { loadMaterialPresets } from '../core/print/MaterialPresets.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
@@ -128,7 +129,12 @@ function wireCloseFlow() {
     };
   }).electronAPI;
   window.addEventListener('beforeunload', event => {
-    if (api || !PersistenceManager.isDirty()) return;
+    if (!shouldGuardUnload({
+      isElectron: !!api,
+      dirty: PersistenceManager.isDirty(),
+      smoke: false, // smoke runs bypass in electron/main.cjs (will-prevent-unload), non-prod only
+      isProd: !!(import.meta as { env?: { PROD?: boolean } }).env?.PROD,
+    })) return;
     event.preventDefault();
     event.returnValue = '';
   });

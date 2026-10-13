@@ -5020,7 +5020,12 @@ viewport drop) and **Open Project** (`PersistenceManager.open`). Any object,
 including a recoverable ghost, hides the overlay; New/removal/load events keep
 it synchronized.
 
-Browser close uses the native `beforeunload` prompt only while dirty. Electron
+Browser close uses the native `beforeunload` prompt only while dirty — on web AND
+Electron (`core/UnloadGuard.shouldGuardUnload`). Electron answers
+`will-prevent-unload` (Ctrl+R / navigation) with a native "Leave without saving?"
+confirm (skipped for an already-approved close), handles `render-process-gone` with a
+Reload / Close dialog, and `MIXO_SMOKE` bypasses these guards only when
+`!app.isPackaged`. Electron also
 intercepts `BrowserWindow.close`, asks the renderer over the allowlisted
 `app:close-requested` channel, and closes only after `{action:'discard'}` or a
 successful `{action:'save',saved:true}` response; cancel and failed/cancelled

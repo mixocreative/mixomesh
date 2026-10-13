@@ -15,6 +15,8 @@ const DEV_URL = process.env.MIXO_DEV_URL || '';
 let _kv = null;
 const _fileRefs = createOpaqueFileRegistry();
 const _approvedClose = new WeakSet();
+// MIXO_SMOKE bypasses the unload/close/crash guards ONLY in unpackaged builds.
+const smokeBypass = () => !!process.env.MIXO_SMOKE && !app.isPackaged;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -32,9 +34,44 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 
   win.on('close', event => {
-    if (_approvedClose.has(win) || process.env.MIXO_SMOKE) return;
+    if (_approvedClose.has(win) || smokeBypass()) return;
     event.preventDefault();
     win.webContents.send('app:close-requested');
+  });
+
+  // The renderer cancels `beforeunload` when the project is dirty (Ctrl+R, navigation).
+  // Electron swallows that silently unless we answer will-prevent-unload ourselves.
+  win.webContents.on('will-prevent-unload', event => {
+    // ignore the prevention = leave. An approved close already went through the
+    // renderer's save/discard dialog — don't ask twice.
+    if (smokeBypass() || _approvedClose.has(win)) { event.preventDefault(); return; }
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Leave', 'Stay'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Leave without saving?',
+      message: 'Leave without saving?',
+      detail: 'This project has unsaved changes that will be lost.',
+    });
+    if (choice === 0) event.preventDefault(); // preventDefault here = proceed with unload
+  });
+
+  // Renderer crash / kill / OOM: offer a reload instead of leaving a dead window.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (smokeBypass()) { console.error('MIXO_SMOKE: render-process-gone', details?.reason); app.exit(3); return; }
+    if (details?.reason === 'clean-exit' || win.isDestroyed()) return;
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'error',
+      buttons: ['Reload', 'Close window'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'MIXOMESH stopped responding',
+      message: 'The window crashed (' + (details?.reason ?? 'unknown') + ').',
+      detail: 'Reload to reopen the app. Unsaved changes may be recovered from autosave.',
+    });
+    if (choice === 0) win.webContents.reload();
+    else { _approvedClose.add(win); win.close(); }
   });
 
   // Headless smoke (MIXO_SMOKE=1): verify the built app boots in the desktop shell,

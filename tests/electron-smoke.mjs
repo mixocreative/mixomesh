@@ -19,6 +19,10 @@ if (!existsSync(bin)) {
 }
 
 const mainSource = readFileSync('electron/main.cjs', 'utf8');
+if (!mainSource.includes("'render-process-gone'") || !mainSource.includes("'will-prevent-unload'")) {
+  console.error('electron smoke: main.cjs must handle render-process-gone and will-prevent-unload');
+  process.exit(1);
+}
 const preloadSource = readFileSync('electron/preload.cjs', 'utf8');
 if (!mainSource.includes("ipcMain.on('app:close-response'")
     || !mainSource.includes("win.webContents.send('app:close-requested'")
