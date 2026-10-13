@@ -4126,6 +4126,24 @@ opens Validation; clicking no-print-parts/source/texture issues switches to
 Layout so the user can import, relink, or pick the affected asset. Issue rows
 select their first live related object when one exists.
 
+**Per-printer readiness hints (task 1.4).** `buildReadiness({parts, targets,
+bedDimensions, reference, profile, strictExport})` adds four profile-driven
+codes (limit 0/absent = no limit): `texture-too-large` (warning; a part's
+diffuse texture longer side > `colour.maxTextureSize`, sizes from the frozen
+source via `ExportTextures.getTextureDimensions`), `texture-count` (warning;
+distinct diffuse textures per object > `colour.maxTexturesPerObject`),
+`thin-feature` (warning; validator thickness proxy × `target.scaleToMM` <
+`validation.minWallMM`, else `minFeatureMM`, per target ratio — an advisory
+estimate per Decision 21), `watertight-required` (warning, ERROR under
+`print.strictExport`; only when `validation.requireWatertight` and a FRESH
+validation found holes/nonManifold — unknown never raises it). Parts carry
+`textures[{assetId,width,height}]`, `thicknessBU`, `watertight`; targets carry
+`scaleToMM = ratioFactor × unitFactor`. `MeshValidator.estimateThickness` =
+`min(3|V|/A, min bbox extent) × worldScale` for closed meshes (one O(tris)
+pass); cache entries gain `thicknessBU`; a `thinFeature` INFO result is added
+only under 3 mm at the size shown. `info` issues (`mixed-scales`) show an Info
+icon, never change status. Each code has `print.issue.*` + `print.issueAction.*`.
+
 `BedFit.checkBedFit(bounds, bed)` compares millimetre print coordinates against
 the positive slicer volume `0..X, 0..Y, 0..Z`. `PrintReadiness` converts the
 centred Babylon bed (`X`, world `Z`, world-up `Y`) into that coordinate space,

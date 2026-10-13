@@ -33,7 +33,10 @@ function partIds(parts, predicate) {
  *       scene floor. Only OBJ/STL keep world placement, so the issue names
  *       them in `data.formats`; a 3MF-only export may ignore it.
  */
-export function buildReadiness({ parts = [], targets = [], bedDimensions, reference = null } = {}) {
+export function buildReadiness({
+  parts = [], targets = [], bedDimensions, reference = null,
+  profile = null, strictExport = false,
+} = {}) {
   const issues = [];
   if (!parts.length) {
     issues.push(issue('no-print-parts', 'error', []));
@@ -62,6 +65,8 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions, refere
       }));
     }
   }
+
+  if (parts.length) addProfileHints(issues, parts, targets, profile, strictExport);
 
   const targetSummaries = targets.map(target => {
     const fit = checkBedFit(target.bounds, bedDimensions);
@@ -107,6 +112,71 @@ export function buildReadiness({ parts = [], targets = [], bedDimensions, refere
     targets: targetSummaries,
     issues,
   };
+}
+
+/**
+ * 1.4 per-printer hints, driven by the selected profile's `colour` and
+ * `validation` blocks (0 / absent limit = no limit). Never invents errors:
+ * only `watertight-required` escalates, and only under `strictExport`.
+ *
+ * thin-feature: `part.thicknessBU` is the MeshValidator thickness PROXY in
+ * world Babylon units; print mm = BU x `target.scaleToMM` (ratioFactor x
+ * unitFactor of that target's ExportContext). Judged against `minWallMM`
+ * (falling back to `minFeatureMM`) for every target ratio.
+ */
+function addProfileHints(issues, parts, targets, profile, strictExport) {
+  const colour = profile?.colour ?? {};
+  const rules = profile?.validation ?? {};
+
+  const maxSize = colour.maxTextureSize;
+  if (maxSize > 0) {
+    const big = parts.filter(p => (p.textures ?? []).some(tx => Math.max(tx.width, tx.height) > maxSize));
+    if (big.length) {
+      issues.push(issue('texture-too-large', 'warning', partIds(big, () => true), {
+        maxTextureSize: maxSize,
+        textures: big.flatMap(p => p.textures.filter(tx => Math.max(tx.width, tx.height) > maxSize)
+          .map(tx => ({ objectId: p.objectId, assetId: tx.assetId, width: tx.width, height: tx.height }))),
+      }));
+    }
+  }
+
+  const maxCount = colour.maxTexturesPerObject;
+  if (maxCount > 0) {
+    const many = parts.filter(p => (p.textures ?? []).length > maxCount);
+    if (many.length) {
+      issues.push(issue('texture-count', 'warning', partIds(many, () => true), {
+        maxTexturesPerObject: maxCount,
+        counts: Object.fromEntries(many.map(p => [p.objectId, p.textures.length])),
+      }));
+    }
+  }
+
+  const minMM = rules.minWallMM > 0 ? rules.minWallMM : (rules.minFeatureMM > 0 ? rules.minFeatureMM : 0);
+  if (minMM > 0) {
+    for (const target of targets) {
+      const k = target.scaleToMM;
+      if (!(k > 0)) continue;
+      const thin = parts.filter(p => p.thicknessBU > 0 && p.thicknessBU * k < minMM);
+      if (!thin.length) continue;
+      issues.push(issue('thin-feature', 'warning', partIds(thin, () => true), {
+        targetRatio: target.ratio ?? null,
+        targetLabel: target.label ?? null,
+        minWallMM: minMM,
+        minFeatureMM: rules.minFeatureMM ?? null,
+        thicknessMM: Object.fromEntries(thin.map(p => [p.objectId, p.thicknessBU * k])),
+        estimate: true,
+      }));
+    }
+  }
+
+  if (rules.requireWatertight) {
+    const open = parts.filter(p => p.watertight === false);
+    if (open.length) {
+      issues.push(issue('watertight-required', strictExport ? 'error' : 'warning', partIds(open, () => true), {
+        strict: !!strictExport,
+      }));
+    }
+  }
 }
 
 /**

@@ -497,6 +497,23 @@ await test('repairObjects: sequential and tolerant — a failure on one object d
   assert.equal(progress.length, 2, 'onProgress called once per object');
 });
 
+// ── 1.4: thickness proxy for the thin-feature hint ──
+await test('1.4 estimateThickness: cube s → s/2; solid slab → t; scale applies; empty → null', async () => {
+  const { estimateThickness } = await import('../src/core/MeshValidator.js');
+  const box = (sx, sy, sz) => {
+    const p = [0,0,0, sx,0,0, sx,sy,0, 0,sy,0, 0,0,sz, sx,0,sz, sx,sy,sz, 0,sy,sz];
+    const f = [0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7];
+    return [new Float32Array(p), new Uint32Array(f)];
+  };
+  const [cp, ci] = box(2, 2, 2);
+  assert.ok(Math.abs(estimateThickness(cp, ci) - 1) < 1e-6, 'cube side 2 → 1');
+  assert.ok(Math.abs(estimateThickness(cp, ci, 10) - 10) < 1e-5, 'world scale multiplies');
+  const [sp, si] = box(100, 100, 1);
+  const slab = estimateThickness(sp, si);
+  assert.ok(Math.abs(slab - 1) < 1e-6, `solid slab → its thickness (bbox cap), got ${slab}`);
+  assert.equal(estimateThickness(cp, new Uint32Array([])), null);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

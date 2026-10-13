@@ -536,6 +536,11 @@ function _issueActionLabel(issue) {
     'below-bed': 'print.issueAction.below-bed',
     'geometry-error': 'print.issueAction.geometry',
     'geometry-warning': 'print.issueAction.geometry',
+    'mixed-scales': 'print.issueAction.mixed-scales',
+    'texture-too-large': 'print.issueAction.texture-too-large',
+    'texture-count': 'print.issueAction.texture-count',
+    'thin-feature': 'print.issueAction.thin-feature',
+    'watertight-required': 'print.issueAction.watertight-required',
   };
   const key = actions[issue.code];
   return key ? t(key) : '';
@@ -561,7 +566,7 @@ function _renderReadinessSummary(readiness) {
     const objectId = readinessIssue.objectIds?.[0] ?? '';
     const action = _issueActionLabel(readinessIssue);
     html += `<button type="button" class="pp-readiness-issue ${escapeAttr(readinessIssue.severity)}" data-issue-code="${escapeAttr(readinessIssue.code)}" data-object-id="${escapeAttr(objectId)}">`;
-    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : 'AlertTriangle', { class: 'inline' })}`;
+    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : readinessIssue.severity === 'info' ? 'Info' : 'AlertTriangle', { class: 'inline' })}`;
     html += `<span class="pp-readiness-copy"><span>${escapeHtml(_issueLabel(readinessIssue))}</span>`;
     if (action) html += `<span class="pp-readiness-action">${escapeHtml(action)}</span>`;
     html += '</span>';

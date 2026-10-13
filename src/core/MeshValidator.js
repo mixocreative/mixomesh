@@ -105,6 +105,67 @@ function _checkInvertedNormals(positions, indices, clockwise) {
 }
 
 /**
+ * Thin-feature ADVISORY (Decision 21, task 1.4): a one-pass thickness PROXY,
+ * not wall analysis. For a closed mesh, thickness ~ min(bbox min extent,
+ * 3|V|/A) where V = signed volume and A = surface area (slab or hollow shell
+ * of wall t -> 1.5t; sphere -> r; cube s -> s/2). O(tris), no spatial
+ * structure. Misses a thin fin on a fat body (real analysis is plan 7.x).
+ * @param {number} scale uniform positions -> world scale (|det|^(1/3))
+ * @returns {number|null} world Babylon units, null when not measurable
+ */
+export function estimateThickness(positions, indices, scale = 1) {
+  if (!(indices?.length >= 3) || !(scale > 0)) return null;
+  let v6 = 0, area2 = 0;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
+    const ax = positions[a], ay = positions[a + 1], az = positions[a + 2];
+    const bx = positions[b], by = positions[b + 1], bz = positions[b + 2];
+    const cx = positions[c], cy = positions[c + 1], cz = positions[c + 2];
+    v6 += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
+    const ux = bx - ax, uy = by - ay, uz = bz - az, wx = cx - ax, wy = cy - ay, wz = cz - az;
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    area2 += Math.sqrt(nx * nx + ny * ny + nz * nz);
+    for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) {
+      if (x < lo[0]) lo[0] = x; if (x > hi[0]) hi[0] = x;
+      if (y < lo[1]) lo[1] = y; if (y > hi[1]) hi[1] = y;
+      if (z < lo[2]) lo[2] = z; if (z > hi[2]) hi[2] = z;
+    }
+  }
+  if (!(area2 > 0)) return null;
+  const vol = Math.abs(v6) / 6, area = area2 / 2;
+  const proxy = Math.min(3 * vol / area, hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  return proxy > 0 ? proxy * scale : null;
+}
+
+// Advisory shows in the validation list only when thin even AS SHOWN
+// (1 BU = 1 m); the measurement is always cached (entry.thicknessBU) so the
+// per-printer, per-target-scale judgement lives in PrintReadiness.
+const THIN_ADVISORY_BU = 0.003;
+
+function _thinResult(thicknessBU) {
+  if (!(thicknessBU > 0) || thicknessBU >= THIN_ADVISORY_BU) return null;
+  const mm = thicknessBU * 1000;
+  return {
+    type: 'thinFeature',
+    severity: 'info',
+    count: 1,
+    thicknessBU,
+    autoFixAvailable: false,
+    fixed: false,
+    message: `Thin section: about ${mm.toFixed(2)} mm at the size shown (estimate; may not print)`,
+  };
+}
+
+function _meshWorldScale(mesh) {
+  try {
+    mesh.computeWorldMatrix?.(true);
+    const det = mesh.getWorldMatrix?.().determinant?.();
+    return det ? Math.cbrt(Math.abs(det)) : 1;
+  } catch { return 1; }
+}
+
+/**
  * Topology pass (non-manifold edge count + inverted winding) for one
  * positions/indices pair. Runs in a Web Worker when available so a heavy
  * print model (80k+ tris) never blocks the UI thread; falls back to the
@@ -307,8 +368,9 @@ function _groupOrientation(siblings) {
  */
 async function _validateUnion(siblings, label) {
   const results = [];
+  let thicknessBU = null;
   const raw = _buildGroupUnion(siblings);
-  if (!raw.positions.length || !raw.indices.length) return results;
+  if (!raw.positions.length || !raw.indices.length) return { results, thicknessBU };
   const { positions, indices } = weldArrays(raw.positions, raw.indices);
   const fixable = indices.length / 3 <= REPAIR_TRIANGLE_CAP;
 
@@ -326,13 +388,18 @@ async function _validateUnion(siblings, label) {
   if (diag && diag.boundaryEdges > 0) {
     results.push({ ..._holesResult(diag.boundaryEdges, canFix, 'group'), scope: 'group' });
   }
-  return results;
+  if (badEdgeCount === 0) {   // union positions are already world-space
+    thicknessBU = estimateThickness(positions, indices);
+    const thin = _thinResult(thicknessBU);
+    if (thin) results.push({ ...thin, scope: 'group' });
+  }
+  return { results, thicknessBU };
 }
 
 export async function validateGroup(sourceGroupId) {
   const siblings = _collectGroupSiblings(sourceGroupId);
   if (siblings.length === 0) return [];
-  return (await _validateUnion(siblings, `group ${sourceGroupId}`)).map(r => ({ ...r, sourceGroupId }));
+  return (await _validateUnion(siblings, `group ${sourceGroupId}`)).results.map(r => ({ ...r, sourceGroupId }));
 }
 
 // ── Validation result cache (arch A6) ────────────────────
@@ -352,13 +419,13 @@ function _bumpSeq(meshIds) {
 }
 function _seqOf(id) { return _seq.get(id) ?? 0; }
 
-function _cacheResults(meshIds, results, stale = false) {
+function _cacheResults(meshIds, results, stale = false, thicknessBU = null) {
   const ids = [].concat(meshIds).filter(Boolean);
   if (!ids.length) return;
   setState(s => {
     const v = { ...s.scene.validation };
     const validatedAt = Date.now();
-    for (const id of ids) v[id] = { results, validatedAt, stale };
+    for (const id of ids) v[id] = { results, validatedAt, stale, thicknessBU };
     return { ...s, scene: { ...s.scene, validation: v } };
   }, SILENT);
 }
@@ -414,6 +481,7 @@ export async function validateMesh(mesh) {
   dispatch(EVENTS.VALIDATION_STARTED, { meshName: mesh.name });
 
   const results = [];
+  let thicknessBU = null;
   // SceneObjects are keyed by minted meshId (stamped on mesh.metadata at
   // registration) — Babylon mesh.name is unrelated and collides across imports.
   const objects = getState().scene.objects;
@@ -438,7 +506,9 @@ export async function validateMesh(mesh) {
     if (isLogicalGroup) {
       // Topology on the WELDED union — one shared routine with validateGroup.
       const siblings = partIds.map(id => ({ meshId: id, babylonMesh: AssetLoader.getBabylonMesh(id) }));
-      results.push(...await _validateUnion(siblings, mesh.name ?? 'object'));
+      const union = await _validateUnion(siblings, mesh.name ?? 'object');
+      results.push(...union.results);
+      thicknessBU = union.thicknessBU;
     } else {
       // Same orientation rule the print writers use (PrintSpace.printIndices),
       // so "inverted" here means exactly what would come out inside-out.
@@ -456,6 +526,11 @@ export async function validateMesh(mesh) {
       if (diag && diag.boundaryEdges > 0) {
         results.push(_holesResult(diag.boundaryEdges, repairable && diag.triangles <= REPAIR_TRIANGLE_CAP));
       }
+      if (badEdgeCount === 0) {
+        thicknessBU = estimateThickness(positions, indices, _meshWorldScale(mesh));
+        const thin = _thinResult(thicknessBU);
+        if (thin) results.push(thin);
+      }
     }
   }
 
@@ -471,9 +546,9 @@ export async function validateMesh(mesh) {
       // Group-scoped topology results attach to every logical part so each
       // sibling's Outliner/Properties badge reflects the whole-object verdict.
       const siblingIds = partIds.filter(id => id !== meshId);
-      if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'), stale);
+      if (siblingIds.length) _cacheResults(siblingIds, results.filter(r => r.scope === 'group'), stale, thicknessBU);
     }
-    _cacheResults([meshId], results, stale);
+    _cacheResults([meshId], results, stale, thicknessBU);
   }
 
   dispatch(EVENTS.VALIDATION_COMPLETE, { meshName: mesh.name, meshId: isLive ? meshId : null, results });

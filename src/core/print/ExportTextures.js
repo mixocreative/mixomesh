@@ -5,7 +5,22 @@
 import { getState } from '../StateManager.js';
 import { textureToPngBlob } from '../assets/TextureReadback.js';
 import { getTextureSource } from '../assets/TextureSource.js';
+import { getTextureImage } from '../assets/TextureImageStore.js';
 import { hasCaptureFailed, currentCapPx } from '../assets/TextureCap.js';
+
+/**
+ * Pixel size of the texture an export would ship for `assetId` (1.4 readiness).
+ * Reads the frozen full-res source / image store — never the GPU copy, which
+ * the viewport cap may have shrunk.
+ * @returns {{width:number,height:number}|null} null when unknown
+ */
+export function getTextureDimensions(assetId, state = getState()) {
+  const src = getTextureSource(assetId);
+  if (src?.width > 0 && src?.height > 0) return { width: src.width, height: src.height };
+  const hash = state.scene?.assetLibrary?.[assetId]?.imageContentHash;
+  const img = hash ? getTextureImage(hash) : null;
+  return img?.width > 0 && img?.height > 0 ? { width: img.width, height: img.height } : null;
+}
 
 export function clamp255(c) { return Math.max(0, Math.min(255, Math.round((c ?? 0) * 255))); }
 export function hex2(n) { return n.toString(16).padStart(2, '0').toUpperCase(); }

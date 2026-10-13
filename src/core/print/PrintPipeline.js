@@ -28,11 +28,13 @@ import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
 import { packageAndDownload } from './PrintPackaging.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './ThreeMFWriter.js';
+import { getPrinterProfile } from './PrinterProfiles.js';
 import { serializeOBJ } from './ObjWriter.js';
 import { serializeSTL } from './StlWriter.js';
 import { serializePLY } from './PlyWriter.js';
 import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
+import { getTextureDimensions } from './ExportTextures.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { vendorUrl, MANIFOLD_VENDOR_DIR } from '../vendorUrl.js';
 
@@ -398,6 +400,11 @@ export function getPrintReadiness(options = {}) {
       validationResults,
       validationPending,
       ratio: objectRatio(obj),
+      // 1.4 profile hints: distinct diffuse textures (what export ships) with
+      // pixel size, the validator's thickness proxy, and an open-shell verdict.
+      textures: _partTextures(ids, objects, state),
+      thicknessBU: _minThickness(ids, state),
+      watertight: _watertightVerdict(ids, state),
     };
   });
   const explicit = exportRatiosFromState(state);
@@ -408,11 +415,48 @@ export function getPrintReadiness(options = {}) {
       ratio: ctx.targetRatio,
       requestedRatio: target,
       bounds: boundsForExportContext(ctx),
+      scaleToMM: ctx.ratioFactor * ctx.unitFactor,
       objectIds: units.map(unit => unit.logicalId),
     };
   }).filter(target => target.bounds) : [];
   const reference = units.length ? getExportReference(options) : null;
-  return buildReadiness({ parts, targets, bedDimensions: state.print.bedDimensions, reference });
+  const profile = getPrinterProfile(state.print?.targetPrinterId);
+  return buildReadiness({
+    parts, targets, bedDimensions: state.print.bedDimensions, reference,
+    profile, strictExport: !!state.print?.strictExport,
+  });
+}
+
+function _partTextures(ids, objects, state) {
+  const seen = new Map();
+  for (const id of ids) {
+    const assetId = state.scene.shaders?.[objects[id]?.shaderId]?.diffuseTextureAssetId;
+    if (!assetId || seen.has(assetId)) continue;
+    const dim = getTextureDimensions(assetId, state);
+    seen.set(assetId, { assetId, width: dim?.width ?? 0, height: dim?.height ?? 0 });
+  }
+  return [...seen.values()];
+}
+
+function _minThickness(ids, state) {
+  let min = null;
+  for (const id of ids) {
+    const c = state.scene.validation?.[id];
+    if (c && !c.stale && c.thicknessBU > 0 && (min === null || c.thicknessBU < min)) min = c.thicknessBU;
+  }
+  return min;
+}
+
+// false = a fresh validation found holes / non-manifold edges; null = unknown.
+function _watertightVerdict(ids, state) {
+  let known = false;
+  for (const id of ids) {
+    const c = state.scene.validation?.[id];
+    if (!c || c.stale) continue;
+    known = true;
+    if (c.results?.some(r => r.type === 'holes' || r.type === 'nonManifold')) return false;
+  }
+  return known ? true : null;
 }
 
 async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {
