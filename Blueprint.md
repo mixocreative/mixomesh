@@ -3616,6 +3616,13 @@ uncommitted field values straight off the DOM, no `setState`/save) so typing
 a new price/support-% updates `#pp-cost-total` on every keystroke; `change`
 (blur/Enter) commits via `SettingsStore.save()`.
 
+**Per-size cost lines (task 1.18).** With two or more print sizes
+(`print.exportTargets.length >= 2`) the cost card shows one
+`.pp-cost-target-row` per size, labelled with `exportTargetLabel` and quoted
+from `previewExportContext({targetIndex})` (volume · weight · total). Sizes
+are alternatives, so there is no grand total and no packaging row; one size
+or "as shown" keeps the single detailed quote.
+
 ### OBJ + MTL Export (Primary)
 
 **OBJ geometry is written by `ObjWriter.encodeOBJ` (task 1.7) — no Babylon OBJExport.**

@@ -21,6 +21,8 @@ import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
 import { Toast } from '../Toast.js';
+import { exportTargetsFromState } from '../../core/scale/ScaleMath.js';
+import { exportTargetLabel } from '../../core/commands/ScaleCommands.js';
 import { boundsForExportContext } from '../../core/print/PrintReadiness.js';
 import { withRestTransform } from '../../core/scene/ImportBounce.js';
 import { getMaterialPresets, getMaterialPresetsSource } from '../../core/print/MaterialPresets.js';
@@ -274,6 +276,51 @@ function _geometryFor(ctx) {
   return _geomCache;
 }
 
+/**
+ * 1.18: several print sizes -> one cost line per size (each quoted against its
+ * own ExportContext via previewExportContext({targetIndex})). No grand total:
+ * the sizes are alternatives, not a combined order, so each line carries its
+ * own total.
+ */
+function _renderPerTarget(el, state, cost, material, targets) {
+  const currency = cost.currency || 'USD';
+  const settings = {
+    pricePerGram: cost.pricePerGram || 0,
+    supportPricePerGram: cost.supportPricePerGram || 0,
+    supportPercent: cost.supportPercent || 0,
+    setupFee: cost.setupFee || 0,
+    volumeMode: cost.volumeMode === 'bbox' ? 'bbox' : 'mesh',
+    currency,
+  };
+  let html = '';
+  let note = null;
+  for (let i = 0; i < targets.length; i++) {
+    const label = exportTargetLabel(targets[i]);
+    const ctx = PrintManager.previewExportContext({ targetIndex: i });
+    if (!ctx) {
+      el.innerHTML = `<div class="pp-cost-row pp-cost-note"><span>${escapeHtml(t('print.cost.noParts'))}</span></div>`;
+      return;
+    }
+    const geometry = totalTriangles(ctx) > costTriangleCap() ? null : _geometryFor(ctx);
+    const q = quote(ctx, settings, material, geometry);
+    if (q.volumeCM3 === null) {
+      el.innerHTML = `<div class="pp-cost-row pp-cost-note">${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })}` +
+        `<span>${escapeHtml(t('print.cost.reasonTooBig'))}</span></div>`;
+      return;
+    }
+    if (q.approximate && !note) note = q;
+    const grams = q.grams == null ? '—' : `${q.grams.toFixed(1)} g`;
+    const total = q.total == null ? '—' : `${q.total.toFixed(2)} ${currency}`;
+    html += `<div class="pp-cost-row pp-cost-target-row" data-target-index="${i}"><span class="pp-cost-k">${escapeHtml(label)}</span>` +
+      `<span class="pp-cost-v" data-cost="target-total">${escapeHtml(`${q.volumeCM3.toFixed(2)} cm³ · ${grams} · ${total}`)}</span></div>`;
+  }
+  if (note) {
+    html += `<div class="pp-cost-row pp-cost-note">${icon('AlertTriangle', { class: 'inline', width: 14, height: 14 })}` +
+      `<span><strong>${escapeHtml(t('print.cost.approximate'))}</strong> · ${escapeHtml(note.reasons.map(_reasonText).join('; '))}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
 function _renderResult(container, state, override = null) {
   const el = container.querySelector('#pp-cost-total');
   if (!el) return;
@@ -281,6 +328,9 @@ function _renderResult(container, state, override = null) {
   const material = _material(state);
   const cost = { ...(state.cost ?? {}), ...(override ?? {}) };
   const currency = cost.currency || 'USD';
+
+  const targets = exportTargetsFromState(state);
+  if (targets.length >= 2) { _renderPerTarget(el, state, cost, material, targets); return; }
 
   const ctx = PrintManager.previewExportContext();
   if (!ctx) {

@@ -519,6 +519,41 @@ async function main() {
     assert(/0\.00\s*cm/.test(costUi.text),
       `flat textured quad should read a 0.00 cm³ volume in the cost block, got: "${costUi.text}"`);
 
+    // ── 1.18: two print sizes -> two cost rows ──
+    const costTargets = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const B = window.BABYLON;
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const scene = sm.SceneManager.getScene();
+      const box = B.MeshBuilder.CreateBox('smoke-cost-box', { size: 0.02 }, scene);
+      box.metadata = { meshId: 'smoke_cost_box' };
+      al.AssetLoader.bindRestoredMesh('smoke_cost_box', box, 'smoke-cost-box-asset');
+      st.setState(s => ({
+        ...s,
+        scene: { ...s.scene, objects: { ...s.scene.objects, smoke_cost_box: {
+          id: 'smoke_cost_box', name: 'CostBox', assetId: 'smoke-cost-box-asset', collectionId: null, parentId: null,
+          shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true,
+          sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1,
+        } } },
+        print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 72 }, { kind: 'factor', value: 2 }] },
+      }), { silent: true });
+      document.querySelector('#rp-print-body [data-tab="export"]')?.click();
+      await frame();
+      const rows = document.querySelectorAll('#pp-cost-total .pp-cost-target-row').length;
+      box.dispose();
+      st.setState(s => {
+        const objects = { ...s.scene.objects };
+        delete objects.smoke_cost_box;
+        return { ...s, scene: { ...s.scene, objects }, print: { ...s.print, exportTargets: [] } };
+      }, { silent: true });
+      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      await frame();
+      return { rows };
+    })()`);
+    assert(costTargets.rows === 2, `two print sizes should render two cost rows, got ${costTargets.rows}`);
+
     const cursorMenu = await evaluate(cdp, `(async () => {
       const cm = await import('/src/ui/ContextMenu.js');
       cm.open({ x: 24, y: 24, source: 'viewport' });
