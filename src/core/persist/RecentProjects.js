@@ -7,11 +7,20 @@ import { capturePng } from '../RenderOutput.js';
 import { storage } from '../storage/StorageAdapter.js';
 import { RECENT_KEY, RECENT_MAX, FILE_EXT } from './constants.js';
 
+// A hidden / minimised / occluded window renders no frames, so the capture can
+// wait indefinitely; the recents entry must still be written (thumbnail is
+// optional). Seen live: Electron smoke on a locked display never wrote recents.
+export const SCREENSHOT_TIMEOUT_MS = 3000;
+
 async function _screenshot() {
   try {
     // Routed through RenderOutput.capturePng so it works on BOTH engines —
     // CreateScreenshotUsingRenderTargetAsync returns empty on WebGPU.
-    const blob = await capturePng({ width: 240, height: 160 });
+    const blob = await Promise.race([
+      capturePng({ width: 240, height: 160 }),
+      new Promise(res => setTimeout(() => res(null), SCREENSHOT_TIMEOUT_MS)),
+    ]);
+    if (!blob) return null;
     return await new Promise((res) => {
       const fr = new FileReader();
       fr.onload = () => res(fr.result);
