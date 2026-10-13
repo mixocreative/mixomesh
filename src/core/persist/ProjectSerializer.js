@@ -74,6 +74,61 @@ export function stripFileData(a) {
   return rest;
 }
 
+// ── Asset provenance (schema 3.4, overhaul §4.4 / task 4.1) ──
+
+/** `dir_<name>_<ts>` (pre-4.2 mount key) → `<name>`; else the path's first folder. */
+function _folderLabel(refKey, path) {
+  const m = /^dir_(.+)_\d+$/.exec(String(refKey ?? ''));
+  if (m) return m[1];
+  const parts = String(path ?? '').split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? parts[0] : '';
+}
+
+/**
+ * The §4.4 `source` descriptor — where an asset's bytes came from:
+ * `null | { kind: 'folder'|'file', refKey, path, label }`. `null` = a loose
+ * drop / embedded-only asset (bytes live only in the .mixo).
+ * Derived from the legacy provenance keys (`directoryHandleKey` +
+ * `originalPath`, `fileHandleKey`), which stay the runtime truth until the
+ * StorageAdapter tasks (4.2+) make `source` authoritative; an already-present
+ * well-formed `source` is kept when no legacy key exists.
+ * @param {Record<string, any>} a  AssetEntry (live or serialised)
+ * @returns {null | { kind: 'folder'|'file', refKey: string, path: string, label: string }}
+ */
+export function deriveAssetSource(a) {
+  if (!a) return null;
+  if (a.directoryHandleKey) {
+    const path = String(a.originalPath || a.filename || '');
+    return { kind: 'folder', refKey: String(a.directoryHandleKey), path, label: _folderLabel(a.directoryHandleKey, path) };
+  }
+  if (a.fileHandleKey) {
+    const path = String(a.filename || a.originalPath || '');
+    return { kind: 'file', refKey: String(a.fileHandleKey), path, label: path.split(/[\\/]/).pop() ?? '' };
+  }
+  const src = a.source;
+  if (src && (src.kind === 'folder' || src.kind === 'file') && typeof src.refKey === 'string' && src.refKey) {
+    return {
+      kind: src.kind, refKey: src.refKey,
+      path: typeof src.path === 'string' ? src.path : '',
+      label: typeof src.label === 'string' ? src.label : '',
+    };
+  }
+  return null;
+}
+
+/** §4.4 `displayName` — ours, never renames the user's file. */
+export function deriveDisplayName(a) {
+  return (typeof a?.displayName === 'string' && a.displayName) || a?.filename || a?.name || a?.id || '';
+}
+
+// Unknown top-level keys of a newer-minor document (task 4.1): set by the
+// loader after resetWorld, cleared by resetWorld, written back verbatim by
+// buildDocument so a 3.5+ file round-trips through this build without loss.
+let _preservedTopLevel = {};
+/** @param {Record<string, unknown>} keys */
+export function setPreservedTopLevelKeys(keys) { _preservedTopLevel = { ...(keys ?? {}) }; }
+export function getPreservedTopLevelKeys() { return { ..._preservedTopLevel }; }
+
 async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
   const state = getState();
   const lib = state.scene.assetLibrary;
@@ -87,7 +142,11 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
     const requiredBy = requiredRefs.get(a.id) ?? null;
     const base = {
       id: a.id, name: a.name, filename: a.filename,
-      displayName: a.displayName ?? null,
+      displayName: deriveDisplayName(a),
+      // 3.4 provenance descriptor. The legacy keys below (directoryHandleKey,
+      // fileHandleKey, originalPath, sourceFileHash) are still written for one
+      // minor so 3.3 readers keep resolving live files.
+      source: deriveAssetSource(a),
       originalPath: a.originalPath ?? null, extension: a.extension,
       kind: a.kind ?? 'mesh', sourceUnit: a.sourceUnit ?? 'millimeters',
       unitConfirmed: a.unitConfirmed !== false, modelRatio: a.modelRatio ?? 1,
@@ -267,9 +326,12 @@ export async function buildDocument(opts = {}) {
   settleImportBounce();
   const s = getState();
   return {
+    // Newer-minor unknown keys first, so every key this build owns wins.
+    ..._preservedTopLevel,
     version: SCHEMA_VERSION,
     savedAt: new Date().toISOString(),
-    // id = stable identity for autosave keys (0.11); lastSavedAt lets boot
+    // id = stable identity for autosave keys (0.11; formal in schema 3.4 —
+    // a uuid, never null once loaded/saved); lastSavedAt lets boot
     // offer an autosave only when it is newer than the last real save.
     project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null },
     sceneSettings: {

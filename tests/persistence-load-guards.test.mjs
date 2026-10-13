@@ -579,6 +579,50 @@ await test('2.7: a legacy save with only sourceGroupId loads with shared logical
   assert.equal(objs.part?.isInternalPart, true);
 });
 
+// ── Task 4.1: schema 3.4 through the real load/save path ──
+
+// savedAt is a wall-clock stamp; project.lastSavedAt is set FROM it on load.
+function _stableDoc(doc) {
+  const { savedAt, ...rest } = doc;
+  const out = JSON.parse(JSON.stringify(rest));
+  delete out.project.lastSavedAt;
+  return out;
+}
+
+await test('4.1: 3.3 doc loads → saves as 3.4 with source/displayName; 3.4 round trip identical', async () => {
+  seedCurrentScene();
+  const doc = goodDoc('Schema');
+  doc.project.id = 'pid-schema';
+  doc.assetLibrary[0] = { ...doc.assetLibrary[0], directoryHandleKey: 'dir_Parts_1700000000000', originalPath: 'sub/a_ok.glb' };
+  await __test._loadProject(doc);
+  const lib = getState().scene.assetLibrary.a_ok;
+  assert.deepEqual(lib.source, { kind: 'folder', refKey: 'dir_Parts_1700000000000', path: 'sub/a_ok.glb', label: 'Parts' });
+  assert.equal(lib.displayName, 'a_ok.glb');
+  AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
+  const saved = await __test._buildDocument({ skipTextureImages: true });
+  assert.equal(saved.version, '3.4');
+  assert.equal(saved.project.id, 'pid-schema');
+  assert.deepEqual(saved.assetLibrary[0].source, lib.source);
+  assert.equal(saved.assetLibrary[0].displayName, 'a_ok.glb');
+  assert.equal(saved.assetLibrary[0].directoryHandleKey, 'dir_Parts_1700000000000', 'legacy key kept for one minor');
+  // Re-open the 3.4 document and save again: identical apart from savedAt.
+  await __test._loadProject(JSON.parse(JSON.stringify(saved)));
+  const again = await __test._buildDocument({ skipTextureImages: true });
+  assert.deepEqual(_stableDoc(again), _stableDoc(saved));
+});
+
+await test('4.1: newer-minor unknown top-level keys round-trip; a later older-doc load drops them', async () => {
+  seedCurrentScene();
+  AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
+  await __test._loadProject({ ...goodDoc('Future'), version: '3.5', futureThing: { a: [1, 2] } });
+  const saved = await __test._buildDocument({ skipTextureImages: true });
+  assert.deepEqual(saved.futureThing, { a: [1, 2] }, 'unknown key written back');
+  assert.equal(saved.version, '3.4');
+  await __test._loadProject({ ...goodDoc('Plain'), futureThing: 'stale' });   // 3.3: noise, not preserved
+  const plain = await __test._buildDocument({ skipTextureImages: true });
+  assert.equal('futureThing' in plain, false);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

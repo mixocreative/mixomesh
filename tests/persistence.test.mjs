@@ -156,9 +156,101 @@ await test('_arrToMap: keys by id, null-safe', () => {
   assert.deepEqual(_arrToMap(undefined), {});
 });
 
-await test('_migrate: passthrough (scalar gridSize ignored, not stripped)', () => {
+await test('_migrate: never mutates the caller doc; 3.1 gridSize ignored, not stripped', () => {
   const doc = { version: '3.1', scene: { gridSize: 250 }, foo: 1 };
-  assert.equal(_migrate(doc), doc);          // same reference, best-effort load
+  const snapshot = JSON.parse(JSON.stringify(doc));
+  const m = _migrate(doc);
+  assert.notEqual(m, doc, 'migrate returns a new top-level object');
+  assert.deepEqual(doc, snapshot, 'caller doc untouched');
+  assert.equal(m.version, '3.4');
+  assert.deepEqual(m.scene, { gridSize: 250 });
+});
+
+// ── Schema 3.4 ladder (task 4.1) ─────────────────────────
+
+function doc33() {
+  return {
+    version: '3.3',
+    project: { name: 'P', id: 'pid-1', lastSavedAt: null },
+    print: { exportTargets: [{ kind: 'ratio', value: 72 }], exportRatios: [72], referenceObjectId: null },
+    assetLibrary: [
+      { id: 'a_dir', name: 'hull', filename: 'hull.glb', extension: '.glb', kind: 'mesh',
+        directoryHandleKey: 'dir_Parts_1700000000000', originalPath: 'sub/hull.glb', fileHandleKey: null, displayName: null },
+      { id: 'a_fh', name: 'drop', filename: 'drop.glb', extension: '.glb', kind: 'mesh',
+        directoryHandleKey: null, originalPath: null, fileHandleKey: 'fh_drop_1' },
+      { id: 'a_loose', name: 'loose', filename: 'loose.stl', extension: '.stl', kind: 'mesh',
+        directoryHandleKey: null, fileHandleKey: null, fileData: 'AAAA' },
+      { id: 'a_part', name: 'part', filename: 'kit.glb', extension: '.glb', kind: 'mesh',
+        displayName: 'kit / wheel' },
+    ],
+    sceneObjects: [{ id: 'o1', name: 'hull', assetId: 'a_dir', ratio: 72, logicalObjectId: null }],
+  };
+}
+
+await test('_migrate: 3.3 → 3.4 derives source descriptor + displayName per asset', () => {
+  const doc = doc33();
+  const snapshot = JSON.parse(JSON.stringify(doc));
+  const m = _migrate(doc);
+  assert.equal(m.version, '3.4');
+  const byId = Object.fromEntries(m.assetLibrary.map(a => [a.id, a]));
+  assert.deepEqual(byId.a_dir.source, { kind: 'folder', refKey: 'dir_Parts_1700000000000', path: 'sub/hull.glb', label: 'Parts' });
+  assert.deepEqual(byId.a_fh.source, { kind: 'file', refKey: 'fh_drop_1', path: 'drop.glb', label: 'drop.glb' });
+  assert.equal(byId.a_loose.source, null, 'loose drop / embedded-only → null source');
+  assert.equal(byId.a_loose.fileData, 'AAAA', 'embedded bytes carried by reference');
+  assert.equal(byId.a_dir.displayName, 'hull.glb', 'null displayName falls back to the filename');
+  assert.equal(byId.a_part.displayName, 'kit / wheel', 'an existing displayName is kept');
+  // Legacy keys untouched (still the runtime resolver inputs for one minor).
+  assert.equal(byId.a_dir.directoryHandleKey, 'dir_Parts_1700000000000');
+  assert.equal(byId.a_dir.originalPath, 'sub/hull.glb');
+  assert.deepEqual(doc, snapshot, 'caller doc untouched');
+});
+
+await test('_migrate: 3.4 doc passes through unchanged and the ladder is idempotent', () => {
+  const m1 = _migrate(doc33());
+  const m2 = _migrate(m1);
+  assert.deepEqual(m2, m1, '3.4 → 3.4 round trip identical');
+  const m3 = _migrate(JSON.parse(JSON.stringify(m1)));
+  assert.deepEqual(m3, m1, 'JSON round trip of a migrated doc is stable');
+});
+
+await test('_migrate: legacy 3.1 / 3.2 still resolve (exportRatios, targetRatio, workingRatio, sourceGroupId)', () => {
+  const m31 = _migrate({ version: '3.1', print: { exportRatios: [144, -1] } });
+  assert.deepEqual(m31.print.exportTargets, [{ kind: 'ratio', value: 144 }], '1.17 exportRatios → exportTargets');
+  assert.equal(m31.print.referenceObjectId, null, '1.15 referenceObjectId default');
+
+  const m32 = _migrate({
+    version: '3.2',
+    print: { targetRatio: 35, workingRatio: 12 },
+    sceneObjects: [
+      { id: 'lead', assetId: 'a', sourceGroupId: 'sg' },
+      { id: 'part', assetId: 'a', sourceGroupId: 'sg', isInternalPart: true, ratio: 24 },
+    ],
+  });
+  assert.deepEqual(m32.print.exportTargets, [{ kind: 'ratio', value: 35 }], 'pre-redesign targetRatio');
+  const [lead, part] = m32.sceneObjects;
+  assert.equal(lead.ratio, 12, 'global workingRatio folded into objects without a ratio');
+  assert.equal(part.ratio, 24, "an object's own ratio wins");
+  assert.equal(lead.logicalObjectId, 'lead', '2.7 seed: lead links to itself');
+  assert.equal(part.logicalObjectId, 'lead');
+  assert.equal(lead.isInternalPart, false);
+  assert.equal(part.isInternalPart, true);
+
+  const mNoVersion = _migrate({ assetLibrary: [{ id: 'x', filename: 'x.obj' }] });
+  assert.equal(mNoVersion.version, '3.4', 'pre-versioned save reads as 3.0 and migrates');
+  assert.equal(mNoVersion.assetLibrary[0].source, null);
+  assert.equal(mNoVersion.assetLibrary[0].displayName, 'x.obj');
+});
+
+await test('_migrate: newer minor (3.5) loads best-effort; unknown top-level keys preserved', async () => {
+  const { preservedTopLevelKeys } = await import('../src/core/persist/ProjectValidator.js');
+  const doc = { version: '3.5', futureThing: { a: 1 }, assetLibrary: [{ id: 'x', filename: 'x.glb' }], print: {} };
+  const m = _migrate(doc);
+  assert.equal(m.version, '3.5', 'a newer minor keeps its stamp');
+  assert.deepEqual(m.futureThing, { a: 1 });
+  assert.equal('source' in m.assetLibrary[0], false, 'no down-ladder steps run on a newer minor');
+  assert.deepEqual(preservedTopLevelKeys(doc), { futureThing: { a: 1 } }, 'only unknown keys preserved');
+  assert.deepEqual(preservedTopLevelKeys({ version: '3.4', junk: 1 }), {}, 'same minor: nothing preserved');
+  assert.deepEqual(preservedTopLevelKeys({ version: '3.3', junk: 1 }), {}, 'older minor: legacy noise dropped');
 });
 
 // ── _fileHandleAtPath ────────────────────────────────────

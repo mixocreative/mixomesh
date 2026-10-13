@@ -14,13 +14,18 @@ import { clear as historyClear } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { getFileHandle } from '../idb.js';
-import { decompose, applyWorld, stripFileData, extOf, bufFromB64 } from './ProjectSerializer.js';
+import {
+  decompose, applyWorld, stripFileData, extOf, bufFromB64,
+  deriveAssetSource, deriveDisplayName, setPreservedTopLevelKeys,
+} from './ProjectSerializer.js';
 import { resolveAssetBlob } from './AssetResolver.js';
 import { clearDirty } from './DirtyTracker.js';
-import { SILENT } from './constants.js';
+import { SILENT, SCHEMA_VERSION } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
 import { deleteAutosave } from './AutosaveKeys.js';
-import { validateDocument } from './ProjectValidator.js';
+import {
+  validateDocument, parseSchemaVersion, compareSchemaVersions, preservedTopLevelKeys,
+} from './ProjectValidator.js';
 import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
@@ -71,6 +76,7 @@ export function resetWorld() {
   }
   AssetLoader.resetAll();
   ShaderLibrary.resetAll();
+  setPreservedTopLevelKeys({});
   replaceState(freshState());
 }
 
@@ -121,11 +127,99 @@ function _restoreGroups(groupDefs, objMap) {
 
 // ── Load ─────────────────────────────────────────────────
 
+// ── Schema migration ladder (task 4.1) ───────────────────
+//
+// One step per schema minor. A step runs when the document is OLDER than the
+// step's `to` version; steps run in order and each mutates the working copy
+// `data` (never the caller's doc). Every per-field migration lives here and
+// is idempotent, so a document whose version stamp lagged its content (e.g. a
+// 3.3 file already carrying `exportTargets`) migrates cleanly.
+//
+// Newer-MINOR documents (3.5+) skip every step and load best-effort; their
+// unknown top-level keys are preserved by the loader (preservedTopLevelKeys)
+// and written back on save. Newer-MAJOR documents never reach here
+// (validateDocument refuses them before the world is reset).
+
+/** @type {{ to: string, up: (data: Record<string, any>) => void }[]} */
+const MIGRATIONS = [
+  // 3.0 → 3.1: v3.0 saves carried a scalar `scene.gridSize` — intentionally
+  // ignored (footprint tracks the printer bed); nothing to rewrite.
+  { to: '3.1', up: () => {} },
+  // 3.1 → 3.2: assets-before-shaders load order is a loader change; the
+  // document shape is unchanged.
+  { to: '3.2', up: () => {} },
+  // 3.2 → 3.3: content-addressed `textureImages` are additive; per-asset
+  // `fileData` on texture entries still resolves through AssetResolver.
+  { to: '3.3', up: () => {} },
+  // 3.3 → 3.4: asset provenance + every per-field migration owned by 1.13 /
+  // 1.15 / 1.17 / 2.7.
+  { to: '3.4', up: _migrateTo34 },
+];
+
+function _migrateTo34(data) {
+  // AssetEntry `source` + `displayName` (§4.4, owned by 4.1).
+  if (Array.isArray(data.assetLibrary)) {
+    data.assetLibrary = data.assetLibrary.map(a => {
+      if (!a || typeof a !== 'object') return a;
+      return {
+        ...a,
+        source: a.source !== undefined ? a.source : deriveAssetSource(a),
+        displayName: deriveDisplayName(a),
+      };
+    });
+  }
+
+  const print = (data.print && typeof data.print === 'object') ? { ...data.print } : null;
+  if (print) {
+    // 1.17: legacy `exportRatios` / pre-redesign `targetRatio` → typed targets.
+    print.exportTargets = resolveLoadedExportTargets(print);
+    // 1.15: explicit export reference — absent means "first printable unit".
+    if (!('referenceObjectId' in print)) print.referenceObjectId = null;
+    data.print = print;
+  }
+
+  if (Array.isArray(data.sceneObjects)) {
+    const workingRatio = print?.workingRatio;
+    data.sceneObjects = data.sceneObjects.map(o => {
+      if (!o || typeof o !== 'object') return o;
+      const next = { ...o };
+      // Per-object ratio redesign (2026-06-16): fold the old global
+      // `print.workingRatio` into objects saved without their own ratio.
+      if (!(Number.isFinite(next.ratio) && next.ratio > 0)
+        && Number.isFinite(workingRatio) && workingRatio > 0) {
+        next.ratio = workingRatio;
+      }
+      return next;
+    });
+    // 2.7 / Decision 33: legacy saves link split siblings only by
+    // `sourceGroupId` — seed `logicalObjectId` / `isInternalPart` ONCE here;
+    // runtime never reads `sourceGroupId` again.
+    seedLogicalObjectIds(data.sceneObjects);
+    // HOOK (task 1.13, not implemented — mockup-gated): seed each object's
+    // `ratioSource` here: `asset.modelRatio !== 1 ? 'file' : 'default'`.
+  }
+  // project.id (0.11) is formal in 3.4; a document without one gets a fresh
+  // uuid from the loader (mintProjectId), never from migrate (pure).
+}
+
+/**
+ * Bring a parsed (already validated) document up to SCHEMA_VERSION.
+ * Returns a NEW top-level object (and new copies of every array/entry a step
+ * rewrites); the caller's doc is never mutated. Large payloads (`fileData`
+ * strings) are shared by reference, not copied.
+ * @param {Record<string, any>} doc
+ * @returns {Record<string, any>}
+ */
 export function migrate(doc) {
-  // v3.0 saves carried a scalar scene.gridSize — intentionally dropped
-  // (footprint now tracks the printer bed). Everything else is forward
-  // compatible; unknown future versions still attempt a best-effort load.
-  return doc;
+  const data = { ...doc };
+  const from = parseSchemaVersion(doc?.version) ?? parseSchemaVersion(SCHEMA_VERSION);
+  for (const step of MIGRATIONS) {
+    const to = parseSchemaVersion(step.to);
+    if (compareSchemaVersions(from, to) < 0) step.up(data);
+  }
+  // Older docs are now SCHEMA_VERSION-shaped; a newer minor keeps its stamp.
+  if (compareSchemaVersions(from, parseSchemaVersion(SCHEMA_VERSION)) < 0) data.version = SCHEMA_VERSION;
+  return data;
 }
 
 /**
@@ -204,9 +298,12 @@ async function _loadProjectInner(doc, previousId) {
   const data = migrate(doc);
   historyClear();
   resetWorld();
+  // Forward compat (4.1): a newer-minor doc's unknown top-level keys survive
+  // this build and are written back by the next save.
+  setPreservedTopLevelKeys(preservedTopLevelKeys(doc));
 
-  // Print-size migration (task 1.17): `exportTargets` (typed) wins; else the
-  // legacy `exportRatios` list; pre-redesign saves carry only `targetRatio`.
+  // Print sizes: migrate() already turned legacy `exportRatios`/`targetRatio`
+  // into `exportTargets` (1.17); this call only normalises the typed list.
   const loadedPrint = data.print || {};
   const exportTargets = resolveLoadedExportTargets(loadedPrint);
   const loadedPrintClean = _printWithoutLegacyScale(loadedPrint);
@@ -356,11 +453,9 @@ async function _loadProjectInner(doc, previousId) {
       mesh = res.geom[idx] || res.geom.find(m => m.name === o.name) || res.geom[0] || null;
       unlinked = res.status === 'static';
     }
-    // Per-object ratio. New saves carry `o.ratio`; MIGRATION of pre-redesign
-    // saves folds the old global `print.workingRatio` into each object.
-    const objRatio = (Number.isFinite(o.ratio) && o.ratio > 0)
-      ? o.ratio
-      : ((Number.isFinite(data.print?.workingRatio) && data.print.workingRatio > 0) ? data.print.workingRatio : 1);
+    // Per-object ratio (pre-redesign `print.workingRatio` was folded in by
+    // migrate()).
+    const objRatio = (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1;
     if (mesh) {
       if (_claimed.has(mesh)) {
         // Duplicate sharing a container mesh — give this object its own copy.
@@ -427,9 +522,7 @@ async function _loadProjectInner(doc, previousId) {
       _savedTransform: o.transform ?? null,
     };
   }
-  // 2.7 / Decision 33: legacy saves carry only sourceGroupId — seed the
-  // logicalObjectId links once here; runtime never reads sourceGroupId again.
-  seedLogicalObjectIds(objMap);
+  // logicalObjectId seeding for legacy saves (2.7) runs in migrate().
   setState(s => ({ ...s, scene: { ...s.scene, objects: objMap } }), SILENT);
 
   // Multi-part repairs replay ONCE per logical object, and only now — the

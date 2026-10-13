@@ -64,14 +64,16 @@ await test('getState exposes the same shape as freshState after init', () => {
 
 // ── Migration / round-trip ───────────────────────────────
 
-await test('_migrate: pre-pivot doc with print.bedPreset returns same ref (best-effort load)', () => {
+await test('_migrate: pre-pivot doc with print.bedPreset loads best-effort', () => {
   const doc = {
     version: '3.1',
     print: { bedPreset: 'Elegoo Saturn 4 Ultra', bedDimensions: { x: 218, y: 122, z: 220 } },
     scene: { gridSize: 250 },
   };
   const migrated = _migrate(doc);
-  assert.equal(migrated, doc, 'migrate is intentionally passthrough');
+  // 4.1 ladder: a new object, but `print` fields it does not own pass through.
+  assert.equal(migrated.print.bedPreset, 'Elegoo Saturn 4 Ultra', 'unowned print fields pass through');
+  assert.deepEqual(migrated.scene, { gridSize: 250 });
   // Legacy bedPreset is left on the doc — the load path shallow-merges
   // {...s.print, ...data.print}, so unknown fields are silently absorbed but
   // don't displace targetPrinterId / printPreview defaults.

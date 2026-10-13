@@ -2782,23 +2782,28 @@ PersistenceManager.__test = {
   _buildDocument, _loadProject,
 }
 ```
-Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.3'` (3.3 adds
-top-level content-addressed `textureImages` plus `imageContentHash` / `textureView`
-on texture AssetEntries; 3.2 and older per-asset `fileData` still loads),
+Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.4'` (3.4 adds
+the AssetEntry `source` descriptor + `displayName` and formalises `project.id`;
+3.3 added top-level content-addressed `textureImages` plus `imageContentHash` /
+`textureView` on texture AssetEntries; 3.2 and older per-asset `fileData` still
+loads — see §11 Schema Migration Ladder),
 `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`,
 `AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are `AUTOSAVE_PREFIX + project.id`
 since task 0.11 — pre-0.11 keys used the project name and still recover),
 `AUTOSAVE_IMG_PREFIX = 'autosaveimg_'` (per-hash texture images of a snapshot;
 deliberately NOT prefixed by `autosave_`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
 
-### Full Project Schema (v3.3)
+### Full Project Schema (v3.4)
 Every field persisted. Restored exactly.
 
 ```jsonc
 {
-  "version": "3.3",
+  "version": "3.4",
   "savedAt": "ISO8601",
-  "project": { "name": "..." },
+  "project": { "name": "...",
+               "id": "uuid",            /* formal since 3.4 (minted by 0.11 on new / Save As /
+                                           load of a doc without one); autosave key */
+               "lastSavedAt": "ISO8601" /* or null */ },
   "sceneSettings": {
     "camera": { "preset": "perspective", "alpha": 1.57, "beta": 1.1, "radius": 10,
                 "target": {"x":0,"y":0,"z":0}, "isOrthographic": false,
@@ -2836,7 +2841,7 @@ Every field persisted. Restored exactly.
      assumptions are a per-user SettingsStore section (localStorage), never
      travel with the .mixo file, and are not FILE-WINS on open like the
      `print` fields above. */
-  "assetLibrary":  [ /* AssetEntry without container or blobUrl */ ],
+  "assetLibrary":  [ /* AssetEntry without container or blobUrl — see 3.4 AssetEntry fields below */ ],
   "textureImages": [ /* unique {hash,width,height,mimeType,fileData}; one per SHA-256 */ ],
   "collections":   [ /* CollectionEntry[] — outliner display buckets */ ],
   "shaders":       [ /* ShaderEntry without linkedMeshIds */ ],
@@ -2850,6 +2855,55 @@ Every field persisted. Restored exactly.
                      "assetPanelHeight": 220, "scaleLocked": true }
 }
 ```
+
+Unknown top-level keys of a NEWER-minor document (3.5+) are preserved on load
+and written back verbatim on the next save (`ProjectValidator.preservedTopLevelKeys`
+→ `ProjectSerializer.setPreservedTopLevelKeys`, cleared by `resetWorld`). Older or
+same-minor documents' unknown keys are legacy noise and are dropped. A newer
+MAJOR is still refused before the world is reset (`validateDocument`).
+
+#### AssetEntry fields added in 3.4 (overhaul §4.4)
+```jsonc
+{
+  "displayName": "chair.glb",   // ours; never renames the user's file. Written on
+                                // every save: displayName || filename || name || id
+  "source": null | {            // where the bytes came from (null = loose drop /
+    "kind": "folder" | "file",  //   embedded-only: bytes live only in the .mixo)
+    "refKey": "dir_…",          // opaque mount / file-handle key
+    "path": "sub/chair.glb",    // path within the folder (folder) or the file name (file)
+    "label": "Parts"            // human label (folder name / file name)
+  },
+  "contentHash": "sha256-hex"   // unchanged — identity of the bytes
+}
+```
+`source` is derived (`ProjectSerializer.deriveAssetSource`) from the legacy
+provenance keys — `directoryHandleKey` + `originalPath` → `folder`,
+`fileHandleKey` → `file` — which remain the runtime resolver inputs until the
+StorageAdapter tasks (4.2+) make `source` authoritative. The legacy keys
+(`directoryHandleKey`, `fileHandleKey`, `originalPath`, `sourceFileHash`) are
+still WRITTEN for one minor so 3.3 readers keep resolving live files, exactly
+like the `print.exportRatios` mirror of `print.exportTargets`.
+
+### Schema Migration Ladder (`ProjectLoader.migrate`, task 4.1)
+`migrate(doc)` runs after `validateDocument` and before `resetWorld`. It is
+pure: it returns a NEW top-level object (rewritten arrays/entries are copied;
+`fileData` strings are shared, never copied) and never mutates the caller's doc.
+A missing `version` reads as 3.0. Each step runs when the document is older
+than the step's target; every step is idempotent (a 3.3 file that already
+carries `exportTargets` migrates cleanly). After the ladder an older doc's
+`version` reads `SCHEMA_VERSION`; a newer-minor doc keeps its stamp and runs no
+steps (best-effort load).
+
+| Step | Rewrites |
+|---|---|
+| 3.0 → 3.1 | nothing — scalar `scene.gridSize` is ignored (footprint = printer bed) |
+| 3.1 → 3.2 | nothing — assets-before-shaders is a load-order change |
+| 3.2 → 3.3 | nothing — `textureImages` is additive; per-asset `fileData` still resolves |
+| 3.3 → 3.4 | asset `source` + `displayName` (4.1); `print.exportTargets` from legacy `exportRatios` / `targetRatio` via `resolveLoadedExportTargets` (1.17); `print.referenceObjectId` default `null` (1.15); objects without a valid `ratio` take the pre-redesign global `print.workingRatio`; `seedLogicalObjectIds(sceneObjects)` from `sourceGroupId` (2.7 / Decision 33 — the ONLY runtime read of `sourceGroupId`); **hook** for `ratioSource` (1.13, not yet implemented) |
+
+`project.id` is not minted by `migrate` (it stays pure): the loader assigns
+`mintProjectId()` when the document has none. `loadProject` still calls
+`resolveLoadedExportTargets` on every load to normalise the typed list.
 
 ### Portable Project Integrity (manual save gate)
 `.mixo` is the editable Mixomesh project snapshot, not a pointer file to the
@@ -2893,7 +2947,8 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 
 ### Load Sequence (order critical)
 ```
-1. Parse JSON, check version compatibility.
+1. Parse JSON, check version compatibility (validateDocument), then
+   migrate(doc) — the §11 Schema Migration Ladder.
 2. HistoryManager.clear()
 3. Dispose all current Babylon meshes/materials/containers, revoke blob URLs.
 4. Restore print, sceneSettings, ui, gizmo, uvOverrides, userSwatches,

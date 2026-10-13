@@ -1,10 +1,11 @@
 import { EVENTS } from './events.js';
 import DS from '../config/default-settings.json' with { type: 'json' };
+import { SCHEMA_VERSION } from './persist/constants.js';
 
 const DEV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 const INITIAL_STATE = {
-  project: { id: null, name: 'Untitled', isDirty: false, lastSavedAt: null, version: '3.1' },   // id minted on new/load/autosave (persist/ProjectId.js)
+  project: { id: null, name: 'Untitled', isDirty: false, lastSavedAt: null, version: SCHEMA_VERSION },   // id minted on new/load/autosave (persist/ProjectId.js)
   scene: {
     objects: {},
     groups: {},
