@@ -33,7 +33,7 @@ export async function textureToBlob(texture, assetId = null) {
       throw new Error(`Texture "${texture?.name ?? assetId}" has no full-resolution source (capture failed) and the viewport texture cap is On — export aborted so a downscaled texture is not printed. Turn the texture cap Off and retry.`);
     }
   }
-  const blob = await textureToPngBlob(texture);
+  const blob = await textureToPngBlob(texture, { toSrgb: true });   // 1.9: linear → sRGB on readback only
   if (!blob) throw new Error(`Texture readback failed for ${texture?.name ?? 'texture'}`);
   return blob;
 }

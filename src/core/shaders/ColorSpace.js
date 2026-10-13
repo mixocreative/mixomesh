@@ -40,3 +40,28 @@ export function materialSrgbColor(mat) {
   if (!c) return null;
   return { r: linearToSrgb01(c.r), g: linearToSrgb01(c.g), b: linearToSrgb01(c.b) };
 }
+
+let _linearToSrgbLut = null;
+/** Linear byte [0,255] → sRGB byte via the exact OETF (256-entry LUT, built lazily). */
+export function linearToSrgbByte(u8) {
+  if (!_linearToSrgbLut) {
+    _linearToSrgbLut = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) _linearToSrgbLut[i] = Math.round(linearToSrgb01(i / 255) * 255);
+  }
+  return _linearToSrgbLut[Math.max(0, Math.min(255, Math.round(Number(u8) || 0)))];
+}
+
+/** In-place linear→sRGB on an RGBA byte buffer. RGB converted, alpha untouched. */
+export function linearRgbaToSrgbInPlace(rgba) {
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = linearToSrgbByte(rgba[i]);
+    rgba[i + 1] = linearToSrgbByte(rgba[i + 1]);
+    rgba[i + 2] = linearToSrgbByte(rgba[i + 2]);
+  }
+  return rgba;
+}
+
+/** True when a Babylon texture's bytes are linear-encoded (flagged `gammaSpace === false`). */
+export function isLinearTexture(texture) {
+  return texture?.gammaSpace === false;
+}
