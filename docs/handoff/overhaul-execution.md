@@ -49,6 +49,7 @@ Then read the plan section for the next task. Update this file at every safe bou
 ' + out.join('
 '))` in tests — insert by line number with `sed -i "<N>r file"` instead.
 - Smokes run against the Vite dev server: ANY file edit by a parallel agent triggers HMR reload → 'target navigated'. Run smokes in the clean worktree while agents work.
+- The verification worktree's node_modules is a JUNCTION to the main repo's, so Vite's dep cache (node_modules/.vite) is SHARED: browser smokes there time out (CDP Runtime.evaluate) while agents run smokes in the main tree. Verify smokes only when no agent smoke is running.
 - Parallel agents: give each disjoint files; agents never touch Blueprint/locales unless the task owns them — they report lines, main applies.
 
 - Stitch capture: **production build only** (`npm run build` → `npx vite preview --host 127.0.0.1 --port 5180 --strictPort`).
@@ -199,3 +200,4 @@ v1 issues fixed in v2: invented slicing UI, 'KoboCAD' name, invented sections, B
 - 2026-10-14 (cont.) — 5.10 + 6.7 5c1ec77. **ALL UNGATED TASKS DONE.** Remaining = MOCKUP-GATED list (Owner queue). BLOCKED on owner: Stitch project binding + first fixture upload (Decision 30). On OK: capture prod build (docs/design/stitch-capture.md), generate one mockup set per gated screen group, owner approves, then implement (opus/sonnet per plan tiers).
 - 2026-10-14 (cont.) — Owner approved Stitch + direction 'minimal clean modern'. DESIGN.md §1/§6 updated (palette kept, treatment flatter/quieter). Project bound, reference capture uploaded, generating mockups 01-06 (shell, printer tab, export tab, properties, outliner+menu, assets/banner/prompt/onboarding).
 - 2026-10-14 (cont.) — Owner approved all 6 mockups ("fix and approve all"; polish edits running) and Phase 8 responsive/touch ("I am ok"): phone viewer + full iPad, AGENTS rule 5 Safari exception lands with 8.1. Phase 8 added to plan. Build agents running: Print (0.6/1.2/1.3/5.3), Properties (1.13/1.16/3.6/5.2/4.6 row), Outliner+menu (3.4/3.5), Assets (4.6/4.7/4.8 display), Shell (5.1/0.7/3.3/5.7/5.4). New strings → .tmp/locale-pending/*.json, Blueprint text → .tmp/blueprint-pending/*.md (main merges). Next: 5.5 onboarding, then Phase 8.
+- 2026-10-14 (cont.) — 8.2 68a8e29 (unit 287 green; smoke deferred — shared Vite cache with running agents). Shell (5.1/0.7/3.3/5.7/5.4) + Outliner (3.4/3.5) agents done, uncommitted (shared browser-smoke.mjs; commit all UI together). Running: Print, Properties, Assets agents.
