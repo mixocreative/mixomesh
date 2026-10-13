@@ -1312,13 +1312,19 @@ async function main() {
       objs = getState().scene.objects;
       const twoShown = twoIds.filter(id => shouldDisplayObject(objs[id])).length;
       const twoGrouped = logicalObjectPartIds(twoIds[0], objs).length;
-      return { cubeParts, cubeShown, cubeBad: nm ? nm.count : 0, twoShown, twoGrouped };
+      // 3.1: a multi-object file arrives as ONE user group named after the file, selected.
+      const fileGroups = Object.values(getState().scene.groups).filter(g => /^two(\.\d+)?$/.test(g.name));
+      const grpOk = fileGroups.length === 1 && fileGroups[0].origin === 'user'
+        && twoIds.every(id => objs[id].parentId === fileGroups[0].id)
+        && getState().selection.selectedIds.join() === fileGroups[0].id;
+      return { cubeParts, cubeShown, cubeBad: nm ? nm.count : 0, twoShown, twoGrouped, grpOk };
     })()`);
     assert(splitVal.cubeParts === 2, `multi-primitive object should group 2 parts, got ${splitVal.cubeParts}`);
     assert(splitVal.cubeShown === 1, `multi-primitive object should present as ONE logical object, got ${splitVal.cubeShown}`);
     assert(splitVal.cubeBad === 0, `welded union of a closed 2-material cube must be watertight (0 non-manifold), got ${splitVal.cubeBad}`);
     assert(splitVal.twoShown === 2 && splitVal.twoGrouped === 1,
       `two SEPARATE objects must NOT merge (shown=${splitVal.twoShown}, parts-of-first=${splitVal.twoGrouped})`);
+    assert(splitVal.grpOk, 'two-object file must arrive as ONE group "two" holding both objects, group selected (3.1)');
 
     // ── Box (marquee) selection ──────────────────────────────────────────
     // Two complementary live checks against the origin STL mesh:

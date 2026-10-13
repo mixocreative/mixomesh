@@ -155,7 +155,7 @@ await test('double-clicking a library child instantiates only that child object'
   assert.match(obj.name, /ColaMesh/);
 });
 
-await test('normal GLB import keeps the assembly group and collapses the single-child wrapper above it', async () => {
+await test('multi-object GLB nests the authored assembly inside ONE group named after the file', async () => {
   // Beverages → Mug → { Body, Handle }. Mug holds two objects → a real
   // assembly, kept as a group. Beverages holds only Mug → a single-child
   // wrapper, collapsed (owner decision 2026-09-18: hierarchy only where it
@@ -170,13 +170,71 @@ await test('normal GLB import keeps the assembly group and collapses the single-
   const groups = Object.values(state.scene.groups);
   const beverages = groups.find(g => g.name === 'Beverages');
   const mug = groups.find(g => g.name === 'Mug');
+  const file = groups.find(g => g.name === 'beverage');
   assert.equal(beverages, undefined, 'single-child wrapper does not become a group');
   assert.ok(mug, 'the assembly node becomes a group');
-  assert.equal(mug.parentId, null, 'the assembly sits at the top');
+  assert.ok(file, 'file group named after the file (no extension)');
+  assert.equal(file.origin, 'user');
+  assert.equal(file.parentId, null);
+  assert.equal(mug.parentId, file.id, 'authored assembly nests inside the file group');
   assert.deepEqual(
     Object.values(state.scene.objects).map(o => [o.name, o.parentId]).sort(),
     [['Body', mug.id], ['Handle', mug.id]],
   );
+  assert.deepEqual(state.selection.selectedIds, [file.id], 'the new group is the selection');
+});
+
+function plainContainer(meshes, nodes) {
+  return {
+    meshes, transformNodes: nodes, materials: [], textures: [],
+    addAllToScene() {}, removeAllFromScene() {}, dispose() {},
+  };
+}
+
+await test('two separate objects in one file → one group named after the file with both', async () => {
+  const root = makeNode('__root__');
+  const an = makeNode('ColaNode', root), bn = makeNode('JuiceNode', root);
+  B.SceneLoader = { LoadAssetContainerAsync: async () =>
+    plainContainer([makeMesh('Cola', an), makeMesh('Juice', bn)], [root, an, bn]) };
+
+  await AssetLoader.loadFromBlob(new Blob(['glb']), 'two.glb');
+
+  const state = StateManager.getState();
+  const groups = Object.values(state.scene.groups);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].name, 'two');
+  assert.deepEqual(Object.values(state.scene.objects).map(o => o.parentId), [groups[0].id, groups[0].id]);
+  assert.equal(groups[0].childIds.length, 2);
+});
+
+await test('one object with several material parts → no wrapper group, single logical object', async () => {
+  const root = makeNode('__root__');
+  const bowl = makeNode('Bowl', root);
+  B.SceneLoader = { LoadAssetContainerAsync: async () =>
+    plainContainer([makeMesh('Bowl_primitive0', bowl), makeMesh('Bowl_primitive1', bowl)], [root, bowl]) };
+
+  const meshIds = await AssetLoader.loadFromBlob(new Blob(['glb']), 'bowl.glb');
+
+  const state = StateManager.getState();
+  assert.equal(Object.keys(state.scene.groups).length, 0, 'material parts never earn a file group');
+  const objs = meshIds.map(id => state.scene.objects[id]);
+  const leads = objs.filter(o => !o.isInternalPart);
+  assert.equal(leads.length, 1, 'one logical object');
+  assert.ok(objs.every(o => o.parentId === null));
+  assert.deepEqual(state.selection.selectedIds, [leads[0].id], 'the single object is selected');
+});
+
+await test('file-group name collision → "file.001" style unique name', async () => {
+  const make = () => {
+    const root = makeNode('__root__');
+    const an = makeNode('An', root), bn = makeNode('Bn', root);
+    return plainContainer([makeMesh('A', an), makeMesh('B', bn)], [root, an, bn]);
+  };
+  B.SceneLoader = { LoadAssetContainerAsync: async () => make() };
+  await AssetLoader.loadFromBlob(new Blob(['glb1']), 'kit.glb');
+  await AssetLoader.loadFromBlob(new Blob(['glb2']), 'kit.glb');
+  const names = Object.values(StateManager.getState().scene.groups).map(g => g.name).sort();
+  assert.deepEqual(names, ['kit', 'kit.001']);
 });
 
 

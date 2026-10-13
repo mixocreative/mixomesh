@@ -525,6 +525,17 @@ Import path:
    In the Outliner a file that yielded exactly one object renders as that
    object at top level with a file badge (provenance stays on the SceneObject
    for relink); files with several objects keep their collection row.
+   **File-group rule (overhaul 3.1):** a file with MORE THAN ONE logical
+   object (material parts — MultiMaterial split siblings sharing a
+   `sourceGroupId`, or glTF `_primitive<N>` siblings of one node — count as
+   ONE object) arrives as a single user group (`origin: 'user'`) named after
+   the file without extension, uniquified among groups AND objects
+   (`kit`, `kit.001`). Authored sub-assemblies stay nested inside it. Its
+   origin is the bottom-centre of the content (same rule as group creation),
+   applied after the import bake (`hierarchy.attachFileGroup`), so nothing
+   moves in world space. A one-object file gets no wrapper. The new group
+   (or the single object) becomes the selection. Re-instantiating an asset
+   follows the same rule.
    The bake folds loader/unit/reflection transforms
    into mesh vertices, then keeps only the promoted group nodes as clean
    identity `TransformNode` parents and reparents baked meshes under them, so

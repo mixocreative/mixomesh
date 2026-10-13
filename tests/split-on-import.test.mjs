@@ -147,6 +147,53 @@ await test('mixed batch — splits only the multi, leaves singles alone', () => 
   assert.deepEqual(r.disposed, [m2]);
 });
 
+// ── 3.1 import rule: file group only for >1 LOGICAL object ─────────────────
+const { buildImportHierarchy, bottomCentreOfMeshes } = await import('../src/core/import/ImportHierarchy.js');
+const hNode = (name, parent = null) => ({ name, parent, uniqueId: name, metadata: {} });
+const hGeo = (name, parent, metadata = {}) => ({
+  name, parent, uniqueId: name, metadata, geometry: {}, getTotalVertices: () => 3,
+});
+let hid = 0;
+const mkId = (p) => `${p}_${++hid}`;
+const keepName = (n) => n;
+
+await test('hierarchy: split material parts (shared sourceGroupId) are ONE object → no file group', () => {
+  const root = hNode('__root__');
+  const a = hGeo('painted__part0', root, { sourceGroupId: 'sg1' });
+  const b = hGeo('painted__part1', root, { sourceGroupId: 'sg1' });
+  const h = buildImportHierarchy({ meshes: [a, b], transformNodes: [root] }, mkId, keepName, { fileName: 'painted' });
+  assert.equal(h.fileGroupId, null);
+  assert.equal(Object.keys(h.groups).length, 0);
+  assert.equal(h.groupIdForMesh(a), null);
+});
+
+await test('hierarchy: two objects → file group named after the file adopts both', () => {
+  const root = hNode('__root__');
+  const a = hGeo('A', hNode('An', root)), b = hGeo('B', hNode('Bn', root));
+  const h = buildImportHierarchy({ meshes: [a, b], transformNodes: [root] }, mkId, keepName, { fileName: 'kit' });
+  assert.ok(h.fileGroupId);
+  assert.equal(h.groups[h.fileGroupId].name, 'kit');
+  assert.equal(h.groupIdForMesh(a), h.fileGroupId);
+  assert.equal(h.groupIdForMesh(b), h.fileGroupId);
+});
+
+await test('hierarchy: no fileName → never wraps', () => {
+  const root = hNode('__root__');
+  const a = hGeo('A', hNode('An', root)), b = hGeo('B', hNode('Bn', root));
+  const h = buildImportHierarchy({ meshes: [a, b], transformNodes: [root] }, mkId, keepName);
+  assert.equal(h.fileGroupId, null);
+});
+
+await test('bottomCentreOfMeshes: centre X/Z of the union, min Y', () => {
+  const m = (min, max) => ({ getBoundingInfo: () => ({ boundingBox: { minimumWorld: min, maximumWorld: max } }) });
+  const c = bottomCentreOfMeshes([
+    m({ x: 0, y: 2, z: 0 }, { x: 2, y: 5, z: 2 }),
+    m({ x: 4, y: 1, z: 0 }, { x: 6, y: 3, z: 4 }),
+  ]);
+  assert.deepEqual(c, { x: 3, y: 1, z: 2 });
+  assert.equal(bottomCentreOfMeshes([{}]), null);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

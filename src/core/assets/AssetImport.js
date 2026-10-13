@@ -234,7 +234,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     });
 
     ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
-    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName);
+    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
+      fileName: filename.replace(/\.[^.]+$/, ''),
+    });
 
     _warnIfOverBudget(scene, container);
     container.addAllToScene();
@@ -245,6 +247,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // that 1 BU in the scene == 1 m at the scene's working ratio (its print size).
     // Export-time rescaling from working → target ratio happens in PrintManager.
     bakeImportTransform(container, importScaleFactor(sourceUnit, modelRatio), position);
+    hierarchy.attachFileGroup(scene);   // multi-object file → one group named after it
 
     // OS drag-drop has no directory handle, but Chrome's
     // DataTransferItem.getAsFileSystemHandle() yields a single FILE handle.
@@ -278,6 +281,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
+    await _selectImported(hierarchy, meshIds);
 
     // F24: a zero-byte / geometry-less file used to import "successfully"
     // with no object and no message. (Library GLBs return earlier, above.)
@@ -329,16 +333,20 @@ export async function instantiateAsset(assetId, position) {
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
-    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName);
+    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
+      fileName: String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, ''),
+    });
     _warnIfOverBudget(scene, container);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
     bakeImportTransform(container, importScaleFactor(sourceUnit, asset.modelRatio), position);
+    hierarchy.attachFileGroup(scene);
 
     const collectionId = createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
     const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1);
     for (const meshId of meshIds) queueValidation(meshId);
+    await _selectImported(hierarchy, meshIds);
     if (!meshIds.length) throw new Error(`${asset.displayName ?? asset.filename}: no geometry found in asset`);
     markDirty();
     return meshIds;
@@ -346,6 +354,19 @@ export async function instantiateAsset(assetId, position) {
     restoreUrls();
     _importEnd();
   }
+}
+
+/**
+ * The new file group (multi-object file) or the single imported object becomes
+ * the selection. Dynamic import: Selection imports AssetLoader (cycle).
+ */
+async function _selectImported(hierarchy, meshIds) {
+  const ids = hierarchy?.fileGroupId ? [hierarchy.fileGroupId] : meshIds;
+  if (!ids.length) return;
+  try {
+    const { Selection } = await import('../Selection.js');
+    Selection.set(ids);
+  } catch { /* selection is a convenience; never fail an import over it */ }
 }
 
 async function _fileHandleKeyFor(assetId, opts = {}) {
