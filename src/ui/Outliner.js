@@ -715,6 +715,9 @@ function _onListKeyDown(e) {
 function _activateRow(row, e = {}) {
   const id = row.dataset.id;
   const kind = row.dataset.kind;
+  // Plain row click: scope = the row's parent group (plan §4.5, task 3.2).
+  const plain = !(e.ctrlKey || e.metaKey || e.shiftKey);
+  if (plain && (kind === 'object' || kind === 'group')) Selection.scopeToParentOf(id);
   if (kind === 'object') {
     if (e.ctrlKey || e.metaKey) Selection.toggle(id);
     else if (e.shiftKey)        Selection.add(id);

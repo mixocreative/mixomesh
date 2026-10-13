@@ -118,3 +118,36 @@ export function canonicalSelectableId(id, scene) {
   if (!obj || obj.isGhost) return null;
   return canonical;
 }
+
+/**
+ * Click-depth mapping (overhaul task 3.2, plan §4.5 Figma/Keynote model).
+ * Maps a picked id (object, material part, or group) to the selectable item
+ * at the depth of `scopeId`: material parts collapse to their logical lead,
+ * then the lead's group-ancestor chain is walked upward.
+ *   - `scopeId == null` (root) → the top-most ancestor (top-level group, or
+ *     the object itself when it is ungrouped).
+ *   - `scopeId` = a group → the direct child of that group on the chain.
+ *   - The item is not inside `scopeId` → null (caller exits the scope).
+ * Unknown ids and ghosts → null.
+ * @param {string|null|undefined} id
+ * @param {{ objects?: Record<string, any>, groups?: Record<string, any> }} scene
+ * @param {string|null} [scopeId]
+ * @returns {string|null}
+ */
+export function selectableAtDepth(id, scene, scopeId = null) {
+  const start = canonicalSelectableId(id, scene);
+  if (start == null) return null;
+  const objects = scene?.objects ?? {};
+  const groups = scene?.groups ?? {};
+  const chain = [start];
+  const seen = new Set(chain);
+  let cur = objects[start]?.parentId ?? groups[start]?.parentId ?? null;
+  while (cur && !seen.has(cur) && isGroupId(cur, groups)) {
+    seen.add(cur);
+    chain.push(cur);
+    cur = groups[cur].parentId ?? null;
+  }
+  if (scopeId == null) return chain[chain.length - 1];
+  const k = chain.indexOf(scopeId);
+  return k > 0 ? chain[k - 1] : null;
+}

@@ -1326,6 +1326,46 @@ async function main() {
       `two SEPARATE objects must NOT merge (shown=${splitVal.twoShown}, parts-of-first=${splitVal.twoGrouped})`);
     assert(splitVal.grpOk, 'two-object file must arrive as ONE group "two" holding both objects, group selected (3.1)');
 
+    // ── 3.2 click-depth: double-click enters a group, Esc steps out ──
+    const dblPt = await evaluate(cdp, `(async () => {
+      const st = await import('/src/core/StateManager.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const bs = await import('/src/core/BoxSelect.js');
+      const sel = (await import('/src/core/Selection.js')).Selection;
+      sel.setScope(null); sel.clear();
+      const g = Object.values(st.getState().scene.groups).find(x => /^two(\.\d+)?$/.test(x.name));
+      const scene = sm.SceneManager.getScene();
+      const kids = scene.meshes.filter(m => g && st.getState().scene.objects[m.metadata?.meshId]?.parentId === g.id);
+      sm.SceneManager.frameSelected(kids);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const p = bs.BoxSelect.projectToScreen(kids[0].getBoundingInfo().boundingBox.centerWorld);
+      const cv = document.querySelector('#renderCanvas').getBoundingClientRect();
+      const hitId = sm.SceneManager.pickMeshIdAt(p.x, p.y);
+      return { gid: g?.id, hitId, x: Math.round(cv.left + p.x), y: Math.round(cv.top + p.y) };
+    })()`);
+    assert(dblPt.gid && dblPt.hitId, 'click-depth smoke: no grouped mesh under the projected point');
+    const clickAt = async (x, y) => {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    };
+    const scopeState = () => evaluate(cdp, `(async () => { const s = (await import('/src/core/Selection.js')).Selection;
+      return { ids: s.getSelectedIds().join(), scope: s.getScope() }; })()`);
+    await clickAt(dblPt.x, dblPt.y);
+    await sleep(500);   // > 350 ms → single click
+    const single = await scopeState();
+    assert(single.ids === dblPt.gid && single.scope === null, `single click must select the group at root: ${JSON.stringify(single)}`);
+    await clickAt(dblPt.x, dblPt.y);
+    await clickAt(dblPt.x, dblPt.y);   // < 350 ms, same point → double-click
+    await sleep(60);
+    const entered = await scopeState();
+    assert(entered.scope === dblPt.gid && entered.ids === dblPt.hitId,
+      `double-click must enter the group and select the child: ${JSON.stringify(entered)}`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await sleep(60);
+    const exited = await scopeState();
+    assert(exited.scope === null && exited.ids === dblPt.gid, `Esc must step out and select the group: ${JSON.stringify(exited)}`);
+
     // ── Box (marquee) selection ──────────────────────────────────────────
     // Two complementary live checks against the origin STL mesh:
     //  (1) PROJECTION — frame the mesh, then run the module's real projector +

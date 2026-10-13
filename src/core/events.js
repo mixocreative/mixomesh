@@ -20,6 +20,7 @@ export const EVENTS = {
   SELECTION_CHANGED:       'selection:changed',
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
   PIVOT_MODE_CHANGED:      'selection:pivotModeChanged',
+  SCOPE_CHANGED:           'selection:scopeChanged',   // { scopeId } click-depth scope (task 3.2); null = root
 
   // 3D cursor
   CURSOR_CHANGED:          'scene:cursorChanged',

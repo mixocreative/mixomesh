@@ -4,6 +4,7 @@ import { SceneManager } from './SceneManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import {
   canonicalObjectId, logicalObjectPartIds, logicalObjectLeadIds, canonicalSelectableId, isGroupId,
+  selectableAtDepth,
 } from './LogicalObjects.js';
 
 // Selection writes are silent against PROJECT_DIRTY — clicking around shouldn't
@@ -12,6 +13,11 @@ import {
 const SILENT = { silent: true };
 
 const VALID_PIVOTS = new Set(['world', 'median', 'active', 'individual', 'cursor']);
+
+// Click-depth scope (task 3.2): the group the user has "entered" by
+// double-click, or null = root. Session-only (Decision 12) — deliberately NOT
+// in state.selection, which ProjectSerializer persists wholesale.
+let _scopeId = null;
 
 /**
  * Find the runtime TransformNode for a user group (`metadata.groupId`).
@@ -342,6 +348,104 @@ export function getSelectedNodes() {
   return out;
 }
 
+// ── Click-depth scope (overhaul task 3.2, plan §4.5) ─────
+
+/**
+ * Current click-depth scope: a group id the user entered, or null (root).
+ * A scope whose group no longer exists reads as root.
+ * @returns {string|null}
+ */
+export function getScope() {
+  return _scopeId != null && isGroupId(_scopeId, getState().scene.groups) ? _scopeId : null;
+}
+
+/**
+ * Set the click-depth scope. `null` = root; a non-group id is a no-op.
+ * Emits `SCOPE_CHANGED {scopeId}` when the scope actually changes.
+ * @param {string|null} groupId
+ */
+export function setScope(groupId) {
+  const next = groupId == null ? null : groupId;
+  if (next != null && !isGroupId(next, getState().scene.groups)) return;
+  if (next === _scopeId) return;
+  _scopeId = next;
+  dispatch(EVENTS.SCOPE_CHANGED, { scopeId: next });
+}
+
+/**
+ * Selectable item at the current scope depth for a picked id (object, part
+ * or group), WITHOUT side effects. null when outside the scope / unknown.
+ * @param {string|null|undefined} id
+ * @returns {string|null}
+ */
+export function targetAtScope(id) {
+  return selectableAtDepth(id, getState().scene, getScope());
+}
+
+/**
+ * Resolve a viewport click on `id` to the item to select: the top-most item
+ * within the current scope. A click outside the scope exits to root first
+ * (then maps at root). Parts always map to their logical lead.
+ * @param {string|null|undefined} id
+ * @returns {string|null}
+ */
+export function resolveClick(id) {
+  if (id == null) return null;
+  const scope = getScope();
+  let target = selectableAtDepth(id, getState().scene, scope);
+  if (target == null && (scope != null || _scopeId != null)) {
+    setScope(null);
+    target = selectableAtDepth(id, getState().scene, null);
+  }
+  return target;
+}
+
+/**
+ * Enter `groupId` (double-click): scope = that group, and select the item one
+ * level deeper that contains `pickedId` (when it is inside the group).
+ * @param {string} groupId
+ * @param {string|null} [pickedId]
+ * @returns {boolean} true when the scope was entered
+ */
+export function enterScope(groupId, pickedId = null) {
+  if (!isGroupId(groupId, getState().scene.groups)) return false;
+  setScope(groupId);
+  const child = pickedId == null ? null : selectableAtDepth(pickedId, getState().scene, groupId);
+  if (child != null) set([child], child);
+  return true;
+}
+
+/**
+ * Step out one scope level (Esc): scope = parent of the current scope, and the
+ * group just exited becomes the selection.
+ * @returns {boolean} true when a scope was exited (false at root)
+ */
+export function exitScope() {
+  const scope = getScope();
+  if (scope == null) {
+    if (_scopeId != null) setScope(null);  // stale scope (group deleted) → root
+    return false;
+  }
+  const groups = getState().scene.groups;
+  const parent = groups[scope]?.parentId ?? null;
+  setScope(isGroupId(parent, groups) ? parent : null);
+  set([scope], scope);
+  return true;
+}
+
+/**
+ * Outliner rule (plan §4.5): selecting a row sets the scope to that item's
+ * parent group (root when it has none).
+ * @param {string} id
+ */
+export function scopeToParentOf(id) {
+  const { objects, groups } = getState().scene;
+  const canonical = _canon(id);
+  if (canonical == null) return;
+  const parent = objects[canonical]?.parentId ?? groups[canonical]?.parentId ?? null;
+  setScope(isGroupId(parent, groups) ? parent : null);
+}
+
 function _eq(a, b) {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -354,4 +458,5 @@ export const Selection = {
   setPivotMode, cyclePivotMode, refresh,
   getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
   getTransformTargets, isEffectivelyLocked,
+  getScope, setScope, targetAtScope, resolveClick, enterScope, exitScope, scopeToParentOf,
 };

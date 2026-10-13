@@ -4,7 +4,7 @@ import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
 import { getState, dispatch } from './StateManager.js';
 import { EVENTS } from './events.js';
-import { logicalObjectCommandIds } from './LogicalObjects.js';
+import { logicalObjectCommandIds, isGroupId } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
@@ -33,6 +33,22 @@ const RMB_DRAG_THRESHOLD_PX = 4;
 // A press has to move farther than this before we promote it to a drag. Below
 // the threshold the LMB-down behaves as a plain click (selection only).
 const BODY_DRAG_THRESHOLD_PX = 4;
+
+// Viewport double-click (task 3.2): two LMB POINTERDOWNs on the same
+// scope-depth target, closer than this in time and distance. Detected on
+// POINTERDOWN (not DOM dblclick) so it composes with body-drag / marquee.
+const DOUBLE_CLICK_MS = 350;
+const DOUBLE_CLICK_PX = 4;
+let _lastClick = null;   // { t, x, y, target } of the previous plain LMB press on content
+let _now = () => performance.now();
+
+/** True when `cur` completes a double-click begun by `prev`. */
+function _isDoubleClick(prev, cur) {
+  if (!prev || !cur || prev.target == null || prev.target !== cur.target) return false;
+  const dt = cur.t - prev.t;
+  if (!(dt >= 0 && dt < DOUBLE_CLICK_MS)) return false;
+  return Math.hypot(cur.x - prev.x, cur.y - prev.y) < DOUBLE_CLICK_PX;
+}
 
 // ── Key string builder ───────────────────────────────────
 
@@ -78,7 +94,14 @@ function _handleKeyDown(e) {
     return;  // block normal shortcuts during a modal op
   }
 
+  // Esc priority (task 3.2): modal G/R/S (above) > body drag > marquee >
+  // step out one click-depth scope level. At root Esc does nothing more.
+  if (e.key === 'Escape' && _bodyDrag) { _onBodyDragCancel(); e.preventDefault(); return; }
   if (e.key === 'Escape' && BoxSelect.isActive()) { BoxSelect.cancel(); e.preventDefault(); return; }
+  if (e.key === 'Escape' && _isViewportKeyTarget(document.activeElement) && Selection.exitScope()) {
+    e.preventDefault();
+    return;
+  }
 
   const key = _buildKey(e);
   const ctx = _isViewportKeyTarget(document.activeElement) ? 'viewport' : _currentContext;
@@ -212,29 +235,49 @@ function _onSelectionPointerDown(info) {
   // the gizmo" early-return only ever fired on stray helper meshes — making
   // clicks on real content randomly dead (field report: selection buggy).
   // pickMeshIdAt's predicate now ignores everything without a meshId chain.
-  const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
+  const meshId = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
+  // Click-depth (task 3.2, plan §4.5): the pick maps to the top-most item
+  // within the current scope (parts → lead; at root a top-level group or a
+  // bare object). A pick outside the scope exits to root first.
+  const id = meshId ? Selection.resolveClick(meshId) : null;
 
   // Modifier clicks (same contract as the Outliner): Shift = add to the
   // selection, Ctrl/Cmd = toggle. Both skip the body drag.
   if (ev.ctrlKey || ev.metaKey) {
+    _lastClick = null;
     if (id) Selection.toggle(id);
     else    BoxSelect.begin(_scene.pointerX, _scene.pointerY, true);  // Ctrl-drag empty → additive marquee
     return;
   }
   if (ev.shiftKey) {
+    _lastClick = null;
     if (id) Selection.add(id);
     else    BoxSelect.begin(_scene.pointerX, _scene.pointerY, true);  // Shift-drag empty → additive marquee
     return;
   }
 
   // Empty pick → start a marquee. A sub-threshold drag falls back to a plain
-  // click (clears the selection) inside BoxSelect.end(). Nothing to body-drag.
+  // click (clears the selection + exits the scope) inside BoxSelect.end().
   if (!id) {
+    _lastClick = null;
     BoxSelect.begin(_scene.pointerX, _scene.pointerY, false);
     return;
   }
 
-  // Promote the picked mesh to active without disturbing an existing multi-
+  // Double-click on a group at the current depth → enter it and select the
+  // child under the cursor. On an object a double-click is just a click.
+  const click = { t: _now(), x: _scene.pointerX, y: _scene.pointerY, target: id };
+  if (_isDoubleClick(_lastClick, click)) {
+    _lastClick = null;
+    if (isGroupId(id, getState().scene.groups) && Selection.enterScope(id, meshId)) {
+      _canvas?.focus();
+      return;
+    }
+  } else {
+    _lastClick = click;
+  }
+
+  // Promote the picked item to active without disturbing an existing multi-
   // selection. If the click landed outside the current selection, single-select.
   if (!Selection.contains(id)) {
     Selection.set([id], id);
@@ -305,7 +348,8 @@ function _pickHorizontalPlaneAtPointer(y) {
 function _onContextMenuRMB(info) {
   const ev = info.event;
   const pick = _scene.pick(_scene.pointerX, _scene.pointerY, mesh => !!mesh && mesh.isPickable !== false);
-  const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
+  const meshId = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
+  const id = meshId ? Selection.resolveClick(meshId) : null;   // same click-depth as LMB
   if (id && !Selection.contains(id)) {
     Selection.set([id], id);
   }
@@ -895,5 +939,12 @@ export const InputManager = {
     setCanvas: (c) => { _canvas = c; },
     deleteSelected: _deleteSelected,
     lockToggleSelected: _lockToggleSelected,
+    // Click-depth seams (tests/selection-scope.test.mjs).
+    isDoubleClick: _isDoubleClick,
+    selectionPointerDown: _onSelectionPointerDown,
+    keyDown: _handleKeyDown,
+    setScene: (sc) => { _scene = sc; },
+    setNow: (fn) => { _now = typeof fn === 'function' ? fn : () => performance.now(); },
+    resetClick: () => { _lastClick = null; },
   },
 };

@@ -1,6 +1,7 @@
 // Box / marquee / rubber-band selection. Drag the LEFT mouse button across
-// empty viewport space to sweep a rectangle; every content mesh whose centre
-// falls inside is selected (Shift-drag adds to the current selection).
+// empty viewport space to sweep a rectangle; every item at the current
+// click-depth scope whose combined-AABB centre falls inside is selected
+// (Shift-drag adds to the current selection).
 //
 // Two layers, kept separate so the only real logic stays unit-testable:
 //   • meshIdsInRect()  — pure screen-space hit-test (projection injected)
@@ -13,6 +14,8 @@
 // video / thumbnail export stay byte-identical (Mimaki fidelity lock).
 
 import { Selection } from './Selection.js';
+import { getState } from './StateManager.js';
+import { selectableAtDepth } from './LogicalObjects.js';
 
 const BABYLON = window.BABYLON;
 
@@ -66,6 +69,55 @@ export function meshIdsInRect(meshes, rect, project, centerOf = _boundingCenter)
   return [...hits];
 }
 
+/** World-space AABB of a mesh as plain {min,max} xyz. */
+function _worldBounds(mesh) {
+  mesh.computeWorldMatrix?.(true);
+  const bb = mesh.getBoundingInfo().boundingBox;
+  const lo = bb.minimumWorld, hi = bb.maximumWorld;
+  return { min: { x: lo.x, y: lo.y, z: lo.z }, max: { x: hi.x, y: hi.y, z: hi.z } };
+}
+
+/**
+ * Scope-aware marquee hit-test (task 3.2, plan §4.5): every content mesh is
+ * mapped to its selectable item at the current click depth via `mapId`
+ * (null = outside the scope → ignored); an item is hit when the centre of the
+ * COMBINED world AABB of all its pickable, enabled meshes projects inside the
+ * rect. Item order = first-seen mesh order.
+ * @param {Iterable} meshes
+ * @param {{sx,sy,ex,ey}} rect
+ * @param {(v:{x,y,z})=>({x,y}|null)} project
+ * @param {(meshId:string)=>(string|null)} mapId
+ * @param {(m:any)=>{min:{x,y,z},max:{x,y,z}}} [boundsOf]
+ * @returns {string[]}
+ */
+export function itemIdsInRect(meshes, rect, project, mapId, boundsOf = _worldBounds) {
+  const { x0, y0, x1, y1 } = normRect(rect);
+  /** @type {Map<string, {min:{x,y,z},max:{x,y,z}}>} */
+  const boxes = new Map();
+  for (const m of meshes) {
+    const meshId = _contentMeshId(m);
+    if (!meshId) continue;
+    if (m.isPickable === false) continue;
+    if (typeof m.isEnabled === 'function' && !m.isEnabled()) continue;
+    const item = mapId(meshId);
+    if (item == null) continue;
+    const b = boundsOf(m);
+    const acc = boxes.get(item);
+    if (!acc) { boxes.set(item, { min: { ...b.min }, max: { ...b.max } }); continue; }
+    for (const k of ['x', 'y', 'z']) {
+      acc.min[k] = Math.min(acc.min[k], b.min[k]);
+      acc.max[k] = Math.max(acc.max[k], b.max[k]);
+    }
+  }
+  const hits = [];
+  for (const [item, { min, max }] of boxes) {
+    const p = project({ x: (min.x + max.x) / 2, y: (min.y + max.y) / 2, z: (min.z + max.z) / 2 });
+    if (!p) continue;
+    if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) hits.push(item);
+  }
+  return hits;
+}
+
 // ── Controller ───────────────────────────────────────────
 
 let _scene = null;
@@ -112,9 +164,13 @@ export function end() {
 
   const { x0, y0, x1, y1 } = normRect(box);
   const tiny = (x1 - x0) < 3 && (y1 - y0) < 3;
-  if (tiny) { if (!box.additive) Selection.clear(); return; }
+  // A plain click on empty space clears AND exits the click-depth scope.
+  if (tiny) { if (!box.additive) { Selection.setScope(null); Selection.clear(); } return; }
 
-  const hits = meshIdsInRect(_scene.meshes, box, projectToScreen);
+  // Marquee respects the scope: top-most items within it (task 3.2).
+  const scope = Selection.getScope();
+  const hits = itemIdsInRect(_scene.meshes, box, projectToScreen,
+    (meshId) => selectableAtDepth(meshId, getState().scene, scope));
   if (box.additive) {
     for (const id of hits) Selection.add(id);
   } else {
@@ -145,7 +201,8 @@ export function projectToScreen(world) {
     const dot = (world.x - cp.x) * fwd.x + (world.y - cp.y) * fwd.y + (world.z - cp.z) * fwd.z;
     if (dot <= 0) return null;
   }
-  const c = BABYLON.Vector3.Project(world, BABYLON.Matrix.Identity(), _scene.getTransformMatrix(), vp);
+  const v = new BABYLON.Vector3(world.x, world.y, world.z);
+  const c = BABYLON.Vector3.Project(v, BABYLON.Matrix.Identity(), _scene.getTransformMatrix(), vp);
   return { x: c.x, y: c.y };
 }
 
@@ -176,5 +233,5 @@ function _hide() {
 
 export const BoxSelect = {
   init, isActive, begin, update, end, cancel,
-  meshIdsInRect, normRect, projectToScreen,
+  meshIdsInRect, itemIdsInRect, normRect, projectToScreen,
 };
