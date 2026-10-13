@@ -1000,11 +1000,12 @@ async function main() {
       const sel = await import('/src/core/Selection.js');
       sel.Selection.setPivotMode('cursor');
       await new Promise(r => requestAnimationFrame(r));
-      const tbCursorOn = !!document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
+      // 5.6: pivot is a <select data-select="pivot"> in the toolbar now.
+      const tbCursorOn = document.querySelector('.vt-group[data-group="pivot"] select[data-select="pivot"]')?.value === 'cursor';
       const npPivotOn  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === true;
       sel.Selection.setPivotMode('median');
       await new Promise(r => requestAnimationFrame(r));
-      const tbCursorOff = !document.querySelector('.vt-group[data-group="pivot"] .vt-btn.vt-on[data-mode="cursor"]');
+      const tbCursorOff = document.querySelector('.vt-group[data-group="pivot"] select[data-select="pivot"]')?.value === 'median';
       const npPivotOff  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === false;
       const pivotSync = tbCursorOn && npPivotOn && tbCursorOff && npPivotOff;
 
