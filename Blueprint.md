@@ -1284,6 +1284,18 @@ Phase 6+ implementations:
   by Properties ▸ File units (review M12).
 - `RenameCollectionCommand` — undoable outliner collection rename (L30).
 
+**GroupCommand / CreateGroupCommand (Ctrl+G, task 2.3).** Members may be
+objects and/or groups; a member already inside another selected group is
+dropped (the outer group carries it). The new group's parent is the lowest
+common ancestor of the members (root if they span branches); its name is
+unique among all groups ("Group", "Group.001", …), fixed at first execute so
+redo reuses it; its origin is the bottom-centre (centre X/Z, min Y — scene is
+Y-up) of the members' combined world AABB, identity rotation/scale. Members
+are reparented preserving world transforms. Undo restores group state, member
+parents and world transforms and disposes the node. After Ctrl+G the new
+group is the selection. Group transforms persist as world `{p,q,s}` and
+restore parent-first via `setParent` (world-preserving) — exact round trip.
+
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
 - New push clears redo stack.
@@ -3008,7 +3020,7 @@ without opening the file. **The ratio suffix is always present, even at
 1:1** — consistency beats brevity here:
 
 ```
-suffix         = `_r${workingRatio}to${targetRatio}`     // e.g. `_r1to144`, `_r1to1`
+suffix         = `_r${referenceRatio}to${targetRatio}`   // e.g. `_r1to144`, `_r1to1` (per-object redesign §12)
 combined       = `${projectName}${suffix}.${ext}`        // e.g. `Saturn_r1to1.3mf`
 individually:
   outer zip    = `${projectName}${suffix}.zip`           // e.g. `Saturn_r1to1.zip`
@@ -3485,14 +3497,14 @@ Default seeded entry: `mimaki-3duj-553`. State default
 `state.print.targetPrinterId === 'mimaki-3duj-553'`. Each printer's `bed`
 also seeds `state.print.bedDimensions` at project create / printer-switch
 time (still a state field; printers.json is the *source*, state is the
-*current value*, mirrors how `scale-presets.json` seeds `workingRatio`).
+*current value*, mirrors how `scale-presets.json` seeds initial scale defaults).
 
 Ratio inputs in PrintPanel accept any positive `M:N` (or `M/N`) — both numerator and denominator parsed as floats. A bare `N` is shorthand for `1:N`. The stored value is `N / M`, so `1:72 → 72`, `2:1 → 0.5`, `3:5 → 5/3 ≈ 1.667`. Display:
 - value `> 1` → `1:N` (N rounded, decimal if non-integer)
 - value `< 1` → `M:1` (M = 1/value, decimal if non-integer)
 - value `≈ 1` → `1:1`
 
-This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as well as **down** (1:72 model). Both `RescaleWorldCommand` and `exportFactor()` already operate on plain positive numbers, so no math changes are needed downstream.
+This lets the user scale **up** (e.g. 2:1 for an oversized fit-test print) as well as **down** (1:72 model). Per-object `RescaleObjectCommand` and the export `exportFactor()` formula already operate on plain positive numbers, so no math changes are needed downstream.
 
 ### Cost quote (watertight-repair-and-cost task 6)
 
@@ -4184,10 +4196,10 @@ the flagged set. A one-off export of the selection is the context menu's
 `collectPrintUnits(state, true)` then takes the selection AS the intent and
 ignores the flag. Readiness and cost always match the file the tab produces.
 
-The Bed tab labels printer choices **Build Volume Preset**: choosing one only
+The Bed tab labels printer choices **Printer**: choosing one only
 seeds `print.bedDimensions` and the viewport volume. The Export tab always
-keeps OBJ, 3MF, and STL actions visible; when `readiness.canExport === false`
-all three buttons render disabled with the same recovery title rather than
+keeps OBJ, 3MF, STL, PLY, and WRL actions visible; when `readiness.canExport === false`
+all export buttons render disabled with the same recovery title rather than
 failing late or hiding a format. Above them it renders one derived readiness
 card with a summary per requested ratio, a blocking-state recovery hint, and
 stable issue records:
@@ -4234,8 +4246,8 @@ the positive slicer volume `0..X, 0..Y, 0..Z`. `PrintReadiness` converts the
 centred Babylon bed (`X`, world `Z`, world-up `Y`) into that coordinate space,
 applies the same pivot-anchored target-ratio scaling as `PrintPrep.flattenWorld`,
 and returns `{ fits, overflowMM:{x,y,z}, belowBedMM }`. Readiness is a projection,
-never persisted, and its `formats` is always `['obj','3mf','stl']` regardless of
-the selected build-volume preset.
+never persisted, and its `formats` includes all five writers `['obj','3mf','stl','ply','wrl']` regardless of
+the selected printer (task 1.4/1.6).
 
 ### Viewport Toggles (`src/ui/ViewportToggles.js`)
 Docked under the NavCube (`#viewport-toggles`). A mutually-exclusive **display-
@@ -4777,11 +4789,11 @@ Print tab bar — Properties/object + session-only Cross-Section have none) call
 (Scene + Print panels re-render).
 
 **Scene-protected fields:** when a scene is loaded (`state.scene.objects`
-non-empty), a reset PRESERVES `print.workingRatio` + `print.targetRatio`
-(`SettingsStore.SCENE_PROTECTED`) — `workingRatio` rebakes every mesh and
-`targetRatio` drives export/bed-fit, so snapping them to factory under loaded
-content would silently rescale the scene. On an empty scene / New they reset
-normally. All other fields (bed, wall, mode, render, grid…) always reset.
+non-empty), a reset does NOT preserve per-object scale (deprecated 2026-06-16,
+Per-Object Ratio Redesign task 2.2) — each object's `ratio` is content, not a setting,
+and belongs in the `.mixo` document, never in user settings. All settings fields
+(bed, wall, mode, render, grid…) always reset on both empty and loaded scenes.
+`SettingsStore.SCENE_PROTECTED` is now empty `{}` (scale is content, not a setting).
 
 **Header logo:** `#app-logo` is an **inline** SVG wordmark in `index.html`,
 pinned far-left of `#header` before the editable `#project-name`. Inline (not
@@ -5010,7 +5022,7 @@ build history. Detailed behaviour contracts live in the module sections above.
 
 - **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export via the explicit OBJ / 3MF / STL format buttons.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
-- **Secondary workflows:** solid-only scenes export 3MF `<colorgroup>` for Bambu / Prusa / Orca-style slicing. Textured scenes use the 3MF Materials Extension regardless of the selected build-volume preset.
+- **Secondary workflows:** solid-only scenes export 3MF `<colorgroup>` for Bambu / Prusa / Orca-style slicing (task 1.11). Textured content always uses the 3MF Materials Extension and solid content `<colorgroup>` (content picks the colour REPRESENTATION, AGENTS rule 6); the package FLAVOUR (core / bambu / prusa) is a printer-profile default the user may override (task 1.11).
 - **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run i18n:check`, `npm run build`, and `npm run test:all` (= `test` → `test:browser` → `test:export` → `test:repair`). Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
 
 ### Build history
