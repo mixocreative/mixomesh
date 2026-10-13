@@ -1,14 +1,14 @@
 import { checkBedFit } from './BedFit.js';
 import { toPrintSpace } from './PrintSpace.js';
 
-export const EXPORT_FORMATS = Object.freeze(['obj', '3mf', 'stl']);
+export const EXPORT_FORMATS = Object.freeze(['obj', '3mf', 'stl', 'ply', 'wrl']);
 
 /**
  * Formats that ship the part where it sits in the scene. The 3MF writer
  * re-seats the build (centred in X/Y, min z → 0), so a part dipping under
  * the scene floor is only a problem for these.
  */
-export const WORLD_PLACED_FORMATS = Object.freeze(['obj', 'stl']);
+export const WORLD_PLACED_FORMATS = Object.freeze(['obj', 'stl', 'ply', 'wrl']);
 
 function issue(code, severity, objectIds, data = {}) {
   return { code, severity, objectIds: [...new Set(objectIds ?? [])], data };

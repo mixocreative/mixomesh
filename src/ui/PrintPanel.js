@@ -627,6 +627,14 @@ function _renderExportTab() {
   html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportStl'))}`;
   html += `</button>`;
 
+  html += `<button class="pp-export-btn pp-export-ply" data-format="ply"${disabledAttr}>`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportPly'))}`;
+  html += `</button>`;
+
+  html += `<button class="pp-export-btn pp-export-wrl" data-format="wrl"${disabledAttr}>`;
+  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportWrl'))}`;
+  html += `</button>`;
+
   html += '</div>';
 
   html += '</div>';
@@ -762,15 +770,24 @@ function _wireExportTabControls(el, runExport, getOptions) {
 
   el.querySelector('.pp-export-stl').addEventListener('click', () =>
     runExport(PrintManager.exportSTL, getOptions()));
+
+  el.querySelector('.pp-export-ply').addEventListener('click', () =>
+    runExport(PrintManager.exportPLY, getOptions()));
+
+  el.querySelector('.pp-export-wrl').addEventListener('click', () =>
+    runExport(PrintManager.exportWRL, getOptions()));
 }
 
-const EXPORTERS = { obj: () => PrintManager.exportOBJ, '3mf': () => PrintManager.exportThreeMF, stl: () => PrintManager.exportSTL };
+const EXPORTERS = {
+  obj: () => PrintManager.exportOBJ, '3mf': () => PrintManager.exportThreeMF, stl: () => PrintManager.exportSTL,
+  ply: () => PrintManager.exportPLY, wrl: () => PrintManager.exportWRL,
+};
 
 /**
  * One-off export of the CURRENT SELECTION as its own file (context menu
  * 匯出所選物件…). Ignores the 列印匯出 flag — the selection is the explicit
  * intent — and changes no state. Same gate/overlay as the Export tab.
- * @param {'obj'|'3mf'|'stl'} format
+ * @param {'obj'|'3mf'|'stl'|'ply'|'wrl'} format
  */
 export function exportSelected(format) {
   const fn = EXPORTERS[format]?.();

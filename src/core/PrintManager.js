@@ -12,6 +12,8 @@
  *   src/core/print/PrintPrep.js        per-mesh prep steps
  *   src/core/print/ObjWriter.js        OBJ + MTL + solid-PNG synthesis
  *   src/core/print/ThreeMFWriter.js    3MF colorgroup + materials-ext
+ *   src/core/print/PlyWriter.js        binary PLY + per-vertex colour
+ *   src/core/print/WrlWriter.js        VRML 2.0 + ImageTexture
  *   src/core/print/PrintPackaging.js   zip + save-picker
  *   src/core/print/PrintFormats.js     format registry
  *   src/core/print/ExportPlanner.js    pure filename math
@@ -31,6 +33,8 @@ const API = Object.freeze({
   exportOBJ:            Pipeline.exportOBJ,
   exportSTL:            Pipeline.exportSTL,
   exportThreeMF:        Pipeline.exportThreeMF,
+  exportPLY:            Pipeline.exportPLY,
+  exportWRL:            Pipeline.exportWRL,
   getPrintReadiness:    Pipeline.getPrintReadiness,
   getExportReference:   Ctx.getExportReference,
   getExportedDimensions: Ctx.getExportedDimensions,
@@ -43,6 +47,8 @@ export const {
   exportOBJ,
   exportSTL,
   exportThreeMF,
+  exportPLY,
+  exportWRL,
   getPrintReadiness,
   getExportReference,
   getExportedDimensions,

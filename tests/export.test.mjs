@@ -178,7 +178,7 @@ await test('all formats stay available but a missing referenced texture blocks t
     },
   }), { silent: true });
   const readiness = PrintManager.getPrintReadiness();
-  assert.deepEqual(readiness.formats, ['obj', '3mf', 'stl']);
+  assert.deepEqual(readiness.formats, ['obj', '3mf', 'stl', 'ply', 'wrl']);
   assert.equal(readiness.issues.some(issue => issue.code === 'missing-texture'), true);
   await assert.rejects(PrintManager.exportOBJ(), err =>
     err.readinessIssues?.some(issue => issue.code === 'missing-texture'));
@@ -1321,6 +1321,170 @@ await test('triggerDownload: picker AbortError (user cancel) stays silent, retur
   finally { window.showSaveFilePicker = undefined; }
   assert.equal(toasts.length, 0, 'no toast');
   assert.equal(calls.downloads.length, 0, 'no anchor download');
+});
+
+// ── PLY + WRL (task 1.6) ─────────────────────────────────
+
+const { deflateSync } = await import('node:zlib');
+const { setTextureSource } = await import('../src/core/assets/TextureSource.js');
+
+// Minimal 8-bit RGBA PNG (filter 0 rows) — real bytes, decoded by PlyWriter.
+function pngRGBA(w, h, rgba) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;
+  });
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0); out.write(type, 4, 'ascii'); Buffer.from(data).copy(out, 8);
+    out.writeUInt32BE(crc(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+  const raw = Buffer.alloc(h * (w * 4 + 1));
+  for (let y = 0; y < h; y++) Buffer.from(rgba.slice(y * w * 4, (y + 1) * w * 4)).copy(raw, y * (w * 4 + 1) + 1);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+// 2×2 texture, image order (top row first): red, green / blue, white.
+const PLY_TEX_ID = 'ply-tex-asset';
+setTextureSource(PLY_TEX_ID, new Blob([pngRGBA(2, 2, [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255])]), 2, 2);
+
+function texturedMesh(name, uv = [0.25, 0.75, 0.75, 0.25, 0.5, 0.5]) {
+  const m = mesh(name);
+  m.material = { id: `mat-${name}`, diffuseColor: { r: 1, g: 1, b: 1 },
+    diffuseTexture: { name: 'chk', metadata: { mixoAssetId: PLY_TEX_ID } } };
+  m.getVerticesData = (k) => k === 'uv' ? new Float32Array(uv) : new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const oc = m.clone;
+  m.clone = (n) => { const c = oc.call(m, n); c.material = m.material; c.getVerticesData = m.getVerticesData; return c; };
+  return m;
+}
+
+function parsePly(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const text = new TextDecoder('latin1').decode(u8);
+  const end = text.indexOf('end_header\n') + 'end_header\n'.length;
+  const header = text.slice(0, end);
+  const nV = Number(/element vertex (\d+)/.exec(header)[1]);
+  const nF = Number(/element face (\d+)/.exec(header)[1]);
+  const textured = /property float s\n/.test(header);
+  const stride = 28 + (textured ? 8 : 0);
+  const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const verts = [];
+  for (let i = 0; i < nV; i++) {
+    const o = end + i * stride;
+    verts.push({
+      pos: [0, 1, 2].map(k => view.getFloat32(o + k * 4, true)),
+      rgba: [u8[o + 24], u8[o + 25], u8[o + 26], u8[o + 27]],
+      st: textured ? [view.getFloat32(o + 28, true), view.getFloat32(o + 32, true)] : null,
+    });
+  }
+  const faces = [];
+  let o = end + nV * stride;
+  for (let i = 0; i < nF; i++) {
+    const n = u8[o];
+    faces.push(Array.from({ length: n }, (_, k) => view.getInt32(o + 1 + k * 4, true)));
+    o += 1 + n * 4;
+  }
+  return { header, nV, nF, verts, faces, trailing: u8.length - o };
+}
+
+await test('PLY: combined export → `${project}${suffix}.ply`, no CSG re-bake', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportPLY();
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1.ply');
+  assert.equal(calls.csgFrom.length, 0, 'PLY keeps colour/UVs — never CSG re-baked');
+  assert.equal(_clones[0].__worldBaked, true, 'world + mm baked like every other writer');
+});
+
+await test('PLY: binary LE header, vertex count, PrintSpace position, solid sRGB colour', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportPLY({ individually: true });
+  const ply = parsePly(zipInstances.at(-1).files['Test_m1_r1to1.ply']);
+  assert.match(ply.header, /^ply\nformat binary_little_endian 1\.0\n/);
+  assert.match(ply.header, /property float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nproperty uchar alpha\n/);
+  assert.match(ply.header, /property list uchar int vertex_indices\nend_header\n$/);
+  assert.doesNotMatch(ply.header, /property float s/, 'solid-only file carries no s/t');
+  assert.equal(ply.nV, 3);
+  assert.equal(ply.nF, 1);
+  assert.equal(ply.trailing, 0, 'byte length matches the header exactly');
+  // Babylon (1,0,0) → print (-1,0,0); Babylon (0,1,0) → print (0,0,1) (Y-up → Z-up).
+  assert.deepEqual(ply.verts[1].pos, [-1, 0, 0]);
+  assert.deepEqual(ply.verts[2].pos, [0, 0, 1]);
+  for (const v of ply.verts) assert.deepEqual(v.rgba, [255, 0, 0, 255]);
+  assert.deepEqual(ply.faces[0], [0, 1, 2], 'CounterClockWise mesh written as-is (PrintSpace.printIndices)');
+});
+
+await test('PLY: ClockWise-flagged (glTF) mesh → face reversed, same as STL/3MF', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { side: 0 }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportPLY({ individually: true });
+  const ply = parsePly(zipInstances.at(-1).files['Test_m1_r1to1.ply']);
+  assert.deepEqual(ply.faces[0], [0, 2, 1]);
+});
+
+await test('PLY: textured mesh → s/t props + BILINEAR texture colour at each vertex UV', async () => {
+  setScene({ objects: { t1: obj('t1') }, registry: { t1: texturedMesh('t1') } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportPLY({ individually: true });
+  const ply = parsePly(zipInstances.at(-1).files['Test_t1_r1to1.ply']);
+  assert.match(ply.header, /property uchar alpha\nproperty float s\nproperty float t\n/);
+  assert.equal(ply.trailing, 0);
+  assert.deepEqual(ply.verts[0].rgba, [255, 0, 0, 255], 'uv (0.25,0.75) = top-left texel centre (bottom-left UV origin)');
+  assert.deepEqual(ply.verts[1].rgba, [255, 255, 255, 255], 'uv (0.75,0.25) = bottom-right texel centre');
+  assert.deepEqual(ply.verts[2].rgba, [128, 128, 128, 255], 'uv (0.5,0.5) = bilinear blend of all four texels');
+  assert.deepEqual(ply.verts[0].st, [0.25, 0.75]);
+});
+
+await test('PLY: multi-object combined export merges into ONE file with offset indices', async () => {
+  setScene({ objects: { a: obj('a'), b: obj('b') },
+    registry: { a: mesh('a', { color: { r: 0, g: 0, b: 1 } }), b: texturedMesh('b') } });
+  MeshValidator.validateMesh = valOK;
+  let captured = null;
+  window.showSaveFilePicker = async () => ({ createWritable: async () => ({ write: async (d) => { captured = d; }, close: async () => {} }) });
+  try { await PrintManager.exportPLY(); } finally { window.showSaveFilePicker = undefined; }
+  assert.ok(captured, 'PLY blob written');
+  const ply = parsePly(new Uint8Array(await captured.arrayBuffer()));
+  assert.equal(ply.nV, 6);
+  assert.equal(ply.nF, 2);
+  assert.deepEqual(ply.faces[1], [3, 4, 5], 'second mesh indices offset by the first mesh vertex count');
+  assert.deepEqual(ply.verts[0].rgba, [0, 0, 255, 255], 'solid part keeps its material colour');
+  assert.deepEqual(ply.verts[0].st, [0, 0], 'untextured vertex in a textured file gets s/t = 0');
+  assert.deepEqual(ply.verts[3].rgba, [255, 0, 0, 255], 'textured part sampled');
+});
+
+await test('WRL: textured export → zip with .wrl + packaged PNG; ImageTexture url matches the entry', async () => {
+  setScene({ objects: { t1: obj('t1') }, registry: { t1: texturedMesh('t1') } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportWRL();
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1.zip');
+  assert.equal(calls.csgFrom.length, 0, 'WRL keeps UVs — never CSG re-baked');
+  const files = zipInstances.at(-1).files;
+  const wrl = files['Test_r1to1.wrl'];
+  assert.ok(wrl, 'combined .wrl entry');
+  assert.match(wrl, /^#VRML V2\.0 utf8\n/);
+  assert.match(wrl, /IndexedFaceSet \{/);
+  assert.match(wrl, /coordIndex \[\s*0 1 2 -1\s*\]/);
+  assert.match(wrl, /texCoordIndex \[\s*0 1 2 -1\s*\]/);
+  assert.match(wrl, /TextureCoordinate \{ point \[\s*0\.25 0\.75,/);
+  assert.match(wrl, /-1 0 0,\s*0 0 1\s*\]/, 'coords pass through PrintSpace (Z-up mm)');
+  const url = /ImageTexture \{ url "([^"]+)" \}/.exec(wrl)?.[1];
+  assert.equal(url, 'textures/chk.png');
+  assert.ok(files[url], 'the referenced PNG is packaged at exactly that path');
+});
+
+await test('WRL: solid-only export → single .wrl with Material diffuseColor', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }) } });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportWRL();
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1.wrl');
+  await PrintManager.exportWRL({ individually: true });
+  const wrl = zipInstances.at(-1).files['Test_m1_r1to1.wrl'];
+  assert.match(wrl, /Material \{ diffuseColor 1 0 0 transparency 0 \}/);
+  assert.doesNotMatch(wrl, /ImageTexture|texCoord/);
 });
 
 // ── Report ───────────────────────────────────────────────

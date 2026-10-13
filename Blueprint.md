@@ -280,6 +280,8 @@ src/
       PrintPrep.js         ← reusable clone prep steps (THROW on missing ctx.pivot/ratioFactor/unitFactor)
       PrintSpace.js        ← THE axis + winding seam (Babylon LH Y-up ↔ print RH Z-up); used by 3MF/STL writers + 3MF loader
       StlWriter.js         ← binary little-endian STL through PrintSpace (Babylon STLExport rejected)
+      PlyWriter.js         ← binary LE PLY, per-vertex colour (bilinear from full-res source texture), PrintSpace (1.6)
+      WrlWriter.js         ← VRML 2.0 IndexedFaceSet + ImageTexture, mm in PrintSpace Z-up frame (1.6)
       PrintFormats.js      ← format registry: labels, prep order, serializers
       PrintPackaging.js    ← zip/blob packaging + download dispatch
       PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
@@ -2963,6 +2965,8 @@ exported but missing from the namespace.
 ```js
 PrintManager.exportOBJ(options)                  → Promise<void>  // triggers download
 PrintManager.exportSTL(options)                  → Promise<void>
+PrintManager.exportPLY(options)                  → Promise<void>  // binary LE PLY, per-vertex colour
+PrintManager.exportWRL(options)                  → Promise<void>  // VRML 2.0 + ImageTexture
 PrintManager.exportThreeMF(options)              → Promise<void>  // content-selected 3MF sub-flavor
 PrintManager.previewExportContext(options)       → ExportContext|null  // UI preview entry — single source of truth
 PrintManager.getExportReference(options)         → {logicalId, ratio}  // active printable unit, else first printable unit
@@ -3133,8 +3137,8 @@ ctx and reads no global state.
     `createNormals` calls `mesh.createNormals(true)`; `csg` delegates to
     injected CSG; `csgSolidOnly` skips textured meshes.
 - `PrintFormats.js`
-  - `createFormats({ serializeOBJ, serializeSTL, serialize3MF })` returns
-    `{ obj, stl, '3mf' }`.
+  - `createFormats({ serializeOBJ, serializeSTL, serialize3MF, serializePLY, serializeWRL })`
+    returns `{ obj, stl, '3mf', ply, wrl }`.
   - OBJ prep: `fallbackMaterial`, `flattenWorld`, `weld`,
     `optimizeIndices`, `createNormals`; CSG not required.
   - STL prep: `flattenWorld`, `weld`, `optimizeIndices`, `csg`,
@@ -3142,6 +3146,28 @@ ctx and reads no global state.
   - 3MF prep: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
     `optimizeIndices`, `csgSolidOnly`, `createNormals`; CSG required, but
     textured meshes keep UV seams.
+  - PLY / WRL prep: `fallbackMaterial`, `flattenWorld`, `weld`, `repair`,
+    `optimizeIndices`, `createNormals`; CSG not required (it would drop UVs /
+    flatten vertex colour), same as OBJ.
+- `PlyWriter.js` (task 1.6) — `serializePLY(ctx)`, `encodeBinaryPLY`,
+  `decodeImageRGBA(blob)`, `sampleBilinear(img,u,v)`. Binary little-endian:
+  vertex `float x y z nx ny nz`, `uchar red green blue alpha`, + `float s t`
+  when any mesh in the file is textured; face `list uchar int vertex_indices`.
+  Geometry/normals via PrintSpace (`positionsToPrintSpace` + `printIndices`).
+  Textured vertices = BILINEAR sample (REPEAT wrap, bottom-left UV origin) of
+  the export PNG from `collectMimakiTextures` (full-res source, fail-closed),
+  PNG decoded in pure JS so samples are the file bytes. Solid =
+  `materialSrgbColor` + alpha. Combined → one merged `${base}.ply`;
+  individually → zip (STL shape). No texture files shipped.
+- `WrlWriter.js` (task 1.6) — `serializeWRL(ctx)`. `#VRML V2.0 utf8`; one
+  `DEF <name> Shape` per clone, `IndexedFaceSet` (+ `texCoord`/`texCoordIndex`
+  when textured); textured → `ImageTexture { url "textures/<name>.png" }`,
+  solid → `Material { diffuseColor transparency }`. Units mm in the PrintSpace
+  Z-up frame (not VRML's nominal Y-up metres — stated in a header comment).
+  Textured → zip `${base}.wrl` + `textures/*.png` (OBJ layout); solid-only →
+  single `.wrl`. PLY and WRL keep world placement (`WORLD_PLACED_FORMATS`).
+  Writer check without a browser: `node tests/scan-probe.mjs --writers`
+  (trimesh volume ≈ +1000 mm³ for a 10 mm box).
 - `PrintPackaging.js`
   - `packageAndDownload(out, fmtLabel, progress)` converts a blob package or
     zip-entry package into a Blob. Zip packages use JSZip at call time. It

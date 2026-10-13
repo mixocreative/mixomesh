@@ -30,6 +30,8 @@ import { packageAndDownload } from './PrintPackaging.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './ThreeMFWriter.js';
 import { serializeOBJ } from './ObjWriter.js';
 import { serializeSTL } from './StlWriter.js';
+import { serializePLY } from './PlyWriter.js';
+import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { vendorUrl, MANIFOLD_VENDOR_DIR } from '../vendorUrl.js';
@@ -251,6 +253,8 @@ const FORMATS = createFormats({
   serializeOBJ,
   serializeSTL,
   serialize3MF: _serialize3MF,
+  serializePLY,
+  serializeWRL,
 });
 
 // ── validation gate ──────────────────────────────────────
@@ -305,7 +309,7 @@ function _groupCloneEntries(entries) {
 // ── orchestration ────────────────────────────────────────
 
 /**
- * @param {'obj'|'stl'|'3mf'} formatKey
+ * @param {'obj'|'stl'|'3mf'|'ply'|'wrl'} formatKey
  * @param {{selectedOnly?:boolean, individually?:boolean,
  *          onProgress?:(frac:number,msg:string)=>void}} options
  */
@@ -633,3 +637,5 @@ async function _serialize3MFMaterialsExt(ctx) {
 export const exportOBJ     = (options = {}) => _runExport('obj', options);
 export const exportSTL     = (options = {}) => _runExport('stl', options);
 export const exportThreeMF = (options = {}) => _runExport('3mf', options);
+export const exportPLY     = (options = {}) => _runExport('ply', options);
+export const exportWRL     = (options = {}) => _runExport('wrl', options);

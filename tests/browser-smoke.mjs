@@ -438,8 +438,8 @@ async function main() {
       `locale switch did not refresh generated Print tab text: ${localeSwitch.after.printTabs.join(', ')}`);
     assert(localeSwitch.after.propertiesEmpty.includes('拖到視窗'),
       `locale switch did not refresh generated Properties empty text: ${localeSwitch.after.propertiesEmpty}`);
-    assert(localeSwitch.after.shaderEmpty.some(text => text.includes('選取上方著色器')),
-      `locale switch did not refresh generated Shader empty text: ${localeSwitch.after.shaderEmpty.join(', ')}`);
+    assert(localeSwitch.after.shaderEmpty.some(text => text.includes('選取上方材質')),
+      `locale switch did not refresh generated Material empty text: ${localeSwitch.after.shaderEmpty.join(', ')}`);
     assert(localeSwitch.after.sceneLabels.includes('背景'),
       `locale switch did not refresh generated Scene labels: ${localeSwitch.after.sceneLabels.join(', ')}`);
     assert(localeSwitch.after.outlinerEmpty.includes('拖到視窗'),
@@ -470,7 +470,7 @@ async function main() {
       'empty-scene readiness summary should render as blocked');
     assert(printReadinessUi.exportView.issues.includes('no-print-parts'),
       'empty-scene readiness issue is missing');
-    assert(printReadinessUi.exportView.formats.join(',') === 'obj,3mf,stl',
+    assert(printReadinessUi.exportView.formats.join(',') === 'obj,3mf,stl,ply,wrl',
       `all export buttons must remain visible: ${printReadinessUi.exportView.formats.join(',')}`);
     assert(printReadinessUi.exportView.disabled.every(Boolean),
       'blocked readiness should disable export buttons instead of failing late');

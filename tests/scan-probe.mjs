@@ -6,6 +6,7 @@
 // timings. Exit 1 when any file fails a hard check.
 //
 //   node tests/scan-probe.mjs [dir]
+//   node tests/scan-probe.mjs --writers   (PLY/WRL writer check, no browser)
 //
 
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -292,6 +293,109 @@ async function main() {
   }
 }
 
+// ── PLY / WRL writer probe (no browser) ─────────────────
+//
+//   node tests/scan-probe.mjs --writers      (or PROBE_WRITERS=1)
+//
+// Builds a REAL Babylon 10 mm box (NullEngine — Babylon's own native winding
+// convention) plus a glTF-style twin (reversed indices + ClockWise flag), runs
+// both through the real PlyWriter / WrlWriter encoders (PrintSpace inside),
+// and — when Python trimesh is installed — checks each file reports volume
+// ≈ +1000 mm³ (positive = outward, not inside-out). trimesh has no VRML
+// loader, so the WRL is read back by a minimal Coordinate/coordIndex parser
+// and handed to trimesh.Trimesh. Skips (exit 0) when trimesh is missing.
+async function writersProbe() {
+  const { writeFileSync } = await import('node:fs');
+  const { deflateSync } = await import('node:zlib');
+  globalThis.location ??= { hostname: 'localhost' };
+  globalThis.window ??= { addEventListener() {}, removeEventListener() {} };
+  const B = await import('@babylonjs/core');
+  window.BABYLON = B;
+  const { encodeBinaryPLY, decodeImageRGBA } = await import('../src/core/print/PlyWriter.js');
+  const { encodeVRML } = await import('../src/core/print/WrlWriter.js');
+
+  const engine = new B.NullEngine();
+  const scene = new B.Scene(engine);
+  const box = B.MeshBuilder.CreateBox('cube10', { size: 10 }, scene);
+  const pos = box.getVerticesData('position');
+  const uv = box.getVerticesData('uv');
+  const nrm = box.getVerticesData('normal');
+  const idx = Array.from(box.getIndices());
+  const reversed = [];
+  for (let i = 0; i < idx.length; i += 3) reversed.push(idx[i], idx[i + 2], idx[i + 1]);
+  const duck = (name, indices, side, material) => ({
+    name, sideOrientation: side, material,
+    getVerticesData: (k) => ({ position: pos, uv, normal: nrm })[k] ?? null,
+    getIndices: () => indices,
+  });
+  const solid = { diffuseColor: { r: 1, g: 0, b: 0 }, alpha: 1 };
+  const textured = { diffuseColor: { r: 1, g: 1, b: 1 }, diffuseTexture: { name: 'probe' } };
+  // 1×1 opaque green PNG — every UV samples (0,255,0).
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (t, d) => { const o = Buffer.alloc(12 + d.length); o.writeUInt32BE(d.length, 0); o.write(t, 4, 'ascii'); Buffer.from(d).copy(o, 8); o.writeUInt32BE(crc(o.subarray(4, 8 + d.length)), 8 + d.length); return o; };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(1, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 6;
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.from([0, 0, 255, 0, 255]))), chunk('IEND', Buffer.alloc(0))]);
+  const img = await decodeImageRGBA(new Blob([png]));
+
+  const cases = [
+    ['native-solid', duck('native', idx, 1, solid), [255, 0, 0]],
+    ['gltf-solid', duck('gltf', reversed, 0, solid), [255, 0, 0]],
+    ['native-textured', duck('nativeTex', idx, 1, textured), [0, 255, 0]],
+  ];
+  const outDir = mkdtempSync(join(tmpdir(), 'mixomesh-writers-probe-'));
+  const files = [];
+  try {
+    for (const [label, mesh, rgb] of cases) {
+      const isTex = !!mesh.material.diffuseTexture;
+      const plyPath = join(outDir, `${label}.ply`);
+      writeFileSync(plyPath, encodeBinaryPLY([{ mesh }], isTex ? new Map([[mesh, img]]) : new Map()));
+      const wrl = encodeVRML([{ mesh }], isTex ? new Map([[mesh, 'textures/probe.png']]) : new Map());
+      const points = [...wrl.matchAll(/\bCoordinate \{ point \[([^\]]*)\]/g)].flatMap(m => m[1].split(',').map(p => p.trim().split(/\s+/).map(Number)));
+      const faces = [...wrl.matchAll(/\n\s*coordIndex \[([^\]]*)\]/g)].flatMap(m => m[1].replace(/,/g, ' ').split('-1').map(f => f.trim()).filter(Boolean).map(f => f.split(/\s+/).map(Number)));
+      const wrlJson = join(outDir, `${label}.wrl.json`);
+      writeFileSync(join(outDir, `${label}.wrl`), wrl);
+      writeFileSync(wrlJson, JSON.stringify({ points, faces }));
+      files.push({ label, plyPath, wrlJson, rgb });
+    }
+    const py = resolveCommand('python') ?? resolveCommand('python3');
+    const has = py && spawnSync(py, ['-c', 'import trimesh'], { stdio: 'ignore' }).status === 0;
+    if (!has) { console.log('WRITERS PROBE SKIPPED — python trimesh not installed'); return; }
+    const script = [
+      'import json, sys, trimesh',
+      'out = []',
+      'for label, ply, wj in json.loads(sys.argv[1]):',
+      '    m = trimesh.load(ply, force="mesh")',
+      // A PLY with s/t loads as TextureVisuals (no vertex_colors) — read the
+      // raw uchar colour props trimesh keeps in metadata instead.
+      '    raw = (m.metadata.get("_ply_raw") or {}).get("vertex", {}).get("data")',
+      '    vc = [int(raw[0][k]) for k in ("red", "green", "blue", "alpha")] if raw is not None and "red" in raw.dtype.names else (m.visual.vertex_colors[0].tolist() if m.visual.kind == "vertex" else None)',
+      '    d = json.load(open(wj))',
+      '    w = trimesh.Trimesh(vertices=d["points"], faces=d["faces"], process=True)',
+      '    out.append({"label": label, "ply": m.volume, "plyWatertight": bool(m.is_watertight), "plyColor": vc, "wrl": w.volume, "wrlWatertight": bool(w.is_watertight), "zMin": float(m.bounds[0][2]), "zMax": float(m.bounds[1][2])})',
+      'print(json.dumps(out))',
+    ].join('\n');
+    const res = spawnSync(py, ['-c', script, JSON.stringify(files.map(f => [f.label, f.plyPath, f.wrlJson]))], { encoding: 'utf8' });
+    if (res.status !== 0) throw new Error(`trimesh probe failed:\n${res.stderr}`);
+    const rows = JSON.parse(res.stdout.trim().split('\n').pop());
+    const hard = [];
+    for (const r of rows) {
+      const want = files.find(f => f.label === r.label).rgb;
+      const okVol = (v) => Math.abs(v - 1000) < 1;
+      const okColor = r.plyColor && want.every((c, i) => r.plyColor[i] === c);
+      const ok = okVol(r.ply) && okVol(r.wrl) && okColor;
+      if (!ok) hard.push(r.label);
+      console.log(`${ok ? '✓' : '✗'} ${r.label} | PLY vol ${r.ply.toFixed(2)} mm³ watertight ${r.plyWatertight} colour ${JSON.stringify(r.plyColor)} z ${r.zMin}..${r.zMax} | WRL vol ${r.wrl.toFixed(2)} mm³ watertight ${r.wrlWatertight}`);
+    }
+    console.log(`WRITERS PROBE DONE — ${rows.length} case(s), ${hard.length} failure(s)`);
+    if (hard.length) throw new Error(`writer probe failures: ${hard.join(', ')}`);
+  } finally {
+    removeTempDir(outDir);
+    engine.dispose();
+  }
+}
+
 // ── Shared plumbing (mirrors tests/browser-export-smoke.mjs) ─────────────
 
 async function openTarget(port, url) {
@@ -463,7 +567,8 @@ async function stopProcess(child) {
 }
 
 try {
-  await main();
+  const writers = process.argv.includes('--writers') || process.env.PROBE_WRITERS === '1';
+  await (writers ? writersProbe() : main());
 } catch (err) {
   console.error(err?.stack ?? err);
   process.exitCode = 1;

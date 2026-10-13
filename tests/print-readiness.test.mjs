@@ -60,8 +60,8 @@ assert.equal(find(sunk, 'bed-overflow'), undefined, '3MF seats the build: no ove
 assert.equal(sunk.targets[0].fit.fits, true);
 assert.equal(find(sunk, 'below-bed')?.severity, 'warning');
 assert.equal(find(sunk, 'below-bed')?.data.belowBedMM, 5);
-assert.deepEqual(find(sunk, 'below-bed')?.data.formats, ['obj', 'stl']);
-assert.deepEqual(WORLD_PLACED_FORMATS, ['obj', 'stl']);
+assert.deepEqual(find(sunk, 'below-bed')?.data.formats, ['obj', 'stl', 'ply', 'wrl']);
+assert.deepEqual(WORLD_PLACED_FORMATS, ['obj', 'stl', 'ply', 'wrl']);
 
 // Height is checked against bed Z when configured, and ignored when not.
 const tall = { min: [0, 0, 0], max: [10, 10, 260] };
@@ -115,6 +115,6 @@ assert.equal(multiple.targets.every(item => item.fit.fits), true);
 assert.deepEqual(multiple.formats, EXPORT_FORMATS);
 assert.deepEqual(
   buildReadiness({ parts: [part()], targets: [target(72)], bedDimensions: bed, printerId: 'anything' }).formats,
-  ['obj', '3mf', 'stl'],
+  ['obj', '3mf', 'stl', 'ply', 'wrl'],
   'printer identity never changes format availability',
 );
