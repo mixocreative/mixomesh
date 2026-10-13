@@ -55,6 +55,45 @@ export function objectRatio(obj) {
   return _positiveOrOne(obj?.ratio ?? obj?.modelRatio);
 }
 
+// World-space node scale of a mesh: per-axis magnitude, so parent scaling
+// (a group at x2) counts and a negative (mirror) scale is just its size.
+// Reads the world matrix (row-major: rows 0-2 hold the scaled basis vectors),
+// else absoluteScaling, else the local scaling chain up the parents.
+export function nodeScaleOf(mesh) {
+  if (!mesh) return { x: 1, y: 1, z: 1 };
+  mesh.computeWorldMatrix?.(true);
+  const m = mesh.getWorldMatrix?.()?.m;
+  if (m && m.length >= 11) {
+    const len = (i) => Math.hypot(m[i], m[i + 1], m[i + 2]);
+    return { x: len(0), y: len(4), z: len(8) };
+  }
+  const a = mesh.absoluteScaling;
+  if (a && Number.isFinite(a.x)) return { x: Math.abs(a.x), y: Math.abs(a.y), z: Math.abs(a.z) };
+  const t = { x: 1, y: 1, z: 1 };
+  for (let n = mesh; n; n = n.parent) {
+    if (!n.scaling) continue;
+    t.x *= Math.abs(n.scaling.x); t.y *= Math.abs(n.scaling.y); t.z *= Math.abs(n.scaling.z);
+  }
+  return t;
+}
+
+// Effective scale (Decision 26): the declared ratio divided by the node's
+// uniform world scale (1:72 at node scale 2 is really 1:36). Non-uniform
+// scale has no single answer, so the declared ratio is kept and flagged.
+export function effectiveRatioInfo(obj, mesh) {
+  const ratio = objectRatio(obj);
+  const s = nodeScaleOf(mesh);
+  const ok = [s.x, s.y, s.z].every(v => Number.isFinite(v) && v > 0);
+  if (!ok) return { ratio, uniform: true, nodeScale: 1 };
+  const uniform = Math.abs(s.x - s.y) <= 1e-6 && Math.abs(s.y - s.z) <= 1e-6;
+  if (!uniform) return { ratio, uniform: false, nodeScale: s };
+  return { ratio: Math.abs(s.x - 1) <= 1e-6 ? ratio : ratio / s.x, uniform: true, nodeScale: s.x };
+}
+
+export function effectiveRatio(obj, mesh) {
+  return effectiveRatioInfo(obj, mesh).ratio;
+}
+
 export function objectScaleFromObject(obj) {
   return { sceneRatio: objectRatio(obj) };
 }

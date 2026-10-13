@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import {
   objectRatio,
+  effectiveRatio,
+  effectiveRatioInfo,
   objectScaleFromObject,
   exportRatiosFromState,
   computePrintExportScale,
@@ -50,6 +52,21 @@ await test('export factor: (ratio / T) × 1000', () => {
   assert.equal(computePrintExportScale({ sceneRatio: 72 }, { printRatio: 144 }), 500);
   // tank 72 → target 35
   assert.ok(Math.abs(computePrintExportScale({ sceneRatio: 72 }, { printRatio: 35 }) - (72 / 35) * 1000) < 1e-6);
+});
+
+await test('effectiveRatio: node scale 2 on 1:72 -> 36; parent scale counts; non-uniform -> 72 + flag', () => {
+  const o = { ratio: 72 };
+  assert.equal(effectiveRatio(o, null), 72);
+  assert.equal(effectiveRatio(o, { scaling: { x: 1, y: 1, z: 1 } }), 72);
+  assert.equal(effectiveRatio(o, { scaling: { x: 2, y: 2, z: 2 } }), 36);
+  const kid = { scaling: { x: 1, y: 1, z: 1 }, parent: { scaling: { x: 2, y: 2, z: 2 } } };
+  assert.equal(effectiveRatio(o, kid), 36);
+  const w = (n) => ({ getWorldMatrix: () => ({ m: [n,0,0,0, 0,n,0,0, 0,0,n,0, 0,0,0,1] }) });
+  assert.equal(effectiveRatio(o, w(2)), 36);
+  const nu = { scaling: { x: 2, y: 1, z: 1 } };
+  assert.equal(effectiveRatio(o, nu), 72);
+  assert.equal(effectiveRatioInfo(o, nu).uniform, false);
+  assert.equal(effectiveRatioInfo(o, w(2)).uniform, true);
 });
 
 await test('RescaleObjectCommand: own-origin rescale, child local offset scales, undo exact', async () => {

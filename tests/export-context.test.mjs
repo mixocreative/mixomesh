@@ -95,6 +95,19 @@ await test('buildExportContext: target 1:144 on 1:72 → factor === 500 (half si
   assert.equal(ctx.factor, 500);
 });
 
+await test('buildExportContext: 1:72 at node scale 2 -> effective 36; target 72 -> factor 500', () => {
+  const u = unit('a', 72);
+  const m2 = { m: [2,0,0,0, 0,2,0,0, 0,0,2,0, 0,0,0,1], getTranslation: () => window.BABYLON.Vector3 ? new window.BABYLON.Vector3(0, 0, 0) : { clone() { return { x: 0, y: 0, z: 0 }; } } };
+  u.parts[0].mesh.getWorldMatrix = () => m2;
+  const ctx = ExportContext.buildExportContext({ state: FAKE_STATE, units: [u], target: 72 });
+  assert.equal(ctx.referenceRatio, 36);
+  assert.equal(ctx.ratioFactor, 0.5);
+  assert.equal(ctx.factor, 500);
+  const asShown = ExportContext.buildExportContext({ state: FAKE_STATE, units: [u], target: null });
+  assert.equal(asShown.targetRatio, 36);
+  assert.equal(asShown.factor, ExportContext.BU_TO_MM);
+});
+
 await test('buildExportContext: returned object is frozen', () => {
   const ctx = ExportContext.buildExportContext({
     state: FAKE_STATE,

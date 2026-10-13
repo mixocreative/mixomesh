@@ -22,7 +22,7 @@
  *     wraps the immutable ctx) doubles the type surface for no gain.
  */
 
-import { objectRatio, exportRatiosFromState } from '../scale/ScaleMath.js';
+import { effectiveRatio, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { logicalObjectLeadIds, logicalObjectPartIds } from '../LogicalObjects.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
@@ -116,7 +116,7 @@ export function buildExportContext({ state, units, target = null, options = {}, 
   if (!state) throw new Error('buildExportContext: state required');
   if (!Array.isArray(units) || !units.length) throw new Error('buildExportContext: units required');
   const referenceUnit = _selectReferenceUnit(units, state);
-  const referenceRatio = objectRatio(referenceUnit?.obj ?? null);
+  const referenceRatio = effectiveRatio(referenceUnit?.obj ?? null, _leadMesh(referenceUnit));
   const targetRatio = _positiveOrNull(target) ?? referenceRatio;
   if (!(referenceRatio > 0)) throw new Error('buildExportContext: referenceRatio must be positive');
   if (!(targetRatio > 0))    throw new Error('buildExportContext: targetRatio must be positive');
@@ -246,7 +246,7 @@ export function getExportReference(options = {}) {
   const unit = _selectReferenceUnit(units, state);
   return {
     logicalId: unit?.logicalId ?? null,
-    ratio: objectRatio(unit?.obj ?? null),
+    ratio: effectiveRatio(unit?.obj ?? null, _leadMesh(unit)),
   };
 }
 
@@ -305,6 +305,11 @@ function _selectReferenceUnit(units, state) {
     ? units.find(u => u.logicalId === refId || u.parts?.some(p => p.meshId === refId))
     : null;
   return refUnit ?? units[0] ?? null;
+}
+
+function _leadMesh(unit) {
+  const lead = unit?.parts?.find(p => p.meshId === unit.logicalId) ?? unit?.parts?.[0] ?? null;
+  return lead?.mesh ?? null;
 }
 
 function _referencePivot(unit) {

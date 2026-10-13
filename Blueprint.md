@@ -3273,6 +3273,13 @@ EXPORT  : ratioFactor = referenceRatio / T,   unitFactor = BU_TO_MM (1000),
           factor      = ratioFactor * unitFactor
           referenceRatio = (print.referenceObjectId unit, else first printable unit).ratio
             — explicit per-project state, NEVER the selection (task 1.15 / Decision 25)
+          referenceRatio is the reference's EFFECTIVE ratio (task 1.16 / Decision 26):
+            effectiveRatio(obj, mesh) = ratio / s, s = uniform WORLD scale of the
+            object's node incl. parent groups (ScaleMath.nodeScaleOf: world-matrix
+            basis lengths). Import bakes all transforms (node scale 1), so only a
+            user's hand-scaling changes it: 1:72 at node scale 2 → 1:36, factor at
+            T=72 = 500, as-shown suffix _r36to36. Non-uniform scale → declared ratio
+            + effectiveRatioInfo(...).uniform === false.
             — built into ctx.referenceRatio by ExportContext.buildExportContext;
             consumed by PrintNaming.exportBaseName(ctx) + PrintPrep.flattenWorld(ctx)
             + ObjWriter.serializeOBJ(ctx) + ThreeMFWriter so factor / filename / pivot
