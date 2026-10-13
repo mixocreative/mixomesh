@@ -37,11 +37,44 @@ await test('A8: subscribe(undefined event) throws in dev instead of silently dyi
   assert.throws(() => subscribe(undefined, () => {}), /unknown event/i);
 });
 
-await test('printer profiles contain build-volume reference data + a default material id only', () => {
-  for (const [id, profile] of Object.entries(printers)) {
-    assert.deepEqual(Object.keys(profile).sort(), ['bed', 'defaultMaterialId', 'displayName', 'vendor'], id);
-    assert.equal(['format', 'pipeline', 'colorMode', 'materials'].some(key => key in profile), false, id);
+await test('printers.json v2: every row validates (required fields, numeric bed, known enums)', async () => {
+  const P = await import('../src/core/print/PrinterProfiles.js');
+  const num = v => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  assert.ok(Object.keys(printers).length >= 20, 'ships the full printer list');
+  for (const id of ['mimaki-3duj-553', 'mimaki-3duj-2207', 'bambu-x1c', 'bambu-a1', 'bambu-a1-mini', 'prusa-mk4', 'elegoo-saturn-4-ultra', 'generic-obj-mtl-png', 'custom']) {
+    assert.ok(printers[id], `legacy id ${id} still present`);
   }
+  for (const [id, p] of Object.entries(printers)) {
+    for (const k of ['displayName', 'vendor', 'process', 'bed', 'colour', 'export', 'validation', 'defaultMaterialId', 'verified']) assert.ok(k in p, `${id}: ${k}`);
+    assert.ok(P.PRINTER_PROCESSES.includes(p.process), `${id}: process`);
+    for (const ax of ['x', 'y', 'z']) {
+      if (id === 'custom') assert.ok(p.bed[ax] === null || num(p.bed[ax]), `${id}: bed.${ax}`);
+      else assert.ok(num(p.bed[ax]), `${id}: bed.${ax} numeric`);
+    }
+    assert.ok(P.PRINTER_COLOUR_MODES.includes(p.colour.mode), `${id}: colour.mode`);
+    assert.equal(typeof p.colour.alpha, 'boolean', id);
+    assert.equal(typeof p.colour.vertexColour, 'boolean', id);
+    assert.ok(Number.isInteger(p.colour.maxTextureSize) && p.colour.maxTextureSize >= 0, `${id}: maxTextureSize`);
+    assert.ok(Number.isInteger(p.colour.maxTexturesPerObject) && p.colour.maxTexturesPerObject >= 0, `${id}: maxTexturesPerObject`);
+    assert.ok(Array.isArray(p.export.formats) && p.export.formats.length > 0, `${id}: export.formats`);
+    for (const f of p.export.formats) assert.ok(P.PRINTER_FORMATS.includes(f), `${id}: format ${f}`);
+    assert.ok(p.export.formats.includes(p.export.recommended), `${id}: recommended in formats`);
+    assert.equal(typeof p.export.splitByMaterial, 'boolean', id);
+    assert.ok(P.PRINTER_OBJ_AXES.includes(p.export.obj.axis), `${id}: obj.axis`);
+    assert.ok(P.PRINTER_3MF_FLAVOURS.includes(p.export.threeMF.flavour), `${id}: 3mf flavour`);
+    assert.equal(typeof p.export.threeMF.seatOnBed, 'boolean', id);
+    assert.equal(typeof p.export.threeMF.metadata, 'boolean', id);
+    assert.equal(typeof p.validation.requireWatertight, 'boolean', id);
+    for (const k of ['minWallMM', 'minFeatureMM', 'maxTrianglesHint']) assert.ok(num(p.validation[k]), `${id}: validation.${k}`);
+    assert.ok(P.PRINTER_VERIFIED.includes(p.verified), `${id}: verified`);
+  }
+});
+
+await test('AGENTS.md rule 6 carries the Printer default amendment (schema and rule cannot drift)', () => {
+  const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
+  const rule6 = agents.slice(agents.indexOf('6. Export format'), agents.indexOf('7. One-mesh'));
+  assert.ok(rule6.length > 50, 'rule 6 found');
+  assert.ok(rule6.includes('Printer default'), 'rule 6 mentions Printer default');
 });
 
 // Material presets moved to the user-editable public/config/materials.json

@@ -5,7 +5,7 @@ installEnv();
 console.error = () => {};
 
 const { setState } = await import('../src/core/StateManager.js');
-const { getPrinterProfile, bedDimensionsForPrinter } = await import('../src/core/print/PrinterProfiles.js');
+const { getPrinterProfile, bedDimensionsForPrinter, normalizePrinterProfile, listPrinterProfiles, printerProfileExists } = await import('../src/core/print/PrinterProfiles.js');
 const DS = (await import('../src/config/default-settings.json', { with: { type: 'json' } })).default;
 
 let passed = 0, failed = 0;
@@ -44,6 +44,36 @@ await test('unknown target printer falls back to Mimaki default', () => {
   assert.equal(profile.displayName, 'Mimaki 3DUJ-553');
   assert.deepEqual(profile.bed, { x: 508, y: 508, z: 305 });
 });
+await test('v1 row (displayName/vendor/bed/defaultMaterialId only) normalises with v2 defaults', () => {
+  const p = normalizePrinterProfile('legacy', { displayName: 'Old', vendor: 'V', bed: { x: 100, y: 90, z: 80 }, defaultMaterialId: 'petg' });
+  assert.equal(p.id, 'legacy');
+  assert.equal(p.process, 'fdm');
+  assert.deepEqual(p.bed, { x: 100, y: 90, z: 80 });
+  assert.equal(p.colour.mode, 'none');
+  assert.equal(p.export.recommended, 'stl');
+  assert.equal(p.export.formats.length, 8, 'every format available by default');
+  assert.equal(p.export.splitByMaterial, false);
+  assert.equal(p.export.obj.axis, 'y-up');
+  assert.equal(p.export.threeMF.flavour, 'core');
+  assert.equal(p.validation.requireWatertight, true);
+  assert.equal(p.defaultMaterialId, 'petg');
+  assert.equal(p.verified, 'unverified');
+  const bare = normalizePrinterProfile('x', {});
+  assert.deepEqual(bare.bed, { x: null, y: null, z: null });
+  assert.equal(bare.defaultMaterialId, 'pla');
+});
+
+await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, all unverified, Custom bed falls back', () => {
+  assert.equal(getPrinterProfile('mimaki-3duj-553').export.recommended, 'obj-mtl');
+  assert.equal(getPrinterProfile('bambu-x1c').export.threeMF.flavour, 'bambu');
+  assert.equal(getPrinterProfile('prusa-xl').export.threeMF.flavour, 'prusa');
+  for (const id of ['stratasys-j55', 'stratasys-j850', 'hp-mjf-580', 'bambu-h2d', 'prusa-xl', 'creality-k1', 'creality-ender-3', 'elegoo-centauri-carbon', 'anycubic-kobra-3', 'anycubic-photon-mono', 'formlabs-form-4']) {
+    assert.ok(printerProfileExists(id), id);
+  }
+  assert.ok(listPrinterProfiles().every(p => p.verified === 'unverified'));
+  assert.deepEqual(bedDimensionsForPrinter('custom'), { x: 508, y: 508, z: 305 });
+});
+
 
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);

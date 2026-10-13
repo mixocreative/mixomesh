@@ -17,11 +17,7 @@ Browser-based 3D model assembly tool for **full-color 3D printing**.
   OrcaSlicer/PrusaSlicer pipeline). 3MF with `<colorgroup>` + per-object
   `pindex` for filament zone assignment. One solid color per part.
 
-Printer/build-volume reference data is data-driven via
-`src/config/printers.json` (display name, vendor, and bed dimensions only).
-Adding a build-volume preset = adding a JSON row, not editing code. Export
-format remains an explicit OBJ / 3MF / STL choice and is independent of the
-selected printer.
+Printer profiles are data-driven via `src/config/printers.json` (display name, vendor, bed, colour capabilities, suggested export defaults, validation hints). Adding a printer = adding a JSON row. Selecting a printer APPLIES its suggested defaults (export format, split-by-material, OBJ axis, 3MF flavour, bed); the user may change any of them; **Printer default** reverts to the profile. Export remains an explicit OBJ / 3MF / STL / PLY / WRL choice that is always available.
 
 Babylon.js, Chrome/Edge only. The supported runtime is Vite + TypeScript:
 `index.html` loads `src/app/boot.ts`, which builds `window.BABYLON` from
@@ -56,12 +52,7 @@ behaviours. Treat it that way:
    writing custom geometry/scene/IO code.
 5. Chrome/Edge only. Single startup check halts on other browsers.
    No Firefox/Safari fallback paths.
-6. Export format is **button-driven**, not printer-driven. The selected printer
-   is a build-volume reference only and must not hide, switch, or block OBJ /
-   3MF / STL. Export content selects the representation: textured 3MF uses the
-   Materials Extension; solid 3MF uses `<colorgroup>`; OBJ uses MTL + PNG when
-   textures exist. Never collapse texture data merely because of a printer
-   preset.
+6. Export format is an explicit user choice. Selecting a printer APPLIES that printer's suggested profile defaults (export format, split-by-material, OBJ axis, 3MF flavour, bed) as one undoable step; the user may then change any of them, and choosing the printer's default profile again (**Printer default ↺**) reverts to those defaults. A profile may raise readiness hints but must never hide or disable a format. Export content still selects the representation: textured 3MF uses the Materials Extension; solid 3MF uses `<colorgroup>`; OBJ uses MTL + PNG when textures exist. Never collapse texture data merely because of a printer preset.
 7. One-mesh-one-shader is an enforced invariant. AssetLoader splits any
    `MultiMaterial` mesh into N single-material siblings at import time and
    stamps `sourceGroupId` on the SceneObject state entries so validator +

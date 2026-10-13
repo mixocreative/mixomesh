@@ -1,6 +1,6 @@
 // Shared scale vocabulary — TYPE-ONLY module (no runtime twin to drift).
 // Runtime math lives in ScaleMath.js; these shapes are consumed by the typed
-// contract modules (ImportPipeline.ts / ExportPipeline.ts) and any future TS.
+// future typed modules.
 
 export type SourceUnit = 'millimeters' | 'centimeters' | 'meters' | 'inches' | 'feet';
 

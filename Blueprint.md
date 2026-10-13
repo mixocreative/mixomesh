@@ -30,9 +30,10 @@ OrcaSlicer/PrusaSlicer ecosystem). They consume 3MF with `<colorgroup>` +
 per-object `pindex` for filament-zone assignment, one solid color per part.
 
 Per-printer reference data is **data-driven** via `src/config/printers.json`
-(single source of truth for display name, vendor, build area / bed dimensions,
-only). Export format selection is deliberately button-driven in the UI: OBJ,
-3MF, and STL remain explicit user choices.
+(single source of truth for display name, vendor, bed, colour capabilities,
+suggested export defaults and validation hints). Selecting a printer applies
+its defaults; export format remains an explicit user choice (OBJ / 3MF / STL /
+PLY / WRL) and is never hidden or blocked.
 
 ---
 
@@ -288,7 +289,6 @@ src/
       PrintCost.js         ← per-unit volume (never Boolean-unioned) × density × price +
                              support premium; overlap = AABB flag only, never subtracted —
                              see §12 Cost quote
-    printers/              ← PrinterProfile.ts (type-only printer JSON schema)
     scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
     shaders/
       ShaderSignature.js  ← exact supported appearance identity + duplicate candidates
@@ -597,12 +597,9 @@ drift liability, and the headless tests already pin the runtime behaviour.
 
 - `src/core/scale/ScaleTypes.ts` — SourceUnit / AuthoredScale / SceneScale /
   PrintScale shapes. Runtime math lives in `ScaleMath.js`.
-- `src/core/printers/PrinterProfile.ts` — printer JSON schema types.
-  Runtime resolver is `src/core/print/PrinterProfiles.js`.
-- `src/import/ImportPipeline.ts` — source-file, raw import, normalized
-  import, asset, collection, and scene-part shapes.
-- `src/export/ExportPipeline.ts` — export request, mesh, package, and plan
-  shapes.
+- (Printer profile typedef lives as a JSDoc `@typedef` in
+  `src/core/print/PrinterProfiles.js`; `PrinterProfile.ts`, `ImportPipeline.ts`
+  and `ExportPipeline.ts` were deleted in overhaul task 1.1.)
 
 These files contain types and `import type` only — never executable mirrors
 of runtime functions.
@@ -3114,6 +3111,8 @@ ctx and reads no global state.
     `listPrinterProfiles()`, `getPrinterProfileMap()`, and
     `printerProfileExists(id)`.
   - Unknown ids fall back to the Mimaki default.
+  - `normalizePrinterProfile(id, row)` fills v2 defaults for v1 rows; enum
+    lists (`PRINTER_FORMATS` etc.) are exported for hygiene.
 - `ExportPlanner.js`
   - `buildExportPlan(input)` resolves profile, normalizes
     `selectedOnly/individually`, computes `printExportScale`, and carries the
@@ -3355,33 +3354,48 @@ Per-printer reference data is data-driven. `src/config/printers.json` is the
 Replaces the earlier `src/config/bed-presets.json` (deleted) — bed dims live
 inline per row.
 
-Export format is **not** selected by the printer profile. The Export panel's
-OBJ / 3MF / STL buttons are the user-facing source of truth for the requested
-file type. Printer rows carry only display/vendor/build-area reference data.
-Selecting a printer must not hide, switch, or block an explicit export button.
+**Printer profile = defaults, hints, limits, bed (overhaul task 1.1, Decision 32).**
+Export format is an explicit user choice. Selecting a printer APPLIES its
+suggested defaults (export format, split-by-material, OBJ axis, 3MF flavour,
+bed) as one undoable step; each is then an ordinary per-project setting the
+user may change, and **Printer default** reverts them. A profile may raise
+readiness hints but never hides, disables or blocks a format. (Apply/revert
+command + UI land in tasks 1.2/1.3; this section is the data contract.)
 
-Schema (one entry per printer, keyed by id):
+Schema v2 (one entry per printer, keyed by id; v1 rows with only
+`displayName/vendor/bed/defaultMaterialId` still load - `getPrinterProfile(id)`
+normalises missing fields to plain single-colour FDM defaults, all formats):
 ```js
 {
   "<id>": {
-    displayName: string,                          // shown in UI dropdowns
-    vendor: string,
-    bed: { x: number|null, y: number|null, z: number|null },  // mm; null falls back to Mimaki default helper
-    materials: [{                                 // watertight-repair-and-cost task 6 — §12 Cost quote
-      id: string, name: string,
-      densityGcm3: number, pricePerGram: number,
-      supportDensityGcm3: number, supportPricePerGram: number,
-      defaultSupportPercent: number,               // 0-100
-    }]
+    displayName: string, vendor: string,
+    process: 'uv-inkjet'|'polyjet'|'mjf'|'fdm'|'fdm-multi'|'resin'|'sls',
+    bed: { x: number|null, y: number|null, z: number|null },  // mm; null (Custom only) falls back to Mimaki default helper
+    colour: { mode: 'texture'|'vertex'|'per-part'|'paint'|'none',
+              maxTextureSize: number, maxTexturesPerObject: number,
+              alpha: boolean, vertexColour: boolean },
+    export: { recommended: <format>, formats: <format>[],   // formats = suggested list; UI still offers every writer
+              splitByMaterial: boolean,
+              obj: { axis: 'y-up'|'z-up' },
+              threeMF: { flavour: 'core'|'bambu'|'prusa', seatOnBed: boolean, metadata: boolean } },
+    validation: { requireWatertight: boolean, minWallMM: number, minFeatureMM: number, maxTrianglesHint: number },
+    defaultMaterialId: string,      // must exist in public/config/materials.json
+    verified: 'unverified'|'verified'
   }
 }
+// <format> = obj-mtl | 3mf-textured | 3mf-colorgroup | 3mf-bambu | 3mf-prusa | stl | ply | wrl
 ```
+`tests/hygiene.test.mjs` validates every row (required fields, numeric bed,
+known enums) and asserts AGENTS.md rule 6 mentions "Printer default".
+Every row ships `verified: 'unverified'` until the owner records verification.
 
 Current profile ids:
 - `mimaki-3duj-553`: default, `508 × 508 × 305` mm.
 - `mimaki-3duj-2207`: `203 × 203 × 76` mm.
-- `bambu-x1c`, `bambu-a1`, `bambu-a1-mini`, `prusa-mk4`: filament printer bed references.
-- `elegoo-saturn-4-ultra`: resin printer bed reference.
+- Also: `stratasys-j55`, `stratasys-j850`, `hp-mjf-580`, `bambu-x1c`, `bambu-h2d`,
+  `bambu-a1`, `bambu-a1-mini`, `prusa-mk4`, `prusa-xl`, `creality-k1`,
+  `creality-ender-3`, `elegoo-centauri-carbon`, `elegoo-saturn-4-ultra`,
+  `anycubic-kobra-3`, `anycubic-photon-mono`, `formlabs-form-4`.
 - `generic-obj-mtl-png`: generic `300 × 300 × 400` mm reference.
 - `custom`: null bed dimensions; user types XYZ manually.
 
