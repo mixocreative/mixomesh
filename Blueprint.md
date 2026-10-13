@@ -2932,6 +2932,26 @@ unembedded without blocking save, because they do not determine whether the
 saved scene reopens or exports. Export/readiness still blocks on ghosts and
 missing assigned textures.
 
+**Relink / Refresh (task 4.5).** Relinking a ghost/missing asset and
+refreshing a `changed` one are ONE undoable `RelinkAssetCommand`
+(`commands/AssetCommands.js`). `await RelinkAssetCommand.create(assetId,
+{blob, filename, link?, siblingFiles?, label?})` hashes the bytes and loads the
+replacement through the normal `restoreContainer` path (import normalisation +
+per-object ratio bake) into a detached, disabled set — live state untouched; a
+failed load throws before any change. `execute`/`undo` are synchronous swaps of
+the per-asset registry slots (AssetContainer, source blob URL, OBJ sibling map)
+and the asset entry (filename, extension, `contentHash`, `sourceFileHash`,
+`isGhost:false`, `libraryItem:null`; link fields replaced only when `link` is
+given = Relink, kept = Refresh). The next save embeds the new bytes under the
+new hash. Every object of the asset is re-bound keeping transform, parent,
+ratio, material; undo restores the previous set/entry/ghost flags exactly.
+Events `OBJECT_UPDATED` + `ASSET_RELINKED` (never `PROJECT_LOADED`). Entry
+points: `ProjectLoader.relinkAsset` (picker → `persistRef` → command) and
+`refreshAsset` (re-read the linked source via `storage.resolveAsset`). A
+Refresh button and wrapping 4.3's `applyFoundSource` in the command land with
+the gated Source UI (4.6). Async-prepared command pattern: async work in a
+static `create()`, then sync execute/undo (see PART 5).
+
 ### Asset Resolution Priority (locked — `_resolveAssetBlob`)
 Every asset has one resolution attempt on load. Walk top-down; first hit wins.
 

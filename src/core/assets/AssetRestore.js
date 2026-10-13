@@ -11,11 +11,12 @@ import {
 } from '../ImportNormalizer.js';
 import { setBlobUrl, getBlobUrl, revokeBlobUrl } from './BlobUrls.js';
 import {
-  newId, registerContainer, registerMesh, hasMesh, trackOrphan,
+  newId, registerContainer, removeContainer, getContainer, registerMesh, hasMesh, trackOrphan,
   getBabylonMesh, bindRestoredMesh,
 } from './MeshRegistry.js';
 import {
   collectObjSiblings, rememberObjSiblings, installSiblingUrls, revokeObjSiblings,
+  getObjSiblings, setObjSiblings,
 } from './ObjSiblings.js';
 import { splitMultiMaterialMeshesInContainer } from './MeshSplit.js';
 import { nextDupName, registerAssetEntry } from './AssetRegistration.js';
@@ -98,6 +99,75 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const asset = getState().scene.assetLibrary[assetId];
   bakeImportTransform(container, importScaleFactor(asset?.sourceUnit ?? DEFAULT_SOURCE_UNIT, asset?.modelRatio ?? 1));
   return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
+}
+
+/**
+ * Bake the (modelRatio / objectRatio) delta into a restored mesh's vertices.
+ * `rebaked` (a WeakSet) guards two objects aliasing one mesh from double-baking.
+ */
+export function applyPersistedRatioBake(mesh, asset, ratio, rebaked = null) {
+  if (!mesh?.geometry) return;
+  if (rebaked?.has(mesh)) return;
+  const B = window.BABYLON;
+  const modelRatio = (Number.isFinite(asset?.modelRatio) && asset.modelRatio > 0) ? asset.modelRatio : 1;
+  const objRatio = (Number.isFinite(ratio) && ratio > 0) ? ratio : 1;
+  const delta = modelRatio / objRatio;
+  if (Number.isFinite(delta) && delta > 0 && Math.abs(delta - 1) > 1e-9) {
+    mesh.bakeTransformIntoVertices(B.Matrix.Scaling(delta, delta, delta));
+    mesh.refreshBoundingInfo?.();
+  }
+  rebaked?.add(mesh);
+}
+
+/**
+ * The per-asset runtime registry slots a replacement swaps: container, source
+ * blob URL (what getAssetBytes reads back), OBJ sibling map. `meshes` is the
+ * ordered geometry list the container produced.
+ * @typedef {{container:any, blobUrl:string|null, siblings:Map<string,string>|null, meshes:any[]}} AssetSet
+ */
+
+/** Snapshot an asset's current registry slots (nothing is copied or disposed). */
+export function captureAssetSet(assetId, meshes = []) {
+  return {
+    container: getContainer(assetId),
+    blobUrl: getBlobUrl(assetId),
+    siblings: getObjSiblings(assetId) ?? null,
+    meshes,
+  };
+}
+
+/** Make `set` the asset's live registry slots (no disposal, no URL revoke). */
+export function installAssetSet(assetId, set) {
+  if (set.container) registerContainer(assetId, set.container); else removeContainer(assetId);
+  setBlobUrl(assetId, set.blobUrl ?? null);
+  setObjSiblings(assetId, set.siblings ?? null);
+}
+
+/**
+ * Load `blob` as a REPLACEMENT geometry set for an existing asset (Relink /
+ * Refresh, task 4.5) without disturbing the live one: runs the normal restore
+ * (same import normalisation as a fresh load), captures the resulting slots,
+ * then re-installs the previous slots. The new meshes are left scene-detached
+ * and disabled until the command swaps them in via installAssetSet.
+ * @returns {Promise<{previous: AssetSet, next: AssetSet}>}
+ */
+export async function prepareAssetReplacement(assetId, blob, extension, opts = {}) {
+  const previous = captureAssetSet(assetId);
+  // restoreContainer's failure path revokes whatever sibling map is registered;
+  // clear the slot first so a failed load can never revoke the LIVE set's URLs.
+  setObjSiblings(assetId, null);
+  let meshes;
+  try {
+    meshes = await restoreContainer(assetId, blob, extension, { siblings: previous.siblings ?? undefined, ...opts });
+  } catch (err) {
+    installAssetSet(assetId, previous);
+    throw err;
+  }
+  const next = captureAssetSet(assetId, meshes);
+  installAssetSet(assetId, previous);
+  for (const m of meshes) m.setEnabled?.(false);
+  next.container?.removeAllFromScene?.();
+  return { previous, next };
 }
 
 /**

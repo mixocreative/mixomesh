@@ -19,6 +19,10 @@ const MAX_SIBLING_FILES = 64;
  * directory inside a mounted/idb-resolved handle.
  */
 export async function collectObjSiblings(opts) {
+  // Relink/Refresh (4.5): reuse a prebuilt sibling map (the replaced asset's own)
+  // when the picked file brings none — a renamed/updated OBJ usually keeps its
+  // mtllib + textures. URLs are shared with the previous map (never revoked here).
+  if (opts.siblings instanceof Map && !Array.isArray(opts.siblingFiles)) return new Map(opts.siblings);
   const map = new Map();
   const add = async (name, fileOrHandle) => {
     if (map.size >= MAX_SIBLING_FILES) return;
@@ -54,6 +58,14 @@ export async function collectObjSiblings(opts) {
 /** Keep a sibling map per assetId so re-instantiation rebinds materials. */
 export function rememberObjSiblings(assetId, map) {
   _objSiblings.set(assetId, map);
+}
+
+/**
+ * Swap an asset's sibling map WITHOUT revoking anything (RelinkAssetCommand
+ * undo/redo owns the URLs of both sets). `null` clears the entry.
+ */
+export function setObjSiblings(assetId, map) {
+  if (map) _objSiblings.set(assetId, map); else _objSiblings.delete(assetId);
 }
 
 /** @returns {Map<string,string>|undefined} */

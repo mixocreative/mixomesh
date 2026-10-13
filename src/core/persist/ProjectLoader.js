@@ -10,15 +10,16 @@ import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { Selection } from '../Selection.js';
-import { clear as historyClear } from '../HistoryManager.js';
+import { clear as historyClear, push as historyPush, RelinkAssetCommand } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { getFileHandle } from '../idb.js';
 import {
-  decompose, applyWorld, stripFileData, extOf, bufFromB64,
+  applyWorld, stripFileData, bufFromB64,
   deriveAssetSource, deriveDisplayName, setPreservedTopLevelKeys,
 } from './ProjectSerializer.js';
-import { resolveAssetBlob } from './AssetResolver.js';
+import { resolveAssetBlob, sourcesOf } from './AssetResolver.js';
+import { storage } from '../storage/StorageAdapter.js';
 import { clearDirty } from './DirtyTracker.js';
 import { SILENT, SCHEMA_VERSION } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
@@ -30,24 +31,12 @@ import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
 import { normalizeExportTargets } from '../scale/ScaleMath.js';
+import { applyPersistedRatioBake as _applyPersistedRatioBake } from '../assets/AssetRestore.js';
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
 
 const _ghostMeshes = new Set(); // wireframe placeholders for unresolved assets
-
-function _applyPersistedRatioBake(mesh, asset, ratio, rebaked = null) {
-  if (!mesh?.geometry) return;
-  if (rebaked?.has(mesh)) return;
-  const modelRatio = (Number.isFinite(asset?.modelRatio) && asset.modelRatio > 0) ? asset.modelRatio : 1;
-  const objRatio = (Number.isFinite(ratio) && ratio > 0) ? ratio : 1;
-  const delta = modelRatio / objRatio;
-  if (Number.isFinite(delta) && delta > 0 && Math.abs(delta - 1) > 1e-9) {
-    mesh.bakeTransformIntoVertices(BABYLON.Matrix.Scaling(delta, delta, delta));
-    mesh.refreshBoundingInfo?.();
-  }
-  rebaked?.add(mesh);
-}
 
 function _makeGhostMesh(obj) {
   const scene = SceneManager.getScene();
@@ -617,8 +606,10 @@ async function _loadProjectInner(doc, previousId) {
 // ── Relink ───────────────────────────────────────────────
 
 /**
- * Relink a ghost / unlinked asset to a file the user picks. Re-binds every
- * scene object backed by that asset to the freshly-loaded geometry.
+ * Relink a ghost / missing / unlinked asset to a file the user picks. One
+ * undoable RelinkAssetCommand (task 4.5): re-binds every scene object backed by
+ * the asset to the freshly-loaded geometry (transforms, ratios, materials kept),
+ * records the new source + contentHash so the next save embeds the new bytes.
  * @param {string} assetId
  */
 export async function relinkAsset(assetId) {
@@ -630,44 +621,36 @@ export async function relinkAsset(assetId) {
     throw err;
   }
   const file = await handle.getFile();
-  const ext  = extOf(file.name);
-  const geom = await AssetLoader.restoreContainer(assetId, file, ext);
-
-  const objs = Object.values(getState().scene.objects).filter(o => o.assetId === assetId);
-  // Shared guard so two objects that alias one restored mesh don't double-bake
-  // the ratio scale (mirrors the loadProject restore loop).
-  const _reBaked = new WeakSet();
-  for (const o of objs) {
-    const old = AssetLoader.getBabylonMesh(o.id);
-    const t   = old ? decompose(old) : (o._savedTransform ?? null);
-    if (old && _ghostMeshes.has(old)) { _ghostMeshes.delete(old); old.dispose(); }
-    const idx  = Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0;
-    const mesh = geom[idx] || geom.find(m => m.name === o.name) || geom[0];
-    if (!mesh) continue;
-    AssetLoader.bindRestoredMesh(o.id, mesh, assetId, o.sourceUnit);
-    _applyPersistedRatioBake(mesh, getState().scene.assetLibrary[assetId], o.ratio, _reBaked);
-    applyWorld(mesh, t);
-    const vis = o.visible !== false;
-    mesh.setEnabled(vis); mesh.isVisible = vis;
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, objects: { ...s.scene.objects,
-        [o.id]: { ...s.scene.objects[o.id], isGhost: false, isUnlinked: false } } },
-    }), SILENT);
-    if (o.shaderId && getState().scene.shaders[o.shaderId]) ShaderLibrary.assignToMesh(o.shaderId, o.id);
-  }
-  // The asset now has bytes again (blob URL registered by restoreContainer):
-  // drop the ghost marker so the next save embeds it instead of `ghost: true`.
-  setState(s => {
-    const entry = s.scene.assetLibrary[assetId];
-    if (!entry?.isGhost) return s;
-    return { ...s, scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [assetId]: { ...entry, isGhost: false } } } };
-  }, SILENT);
-  ShaderLibrary.rebuildLinkedIndex();
-  dispatch(EVENTS.ASSET_RELINKED, { assetId });
-  dispatch(EVENTS.PROJECT_LOADED, {});   // cheap full re-render of Outliner etc.
-  Selection.refresh();
+  let fileHandleKey = null;
+  try { fileHandleKey = await storage.persistRef(handle); } catch { /* embedded-only link */ }
+  const link = {
+    directoryHandleKey: null, fileHandleKey, originalPath: null,
+    source: fileHandleKey ? { kind: 'file', refKey: fileHandleKey, path: file.name, label: file.name } : null,
+  };
+  const cmd = await RelinkAssetCommand.create(assetId, { blob: file, filename: file.name, link, label: 'Relink Asset' });
+  historyPush(cmd);
   Toast.show(t('toast.assetRelinked'), 'success', 3000);
+}
+
+/**
+ * Refresh a `changed` asset: re-read the SAME linked source and adopt its
+ * current bytes (undoable, same command as Relink). Returns false when the
+ * source cannot be read.
+ * @param {string} assetId
+ */
+export async function refreshAsset(assetId) {
+  const entry = getState().scene.assetLibrary[assetId];
+  if (!entry) return false;
+  for (const source of sourcesOf(entry)) {
+    let r;
+    try { r = await storage.resolveAsset(source, { contentHash: entry.contentHash }); } catch { continue; }
+    if (!r?.blob) continue;
+    const cmd = await RelinkAssetCommand.create(assetId, { blob: r.blob, filename: entry.filename, label: 'Refresh Asset' });
+    historyPush(cmd);
+    Toast.show(t('toast.assetRelinked'), 'success', 3000);
+    return true;
+  }
+  return false;
 }
 
 /** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
