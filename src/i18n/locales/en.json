@@ -248,6 +248,7 @@
   "print.cost.reasonTooBig": "Too many triangles to estimate cost live",
   "progress.working": "Working...",
   "progress.starting": "Starting...",
+  "progress.cancelling": "Cancelling...",
   "progress.exporting": "Exporting...",
   "project.newTitle": "New project (Ctrl+N)",
   "project.openTitle": "Open project (Ctrl+O)",

@@ -248,6 +248,7 @@
   "print.cost.reasonTooBig": "三角形數過多，無法即時估算成本",
   "progress.working": "處理中...",
   "progress.starting": "開始中...",
+  "progress.cancelling": "取消中...",
   "progress.exporting": "匯出中...",
   "project.newTitle": "新專案 (Ctrl+N)",
   "project.openTitle": "開啟專案 (Ctrl+O)",

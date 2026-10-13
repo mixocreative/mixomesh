@@ -24,6 +24,7 @@ let _rootEl   = null;
 let _shellEl  = null;
 let _current  = null;   // { id, onClose, blocking, previousFocus }
 let _titleSeq = 0;
+const _queue = [];      // payloads waiting for the current modal to close
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -77,12 +78,19 @@ function _onOpen(payload) {
     console.error(`Modal: no renderer registered for "${payload.id}"`);
     return;
   }
+  if (_current) {
+    // A non-blocking open waits its turn (FIFO); a blocking one (e.g. the
+    // dirty-confirm gate) still takes over, closing what's up.
+    if (!payload.blocking) { _queue.push(payload); return; }
+    _close(undefined, { restoreFocus: false, advance: false });
+  }
+  _show(payload, renderer);
+}
+
+function _show(payload, renderer) {
   const previousFocus = document.activeElement instanceof HTMLElement
     ? document.activeElement
     : null;
-
-  // Replace whatever's currently up.
-  if (_current) _close(undefined, { restoreFocus: false });
 
   _current = {
     id: payload.id,
@@ -145,6 +153,7 @@ function _stopPropagation(e) { e.stopPropagation(); }
 function _close(result, opts = {}) {
   if (!_current) return;
   const restoreFocus = opts.restoreFocus !== false;
+  const advance = opts.advance !== false;
   const cb = _current.onClose;
   const previousFocus = _current.previousFocus;
   _current = null;
@@ -158,8 +167,22 @@ function _close(result, opts = {}) {
   dispatch(EVENTS.MODAL_CLOSE, { result });
   try { cb?.(result); }
   catch (err) { console.error('Modal onClose handler threw:', err); }
-  if (restoreFocus && previousFocus?.isConnected) {
+  if (advance) _showNext();
+  if (!_current && restoreFocus && previousFocus?.isConnected) {
     requestAnimationFrame(() => previousFocus.focus?.({ preventScroll: true }));
+  }
+}
+
+function _showNext() {
+  while (!_current && _queue.length) {
+    const payload = _queue.shift();
+    const renderer = _renderers.get(payload.id);
+    if (!renderer) continue;
+    try { _show(payload, renderer); }
+    catch (err) {
+      console.error(`Modal: renderer "${payload.id}" threw:`, err);
+      _current = null;
+    }
   }
 }
 

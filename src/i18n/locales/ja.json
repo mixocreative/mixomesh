@@ -248,6 +248,7 @@
   "print.cost.reasonTooBig": "三角形が多すぎてリアルタイムに見積もれません",
   "progress.working": "処理中...",
   "progress.starting": "開始中...",
+  "progress.cancelling": "キャンセル中...",
   "progress.exporting": "書き出し中...",
   "project.newTitle": "新規プロジェクト (Ctrl+N)",
   "project.openTitle": "プロジェクトを開く (Ctrl+O)",

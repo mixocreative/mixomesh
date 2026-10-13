@@ -31,3 +31,18 @@
 }
 .po-pct { color: var(--text-0); font-variant-numeric: tabular-nums; }
 .po-msg { color: var(--text-2); }
+
+/* Task 5.8: optional Cancel (shown only when the caller passes onCancel/controller). */
+.po-cancel {
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  color: var(--text-0);
+  font: inherit;
+  cursor: pointer;
+}
+.po-cancel:hover:not(:disabled) { background: var(--ctl-bg-hover); }
+.po-cancel:focus-visible { outline: 2px solid var(--ring-focus); }
+.po-cancel:disabled { opacity: 0.6; cursor: default; }

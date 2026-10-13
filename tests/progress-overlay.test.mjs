@@ -23,7 +23,7 @@ function makeElement(tag = 'div') {
     textContent: '',
     tabIndex: 0,
     set innerHTML(_) {
-      for (const cls of ['po-bar', 'po-pct', 'po-msg', 'po-title']) {
+      for (const cls of ['po-bar', 'po-pct', 'po-msg', 'po-title', 'po-cancel']) {
         const child = makeElement('div');
         child.className = cls;
         bySelector.set(`.${cls}`, child);
@@ -36,6 +36,7 @@ function makeElement(tag = 'div') {
       listeners.get(type).push(fn);
     },
     focus() { document.activeElement = el; },
+    dispatch(ev) { for (const fn of listeners.get(ev.type) ?? []) fn(ev); },
   };
   return el;
 }
@@ -68,14 +69,14 @@ function makeDocument() {
       return !event.defaultPrevented;
     },
   };
-  body.appendChild = (child) => { child.parentElement = body; };
+  body.appendChild = (child) => { child.parentElement = body; doc.__lastRoot = child; body.__root = child; };
   return doc;
 }
 
-function keyboardEvent() {
+function keyboardEvent(key = 'G') {
   return {
     type: 'keydown',
-    key: 'G',
+    key,
     defaultPrevented: false,
     __stopped: false,
     preventDefault() { this.defaultPrevented = true; },
@@ -111,4 +112,54 @@ test('ProgressOverlay releases document-level keydown after hide', () => {
 
   assert.equal(ev.defaultPrevented, false);
   assert.equal(delivered, 1);
+});
+
+test('ProgressOverlay without onCancel: Esc does nothing but is still blocked', () => {
+  const cancelled = 0;
+  ProgressOverlay.show('Exporting');
+  const ev = keyboardEvent('Escape');
+  document.dispatchEvent(ev);
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(cancelled, 0);
+  ProgressOverlay.hide();
+});
+
+test('ProgressOverlay Esc triggers onCancel once and shows Cancelling', () => {
+  let cancelled = 0;
+  ProgressOverlay.show('Exporting', { onCancel: () => { cancelled++; } });
+  const ev = keyboardEvent('Escape');
+  document.dispatchEvent(ev);
+  document.dispatchEvent(keyboardEvent('Escape'));
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(cancelled, 1, 'cancel fires exactly once');
+  const msg = document.body.__root?.querySelector?.('.po-msg');
+  ProgressOverlay.update(0.5, 'later message');
+  if (msg) assert.notEqual(msg.textContent, 'later message');
+  ProgressOverlay.hide();
+});
+
+test('ProgressOverlay Cancel button click triggers an AbortController', () => {
+  const controller = new AbortController();
+  ProgressOverlay.show('Exporting', { controller });
+  const btn = document.__lastRoot.querySelector('.po-cancel');
+  assert.equal(btn.hidden, false);
+  const click = { type: 'click', target: btn, defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} };
+  document.__lastRoot.dispatch(click);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(btn.disabled, true);
+  ProgressOverlay.hide();
+});
+
+test('ProgressOverlay hidden after cancel run does not swallow Esc', () => {
+  let cancelled = 0;
+  ProgressOverlay.show('x', { onCancel: () => { cancelled++; } });
+  ProgressOverlay.hide();
+  let delivered = 0;
+  document.addEventListener('keydown', () => { delivered++; });
+  const ev = keyboardEvent('Escape');
+  document.dispatchEvent(ev);
+  assert.equal(ev.defaultPrevented, false);
+  assert.equal(cancelled, 0);
+  assert.ok(delivered >= 1);
 });

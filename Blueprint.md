@@ -358,12 +358,12 @@ src/
                              the failures INSTEAD of success (2026-09-18, review I7b/I7c)
     Toast.js
     Status.js              ← centralized error + loading policy (reportError / guard / runTask / safeAsync)
-    Modal.js               ← generic modal helper
+    Modal.js               ← generic modal helper  [5.8: non-blocking MODAL_OPEN while a modal is up QUEUES (FIFO); `blocking:true` still takes over; each onClose fires once]
     AppShell.js            ← shell controls: panel collapse/resize + boot status
     renderSafe.js          ← escaping helpers + validated image data URLs
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
     SliceConnectorSession.js ← viewport-first cut plane + connector placement session — §Slice Connector
-    ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b)
+    ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b); optional Cancel (show(title,{onCancel|controller}), Esc/Cancel fire once → "Cancelling…"; hidden overlay never blocks keys — 5.8)
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportEmptyState.js  ← zero-object Import Model / Open Project entry point
     ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
@@ -989,6 +989,7 @@ export const EVENTS = {
 
   // Selection
   SELECTION_CHANGED:       'selection:changed',
+  SCOPE_CHANGED:           'selection:scopeChanged',   // { scopeId } click-depth scope (task 3.2); null = root
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
 
   // Transform
@@ -1221,7 +1222,23 @@ Selection.contains(id)               → boolean
 Selection.getSelectedResolved()      → { id, mesh }[]   // OBJECTS only, every material part; ghost/missing/groups dropped
 Selection.getSelectedNodes()         → { id, node, kind: 'object'|'group' }[]  // every entry in selection order
 Selection.getTransformTargets()      → { targets: { id, node, kind }[], activeNode, activeGeometry }  // gizmo / G-R-S targets (2.2)
+Selection.getScope()                 → string|null      // click-depth scope group (null = root); stale group reads as root
+Selection.setScope(groupId|null)     → void             // non-group id = no-op; emits SCOPE_CHANGED {scopeId} on change
+Selection.targetAtScope(id)          → string|null      // pure depth mapping at the current scope (no side effects)
+Selection.resolveClick(id)           → string|null      // viewport click: depth-map; outside scope → exit to root, then map
+Selection.enterScope(groupId, pickedId?) → boolean      // double-click: scope = group, select the child containing pickedId
+Selection.exitScope()                → boolean          // Esc: scope = parent of scope, selection = exited group; false at root
+Selection.scopeToParentOf(id)        → void             // Outliner row click: scope = the row's parent group (root if none)
 ```
+
+### Click-depth scope (overhaul task 3.2, plan §4.5 — Figma/Keynote)
+- **Scope** = the group the user has entered (`null` = root). Session-only (Decision 12): a module variable in `Selection.js`, deliberately **not** in `state.selection` (which `ProjectSerializer` persists wholesale). A scope whose group no longer exists reads as root.
+- **Depth mapping** = `LogicalObjects.selectableAtDepth(id, scene, scopeId)`: canonicalise (part → logical lead, group → itself, ghost/unknown → null), walk the lead's `parentId` chain through `scene.groups`; at root return the top-most ancestor (top-level group, or the bare object); inside a scope return the direct child of the scope on that chain; not inside the scope → `null`.
+- **Click** (LMB, Shift-add, Ctrl-toggle, and the RMB context-menu pick) selects `resolveClick(meshId)`: the item at the current depth; a click on an item outside the scope exits to root first. **Empty click** (sub-3 px marquee, non-additive) clears the selection AND exits to root.
+- **Double-click** = two LMB POINTERDOWNs < 350 ms and < 4 px apart whose depth target is the same (`InputManager._isDoubleClick`). On a group → `enterScope(group, meshId)` (no body drag); on an object it is a plain click. Detected on POINTERDOWN (not DOM `dblclick`) so it composes with body-drag and marquee.
+- **Esc** priority: modal G/R/S cancel > body-drag cancel > marquee cancel > `exitScope()` (one level up, the exited group becomes the selection) > nothing (Esc never cleared the selection at root).
+- **Marquee** (`BoxSelect.itemIdsInRect`): every pickable, enabled content mesh is mapped to its item at the current depth (outside scope → ignored); an item is hit when the centre of the COMBINED world AABB of its meshes projects inside the rect.
+- **Outliner** plain row click (object or group) sets scope to that row's parent group (`scopeToParentOf`); modifier clicks leave the scope. The breadcrumb UI is task 3.3.
 
 `set/add/toggle/remove/setActive` accept object ids and group ids. `getSelectedResolved()` keeps its historical mesh-only contract (callers that transform/validate/export meshes are unaffected by group entries). `getSelectedNodes()` resolves each entry once: an object to its lead Babylon mesh (no part expansion), a group to its runtime `TransformNode` (found by `metadata.groupId` in `scene.transformNodes`); entries without a live node are skipped but stay selected.
 
@@ -1229,7 +1246,7 @@ Selection.getTransformTargets()      → { targets: { id, node, kind }[], active
 - Resolution drops `obj.isGhost === true` and meshes `AssetLoader.getBabylonMesh` cannot find. Ghosts are *selectable in the outliner* but never receive gizmo / silhouette attention.
 - Private `_resolve(id)` → `{ id, node, kind }` or `null` (ghost, unknown, no live node). Writes (`set/add/toggle/setActive`) drop ids that canonicalise to `null`; `setActive(unknown)` is a no-op (it does not clear the active id); `setActive(null)` clears it.
 - The active id may be a group id. Event payloads are unchanged in shape (`SELECTION_CHANGED {selectedIds, activeId}`, `ACTIVE_OBJECT_CHANGED {activeId}`).
-- **Transform targets (task 2.2).** `getTransformTargets()` lists, in selection order, every material-part mesh of each selected object (`id` = part meshId) and each selected group's `TransformNode` (`id` = groupId). It is NOT ancestor-filtered: the consumer (pivot / G-R-S modal) calls `PivotSession.topmostTransformTargets` once the pivot is detached and every node sits in its canonical parent, dropping any node that has a selected ancestor — so an object selected together with its group (or a subgroup with its parent group) is transformed exactly once, rigidly, by the topmost node. `activeNode` = the active group node or the active object's lead mesh; `activeGeometry` = the nodes whose geometry defines the `'active'` pivot (every part of the active object, or the active group node). Click-depth scope is task 3.2. **Lock enforcement (task 2.5):** lock = transform-lock and cascades DOWN (`Selection.isEffectivelyLocked(id)` = the item or any ancestor group has `locked`; groups carry `scene.groups[id].locked`). Locked items stay selectable and outlined, but `getTransformTargets()` omits them (`lockedSkipped` counts them; `{ includeLocked: true }` is for outlines only), so they never reach the pivot/gizmo or the G/R/S modal (toast `toast.lockedNoTransform` when nothing transformable remains). Properties transform fields (ratio, size, pos, rot, scale) are disabled with a tooltip via `isTransformReadOnly(ids)`; Delete of a selection containing locked items ASKS first (Decision 9; generic `confirmAction` modal in ProjectMenu — cancel keeps, confirm deletes); group `locked` persists in the `.mixo` groups array; Duplicate/Group/Ungroup stay allowed; `L` / `LockCommand` toggles objects and groups, undoably.
+- **Transform targets (task 2.2).** `getTransformTargets()` lists, in selection order, every material-part mesh of each selected object (`id` = part meshId) and each selected group's `TransformNode` (`id` = groupId). It is NOT ancestor-filtered: the consumer (pivot / G-R-S modal) calls `PivotSession.topmostTransformTargets` once the pivot is detached and every node sits in its canonical parent, dropping any node that has a selected ancestor — so an object selected together with its group (or a subgroup with its parent group) is transformed exactly once, rigidly, by the topmost node. `activeNode` = the active group node or the active object's lead mesh; `activeGeometry` = the nodes whose geometry defines the `'active'` pivot (every part of the active object, or the active group node). Click-depth scope: see "Click-depth scope" below (task 3.2). **Lock enforcement (task 2.5):** lock = transform-lock and cascades DOWN (`Selection.isEffectivelyLocked(id)` = the item or any ancestor group has `locked`; groups carry `scene.groups[id].locked`). Locked items stay selectable and outlined, but `getTransformTargets()` omits them (`lockedSkipped` counts them; `{ includeLocked: true }` is for outlines only), so they never reach the pivot/gizmo or the G/R/S modal (toast `toast.lockedNoTransform` when nothing transformable remains). Properties transform fields (ratio, size, pos, rot, scale) are disabled with a tooltip via `isTransformReadOnly(ids)`; Delete of a selection containing locked items ASKS first (Decision 9; generic `confirmAction` modal in ProjectMenu — cancel keeps, confirm deletes); group `locked` persists in the `.mixo` groups array; Duplicate/Group/Ungroup stay allowed; `L` / `LockCommand` toggles objects and groups, undoably.
 - `_applyVisuals` (private) hands `getTransformTargets()` to the pivot: `SceneManager.attachToSelection(targets.map(t => t.node), pivotMode, activeNode, activeGeometry)`. Outline: object parts are outlined directly; a selected group outlines its member meshes (`node.getChildMeshes(false)` with `metadata.meshId`); the active entry's meshes (all parts of the active object / all members of the active group) go to `SceneManager.setActive`, the rest to `SceneManager.setSelected`. A selected group therefore shows the gizmo and outline.
 - Every selection-write call emits `EVENTS.SELECTION_CHANGED` (with `{selectedIds, activeId}`); an active-id change additionally emits `EVENTS.ACTIVE_OBJECT_CHANGED`.
 - The gizmo's pivot follows `state.selection.pivotMode` (see §7 Gizmo for the per-mode pivot rule).
@@ -1419,7 +1436,8 @@ Outliner (`InputManager.__test.isViewportKeyTarget`); body focus under an open
 G              → grab (translate); axis with X/Y/Z; plane with Shift+X/Y/Z
 R              → rotate; axis with X/Y/Z
 S              → scale; axis with X/Y/Z
-Escape / RMB   → cancel current op (restore pre-op transform)
+Escape / RMB   → cancel current op (restore pre-op transform); with no op: marquee
+                 cancel, else step out one click-depth scope level (PART 4b)
 Enter / LMB    → confirm op
 
 A              → select all (toggle: all → none if all already selected)
@@ -1462,7 +1480,14 @@ Delete / X     → delete (confirm)
 
 ### Mouse
 ```
-LMB click           → pick + select
+LMB click           → pick + select the item at the click-depth scope (PART 4b
+                      "Click-depth scope": root = top-level group / bare object;
+                      outside the scope → back to root; parts → lead)
+LMB double-click    → two presses < 350 ms / < 4 px on the same depth target: a
+                      group → enter it + select the child under the cursor;
+                      an object → plain click
+Esc (no op)         → priority: modal G/R/S > body drag > marquee > step out one
+                      scope level (exited group selected); no-op at root
 LMB drag on mesh    → translate selection on the horizontal plane
                       (locked to the active mesh's current Y; Bambu-Studio /
                       Tinkercad style). A drag has to clear ~4 px to engage —
@@ -1471,10 +1496,11 @@ Shift+LMB           → add / remove from selection (no drag)
 LMB drag empty      → box / marquee select (core/BoxSelect.js). Starts only on
                       an EMPTY left-down, so it never competes with body-drag
                       (left-down on a mesh) or camera nav (left button unused by
-                      the camera). Every content mesh whose bounding-box centre
-                      projects inside the rect is selected; Shift+drag ADDS to
+                      the camera). Every item at the current click-depth scope
+                      whose COMBINED world-AABB centre projects inside the rect
+                      is selected (BoxSelect.itemIdsInRect); Shift+drag ADDS to
                       the current selection. A sub-3 px drag falls back to a
-                      plain empty click (clears, unless additive). Esc / RMB
+                      plain empty click (clears + exits the scope, unless additive). Esc / RMB
                       mid-drag cancels. Overlay is a plain <div> (.box-select) —
                       never touches the RTT, so exports stay byte-identical.
 RMB during body drag → cancel (pivot snaps back, no history push)
