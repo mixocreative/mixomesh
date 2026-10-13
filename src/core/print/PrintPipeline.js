@@ -337,6 +337,13 @@ async function _runExport(formatKey, options = {}) {
     if (!csgReady) Toast.show(t('toast.csgUnavailable'), 'warning', 4000);
   }
 
+  // 3MF package thumbnail (task 1.5): ONE viewport capture per batch, taken
+  // BEFORE any export clone exists so the preview is the scene as shown.
+  // Never fails the export — no image ⇒ the package simply has no thumbnail.
+  if (formatKey === '3mf') {
+    options = { ...options, thumbnailPng: await _captureThumbnail(options) };
+  }
+
   // Repair runs on every format (unlike CSG, OBJ included). One pre-flight
   // engine load for the whole batch — a slow/failed vendor script load
   // produces ONE toast, not one per target/mesh.
@@ -635,12 +642,78 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
  *   3mf-colorgroup    → Filament multi-colour (Bambu/Prusa/Orca): solid
  *                       diffuse colour per object via <m:colorgroup>.
  *
- * Solid-only scenes emit lean colorgroup packages. Printer profile selection
- * is build-area only and must NOT switch 3MF flavour.
+ * Solid-only scenes emit lean colorgroup packages. The printer profile never
+ * switches the flavour (AGENTS rule 6); it only supplies package DEFAULTS
+ * (split-by-material, metadata, colour alpha) via `_threeMFWriterOptions`.
  */
 async function _serialize3MF(ctx) {
   if (_hasTextured3MFContent(ctx.meshes)) return _serialize3MFMaterialsExt(ctx);
   return _serialize3MFColorGroup(ctx);
+}
+
+const THUMBNAIL_PX = 256;
+const THUMBNAIL_TIMEOUT_MS = 5000;
+
+function _isPngData(data) {
+  if (!data) return false;
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return data.size > 0;
+  const u8 = data instanceof Uint8Array ? data
+    : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+  // PNG signature 89 50 4E 47.
+  return !!u8 && u8.length > 8 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47;
+}
+
+/**
+ * Viewport thumbnail for the 3MF package via the shared RTT capture path
+ * (FrameCapture.capturePng — same as the recent-projects thumbnail, works on
+ * WebGL and WebGPU). `options.captureThumbnail` injects the capture (tests);
+ * `false` disables it. Headless / failed / slow capture → null, silently.
+ * @returns {Promise<Blob|Uint8Array|null>}
+ */
+async function _captureThumbnail(options = {}) {
+  if (options.captureThumbnail === false) return null;
+  let timer = null;
+  try {
+    const capture = typeof options.captureThumbnail === 'function'
+      ? options.captureThumbnail
+      : async (opts) => (await import('../render/FrameCapture.js')).capturePng(opts);
+    const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(null), THUMBNAIL_TIMEOUT_MS); });
+    const png = await Promise.race([
+      Promise.resolve().then(() => capture({ width: THUMBNAIL_PX, height: THUMBNAIL_PX })),
+      timeout,
+    ]);
+    return _isPngData(png) ? png : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Resolve the 3MF writer options (task 1.5) from the ctx and the selected
+ * printer profile. `ctx.prefs.splitByMaterial` (a boolean) wins; otherwise the
+ * profile default, which is ON for `per-part` / `paint` colour modes.
+ * @returns {import('./ThreeMFWriter.js').ThreeMFWriterOptions}
+ */
+function _threeMFWriterOptions(ctx, { withState = true } = {}) {
+  const profile = getPrinterProfile(ctx.state?.print?.targetPrinterId || null);
+  const pref = /** @type {any} */ (ctx.prefs)?.splitByMaterial;
+  const splitByMaterial = typeof pref === 'boolean'
+    ? pref
+    : !!profile.export?.splitByMaterial || profile.colour?.mode === 'per-part' || profile.colour?.mode === 'paint';
+  const metadata = profile.export?.threeMF?.metadata === false ? null : {
+    title: ctx.projectName,
+    application: 'MIXOMESH',
+    creationDate: new Date().toISOString().slice(0, 10),
+  };
+  return {
+    ...(withState ? { state: ctx.state } : {}),
+    splitByMaterial,
+    alpha: !!profile.colour?.alpha,
+    metadata,
+    thumbnailPng: ctx.options?.thumbnailPng ?? null,
+  };
 }
 
 /**
@@ -662,19 +735,22 @@ async function _wrapIndividual3MF(ctx, entriesForUnit) {
 
 async function _serialize3MFColorGroup(ctx) {
   if (ctx.individually) {
-    return _wrapIndividual3MF(ctx, list => buildColorGroupEntries(list));
+    // One file per unit: no group hierarchy (state omitted, as before).
+    const opts = _threeMFWriterOptions(ctx, { withState: false });
+    return _wrapIndividual3MF(ctx, list => buildColorGroupEntries(list, opts));
   }
   return {
     kind: 'zip', mime: 'model/3mf', filename: `${exportBaseName(ctx)}.3mf`,
-    entries: buildColorGroupEntries(ctx.cloneGroups, { state: ctx.state }),
+    entries: buildColorGroupEntries(ctx.cloneGroups, _threeMFWriterOptions(ctx)),
   };
 }
 
 async function _serialize3MFMaterialsExt(ctx) {
   if (ctx.individually) {
-    return _wrapIndividual3MF(ctx, list => buildMaterialsExtEntries(list));
+    const opts = _threeMFWriterOptions(ctx, { withState: false });
+    return _wrapIndividual3MF(ctx, list => buildMaterialsExtEntries(list, opts));
   }
-  const entries = await buildMaterialsExtEntries(ctx.cloneGroups, { state: ctx.state });
+  const entries = await buildMaterialsExtEntries(ctx.cloneGroups, _threeMFWriterOptions(ctx));
   return { kind: 'zip', mime: 'model/3mf', filename: `${exportBaseName(ctx)}.3mf`, entries };
 }
 

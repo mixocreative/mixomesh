@@ -215,6 +215,156 @@ await test('nested 3MF components define children before parents that reference 
   assert.ok(objectStart(model, childObject[1]) < objectStart(model, parentObject[1]), 'child component object must precede parent component object');
 });
 
+// ── Task 1.5: split-by-material parts ────────────────────
+
+function colouredMesh(name, rgb, alpha = 1) {
+  const mesh = makeMesh(name);
+  mesh.material.diffuseColor = new BABYLON.Color3(...rgb);
+  mesh.material.alpha = alpha;
+  return mesh;
+}
+
+function multiUnit(id, meshes) {
+  return {
+    logicalId: id, name: id,
+    meshes: meshes.map(mesh => ({ meshId: mesh.name, logicalId: id, logicalName: id, name: mesh.name, mesh })),
+  };
+}
+
+const ID_T = 'transform="1 0 0 0 1 0 0 0 1 0 0 0"';
+
+await test('splitByMaterial ON: multi-material object → one <object> per part under a <components> parent, one build item', async () => {
+  const red = colouredMesh('Mug_red', [1, 0, 0]);
+  const blue = colouredMesh('Mug_blue', [0, 0, 1]);
+  const entries = Writer.buildColorGroupEntries([multiUnit('Mug', [red, blue])], { splitByMaterial: true });
+  const model = entries.find(e => e.path === '3D/3dmodel.model').data;
+
+  const redPart = model.match(/<object id="(\d+)" type="model" name="Mug_red" pid="1" pindex="0"><mesh>/);
+  const bluePart = model.match(/<object id="(\d+)" type="model" name="Mug_blue" pid="1" pindex="1"><mesh>/);
+  const parent = model.match(/<object id="(\d+)" type="model" name="Mug"><components>(.*?)<\/components><\/object>/);
+  assert.ok(redPart && bluePart && parent, `expected 2 part objects + parent:\n${model}`);
+  assert.equal(parent[2],
+    `<component objectid="${redPart[1]}" ${ID_T}/>` +
+    `<component objectid="${bluePart[1]}" ${ID_T}/>`);
+  assert.ok(objectStart(model, redPart[1]) < objectStart(model, parent[1]), 'parts defined before the parent');
+  assert.equal((model.match(/<item /g) ?? []).length, 1, 'one build item per logical object');
+  assert.ok(model.includes(`<build><item objectid="${parent[1]}" ${ID_T}/></build>`));
+  assert.ok(!/<triangle[^>]+pid=/.test(model), 'per-part objects carry the colour at object level, not per triangle');
+
+  // Round-trip: the loader reads it back as one node holding the two parts.
+  const container = await Loader.__test.buildContainer(scene, null, model);
+  assert.equal(container.meshes.length, 2);
+  assert.equal(container.transformNodes.length, 1);
+  assert.equal(container.transformNodes[0].name, 'Mug');
+  assert.ok(container.meshes.every(m => m.parent === container.transformNodes[0]));
+  const colours = container.meshes.map(m => [m.material.diffuseColor.r, m.material.diffuseColor.b]);
+  assert.deepEqual(colours, [[1, 0], [0, 1]]);
+});
+
+await test('splitByMaterial OFF (default): multi-material object stays ONE merged <object> with per-triangle colour', () => {
+  const red = colouredMesh('Mug_red', [1, 0, 0]);
+  const blue = colouredMesh('Mug_blue', [0, 0, 1]);
+  const model = Writer.buildColorGroupEntries([multiUnit('Mug', [red, blue])])
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.equal((model.match(/<object /g) ?? []).length, 1);
+  assert.ok(!/<components>/.test(model));
+  assert.match(model, /<triangle[^>]+pid="1" p1="1" p2="1" p3="1"\/>/);
+});
+
+await test('splitByMaterial ON: a single-material object keeps the plain one-object shape', () => {
+  const model = Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')], { splitByMaterial: true })
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.match(model, /<object id="2" type="model" pid="1" pindex="0"><mesh>/);
+  assert.ok(!/<components>/.test(model));
+  assert.match(model, /<build><item objectid="2" /);
+});
+
+await test('splitByMaterial ON inside a group: the group component targets the split parent', () => {
+  const red = colouredMesh('Body_red', [1, 0, 0]);
+  const blue = colouredMesh('Body_blue', [0, 0, 1]);
+  const model = Writer.buildColorGroupEntries([multiUnit('body', [red, blue])], { state: stateForHierarchy(), splitByMaterial: true })
+    .find(e => e.path === '3D/3dmodel.model').data;
+  const parent = model.match(/<object id="(\d+)" type="model" name="body"><components>/);
+  const group = model.match(/<object id="(\d+)" type="model" name="Robot"><components>(.*?)<\/components>/);
+  assert.ok(parent && group, model);
+  assert.equal(group[2], `<component objectid="${parent[1]}" ${ID_T}/>`);
+  assert.ok(model.includes(`<build><item objectid="${group[1]}" `));
+  assert.ok(objectStart(model, parent[1]) < objectStart(model, group[1]));
+});
+
+await test('splitByMaterial ON (textured package): textured + solid parts each bind their own resource at object level', async () => {
+  const tex = makeMesh('Body_tex', { textured: true });
+  const solid = colouredMesh('Body_solid', [0, 0, 1]);
+  const entries = await Writer.buildMaterialsExtEntries([multiUnit('Body', [tex, solid])], { splitByMaterial: true });
+  const model = entries.find(e => e.path === '3D/3dmodel.model').data;
+  // tex2d=1, tex2dgroup=2, colorgroup=3, parts 4/5, parent 6.
+  assert.match(model, /<object id="4" type="model" name="Body_tex" pid="2" pindex="0"><mesh>/);
+  assert.match(model, /<triangle v1="0" v2="1" v3="2" p1="0" p2="1" p3="2"\/>/);
+  assert.match(model, /<object id="5" type="model" name="Body_solid" pid="3" pindex="0"><mesh>/);
+  assert.match(model, /<object id="6" type="model" name="Body"><components><component objectid="4" [^>]*\/><component objectid="5" [^>]*\/><\/components>/);
+  assert.match(model, /<build><item objectid="6" /);
+  const container = await Loader.__test.buildContainer(scene, null, model);
+  assert.equal(container.meshes.length, 2, 'both parts re-import');
+});
+
+// ── Task 1.5: metadata, thumbnail, alpha ─────────────────
+
+await test('metadata: Title / Application / CreationDate in the model part (escaped); none when metadata is null', async () => {
+  const meta = { title: 'Robot & <Co>', application: 'MIXOMESH', creationDate: '2026-10-14' };
+  const solid = Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')], { metadata: meta })
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.ok(solid.includes(
+    '<metadata name="Title">Robot &amp; &lt;Co&gt;</metadata><metadata name="Application">MIXOMESH</metadata>' +
+    '<metadata name="CreationDate">2026-10-14</metadata><resources>'), solid);
+  const textured = (await Writer.buildMaterialsExtEntries([unit(makeMesh('Body', { textured: true }), 'body')], { metadata: meta }))
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.ok(textured.includes('<metadata name="Application">MIXOMESH</metadata>'));
+  const none = Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')], { metadata: null })
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.ok(!/<metadata/.test(none));
+  // Loader ignores metadata: round-trip still yields the mesh.
+  const container = await Loader.__test.buildContainer(scene, null, solid);
+  assert.equal(container.meshes.length, 1);
+});
+
+await test('thumbnail: supplied PNG → Metadata/thumbnail.png + root thumbnail relationship + png content type', async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0]);
+  for (const entries of [
+    Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')], { thumbnailPng: png }),
+    await Writer.buildMaterialsExtEntries([unit(makeMesh('Body', { textured: true }), 'body')], { thumbnailPng: png }),
+  ]) {
+    const byPath = Object.fromEntries(entries.map(e => [e.path, e.data]));
+    assert.equal(byPath['Metadata/thumbnail.png'], png);
+    assert.ok(byPath['_rels/.rels'].includes(
+      '<Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'));
+    assert.ok(byPath['_rels/.rels'].includes(
+      '<Relationship Target="/Metadata/thumbnail.png" Id="rel1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/>'));
+    assert.match(byPath['[Content_Types].xml'], /Extension="png" ContentType="image\/png"/);
+  }
+  const plain = Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')]);
+  assert.ok(!plain.some(e => e.path === 'Metadata/thumbnail.png'));
+  assert.ok(!plain.find(e => e.path === '_rels/.rels').data.includes('thumbnail'));
+  assert.ok(!plain.find(e => e.path === '[Content_Types].xml').data.includes('png'));
+});
+
+await test('colorgroup alpha: material alpha → #RRGGBBAA when options.alpha, FF otherwise', async () => {
+  const glass = colouredMesh('Glass', [1, 0, 0], 0.5);
+  const withAlpha = Writer.buildColorGroupEntries([unit(glass, 'glass')], { alpha: true })
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.match(withAlpha, /<m:color color="#FF000080"\/>/);
+  const opaque = Writer.buildColorGroupEntries([unit(glass, 'glass')])
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.match(opaque, /<m:color color="#FF0000FF"\/>/);
+  // Same contract on the Materials-Extension package's solid colours.
+  const mixed = (await Writer.buildMaterialsExtEntries(
+    [unit(makeMesh('T', { textured: true }), 't'), unit(colouredMesh('G', [0, 0, 1], 0.25), 'g')], { alpha: true }))
+    .find(e => e.path === '3D/3dmodel.model').data;
+  assert.match(mixed, /<m:color color="#0000FF40"\/>/);
+  // Loader accepts 8-digit colours.
+  const container = await Loader.__test.buildContainer(scene, null, withAlpha);
+  assert.equal(container.meshes[0].material.diffuseColor.r, 1);
+});
+
 await test('3MF component import creates transform groups and child meshes', async () => {
   const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">

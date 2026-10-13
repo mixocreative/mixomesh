@@ -360,6 +360,89 @@ await test('colour contract: PBR albedo (linear 0.216) exports as sRGB #808080FF
   assert.equal((model.match(/pindex="0"/g) || []).length, 2, 'both objects bind the single colour');
 });
 
+// ── Task 1.5: profile-driven package options through the real pipeline ──
+
+function splitMugScene(targetPrinterId, { alpha = 1 } = {}) {
+  const red = solidMesh('Mug', { color: { r: 1, g: 0, b: 0 } });
+  const blue = solidMesh('Mug__part1', { color: { r: 0, g: 0, b: 1 } });
+  red.material.alpha = alpha;
+  setScene({
+    objects: {
+      partA: { ...obj('partA'), name: 'Mug', sourceGroupId: 'sg_mug', logicalObjectId: 'partA' },
+      partB: { ...obj('partB'), name: 'Mug__part1', sourceGroupId: 'sg_mug', logicalObjectId: 'partA', isInternalPart: true },
+    },
+    registry: { partA: red, partB: blue },
+    targetPrinterId,
+  });
+}
+
+await test('per-part printer (Bambu X1C) → split-by-material parts under a components parent by default', async () => {
+  splitMugScene('bambu-x1c');
+  await PrintManager.exportThreeMF();
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  const parts = [...model.matchAll(/<object id="(\d+)" type="model" name="[^"]*" pid="1" pindex="(\d)"><mesh>/g)];
+  assert.equal(parts.length, 2, `two part objects:\n${model}`);
+  const parent = model.match(/<object id="(\d+)" type="model" name="Mug"><components>(.*?)<\/components>/);
+  assert.ok(parent, 'components parent named after the logical object');
+  for (const p of parts) assert.ok(parent[2].includes(`<component objectid="${p[1]}" `));
+  assert.equal((model.match(/<item /g) ?? []).length, 1, 'one build item per logical object');
+  assert.ok(model.includes(`<item objectid="${parent[1]}" `));
+});
+
+await test('texture printer (Mimaki) → split-by-material OFF by default: one merged object', async () => {
+  splitMugScene('mimaki-3duj-553');
+  await PrintManager.exportThreeMF();
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  assert.equal((model.match(/<object /g) ?? []).length, 1);
+  assert.ok(!/<components>/.test(model));
+});
+
+await test('metadata: Title = project name, Application = MIXOMESH, CreationDate = ISO date', async () => {
+  splitMugScene('mimaki-3duj-553');
+  await PrintManager.exportThreeMF();
+  const model = zipInstances.at(-1).files['3D/3dmodel.model'];
+  assert.match(model, /<metadata name="Title">MimakiTest<\/metadata>/);
+  assert.match(model, /<metadata name="Application">MIXOMESH<\/metadata>/);
+  assert.match(model, /<metadata name="CreationDate">\d{4}-\d{2}-\d{2}<\/metadata>/);
+});
+
+await test('thumbnail: injected capture PNG lands at Metadata/thumbnail.png with the OPC thumbnail rel', async () => {
+  splitMugScene('mimaki-3duj-553');
+  const png = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]);
+  let asked = null;
+  await PrintManager.exportThreeMF({ captureThumbnail: async (opts) => { asked = opts; return png; } });
+  const files = zipInstances.at(-1).files;
+  assert.deepEqual(asked, { width: 256, height: 256 });
+  assert.equal(files['Metadata/thumbnail.png'], png);
+  assert.match(files['_rels/.rels'], /Target="\/Metadata\/thumbnail\.png" Id="rel1" Type="http:\/\/schemas\.openxmlformats\.org\/package\/2006\/relationships\/metadata\/thumbnail"/);
+  assert.match(files['[Content_Types].xml'], /Extension="png" ContentType="image\/png"/);
+});
+
+await test('thumbnail: failed / empty capture → no thumbnail, export still succeeds', async () => {
+  for (const captureThumbnail of [
+    async () => { throw new Error('Scene not ready'); },
+    async () => null,
+    async () => new Uint8Array([1, 2, 3]),          // not a PNG
+  ]) {
+    splitMugScene('mimaki-3duj-553');
+    zipInstances.length = 0;
+    await PrintManager.exportThreeMF({ captureThumbnail });
+    const files = zipInstances.at(-1).files;
+    assert.ok(files['3D/3dmodel.model'], 'package written');
+    assert.equal(files['Metadata/thumbnail.png'], undefined);
+    assert.ok(!files['_rels/.rels'].includes('thumbnail'));
+  }
+});
+
+await test('colorgroup alpha follows the profile: Mimaki (alpha) → #FF000080, Bambu (no alpha) → #FF0000FF', async () => {
+  splitMugScene('mimaki-3duj-553', { alpha: 0.5 });
+  await PrintManager.exportThreeMF();
+  assert.match(zipInstances.at(-1).files['3D/3dmodel.model'], /<m:color color="#FF000080"\/>/);
+  splitMugScene('bambu-x1c', { alpha: 0.5 });
+  await PrintManager.exportThreeMF();
+  assert.match(zipInstances.at(-1).files['3D/3dmodel.model'], /<m:color color="#FF0000FF"\/>/);
+});
+
 // ── Report ───────────────────────────────────────────────
 
 console.log('\n' + out.join('\n'));

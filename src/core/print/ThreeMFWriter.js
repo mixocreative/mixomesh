@@ -6,6 +6,10 @@
 //                               textures via the Materials Extension.
 // The `.3mf` loader (core/ThreeMFLoader.js) is the exact INVERSE of these
 // writers — if either changes shape, mirror the other.
+// Task 1.5 package options (ThreeMFWriterOptions, resolved by PrintPipeline):
+// split-by-material parts (`<components>` parent → loader's TransformNode
+// path), model `<metadata>` (loader ignores), `Metadata/thumbnail.png` (loader
+// follows only the 3dmodel rel), colorgroup alpha (loader accepts #RRGGBBAA).
 
 import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
@@ -35,37 +39,68 @@ const CONTENT_TYPES_TEXTURED = `<?xml version="1.0" encoding="UTF-8"?>
 const RELS = `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
 
+// Package thumbnail (3MF Core §6.1 / OPC): `Metadata/thumbnail.png`, linked
+// from the ROOT rels so slicers / file browsers show a preview.
+export const THUMBNAIL_PATH = 'Metadata/thumbnail.png';
+export const THUMBNAIL_REL_TYPE = 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail';
+const RELS_WITH_THUMBNAIL = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/><Relationship Target="/${THUMBNAIL_PATH}" Id="rel1" Type="${THUMBNAIL_REL_TYPE}"/></Relationships>`;
+
 const TEXTURE_REL_TYPE = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture';
 
 /**
- * Solid diffuse colour of a mesh's material as 3MF #RRGGBBFF (sRGB). Standard
+ * Solid diffuse colour of a mesh's material as 3MF #RRGGBBAA (sRGB). Standard
  * `diffuseColor` is read raw; PBR `albedoColor` is linear and is gamma-encoded
- * by `materialSrgbColor` (Blueprint §10 colour contract).
+ * by `materialSrgbColor` (Blueprint §10 colour contract). Alpha is `FF`
+ * unless `withAlpha` (printer profile `colour.alpha`, task 1.5), in which case
+ * it carries the material's `alpha` (absent → opaque).
  */
-function _materialHex(mesh) {
+function _materialHex(mesh, withAlpha = false) {
   const c = materialSrgbColor(mesh.material);
-  if (!c) return '#CCCCCCFF';
-  return `#${hex2(clamp255(c.r))}${hex2(clamp255(c.g))}${hex2(clamp255(c.b))}FF`;
+  const rawAlpha = Number(mesh.material?.alpha);
+  const a = withAlpha && Number.isFinite(rawAlpha) ? hex2(clamp255(rawAlpha)) : 'FF';
+  if (!c) return `#CCCCCC${a}`;
+  return `#${hex2(clamp255(c.r))}${hex2(clamp255(c.g))}${hex2(clamp255(c.b))}${a}`;
+}
+
+/**
+ * Writer options (all optional; PrintPipeline resolves them from ctx.prefs +
+ * the selected printer profile — this module never reads state/profiles):
+ * @typedef {Object} ThreeMFWriterOptions
+ * @property {Object}  [state]           StateManager snapshot (group hierarchy).
+ * @property {boolean} [splitByMaterial] Multi-material logical object → one
+ *   `<object>` per material part under a `<components>` parent (one build item
+ *   per logical object). Off = one merged `<object>` with per-triangle colour.
+ * @property {boolean} [alpha]           colorgroup colours carry material alpha.
+ * @property {{title?:string, application?:string, creationDate?:string}|null} [metadata]
+ *   Model-part `<metadata>` (Title / Application / CreationDate); null = none.
+ * @property {Blob|Uint8Array|null} [thumbnailPng] PNG bytes → `Metadata/thumbnail.png`
+ *   + root thumbnail relationship; absent = no thumbnail (never an error).
+ */
+
+/** OPC skeleton shared by both package shapes. */
+function _packageEntries(modelXml, options, textured) {
+  const thumb = options.thumbnailPng ?? null;
+  const entries = [
+    // PNG default content type whenever the package holds any PNG part.
+    { path: '[Content_Types].xml', data: (textured || thumb) ? CONTENT_TYPES_TEXTURED : CONTENT_TYPES },
+    { path: '_rels/.rels',         data: thumb ? RELS_WITH_THUMBNAIL : RELS },
+    { path: '3D/3dmodel.model',    data: modelXml },
+  ];
+  if (thumb) entries.push({ path: THUMBNAIL_PATH, data: thumb });
+  return entries;
 }
 
 /** Filament colorgroup package: [Content_Types] + rels + model XML. */
 export function buildColorGroupEntries(meshList, options = {}) {
-  return [
-    { path: '[Content_Types].xml', data: CONTENT_TYPES },
-    { path: '_rels/.rels',         data: RELS },
-    { path: '3D/3dmodel.model',    data: _buildColorGroupModel(meshList, options) },
-  ];
+  return _packageEntries(_buildColorGroupModel(meshList, options), options, false);
 }
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
 export async function buildMaterialsExtEntries(meshList, options = {}) {
   const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON, options.state ?? undefined);
   const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options);
-  const entries = [
-    { path: '[Content_Types].xml', data: CONTENT_TYPES_TEXTURED },
-    { path: '_rels/.rels',         data: RELS },
-    { path: '3D/3dmodel.model',    data: modelXml },
-  ];
+  const entries = _packageEntries(modelXml, options, true);
   if (blobByPath.size) {
     entries.push({ path: '3D/_rels/3dmodel.model.rels', data: _buildTextureRels(blobByPath) });
     for (const [path, blob] of blobByPath) entries.push({ path, data: blob });
@@ -110,6 +145,64 @@ function _unitId(unit) {
   return unit.logicalId ?? unit.meshes.find(entry => entry.logicalId)?.logicalId
     ?? unit.meshes.find(entry => entry.meshId)?.meshId
     ?? null;
+}
+
+/** Model-part `<metadata>` elements (3MF Core §3.4.1 well-known names). */
+function _metadataXml(metadata) {
+  if (!metadata) return '';
+  const rows = [
+    ['Title', metadata.title],
+    ['Application', metadata.application],
+    ['CreationDate', metadata.creationDate],
+  ];
+  return rows
+    .filter(([, value]) => value != null && value !== '')
+    .map(([name, value]) => `<metadata name="${name}">${_xmlAttr(value)}</metadata>`)
+    .join('');
+}
+
+function _meshObjectXml(objId, nameAttr, built) {
+  return `<object id="${objId}" type="model"${nameAttr}${built.objectAttrs}>` +
+    `<mesh><vertices>${built.vertices}</vertices><triangles>${built.triangles}</triangles></mesh></object>`;
+}
+
+/**
+ * Emit the resource object(s) for ONE logical unit and record the object id
+ * that stands for the unit (the build item / group component target).
+ *
+ *  - default / single-material: one `<object>` holding the merged mesh
+ *    (per-triangle colour when it has several materials) — today's shape.
+ *  - `split` and >1 material part (task 1.5): one `<object>` per part, then a
+ *    parent `<object name=unit><components>` referencing them at identity
+ *    (all parts share the build's centring, so no per-part offset). Slicers
+ *    (PrusaSlicer / Bambu / Orca) read this as one object with N parts, each
+ *    assignable to its own filament.
+ *
+ * `buildMesh(unit)` returns `{vertices, triangles, objectAttrs}` or null.
+ * @returns {number} next free object id
+ */
+function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId }) {
+  if (split && unit.meshes.length > 1) {
+    const partIds = [];
+    unit.meshes.forEach((entry, k) => {
+      const built = buildMesh({ ...unit, meshes: [entry] });
+      if (!built) return;
+      const partName = entry.name ?? entry.mesh?.name ?? `${unit.name ?? 'part'} ${k + 1}`;
+      objs.push(_meshObjectXml(objId, ` name="${_xmlAttr(partName)}"`, built));
+      partIds.push(objId++);
+    });
+    if (!partIds.length) return objId + 1;
+    const components = partIds
+      .map(id => `<component objectid="${id}" transform="${THREEMF_IDENTITY}"/>`).join('');
+    objs.push(`<object id="${objId}" type="model" name="${_xmlAttr(unit.name ?? '')}"><components>${components}</components></object>`);
+    meshObjectIds.set(unit, objId);
+    return objId + 1;
+  }
+  const built = buildMesh(unit);
+  if (!built) return objId + 1;
+  objs.push(_meshObjectXml(objId, '', built));
+  meshObjectIds.set(unit, objId);
+  return objId + 1;
 }
 
 function _hierarchyPlan(units, state, meshObjectIds) {
@@ -213,10 +306,11 @@ function _appendComponentHierarchy({ objs, items, units, state, meshObjectIds, n
 function _buildColorGroupModel(list, options = {}) {
   const units = _normaliseUnits(list);
   const flat = _flattenEntries(units);
+  const hexOf = mesh => _materialHex(mesh, !!options.alpha);
   const colors = [];
   const colorIndex = new Map();
   for (const { mesh } of flat) {
-    const hex = _materialHex(mesh);
+    const hex = hexOf(mesh);
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
   }
 
@@ -226,28 +320,21 @@ function _buildColorGroupModel(list, options = {}) {
   const items = [];
   const meshObjectIds = new Map();
   let objId = 2;                                  // id 1 = colorgroup
+  const buildMesh = u => _buildUnitColorMeshXml(u, converted, cx, cy, cz, colorIndex, hexOf);
   for (const unit of units) {
-    const built = _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex);
-    if (!built) { objId++; continue; }
-    const { vertices, triangles, objectAttrs } = built;
-    objs.push(
-      `<object id="${objId}" type="model"${objectAttrs}>` +
-      `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
-    );
-    meshObjectIds.set(unit, objId);
-    objId++;
+    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial, objs, meshObjectIds, objId });
   }
   _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
 
   const colorXml = colors.map(c => `<m:color color="${c}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-<resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${objs.join('')}</resources>
+${_metadataXml(options.metadata)}<resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${objs.join('')}</resources>
 <build>${items.join('')}</build>
   </model>`;
 }
 
-function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex) {
+function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex, hexOf) {
   const single = unit.meshes.length === 1;
   let vertices = '';
   let triangles = '';
@@ -261,7 +348,7 @@ function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex) {
     for (let i = 0; i < pos.length; i += 3) {
       vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
     }
-    const pidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+    const pidx = colorIndex.get(hexOf(mesh)) ?? 0;
     if (single) objectAttrs = ` pid="1" pindex="${pidx}"`;
     for (let i = 0; i < idx.length; i += 3) {
       const a = idx[i] + vertexOffset;
@@ -315,7 +402,7 @@ function _convertVertices(list) {
  *       <m:tex2coord u=".." v=".."/> × verts
  *     </m:texture2dgroup>
  *     <m:colorgroup id="K">                              — only if any solid mesh
- *       <m:color color="#RRGGBBFF"/> × distinct
+ *       <m:color color="#RRGGBBAA"/> × distinct (AA = FF unless options.alpha)
  *     </m:colorgroup>
  *     <object id="..." type="model" pid="K" pindex="P">  — solid path
  *     <object id="..." type="model" pid="N">             — textured path
@@ -339,11 +426,12 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}) {
   const tex2dGroupIdByMesh = new Map();
   for (const { mesh } of flat) if (pathByMesh.has(mesh)) tex2dGroupIdByMesh.set(mesh, nextId++);
 
+  const hexOf = mesh => _materialHex(mesh, !!options.alpha);
   const colors = [];
   const colorIndex = new Map();
   for (const { mesh } of flat) {
     if (pathByMesh.has(mesh)) continue;
-    const hex = _materialHex(mesh);
+    const hex = hexOf(mesh);
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
   }
   const colorGroupId = colors.length ? nextId++ : null;
@@ -381,30 +469,23 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}) {
   const items = [];
   const meshObjectIds = new Map();
   let objId = nextId;
+  const buildMesh = u => _buildUnitMaterialsMeshXml(
+    u, converted, cx, cy, cz,
+    tex2dGroupIdByMesh, colorGroupId, colorIndex, hexOf
+  );
   for (const unit of units) {
-    const built = _buildUnitMaterialsMeshXml(
-      unit, converted, cx, cy, cz,
-      tex2dGroupIdByMesh, colorGroupId, colorIndex
-    );
-    if (!built) { objId++; continue; }
-    const { vertices, triangles, objectAttrs } = built;
-    objs.push(
-      `<object id="${objId}" type="model"${objectAttrs}>` +
-      `<mesh><vertices>${vertices}</vertices><triangles>${triangles}</triangles></mesh></object>`
-    );
-    meshObjectIds.set(unit, objId);
-    objId++;
+    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial, objs, meshObjectIds, objId });
   }
   _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
+${_metadataXml(options.metadata)}<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
 <build>${items.join('')}</build>
 </model>`;
 }
 
-function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByMesh, colorGroupId, colorIndex) {
+function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByMesh, colorGroupId, colorIndex, hexOf) {
   const single = unit.meshes.length === 1;
   let vertices = '';
   let triangles = '';
@@ -419,7 +500,7 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
       vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
     }
     const texGroupId = tex2dGroupIdByMesh.get(mesh);
-    const solidPidx = colorIndex.get(_materialHex(mesh)) ?? 0;
+    const solidPidx = colorIndex.get(hexOf(mesh)) ?? 0;
     if (single) {
       // 3MF Core §4.1: `pindex` is REQUIRED whenever `pid` is present, even
       // for a texture2dgroup (strict consumers such as lib3mf reject it).

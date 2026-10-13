@@ -3687,6 +3687,27 @@ package writers: `print/ThreeMFWriter.js`):
    Individual-per-part 3MF export stays standalone by design and does not carry
    cross-part hierarchy.
 
+**3MF package options (task 1.5).** PrintPipeline resolves writer options
+from `ctx.prefs` + the selected printer profile (`_threeMFWriterOptions`);
+ThreeMFWriter never reads state. **Split by material**: `ctx.prefs.splitByMaterial`
+(boolean) wins, else `profile.export.splitByMaterial`, else ON for
+`colour.mode` `per-part`/`paint`. On → a logical object with >1 material part
+is one `<object type="model" name=part>` per part (colour/texture bound at
+object level) plus a parent `<object name=object><components>` at identity
+transforms; the build item / group component targets the parent. Off = one
+merged `<object>` with per-triangle `pid/p1..p3` (Mimaki default).
+**Metadata**: `<metadata>` Title (project), Application (`MIXOMESH`),
+CreationDate (`YYYY-MM-DD`) unless `profile.export.threeMF.metadata === false`.
+**Thumbnail**: one 256×256 viewport capture per export batch
+(`FrameCapture.capturePng`, before clones exist, 5 s timeout; tests inject
+`options.captureThumbnail`, `false` disables) → `Metadata/thumbnail.png` +
+root rel of type `http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail`
++ png content type; any failure ⇒ no thumbnail, never an export error.
+**Alpha**: when `profile.colour.alpha`, colorgroup colours are `#RRGGBBAA`
+(AA = material alpha, absent ⇒ FF); else AA = FF. The loader ignores
+metadata/thumbnail, accepts 8-digit colours, and imports a split parent as a
+TransformNode holding the part meshes.
+
 ### Print-space axis + winding contract (ALL writers + the 3MF loader)
 `src/core/print/PrintSpace.js` is the ONE seam between Babylon (left-handed,
 Y-up) and print files (right-handed, Z-up, mm). Locked 2026-09-17 after the

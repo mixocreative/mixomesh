@@ -896,6 +896,30 @@ await test('3MF colorgroup: individually → one inner 3MF zip per mesh in outer
   }
 });
 
+await test('3MF individually: every inner 3MF carries metadata + the one batch thumbnail (captured once)', async () => {
+  setScene({ objects: { m1: obj('m1'), m2: obj('m2') },
+    registry: { m1: mesh('m1', { color: { r: 1, g: 0, b: 0 } }),
+                m2: mesh('m2', { color: { r: 0, g: 0, b: 1 } }) } });
+  MeshValidator.validateMesh = valOK;
+  const png = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 7]);
+  let captures = 0;
+  await PrintManager.exportThreeMF({ individually: true, captureThumbnail: async () => { captures++; return png; } });
+  assert.equal(captures, 1, 'one viewport capture per export batch');
+  for (const inner of zipInstances.slice(0, 2)) {
+    assert.equal(inner.files['Metadata/thumbnail.png'], png);
+    assert.match(inner.files['_rels/.rels'], /relationships\/metadata\/thumbnail/);
+    assert.match(inner.files['3D/3dmodel.model'], /<metadata name="Title">Test<\/metadata><metadata name="Application">MIXOMESH<\/metadata>/);
+  }
+});
+
+await test('3MF: thumbnail capture is never attempted for non-3MF formats', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  MeshValidator.validateMesh = valOK;
+  let captures = 0;
+  await PrintManager.exportSTL({ captureThumbnail: async () => { captures++; return null; } });
+  assert.equal(captures, 0);
+});
+
 await test('3MF materials-ext: individually → per-mesh 3MF carries only its own texture', async () => {
   const tex = { name: 'paint', getBaseSize: () => ({ width: 2, height: 2 }), readPixels: () => new Uint8Array(16) };
   const mt1 = mesh('mt1');
