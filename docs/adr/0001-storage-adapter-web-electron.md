@@ -76,6 +76,13 @@ Export:   saveExport(suggestedName, bytes)                   // picker+write, el
   `mount_*` / `ref_*` token). The renderer cannot submit or receive absolute paths for
   mounted assets; unknown/stale tokens fail closed. All caps `true`. Injected when
   `window.electronAPI` is present.
+- **Asset surface (overhaul task 4.2, 2026-10-14):** `resolveAsset(source,{contentHash}) ->
+  {status:'embedded'|'linked'|'changed'|'missing', blob|null}`; `persistRef(ref) -> stableKey`,
+  `restoreRef(stableKey) -> ref|null` (re-validated), `deleteRef(key)`;
+  `findMoved(source,{contentHash,onProgress,limit,refKey}) -> {source|null, blob|null, scanned}`
+  (explicit only — load never scans). Desktop session tokens still never persist; persistence is
+  by stable key → main-only `mixo-refs.json`, kept separate from the KV the renderer can read.
+  Desktop `watchFiles` stays false until implemented.
 
 ### Refactor order (from the LEAF/LEAKED audit)
 

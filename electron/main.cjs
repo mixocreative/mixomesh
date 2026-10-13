@@ -13,7 +13,10 @@ const { createKvStore } = require('./KvStore.cjs');
 
 const DEV_URL = process.env.MIXO_DEV_URL || '';
 let _kv = null;
-const _fileRefs = createOpaqueFileRegistry();
+// Opaque file registry; its persisted ref store (`mixo-refs.json`, absolute paths)
+// is a SEPARATE file from the renderer-readable KV so kv:get/kv:keys can never
+// expose an OS path. Created on app ready (needs userData).
+let _fileRefs = null;
 const _approvedClose = new WeakSet();
 // MIXO_SMOKE bypasses the unload/close/crash guards ONLY in unpackaged builds.
 const smokeBypass = () => !!process.env.MIXO_SMOKE && !app.isPackaged;
@@ -137,6 +140,35 @@ ipcMain.handle('dialog:mountDirectory', async () => {
 ipcMain.handle('fs:listDirectoryRef', (_e, ref, parentPath) => _fileRefs.listDirectory(ref, parentPath));
 ipcMain.handle('fs:readFileRef', (_e, ref) => _fileRefs.readFile(ref));
 
+// ── Persisted asset refs (task 4.2) — stable keys in, opaque tokens / bytes out ──
+// Every argument is type-checked here; the registry re-validates keys, files and
+// relative paths (no escaping the folder). Absolute paths never leave main.
+const _str = v => (typeof v === 'string' && v.length > 0 && v.length < 4096 ? v : null);
+ipcMain.handle('refs:persist', (_e, ref) => {
+  if (!_str(ref)) throw new Error('refs:persist expects an opaque ref');
+  return _fileRefs.persistRef(ref);
+});
+ipcMain.handle('refs:restore', (_e, key) => (_str(key) ? _fileRefs.restoreRef(key) : null));
+ipcMain.handle('refs:delete', (_e, key) => (_str(key) ? _fileRefs.deleteRef(key) : undefined));
+ipcMain.handle('refs:read', (_e, key, relPath) => {
+  if (!_str(key)) return null;
+  return _fileRefs.readStoredFile(key, relPath == null ? null : _str(relPath) ?? '');
+});
+// Explicit, user-invoked only (Decision 3: load never scans). Progress is pushed
+// back on 'refs:find-progress' tagged with the caller's request id.
+ipcMain.handle('refs:findMoved', (event, requestId, args) => {
+  const id = _str(requestId);
+  const a = args && typeof args === 'object' ? args : {};
+  return _fileRefs.findMoved({
+    refKey: _str(a.refKey),
+    contentHash: _str(a.contentHash),
+    ext: _str(a.ext) ?? '',
+    limit: Number(a.limit) || undefined,
+  }, progress => {
+    if (id && !event.sender.isDestroyed()) event.sender.send('refs:find-progress', id, progress);
+  });
+});
+
 // ── Legacy project/export dialogs (path-based fs:readFile/writeFile IPC removed — no callers) ──
 ipcMain.handle('dialog:open', async (_e, opts) => dialog.showOpenDialog(opts ?? {}));
 ipcMain.handle('dialog:save', async (_e, opts) => dialog.showSaveDialog(opts ?? {}));
@@ -152,6 +184,9 @@ ipcMain.on('app:close-response', (event, result) => {
 
 app.whenReady().then(() => {
   _kv = createKvStore(path.join(app.getPath('userData'), 'mixo-kv.json'));
+  _fileRefs = createOpaqueFileRegistry({
+    store: createKvStore(path.join(app.getPath('userData'), 'mixo-refs.json')),
+  });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

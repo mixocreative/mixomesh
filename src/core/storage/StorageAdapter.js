@@ -9,12 +9,22 @@
 // never on ad-hoc "is Electron" checks. The desktop impl (Node fs via Electron IPC)
 // is injected in Phase 2 — until then the browser impl is the only one.
 //
-// Directory mounting/listing/reading and cross-session KV are implemented. Remaining
-// project picker and asset-resolution leaves migrate incrementally (see ADR 0001 +
-// HANDOFF.md); today PersistenceManager / AssetImport still own those operations.
+// Directory mounting/listing/reading, cross-session KV and the asset-ref surface
+// (task 4.2: resolveAsset / persistRef / restoreRef / deleteRef / findMoved) are
+// implemented on both impls. Project pickers migrate in 4.4 (see ADR 0001).
+//
+// Asset refs: `persistRef(ref)` returns a STABLE key (same folder/file → same key
+// after a restart); `restoreRef(key)` re-validates and returns a fresh session ref
+// or null. `resolveAsset(source, {contentHash})` reads ONE source and classifies it
+// ('embedded' | 'linked' | 'changed' | 'missing') — it never scans (Decision 3).
+// `findMoved` is the only hash walk and is user-invoked only.
 
 import { caps, isDesktop } from './capabilities.js';
 import { DesktopStorageAdapter } from './DesktopStorageAdapter.js';
+import {
+  ASSET_STATUS, FIND_MOVED_LIMIT, extOfName, fileHandleAtPath, normalizeSource,
+  resolveVia, stableKeyFor, walkForHash,
+} from './AssetSource.js';
 
 /** @typedef {import('./capabilities.js').Capabilities} Capabilities */
 
@@ -30,11 +40,66 @@ import { DesktopStorageAdapter } from './DesktopStorageAdapter.js';
  * @property {()=>Promise<{ref:any,name:string}>} mountDirectory
  * @property {(ref:any, parentPath?:string)=>Promise<Array<{name:string,path:string,kind:'file'|'directory',ref:any}>>} listDirectory
  * @property {(ref:any)=>Promise<File|Blob|any>} readFile
- * — Declared, routed as LEAF sites migrate (Phase 1b continuation): —
+ * Asset refs (task 4.2, plan §4.4):
+ * @property {(source:AssetSource|null, opts?:{contentHash?:string})=>Promise<AssetResolution>} resolveAsset
+ * @property {(ref:any)=>Promise<string>} persistRef        ref → stable key (persisted)
+ * @property {(key:string)=>Promise<any|null>} restoreRef    key → re-validated session ref | null
+ * @property {(key:string)=>Promise<void>} deleteRef
+ * @property {(source:AssetSource, opts:FindMovedOptions)=>Promise<FindMovedResult>} findMoved
+ * — Declared, routed as LEAF sites migrate (task 4.4): —
  * pickOpenProject / pickSaveProject / readProject / writeProject
- * pickImportAssets / readAsset / resolveAsset / watchAsset
- * persistRef / restoreRef / deleteRef / saveExport / recentProjects
+ * pickImportAssets / readAsset / watchAsset / saveExport / recentProjects
  */
+
+/**
+ * @typedef {{kind:'folder'|'file', refKey:string, path?:string, label?:string}} AssetSource
+ * @typedef {{status:'embedded'|'linked'|'changed'|'missing', blob:Blob|null}} AssetResolution
+ * @typedef {{contentHash:string, onProgress?:(p:{scanned:number})=>void, limit?:number, refKey?:string}} FindMovedOptions
+ *   `refKey` = search this persisted folder instead of the source's own folder.
+ * @typedef {{source:AssetSource|null, blob:Blob|null, scanned:number}} FindMovedResult
+ */
+
+const MAX_KEY_SUFFIX = 50;
+
+async function _idb() { return import('../idb.js'); }
+
+async function _sameEntry(a, b) {
+  if (a === b) return true;
+  try { return typeof a?.isSameEntry === 'function' && await a.isSameEntry(b); }
+  catch { return false; }
+}
+
+/** Decision 10: folder key = sha256(name + first entry name); file key = sha256(name+size+mtime). */
+async function _browserBaseKey(ref) {
+  if (ref.kind === 'directory') {
+    const names = [];
+    for await (const [name] of ref.entries()) names.push(name);
+    names.sort();
+    return stableKeyFor('dir', [ref.name, names[0] ?? '']);
+  }
+  const file = await ref.getFile();
+  return stableKeyFor('file', [ref.name, file?.size ?? 0, file?.lastModified ?? 0]);
+}
+
+async function _browserRestore(key) {
+  if (typeof key !== 'string' || !key) return null;
+  const handle = await (await _idb()).getHandle(key);
+  if (!handle) return null;
+  const perm = typeof handle.requestPermission === 'function'
+    ? await handle.requestPermission({ mode: 'read' })
+    : 'granted';
+  return perm === 'granted' ? handle : null;
+}
+
+async function _browserReadSource(src) {
+  const ref = await _browserRestore(src.refKey);
+  if (!ref) return null;
+  if (src.kind === 'folder') {
+    if (ref.kind !== 'directory') return null;
+    return (await fileHandleAtPath(ref, src.path)).getFile();
+  }
+  return ref.kind === 'file' ? ref.getFile() : null;
+}
 
 /**
  * Browser adapter — File System Access + IndexedDB (current behaviour). `ref` = FileSystemHandle.
@@ -72,7 +137,56 @@ export const BrowserStorageAdapter = {
     ));
   },
   async readFile(ref) { return ref.getFile(); },
+
+  async resolveAsset(source, opts = {}) {
+    return resolveVia(_browserReadSource, source, opts);
+  },
+
+  async persistRef(ref) {
+    if (!ref || (ref.kind !== 'directory' && ref.kind !== 'file')) {
+      throw new TypeError('persistRef: expected a file or directory handle');
+    }
+    const idb = await _idb();
+    const base = await _browserBaseKey(ref);
+    // A different entry already owns the derived key (same name + first entry):
+    // suffix instead of overwriting someone else's link.
+    for (let i = 1; i <= MAX_KEY_SUFFIX; i++) {
+      const key = i === 1 ? base : `${base}_${i}`;
+      const existing = await idb.getHandle(key);
+      if (!existing || await _sameEntry(existing, ref)) {
+        await idb.putHandle(key, ref);
+        return key;
+      }
+    }
+    throw new Error('persistRef: too many distinct entries share one key');
+  },
+
+  async restoreRef(key) { return _browserRestore(key); },
+
+  async deleteRef(key) { return (await _idb()).deleteHandle(key); },
+
+  async findMoved(source, opts = {}) {
+    const src = normalizeSource(source);
+    const folderKey = opts.refKey ?? (src?.kind === 'folder' ? src.refKey : null);
+    const root = folderKey ? await _browserRestore(folderKey) : null;
+    if (!src || !root || root.kind !== 'directory' || !opts.contentHash) {
+      return { source: null, blob: null, scanned: 0 };
+    }
+    const hit = await walkForHash(BrowserStorageAdapter, root, {
+      contentHash: opts.contentHash,
+      ext: extOfName(src.path || src.label),
+      limit: opts.limit ?? FIND_MOVED_LIMIT,
+      onProgress: opts.onProgress,
+    });
+    return {
+      source: hit.path ? { kind: 'folder', refKey: folderKey, path: hit.path, label: src.label } : null,
+      blob: hit.blob,
+      scanned: hit.scanned,
+    };
+  },
 };
+
+export { ASSET_STATUS };
 
 /**
  * The active StorageAdapter for this runtime. Desktop (Node fs) is injected at boot

@@ -2935,6 +2935,26 @@ missing assigned textures.
 ### Asset Resolution Priority (locked — `_resolveAssetBlob`)
 Every asset has one resolution attempt on load. Walk top-down; first hit wins.
 
+**Adapter seam (task 4.2).** Live tiers go through
+`storage.resolveAsset(source,{contentHash})` → `{status, blob}`, status
+`embedded | linked | changed | missing` (UI: Embedded copy / Linked / Changed
+on disk / Missing). `source = {kind:'folder'|'file', refKey, path, label}`
+(`storage/AssetSource.js`); legacy `directoryHandleKey+originalPath` /
+`fileHandleKey` map onto it (`sourcesOf`). `resolveAsset` reads ONE source and
+never scans (Decision 3). `findMoved(source,{contentHash,onProgress,limit,refKey})`
+is the only hash walk and is user-invoked only. Refs: `persistRef(ref)` →
+stable key (`dir_`/`file_` + 32 hex); `restoreRef(key)` → re-validated session
+ref or null; `deleteRef(key)`. Browser: handles in IndexedDB `handles`; dir key
+= sha256(name + first sorted entry), file key = sha256(name + size +
+lastModified), `_n` suffix on collision. Desktop: key = sha256(normalised
+absolute path); `{kind, absolutePath, name}` lives in main-only
+`<userData>/mixo-refs.json` (NOT the renderer-readable KV); restore checks
+exists + kind + R_OK and mints a fresh token; relative reads cannot escape the
+folder; symlinks skipped. `caps.watchFiles=false` until `watchAsset` ships.
+TRANSITIONAL until 4.3/4.5: `resolveAssetBlob` still runs the folder hash scan
+(tier 2) and still uses live bytes when status is `changed`; returns
+`{blob, live, status}`. AssetResolver no longer touches FSA/idb directly.
+
 | # | Tier | Condition | Live? | Source |
 |---|---|---|---|---|
 | 1 | Live exact path | `directoryHandleKey` granted **and** file exists at `originalPath` | yes | file on disk |

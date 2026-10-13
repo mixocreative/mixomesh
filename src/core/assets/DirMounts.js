@@ -1,8 +1,9 @@
-// Mounted-directory opaque refs. Browser refs are File System Access handles and
-// can be restored from IndexedDB; desktop refs are main-process-only tokens and
-// are intentionally session-scoped. Kept across project switches (BLUEPRINT §14.2).
+// Mounted-directory opaque refs. Browser refs are File System Access handles,
+// desktop refs are main-process session tokens. Both are persisted through the
+// adapter (`persistRef` → STABLE key, Decision 10 / task 4.2) and restored with
+// `restoreRef`, so a mount key written into a project survives a restart on
+// either runtime. Kept across project switches (BLUEPRINT §14.2).
 
-import { putHandle, getHandle } from '../idb.js';
 import { storage } from '../storage/StorageAdapter.js';
 
 const _dirRefs = new Map();    // key → adapter-owned opaque ref (session)
@@ -15,25 +16,29 @@ const _dirRefs = new Map();    // key → adapter-owned opaque ref (session)
 export async function mountDirectory() {
   const mounted = await storage.mountDirectory();
   if (!mounted) return null;
-  const key = `dir_${mounted.name}_${Date.now()}`;
+  let key;
+  try {
+    key = await storage.persistRef(mounted.ref);
+  } catch (err) {
+    // Still usable this session; it just won't relink after a restart.
+    console.error(`Could not persist the mount for ${mounted.name}:`, err);
+    key = `session_dir_${Date.now()}`;
+  }
   _dirRefs.set(key, mounted.ref);
-  if (storage.kind === 'browser') await putHandle(key, mounted.ref);
   return { ref: mounted.ref, handle: mounted.ref, key, name: mounted.name };
 }
 
 /**
- * Restore a previously-mounted directory handle (requires re-grant of permission).
+ * Restore a previously-mounted directory by its stable key. The adapter
+ * re-validates (browser: permission re-grant; desktop: exists + readable).
  * @param {string} key
- * @returns {Promise<FileSystemDirectoryHandle|null>}
+ * @returns {Promise<any|null>} adapter-owned opaque ref, or null when missing
  */
 export async function restoreDirectory(key) {
-  if (storage.kind !== 'browser') return null;
-  const handle = await getHandle(key);
-  if (!handle) return null;
-  const granted = await handle.requestPermission({ mode: 'read' });
-  if (granted !== 'granted') return null;
-  _dirRefs.set(key, handle);
-  return handle;
+  const ref = await storage.restoreRef(key);
+  if (!ref) return null;
+  _dirRefs.set(key, ref);
+  return ref;
 }
 
 /** @param {string} key */

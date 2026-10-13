@@ -9,11 +9,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // Full filesystem tier on desktop (Node fs) — capabilities.js trusts this verbatim.
+  // watchFiles stays false until watchAsset is implemented (task 4.2).
   capabilities: {
     persistAssets: true,
     mountDirectory: true,
     relinkByPath: true,
-    watchFiles: true,
+    watchFiles: false,
     writeFiles: true,
   },
   // Cross-session KV (autosave / recent / settings) — JSON file in userData.
@@ -25,6 +26,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mountDirectory: () => ipcRenderer.invoke('dialog:mountDirectory'),
   listDirectory: (ref, parentPath) => ipcRenderer.invoke('fs:listDirectoryRef', ref, parentPath),
   readFileRef: (ref) => ipcRenderer.invoke('fs:readFileRef', ref),
+  // Persisted asset refs: stable keys (dir_/file_) ↔ session tokens; never paths.
+  persistRef: (ref) => ipcRenderer.invoke('refs:persist', ref),
+  restoreRef: (key) => ipcRenderer.invoke('refs:restore', key),
+  deleteRef: (key) => ipcRenderer.invoke('refs:delete', key),
+  readStoredFile: (key, relPath) => ipcRenderer.invoke('refs:read', key, relPath),
+  // Explicit "Find moved file" walk; onProgress({scanned}) while it runs.
+  findMoved: (args, onProgress) => {
+    const id = `fm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const listener = (_event, requestId, progress) => {
+      if (requestId === id && typeof onProgress === 'function') onProgress(progress);
+    };
+    ipcRenderer.on('refs:find-progress', listener);
+    return ipcRenderer.invoke('refs:findMoved', id, args)
+      .finally(() => ipcRenderer.removeListener('refs:find-progress', listener));
+  },
   // User-editable config files (materials.json): <userData>/config/<name>,
   // seeded from the shipped copy on first run. Returns { text, path } or { error }.
   readUserConfig: (name) => ipcRenderer.invoke('config:read', name),

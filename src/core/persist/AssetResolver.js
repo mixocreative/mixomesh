@@ -1,19 +1,17 @@
-// Tiered asset-byte resolution on load: live path → content-hash scan →
-// persisted single-file handle → embedded base64 → null (ghost).
+// Tiered asset-byte resolution on load. Every live tier goes through the active
+// StorageAdapter (`resolveAsset` / `restoreRef`, task 4.2) — no FSA or IndexedDB
+// calls here, so the same resolver serves the browser and the desktop runtime.
+// Order: folder source → (legacy) hash scan of that folder → single-file source
+//        → embedded base64 → null (ghost).
 
-import { getFileHandle } from '../idb.js';
+import { storage } from '../storage/StorageAdapter.js';
+import { ASSET_STATUS, fileHandleAtPath } from '../storage/AssetSource.js';
+import { directoryRefFacade } from '../assets/DirMounts.js';
 import { sha256Hex } from '../hash.js';
 import { bufFromB64, extOf } from './ProjectSerializer.js';
 import { SCAN_FILE_LIMIT } from './constants.js';
 
-export async function fileHandleAtPath(dirHandle, path) {
-  const parts = String(path).split(/[\\/]+/).filter(Boolean);
-  let dir = dirHandle;
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = await dir.getDirectoryHandle(parts[i]);
-  }
-  return dir.getFileHandle(parts[parts.length - 1]);
-}
+export { fileHandleAtPath };
 
 export async function scanDirForHash(dirHandle, hash, ext, budget = { n: 0 }) {
   for await (const [, h] of dirHandle.entries()) {
@@ -35,25 +33,49 @@ export async function scanDirForHash(dirHandle, hash, ext, budget = { n: 0 }) {
 }
 
 /**
- * Resolve an asset's bytes for load. Priority:
- *   1. Live file at originalPath inside a re-granted mounted directory.
- *   2. Live file found by content-hash scan of that directory (moved/renamed).
- *   3. Embedded base64 copy (static / unlinked).
- *   4. null → ghost.
- * @returns {Promise<{blob:Blob, live:boolean}|null>}
+ * The asset's link(s) as adapter `source` descriptors, highest priority first.
+ * Schema-3.4 `entry.source` wins; legacy `directoryHandleKey`+`originalPath`
+ * and `fileHandleKey` are mapped onto the same shape.
+ * @returns {Array<{kind:'folder'|'file', refKey:string, path:string, label:string}>}
  */
-export async function resolveAssetBlob(entry) {
-  if (entry.directoryHandleKey && entry.originalPath) {
+export function sourcesOf(entry) {
+  const label = entry?.filename ?? '';
+  if (entry?.source && typeof entry.source === 'object') return [entry.source];
+  const out = [];
+  if (entry?.directoryHandleKey && entry.originalPath) {
+    out.push({ kind: 'folder', refKey: entry.directoryHandleKey, path: entry.originalPath, label });
+  }
+  if (entry?.fileHandleKey) out.push({ kind: 'file', refKey: entry.fileHandleKey, path: label, label });
+  return out;
+}
+
+/**
+ * Resolve an asset's bytes for load. Priority:
+ *   1. Linked source (folder path, adapter `resolveAsset`).
+ *   2. Content-hash scan of that folder (legacy tier, see BLUEPRINT §11).
+ *   3. Linked single-file source.
+ *   4. Embedded base64 copy.
+ *   5. null → ghost.
+ * `status` uses the adapter words: 'linked' | 'changed' (live bytes differ from
+ * contentHash — still used, flagged) | 'missing' (a link existed but failed;
+ * embedded copy used) | 'embedded' (never linked).
+ * @param {object} entry  asset library entry
+ * @param {{adapter?:import('../storage/StorageAdapter.js').StorageAdapter}} [opts]
+ * @returns {Promise<{blob:Blob, live:boolean, status:string}|null>}
+ */
+export async function resolveAssetBlob(entry, { adapter = storage } = {}) {
+  const sources = sourcesOf(entry);
+  for (const source of sources) {
     try {
-      const dir = await getFileHandle(entry.directoryHandleKey);
-      if (dir && (await dir.requestPermission({ mode: 'read' })) === 'granted') {
-        try {
-          const fh = await fileHandleAtPath(dir, entry.originalPath);
-          if (fh) return { blob: await fh.getFile(), live: true };
-        } catch { /* path miss → hash fallback */ }
-        if (entry.contentHash) {
-          const f = await scanDirForHash(dir, entry.contentHash, entry.extension);
-          if (f) return { blob: f, live: true };
+      const r = await adapter.resolveAsset(source, { contentHash: entry.contentHash });
+      if (r?.blob && (r.status === ASSET_STATUS.LINKED || r.status === ASSET_STATUS.CHANGED)) {
+        return { blob: r.blob, live: true, status: r.status };
+      }
+      if (source.kind === 'folder' && entry.contentHash) {
+        const ref = await adapter.restoreRef(source.refKey);
+        if (ref) {
+          const f = await scanDirForHash(directoryRefFacade(adapter, ref), entry.contentHash, entry.extension);
+          if (f) return { blob: f, live: true, status: ASSET_STATUS.LINKED };
         }
       }
     } catch (err) {
@@ -62,21 +84,7 @@ export async function resolveAssetBlob(entry) {
       console.error(`Live resolve failed for ${entry.filename}:`, err);
     }
   }
-  // Loose drag-drop: no directory, but a persisted single-file handle. Lower
-  // priority than a mounted directory (a dir also gives the hash-rescan
-  // relink) but above the frozen embedded snapshot — a dragged file can stay
-  // live across reloads in the same browser profile.
-  if (entry.fileHandleKey) {
-    try {
-      const fh = await getFileHandle(entry.fileHandleKey);
-      if (fh && (await fh.requestPermission({ mode: 'read' })) === 'granted') {
-        return { blob: await fh.getFile(), live: true };
-      }
-    } catch (err) {
-      // Console-only by policy: falls through to the embedded snapshot.
-      console.error(`File-handle resolve failed for ${entry.filename}:`, err);
-    }
-  }
+  const fallbackStatus = sources.length ? ASSET_STATUS.MISSING : ASSET_STATUS.EMBEDDED;
   if (entry.fileData) {
     const bytes = bufFromB64(entry.fileData);
     // M5: the embedded copy must match the hash recorded at import. A mismatch
@@ -91,7 +99,7 @@ export async function resolveAssetBlob(entry) {
         return null;
       }
     }
-    return { blob: new Blob([bytes]), live: false };
+    return { blob: new Blob([bytes]), live: false, status: fallbackStatus };
   }
   return null;
 }
