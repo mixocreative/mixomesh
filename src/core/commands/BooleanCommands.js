@@ -28,15 +28,19 @@ export function _isMaterialTextured(mat) {   // exported for tests
     // NOT reflectionTexture: on PBR it is the scene environment cube map, not a
     // UV texture — counting it made every lit mesh "textured" (6.3 regression).
     'lightmapTexture',        // Both
-    'detailMap',              // Both
+    // detailMap / sheen / anisotropy / clearCoat are CONFIGURATION objects
+    // (always truthy) — checked via their .texture below, never by presence.
     'occlusionTexture',       // PBRMaterial
     'metallicTexture',        // PBRMaterial (when combined)
     'reflectanceTexture',     // PBRMaterial
-    'sheenTexture',           // PBRMaterial
-    'anisotropyTexture',      // PBRMaterial
+    'ambientTexture',         // StandardMaterial
+    'microSurfaceTexture',    // PBRMaterial
   ];
   for (const slot of textureSlots) {
     if (mat[slot]) return true;
+  }
+  for (const cfg of ['detailMap', 'sheen', 'anisotropy', 'clearCoat']) {
+    if (mat[cfg]?.texture) return true;
   }
   return false;
 }

@@ -74,6 +74,8 @@ test('6.3: every UV texture slot counts as textured; the environment reflection 
   assert.equal(_isMaterialTextured({ albedoTexture: tex }), true);
   assert.equal(_isMaterialTextured({ reflectionTexture: tex }), false, 'PBR env reflection map is NOT a UV texture');
   assert.equal(_isMaterialTextured({}), false);
+  assert.equal(_isMaterialTextured({ detailMap: { isEnabled: false, texture: null } }), false, 'an empty detail-map CONFIG object is not a texture');
+  assert.equal(_isMaterialTextured({ clearCoat: { texture: tex } }), true, 'config-held texture counts');
   assert.equal(_isMaterialTextured(null), false);
 });
 

@@ -17,6 +17,21 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  // Pre-bundle the Babylon deep imports used only by the OBJ parse worker /
+  // lazy export paths. Discovered late, Vite re-optimises and FULL-RELOADS the
+  // page mid-session ("optimized dependencies changed. reloading") — that was
+  // the intermittent "Inspected target navigated or closed" in the export
+  // smoke, and would drop a dev user's unsaved scene the same way.
+  optimizeDeps: {
+    include: [
+      '@babylonjs/core/Buffers/buffer.js',
+      '@babylonjs/core/Engines/nullEngine.js',
+      '@babylonjs/core/Loading/sceneLoader.js',
+      '@babylonjs/core/Misc/tools.js',
+      '@babylonjs/core/scene.js',
+      '@babylonjs/loaders/OBJ/index.js',
+    ],
+  },
   preview: {
     host: '127.0.0.1',
     port: 4173,
