@@ -1338,6 +1338,7 @@ Ctrl+S          → save
 Ctrl+Shift+S    → save as
 Ctrl+N          → new project (confirm if dirty)
 Ctrl+O          → open
+Ctrl+I          → import model (same picker as context menu ▸ Import)
 
 Ctrl+Shift+1    → workspace: Layout     (see PART 13b — Ctrl+digit is Chrome-reserved)
 Ctrl+Shift+2    → workspace: Shade
@@ -1356,6 +1357,9 @@ Shortcut suppression applies to every global and viewport shortcut while focus
 is inside an `<input>`, `<textarea>`, `<select>`, or `contentEditable` element,
 except `Escape`. Panel dropdowns and inline editors therefore cannot leak
 transform, delete, or panel-collapse commands while the user is editing.
+Viewport shortcuts fire when focus is on `body`, the canvas, or inside the
+Outliner (`InputManager.__test.isViewportKeyTarget`); body focus under an open
+`.modal-overlay` does not count.
 
 **Viewport:**
 ```
@@ -1368,9 +1372,12 @@ Enter / LMB    → confirm op
 A              → select all (toggle: all → none if all already selected)
 Alt+A          → deselect all
 LMB drag empty → box select (drag marquee); Shift+drag = additive (see Mouse)
-Shift+LMB      → add/remove from selection
+Shift+LMB      → add to selection; Ctrl+LMB → toggle (same in viewport and Outliner)
 
 F              → frame selected
+Home           → frame all
+F2             → rename active (inline, in the Outliner)
+L              → lock / unlock selection
 Numpad 0       → restore perspective camera
 Numpad 1       → front ortho;   Ctrl+Numpad 1 → back
 Numpad 3       → right ortho;   Ctrl+Numpad 3 → left
@@ -1385,7 +1392,6 @@ Ctrl+G         → group
 Ctrl+Shift+G   → ungroup
 Shift+D        → duplicate
 Delete / X     → delete (confirm)
-Tab            → cycle active panel
 ~              → toggle gizmo space (world/local)
 . (period)     → cycle pivot mode (world → median → active → individual → cursor)
 ```

@@ -200,7 +200,6 @@ function _objectItems(info, selIds) {
       { label: t('context.selectParent'), shortcut: '', action: 'select-parent', iconName: 'GitBranch', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.selectSiblings'), shortcut: '', action: 'select-siblings', iconName: 'Boxes', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.selectImportMembers'), shortcut: '', action: 'select-import', iconName: 'Package', cls: objs[info.targetId]?.collectionId ? '' : 'cm-disabled' },
-      { label: t('context.unparent'), shortcut: '', action: 'unparent', iconName: 'GitBranch', cls: objs[info.targetId]?.parentId ? '' : 'cm-disabled' },
       { label: t('context.revealOutliner'), shortcut: '', action: 'reveal-outliner', iconName: 'LocateFixed', cls: '' },
       'sep',
     ] : []),

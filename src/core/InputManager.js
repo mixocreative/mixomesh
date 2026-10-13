@@ -2,8 +2,7 @@ import { undo, redo, push, TransformCommand, VisibilityCommand, LockCommand, Del
 import { SceneManager, setCameraPreset } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
-import { getState, dispatch } from './StateManager.js';
-import { EVENTS } from './events.js';
+import { getState } from './StateManager.js';
 import { logicalObjectCommandIds } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
@@ -52,6 +51,21 @@ function _isTypingTarget(el) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
 
+/**
+ * True when focus is somewhere viewport shortcuts should fire: nothing / body,
+ * the 3D canvas, or the Outliner (rows are focusable). Text-entry elements are
+ * always excluded, including the Outliner's rename and search inputs.
+ */
+function _isViewportKeyTarget(el) {
+  if (_isTypingTarget(el)) return false;
+  if (!el || el === document.body || el === document.documentElement) {
+    // An open modal owns the keyboard even when focus has fallen back to body.
+    return !document.querySelector?.('.modal-overlay:not(.hidden)');
+  }
+  if (el === _canvas) return true;
+  return !!el.closest?.('#outliner');
+}
+
 // ── Dispatcher ───────────────────────────────────────────
 
 function _handleKeyDown(e) {
@@ -65,7 +79,8 @@ function _handleKeyDown(e) {
   if (e.key === 'Escape' && BoxSelect.isActive()) { BoxSelect.cancel(); e.preventDefault(); return; }
 
   const key = _buildKey(e);
-  const fn  = _handlers.get(`${key}::${_currentContext}`) ?? _handlers.get(`${key}::global`);
+  const ctx = _isViewportKeyTarget(document.activeElement) ? 'viewport' : _currentContext;
+  const fn  = _handlers.get(`${key}::${ctx}`) ?? _handlers.get(`${key}::global`);
   if (fn) { e.preventDefault(); fn(e); }
 }
 
@@ -197,9 +212,15 @@ function _onSelectionPointerDown(info) {
   // pickMeshIdAt's predicate now ignores everything without a meshId chain.
   const id = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
 
-  // Shift-click is a multi-select gesture — toggle and skip drag.
-  if (ev.shiftKey) {
+  // Modifier clicks (same contract as the Outliner): Shift = add to the
+  // selection, Ctrl/Cmd = toggle. Both skip the body drag.
+  if (ev.ctrlKey || ev.metaKey) {
     if (id) Selection.toggle(id);
+    else    BoxSelect.begin(_scene.pointerX, _scene.pointerY, true);  // Ctrl-drag empty → additive marquee
+    return;
+  }
+  if (ev.shiftKey) {
+    if (id) Selection.add(id);
     else    BoxSelect.begin(_scene.pointerX, _scene.pointerY, true);  // Shift-drag empty → additive marquee
     return;
   }
@@ -793,25 +814,29 @@ function _toggleGizmoSpace() {
   SceneManager.setGizmoSpace(cur === 'world' ? 'local' : 'world');
 }
 
-function _cyclePanels() {
-  const panels = ['properties', 'shader', 'print'];
-  const cur = getState().ui.activePanel ?? 'properties';
-  const next = panels[(panels.indexOf(cur) + 1) % panels.length];
-  dispatch(EVENTS.UI_PANEL_CHANGED, { panel: next });
+// Ctrl+I — Import model (same picker as the context menu / header Import).
+// Dynamic import: ViewportDrop pulls in the asset pipeline, keep this module light.
+function _importModel() {
+  import('../ui/ViewportDrop.js')
+    .then(m => m.ViewportDrop.promptImport())
+    .catch(err => Toast.show(`${t('toast.operationFailed')}: ${err?.message ?? err}`, 'error'));
 }
 
-const _noop = () => {};
+// F2 — inline-rename the active object/group in the Outliner. Dynamic import:
+// the Outliner imports this module's neighbours, so a static edge would cycle.
+function _renameActive() {
+  if (!Selection.getActiveId()) return;
+  import('../ui/Outliner.js').then(m => m.renameActive?.());
+}
 
 function _registerAll() {
   // ── Global ─────────────────────────
   register('Ctrl+Z',       'global', () => undo());
   register('Ctrl+Shift+Z', 'global', () => redo());
   register('Ctrl+Y',       'global', () => redo());
+  register('Ctrl+I',       'global', _importModel);
 
-  register('Ctrl+S',       'global', _noop);
-  register('Ctrl+Shift+S', 'global', _noop);
-  register('Ctrl+N',       'global', _noop);
-  register('Ctrl+O',       'global', _noop);
+  // Save / Save As / New / Open are registered by src/app/main.ts.
 
   // ── Viewport: transforms ──────────
   register('G', 'viewport', () => _enterModal('translate'));
@@ -821,9 +846,12 @@ function _registerAll() {
   // ── Viewport: selection ───────────
   register('A',     'viewport', () => Selection.selectAll());
   register('Alt+A', 'viewport', () => Selection.clear());
+  register('F2',     'viewport', _renameActive);
+  register('L',      'viewport', _lockToggleSelected);
 
   // ── Viewport: framing ─────────────
   register('F', 'viewport', _frameSelection);
+  register('Home', 'viewport', () => SceneManager.frameAll());
 
   // ── Viewport: camera numpad ───────
   register('Numpad0',      'viewport', () => setCameraPreset('perspective'));
@@ -856,10 +884,19 @@ function _registerAll() {
   register('X',            'viewport', _deleteSelected);
 
   // ── Viewport: misc ────────────────
-  register('Tab', 'viewport', _cyclePanels);
   register('`',   'viewport', _toggleGizmoSpace);  // `~` shares key with backtick
   register('~',   'viewport', _toggleGizmoSpace);
   register('.',   'viewport', () => Selection.cyclePivotMode());
 }
 
-export const InputManager = { init, register, unregister, setContext, setContextMenuHandler, setViewportToolHandler };
+export const InputManager = {
+  init, register, unregister, setContext, setContextMenuHandler, setViewportToolHandler,
+  // Test seam (tests/safety-commands.test.mjs) — not part of the app API.
+  __test: {
+    isViewportKeyTarget: _isViewportKeyTarget,
+    registerAll: _registerAll,
+    hasHandler: (shortcut, context) => _handlers.has(`${shortcut}::${context}`),
+    clearHandlers: () => _handlers.clear(),
+    setCanvas: (c) => { _canvas = c; },
+  },
+};

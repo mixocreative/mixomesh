@@ -529,6 +529,17 @@ export function reveal(objectId) {
   });
 }
 
+/** Inline-rename the active object's row (F2 from anywhere in the viewport/outliner). */
+export function renameActive() {
+  const id = getState().selection.activeId;
+  if (!id || !_listEl) return false;
+  reveal(id);   // expand collapsed ancestors so the row exists
+  const row = _listEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (!row || row.dataset.kind === 'part' || row.querySelector('.ol-rename-input')) return false;
+  _beginRename(row, id, row.dataset.kind);
+  return true;
+}
+
 function _rowFromEvent(e) {
   const row = e.target.closest?.('.ol-row');
   return row && _listEl.contains(row) ? row : null;
@@ -693,6 +704,7 @@ function _onListKeyDown(e) {
     _activateRow(row, e);
   } else if (e.key === 'F2') {
     e.preventDefault();
+    e.stopPropagation();   // handled here; keep the global F2 binding from firing a second rename
     _beginRename(row, row.dataset.id, row.dataset.kind);
   } else if (row.dataset.hasChildren === 'true' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();

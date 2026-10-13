@@ -187,6 +187,41 @@ await test('M14: ShaderDuplicateCommand redo reuses the id minted on first execu
   assert.ok(getState().scene.shaders[firstId], 'shader lives under the original id');
 });
 
+// ── 0.3 input hygiene ────────────────────────────────────────────────────
+
+await test('0.3: viewport shortcuts fire on body/canvas/Outliner, never in text inputs', async () => {
+  const { InputManager } = await import('../src/core/InputManager.js');
+  const T = InputManager.__test;
+  const canvas = { tagName: 'CANVAS' };
+  T.setCanvas(canvas);
+  const inOutliner = { tagName: 'DIV', closest: (sel) => (sel === '#outliner' ? {} : null) };
+  const outside = { tagName: 'DIV', closest: () => null };
+  const input = { tagName: 'INPUT', closest: (sel) => (sel === '#outliner' ? {} : null) };
+  assert.equal(T.isViewportKeyTarget(null), true);
+  assert.equal(T.isViewportKeyTarget(document.body), true);
+  assert.equal(T.isViewportKeyTarget(canvas), true);
+  assert.equal(T.isViewportKeyTarget(inOutliner), true, 'Outliner focus must not swallow shortcuts');
+  assert.equal(T.isViewportKeyTarget(outside), false);
+  assert.equal(T.isViewportKeyTarget(input), false, 'rename/search inputs inside the Outliner stay excluded');
+  assert.equal(T.isViewportKeyTarget({ tagName: 'TEXTAREA' }), false);
+  assert.equal(T.isViewportKeyTarget({ tagName: 'SELECT' }), false);
+  assert.equal(T.isViewportKeyTarget({ tagName: 'DIV', isContentEditable: true }), false);
+});
+
+await test('0.3: Tab unbound; F2/Ctrl+I/Home/L registered; Ctrl+S/N/O stubs gone', async () => {
+  const { InputManager } = await import('../src/core/InputManager.js');
+  const T = InputManager.__test;
+  T.clearHandlers();
+  T.registerAll();
+  assert.equal(T.hasHandler('Tab', 'viewport'), false);
+  for (const k of ['F2', 'Home', 'L']) assert.equal(T.hasHandler(k, 'viewport'), true, k);
+  assert.equal(T.hasHandler('Ctrl+I', 'global'), true, 'Ctrl+I = Import model (global)');
+  for (const k of ['Ctrl+S', 'Ctrl+Shift+S', 'Ctrl+N', 'Ctrl+O']) {
+    assert.equal(T.hasHandler(k, 'global'), false, `${k} stub must be gone (main.ts owns it)`);
+  }
+  assert.equal(T.hasHandler('Ctrl+Z', 'global'), true);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
