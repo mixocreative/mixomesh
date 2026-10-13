@@ -136,8 +136,8 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 4.9 Dead code + registry growth | sonnet | done f1ae2fd | |
 | 4.10 Blueprint §11 pass + ADR addendum | haiku | done ab577a9 | main corrected 2 invented ADR claims |
 
-### Phase 5 (10): 5.8 done 30ef0bc, 5.9 done 73168df, 5.4 toasts done 80e48d3 (Scene Advanced part gated); 5.6 done daedf6e (+smoke c17f482); 5.1-5.3, 5.5, 5.7 gated; 5.10 haiku last
-### Phase 6 (13): 6.3 done 73168df (+fix e5c291b, 0c4eb6a), 6.5 done ff04eb9, 6.6a-d done ae96ca6 (found+fixed CreateGroup bug); 6.1+6.2 done 8b40509 (CSP; all 4 browser smokes + electron security probe green), 6.4 done d45da4a, 6.6e-g done d2b04de, 6.7 haiku todo (last)
+### Phase 5 (10): 5.8 done 30ef0bc, 5.9 done 73168df, 5.4 toasts done 80e48d3 (Scene Advanced part gated); 5.6 done daedf6e (+smoke c17f482); 5.1-5.3, 5.5, 5.7 gated; 5.10 done 5c1ec77
+### Phase 6 (13): 6.3 done 73168df (+fix e5c291b, 0c4eb6a), 6.5 done ff04eb9, 6.6a-d done ae96ca6 (found+fixed CreateGroup bug); 6.1+6.2 done 8b40509 (CSP; all 4 browser smokes + electron security probe green), 6.4 done d45da4a, 6.6e-g done d2b04de, 6.7 done 5c1ec77 (BUILDLOG entry rewritten by main — agent's draft misattributed tasks)
 
 ### Phases 5–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
@@ -184,3 +184,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 4.9 f1ae2fd, 6.6e-g d2b04de, 4.8+3.7 c409f3d (worktree 268/268 + browser/export smokes). Running: 6.1+6.2 (opus), 6.4, 5.6 (opus), 5.4 toasts. Remaining after: 4.10, 5.10, 6.7 Blueprint passes; then ONLY mockup-gated tasks remain (need owner Stitch OK).
 - 2026-10-14 (cont.) — 5.4 80e48d3, 6.4 d45da4a, 4.10 ab577a9, 6.1+6.2 8b40509 (worktree: unit 269, browser/export/repair/group smokes, build, electron smoke incl. security probe — all green). Running: 5.6. Then 5.10 + 6.7 Blueprint passes → only mockup-gated tasks remain.
 - 2026-10-14 (cont.) — 5.6 daedf6e + smoke c17f482; full tree green (unit 286, browser/export/repair/group, build, electron). Running: 5.10+6.7 Blueprint/BUILDLOG passes. After that ALL UNGATED WORK IS DONE — remaining = mockup-gated list above (needs owner).
+- 2026-10-14 (cont.) — 5.10 + 6.7 5c1ec77. **ALL UNGATED TASKS DONE.** Remaining = MOCKUP-GATED list (Owner queue). BLOCKED on owner: Stitch project binding + first fixture upload (Decision 30). On OK: capture prod build (docs/design/stitch-capture.md), generate one mockup set per gated screen group, owner approves, then implement (opus/sonnet per plan tiers).
