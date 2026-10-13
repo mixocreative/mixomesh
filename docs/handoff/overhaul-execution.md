@@ -63,24 +63,45 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 ### Phase 0 — Safety net + quick wins (14)
 | Task | Tier | Status | Notes |
 |---|---|---|---|
-| 0.1 Terminology pass | sonnet | doing | batch B agent |
+| 0.1 Terminology pass | sonnet | done 6dbdb78 | bundled w/ 0.9 (shared locales); UV rot field now degrees |
 | 0.2 Write hardening + persistent storage | sonnet | done 16e169a | bundled w/ 0.8+0.10 (shared files) |
 | 0.3 Input hygiene | sonnet | done 6d66b10 | Ctrl+I = Import (plan row 11), not invert-select |
 | 0.4 Electron reload/crash guard | sonnet | done a3da60f | `npm run test:electron` not yet run (needs build) — run at phase close |
-| 0.5 Load-path integrity | sonnet | doing | batch B agent |
+| 0.5 Load-path integrity | sonnet | done 7efeb91 | |
 | 0.6 Readiness strip every Print tab | sonnet | gated | Mockup gate |
 | 0.7 Arrange rename + toolbar button | sonnet | gated | Mockup gate |
 | 0.8 Texture capture failure surfaced | sonnet | done 16e169a | |
-| 0.9 Undo/Redo buttons + reset-all confirm | haiku | doing | batch B agent; smoke snippet pasted by main |
+| 0.9 Undo/Redo buttons + reset-all confirm | haiku | done 6dbdb78 | smoke: Undo button reverts Duplicate |
 | 0.10 Case-insensitive texture export names | sonnet | done 16e169a | |
-| 0.11 Autosave reachable, keyed by id | opus | todo | after 0.5 + 0.9 (shares PersistenceManager/ProjectMenu) |
-| 0.12 Shader → Material strings | haiku | todo | after 0.1 (locales) |
+| 0.11 Autosave reachable, keyed by id | opus | done b84bece | also fixed: loader deleted autosave via raw IDB (missed Electron kv) |
+| 0.12 Shader → Material strings | haiku | doing | batch C |
 | 0.13a DESIGN.md | opus | done 2b4edff | stitch designMd.valid=true |
-| 0.13b Stitch gitignore + capture recipe + hygiene test | haiku | done 2b4edff | trial capture pending |
+| 0.13b Stitch gitignore + capture recipe + hygiene test | haiku | done 2b4edff | trial capture OK (scratchpad, git clean) |
 
-### Phases 1–6
+### Phase 1 — Printer strategy, export flow, scale model (18)
+| Task | Tier | Status | Notes |
+|---|---|---|---|
+| 1.1 printers.json v2 + loader (+AGENTS rule 6) | sonnet | doing | batch C |
+| 1.2 Printer tab | sonnet | gated | Mockup gate; deps 1.1 |
+| 1.3 Export flow + settings scope (+ApplyPrinterProfileCommand) | opus | gated | Mockup gate; deps 1.1/1.15/1.16/1.17 |
+| 1.4 Per-printer readiness hints | sonnet | todo | after 1.6 (PrintReadiness) + 0.12 (locales) |
+| 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | todo | deps 1.1; ThreeMFWriter + PrintPipeline |
+| 1.6 PLY + WRL writers | opus | doing | batch C |
+| 1.7 OBJ through PrintSpace w/ per-printer axis | opus | todo | deps 1.1 |
+| 1.8 Gate tightening | sonnet | todo | PrintPipeline/PrintPanel — after 1.5/1.6 |
+| 1.9 Texture colour-space check | sonnet | doing | batch C |
+| 1.10 Dead export/scale code removal | sonnet | todo | deps 1.1 |
+| 1.11 Bambu/Orca 3MF flavour | opus | todo | after 1.5 (ThreeMFWriter) |
+| 1.12 Blueprint §12 consistency pass | haiku | todo | last in phase |
+| 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
+| 1.14 Rescale about own origin | sonnet | doing | batch C |
+| 1.15 Explicit export reference + mixed-scale note | opus | todo | ExportContext |
+| 1.16 Effective scale | sonnet | todo | logic part; UI line waits on 1.13 mockup |
+| 1.17 Typed print sizes + filename tokens | opus | todo | after 1.15 (ExportContext) |
+| 1.18 Per-target cost lines | sonnet | todo | after 1.17 |
+
+### Phases 2–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
-- Phase 1 — Printer strategy, export flow, scale model (18) — todo
 - Phase 2 — Hierarchy core (7) — todo
 - Phase 3 — Hierarchy UI (7) — todo
 - Phase 4 — Asset model + name clashes (10) — todo
@@ -97,3 +118,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 — Plan authored (Fable), audited twice (Sonnet), committed `421b8be`; all decisions accepted;
   this handoff created. Next: Phase 0, start with 0.13a/0.13b + ungated 0.1–0.5, 0.8–0.12.
 - 2026-10-14 (cont.) — Phase 0 batch A landed: 0.13a/b 2b4edff, 0.3 6d66b10, 0.4 a3da60f, 0.2+0.8+0.10 16e169a (all checks + browser/export smokes green). Batch B (0.1, 0.5, 0.9) dispatched; then 0.11 (opus, main), 0.12.
+- 2026-10-14 (cont.) — Phase 0 ungated DONE: 0.5 7efeb91, 0.1+0.9 6dbdb78, 0.11 b84bece. Remaining Phase 0: 0.12 (batch C), gated 0.6/0.7. Batch C dispatched: 0.12, 1.1, 1.6 (opus agent), 1.9, 1.14. `npm run test:electron` still to run (0.4/0.11) at Phase 0/1 close.
