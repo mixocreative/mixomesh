@@ -91,17 +91,28 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.7 OBJ through PrintSpace w/ per-printer axis | opus | done ba786e6 | Y-up identical to old OBJExport; owner eyeball in Mimaki tool |
 | 1.8 Gate tightening | sonnet | todo | PrintPipeline/PrintPanel — after 1.5/1.6 |
 | 1.9 Texture colour-space check | sonnet | done fc71135 | conversion export-readback only (capture raw) |
-| 1.10 Dead export/scale code removal | sonnet | doing | batch E |
-| 1.11 Bambu/Orca 3MF flavour | opus | doing | batch E |
+| 1.10 Dead export/scale code removal | sonnet | done 498f444 | dead keys also stripped from old .mixo on load |
+| 1.11 Bambu/Orca 3MF flavour | opus | done 8446ac3 | owner eyeball checklist (Bambu Studio/Orca) before `verified` |
 | 1.12 Blueprint §12 consistency pass | haiku | todo | last in phase |
 | 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
 | 1.14 Rescale about own origin | sonnet | done e7fed24 | |
 | 1.15 Explicit export reference + mixed-scale note | opus | done 1d7864f | UI row lands in 1.3 |
 | 1.16 Effective scale | sonnet | done f4c8d88 | logic; Properties line waits on 1.13 mockup |
-| 1.17 Typed print sizes + filename tokens | opus | todo | after 1.15 (ExportContext) |
+| 1.17 Typed print sizes + filename tokens | opus | doing | opus agent |
 | 1.18 Per-target cost lines | sonnet | todo | after 1.17 |
 
-### Phases 2–6
+### Phase 2 — Hierarchy core (7)
+| Task | Tier | Status | Notes |
+|---|---|---|---|
+| 2.1 Selection accepts group ids | opus | done d7843e5 | |
+| 2.2 Pivot attaches group nodes rigidly | opus | doing | opus agent |
+| 2.3 Group creation semantics + persistence | sonnet | todo | after 1.17 (ProjectLoader/Serializer) |
+| 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | todo | after 2.2 (InputManager) + 2.7 (HierarchyCommands) |
+| 2.5 Lock enforcement | sonnet | todo | after 2.2/2.4 |
+| 2.6 Logical-object edge cases | sonnet | todo | after 2.3/2.7 (ParentCommands, MeshValidator) |
+| 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | doing | |
+
+### Phases 3–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
 - Phase 2 — Hierarchy core (7) — todo
 - Phase 3 — Hierarchy UI (7) — todo
@@ -125,3 +136,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — Phase 0 ungated DONE: 0.5 7efeb91, 0.1+0.9 6dbdb78, 0.11 b84bece. Remaining Phase 0: 0.12 (batch C), gated 0.6/0.7. Batch C dispatched: 0.12, 1.1, 1.6 (opus agent), 1.9, 1.14. 
 - 2026-10-14 (cont.) — 1.1 2e47d4c, 1.9 fc71135, 1.14 e7fed24, 1.6+0.12 5c5a24c, 1.15 1d7864f. Phase 0 ungated complete. Batch D running: 1.4, 1.5 (opus), 1.7 (opus), 1.16. Then 1.10, 1.8, 1.11, 1.17, 1.18, 1.12.
 - 2026-10-14 (cont.) — 1.16 f4c8d88, 1.4 4aabce3, 1.7 ba786e6 (amended: 1.5 tests had leaked in), 1.5 8bdfaca. Full tree green incl. browser/export/ELECTRON smokes. Pending follow-up for 1.3: ExportContext._capturePrefs must carry objAxis + splitByMaterial (+exportFormat, threeMFFlavour). Batch E: 1.10, 1.11. Then 1.8, 1.17, 1.18, 1.12.
+- 2026-10-14 (cont.) — 1.10 498f444, 1.11 8446ac3, 2.1 d7843e5 (worktree green 170/170). Running: 1.17 (opus), 2.2 (opus), 2.7. Next: 1.8, 1.18, 1.12; 2.3-2.6 sequenced per table.
