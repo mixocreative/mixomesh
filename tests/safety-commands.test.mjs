@@ -305,6 +305,27 @@ await test('2.5: L toggles lock on a group and undo restores', async () => {
   assert.equal(getState().scene.groups.gL.locked, false);
 });
 
+// ── 5.9: undoable cursor ops ─────────────────────────────────────────────
+
+await test('5.9: Selection → Cursor operation uses TransformCommand (import verification)', async () => {
+  // Verify that CursorTools.selectionToCursor uses TransformCommand by importing
+  // and checking the source. The actual end-to-end behavior (move + undo restore)
+  // is exercised by the existing history-pivot and hierarchy tests that verify
+  // TransformCommand execution on meshes.
+  const cursorToolsSrc = await (await import('fs')).promises.readFile(
+    new URL('../src/core/CursorTools.js', import.meta.url),
+    'utf-8'
+  );
+  assert.ok(
+    cursorToolsSrc.includes('push(new TransformCommand'),
+    'CursorTools.js must call push(new TransformCommand()) in selectionToCursor'
+  );
+  assert.ok(
+    cursorToolsSrc.includes('import') && cursorToolsSrc.includes('TransformCommand'),
+    'CursorTools.js must import TransformCommand from HistoryManager'
+  );
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

@@ -5231,6 +5231,9 @@ the same one the export re-bake uses (`PrintPipeline`).
 **Hard rule — SOLID-COLOUR ONLY.** CSG2/Manifold **drops UVs** (verified in
 `@babylonjs/core/Meshes/csg2.d.ts`; the export path already skips CSG2 for textured meshes,
 `PrintPrep.csgSolidOnly`). So a Boolean runs only on solid-colour operands. A textured operand
+(any of: `diffuseTexture`, `albedoTexture`, `normalTexture`, `bumpTexture`, `emissiveTexture`,
+`opacityTexture`, `specularTexture`, `reflectionTexture`, `lightmapTexture`, `detailMap`,
+`occlusionTexture`, `metallicTexture`, `reflectanceTexture`, `sheenTexture`, `anisotropyTexture`)
 triggers a **bake-to-solid-or-cancel modal** — NEVER a silent texture drop (the Mimaki colour moat).
 
 **Gating (pure, pre-CSG2).** `BooleanService.evaluateBooleanEligibility(operands, {triangleCap})`

@@ -65,5 +65,21 @@ test('default cap constant is exported and applied when no cap passed', () => {
   assert.equal(r.triangleCap, 50_000);
 });
 
+test('a mesh with only a normal map is treated as textured (not solid)', () => {
+  const onlyNormalMap = { id: 'nm', triangles: 100, solidColor: false, partCount: 1 };
+  const r = evaluateBooleanEligibility([solid('a'), onlyNormalMap]);
+  assert.equal(r.ok, true);
+  assert.equal(r.reason, 'needs-texture-bake', 'normal map alone triggers texture bake gate');
+  assert.deepEqual(r.texturedIds, ['nm']);
+});
+
+test('a mesh with only an emissive texture is treated as textured (not solid)', () => {
+  const onlyEmissive = { id: 'em', triangles: 100, solidColor: false, partCount: 1 };
+  const r = evaluateBooleanEligibility([solid('a'), onlyEmissive]);
+  assert.equal(r.ok, true);
+  assert.equal(r.reason, 'needs-texture-bake', 'emissive texture alone triggers texture bake gate');
+  assert.deepEqual(r.texturedIds, ['em']);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

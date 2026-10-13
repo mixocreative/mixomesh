@@ -13,14 +13,41 @@ import { evaluateBooleanEligibility, computeBoolean } from '../BooleanService.js
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 
+function _isMaterialTextured(mat) {
+  if (!mat) return false;
+  // Check all texture slots on StandardMaterial and PBRMaterial that Babylon exposes.
+  // A material is textured if ANY of these slots has a texture.
+  const textureSlots = [
+    'diffuseTexture',         // StandardMaterial
+    'albedoTexture',          // PBRMaterial
+    'normalTexture',          // PBRMaterial (bump equivalent)
+    'bumpTexture',            // StandardMaterial
+    'emissiveTexture',        // Both
+    'opacityTexture',         // StandardMaterial
+    'specularTexture',        // StandardMaterial
+    'reflectionTexture',      // StandardMaterial
+    'lightmapTexture',        // Both
+    'detailMap',              // Both
+    'occlusionTexture',       // PBRMaterial
+    'metallicTexture',        // PBRMaterial (when combined)
+    'reflectanceTexture',     // PBRMaterial
+    'sheenTexture',           // PBRMaterial
+    'anisotropyTexture',      // PBRMaterial
+  ];
+  for (const slot of textureSlots) {
+    if (mat[slot]) return true;
+  }
+  return false;
+}
+
 function _operandDescriptor(id, objects) {
   const m = AssetLoader.getBabylonMesh(id);
-  // Solid-colour = no base texture on the live material. CSG2/Manifold DROPS UVs
+  // Solid-colour = no texture on the live material. CSG2/Manifold DROPS UVs
   // (ADR 0002), so a textured operand must NOT silently combine — eligibility
   // returns `needs-texture-bake` and performBoolean blocks (moat protection). A
   // future bake-or-cancel modal lets the user consciously downgrade to solid.
   const mat = m?.material;
-  const solidColor = !(mat && (mat.diffuseTexture || mat.albedoTexture || mat.emissiveTexture));
+  const solidColor = !_isMaterialTextured(mat);
   return {
     id,
     triangles: m ? Math.floor((m.getTotalIndices?.() ?? 0) / 3) : 0,

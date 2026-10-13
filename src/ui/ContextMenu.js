@@ -1,8 +1,7 @@
 import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { CursorTools } from '../core/CursorTools.js';
-import { getState, setState, dispatch } from '../core/StateManager.js';
-import { EVENTS } from '../core/events.js';
+import { getState } from '../core/StateManager.js';
 import { push, VisibilityCommand, LockCommand, RenameCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand, UnparentCommand, SmartReplaceCommand, TransformSwabCommand, AlignCommand, MirrorCommand, ArrayCommand, MateCommand, BedPlacementCommand, SplitToPartsCommand, JoinCommand, performBoolean } from '../core/HistoryManager.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
@@ -149,9 +148,6 @@ function _buildItems(info) {
   if (info.targetKind === 'collection' && info.targetId) {
     return [
       { label: t('context.selectMembers'),     shortcut: '',  action: 'col-select', iconName: 'Box',      cls: '' },
-      { label: t('context.renameCollection'), shortcut: '',  action: 'col-rename', iconName: 'Edit3',    cls: '' },
-      'sep',
-      { label: t('context.deleteCollection'),  shortcut: '',  action: 'col-delete', iconName: 'Trash2',   cls: 'cm-danger' },
     ];
   }
 
@@ -316,8 +312,6 @@ function _runAction(action, info) {
   }
   if (action === 'relink')     _relink(info.targetId);
   if (action === 'col-select') _selectCollectionMembers(info.targetId);
-  if (action === 'col-rename') _renameCollection(info.targetId);
-  if (action === 'col-delete') _deleteCollection(info.targetId);
   if (action === 'group-select') _selectGroupMembers(info.targetId);
   if (action === 'select-parent') _selectParent(info.targetId, info.targetKind);
   if (action === 'select-siblings') _selectSiblings(info.targetId);
@@ -575,41 +569,6 @@ function _selectCollectionMembers(collectionId) {
     .filter(o => o.collectionId === collectionId)
     .map(o => o.id);
   if (ids.length) Selection.set(ids, ids[ids.length - 1]);
-}
-
-function _renameCollection(collectionId) {
-  const col = getState().scene.collections?.[collectionId];
-  if (!col) return;
-  const next = window.prompt('Rename collection to:', col.name);
-  if (next == null) return;
-  const trimmed = next.trim();
-  if (!trimmed || trimmed === col.name) return;
-  setState(s => ({
-    ...s,
-    scene: {
-      ...s.scene,
-      collections: { ...s.scene.collections, [collectionId]: { ...col, name: trimmed } },
-    },
-  }));
-  dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name: trimmed });
-}
-
-function _deleteCollection(collectionId) {
-  const col = getState().scene.collections?.[collectionId];
-  if (!col) return;
-  const memberCount = Object.values(getState().scene.objects).filter(o => o.collectionId === collectionId).length;
-  if (memberCount > 0 && !window.confirm(`Delete collection "${col.name}"? Its ${memberCount} member${memberCount === 1 ? '' : 's'} will become uncollected.`)) return;
-
-  setState(s => {
-    const nextObjects = { ...s.scene.objects };
-    for (const [id, obj] of Object.entries(nextObjects)) {
-      if (obj.collectionId === collectionId) nextObjects[id] = { ...obj, collectionId: null };
-    }
-    const nextCols = { ...s.scene.collections };
-    delete nextCols[collectionId];
-    return { ...s, scene: { ...s.scene, objects: nextObjects, collections: nextCols } };
-  });
-  dispatch(EVENTS.COLLECTION_REMOVED, { collectionId });
 }
 
 export const ContextMenu = { init, open, close };
