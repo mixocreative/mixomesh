@@ -8,14 +8,20 @@ picture only — never paste generated HTML/CSS into `src/`.
 
 ## 1. Visual Theme & Atmosphere
 
-A calm, light, paper-like 3D-print workbench. Surfaces are warm washi cream (never
-pure white), text is warm sumi ink (never pure black), and the single accent is a quiet
-dark stone brown. Density is desktop-tool compact (Blender-like: 22px controls, 12–13px
-type) but airy through soft hairlines instead of hard boxes. The 3D viewport is the hero
-and fills the centre; panels frame it and stay visually quieter than the model. Mood
-words: wabi-sabi, paper, ink, stone, quiet craft, precise, beginner-friendly. No neon,
-no gradients on chrome (except the viewport HUD glass), no floating SaaS cards, no
-badge dots for decoration.
+**Direction (owner, 2026-10-14): minimal, clean, modern.** A calm, light
+3D-print workbench: flat surfaces, generous whitespace, hairlines instead of
+boxes, one accent, restrained colour, clear type hierarchy, no ornament. The
+locked palette stays (warm washi off-white ground, sumi-ink text, a single dark
+stone-brown accent, bengara red ONLY for the active/selected cue) but is used
+quietly: mostly neutral surfaces, the accent reserved for the one primary
+action per view. Density stays desktop-tool compact (22px controls, 12–13px
+type) yet airy: group with spacing and subtle surface steps, not borders.
+The 3D viewport is the hero and fills the centre; panels frame it and stay
+visually quieter than the model. Mood words: minimal, modern, clean, calm,
+precise, beginner-friendly, premium tool (Figma / Linear / Bambu Studio level
+polish). Avoid: gradients on chrome (except the viewport HUD glass), heavy
+shadows, floating SaaS cards, badge dots, icon clutter, all-caps headings,
+multiple competing accents.
 
 ## 2. Color Palette & Roles
 
@@ -74,7 +80,7 @@ badge dots for decoration.
 
 ## 6. Design System Notes for Stitch Generation
 
-- Atmosphere: "calm washi-paper 3D printing workbench, Blender-compact controls, warm cream surfaces, sumi-ink text, single dark stone-brown accent, bengara red only for active state".
+- Atmosphere: "minimal, clean, modern 3D-print desktop tool; flat warm off-white surfaces, generous whitespace, hairline dividers instead of boxes, compact 22px controls, sumi-ink text, ONE dark stone-brown accent for the primary action, bengara red only for the active/selected cue; Figma/Linear-level polish".
 - Canonical colours: Washi Ground `#efe7d8`, Washi Sheet `#fbf6ec`, Sumi Ink `#1a1612`, Sepia Ink `#4a3f33`, Stone Brown `#3e2c1e`, Bengara Red `#a23a2a`, Kasumi Hairline `#d4c9b3`.
 - Leave the centre viewport as a plain light-grey gradient placeholder (`#e8e6e1` → `#cfcbc3`) labelled "3D viewport"; mock only the panel chrome around it.
 - Prompt 1: "Right-side Properties panel, 300px wide, collapsible sections with right-aligned 84px labels, 22px cream fields, XYZ rows with red/green/blue axis chips, one stone-brown primary button."

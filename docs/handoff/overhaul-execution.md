@@ -163,7 +163,7 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - Owner rule: start every status report with 🟡/⛔, and ✅🎉 ALL DONE only when the whole mission is finished (memory feedback_done_emoji).
 - [ ] Double-check printer bed specs flagged by 1.1: Stratasys J55/J850, Anycubic Photon Mono/Kobra 3, Bambu H2D, Prusa XL, Elegoo Centauri Carbon, Formlabs Form 4, HP MJF 580.
 
-- [ ] Confirm Stitch project binding + first fixture-screen batch upload (Decision 30) — 0.13a/b DONE, asked owner 2026-10-14 (non-blocking).
+- [x] Stitch binding + upload APPROVED by owner 2026-10-14 ("Go. We want minimal clean and modern feel."). Project `8138696085052519929` "MIXOMESH Overhaul UI" (bound in gitignored .stitch.json); DESIGN.md uploaded as design system 6131146374172641452. Mockups 01-06 generated per gated screen group → owner approval pending.
 - [ ] Optional: fix `~/.codex/config.toml` so Codex audits work again.
 
 ## Session log
@@ -185,3 +185,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 5.4 80e48d3, 6.4 d45da4a, 4.10 ab577a9, 6.1+6.2 8b40509 (worktree: unit 269, browser/export/repair/group smokes, build, electron smoke incl. security probe — all green). Running: 5.6. Then 5.10 + 6.7 Blueprint passes → only mockup-gated tasks remain.
 - 2026-10-14 (cont.) — 5.6 daedf6e + smoke c17f482; full tree green (unit 286, browser/export/repair/group, build, electron). Running: 5.10+6.7 Blueprint/BUILDLOG passes. After that ALL UNGATED WORK IS DONE — remaining = mockup-gated list above (needs owner).
 - 2026-10-14 (cont.) — 5.10 + 6.7 5c1ec77. **ALL UNGATED TASKS DONE.** Remaining = MOCKUP-GATED list (Owner queue). BLOCKED on owner: Stitch project binding + first fixture upload (Decision 30). On OK: capture prod build (docs/design/stitch-capture.md), generate one mockup set per gated screen group, owner approves, then implement (opus/sonnet per plan tiers).
+- 2026-10-14 (cont.) — Owner approved Stitch + direction 'minimal clean modern'. DESIGN.md §1/§6 updated (palette kept, treatment flatter/quieter). Project bound, reference capture uploaded, generating mockups 01-06 (shell, printer tab, export tab, properties, outliner+menu, assets/banner/prompt/onboarding).
