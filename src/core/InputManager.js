@@ -9,8 +9,10 @@ import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
 import { BU_TO_MM } from './PrintManager.js';
-import { Hover } from './Hover.js';
+import { Hover, hoverTarget } from './Hover.js';
 import { setGizmoSnap } from './scene/PivotSession.js';
+import { touchOrbit, touchPan, touchPinch } from './scene/CameraRig.js';
+import { createTouchGestures, TOUCH_LONG_PRESS_MS } from './TouchGestures.js';
 import { translateSnapBU, rotateSnapRad, scaleSnapStep, snapToStep, nudgeStepMM, nudgeDirection } from './SnapUnits.js';
 
 const BABYLON = window.BABYLON;
@@ -52,6 +54,16 @@ function _isDoubleClick(prev, cur) {
   if (!(dt >= 0 && dt < DOUBLE_CLICK_MS)) return false;
   return Math.hypot(cur.x - prev.x, cur.y - prev.y) < DOUBLE_CLICK_PX;
 }
+
+// Touch (overhaul 8.4): pointerType 'touch' never takes the mouse path. A pure
+// recogniser (core/TouchGestures.js) turns pointer events into orbit / pan /
+// pinch / tap / doubletap / longpress; _onTouchGesture maps them onto the same
+// selection, body-drag, context-menu and camera paths the mouse uses.
+let _gest = createTouchGestures({ now: () => _now() });
+let _touchBody = null;       // { itemId, planeY, startWorld, engaged } — one-finger drag on a selected movable item
+let _lastTouchTap = null;    // item id of the previous tap (double-tap must hit the same depth target)
+let _longPressTimer = null;
+let _touchCam = { orbit: touchOrbit, pan: touchPan, pinch: touchPinch };
 
 // ── Key string builder ───────────────────────────────────
 
@@ -145,6 +157,24 @@ export function init(scene) {
     _canvas.addEventListener('focus', () => setContext('viewport'));
     _canvas.addEventListener('blur',  () => setContext('global'));
     _canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    // Touch (8.4): the canvas owns every finger — no browser scroll / page
+    // zoom / iOS callout or text selection on long-press. Safari's legacy
+    // gesture* events still page-zoom without the preventDefault.
+    const st = _canvas.style;
+    if (st) {
+      st.touchAction = 'none';
+      st.userSelect = 'none';
+      st.webkitUserSelect = 'none';
+      st.webkitTouchCallout = 'none';
+    }
+    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+      _canvas.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+    }
+    // Babylon does not route pointercancel; a cancelled finger must not leave
+    // a half-finished orbit / body drag behind.
+    _canvas.addEventListener('pointercancel', (e) => {
+      if (e.pointerType === 'touch') _onTouchGestures(_gest.cancel(e.pointerId));
+    });
   }
 }
 
@@ -194,6 +224,8 @@ function _onPointer(info) {
     ev.preventDefault?.();
     return;
   }
+
+  if (ev.pointerType === 'touch') { _onTouchPointer(info); return; }
 
   // Keep gizmo Ctrl-snap in sync with the live modifier state (covers a Ctrl
   // pressed while focus was elsewhere, e.g. in another window).
@@ -295,13 +327,7 @@ function _onSelectionPointerDown(info) {
     _lastClick = click;
   }
 
-  // Promote the picked item to active without disturbing an existing multi-
-  // selection. If the click landed outside the current selection, single-select.
-  if (!Selection.contains(id)) {
-    Selection.set([id], id);
-  } else if (Selection.getActiveId() !== id) {
-    Selection.setActive(id);
-  }
+  _promoteClicked(id);
 
   // Stage a body drag. We don't engage the pivot until the pointer crosses
   // BODY_DRAG_THRESHOLD_PX so a plain click still reads as just-a-click.
@@ -318,6 +344,162 @@ function _onSelectionPointerDown(info) {
   }
 
   _canvas?.focus();
+}
+
+// Promote the picked item to active without disturbing an existing multi-
+// selection. If the click landed outside the current selection, single-select.
+function _promoteClicked(id) {
+  if (!Selection.contains(id)) {
+    Selection.set([id], id);
+  } else if (Selection.getActiveId() !== id) {
+    Selection.setActive(id);
+  }
+}
+
+// ── Touch (overhaul 8.4) ─────────────────────────────────
+
+function _canvasLocal(x, y) {
+  const r = _canvas?.getBoundingClientRect?.();
+  return { x: x - (r?.left ?? 0), y: y - (r?.top ?? 0) };
+}
+
+function _clearLongPress() {
+  if (_longPressTimer != null) clearTimeout(_longPressTimer);
+  _longPressTimer = null;
+}
+
+function _onTouchPointer(info) {
+  const ev = info.event;
+  const T = PointerEventTypes;
+  const p = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, t: _now() };
+  if (info.type === T.POINTERDOWN) {
+    Hover.clear();
+    const out = _gest.down(p);
+    if (out.some(g => g.type === 'press')) {
+      _clearLongPress();
+      _longPressTimer = setTimeout(() => {
+        _longPressTimer = null;
+        _onTouchGestures(_gest.poll(_now()));
+      }, TOUCH_LONG_PRESS_MS);
+    }
+    _onTouchGestures(out);
+  } else if (info.type === T.POINTERMOVE) {
+    _onTouchGestures(_gest.move(p));
+  } else if (info.type === T.POINTERUP) {
+    const out = _gest.up(p);
+    if (_gest.count() === 0) _clearLongPress();
+    _onTouchGestures(out);
+  }
+}
+
+function _onTouchGestures(list) {
+  for (const g of list ?? []) _onTouchGesture(g);
+}
+
+/**
+ * Map one recognised gesture onto the mouse-equivalent action:
+ *   press      → stage a body drag when it lands on a selected, unlocked item
+ *   orbit      → body drag (staged) else camera orbit; never a marquee on touch
+ *   pan/pinch  → camera pan / zoom towards the pinch centre
+ *   tap        → click (click-depth mapping); doubletap → double-click
+ *   longpress  → context menu at that point
+ * During a modal G/R/S op a tap confirms, a long-press cancels.
+ */
+function _onTouchGesture(g) {
+  if (g.type === 'press') {
+    _touchBody = null;
+    if (_modal) return;
+    const l = _canvasLocal(g.x, g.y);
+    const meshId = SceneManager.pickMeshIdAt(l.x, l.y);
+    const id = meshId ? hoverTarget(meshId, getState().scene, Selection.getScope()) : null;
+    if (id && Selection.contains(id) && !Selection.isEffectivelyLocked(id)) {
+      _touchBody = { itemId: id, planeY: 0, startWorld: null, engaged: false };
+    }
+    _canvas?.focus?.();
+    return;
+  }
+  if (g.type === 'orbit') {
+    if (_modal) return;
+    if (g.phase === 'start' && _touchBody) _touchBodyBegin(g);
+    if (_touchBody?.engaged) {
+      if (g.phase === 'end') {
+        if (g.interrupted || g.cancelled) SceneManager.cancelBodyDrag();
+        else SceneManager.endBodyDrag();
+        _touchBody = null;
+      } else {
+        _touchBodyMove(g);
+      }
+      return;
+    }
+    _touchBody = null;
+    if (g.phase !== 'end') _touchCam.orbit(g.dx, g.dy);
+    return;
+  }
+  if (g.type === 'pan' || g.type === 'pinch') {
+    _touchBody = null;
+    if (_modal) return;
+    if (g.type === 'pan') _touchCam.pan(g.dx, g.dy);
+    else {
+      const l = _canvasLocal(g.x, g.y);
+      _touchCam.pinch(g.scale, l.x, l.y);
+    }
+    return;
+  }
+  if (g.type === 'tap' || g.type === 'doubletap') {
+    _touchBody = null;
+    if (_modal) { if (g.type === 'tap') _commitModal(); return; }
+    const l = _canvasLocal(g.x, g.y);
+    _touchSelectAt(l.x, l.y, g.type === 'doubletap');
+    return;
+  }
+  if (g.type === 'longpress') {
+    _touchBody = null;
+    _lastTouchTap = null;
+    if (_modal) { _cancelModal(); return; }
+    const l = _canvasLocal(g.x, g.y);
+    _openContextMenuAt(l.x, l.y, g.x, g.y);
+  }
+}
+
+function _touchBodyBegin(g) {
+  const b = _touchBody;
+  if (Selection.getActiveId() !== b.itemId) Selection.setActive(b.itemId);
+  b.planeY = SceneManager.getBodyDragPlaneY();
+  const s = _canvasLocal(g.startX, g.startY);
+  b.startWorld = _pickHorizontalPlaneAtPointer(b.planeY, s.x, s.y);
+  b.engaged = !!b.startWorld && SceneManager.beginBodyDrag();
+  if (!b.engaged) _touchBody = null;   // nothing movable → the drag orbits instead
+}
+
+function _touchBodyMove(g) {
+  const b = _touchBody;
+  const l = _canvasLocal(g.x, g.y);
+  const now = _pickHorizontalPlaneAtPointer(b.planeY, l.x, l.y);
+  if (!now) return;
+  const delta = now.subtract(b.startWorld);
+  delta.y = 0;
+  SceneManager.setBodyDragOffset(delta);
+}
+
+// Tap = mouse click at the same click depth (no marquee on touch); empty tap
+// clears + exits the scope like an empty click. Double-tap on the same group
+// enters it (mouse double-click rule, with the touch distance tolerance).
+function _touchSelectAt(x, y, isDouble) {
+  const meshId = SceneManager.pickMeshIdAt(x, y);
+  const id = meshId ? Selection.resolveClick(meshId) : null;
+  if (!id) {
+    _lastTouchTap = null;
+    Selection.setScope(null);
+    Selection.clear();
+    return;
+  }
+  if (isDouble && _lastTouchTap === id) {
+    _lastTouchTap = null;
+    if (isGroupId(id, getState().scene.groups) && Selection.enterScope(id, meshId)) return;
+  } else {
+    _lastTouchTap = id;
+  }
+  _promoteClicked(id);
 }
 
 function _onBodyDragMove() {
@@ -353,10 +535,10 @@ function _onBodyDragCancel() {
  * Cast a ray from the pointer onto a horizontal plane at world Y = `y`.
  * Returns `null` when the ray is parallel to the plane or points away from it.
  */
-function _pickHorizontalPlaneAtPointer(y) {
+function _pickHorizontalPlaneAtPointer(y, px = _scene.pointerX, py = _scene.pointerY) {
   const cam = _scene.activeCamera;
   if (!cam) return null;
-  const ray = _scene.createPickingRay(_scene.pointerX, _scene.pointerY, BABYLON.Matrix.Identity(), cam);
+  const ray = _scene.createPickingRay(px, py, BABYLON.Matrix.Identity(), cam);
   if (Math.abs(ray.direction.y) < 1e-6) return null;
   const t = (y - ray.origin.y) / ray.direction.y;
   if (t < 0) return null;
@@ -365,8 +547,14 @@ function _pickHorizontalPlaneAtPointer(y) {
 
 function _onContextMenuRMB(info) {
   const ev = info.event;
-  const pick = _scene.pick(_scene.pointerX, _scene.pointerY, mesh => !!mesh && mesh.isPickable !== false);
-  const meshId = SceneManager.pickMeshIdAt(_scene.pointerX, _scene.pointerY);
+  _openContextMenuAt(_scene.pointerX, _scene.pointerY, ev.clientX, ev.clientY);
+}
+
+// Shared by RMB-up and touch long-press: (x,y) canvas px for the pick,
+// (clientX, clientY) viewport px for the menu position.
+function _openContextMenuAt(x, y, clientX, clientY) {
+  const pick = _scene.pick?.(x, y, mesh => !!mesh && mesh.isPickable !== false);
+  const meshId = SceneManager.pickMeshIdAt(x, y);
   const id = meshId ? Selection.resolveClick(meshId) : null;   // same click-depth as LMB
   if (id && !Selection.contains(id)) {
     Selection.set([id], id);
@@ -374,7 +562,7 @@ function _onContextMenuRMB(info) {
   if (_onContextMenu) {
     const normal = pick?.hit ? pick.getNormal?.(true) : null;
     _onContextMenu({
-      x: ev.clientX, y: ev.clientY, source: 'viewport',
+      x: clientX, y: clientY, source: 'viewport',
       hit: !!id,   // false = empty space under the cursor (scene menu)
       faceNormal: normal ? { x: normal.x, y: normal.y, z: normal.z } : null,
     });
@@ -1017,5 +1205,15 @@ export const InputManager = {
     setNow: (fn) => { _now = typeof fn === 'function' ? fn : () => performance.now(); },
     resetClick: () => { _lastClick = null; },
     nudge: _nudge,
+    // Touch seams (tests/touch-gestures.test.mjs).
+    touchPointer: _onTouchPointer,
+    touchPoll: () => _onTouchGestures(_gest.poll(_now())),
+    setTouchCamera: (cam) => { _touchCam = cam ?? { orbit: touchOrbit, pan: touchPan, pinch: touchPinch }; },
+    resetTouch: () => {
+      _clearLongPress();
+      _gest = createTouchGestures({ now: () => _now() });
+      _touchBody = null;
+      _lastTouchTap = null;
+    },
   },
 };

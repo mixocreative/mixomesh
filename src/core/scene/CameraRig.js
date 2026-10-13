@@ -15,6 +15,7 @@ import {
   REVERT_ANGLE_DELTA,
 } from './SceneConstants.js';
 import { logicalObjectPartIds } from '../LogicalObjects.js';
+import { zoomAboutPoint } from '../TouchGestures.js';
 
 const BABYLON = window.BABYLON;
 
@@ -265,6 +266,63 @@ function _onCameraPointer(info) {
 
   if (_camDrag.btn === 2 || ev.shiftKey) _orbit(dx, dy);
   else _pan(dx, dy);
+}
+
+// ── Touch navigation (overhaul 8.4) ──────────────────────
+// Driven by InputManager's touch recogniser (core/TouchGestures.js). Babylon's
+// own pointer input ignores touch here (buttons=[] in _setupCamera), so these
+// are the only touch camera paths: one finger = orbit, two fingers = pan +
+// pinch zoom. Same sensitivities as the mouse.
+
+/** One-finger orbit by a pixel delta (same factor as RMB orbit). */
+export function touchOrbit(dx, dy) {
+  if (_camera) _orbit(dx, dy);
+}
+
+/** Two-finger grab-pan by the centroid's pixel delta (same as MMB pan). */
+export function touchPan(dx, dy) {
+  if (_camera) _pan(dx, dy);
+}
+
+/**
+ * Pinch zoom by finger-distance ratio `scale` (> 1 zooms in) towards the
+ * pinch centre (`x`,`y` canvas px). Follows the wheel rules: zoom-to-cursor
+ * only when enabled AND follow mode is 'free' (otherwise zoom about the
+ * target); ortho extents follow the radius in the per-frame hook, and the
+ * target shift is flagged so a face preset's auto-revert reads it as a zoom.
+ */
+export function touchPinch(scale, x, y) {
+  if (!_camera) return;
+  const toPoint = _zoomToCursor && _cachedFollowMode === 'free';
+  const point = toPoint ? _pointOnTargetPlane(x, y) : null;
+  const r = zoomAboutPoint(_camera.target, point, _camera.radius, scale,
+    _camera.lowerRadiusLimit ?? 0, _camera.upperRadiusLimit ?? Infinity);
+  if (!r) return;
+  if (r.moved) {
+    _camera.target.set(r.target.x, r.target.y, r.target.z);
+    _wheelZoomed = true;
+  }
+  _camera.radius = r.radius;
+}
+
+// World point under canvas px (x,y) on the plane through the target facing
+// the camera — the same hit plane Babylon's wheel zoom-to-mouse uses.
+function _pointOnTargetPlane(x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !_scene?.createPickingRay) return null;
+  const ray = _scene.createPickingRay(x, y, BABYLON.Matrix.Identity(), _camera);
+  const t0 = _camera.target;
+  const p0 = _camera.position;
+  let nx = t0.x - p0.x, ny = t0.y - p0.y, nz = t0.z - p0.z;
+  const nl = Math.hypot(nx, ny, nz);
+  if (!(nl > 0)) return null;
+  nx /= nl; ny /= nl; nz /= nl;
+  const d = ray.direction;
+  const denom = d.x * nx + d.y * ny + d.z * nz;
+  if (Math.abs(denom) < 1e-6) return null;
+  const o = ray.origin;
+  const t = ((t0.x - o.x) * nx + (t0.y - o.y) * ny + (t0.z - o.z) * nz) / denom;
+  if (!(t >= 0)) return null;
+  return { x: o.x + d.x * t, y: o.y + d.y * t, z: o.z + d.z * t };
 }
 
 function _syncOrtho() {

@@ -1657,6 +1657,42 @@ Shift+N              → toggle the 3D-cursor N-panel (plain N = right-panel tog
 Ctrl+C / Ctrl+V      → copy / paste with an aspect chooser (Object/Location/Rotation/Scale/Loc+Rot/All)
 ```
 
+### Touch (overhaul 8.4 — iPad full app)
+Only `pointerType === 'touch'` takes this path; mouse and pen are untouched.
+`_onPointer` hands touch events (after the viewport-tool handler) to a pure
+recogniser, `src/core/TouchGestures.js` (`createTouchGestures({now})` →
+`down/move/up/cancel/poll` with `{id,x,y,t}` in, gesture records out; no DOM,
+no timers — InputManager arms a `TOUCH_LONG_PRESS_MS` timer that calls
+`poll`). Babylon's camera pointer input never sees touch (`buttons = []`), and
+a touch that lands on a gizmo handle is swallowed by the utility layer
+(`skipOnPointerObservable`), so gizmo drags never orbit.
+```
+1 finger drag (≥ 8 px) on empty space / unselected item → orbit (NO marquee on touch)
+1 finger drag starting on a SELECTED, not-effectively-locked item
+                  → body drag (same horizontal-plane drag + TransformCommand as the
+                    mouse; the item becomes active); beginBodyDrag refusing → orbit
+                    A second finger during the body drag CANCELS it (≙ RMB)
+2 finger drag     → pan (centroid delta, same grab-pan as MMB)
+pinch             → zoom by finger-distance ratio TOWARDS THE PINCH CENTRE
+                    (CameraRig.touchPinch: homothety about the point on the
+                    target-facing plane, `zoomAboutPoint`; zoom-to-cursor +
+                    follow-mode rules as the wheel; ortho extents follow radius;
+                    flagged like a wheel step so a face preset does not auto-revert)
+tap               → click: click-depth mapping (PART 4b); empty tap clears + exits scope
+double-tap        → double-click: 2nd tap < 350 ms and < 12 px on the same depth
+                    target → enter group + select the child under the finger
+long-press        → ≥ 500 ms moving < 8 px → context menu at that point (same as
+                    RMB-up: selects the hit item; empty = scene menu); never a tap
+3rd finger        → ignored; lifting to 1 finger after 2 never resumes orbit
+modal G/R/S       → tap confirms, long-press cancels, other gestures ignored
+hover             → none for touch (Hover is only fed by mouse/pen moves)
+```
+Two-finger tap = undo is NOT mapped (not in plan 8.4). The canvas gets
+`touch-action: none`, `user-select`/`-webkit-touch-callout: none`, Safari
+`gesturestart/change/end` preventDefault (no page zoom/scroll/callout), and a
+`pointercancel` listener that aborts the gesture (a cancelled body drag snaps
+back). Pinned by `tests/touch-gestures.test.mjs`.
+
 ---
 
 ## PART 7 — SCENE MANAGER
@@ -1703,6 +1739,10 @@ SceneManager.frameSelected(meshes)            // animate to fit bounding box of 
 SceneManager.frameAll()                       // frame every registered mesh — used by NavCube Home button
 SceneManager.saveCameraState()                → CameraState
 SceneManager.restoreCameraState(state)
+// Touch camera (overhaul 8.4) — exported by scene/CameraRig.js, called by InputManager's touch path (PART 6 "Touch")
+touchOrbit(dx, dy)                            // 1-finger orbit, same factor as RMB orbit
+touchPan(dx, dy)                              // 2-finger grab-pan, same as MMB pan
+touchPinch(scale, x, y)                       // zoom towards canvas px (x,y); zoom-to-cursor/follow/ortho rules as the wheel
 
 // Gizmos
 SceneManager.setGizmoMode(mode)               // 'translate'|'rotate'|'scale'|'none'
