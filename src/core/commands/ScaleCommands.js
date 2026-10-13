@@ -6,6 +6,7 @@ import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { SOURCE_UNIT_FACTORS } from '../scale/ScaleMath.js';
+import { canonicalObjectId } from '../LogicalObjects.js';
 import { SILENT, withDetachedPivot } from './support.js';
 
 const BABYLON = window.BABYLON;
@@ -98,8 +99,12 @@ function _fmtRatioLabel(n) {
  * Per-object scale ratio change (per-object ratio redesign, 2026-06-16).
  *
  * Rescales each given object by `prevRatio / nextRatio`, baked into that
- * object's OWN geometry, scaling only its OWN local position — never a shared
- * group/collection ancestor (finding D) — and stores the new `ratio`. The
+ * object's OWN geometry and stores the new `ratio`. Scaling is about the
+ * object's OWN origin (task 1.14): a top-level mesh keeps its position; a
+ * child's LOCAL position (relative to its parent) scales with the factor so
+ * spacing inside a group follows; top-level sibling parts of a logical object
+ * scale their offset from the lead so the parts stay assembled. Shared
+ * group/collection ancestors are never touched (finding D). The
  * caller passes the full member set of a logical object so multi-mesh objects
  * scale as one unit (finding E). Geometry is uniquified at duplication time
  * (AssetLoader.cloneMeshAsNewObject), so the bake here can't alias siblings
@@ -141,9 +146,7 @@ function _rescaleObject(id, fromRatio, toRatio) {
       if (mesh.geometry && typeof mesh.bakeTransformIntoVertices === 'function') {
         mesh.bakeTransformIntoVertices(BABYLON.Matrix.Scaling(factor, factor, factor));
       }
-      if (mesh.position && typeof mesh.position.scaleInPlace === 'function') {
-        mesh.position.scaleInPlace(factor);
-      }
+      _rescalePosition(id, mesh, factor);
       mesh.refreshBoundingInfo?.();
       updatedMesh = true;
     }
@@ -160,4 +163,24 @@ function _rescaleObject(id, fromRatio, toRatio) {
     };
   }, SILENT);
   if (updatedMesh) dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
+}
+
+// Position policy for a rescale (task 1.14). Never scales about the world
+// origin. Exact inverse under factor -> 1/factor (lead position is untouched).
+function _rescalePosition(id, mesh, factor) {
+  const pos = mesh.position;
+  if (!pos) return;
+  const scaleAbout = (ax, ay, az) => {
+    pos.x = ax + (pos.x - ax) * factor;
+    pos.y = ay + (pos.y - ay) * factor;
+    pos.z = az + (pos.z - az) * factor;
+  };
+  if (mesh.parent) { scaleAbout(0, 0, 0); return; }   // local offset inside parent
+  const objects = getState().scene.objects;
+  const leadId = canonicalObjectId(id, objects);
+  if (leadId === id) return;                           // top-level lead: own origin
+  const lead = AssetLoader.getBabylonMesh(leadId);
+  if (lead && !lead.parent && lead.position) {
+    scaleAbout(lead.position.x, lead.position.y, lead.position.z);
+  }
 }

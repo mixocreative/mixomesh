@@ -3242,7 +3242,7 @@ glTF extras.ratio ─┬─► modelRatio (asset, fixed)
 
 IMPORT  : bake  unit × modelRatio / ratio  into vertices   (seed ratio==modelRatio ⇒ file as authored)
 DISPLAY : object shown at its own ratio; mixed ratios look correct automatically
-EDIT    : ratio R_old→R_new ⇒ rescale ×(R_old/R_new), bake, store ratio   [RescaleObjectCommand]
+EDIT    : ratio R_old→R_new ⇒ rescale ×(R_old/R_new) about the object's own origin, bake, store ratio   [RescaleObjectCommand]
 EXPORT  : ratioFactor = referenceRatio / T,   unitFactor = BU_TO_MM (1000),
           factor      = ratioFactor * unitFactor
           referenceRatio = (active printable unit, else first printable unit).ratio
@@ -3279,8 +3279,13 @@ referenceRatio, same factor, same pivot, same filename).
 - **Geometry sharing** — `cloneMeshAsNewObject` calls `makeGeometryUnique()` so a
   per-object vertex bake can't corrupt the source through Babylon's shared
   `Geometry`.
-- **Shared ancestors** — `RescaleObjectCommand` bakes only the object's own
-  geometry + own local position; never a shared group/collection parent.
+- **Rescale about own origin (task 1.14)** — `RescaleObjectCommand` bakes only
+  the object's own geometry and never touches a shared group/collection
+  ancestor. A top-level mesh keeps its position (it scales about its own
+  origin); a child's LOCAL position (relative to its parent) is multiplied by
+  the factor so intra-group spacing follows; top-level sibling parts of a
+  logical object scale their offset from the lead part so they stay
+  assembled. Undo applies the inverse factor (exact restore).
 - **Logical objects** — the Properties Ratio dropdown expands the selection to
   `logicalObjectPartIds` so a multi-mesh object scales as one unit.
 - **Bed validation removed** — `_checkExceedsBed` + `exceedsBed` + its invalidate

@@ -52,6 +52,33 @@ await test('export factor: (ratio / T) × 1000', () => {
   assert.ok(Math.abs(computePrintExportScale({ sceneRatio: 72 }, { printRatio: 35 }) - (72 / 35) * 1000) < 1e-6);
 });
 
+await test('RescaleObjectCommand: own-origin rescale, child local offset scales, undo exact', async () => {
+  const { installEnv } = await import('./env.mjs');
+  installEnv();
+  const { RescaleObjectCommand } = await import('../src/core/HistoryManager.js');
+  const { AssetLoader } = await import('../src/core/AssetLoader.js');
+  const { setState } = await import('../src/core/StateManager.js');
+  const mk = (id, x, parent = null) => ({
+    metadata: { meshId: id }, parent, geometry: true, position: { x, y: 0, z: 0 },
+    verts: [], bakeTransformIntoVertices(m) { this.verts.push(m); }, refreshBoundingInfo() {},
+  });
+  const top = mk('top', 0.1);
+  const kid = mk('kid', 0.02, top);
+  const meshes = { top, kid };
+  AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
+  setState(s => ({ ...s, scene: { ...s.scene, objects: {
+    top: { id: 'top', ratio: 1 }, kid: { id: 'kid', ratio: 1 } } } }), { silent: true });
+  const cmd = new RescaleObjectCommand(['top', 'kid'], 72);
+  cmd.execute();
+  assert.equal(top.position.x, 0.1, 'top-level position untouched');
+  assert.ok(Math.abs(kid.position.x - 0.02 / 72) < 1e-12, 'child local offset scales');
+  assert.equal(top.verts.length, 1);
+  cmd.undo();
+  assert.ok(Math.abs(top.position.x - 0.1) < 1e-12);
+  assert.ok(Math.abs(kid.position.x - 0.02) < 1e-12, 'undo restores child offset');
+  assert.equal(top.verts.length, 2, 'undo re-bakes inverse');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
