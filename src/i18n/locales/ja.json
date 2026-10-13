@@ -719,5 +719,16 @@
   "print.issueAction.watertight-required": "検証パネルを開き、自動修復で穴を塞いでください。",
   "context.deleteLockedTitle": "ロックされた項目を削除しますか？",
   "context.deleteLockedBody": "選択にロックされたオブジェクトまたはグループが含まれています。それでも削除しますか？",
-  "context.deleteLockedConfirm": "削除"
+  "context.deleteLockedConfirm": "削除",
+  "asset.missing": "見つかりません",
+  "asset.missingTitle": "リンク先のファイルが見つからないため、埋め込みコピーを使用しています",
+  "asset.changed": "変更あり",
+  "asset.changedTitle": "リンク先のファイルが保存時と異なるため、埋め込みコピーを使用しています",
+  "asset.findMoved.action": "移動したファイルを探す…",
+  "asset.findMoved.title": "リンク先フォルダ内を内容で検索します",
+  "asset.findMoved.hint": "リンク先のファイルが見つからないか変更されています",
+  "asset.findMoved.searching": "{name} を検索中…",
+  "asset.findMoved.scanned": "{n} 件を確認",
+  "asset.findMoved.found": "{name} を {path} に再リンクしました",
+  "asset.findMoved.notFound": "{name} に一致するファイルは見つかりませんでした"
 }

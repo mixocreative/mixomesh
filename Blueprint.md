@@ -2951,14 +2951,20 @@ absolute path); `{kind, absolutePath, name}` lives in main-only
 `<userData>/mixo-refs.json` (NOT the renderer-readable KV); restore checks
 exists + kind + R_OK and mints a fresh token; relative reads cannot escape the
 folder; symlinks skipped. `caps.watchFiles=false` until `watchAsset` ships.
-TRANSITIONAL until 4.3/4.5: `resolveAssetBlob` still runs the folder hash scan
-(tier 2) and still uses live bytes when status is `changed`; returns
-`{blob, live, status}`. AssetResolver no longer touches FSA/idb directly.
+Load never scans (task 4.3, Decision 3): `resolveAssetBlob` makes one
+`resolveAsset` per link and returns `{blob, live, status}`. A `missing` or
+`changed` link resolves to the EMBEDDED copy (status recorded, queryable via
+`getAssetStatus`; a `changed` live file is used only when no embedded bytes
+exist). The explicit "Find moved file..." action (asset card + Properties) calls
+`findMovedForAsset` (adapter `findMoved`, progress overlay) and on a hit
+`applyFoundSource(assetId, result)` repoints `source` (4.5 wraps it in a
+command). TRANSITIONAL until 4.5: Refresh of a `changed` asset is not yet
+wired. AssetResolver no longer touches FSA/idb directly.
 
 | # | Tier | Condition | Live? | Source |
 |---|---|---|---|---|
 | 1 | Live exact path | `directoryHandleKey` granted **and** file exists at `originalPath` | yes | file on disk |
-| 2 | Hash relink | `directoryHandleKey` granted **and** no exact path, but a sibling/descendant file with matching `sha256` (+ ext filter) is found within `SCAN_FILE_LIMIT` (4000) | yes | file on disk |
+| 2 | ~~Hash relink~~ | RETIRED on load (Decision 3) - only the user-invoked "Find moved file..." walks (cap `SCAN_FILE_LIMIT` 4000) | - | - |
 | 3 | Single-file handle | `fileHandleKey` resolves and permission is granted (loose drag-drop relink — Chrome only, only set when caller passed `fileHandle:` without a `directoryHandleKey`) | yes | file on disk |
 | 4 | Embedded snapshot | `fileData` (base64) present | no (Snapshot) | embedded in `.mixo` |
 | 5 | None | nothing left | — | → ghost wireframe |

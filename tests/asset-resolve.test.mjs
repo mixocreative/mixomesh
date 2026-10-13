@@ -11,7 +11,7 @@ import { installEnv } from './env.mjs';
 import { putFileHandle as seedHandle, __reset as resetIdb } from './idb-stub.mjs';
 
 installEnv();
-const { resolveAssetBlob, sourcesOf } = await import('../src/core/persist/AssetResolver.js');
+const { resolveAssetBlob, sourcesOf, getAssetStatus, canFindMoved } = await import('../src/core/persist/AssetResolver.js');
 const { bufFromB64 } = await import('../src/core/persist/ProjectSerializer.js');
 const { BrowserStorageAdapter } = await import('../src/core/storage/StorageAdapter.js');
 const { DesktopStorageAdapter } = await import('../src/core/storage/DesktopStorageAdapter.js');
@@ -87,11 +87,23 @@ await test('tier: linked folder source wins over embedded, contentHash forwarded
   assert.deepEqual(adapter.calls[0], ['resolveAsset', 'folder', 'D', 'p/hull.glb', 'h1']);
 });
 
-await test('tier: changed on disk → live bytes used, status changed', async () => {
+await test('tier: changed on disk -> EMBEDDED bytes, status changed, not live', async () => {
+  const adapter = stubAdapter({ D: { status: 'changed', bytes: [3] } });
+  const r = await resolveAssetBlob(entry({
+    id: 'a_ch', directoryHandleKey: 'D', originalPath: 'hull.glb', contentHash: sha(EMB), fileData: b64(EMB),
+  }), { adapter });
+  assert.equal(r.status, 'changed');
+  assert.equal(r.live, false);
+  assert.deepEqual(await bytesOf(r.blob), EMB, 'live bytes must not be silently swapped in');
+  assert.equal(getAssetStatus('a_ch'), 'changed');
+  assert.equal(canFindMoved('a_ch'), true);
+});
+
+await test('tier: changed on disk with NO embedded copy -> live changed bytes (better than a ghost)', async () => {
   const adapter = stubAdapter({ D: { status: 'changed', bytes: [3] } });
   const r = await resolveAssetBlob(entry({ directoryHandleKey: 'D', originalPath: 'hull.glb', contentHash: 'h' }), { adapter });
   assert.equal(r.status, 'changed');
-  assert.equal(r.live, true);
+  assert.deepEqual(await bytesOf(r.blob), [3]);
 });
 
 await test('tier: link fails → embedded copy with status missing; findMoved never called', async () => {
@@ -104,26 +116,57 @@ await test('tier: link fails → embedded copy with status missing; findMoved ne
   assert.equal(r.live, false);
   assert.deepEqual(await bytesOf(r.blob), EMB);
   assert.deepEqual(adapter.calls.map(c => c.slice(0, 3)), [
-    ['resolveAsset', 'folder', 'D'], ['restoreRef', 'D'], ['resolveAsset', 'file', 'F'],
-  ]);
+    ['resolveAsset', 'folder', 'D'], ['resolveAsset', 'file', 'F'],
+  ], 'one resolveAsset per link, no restoreRef/scan');
 });
 
-await test('tier: folder miss → legacy hash scan of the SAME folder via adapter listDirectory/readFile', async () => {
+await test('load never scans: folder miss with a matching renamed file -> embedded copy, status missing', async () => {
   const live = [7, 7, 7];
   const dirs = {
     D: 'rootRef',
-    rootRef: [
-      { name: 'other.glb', path: 'other.glb', kind: 'file', ref: { bytes: [0] } },
-      { name: 'renamed.glb', path: 'renamed.glb', kind: 'file', ref: { bytes: live } },
-    ],
+    rootRef: [{ name: 'renamed.glb', path: 'renamed.glb', kind: 'file', ref: { bytes: live } }],
   };
   const adapter = stubAdapter({}, dirs);
+  adapter.listDirectory = async () => { throw new Error('load must not list directories'); };
   const r = await resolveAssetBlob(entry({
-    directoryHandleKey: 'D', originalPath: 'gone/hull.glb', contentHash: sha(live), fileData: b64([0]),
+    id: 'a_ms', directoryHandleKey: 'D', originalPath: 'gone/hull.glb', contentHash: sha(live), fileData: b64([0]),
   }), { adapter });
-  assert.equal(r.status, 'linked');
-  assert.equal(r.live, true);
-  assert.deepEqual(await bytesOf(r.blob), live);
+  assert.equal(r, null, 'embedded bytes disagree with hash -> ghost; no scan rescued it');
+  const r2 = await resolveAssetBlob(entry({
+    id: 'a_ms2', directoryHandleKey: 'D', originalPath: 'gone/hull.glb', contentHash: sha([0]), fileData: b64([0]),
+  }), { adapter });
+  assert.equal(r2.status, 'missing');
+  assert.deepEqual(await bytesOf(r2.blob), [0]);
+  assert.ok(adapter.calls.every(c => c[0] === 'resolveAsset'));
+});
+
+await test('findMovedForAsset forwards progress and applyFoundSource repoints the asset', async () => {
+  const { setState, getState, subscribe } = await import('../src/core/StateManager.js');
+  const { findMovedForAsset, applyFoundSource } = await import('../src/core/persist/AssetResolver.js');
+  setState(s => ({ ...s, scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, a_mv: {
+    id: 'a_mv', filename: 'hull.glb', extension: '.glb', contentHash: 'HASH',
+    directoryHandleKey: 'D', originalPath: 'old/hull.glb',
+  } } } }), { silent: true });
+  const seen = [];
+  const found = { kind: 'folder', refKey: 'D', path: 'new/hull.glb', label: 'hull.glb' };
+  const adapter = { async findMoved(source, opts) {
+    seen.push([source.refKey, opts.contentHash, opts.refKey]);
+    opts.onProgress?.({ scanned: 3 }); opts.onProgress?.({ scanned: 9 });
+    return { source: found, blob: new Blob([]), scanned: 9 };
+  } };
+  const progress = [];
+  const res = await findMovedForAsset('a_mv', { adapter, onProgress: p => progress.push(p.scanned) });
+  assert.deepEqual(progress, [3, 9]);
+  assert.deepEqual(seen, [['D', 'HASH', 'D']]);
+  let relinked = null;
+  subscribe('asset:relinked', p => { relinked = p; });
+  assert.equal(applyFoundSource('a_mv', res), true);
+  const e = getState().scene.assetLibrary.a_mv;
+  assert.deepEqual(e.source, found);
+  assert.equal(e.originalPath, 'new/hull.glb');
+  assert.equal(getAssetStatus('a_mv'), 'linked');
+  assert.equal(relinked?.assetId, 'a_mv');
+  assert.equal(applyFoundSource('a_mv', { source: null }), false, 'no hit -> no change');
 });
 
 await test('tier: file source used when the folder source fails', async () => {

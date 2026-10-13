@@ -1,6 +1,8 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, setState, getState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
+import { runFindMoved } from './FindMoved.js';
+import { canFindMoved } from '../core/persist/AssetResolver.js';
 import { Selection } from '../core/Selection.js';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { SOURCE_UNIT_FACTORS } from '../core/ImportNormalizer.js';
@@ -529,6 +531,10 @@ function _renderSourceUnitSection(asset) {
         <span class="pp-hint">${_escape(t('properties.authoredAt', { ratio: formatScaleRatio(authoredScale.authoredRatio) }))}</span>
         <button class="pp-btn" id="pp-confirm-unit" ${asset.unitConfirmed ? 'disabled' : ''}>${_escape(t('properties.confirm'))}</button>
       </div>
+      ${canFindMoved(asset.id) ? `<div class="pp-row pp-row-inline">
+        <span class="pp-hint">${_escape(t('asset.findMoved.hint'))}</span>
+        <button class="pp-btn" id="pp-find-moved">${_escape(t('asset.findMoved.action'))}</button>
+      </div>` : ''}
     </section>
   `;
 }
@@ -541,6 +547,9 @@ function _wireSourceUnitSection(asset) {
     const newUnit = sel.value;
     if (newUnit === asset.sourceUnit) return;
     _changeSourceUnit(asset, newUnit);
+  });
+  _bodyEl.querySelector('#pp-find-moved')?.addEventListener('click', async () => {
+    if (await runFindMoved(asset.id)) _render();
   });
   btn?.addEventListener('click', () => {
     setState(s => {

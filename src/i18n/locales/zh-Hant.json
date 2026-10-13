@@ -719,5 +719,16 @@
   "print.issueAction.watertight-required": "請開啟驗證面板，執行自動修復以封閉破洞。",
   "context.deleteLockedTitle": "要刪除已鎖定的項目嗎？",
   "context.deleteLockedBody": "選取範圍包含已鎖定的物件或群組。仍要刪除嗎？",
-  "context.deleteLockedConfirm": "刪除"
+  "context.deleteLockedConfirm": "刪除",
+  "asset.missing": "找不到",
+  "asset.missingTitle": "找不到連結的檔案，目前使用內嵌副本",
+  "asset.changed": "已變更",
+  "asset.changedTitle": "連結的檔案與儲存的副本不同，目前使用內嵌副本",
+  "asset.findMoved.action": "尋找已移動的檔案…",
+  "asset.findMoved.title": "依內容在連結的資料夾中搜尋此檔案",
+  "asset.findMoved.hint": "連結的檔案遺失或已變更",
+  "asset.findMoved.searching": "正在搜尋 {name}…",
+  "asset.findMoved.scanned": "已檢查 {n} 個檔案",
+  "asset.findMoved.found": "已將 {name} 重新連結至 {path}",
+  "asset.findMoved.notFound": "找不到符合 {name} 的檔案"
 }

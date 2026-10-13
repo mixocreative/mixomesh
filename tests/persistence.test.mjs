@@ -8,7 +8,7 @@
 //   • embedded mesh bytes survive a base64 round-trip EXACTLY (incl. the
 //     0x8000 chunk boundary in _b64FromBuf and full 0..255 byte range)
 //   • _resolveAssetBlob honours the locked priority order:
-//       live exact path  >  content-hash scan of moved/renamed file
+//       live exact path  >  (content-hash scan retired: load never scans)
 //       >  embedded static copy  >  null (ghost)
 //   • sha256 / ext / arrToMap / migrate behave as the load path assumes
 // The live Babylon scene round-trip stays a human Chrome check (STEP 1).
@@ -291,7 +291,7 @@ await test('priority 1: live file at exact originalPath wins over embedded', asy
   const entry = {
     filename: 'hull.glb', extension: '.glb',
     directoryHandleKey: 'DIRKEY', originalPath: 'parts/hull.glb',
-    contentHash: 'deadbeef',
+    contentHash: await _sha256Hex(u8(live)),
     fileData: _b64FromBuf(u8([99, 99]).buffer),   // embedded decoy, must NOT win
   };
   const r = await _resolveAssetBlob(entry);
@@ -299,21 +299,23 @@ await test('priority 1: live file at exact originalPath wins over embedded', asy
   eqBytes(await bytesOf(r.blob), live);
 });
 
-await test('priority 2: path miss → content-hash scan relinks the moved/renamed file', async () => {
+await test('priority 2 (retired, Decision 3): path miss does NOT scan - falls back to embedded copy', async () => {
   const live = [4, 5, 6, 7];
-  const hash = await _sha256Hex(u8(live));
-  // Saved path no longer exists; the file was renamed elsewhere in the dir.
+  const embedded = [0];
+  const hash = await _sha256Hex(u8(embedded).buffer);
+  // Saved path gone; a renamed copy sits in the dir but load must not hunt for it.
   const root = dirHandle({ files: new Map([['totally-renamed.glb', live]]) });
   await seedHandle('DIRKEY', root);
   const entry = {
     filename: 'old.glb', extension: '.glb',
     directoryHandleKey: 'DIRKEY', originalPath: 'gone/old.glb',
     contentHash: hash,
-    fileData: _b64FromBuf(u8([0]).buffer),
+    fileData: _b64FromBuf(u8(embedded).buffer),
   };
   const r = await _resolveAssetBlob(entry);
-  assert.equal(r.live, true, 'hash-matched file must count as live (relinked)');
-  eqBytes(await bytesOf(r.blob), live);
+  assert.equal(r.live, false, 'no scan on load: embedded snapshot, not the renamed file');
+  eqBytes(await bytesOf(r.blob), embedded);
+  assert.equal(r.status, 'missing');
 });
 
 await test('priority 3: no granted dir → falls back to embedded static copy', async () => {

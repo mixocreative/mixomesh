@@ -4,6 +4,8 @@ import { t, applyTranslations } from '../i18n/index.js';
 import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
 import { kvSet, kvGet, getHandle } from '../core/idb.js';
 import { Modal } from './Modal.js';
+import { runFindMoved } from './FindMoved.js';
+import { getAssetStatus, canFindMoved } from '../core/persist/AssetResolver.js';
 import { Toast, safeAsync } from './Toast.js';
 import { safeImport } from './ImportError.js';
 import { icon } from '../core/Icons.js';
@@ -128,6 +130,7 @@ export function init() {
 
   subscribe(EVENTS.ASSET_REGISTERED,   () => _renderGrid());
   subscribe(EVENTS.ASSET_REMOVED,      () => _renderGrid());
+  subscribe(EVENTS.ASSET_RELINKED,     () => _renderGrid());
   subscribe(EVENTS.ASSET_INSTANTIATED, () => _renderGrid());
   // Header is built once and survives re-renders — only retranslate it on
   // locale switch; the grid body has no section.* labels in scope for v1.
@@ -489,7 +492,12 @@ function _renderCard(file) {
   // always live by definition since they're the mounted folder browser).
   if (isSession && asset) {
     const linked = !!(asset.directoryHandleKey || asset.fileHandleKey);
-    badges += linked
+    const st = getAssetStatus(asset.id);
+    if (linked && canFindMoved(asset.id)) {
+      const key = st === 'changed' ? 'asset.changed' : 'asset.missing';
+      badges += `<span class="ac-link is-snapshot" title="${escapeAttr(t(key + 'Title'))}">${_escape(t(key))}</span>`
+        + `<button class="ac-link is-linked ac-find-moved" type="button" data-asset-id="${escapeAttr(asset.id)}" title="${escapeAttr(t('asset.findMoved.title'))}">${_escape(t('asset.findMoved.action'))}</button>`;
+    } else badges += linked
       ? `<span class="ac-link is-linked" title="${escapeAttr(t('asset.linkedTitle'))}">${_escape(t('asset.linked'))}</span>`
       : `<span class="ac-link is-snapshot" title="${escapeAttr(t('asset.snapshotTitle'))}">${_escape(t('asset.snapshot'))}</span>`;
   }
@@ -592,6 +600,12 @@ function _onGridChange(e) {
 }
 
 function _onGridClick(e) {
+  const findBtn = e.target.closest?.('.ac-find-moved');
+  if (findBtn && _gridEl.contains(findBtn)) {
+    e.stopPropagation();
+    runFindMoved(findBtn.dataset.assetId);
+    return;
+  }
   const deleteBtn = e.target.closest?.('.ac-delete');
   if (!deleteBtn || !_gridEl.contains(deleteBtn)) return;
   e.stopPropagation();

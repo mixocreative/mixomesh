@@ -719,5 +719,16 @@
   "print.issueAction.watertight-required": "Open Validation and run Auto-Fix to close the holes.",
   "context.deleteLockedTitle": "Delete locked items?",
   "context.deleteLockedBody": "The selection includes locked objects or groups. Delete them anyway?",
-  "context.deleteLockedConfirm": "Delete"
+  "context.deleteLockedConfirm": "Delete",
+  "asset.missing": "Missing",
+  "asset.missingTitle": "The linked file was not found; using the embedded copy",
+  "asset.changed": "Changed",
+  "asset.changedTitle": "The linked file differs from the saved copy; using the embedded copy",
+  "asset.findMoved.action": "Find moved file…",
+  "asset.findMoved.title": "Search the linked folder for this file by content",
+  "asset.findMoved.hint": "Linked file is missing or changed",
+  "asset.findMoved.searching": "Searching for {name}…",
+  "asset.findMoved.scanned": "{n} files checked",
+  "asset.findMoved.found": "Relinked {name} to {path}",
+  "asset.findMoved.notFound": "No matching file found for {name}"
 }
