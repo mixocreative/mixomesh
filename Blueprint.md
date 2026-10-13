@@ -3700,6 +3700,24 @@ root rel of type `http://schemas.openxmlformats.org/package/2006/relationships/m
 metadata/thumbnail, accepts 8-digit colours, and imports a split parent as a
 TransformNode holding the part meshes.
 
+**Bambu/Orca flavour (task 1.11).** `flavour` = `ctx.prefs.threeMFFlavour ??
+profile.export.threeMF.flavour ?? 'core'` (`_threeMFWriterOptions`); `'prusa'`
+currently writes core. `'bambu'` (`ThreeMFBambu.js`, post-pass over the core
+package): split-by-material forced ON and EVERY logical object written as a
+parent `<object><components>` + one part object per material (even
+single-material); no group hierarchy (flat build, one item per logical
+object). Model: `requiredextensions="p"`, `xmlns:p` (Production 2015/06),
+deterministic `p:UUID` on every `<object>`, `<component>`, `<build>`, `<item>`.
+`Metadata/model_settings.config` (Bambu XML: object `name`/`extruder`, parts
+`subtype="normal_part"` with `name`/`extruder`, one `<plate>`). Extruder slots:
+first 4 distinct material keys (solid `#RRGGBBAA`, textured → texture path) in
+first-appearance order → slots 1–4; more share slot 4 and raise
+`onWarning({code:'3mf-bambu-slot-overflow'})` (→ console.warn).
+`Metadata/project_settings.config` = JSON `{"filament_colour":[…]}`; thumbnail
+also as `Metadata/plate_1.png`; `[Content_Types]` gains `config` (text/plain).
+Textured content keeps the Materials Extension (rule 6); no per-triangle paint
+(7.1). The loader ignores UUIDs/config; re-import = parent node + part meshes.
+
 ### Print-space axis + winding contract (ALL writers + the 3MF loader)
 `src/core/print/PrintSpace.js` is the ONE seam between Babylon (left-handed,
 Y-up) and print files (right-handed, Z-up, mm). Locked 2026-09-17 after the

@@ -10,10 +10,16 @@
 // split-by-material parts (`<components>` parent → loader's TransformNode
 // path), model `<metadata>` (loader ignores), `Metadata/thumbnail.png` (loader
 // follows only the 3dmodel rel), colorgroup alpha (loader accepts #RRGGBBAA).
+// Task 1.11 flavour switch: `options.flavour === 'bambu'` forces split-by-
+// material, wraps EVERY logical object as parent + parts (Bambu's object →
+// part model), flattens group hierarchy (Bambu has one object level) and
+// hands the package to ThreeMFBambu.js (p:UUID, Metadata/*.config, plate
+// thumbnail). 'core' / 'prusa' (Prusa stays core for now) = the 1.5 package.
 
 import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
+import { applyBambuFlavour } from './ThreeMFBambu.js';
 
 const BABYLON = window.BABYLON;
 
@@ -76,7 +82,25 @@ function _materialHex(mesh, withAlpha = false) {
  *   Model-part `<metadata>` (Title / Application / CreationDate); null = none.
  * @property {Blob|Uint8Array|null} [thumbnailPng] PNG bytes → `Metadata/thumbnail.png`
  *   + root thumbnail relationship; absent = no thumbnail (never an error).
+ * @property {'core'|'bambu'|'prusa'} [flavour] 'bambu' → Bambu/Orca package
+ *   (ThreeMFBambu.js); anything else = core.
+ * @property {(warning:{code:string,message:string}) => void} [onWarning]
+ *   Non-fatal export warnings (e.g. more materials than Bambu filament slots).
  */
+
+function _isBambu(options) {
+  return options?.flavour === 'bambu';
+}
+
+/** Bambu flavour post-pass over a finished core package. */
+function _finishFlavour(entries, options, bambuObjects) {
+  if (!_isBambu(options)) return entries;
+  return applyBambuFlavour(entries, bambuObjects, {
+    seed: options.metadata?.title || 'MIXOMESH',
+    thumbnailPng: options.thumbnailPng ?? null,
+    onWarning: options.onWarning,
+  });
+}
 
 /** OPC skeleton shared by both package shapes. */
 function _packageEntries(modelXml, options, textured) {
@@ -93,19 +117,22 @@ function _packageEntries(modelXml, options, textured) {
 
 /** Filament colorgroup package: [Content_Types] + rels + model XML. */
 export function buildColorGroupEntries(meshList, options = {}) {
-  return _packageEntries(_buildColorGroupModel(meshList, options), options, false);
+  const bambuObjects = [];
+  const entries = _packageEntries(_buildColorGroupModel(meshList, options, bambuObjects), options, false);
+  return _finishFlavour(entries, options, bambuObjects);
 }
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
 export async function buildMaterialsExtEntries(meshList, options = {}) {
   const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON, options.state ?? undefined);
-  const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options);
+  const bambuObjects = [];
+  const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options, bambuObjects);
   const entries = _packageEntries(modelXml, options, true);
   if (blobByPath.size) {
     entries.push({ path: '3D/_rels/3dmodel.model.rels', data: _buildTextureRels(blobByPath) });
     for (const [path, blob] of blobByPath) entries.push({ path, data: blob });
   }
-  return entries;
+  return _finishFlavour(entries, options, bambuObjects);
 }
 
 function _normaliseUnits(list) {
@@ -179,23 +206,26 @@ function _meshObjectXml(objId, nameAttr, built) {
  *    assignable to its own filament.
  *
  * `buildMesh(unit)` returns `{vertices, triangles, objectAttrs}` or null.
+ * `record` (Bambu flavour only): always parent + parts, even for ONE
+ * material, and receives `{objectId, name, parts:[{objectId, name, mesh}]}`.
  * @returns {number} next free object id
  */
-function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId }) {
-  if (split && unit.meshes.length > 1) {
-    const partIds = [];
+function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId, record = null }) {
+  if (split && (unit.meshes.length > 1 || record)) {
+    const parts = [];
     unit.meshes.forEach((entry, k) => {
       const built = buildMesh({ ...unit, meshes: [entry] });
       if (!built) return;
       const partName = entry.name ?? entry.mesh?.name ?? `${unit.name ?? 'part'} ${k + 1}`;
       objs.push(_meshObjectXml(objId, ` name="${_xmlAttr(partName)}"`, built));
-      partIds.push(objId++);
+      parts.push({ objectId: objId++, name: partName, mesh: entry.mesh });
     });
-    if (!partIds.length) return objId + 1;
-    const components = partIds
-      .map(id => `<component objectid="${id}" transform="${THREEMF_IDENTITY}"/>`).join('');
+    if (!parts.length) return objId + 1;
+    const components = parts
+      .map(p => `<component objectid="${p.objectId}" transform="${THREEMF_IDENTITY}"/>`).join('');
     objs.push(`<object id="${objId}" type="model" name="${_xmlAttr(unit.name ?? '')}"><components>${components}</components></object>`);
     meshObjectIds.set(unit, objId);
+    record?.({ objectId: objId, name: unit.name ?? parts[0].name, parts });
     return objId + 1;
   }
   const built = buildMesh(unit);
@@ -203,6 +233,21 @@ function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId }
   objs.push(_meshObjectXml(objId, '', built));
   meshObjectIds.set(unit, objId);
   return objId + 1;
+}
+
+/**
+ * Bambu flavour: collect `{objectId, name, parts:[{objectId, name, key, colour}]}`
+ * per build object (key = material identity for the extruder slot map).
+ * Null for every other flavour.
+ */
+function _bambuRecorder(options, bambuObjects, materialOf) {
+  if (!_isBambu(options)) return null;
+  return ({ objectId, name, parts }) => {
+    bambuObjects.push({
+      objectId, name,
+      parts: parts.map(p => ({ objectId: p.objectId, name: p.name, ...materialOf(p.mesh) })),
+    });
+  };
 }
 
 function _hierarchyPlan(units, state, meshObjectIds) {
@@ -303,7 +348,7 @@ function _appendComponentHierarchy({ objs, items, units, state, meshObjectIds, n
   return nextObjectId;
 }
 
-function _buildColorGroupModel(list, options = {}) {
+function _buildColorGroupModel(list, options = {}, bambuObjects = []) {
   const units = _normaliseUnits(list);
   const flat = _flattenEntries(units);
   const hexOf = mesh => _materialHex(mesh, !!options.alpha);
@@ -321,10 +366,15 @@ function _buildColorGroupModel(list, options = {}) {
   const meshObjectIds = new Map();
   let objId = 2;                                  // id 1 = colorgroup
   const buildMesh = u => _buildUnitColorMeshXml(u, converted, cx, cy, cz, colorIndex, hexOf);
+  const record = _bambuRecorder(options, bambuObjects, mesh => {
+    const hex = hexOf(mesh);
+    return { key: hex, colour: hex };
+  });
   for (const unit of units) {
-    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial, objs, meshObjectIds, objId });
+    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
   }
-  _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
+  // Bambu: flat build (one object level) — group hierarchy is not emitted.
+  _appendComponentHierarchy({ objs, items, units, state: record ? null : options.state, meshObjectIds, nextObjectId: objId });
 
   const colorXml = colors.map(c => `<m:color color="${c}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -415,7 +465,7 @@ function _convertVertices(list) {
  * `v1/v2/v3` — vertex i ↔ UV i. Welding is skipped on textured meshes (see
  * PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
  */
-function _buildMaterialsExtModel(list, pathByMesh, options = {}) {
+function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = []) {
   const units = _normaliseUnits(list);
   const flat = _flattenEntries(units);
   // Pass 1: assign resource ids, gather distinct solid colours.
@@ -473,10 +523,14 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}) {
     u, converted, cx, cy, cz,
     tex2dGroupIdByMesh, colorGroupId, colorIndex, hexOf
   );
+  const record = _bambuRecorder(options, bambuObjects, mesh => {
+    const hex = hexOf(mesh);
+    return { key: pathByMesh.has(mesh) ? `tex:${pathByMesh.get(mesh)}` : hex, colour: hex };
+  });
   for (const unit of units) {
-    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial, objs, meshObjectIds, objId });
+    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
   }
-  _appendComponentHierarchy({ objs, items, units, state: options.state, meshObjectIds, nextObjectId: objId });
+  _appendComponentHierarchy({ objs, items, units, state: record ? null : options.state, meshObjectIds, nextObjectId: objId });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">

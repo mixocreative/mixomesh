@@ -713,6 +713,11 @@ function _threeMFWriterOptions(ctx, { withState = true } = {}) {
     alpha: !!profile.colour?.alpha,
     metadata,
     thumbnailPng: ctx.options?.thumbnailPng ?? null,
+    // Task 1.11: user/project flavour wins, else the printer profile's.
+    flavour: /** @type {any} */ (ctx.prefs)?.threeMFFlavour ?? profile.export?.threeMF?.flavour ?? 'core',
+    // Non-fatal writer warnings (Bambu slot overflow) → console, like the
+    // other non-fatal export fallbacks in this pipeline.
+    onWarning: (warning) => console.warn(warning.message),
   };
 }
 

@@ -220,7 +220,9 @@ await test('Bambu target + textured mesh → Materials Extension layout (printer
   assert.ok(files['3D/_rels/3dmodel.model.rels'], 'per-part rels present');
   const model = files['3D/3dmodel.model'];
   assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
-  assert.match(model, /<object id="3" type="model" pid="2" pindex="0">/);
+  // Bambu profile → Bambu flavour (task 1.11): p:UUID + part name on the object.
+  assert.match(model, /<object id="3" p:UUID="[^"]+" type="model" name="p" pid="2" pindex="0">/);
+  assert.ok(files['Metadata/model_settings.config'], 'Bambu flavour resolved from the printer profile');
   assert.ok(!/<m:colorgroup/.test(model), 'no colorgroup when every mesh is textured');
 });
 
@@ -380,9 +382,10 @@ await test('per-part printer (Bambu X1C) → split-by-material parts under a com
   splitMugScene('bambu-x1c');
   await PrintManager.exportThreeMF();
   const model = zipInstances.at(-1).files['3D/3dmodel.model'];
-  const parts = [...model.matchAll(/<object id="(\d+)" type="model" name="[^"]*" pid="1" pindex="(\d)"><mesh>/g)];
+  // Bambu profile → Bambu flavour (task 1.11): objects/components carry p:UUID.
+  const parts = [...model.matchAll(/<object id="(\d+)"(?: p:UUID="[^"]+")? type="model" name="[^"]*" pid="1" pindex="(\d)"><mesh>/g)];
   assert.equal(parts.length, 2, `two part objects:\n${model}`);
-  const parent = model.match(/<object id="(\d+)" type="model" name="Mug"><components>(.*?)<\/components>/);
+  const parent = model.match(/<object id="(\d+)"(?: p:UUID="[^"]+")? type="model" name="Mug"><components>(.*?)<\/components>/);
   assert.ok(parent, 'components parent named after the logical object');
   for (const p of parts) assert.ok(parent[2].includes(`<component objectid="${p[1]}" `));
   assert.equal((model.match(/<item /g) ?? []).length, 1, 'one build item per logical object');
