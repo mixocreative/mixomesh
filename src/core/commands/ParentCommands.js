@@ -288,9 +288,13 @@ export class CreateGroupCommand {
   }
   execute() {
     withDetachedPivot(() => {
-      const members = [...this._ids, ...this._groupMemberIds];
-      if (!members.some(id => findNodeForId(id))) return;
+      if (![...this._ids, ...this._groupMemberIds].some(id => findNodeForId(id))) return;
       this._ensureSnapshots();
+      // AFTER _ensureSnapshots: it drops members already inside another
+      // selected group (the outer group carries them). Building the list
+      // earlier re-parented a covered child straight under the new node and
+      // broke its undo (6.6b finding).
+      const members = [...this._ids, ...this._groupMemberIds];
 
       const scene = SceneManager.getScene();
       let node = findGroupNode(this._groupId);
