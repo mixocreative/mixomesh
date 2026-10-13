@@ -142,6 +142,7 @@ function _parseDoc(text) {
 
 /** Prompt for a .mixo file and load it. */
 export async function open() {
+  assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm, not after the user answered it
   if (isDirty()) {
     const choice = await confirmDirty();
     if (choice === 'cancel') return;
@@ -195,6 +196,7 @@ export async function newProject() {
 
 /** Open a recent project by its stored entry. */
 export async function openRecent(rec) {
+  assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm
   if (isDirty()) {
     const choice = await confirmDirty();
     if (choice === 'cancel') return;

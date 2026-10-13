@@ -32,7 +32,7 @@ const { Selection } = await import('../src/core/Selection.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { PersistenceManager, __test } = await import('../src/core/PersistenceManager.js');
-const { setState, getState, subscribe, replaceState, freshState } = await import('../src/core/StateManager.js');
+const { setState, getState, subscribe, replaceState, freshState, markDirty } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
 const { sha256Hex } = await import('../src/core/hash.js');
 const { encodeBase64 } = await import('../src/core/workers/base64Codec.js');
@@ -311,6 +311,22 @@ await test('geometryFixes replay failure (engine down) does not abort the load �
   assert.ok(errors.some(e => /geometry-fix replay failed/i.test(e)), 'replay failure logged, not swallowed silently');
 });
 
+await test('0.5: failed geometryFixes replay removes the fix from state + toasts the object name; load continues', async () => {
+  seedCurrentScene();
+  toasts.length = 0;
+  const { __test: repairTest } = await import('../src/core/repair/MeshRepair.js');
+  repairTest.setEngine(null);
+  const doc = goodDoc('Repaired');
+  doc.sceneObjects[0] = { ...doc.sceneObjects[0], name: 'Dragon', geometryFixes: ['holes'] };
+  doc.assetLibrary.push(meshAsset('a_ok3', { fileData: GLB_B64, contentHash: GLB_HASH }));
+  doc.sceneObjects.push(sceneObject('o_ok3', 'a_ok3'));   // no fixes — unaffected
+  await __test._loadProject(doc);
+  const objs = getState().scene.objects;
+  assert.ok(objs.o_ok && objs.o_ok3, 'load continued');
+  assert.equal(objs.o_ok.geometryFixes, undefined, 'failed fix not kept as if applied');
+  assert.ok(toasts.some(x => /Dragon/.test(x.msg) && x.type === 'warning'), 'toast names the object');
+});
+
 // ── Item 4: import ↔ load mutual exclusion (F20) ──────────
 
 await test('F20: loadProject refuses while an import is in flight', async () => {
@@ -326,6 +342,26 @@ await test('F20: loadProject refuses while an import is in flight', async () => 
   assert.ok(getState().scene.objects.keep, 'world untouched');
   d.resolve(makeContainer());
   await importing;
+  assert.equal(AssetLoader.isImporting(), false);
+});
+
+await test('F20 window: import is flagged synchronously, before the first await; open() refuses before the dirty confirm', async () => {
+  seedCurrentScene();
+  const d = deferred();
+  B.SceneLoader = { LoadAssetContainerAsync: () => d.promise };
+  const importing = AssetLoader.loadFromBlob(new Blob(['glb']), 'slow2.glb');
+  // No await between the call and this check: the hash await has not resolved yet.
+  assert.equal(AssetLoader.isImporting(), true, 'flagged before any await');
+  const before = modals.length;
+  markDirty();   // dirty project: the confirm would show if the guard ran after it
+  try {
+    await assert.rejects(PersistenceManager.open(), /import is still running/);
+    await assert.rejects(PersistenceManager.openRecent({ handleKey: 'k' }), /import is still running/);
+    assert.equal(modals.length, before, 'no dirty confirm shown');
+  } finally {
+    d.resolve(makeContainer());
+    await importing;
+  }
   assert.equal(AssetLoader.isImporting(), false);
 });
 

@@ -321,6 +321,7 @@ async function _loadProjectInner(doc, previousName) {
   // the same container mesh must get its OWN clone — otherwise both collapse
   // onto one mesh and only one ratio/transform survives.
   const _claimed = new Set();
+  const replayFailed = new Set();   // ids whose geometryFixes replay threw — dropped from state
   for (const o of data.sceneObjects || []) {
     const res = assetRes.get(o.assetId);
     let mesh = null, ghost = false, unlinked = false;
@@ -357,13 +358,16 @@ async function _loadProjectInner(doc, previousName) {
       // Fault-isolated per object: 'holes'/'nonManifold' replay through the
       // repair engine, which can fail (engine unavailable, triangle cap) —
       // that must not abort the rest of the load. The object's ORIGINAL
-      // geometry is already bound and stays loaded; geometryFixes is left
-      // untouched on the SceneObject so the user can re-run Auto-Fix later.
+      // geometry is already bound and stays loaded; the failed fixes are
+      // dropped from the object's state (so a later save does not record them
+      // as applied) and the user is told which object needs Auto-Fix re-run.
       if (Array.isArray(o.geometryFixes) && o.geometryFixes.length) {
         try {
           await MeshValidator.replayGeometryFixes(mesh, o.geometryFixes);
         } catch (err) {
           console.error(`Geometry-fix replay failed for "${o.name}":`, err);
+          replayFailed.add(o.id);
+          Toast.show(`${t('toast.operationFailed')}: ${o.name}`, 'warning', 5000);
         }
       }
       applyWorld(mesh, o.transform);
@@ -392,7 +396,7 @@ async function _loadProjectInner(doc, previousName) {
       isInternalPart: !!o.isInternalPart,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
-      ...(Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
+      ...(!replayFailed.has(o.id) && Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
       ...(o.sliceRecipe ? { sliceRecipe: JSON.parse(JSON.stringify(o.sliceRecipe)) } : {}),
       _savedTransform: o.transform ?? null,
     };

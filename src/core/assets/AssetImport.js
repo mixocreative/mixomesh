@@ -176,30 +176,32 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     throw new Error(`Unsupported file type: ${ext}`);
   }
 
+  // F20: flag the import BEFORE the first await (hash / sibling collection
+  // below) — otherwise Open/New started in that window races a running import.
+  _importBegin(`Reading ${filename}…`);
+  let restoreUrls = () => {};
   const scene = SceneManager.getScene();
   const assetId = newId('asset');
   const blobUrl = URL.createObjectURL(blob);
   setBlobUrl(assetId, blobUrl);
 
-  // §10b texture-identity scope: hash the source bytes once. Reused as the
-  // AssetEntry contentHash so persistence doesn't re-hash at save time.
-  let sourceFileHash = null;
-  try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
-  catch { /* hash is an identity optimisation — import proceeds without it */ }
-
-  // OBJ: resolve mtllib/texture references against drop-set or directory
-  // siblings (blob URLs have no usable base URL).
-  let siblings = null;
-  if (ext === '.obj') {
-    siblings = await collectObjSiblings(opts);
-    if (siblings.size) rememberObjSiblings(assetId, siblings);
-    noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
-  }
-
-  _importBegin(`Reading ${filename}…`);
-  const restoreUrls = installSiblingUrls(siblings);
-
   try {
+    // §10b texture-identity scope: hash the source bytes once. Reused as the
+    // AssetEntry contentHash so persistence doesn't re-hash at save time.
+    let sourceFileHash = null;
+    try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
+    catch { /* hash is an identity optimisation — import proceeds without it */ }
+
+    // OBJ: resolve mtllib/texture references against drop-set or directory
+    // siblings (blob URLs have no usable base URL).
+    let siblings = null;
+    if (ext === '.obj') {
+      siblings = await collectObjSiblings(opts);
+      if (siblings.size) rememberObjSiblings(assetId, siblings);
+      noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
+    }
+
+    restoreUrls = installSiblingUrls(siblings);
     const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
     ProgressOverlay.update(0.8, `Materials for ${filename}…`);
 

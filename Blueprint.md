@@ -254,6 +254,8 @@ src/
     placement/AlignMath.js ← pure align-delta math for placement verbs — see §Placement + ADR 0003
     placement/BedPlacement.js ← pure drop/centre/face-normal quaternion math
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
+                             open/openRecent/newProject call assertNoImportInFlight BEFORE the dirty confirm;
+                             AssetImport flags the import (_importBegin) before its first await (F20, task 0.5)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
       ProjectIntegrity.js  ← portable .mixo save gate: required asset refs + missing-byte error shape
@@ -2099,6 +2101,8 @@ MeshValidator.repairObject(meshId)                 → Promise<{holesFilled, nmF
 MeshValidator.repairObjects(meshIds, {onProgress}) → Promise<{holesFilled, nmFixed, repaired, failed}>      // sequential batch; one failure never loses the rest
 MeshValidator.applyGeometryFix(mesh, type, report?) → Promise<boolean>  // 'holes'/'nonManifold' → MeshFixLib.repairMesh; nonManifold falls back to the shared weld offline
 MeshValidator.replayGeometryFixes(mesh, fixes)     → Promise<void>      // re-applies persisted `geometryFixes` on `.mixo` reload
+                                                                        // a replay that throws is fault-isolated: original geometry stays, that object's
+                                                                        // geometryFixes are DROPPED from loaded state + a warning toast names it (task 0.5)
 ```
 
 **Implementation split (2026-09-18, review I9).** Everything above the line
