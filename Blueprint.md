@@ -4200,6 +4200,17 @@ opens Validation; clicking no-print-parts/source/texture issues switches to
 Layout so the user can import, relink, or pick the affected asset. Issue rows
 select their first live related object when one exists.
 
+**Export gate (Decision 18, task 1.8).** Readiness `error` issues always
+block. `warning` issues block unless the caller passes `acknowledgeWarnings:
+true`; `_runExport` enforces this itself before any side effect and throws
+`{needsAcknowledgement:true, code:'EXPORT_NEEDS_ACKNOWLEDGEMENT',
+readinessIssues}`, which the panel turns into the three-way modal (Repair &
+export [default] / Export anyway / Cancel) and re-calls with
+`acknowledgeWarnings:true`. `info` issues never need acknowledgement. Under
+`strictExport`, any clone whose post-repair watertight verdict is not
+confirmed true (open, unknown, engine unavailable, `repair:false`) aborts with
+`validationErrors` ("could not verify watertight" for unknown).
+
 **Per-printer readiness hints (task 1.4).** `buildReadiness({parts, targets,
 bedDimensions, reference, profile, strictExport})` adds four profile-driven
 codes (limit 0/absent = no limit): `texture-too-large` (warning; a part's

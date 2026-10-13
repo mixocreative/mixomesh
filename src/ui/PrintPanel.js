@@ -678,7 +678,7 @@ function _renderExportTab() {
  * Cancel); then the pipeline under the progress overlay. Shared by the
  * Export tab buttons and the context menu's export-selected action.
  */
-async function _runExport(fn, opts) {
+async function _runExport(fn, opts, _regated = false) {
   {
     const currentReadiness = PrintManager.getPrintReadiness(opts);
     if (!currentReadiness.canExport) {
@@ -716,6 +716,7 @@ async function _runExport(fn, opts) {
         // Explicit user click on Auto-fix IS the export consent — proceed
         // below without re-opening the gate, even if unrelated warnings
         // (e.g. bed-overflow) remain.
+        exportOpts = { ...opts, acknowledgeWarnings: true };
       } else if (choice === 'export') {
         // Clones are still repaired on export regardless (the `repair` prep
         // step runs on every export); this only records the user's explicit
@@ -724,7 +725,7 @@ async function _runExport(fn, opts) {
         // knows the real post-repair result (which parts, if any, are still
         // not watertight); the panel does not also toast here (fix-round-1
         // finding #2 — a caller-side toast here duplicated the pipeline's).
-        exportOpts = { ...opts, repair: true };
+        exportOpts = { ...opts, repair: true, acknowledgeWarnings: true };
       } else {
         return;   // 'cancel', ESC, or backdrop dismissal
       }
@@ -733,7 +734,12 @@ async function _runExport(fn, opts) {
     try {
       await fn({ ...exportOpts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
     } catch (err) {
-      if (err?.validationErrors?.length) {
+      if (err?.needsAcknowledgement && !_regated) {
+        // The pipeline enforces the gate itself; readiness changed between
+        // the panel's check and the run. Re-open the three-way prompt once.
+        ProgressOverlay.hide();
+        return _runExport(fn, opts, true);
+      } else if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
       } else if (err?.readinessIssues?.length) {
         reportError(err, { title: t('print.readiness.blocked'), modal: true });

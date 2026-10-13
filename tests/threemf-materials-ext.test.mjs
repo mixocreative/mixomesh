@@ -127,9 +127,11 @@ function setScene({ objects = {}, registry = {}, targetPrinterId = 'mimaki-3duj-
   StateManager.setState(s => ({
     ...s,
     project: { ...s.project, name: 'MimakiTest' },
-    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 1 }], targetPrinterId },
+    // Warning-free readiness (task 1.8 gate): huge bed + fresh clean validation cache.
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 1 }], targetPrinterId, bedDimensions: { x: 1e6, y: 1e6, z: 1e6 } },
     selection: { ...s.selection, selectedIds: [] },
-    scene: { ...s.scene, objects },
+    scene: { ...s.scene, objects,
+      validation: Object.fromEntries(Object.keys(objects).map(id => [id, { results: [], stale: false }])) },
   }), { silent: true });
 }
 

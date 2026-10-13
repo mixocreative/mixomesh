@@ -90,9 +90,16 @@ function setScene({ objects = {}, registry = {}, selectedIds = [], workingRatio 
   StateManager.setState(s => ({
     ...s,
     project: { ...s.project, name: 'Test' },
-    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: targetRatio }] },
+    // Huge bed: the fake meshes are 10-30 BU (= metres of mm), and a
+    // bed-overflow WARNING would demand acknowledgement (task 1.8).
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: targetRatio }], bedDimensions: { x: 1e6, y: 1e6, z: 1e6 } },
     selection: { ...s.selection, selectedIds, activeId },
-    scene: { ...s.scene, objects: objectsWithRatio },
+    // Fresh, clean validation cache: an unvalidated object is a
+    // `validation-pending` WARNING, which (task 1.8) needs acknowledgement.
+    scene: {
+      ...s.scene, objects: objectsWithRatio,
+      validation: Object.fromEntries(Object.keys(objectsWithRatio).map(id => [id, { results: [], stale: false }])),
+    },
   }), { silent: true });
 }
 
@@ -273,6 +280,100 @@ await test('OBJ: warnings only → still exports', async () => {
   MeshValidator.validateMesh = valWarnOnly;
   await PrintManager.exportOBJ();
   assert.equal(objTexts().length, 1);
+  assert.equal(calls.downloads.length, 1);
+});
+
+// ── Gate (task 1.8, Decision 18): acknowledgement enforced IN the pipeline ──
+
+const withCache = (id, results) => StateManager.setState(
+  s => ({ ...s, scene: { ...s.scene, validation: { [id]: { results, stale: false } } } }), { silent: true });
+const geoWarn = [{ type: 'holes', severity: 'warning', message: 'open edges' }];
+
+await test('gate: readiness warning + no acknowledgement → rejected needsAcknowledgement, no download, no clone', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  withCache('m1', geoWarn);
+  MeshValidator.validateMesh = valOK;
+  await assert.rejects(PrintManager.exportOBJ(), err =>
+    err.needsAcknowledgement === true && err.code === 'EXPORT_NEEDS_ACKNOWLEDGEMENT'
+    && err.readinessIssues.some(i => i.code === 'geometry-warning'));
+  assert.equal(calls.downloads.length, 0, 'nothing downloaded');
+  assert.equal(_clones.length, 0, 'rejected before any export clone was made');
+});
+
+await test('gate: every format rejects an unacknowledged warning', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  withCache('m1', geoWarn);
+  MeshValidator.validateMesh = valOK;
+  for (const fn of ['exportOBJ', 'exportSTL', 'exportThreeMF', 'exportPLY', 'exportWRL']) {
+    await assert.rejects(PrintManager[fn](), err => err.needsAcknowledgement === true, fn);
+  }
+  assert.equal(calls.downloads.length, 0);
+});
+
+await test('gate: acknowledgeWarnings only counts when strictly true', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  withCache('m1', geoWarn);
+  MeshValidator.validateMesh = valOK;
+  await assert.rejects(PrintManager.exportOBJ({ acknowledgeWarnings: 'yes' }), err => err.needsAcknowledgement === true);
+  assert.equal(calls.downloads.length, 0);
+});
+
+await test('gate: readiness warning + acknowledgeWarnings:true → exports', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  withCache('m1', geoWarn);
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ({ acknowledgeWarnings: true });
+  assert.equal(calls.downloads.length, 1);
+});
+
+await test('gate: readiness error blocks even WITH acknowledgement', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  withCache('m1', [{ type: 'x', severity: 'error', message: 'broken' }, ...geoWarn]);
+  MeshValidator.validateMesh = valOK;
+  await assert.rejects(PrintManager.exportOBJ({ acknowledgeWarnings: true }), err =>
+    !err.needsAcknowledgement && err.readinessIssues?.some(i => i.code === 'geometry-error'));
+  assert.equal(calls.downloads.length, 0);
+});
+
+await test('gate: info-only readiness (mixed-scales) exports without acknowledgement', async () => {
+  setScene({ objects: { m1: obj('m1', { ratio: 1 }), m2: obj('m2', { ratio: 2 }) },
+    registry: { m1: mesh('m1'), m2: mesh('m2') } });
+  withCache('m1', []);
+  StateManager.setState(s => ({ ...s, scene: { ...s.scene, validation: {
+    m1: { results: [], stale: false }, m2: { results: [], stale: false } } } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  const r = PrintManager.getPrintReadiness();
+  assert.ok(r.issues.some(i => i.code === 'mixed-scales' && i.severity === 'info'), 'precondition: info issue present');
+  assert.equal(r.requiresAcknowledgement, false);
+  await PrintManager.exportOBJ();
+  assert.equal(calls.downloads.length, 1);
+});
+
+await test('gate (strict): UNKNOWN watertight verdict (repair engine unavailable) blocks', async () => {
+  MeshRepair.__test.setEngine(null);
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  try {
+    await assert.rejects(PrintManager.exportOBJ(), err =>
+      /could not verify/i.test(err.message) && err.validationErrors?.[0]?.meshName === 'm1');
+    assert.equal(calls.downloads.length, 0);
+  } finally {
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: false } }), { silent: true });
+  }
+});
+
+await test('gate (strict): repair:false (unverified) blocks; non-strict still exports', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  MeshValidator.validateMesh = valOK;
+  StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true });
+  try {
+    await assert.rejects(PrintManager.exportOBJ({ repair: false }), /could not verify/i);
+    assert.equal(calls.downloads.length, 0);
+  } finally {
+    StateManager.setState(s => ({ ...s, print: { ...s.print, strictExport: false } }), { silent: true });
+  }
+  await PrintManager.exportOBJ({ repair: false });
   assert.equal(calls.downloads.length, 1);
 });
 
@@ -701,6 +802,7 @@ await test('prep leaves a part with zero triangles → export ABORTS (M4), not a
 
 await test('readiness: missing or stale validation cache → validation-pending warning (M3), fresh cache → none', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  StateManager.setState(s => ({ ...s, scene: { ...s.scene, validation: {} } }), { silent: true });
   let r = PrintManager.getPrintReadiness();
   assert.ok(r.issues.some(i => i.code === 'validation-pending'), 'no cache = pending');
   StateManager.setState(s => ({ ...s, scene: { ...s.scene, validation: { m1: { results: [], stale: true, validatedAt: 1 } } } }), { silent: true });

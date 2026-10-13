@@ -313,6 +313,7 @@ function _groupCloneEntries(entries) {
 /**
  * @param {'obj'|'stl'|'3mf'|'ply'|'wrl'} formatKey
  * @param {{selectedOnly?:boolean, individually?:boolean,
+ *          acknowledgeWarnings?:boolean,
  *          onProgress?:(frac:number,msg:string)=>void}} options
  */
 async function _runExport(formatKey, options = {}) {
@@ -325,6 +326,17 @@ async function _runExport(formatKey, options = {}) {
     throw Object.assign(
       new Error(noParts ? 'No printable meshes to export.' : 'Print readiness errors must be resolved before export.'),
       { readinessIssues: readiness.issues },
+    );
+  }
+  // Decision 18 / task 1.8: warnings need an explicit acknowledgement, and it
+  // is enforced HERE (not only by the panel) so no caller can write a file
+  // from a warning state by omission. Info issues never require it. The UI
+  // turns this rejection into the three-way modal (default Repair & export)
+  // and re-calls with `acknowledgeWarnings: true`.
+  if (readiness.requiresAcknowledgement && options.acknowledgeWarnings !== true) {
+    throw Object.assign(
+      new Error('Print readiness warnings need acknowledgement before export.'),
+      { needsAcknowledgement: true, code: 'EXPORT_NEEDS_ACKNOWLEDGEMENT', readinessIssues: readiness.issues },
     );
   }
 
@@ -592,16 +604,26 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     ctx.meshes.push(...clones);
     ctx.cloneGroups.push(..._groupCloneEntries(clones));
 
-    // Fail closed: strictExport blocks on a CONFIRMED not-watertight clone
-    // (repair ran and reported isWatertight:false) — never on "unknown"
-    // (engine unavailable / capped), which is a repair-engine problem, not
-    // a geometry one, and is already surfaced by toast.repairUnavailable.
+    // Fail closed (Decision 18): strictExport blocks on a CONFIRMED
+    // not-watertight clone AND on any UNKNOWN verdict (engine unavailable,
+    // capped, errored, repair opted out) — "could not verify" is not "fine".
     if (state.print?.strictExport) {
-      const notWatertight = ctx.repairReport.filter(r => r.isWatertight === false).map(r => r.name);
-      if (notWatertight.length) {
+      const open = [], unknown = [];
+      for (const c of clones) {
+        const verdict = _reportEntryFor.get(c.mesh)?.isWatertight;
+        if (verdict === false) open.push(c.name);
+        else if (verdict !== true) unknown.push(c.name);
+      }
+      if (open.length) {
         throw _exportError(
-          `Parts are not watertight: ${notWatertight.join(', ')}`,
-          notWatertight.map(name => ({ meshName: name, message: 'Not watertight after repair' })),
+          `Parts are not watertight: ${open.join(', ')}`,
+          open.map(name => ({ meshName: name, message: 'Not watertight after repair' })),
+        );
+      }
+      if (unknown.length) {
+        throw _exportError(
+          `Strict export: could not verify watertight: ${unknown.join(', ')}`,
+          unknown.map(name => ({ meshName: name, message: 'Watertight status unknown (strict export blocks unverified parts)' })),
         );
       }
     }
