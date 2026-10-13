@@ -41,6 +41,9 @@ Then read the plan section for the next task. Update this file at every safe bou
 
 ## Known gotchas (verified this session)
 
+- Partial staging of shared files (Blueprint.md): scratchpad helper must pipe the patch as BYTES — Python text-mode stdin on Windows turns LF→CRLF and `git apply --cached` fails.
+- Parallel agents: give each disjoint files; agents never touch Blueprint/locales unless the task owns them — they report lines, main applies.
+
 - Stitch capture: **production build only** (`npm run build` → `npx vite preview --host 127.0.0.1 --port 5180 --strictPort`).
   Dev server capture inlines Vite HMR JS instead of CSS. Port **4173 is EACCES-reserved** by Windows here.
   WebGL viewport is not captured (blank). Workspace switches need chrome-devtools + `--page`.
@@ -60,20 +63,20 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 ### Phase 0 — Safety net + quick wins (14)
 | Task | Tier | Status | Notes |
 |---|---|---|---|
-| 0.1 Terminology pass | sonnet | todo | |
-| 0.2 Write hardening + persistent storage | sonnet | todo | |
-| 0.3 Input hygiene | sonnet | todo | |
-| 0.4 Electron reload/crash guard | sonnet | todo | |
-| 0.5 Load-path integrity | sonnet | todo | |
+| 0.1 Terminology pass | sonnet | doing | batch B agent |
+| 0.2 Write hardening + persistent storage | sonnet | done 16e169a | bundled w/ 0.8+0.10 (shared files) |
+| 0.3 Input hygiene | sonnet | done 6d66b10 | Ctrl+I = Import (plan row 11), not invert-select |
+| 0.4 Electron reload/crash guard | sonnet | done a3da60f | `npm run test:electron` not yet run (needs build) — run at phase close |
+| 0.5 Load-path integrity | sonnet | doing | batch B agent |
 | 0.6 Readiness strip every Print tab | sonnet | gated | Mockup gate |
 | 0.7 Arrange rename + toolbar button | sonnet | gated | Mockup gate |
-| 0.8 Texture capture failure surfaced | sonnet | todo | |
-| 0.9 Undo/Redo buttons + reset-all confirm | haiku | todo | |
-| 0.10 Case-insensitive texture export names | sonnet | todo | |
-| 0.11 Autosave reachable, keyed by id | opus | todo | |
-| 0.12 Shader → Material strings | haiku | todo | |
-| 0.13a DESIGN.md | opus | todo | prerequisite of every Mockup gate |
-| 0.13b Stitch gitignore + capture recipe + hygiene test | haiku | todo | prerequisite of every Mockup gate |
+| 0.8 Texture capture failure surfaced | sonnet | done 16e169a | |
+| 0.9 Undo/Redo buttons + reset-all confirm | haiku | doing | batch B agent; smoke snippet pasted by main |
+| 0.10 Case-insensitive texture export names | sonnet | done 16e169a | |
+| 0.11 Autosave reachable, keyed by id | opus | todo | after 0.5 + 0.9 (shares PersistenceManager/ProjectMenu) |
+| 0.12 Shader → Material strings | haiku | todo | after 0.1 (locales) |
+| 0.13a DESIGN.md | opus | done 2b4edff | stitch designMd.valid=true |
+| 0.13b Stitch gitignore + capture recipe + hygiene test | haiku | done 2b4edff | trial capture pending |
 
 ### Phases 1–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
@@ -86,10 +89,11 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 
 ## Owner queue (things waiting on the owner)
 
-- [ ] Confirm Stitch project binding + first fixture-screen batch upload (Decision 30) — ask when 0.13a/b are done.
+- [ ] Confirm Stitch project binding + first fixture-screen batch upload (Decision 30) — 0.13a/b DONE, asked owner 2026-10-14 (non-blocking).
 - [ ] Optional: fix `~/.codex/config.toml` so Codex audits work again.
 
 ## Session log
 
 - 2026-10-14 — Plan authored (Fable), audited twice (Sonnet), committed `421b8be`; all decisions accepted;
   this handoff created. Next: Phase 0, start with 0.13a/0.13b + ungated 0.1–0.5, 0.8–0.12.
+- 2026-10-14 (cont.) — Phase 0 batch A landed: 0.13a/b 2b4edff, 0.3 6d66b10, 0.4 a3da60f, 0.2+0.8+0.10 16e169a (all checks + browser/export smokes green). Batch B (0.1, 0.5, 0.9) dispatched; then 0.11 (opus, main), 0.12.
