@@ -131,7 +131,7 @@ async function main() {
         let captured = null;
         window.showSaveFilePicker = async () => ({ createWritable: async () => ({ write: async (d) => { captured = d; }, close: async () => {} }) });
         const { PrintManager } = await import('/src/core/PrintManager.js');
-        await PrintManager.exportThreeMF({});
+        await PrintManager.exportThreeMF({ acknowledgeWarnings: true });   // 1.8 gate: smoke acknowledges warnings like the panel does
         if (!captured) return { error: 'export captured no bytes' };
         const buf = new Uint8Array(captured.arrayBuffer ? await captured.arrayBuffer() : captured);
         let bin = ''; const CHUNK = 0x8000;
