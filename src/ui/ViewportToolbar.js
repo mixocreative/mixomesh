@@ -7,6 +7,7 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { CursorPanel } from './CursorPanel.js';
+import { TransformSheet } from './TransformSheet.js';
 
 /**
  * Floating Fusion 360-style toolbar anchored bottom-centre of the viewport.
@@ -47,6 +48,7 @@ const FOLLOW_MODES = [
 export function init() {
   _root = document.getElementById('viewport-toolbar');
   if (!_root) return;
+  TransformSheet.init(_root.parentElement);   // numeric Transform sheet (touch, 8.5)
   _render();
   for (const ev of [
     EVENTS.SELECTION_CHANGED,
@@ -96,6 +98,8 @@ function _render() {
         <span class="vt-label">${escapeHtml(tr('arrange.panelTitle', 'Arrange'))}</span>
       </button>
     </div>
+    <div class="vt-sep vt-touch-only"></div>
+    <div class="vt-group vt-touch-only" data-group="numeric">${TransformSheet.buttonHtml()}</div>
   `;
   _wire();
 }
@@ -139,6 +143,7 @@ function _wire() {
       const mode = btn.dataset.mode;
       if (kind === 'gizmoMode') SceneManager.setGizmoMode(mode);
       if (kind === 'arrange') CursorPanel.toggle();
+      if (kind === 'transformSheet') TransformSheet.toggle();
       if (kind === 'space') {
         const cur = getState().gizmo?.space ?? 'world';
         SceneManager.setGizmoSpace(cur === 'world' ? 'local' : 'world');

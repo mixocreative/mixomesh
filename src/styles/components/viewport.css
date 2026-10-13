@@ -511,3 +511,50 @@ button.sb-crumb:hover { color: var(--hud-text-hi); background: var(--hud-hover-b
 
 .np-subhead { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin-bottom: var(--sp-2); }
 @media (max-width: 900px) { .sb-esc { display: none; } }
+
+/* ── Touch gizmo + numeric Transform sheet (overhaul 8.5) ──── */
+/* Touch-only controls: hidden for mouse, shown once a touch/pen pointer is
+   (or was) the live input (body.touch-input, set by PivotSession). */
+.vt-touch-only { display: none; }
+body.touch-input .vt-touch-only { display: inline-flex; }
+body.touch-input .vt-btn { min-width: 44px; height: 44px; }
+
+.transform-sheet {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--hud-bg);
+  backdrop-filter: var(--hud-blur);
+  -webkit-backdrop-filter: var(--hud-blur);
+  border: 1px solid var(--hud-border);
+  border-radius: 12px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  color: var(--hud-text);
+  z-index: 12;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.transform-sheet[hidden] { display: none; }
+.ts-head { display: flex; align-items: center; gap: var(--sp-2); }
+.ts-hint { flex: 1; font-size: 11px; opacity: 0.75; }
+.ts-row { display: flex; align-items: center; gap: var(--sp-2); }
+.ts-row > b { width: 52px; flex: none; font-weight: 600; }
+.ts-cell { display: flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
+.ts-cell.ts-wide { flex: 2; }
+.ts-cell input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--sp-2);
+  font-size: 16px;               /* >=16px stops iOS zooming on focus */
+  text-align: right;
+}
+.ts-cell em { font-style: normal; font-size: 11px; opacity: 0.7; }
+.ts-actions { display: flex; justify-content: flex-end; }
+.ts-apply { min-height: 44px; min-width: 96px; }

@@ -26,6 +26,15 @@ let _dragSnapshot       = null;
 let _bodyDragOriginPivot = null; // pivot world position at body-drag start
 let _onTransformCommit  = null; // injected by src/app/main.ts to avoid circular imports
 let _gizmoSnapOn        = false; // Ctrl held → gizmo drags snap (overhaul 5.6)
+let _coarseInput        = false; // touch/pen is the live input → bigger gizmo handles (8.5)
+
+/** Gizmo handle size multiplier: 1 = Babylon default (mouse), larger on touch. */
+export const TOUCH_GIZMO_SCALE = 1.7;
+
+/** @param {boolean} coarse @returns {number} */
+export function gizmoScaleRatioFor(coarse) {
+  return coarse ? TOUCH_GIZMO_SCALE : 1;
+}
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -45,6 +54,7 @@ export function initPivotSession(scene, { getCursorPosition }) {
   _gizmos.scaleGizmoEnabled        = false;
   _gizmos.usePointerToAttachGizmos = false;
   _wireGizmoObservers();
+  _initCoarseInputTracking();
 
   const gz = getState().gizmo;
   setGizmoMode(gz.mode);
@@ -76,6 +86,44 @@ function _enabledGizmoChanged() {
   // Babylon recreates the sub-gizmos when modes toggle. Re-attach observers.
   _wireGizmoObservers();
   _applyGizmoSnap();
+  _applyGizmoScale();
+}
+
+// ── Touch sizing (overhaul 8.5) ──────────────────────────
+// Coarse pointer (matchMedia) or last pointerType touch/pen → larger handles
+// (a bigger visual is also a bigger hit area); a mouse press switches back.
+// Mouse ratio is Babylon's default 1, so mouse behaviour is unchanged.
+
+function _applyGizmoScale() {
+  const g = _gizmos?.gizmos;
+  if (!g) return;
+  const r = gizmoScaleRatioFor(_coarseInput);
+  for (const name of ['positionGizmo', 'rotationGizmo', 'scaleGizmo']) {
+    if (g[name]) g[name].scaleRatio = r;
+  }
+}
+
+/** @param {boolean} coarse */
+export function setCoarseInput(coarse) {
+  const next = !!coarse;
+  if (next === _coarseInput) return;
+  _coarseInput = next;
+  document.body?.classList?.toggle('touch-input', next);
+  _applyGizmoScale();
+  document.dispatchEvent?.(new CustomEvent('mx:input-kind', { detail: { coarse: next } }));
+}
+
+/** @returns {boolean} touch/pen is the live input kind. */
+export function isCoarseInput() { return _coarseInput; }
+
+function _initCoarseInputTracking() {
+  try {
+    if (window.matchMedia?.('(pointer: coarse)')?.matches) setCoarseInput(true);
+  } catch { /* matchMedia unavailable */ }
+  window.addEventListener?.('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') setCoarseInput(true);
+    else if (e.pointerType === 'mouse') setCoarseInput(false);
+  }, { capture: true, passive: true });
 }
 
 // Push the current Ctrl-snap state into every live sub-gizmo. Babylon's
