@@ -118,7 +118,13 @@ async function bootstrap() {
 
   PersistenceManager.startAutosave();
   canvas.focus();
-  safeAsync(() => AssetPanel.promptRemount());
+  // Remount the last folder FIRST (recovery resolves handle-backed assets
+  // through it — autosave skips their bytes, A9), then offer the newest
+  // autosave if it is newer than its project's last save (task 0.11).
+  safeAsync(async () => {
+    await AssetPanel.promptRemount();
+    await PersistenceManager.recoverAutosave();
+  });
 }
 
 function wireCloseFlow() {

@@ -140,7 +140,7 @@ function seedCurrentScene() {
   replaceState(freshState());
   setState(s => ({
     ...s,
-    project: { ...s.project, name: 'Current' },
+    project: { ...s.project, name: 'Current', id: 'cur-id' },
     scene: { ...s.scene, objects: { keep: { id: 'keep', name: 'keep', assetId: 'x', isGhost: false } } },
   }), { silent: true });
 }
@@ -441,13 +441,80 @@ await test('M2: autosave tick skips while loading / importing', async () => {
   }
 });
 
-await test('M2: successful load clears the OLD project name autosave key; failed load keeps it', async () => {
-  seedCurrentScene();   // name 'Current'
-  await kvSet('autosave_Current', { savedAt: 'x', doc: {} });
+await test('M2/0.11: successful load clears the OLD project id autosave (+ its images); failed load keeps it', async () => {
+  seedCurrentScene();   // id 'cur-id'
+  await kvSet('autosave_cur-id', { savedAt: 'x', doc: {} });
+  await kvSet('autosaveimg_cur-id_abc', { hash: 'abc' });
   await assert.rejects(__test._loadProject({ ...goodDoc(), version: '9.0' }));
-  assert.ok(await kvGet('autosave_Current'), 'failed load leaves the old key');
+  assert.ok(await kvGet('autosave_cur-id'), 'failed load leaves the old key');
   await __test._loadProject(goodDoc('Next'));
-  assert.equal(await kvGet('autosave_Current'), undefined, 'old key gone after success');
+  assert.equal(await kvGet('autosave_cur-id'), undefined, 'old key gone after success');
+  assert.equal(await kvGet('autosaveimg_cur-id_abc'), undefined, 'old image keys gone too');
+});
+
+// ── 0.11: autosave keyed by project.id, images stored once, boot offer ──
+await test('0.11: load keeps a document id, mints one for a legacy doc, restores lastSavedAt', async () => {
+  seedCurrentScene();
+  await __test._loadProject({ ...goodDoc('WithId'), savedAt: '2026-10-01T00:00:00.000Z', project: { name: 'WithId', id: 'doc-id' } });
+  assert.equal(getState().project.id, 'doc-id');
+  assert.equal(getState().project.lastSavedAt, '2026-10-01T00:00:00.000Z');
+  await __test._loadProject(goodDoc('Legacy'));
+  const minted = getState().project.id;
+  assert.ok(typeof minted === 'string' && minted.length > 0 && minted !== 'doc-id', 'legacy doc gets a fresh id');
+});
+
+await test('0.11: tick writes autosave_<id> with no inline images; each texture image stored ONCE', async () => {
+  replaceState(freshState());
+  const { storeTextureImage } = await import('../src/core/assets/TextureImageStore.js');
+  const { autosaveTick } = await import('../src/core/persist/Autosave.js');
+  const { dispatch } = await import('../src/core/StateManager.js');
+  const bytes = new Uint8Array([1, 2, 3]);
+  const hash = await sha256Hex(bytes.buffer);
+  await storeTextureImage(new Blob([bytes], { type: 'image/png' }), 2, 2, hash);
+  setState(st => ({
+    ...st,
+    project: { ...st.project, id: 'tick-id', name: 'TickProj' },
+    scene: { ...st.scene, assetLibrary: { t1: { id: 't1', kind: 'texture', filename: 't.png', imageContentHash: hash } } },
+  }), { silent: true });
+  dispatch(EVENTS.PROJECT_DIRTY, {});
+  assert.equal(await autosaveTick(), true, `tick wrote (errors: ${errors.join(' | ')})`);
+  const snap = await kvGet('autosave_tick-id');
+  assert.ok(snap?.doc, 'snapshot under autosave_<id>');
+  assert.deepEqual(snap.doc.textureImages, [], 'images not inlined in the snapshot');
+  assert.equal(snap.doc.project.id, 'tick-id');
+  const img = await kvGet(`autosaveimg_tick-id_${hash}`);
+  assert.equal(img?.hash, hash, 'image stored under its own key');
+  await kvSet(`autosaveimg_tick-id_${hash}`, { hash, sentinel: true });
+  dispatch(EVENTS.PROJECT_DIRTY, {});
+  assert.equal(await autosaveTick(), true);
+  assert.equal((await kvGet(`autosaveimg_tick-id_${hash}`))?.sentinel, true, 'second tick did not re-encode the image');
+});
+
+await test('0.11: boot offer skipped (and key dropped) when the autosave is not newer than the last save', async () => {
+  seedCurrentScene();
+  await kvSet('autosave_old-id', { savedAt: '2026-01-01T00:00:00.000Z', doc: { ...goodDoc('Old'), project: { name: 'Old', id: 'old-id', lastSavedAt: '2026-02-01T00:00:00.000Z' } } });
+  let offered = false;
+  const off = subscribe(EVENTS.MODAL_OPEN, p => { if (p?.id === 'recoverAutosave') offered = true; });
+  try {
+    assert.equal(await PersistenceManager.recoverAutosave(), false);
+  } finally { off(); }
+  assert.equal(offered, false, 'no modal for a stale autosave');
+  assert.equal(await kvGet('autosave_old-id'), undefined, 'stale autosave removed');
+});
+
+await test('0.11: recover re-attaches stored images and leaves the project dirty', async () => {
+  seedCurrentScene();
+  resetIdb();
+  const imgHash = await sha256Hex(new Uint8Array([4, 5, 6]).buffer);
+  const doc = { ...goodDoc('Rec'), project: { name: 'Rec', id: 'rec-id', lastSavedAt: '2026-01-01T00:00:00.000Z' }, textureImages: [] };
+  await kvSet('autosave_rec-id', { savedAt: '2026-03-01T00:00:00.000Z', doc });
+  await kvSet(`autosaveimg_rec-id_${imgHash}`, { hash: imgHash, width: 1, height: 1, mimeType: 'image/png', fileData: 'BAUG' });
+  recoverChoice = 'recover';
+  assert.equal(await PersistenceManager.recoverAutosave(), true, `recovered (errors: ${errors.join(' | ')})`);
+  assert.equal(getState().project.id, 'rec-id');
+  assert.equal(PersistenceManager.isDirty(), true, 'recovered work is unsaved');
+  const { getTextureImage } = await import('../src/core/assets/TextureImageStore.js');
+  assert.ok(getTextureImage(imgHash), 'stored image restored into the image store');
 });
 
 await test('M2: recoverAutosave with a poisoned doc → deletes the key, returns false, error surfaced', async () => {

@@ -164,18 +164,26 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
   return out;
 }
 
-export async function serialiseTextureImages() {
+/** Stored texture images referenced by the asset library (not yet encoded). */
+export function referencedTextureImages() {
   const referenced = new Set(Object.values(getState().scene.assetLibrary)
     .map(asset => asset.imageContentHash).filter(Boolean));
-  return Promise.all(listTextureImages()
-    .filter(image => referenced.has(image.hash))
-    .map(async image => ({
-      hash: image.hash,
-      width: image.width,
-      height: image.height,
-      mimeType: image.mimeType,
-      fileData: await encodeBase64Async(await image.blob.arrayBuffer()),
-    })));
+  return listTextureImages().filter(image => referenced.has(image.hash));
+}
+
+/** One stored texture image → its `.mixo` `textureImages[]` entry (base64 bytes). */
+export async function serialiseTextureImage(image) {
+  return {
+    hash: image.hash,
+    width: image.width,
+    height: image.height,
+    mimeType: image.mimeType,
+    fileData: await encodeBase64Async(await image.blob.arrayBuffer()),
+  };
+}
+
+export async function serialiseTextureImages() {
+  return Promise.all(referencedTextureImages().map(serialiseTextureImage));
 }
 
 /**
@@ -238,7 +246,10 @@ function _serialiseGroups() {
 
 /**
  * Assemble the full .mixo document from live state.
- * @param {{ skipEmbed?: boolean }} [opts]  skipEmbed = autosave path (A9).
+ * @param {{ skipEmbed?: boolean, skipTextureImages?: boolean }} [opts]
+ *   skipEmbed = autosave path (A9). skipTextureImages = autosave stores each
+ *   texture image ONCE under its own key (0.11) instead of re-encoding all of
+ *   them into every 60 s snapshot; `textureImages` is then [].
  */
 export async function buildDocument(opts = {}) {
   // Snap any in-flight import/duplicate bounce to its resting scale FIRST: the
@@ -251,7 +262,9 @@ export async function buildDocument(opts = {}) {
   return {
     version: SCHEMA_VERSION,
     savedAt: new Date().toISOString(),
-    project: { name: s.project.name || 'Untitled' },
+    // id = stable identity for autosave keys (0.11); lastSavedAt lets boot
+    // offer an autosave only when it is newer than the last real save.
+    project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null },
     sceneSettings: {
       camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
       overlays: { ...s.scene.overlays },
@@ -266,7 +279,7 @@ export async function buildDocument(opts = {}) {
     // saver's choice. Everything else in `print` is project data.
     print: _serialisablePrint(s.print),
     assetLibrary: await _serialiseAssetLibrary(opts),
-    textureImages: await serialiseTextureImages(),
+    textureImages: opts.skipTextureImages ? [] : await serialiseTextureImages(),
     collections: Object.values(s.scene.collections ?? {}),
     shaders: Object.values(s.scene.shaders).map(({ linkedMeshIds, ...rest }) => rest),
     uvOverrides: { ...s.scene.uvOverrides },

@@ -263,7 +263,9 @@ src/
       AssetResolver.js     ← tiered byte resolve: live path → hash-scan → file handle → embedded → null
       ProjectLoader.js     ← loadProject pipeline: migrate, world reset, ghost meshes, groups, relinkAsset
       RecentProjects.js    ← recent-projects list (idb kv) + save-time viewport thumbnail
-      Autosave.js          ← interval autosave (skipEmbed A9) + boot crash recovery
+      Autosave.js          ← interval autosave (skipEmbed A9) + boot crash recovery, keyed by project.id
+      AutosaveKeys.js      ← autosave key layout + deleteAutosave (snapshot + per-hash images)
+      ProjectId.js         ← mintProjectId() — stable project identity (0.11)
       DirtyTracker.js      ← position-based + sticky dirty, isDirty/clearDirty, dirty-confirm modal
     PrintManager.js        ← thin façade (~50 lines; size budget in §file-size-budget) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
     print/
@@ -464,7 +466,8 @@ Boot order:
 6. `main.ts` registers global project shortcuts (`Ctrl+S`,
    `Ctrl+Shift+S`, `Ctrl+O`, `Ctrl+N`), reapplies overlay defaults, starts
    autosave, focuses the canvas, then asks the Asset Panel to remount the last
-   folder.
+   folder and, after that prompt resolves, offers the newest autosave if it is
+   newer than its project's last save (`recoverAutosave`, task 0.11).
 
 No module except `boot.ts` imports Babylon npm packages directly. Runtime JS
 modules read `window.BABYLON`; TypeScript-only contract modules may import
@@ -2744,8 +2747,10 @@ Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.3'` (3.3 ad
 top-level content-addressed `textureImages` plus `imageContentHash` / `textureView`
 on texture AssetEntries; 3.2 and older per-asset `fileData` still loads),
 `FILE_EXT = '.mixo'`, `RECENT_KEY = 'recent_projects'`, `RECENT_MAX = 10`,
-`AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are literally
-`AUTOSAVE_PREFIX + projectName`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
+`AUTOSAVE_PREFIX = 'autosave_'` (autosave keys are `AUTOSAVE_PREFIX + project.id`
+since task 0.11 — pre-0.11 keys used the project name and still recover),
+`AUTOSAVE_IMG_PREFIX = 'autosaveimg_'` (per-hash texture images of a snapshot;
+deliberately NOT prefixed by `autosave_`), `SCAN_FILE_LIMIT = 4000` (hash-relink safety cap — see §11 Asset Resolution Priority).
 
 ### Full Project Schema (v3.3)
 Every field persisted. Restored exactly.
@@ -2885,12 +2890,27 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 
 ### Autosave
 - Interval 60s when dirty (position-based — see §5 dirty contract).
-- Writes full JSON to IndexedDB key `autosave_${projectName}`.
-- Startup does NOT auto-offer recovery: the boot flow re-mounts the last
-  asset folder instead (AssetPanel.promptRemount — deliberate Phase 6
-  decision: folder relink beats session recovery for this workflow).
-  `recoverAutosave()` exists for an explicit recovery entry point.
-- Cleared after successful explicit save.
+- Keyed by a stable `project.id` (uuid, `persist/ProjectId.js`; task 0.11):
+  minted on New, on Save As (the copy is a new document), on loading a doc
+  without one, or lazily by the first tick; written into `.mixo`
+  `project.id` together with `project.lastSavedAt`. Renames and same-named
+  projects can no longer cross-wire recovery.
+- Writes `{savedAt, name, doc}` to kv key `autosave_<id>` through the storage
+  adapter (web IndexedDB / Electron kv file). The snapshot's `textureImages`
+  is `[]`; each referenced texture image is stored ONCE per hash under
+  `autosaveimg_<id>_<hash>` (`persist/AutosaveKeys.js`) instead of being
+  re-encoded every 60 s. `deleteAutosave(id)` removes both.
+- One tick at a time; the loading/importing check runs before AND after the
+  async build (and the project id must be unchanged), so a load/import/New
+  that starts mid-build drops the snapshot instead of writing a torn one.
+- Boot: after the folder-remount prompt, `recoverAutosave()` offers the
+  newest snapshot only if its `savedAt` is newer than the snapshot doc's
+  `project.lastSavedAt` (otherwise it is deleted silently). A recovered
+  project re-attaches its stored images, stays DIRTY (it is unsaved work)
+  and is re-snapshotted at once. (Supersedes the Phase 6 "no boot offer"
+  decision — overhaul task 0.11.)
+- Cleared (snapshot + images) after a successful explicit save and after any
+  successful load (for both the loaded and the previous project id).
 - Autosave uses `buildDocument({skipEmbed:true})`: handle-backed assets keep
   their live/hash tiers lightweight, while handleless loose-drop assets must
   still embed bytes or the autosave is discarded by the catch path. This keeps
@@ -2908,7 +2928,7 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 
 Thin wrapper over IndexedDB. Single DB `'mixomesh'` v1 with two object stores:
 - `handles` — structured-clonable `FileSystemDirectoryHandle` / `FileSystemFileHandle`. Survives reloads (Chrome only). Keys: `last_mount_dir` (rec `{key, name}`), `fh_<assetId>` (loose-drop file handles, see §11 tier 3), `<mountKey>` (per-mount dir handles minted by `AssetLoader.mountDirectory`).
-- `kv` — generic JSON-serialisable values. Keys: `recent_projects` (max 10, see above), `autosave_<projectName>` (full project JSON, 60 s while dirty).
+- `kv` — generic JSON-serialisable values. Keys: `recent_projects` (max 10, see above), `autosave_<projectId>` (project JSON without inline texture images, 60 s while dirty), `autosaveimg_<projectId>_<hash>` (one texture image each, written once).
 
 ### Public API
 ```js

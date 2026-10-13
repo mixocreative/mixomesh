@@ -12,5 +12,6 @@ export const FILE_TYPES     = [{
 export const RECENT_KEY      = 'recent_projects';
 export const RECENT_MAX      = 10;
 export const AUTOSAVE_PREFIX = 'autosave_';
+export const AUTOSAVE_IMG_PREFIX = 'autosaveimg_';   // per-hash texture images (0.11); must NOT start with AUTOSAVE_PREFIX
 export const SCAN_FILE_LIMIT = 4000;            // hash-scan safety cap
 export const SILENT          = { silent: true };

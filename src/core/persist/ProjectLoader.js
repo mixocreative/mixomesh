@@ -13,11 +13,13 @@ import { Selection } from '../Selection.js';
 import { clear as historyClear } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
-import { kvDelete, getFileHandle } from '../idb.js';
+import { getFileHandle } from '../idb.js';
 import { decompose, applyWorld, stripFileData, extOf, bufFromB64 } from './ProjectSerializer.js';
 import { resolveAssetBlob } from './AssetResolver.js';
 import { clearDirty } from './DirtyTracker.js';
-import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
+import { SILENT } from './constants.js';
+import { mintProjectId } from './ProjectId.js';
+import { deleteAutosave } from './AutosaveKeys.js';
 import { validateDocument } from './ProjectValidator.js';
 import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
@@ -172,16 +174,16 @@ export function assertNoImportInFlight() {
 export async function loadProject(doc) {
   assertNoImportInFlight();
   validateDocument(doc);
-  const previousName = getState().project?.name ?? null;
+  const previousId = getState().project?.id ?? null;
   setLoading(true);
   try {
-    await _loadProjectInner(doc, previousName);
+    await _loadProjectInner(doc, previousId);
   } finally {
     setLoading(false);
   }
 }
 
-async function _loadProjectInner(doc, previousName) {
+async function _loadProjectInner(doc, previousId) {
   const data = migrate(doc);
   historyClear();
   resetWorld();
@@ -194,7 +196,14 @@ async function _loadProjectInner(doc, previousName) {
 
   setState(s => ({
     ...s,
-    project: { ...s.project, name: data.project?.name || 'Untitled' },
+    // id: the document's identity, or a fresh one for pre-0.11 files (0.11).
+    // lastSavedAt: the file's own save time — autosave recovery compares to it.
+    project: {
+      ...s.project,
+      name: data.project?.name || 'Untitled',
+      id: (typeof data.project?.id === 'string' && data.project.id) || mintProjectId(),
+      lastSavedAt: data.savedAt ?? data.project?.lastSavedAt ?? null,
+    },
     print:   { ...s.print, ...loadedPrintClean, exportRatios },
     scene: {
       ...s.scene,
@@ -465,11 +474,10 @@ async function _loadProjectInner(doc, previousName) {
   // stale, and so is the one for the project we just left (its dirty state
   // was either saved or explicitly discarded via the dirty-confirm). A failed
   // load above throws before reaching here, so a torn load keeps both (M2).
+  const loadedId = getState().project.id;
   const loadedName = getState().project.name;
-  await kvDelete(`${AUTOSAVE_PREFIX}${loadedName}`);
-  if (previousName && previousName !== loadedName) {
-    await kvDelete(`${AUTOSAVE_PREFIX}${previousName}`);
-  }
+  await deleteAutosave(loadedId);
+  if (previousId && previousId !== loadedId) await deleteAutosave(previousId);
 
   if (unmatched.length) {
     dispatch(EVENTS.MODAL_OPEN, { id: 'unmatchedAssets', assets: unmatched });

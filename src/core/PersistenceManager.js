@@ -14,9 +14,11 @@ import { SettingsStore } from './SettingsStore.js';
 import { clear as historyClear } from './HistoryManager.js';
 import { Toast } from '../ui/Toast.js';
 import { t } from '../i18n/index.js';
-import { kvDelete, getFileHandle } from './idb.js';
+import { getFileHandle } from './idb.js';
 import { sha256Hex } from './hash.js';
-import { FILE_EXT, FILE_TYPES, AUTOSAVE_PREFIX, SILENT } from './persist/constants.js';
+import { FILE_EXT, FILE_TYPES, SILENT } from './persist/constants.js';
+import { mintProjectId } from './persist/ProjectId.js';
+import { deleteAutosave } from './persist/AutosaveKeys.js';
 import { b64FromBuf, bufFromB64, extOf, buildDocument } from './persist/ProjectSerializer.js';
 import { resolveAssetBlob, scanDirForHash, fileHandleAtPath } from './persist/AssetResolver.js';
 import {
@@ -80,9 +82,9 @@ function _requestPersistentStorage() {
 }
 
 // Post-write bookkeeping shared by save / saveAs: runs only once bytes are on
-// disk. `staleName` = the project name before a saveAs rename, whose autosave
-// key is now stale too.
-async function _afterWrite(staleName = null) {
+// disk. `staleId` = the project id before a saveAs (which mints a new id —
+// the new file is a new document), whose autosave is now stale too.
+async function _afterWrite(staleId = null) {
   setState(s => ({ ...s, project: { ...s.project, lastSavedAt: new Date().toISOString() } }), SILENT);
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});
@@ -93,8 +95,9 @@ async function _afterWrite(staleName = null) {
   // cleanup) are reported but must never reject save().
   try {
     await pushRecent(name, _fileHandle);
-    await kvDelete(`${AUTOSAVE_PREFIX}${name}`);
-    if (staleName && staleName !== name) await kvDelete(`${AUTOSAVE_PREFIX}${staleName}`);
+    const id = getState().project.id;
+    await deleteAutosave(id);
+    if (staleId && staleId !== id) await deleteAutosave(staleId);
   } catch (err) {
     console.error('Post-save bookkeeping failed (file was saved):', err);
     Toast.show(`${t('toast.operationFailed')}: ${err?.message ?? err}`, 'warning', 4000);
@@ -119,12 +122,14 @@ export async function saveAs() {
     throw err;
   }
   const name = handle.name.replace(/\.mixo$/i, '');
+  const previousId = getState().project.id ?? null;
+  const id = mintProjectId();   // a Save As copy is a new document (own autosave identity)
   const doc = await buildDocument();
-  doc.project = { ...doc.project, name };   // the file carries its own name
+  doc.project = { ...doc.project, name, id };   // the file carries its own name + id
   await _writeTo(handle, JSON.stringify(doc));   // throws → nothing below runs
   _fileHandle = handle;
-  setState(s => ({ ...s, project: { ...s.project, name } }), SILENT);
-  await _afterWrite(previousName);
+  setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
+  await _afterWrite(previousId);
   return true;
 }
 
@@ -181,6 +186,7 @@ export async function newProject() {
   historyClear();
   resetWorld();
   _fileHandle = null;
+  setState(s => ({ ...s, project: { ...s.project, id: mintProjectId(), lastSavedAt: null } }), SILENT);
   // New starts from the user's last-used settings, not raw factory (File-wins
   // applies to OPENING a .mixo, not to New). seedBootState merges the persisted
   // per-user settings onto the fresh factory state; applyToScene pushes the
