@@ -114,19 +114,21 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 2.3 Group creation semantics + persistence | sonnet | done 2b9c0e4 | Ctrl+G selects new group; Blueprint text in c4351f1 |
 | 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | done 6fcd5ee | group duplicate nudged +10 mm like objects |
 | 2.5 Lock enforcement | sonnet | done a242b9b | Delete ASKS (main fixed agent's refusal → Decision 9); group lock persisted |
-| 2.6 Logical-object edge cases | sonnet | todo | after 2.3/2.7 (ParentCommands, MeshValidator) |
+| 2.6 Logical-object edge cases | sonnet | done 3b0d6ba | |
 | 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | done 55bd4f6 | legacy seed in ProjectLoader + test |
 
-### Phase 3 — Hierarchy UI (7): 3.1 sonnet, 3.2 opus, 3.3-3.6 gated (Mockup), 3.7 haiku — todo
+### Phase 3 — Hierarchy UI (7): 3.1 sonnet doing, 3.2 opus doing, 3.3-3.6 gated (Mockup), 3.7 haiku todo (after 3.1/3.2)
+
+**PHASE 2 COMPLETE** (2.1-2.7).
 
 ### Phase 4 — Asset model + name clashes (10)
 | Task | Tier | Status | Notes |
 |---|---|---|---|
 | 4.1 Schema 3.4 + real migrate() | opus | done 39ae3e4 | ratioSource hook left for 1.13 (gated) |
 | 4.2 Adapter resolveAsset/persistRef/restoreRef/findMoved | opus | done 1210b7f | load-time scan + 'changed' live bytes still on → 4.3/4.5 switch off and update persistence.test priority 1/2 cases |
-| 4.3 Explicit Find moved file | sonnet | todo | after 4.2 |
+| 4.3 Explicit Find moved file | sonnet | done c16bb4e | load never scans; changed→embedded |
 | 4.4 Route remaining FSA/idb + boot gate | opus | todo | after 4.2 |
-| 4.5 RelinkAssetCommand | sonnet | todo | after 4.2 |
+| 4.5 RelinkAssetCommand | sonnet | doing | |
 | 4.6 Source status / Project-Folders tabs / Sources modal | sonnet | gated | Mockup |
 | 4.7 Boot banner | sonnet | gated | Mockup |
 | 4.8 Name-clash rules | opus | todo | logic ungated, display parts gated; after 4.1 |
@@ -162,3 +164,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 1.18 5faaac5, 2.2 29667e2, 1.8 0ce3ce4 + smoke ack fix. Phase 1 ungated complete except 1.12 (Blueprint pass, next). Then 2.3 → 2.4 → 2.5 → 2.6.
 - 2026-10-14 (cont.) — 2.3 2b9c0e4, 1.12 c4351f1 → Phase 1 ungated DONE (remaining 1.2/1.3/1.13 gated). Running: 2.4, 4.1 (opus), 4.2 (opus).
 - 2026-10-14 (cont.) — 2.4 6fcd5ee, 4.1 39ae3e4, 2.5 a242b9b, 4.2 1210b7f. Full tree: unit 174/174, browser + electron smokes green; export smoke flaky (3 clean reruns). Next: 2.6; 4.3 + 4.5 (+switch off load scan), 4.4, 4.8 logic, 4.9.
+- 2026-10-14 (cont.) — 2.6 3b0d6ba, 4.3 c16bb4e → Phase 2 complete. Running: 4.5, 3.1, 3.2 (opus). Next: 4.4 (after 4.5, shares ProjectLoader), 4.8 logic, 4.9, 3.7, then Phase 5/6 ungated.
