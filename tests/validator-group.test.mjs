@@ -162,6 +162,18 @@ await test('validateAllPrintParts dedupes by sourceGroupId', async () => {
   assert.equal(map.size, 1, `dedup should yield 1 entry, got ${map.size}`);
 });
 
+await test('validateAllPrintParts: one entry per logical object, keyed by the lead, however many parts are flagged', async () => {
+  const lo = buildHalfMesh('lo', LO_TRIS);
+  const hi = buildHalfMesh('hi', HI_TRIS);
+  seedState([
+    { id: 'hi', sourceGroupId: 'grp_lead', mesh: hi },   // part listed first in state order
+    { id: 'lo', sourceGroupId: 'grp_lead', mesh: lo },
+  ]);
+  const map = await MeshValidator.validateAllPrintParts();
+  assert.equal(map.size, 1);
+  assert.deepEqual([...map.keys()], ['hi'], 'keyed by canonical lead (first member)');
+});
+
 await test('validateMesh routes by metadata.meshId, not Babylon mesh name', async () => {
   // Real imports produce mesh.name like "Cube__part0" while the SceneObject
   // key is the minted meshId — they NEVER match. Regression for review C4.

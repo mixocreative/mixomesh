@@ -2218,7 +2218,7 @@ meshes. `PrintReadiness` separately reports missing sources/textures and
 per-target build-volume fit; these are export-context concerns, not topology.
 
 **Pre-export gate** (§9 *Pre-Export Gate*) iterates print parts, but
-deduplicates by `logicalObjectId` so each part runs once even if it has 12
+deduplicates by `canonicalObjectId` (results keyed by the lead) so each logical object runs once even if it has 12
 siblings. Block / confirm-anyway semantics unchanged.
 
 ### ValidationResult
@@ -3984,10 +3984,19 @@ outside that range. Pinned by `tests/validator.test.mjs`.
   suffix. Separation is explicit and undoable, never automatic (Blender
   Separate/Join, PrusaSlicer Split to parts): context menu **Separate by material**
   (`SplitToPartsCommand`) makes every part an independent object under a new
-  group named after the lead (nested under the lead's previous parent), parts
-  named `<lead>.<n>`; **Merge into one object** (`JoinCommand`) makes the
-  active object the lead and every other selected object — with its own parts
-  — a material part, meshes and transforms untouched. Neither command touches
+  group named `<lead> parts` (unique among groups; nested under the lead's
+  previous parent), the lead keeps its name and the other parts are named
+  `<lead>.001`, `<lead>.002`… (unique among objects); **Merge into one object**
+  (`JoinCommand`) makes the active object the lead and every other selected
+  object — with its own parts — a material part, meshes and transforms
+  untouched. Join keeps the hierarchy consistent: a `<lead> parts` group that
+  holds only the joined members is dissolved (children rise to its parent) and
+  any part sitting under a different parent moves next to the lead; undo
+  restores both. Everything that iterates parts dedupes by `canonicalObjectId`
+  (`collectPrintUnits` resolves selected parts to their lead — one unit per
+  logical object; `validateAllPrintParts` is keyed by the lead), and
+  `PrintPartCommand` on any part sets the flag on every part of the logical
+  object as ONE undo step. Neither command touches
   geometry, shaders or `geometryFixes`; both only change the linkage flags
   (and, for Separate, the Outliner parent). The header toggle **Show material
   parts** (per-user, `localStorage` `mx-outliner-parts-v1`) lists a lead's

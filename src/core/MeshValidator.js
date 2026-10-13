@@ -1,7 +1,7 @@
 import { EVENTS } from './events.js';
 import { dispatch, getState, setState, subscribe } from './StateManager.js';
 import { AssetLoader } from './AssetLoader.js';
-import { logicalObjectPartIds } from './LogicalObjects.js';
+import { logicalObjectPartIds, canonicalObjectId } from './LogicalObjects.js';
 import { isValidateWorkerSupported, validateTopologyInWorker } from './ValidateWorker.js';
 import { frontFaceIsClockwise } from './print/PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from './repair/MeshRepair.js';
@@ -588,13 +588,14 @@ export async function validateAllPrintParts() {
   const seenGroups = new Set();
   for (const [meshId, obj] of Object.entries(objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
-    if (obj.logicalObjectId) {
-      if (seenGroups.has(obj.logicalObjectId)) continue;
-      seenGroups.add(obj.logicalObjectId);
-    }
-    const babylonMesh = AssetLoader.getBabylonMesh(meshId);
+    // One validation per LOGICAL object (canonical lead), however many parts
+    // are print-flagged; the result is keyed by the lead's id.
+    const leadId = canonicalObjectId(meshId, objects);
+    if (seenGroups.has(leadId)) continue;
+    const babylonMesh = AssetLoader.getBabylonMesh(leadId) ?? AssetLoader.getBabylonMesh(meshId);
     if (!babylonMesh) continue;
-    out.set(meshId, await validateMesh(babylonMesh));
+    seenGroups.add(leadId);
+    out.set(leadId, await validateMesh(babylonMesh));
   }
   return out;
 }

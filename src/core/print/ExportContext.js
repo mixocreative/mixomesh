@@ -24,7 +24,7 @@
 
 import { effectiveRatio, exportTargetsFromState, normalizeExportTarget } from '../scale/ScaleMath.js';
 import { toPrintSpace } from './PrintSpace.js';
-import { logicalObjectLeadIds, logicalObjectPartIds } from '../LogicalObjects.js';
+import { logicalObjectLeadIds, logicalObjectPartIds, canonicalObjectId } from '../LogicalObjects.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
 
@@ -180,7 +180,9 @@ export function buildExportContext({ state, units, target = null, options = {}, 
  */
 export function collectPrintUnits(state, selectedOnly) {
   const objects = state.scene.objects;
-  const selected = new Set(state.selection.selectedIds);
+  // Selected parts resolve to their logical-object lead, so one unit per
+  // logical object however many of its parts are selected.
+  const selected = new Set((state.selection.selectedIds ?? []).map(id => canonicalObjectId(id, objects)));
   const units = [];
   for (const leadId of logicalObjectLeadIds(objects)) {
     const leadObj = objects[leadId];

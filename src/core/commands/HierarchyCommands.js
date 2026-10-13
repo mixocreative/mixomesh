@@ -503,14 +503,20 @@ export class PrintPartCommand {
     this._meshId = meshId;
     this._prev = !!prev;
     this._next = !!next;
+    // Any part expands to every part of its logical object (one undo step);
+    // each part's prior flag is captured so undo restores exactly.
+    const objects = getState().scene.objects;
+    this._ids = logicalObjectCommandIds([meshId], objects);
+    if (!this._ids.length) this._ids = [meshId];
+    this._prevById = Object.fromEntries(this._ids.map(id => [id, id === meshId ? this._prev : !!objects[id]?.isPrintPart]));
     this.label = this._next ? 'Mark to print' : 'Unmark as Print Part';
   }
   execute() {
-    _setPrintPart(this._meshId, this._next);
+    for (const id of this._ids) _setPrintPart(id, this._next);
     markDirty();
   }
   undo() {
-    _setPrintPart(this._meshId, this._prev);
+    for (const id of this._ids) _setPrintPart(id, this._prevById[id]);
   }
 }
 

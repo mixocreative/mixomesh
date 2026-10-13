@@ -445,3 +445,25 @@ await test('getExportedDimensions: ctx.state is read when ctx is supplied (snaps
     AssetLoader.getBabylonMesh = stash;
   }
 });
+
+await test('2.6: collectPrintUnits yields ONE unit per logical object even with several parts selected', () => {
+  const mk = (id, extra = {}) => ({ id, name: id, isPrintPart: true, isGhost: false, logicalObjectId: null, isInternalPart: false, ...extra });
+  const objects = {
+    lead: mk('lead', { logicalObjectId: 'lead' }),
+    p1: mk('p1', { logicalObjectId: 'lead', isInternalPart: true }),
+    p2: mk('p2', { logicalObjectId: 'lead', isInternalPart: true }),
+  };
+  const real = AssetLoader.getBabylonMesh;
+  AssetLoader.getBabylonMesh = () => ({ getTotalVertices: () => 3 });
+  try {
+    for (const selectedIds of [['p1', 'p2'], ['p2'], ['lead', 'p1', 'p2']]) {
+      const state = { scene: { objects }, selection: { activeId: selectedIds[0], selectedIds } };
+      const sel = ExportContext.collectPrintUnits(state, true);
+      assert.equal(sel.length, 1, `selection ${selectedIds} -> one unit`);
+      assert.equal(sel[0].logicalId, 'lead');
+      assert.deepEqual(sel[0].parts.map(p => p.meshId).sort(), ['lead', 'p1', 'p2']);
+    }
+    const all = ExportContext.collectPrintUnits({ scene: { objects }, selection: { selectedIds: [] } }, false);
+    assert.equal(all.length, 1);
+  } finally { AssetLoader.getBabylonMesh = real; }
+});

@@ -91,11 +91,11 @@ await test('split: a 2-part object becomes two objects in a new group; undo rest
   assert.equal(s.objects.part.logicalObjectId, null);
   assert.equal(s.objects.part.isInternalPart, false);
   assert.equal(s.objects.lead.logicalObjectId, null);
-  assert.equal(s.objects.part.name, 'Bowl.2', 'part named after the lead, readable and unique');
+  assert.equal(s.objects.part.name, 'Bowl.001', 'part named after the lead, readable and unique');
   assert.equal(logicalObjectPartIds('lead', s.objects).length, 1, 'lead is single-part now');
   const groups = Object.values(s.groups);
   assert.equal(groups.length, 1, 'one new group');
-  assert.equal(groups[0].name, 'Bowl');
+  assert.equal(groups[0].name, 'Bowl parts');
   assert.deepEqual([...groups[0].childIds].sort(), ['lead', 'part']);
   assert.equal(s.objects.lead.parentId, groups[0].id);
   assert.equal(s.objects.part.parentId, groups[0].id);
@@ -111,7 +111,7 @@ await test('split: a 2-part object becomes two objects in a new group; undo rest
   cmd.execute();
   assert.equal(cmd.applied, true);
   assert.equal(Object.keys(getState().scene.groups).length, 1, 'redo recreates the group');
-  assert.equal(getState().scene.objects.part.name, 'Bowl.2');
+  assert.equal(getState().scene.objects.part.name, 'Bowl.001');
 });
 
 await test('split: no-op on a single-part object', () => {
@@ -133,7 +133,7 @@ await test('split: the new group goes under the lead\'s previous parent group', 
   const cmd = new SplitToPartsCommand('lead');
   cmd.execute();
   const s = getState().scene;
-  const inner = Object.values(s.groups).find(g => g.name === 'Bowl');
+  const inner = Object.values(s.groups).find(g => g.name === 'Bowl parts');
   assert.ok(inner);
   assert.equal(inner.parentId, 'gOuter', 'split group nested under the old parent');
   assert.deepEqual(s.groups.gOuter.childIds, [], 'objects left the outer group for the inner one');
@@ -187,6 +187,87 @@ await test('join: an object that already has parts brings them along under the n
   cmd.undo();
   assert.deepEqual([...logicalObjectPartIds('lead', getState().scene.objects)].sort(), ['lead', 'part']);
   assert.equal(getState().scene.objects.c.logicalObjectId, null);
+});
+
+await test('split: three parts -> .001/.002 names, group "<lead> parts", unique on collision, undo/redo', () => {
+  const o = twoPartObject();
+  o.third = base('third', 'Bowl_primitive2', { logicalObjectId: 'lead', isInternalPart: true, _tris: [[1, 2, 3]] });
+  o.other = base('other', 'Bowl.001', { _tris: [[0, 2, 1]] });   // collides with first generated name
+  seed(o, { gOld: { id: 'gOld', name: 'Bowl parts', parentId: null, childIds: [], origin: 'user' } });
+  const cmd = new SplitToPartsCommand('lead');
+  cmd.execute();
+  const s = getState().scene;
+  assert.equal(s.objects.lead.name, 'Bowl');
+  const names = [s.objects.part.name, s.objects.third.name];
+  assert.deepEqual(names, ['Bowl.002', 'Bowl.003'], 'unique against existing Bowl.001');
+  assert.equal(new Set(Object.values(s.objects).map(x => x.name)).size, 4, 'all names unique');
+  const grp = Object.values(s.groups).find(g => g.id !== 'gOld');
+  assert.equal(grp.name, 'Bowl parts.001', 'group name unique among groups');
+  cmd.undo();
+  assert.equal(getState().scene.objects.part.name, 'Bowl_primitive1');
+  assert.equal(Object.keys(getState().scene.groups).length, 1);
+  cmd.execute();
+  assert.equal(Object.keys(getState().scene.groups).length, 2);
+});
+
+await test('join after split: parts return to the lead, emptied "<lead> parts" group removed; undo restores', () => {
+  seed(twoPartObject());
+  const split = new SplitToPartsCommand('lead');
+  split.execute();
+  const afterSplit = structuredClone(getState().scene);
+  const join = new JoinCommand(['lead', 'part'], { leadId: 'lead' });
+  join.execute();
+  let s = getState().scene;
+  assert.equal(join.applied, true);
+  assert.equal(Object.keys(s.groups).length, 0, 'no orphan group left behind');
+  assert.equal(s.objects.part.parentId, null);
+  assert.equal(s.objects.lead.parentId, null);
+  assert.deepEqual(logicalObjectPartIds('lead', s.objects), ['lead', 'part']);
+  assert.equal(meshes.get('part').parent, null);
+  join.undo();
+  s = getState().scene;
+  assert.deepEqual(s.groups, afterSplit.groups, 'group restored');
+  assert.deepEqual(s.objects, afterSplit.objects, 'objects restored');
+  join.execute();
+  assert.equal(Object.keys(getState().scene.groups).length, 0, 'redo removes the group again');
+});
+
+await test('join: a part outside the lead\'s group is reparented next to the lead; non-parts groups untouched', () => {
+  const o = {
+    a: base('a', 'Cup', { parentId: 'gKeep', _tris: [[0, 2, 1]] }),
+    b: base('b', 'Handle', { parentId: 'gUser', _tris: [[0, 3, 2]] }),
+  };
+  seed(o, {
+    gKeep: { id: 'gKeep', name: 'Keep', parentId: null, childIds: ['a'], origin: 'user' },
+    gUser: { id: 'gUser', name: 'Mine', parentId: null, childIds: ['b'], origin: 'user' },
+  });
+  const k = new FakeNode('Keep'); k.metadata = { groupId: 'gKeep' };
+  const u = new FakeNode('Mine'); u.metadata = { groupId: 'gUser' };
+  meshes.get('a').parent = k; meshes.get('b').parent = u;
+  const cmd = new JoinCommand(['a', 'b'], { leadId: 'a' });
+  cmd.execute();
+  const s = getState().scene;
+  assert.equal(s.objects.b.parentId, 'gKeep');
+  assert.ok(s.groups.gUser, 'emptied user group is NOT a parts group, so it stays');
+  cmd.undo();
+  assert.equal(getState().scene.objects.b.parentId, 'gUser');
+  assert.deepEqual(getState().scene.groups.gKeep.childIds, ['a']);
+});
+
+await test('PrintPartCommand on any part toggles every part of the logical object; one undo restores', async () => {
+  seed(twoPartObject());
+  setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, part: { ...s.scene.objects.part, isPrintPart: false } } } }), { silent: true });
+  const { PrintPartCommand } = await import('../src/core/HistoryManager.js');
+  const cmd = new PrintPartCommand('part', false, true);
+  cmd.execute();
+  assert.equal(getState().scene.objects.lead.isPrintPart, true);
+  assert.equal(getState().scene.objects.part.isPrintPart, true);
+  cmd.undo();
+  assert.equal(getState().scene.objects.lead.isPrintPart, true, 'lead flag prior value restored');
+  assert.equal(getState().scene.objects.part.isPrintPart, false);
+  const off = new PrintPartCommand('part', true, false);
+  off.execute();
+  assert.equal(getState().scene.objects.lead.isPrintPart, false);
 });
 
 await test('validation of a joined object goes through the welded-union (group) path', async () => {

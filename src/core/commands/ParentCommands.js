@@ -571,7 +571,7 @@ export class SplitToPartsCommand {
     ids.forEach((id, i) => {
       const obj = objects[id];
       before[id] = _snapshotLink(obj);
-      const name = i === 0 ? obj.name : _uniqueNameIn(`${lead.name}.${i + 1}`, draft);
+      const name = i === 0 ? obj.name : _uniqueNameIn(`${lead.name}.${String(i).padStart(3, '0')}`, draft);
       after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
       draft[id] = { ...obj, ...after[id] };
     });
@@ -586,7 +586,7 @@ export class SplitToPartsCommand {
     _applyLinkPatches(this._after);
     // Group AFTER the flags are cleared so the group command sees N plain
     // objects (its id expansion would otherwise re-collapse them).
-    this._group ??= new CreateGroupCommand(this._ids, getState().scene.objects[this._ids[0]].name);
+    this._group ??= new CreateGroupCommand(this._ids, `${getState().scene.objects[this._ids[0]].name} parts`);
     this._group.execute();
     if (this._leadParentId) {
       this._reparent ??= new ReparentCommand(this._group._groupId, this._leadParentId);
@@ -617,6 +617,8 @@ export class JoinCommand {
     this._leadHint = opts.leadId ?? null;
     this._before = null;
     this._after = null;
+    this._reparent = null;      // ReparentCommand (parts → lead's parent)
+    this._dissolves = [];       // emptied `<lead> parts` groups removed
     this.applied = false;
     this.label = 'Join';
   }
@@ -654,11 +656,37 @@ export class JoinCommand {
   execute() {
     if (!this._plan()) { this.applied = false; return; }
     _applyLinkPatches(this._after);
+    // Parts live where their lead lives. First dissolve any `<lead> parts`
+    // group that holds only members of this join (its children rise to the
+    // group's parent), then reparent stragglers next to the lead.
+    if (this._reparent === null) {
+      const joined = new Set(Object.keys(this._after));
+      const { groups, objects } = getState().scene;
+      const candidates = new Set([...joined].map(id => objects[id]?.parentId).filter(Boolean));
+      for (const gid of candidates) {
+        const g = groups[gid];
+        if (!g || !/ parts(\.\d+)?$/.test(g.name ?? '')) continue;
+        const objKids = Object.values(objects).filter(o => o.parentId === gid);
+        const hasGroupKids = Object.values(groups).some(x => x.parentId === gid);
+        if (!hasGroupKids && objKids.every(o => joined.has(o.id))) this._dissolves.push(new _DissolveGroup(gid));
+      }
+      for (const d of this._dissolves) d.execute();
+      const now = getState().scene.objects;
+      const leadParent = now[this._leadId]?.parentId ?? null;
+      const moving = [...joined].some(id => id !== this._leadId && (now[id]?.parentId ?? null) !== leadParent);
+      this._reparent = moving ? new ReparentCommand(this._leadId, leadParent) : false;
+      if (this._reparent) this._reparent.execute();
+    } else {
+      for (const d of this._dissolves) d.execute();
+      if (this._reparent) this._reparent.execute();
+    }
     this.applied = true;
     markDirty();
   }
   undo() {
     if (!this.applied) return;
+    if (this._reparent) this._reparent.undo();
+    for (let i = this._dissolves.length - 1; i >= 0; i--) this._dissolves[i].undo();
     _applyLinkPatches(this._before);
     this.applied = false;
   }
