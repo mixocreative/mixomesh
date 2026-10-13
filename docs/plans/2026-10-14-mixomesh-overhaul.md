@@ -573,6 +573,19 @@ Google Stitch (CLI `stitch` 0.11.1, signed in; skill at `C:\Users\DCT\.claude\sk
 
 **6.7 Blueprint §0.3 file-layout review-only pass + BUILDLOG entry.** Tier: haiku.
 
+### Phase 8 — Responsive + touch (owner-approved 2026-10-14) · 8 tasks
+
+Goal: phone = simple read-only viewer; iPad = full app. All iOS/iPadOS browsers are WebKit, so AGENTS rule 5 gains a Safari (WebKit) exception and the browser gets a storage tier without File System Access (OPFS project store + file-input import + download export).
+
+**8.1 AGENTS rule 5 + capability gate.** Files: `AGENTS.md` rule 5 (same commit), `src/core/storage/capabilities.js`, `src/app/main.ts` boot gate. Behaviour: Chrome/Edge = full desktop; Safari/WebKit (iPad, iPhone) allowed with the touch/OPFS tier; other browsers still blocked. Accept: capabilities test per UA. Tier: sonnet.
+**8.2 OPFS storage adapter tier.** Files: new `src/core/storage/OpfsStorageAdapter.js`, `StorageAdapter.js` selection. Behaviour: projects + autosave in OPFS; import via `<input type=file multiple>`; export via download/share sheet; refs are embedded-only (no live links, status 'embedded'). Accept: storage-adapter conformance suite runs against the OPFS impl (stubbed). Tier: opus.
+**8.3 Layout breakpoints.** Files: `src/styles/layout.css`, shell/panel CSS. Behaviour: ≥ 1024 px tablet landscape = full layout with panels as slide-over sheets when narrow; < 768 px = viewer layout (viewport full-screen, bottom sheet for object info). Accept: `scripts/ui-screenshot.mjs` captures at 1366×1024, 1024×768, 390×844. Tier: sonnet · Mockup gate (tablet + phone frames).
+**8.4 Touch camera + selection.** Files: `src/core/scene/CameraRig.js`, `src/core/InputManager.js`. Behaviour: one-finger orbit, two-finger pan/pinch zoom, tap select, double-tap enter group, long-press = context menu. Accept: pointer-event unit tests. Tier: opus.
+**8.5 Touch gizmo + transforms (iPad).** Files: `src/core/scene/PivotSession.js`, gizmo sizing. Behaviour: larger handles on coarse pointers, numeric entry sheet for precise moves. Tier: sonnet.
+**8.6 Phone viewer mode.** Files: new `src/ui/ViewerMode.js`. Behaviour: open .mixo / GLB / 3MF read-only, object list + info sheet (name, size mm, scale), no editing/export. Tier: sonnet · Mockup gate.
+**8.7 PWA install + offline.** Files: manifest, service worker (vendored assets cached). Tier: sonnet.
+**8.8 Blueprint + ADR 0001 addendum (WebKit/OPFS tier).** Tier: haiku.
+
 ### Phase 7 — Deferred (unscheduled)
 
 7.1 Prusa `slic3rpe:mmu_segmentation` + Bambu per-triangle `paint_color` (needs a face-paint tool) · 7.2 HP MJF / PolyJet real-slicer verification (owner records `verified`) · 7.3 two-point measure tool · 7.4 `watchFiles` desktop watcher → auto "Changed on disk" · 7.5 `caps.externalTools` + `src/core/tools/ToolAdapter.js` typedef (Blender sidecar seam, no callers) · 7.6 surface/vertex snapping · 7.7 per-section workspace expand presets · 7.8 multi-slot texture export (normal / roughness maps — no listed printer consumes them for colour; diffuse-only stays by design).
