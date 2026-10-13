@@ -34,9 +34,55 @@ export const WEB_TRIANGLE_BUDGET = 1_500_000;
 export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
 
 /**
- * @typedef {{hasFSA?:boolean, hasIDB?:boolean, hasOPFS?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>}} StorageEnv
+ * @typedef {'chromium'|'webkit'|'gecko'|'other'} Engine
+ * @typedef {{hasFSA?:boolean, hasIDB?:boolean, hasOPFS?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>, engine?:Engine}} StorageEnv
  * @typedef {'desktop'|'browser'|'opfs'} StorageTier
  */
+
+/** Browsers the boot gate names to the user (AGENTS rule 5). */
+export const SUPPORTED_BROWSERS_TEXT =
+  'Chrome or Edge on desktop (full app), or Safari on iPad, iPhone and Mac.';
+
+/**
+ * Rendering engine from the user agent (task 8.1). Pure.
+ * - Electron shell (`env.desktop` or an `Electron/` token) -> chromium.
+ * - ANY iOS / iPadOS browser is WebKit (Apple mandates it), whatever its brand
+ *   token: CriOS (Chrome), FxiOS (Firefox), EdgiOS (Edge) all -> webkit.
+ *   iPadOS 13+ reports a "Macintosh" desktop UA; `maxTouchPoints > 1`
+ *   (a real Mac has 0) tells it apart.
+ * - Firefox desktop / Android (`Firefox/`) -> gecko.
+ * - `Chrome/`, `Chromium/`, `Edg/`, `OPR/` -> chromium.
+ * - `Safari/` + `Version/` with no Chromium token (macOS Safari) -> webkit.
+ * - anything else -> other.
+ * @param {string} [ua]
+ * @param {{maxTouchPoints?:number, desktop?:boolean}} [env]
+ * @returns {Engine}
+ */
+export function detectEngine(ua = '', env = {}) {
+  const u = String(ua || '');
+  if (env.desktop || /\bElectron\//.test(u)) return 'chromium';
+  if (/\b(iPhone|iPad|iPod)\b/.test(u)) return 'webkit';
+  if (/\bMacintosh\b/.test(u) && (env.maxTouchPoints ?? 0) > 1) return 'webkit';
+  if (/\bFirefox\//.test(u)) return 'gecko';
+  if (/\b(Chrome|Chromium|Edg|OPR)\//.test(u)) return 'chromium';
+  if (/\bSafari\//.test(u) && /\bVersion\//.test(u)) return 'webkit';
+  return 'other';
+}
+
+/**
+ * Boot-gate decision on engine (task 8.1): null = allowed, else the blocking
+ * screen's title + message. gecko / other are blocked regardless of tier.
+ * @param {Engine} engine
+ * @returns {{title:string, message:string}|null}
+ */
+export function engineGate(engine) {
+  if (engine === 'chromium' || engine === 'webkit') return null;
+  return {
+    title: 'Browser not supported',
+    message: `MIXOMESH needs a supported browser: ${SUPPORTED_BROWSERS_TEXT} `
+      + (engine === 'gecko' ? 'Firefox is not supported.' : 'This browser is not supported.'),
+  };
+}
 
 /**
  * Which StorageAdapter impl this runtime gets (task 8.2). Pure, like
@@ -53,6 +99,8 @@ export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
  */
 export function detectStorageTier(env = {}) {
   if (env.desktop) return 'desktop';
+  // Blocked engines (task 8.1) never pick OPFS; the boot gate also stops them.
+  if (env.engine === 'gecko' || env.engine === 'other') return 'browser';
   if (env.hasFSA) return 'browser';
   if (env.hasOPFS) return 'opfs';
   return 'browser';
@@ -109,6 +157,10 @@ function _snapshotEnv() {
     hasOPFS: typeof globalThis.navigator?.storage?.getDirectory === 'function',
     desktop: !!w && !!w.electronAPI,
     desktopCaps: w?.electronAPI?.capabilities,
+    engine: detectEngine(globalThis.navigator?.userAgent, {
+      maxTouchPoints: globalThis.navigator?.maxTouchPoints,
+      desktop: !!w && !!w.electronAPI,
+    }),
   };
 }
 
@@ -119,6 +171,9 @@ export const caps = detectCapabilities(_env);
 
 /** Adapter tier picked for this runtime at load (`detectStorageTier`). */
 export const storageTier = detectStorageTier(_env);
+
+/** Rendering engine of this runtime (`detectEngine`). */
+export const engine = /** @type {Engine} */ (_env.engine);
 
 /** True when running inside the Electron desktop shell. */
 export function isDesktop() {

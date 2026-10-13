@@ -1,5 +1,5 @@
 # MIXOMESH — Implementation Blueprint v4.0
-### Babylon.js · Vite/TypeScript Runtime · Chrome/Edge Only
+### Babylon.js · Vite/TypeScript Runtime · Chrome/Edge + Safari (OPFS tier)
 
 > **For Codex / Claude Code:** Sections are in build order. Each module section is a contract:
 > *Purpose · Data Structure · Public API · Implementation Rules · Pitfalls.*
@@ -40,7 +40,7 @@ PLY / WRL) and is never hidden or blocked.
 ## PART 0 — GROUND RULES
 
 ### 0.1 Absolute Rules
-- **Target browser:** Chrome / Edge only. App halts on startup if `'showDirectoryPicker' in window === false`.
+- **Target browser:** Chrome / Edge (desktop) = full app incl. live file links; Safari/WebKit (iPad, iPhone, macOS Safari; all iOS/iPadOS browsers) = supported via the OPFS tier (projects in the browser, import/export by file pick + share/download, no live folder links). Firefox and other engines halt on startup with a message naming the supported browsers (`detectEngine` + `engineGate`, task 8.1).
 - **1 Babylon Unit = 1 Meter.** UI shows mm: `mm = BU * 1000`.
 - **All state mutations go through `StateManager.dispatch()`.**
 - **All reversible actions push a Command to `HistoryManager`.**
@@ -582,8 +582,9 @@ Boot order:
    `ShadowOnlyMaterial` (transparent-PNG floor swap), `OBJExport`, and
    `STLExport`.
 3. `boot.ts` imports `src/app/main.ts`.
-4. `main.ts` blocks non-Chrome/Edge by requiring
-   `'showDirectoryPicker' in window`.
+4. `main.ts` boot gate (task 8.1): `engineGate(engine)` blocks gecko/other
+   engines (chromium + webkit pass), then `storage.ready()` for the selected
+   tier.
 5. `main.ts` initialises modules in this order: `Toast`, `StatusBar`,
    `SceneManager`, `InputManager`, transform-commit history hook, `Modal`,
    `Outliner`, `PropertiesPanel`, `ShaderPanel`, `PrintPanel`, `ContextMenu`,
@@ -3329,7 +3330,14 @@ pure: `detectStorageTier(env)` (capabilities.js) → `desktop` (Electron
 > `opfs` (`navigator.storage.getDirectory` present) > `browser` (its `ready()`
 blocks "Browser not supported"). Live `storageTier` + `ADAPTERS[tier]` pick
 `storage`. Firefox also has OPFS-without-FSA and so maps to `opfs`; which
-engines may boot is the 8.1 gate's call, not the tier detector's.
+engines may boot is the 8.1 gate's call. **Engine gate (task 8.1):**
+`detectEngine(ua, {maxTouchPoints, desktop})` returns `chromium` (Chrome/Edge/
+Opera/Electron), `webkit` (any iPhone/iPad/iPod UA incl. CriOS/FxiOS/EdgiOS;
+iPadOS "Macintosh" UA with `maxTouchPoints>1`; macOS Safari), `gecko`
+(`Firefox/`) or `other`. `engineGate(engine)` is null for chromium/webkit and a
+blocking title+message naming Chrome/Edge/Safari for gecko/other (rendered by
+main.ts `renderBlockingMessage` before `storage.ready()`); `detectStorageTier`
+maps gecko/other to `browser` so they never pick OPFS.
 Caps (opfs): `mountDirectory/relinkByPath/watchFiles:false`, `writeFiles:true`
 (in-place OPFS writes, no picker), `persistAssets = IndexedDB opens`.
 
@@ -5981,7 +5989,7 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 
 | Constraint | Mitigation |
 |---|---|
-| Chrome / Edge only | Single startup check; blocking dialog otherwise |
+| Chrome / Edge / Safari (WebKit) only | Single startup check (`engineGate`); blocking dialog otherwise |
 | Source unit assumed mm (Blender default) | Per-asset override in Properties Panel; flips `unitConfirmed: false` until reviewed |
 | Validation v1 = 3 checks only | Future Pro version adds thin-wall, self-intersect, overhang |
 | Numpad shortcuts assume numpad | `Alt+1/3/7` registered as alternates |

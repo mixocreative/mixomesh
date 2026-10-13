@@ -32,6 +32,7 @@ import { CopyPaste } from '../ui/CopyPaste.js';
 import { ViewportEmptyState } from '../ui/ViewportEmptyState.js';
 import * as i18n from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
+import { engine, engineGate } from '../core/storage/capabilities.js';
 
 type TransformCommit = {
   prev: unknown;
@@ -42,11 +43,18 @@ type TransformCommit = {
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
 
 // Boot gate (task 4.4): nothing touches storage — and no UI initialises —
-// until the active adapter says it is usable. Browser: Chrome/Edge File System
-// Access (AGENTS rule 5) + IndexedDB probe (non-blocking); desktop: the preload
-// bridge is complete and main answers the `storage:ready` handshake. Failure =
-// one blocking screen naming the problem, never a half-booted app.
+// until the engine is supported and the active adapter says it is usable.
+// Engine (task 8.1, AGENTS rule 5): chromium + webkit pass, Firefox/other are
+// blocked with a message naming the supported browsers. Adapter: Chrome/Edge
+// File System Access or the Safari OPFS tier + IndexedDB probe (non-blocking);
+// desktop: the preload bridge is complete and main answers `storage:ready`.
+// Failure = one blocking screen naming the problem, never a half-booted app.
 async function gateStorage(): Promise<boolean> {
+  const blocked = engineGate(engine);
+  if (blocked) {
+    renderBlockingMessage(blocked.title, blocked.message);
+    return false;
+  }
   try {
     await storage.ready();
     return true;

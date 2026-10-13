@@ -19,7 +19,7 @@ Browser-based 3D model assembly tool for **full-color 3D printing**.
 
 Printer profiles are data-driven via `src/config/printers.json` (display name, vendor, bed, colour capabilities, suggested export defaults, validation hints). Adding a printer = adding a JSON row. Selecting a printer APPLIES its suggested defaults (export format, split-by-material, OBJ axis, 3MF flavour, bed); the user may change any of them; **Printer default** reverts to the profile. Export remains an explicit OBJ / 3MF / STL / PLY / WRL choice that is always available.
 
-Babylon.js, Chrome/Edge only. The supported runtime is Vite + TypeScript:
+Babylon.js, Chrome/Edge (desktop) + Safari/WebKit (OPFS tier). The supported runtime is Vite + TypeScript:
 `index.html` loads `src/app/boot.ts`, which builds `window.BABYLON` from
 pinned Babylon npm packages and starts `src/app/main.ts`.
 
@@ -50,8 +50,12 @@ behaviours. Treat it that way:
    No raw event-name strings in calling code.
 4. Use Babylon.js built-ins per BLUEPRINT §0.4 "Babylon-First Rule" before
    writing custom geometry/scene/IO code.
-5. Chrome/Edge only. Single startup check halts on other browsers.
-   No Firefox/Safari fallback paths.
+5. Chrome/Edge (desktop) = full app incl. live file links. Safari/WebKit
+   (iPad, iPhone, macOS Safari; every iOS/iPadOS browser is WebKit) = supported
+   through the OPFS tier: projects stored in the browser, import/export by file
+   pick + share/download, no live folder links. Firefox and other engines are
+   blocked with a clear message by the single startup check
+   (`detectEngine`/`engineGate`, capabilities.js). No other fallback paths.
 6. Export format is an explicit user choice. Selecting a printer APPLIES that printer's suggested profile defaults (export format, split-by-material, OBJ axis, 3MF flavour, bed) as one undoable step; the user may then change any of them, and choosing the printer's default profile again (**Printer default ↺**) reverts to those defaults. A profile may raise readiness hints but must never hide or disable a format. Export content still selects the representation: textured 3MF uses the Materials Extension; solid 3MF uses `<colorgroup>`; OBJ uses MTL + PNG when textures exist. Never collapse texture data merely because of a printer preset.
 7. One-mesh-one-shader is an enforced invariant. AssetLoader splits any
    `MultiMaterial` mesh into N single-material siblings at import time and
