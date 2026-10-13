@@ -152,6 +152,28 @@ await test('OBJECT_REMOVED drops the entry; PROJECT_NEW clears everything', asyn
   assert.deepEqual(getState().scene.validation, {}, 'new project → cache cleared');
 });
 
+await test('worker timeout -> worker terminated, inline fallback result used, warning logged', async () => {
+  const VW = await import('../src/core/ValidateWorker.js');
+  let terminated = 0, posted = 0;
+  globalThis.Worker = class { postMessage() { posted++; } terminate() { terminated++; } };
+  const warn = console.warn; const warns = [];
+  console.warn = (...a) => warns.push(a.join(' '));
+  const prev = VW.setValidateWorkerTimeout(25);
+  try {
+    const m = buildMesh('Hung', LO_TRIS, 'mesh_hung');
+    seedState([{ id: 'mesh_hung', mesh: m }]);
+    const results = await MeshValidator.validateMesh(m);
+    assert.equal(posted, 1, 'request was sent to the (hung) worker');
+    assert.equal(terminated, 1, 'hung worker terminated');
+    assert.ok(warns.some(w => /did not answer/.test(w)), 'console warning logged');
+    assert.ok(results.length > 0, 'inline fallback still flags the open shell');
+  } finally {
+    VW.setValidateWorkerTimeout(prev);
+    console.warn = warn;
+    delete globalThis.Worker;
+  }
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

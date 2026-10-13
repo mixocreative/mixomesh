@@ -19,6 +19,7 @@
 // inherent ratio-model behaviour as re-importing an exported OBJ/STL.
 
 import { fromPrintSpace } from './print/PrintSpace.js';
+import { IMPORT_LIMITS, assertImportFileSize, assertZipSafe } from './import/ImportLimits.js';
 
 const BABYLON = window.BABYLON;
 
@@ -524,6 +525,14 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   return container;
 }
 
+/** Open the package and enforce Decision 19 zip caps before any entry is read. */
+async function _openZip(JSZip, data, limits = IMPORT_LIMITS) {
+  assertImportFileSize(data?.byteLength, '3MF file', limits);
+  const zip = await JSZip.loadAsync(data);
+  assertZipSafe(zip, '3MF file', limits);
+  return zip;
+}
+
 /** Register the `.3mf` SceneLoader plugin exactly once. Idempotent. */
 export function registerThreeMFLoader() {
   if (_registered || !BABYLON?.SceneLoader?.RegisterPlugin) return;
@@ -531,7 +540,7 @@ export function registerThreeMFLoader() {
 
   const parse = async (scene, data) => {
     const { default: JSZip } = await import('jszip');
-    const zip = await JSZip.loadAsync(data);          // data = ArrayBuffer (isBinary)
+    const zip = await _openZip(JSZip, data);          // data = ArrayBuffer (isBinary)
     // zip is threaded into _buildContainer so the Materials Extension path
     // can read embedded PNG texture parts directly out of the OPC package.
     const model = await _findModelXml(zip);
@@ -566,4 +575,5 @@ registerThreeMFLoader();
 export const __test = {
   buildContainer: _buildContainer,
   itemMatrix: _itemMatrix,
+  openZip: _openZip,
 };

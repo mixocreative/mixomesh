@@ -8,6 +8,7 @@ import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
 import { sha256Hex } from '../hash.js';
+import { assertImportFileSize } from '../import/ImportLimits.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
@@ -187,6 +188,7 @@ export function askDuplicateImport({ filename, existingName }) {
  */
 export async function importWithDedupe(blob, filename, position, opts = {}, deps = {}) {
   _assertNoProjectLoad();
+  assertImportFileSize(blob.size, filename);   // before reading the bytes to hash
   let contentHash = null;
   try { contentHash = await sha256Hex(await blob.arrayBuffer()); }
   catch { /* no hash → no dedupe; loadFromBlob proceeds as before */ }
@@ -263,6 +265,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   if (!SUPPORTED_EXTENSIONS.includes(ext)) {
     throw new Error(`Unsupported file type: ${ext}`);
   }
+  assertImportFileSize(blob.size, filename);   // Decision 19: before any state change
 
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.

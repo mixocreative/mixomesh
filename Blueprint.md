@@ -2969,6 +2969,15 @@ unembedded without blocking save, because they do not determine whether the
 saved scene reopens or exports. Export/readiness still blocks on ghosts and
 missing assigned textures.
 
+**Import caps (task 6.4, Decision 19, `import/ImportLimits.js`).** Max file
+size 1 GB (checked before hashing/reading); zip packages (3MF): ≤ 256
+entries, ≤ 2 GB total DECLARED uncompressed size (checked from the central
+directory before any entry is inflated), and any entry with a `..` segment,
+an absolute or drive path, or a NUL is rejected. Violations throw a
+user-readable Error → import-error modal. The mesh-validation worker has a
+120 s per-request timeout (`setValidateWorkerTimeout`); on expiry it is
+terminated, warned, and validation falls back to the inline path.
+
 **Name clashes (task 4.8, Decisions 16-17).** Identity = `contentHash`.
 `importWithDedupe(blob, name, pos, opts)` (AssetImport) is the single new-file
 import entry (OS drop, picker, folder file). It hashes before the progress
@@ -4777,6 +4786,14 @@ Single bar at bottom. Segments:
 Collapses non-essential segments below 1280px.
 
 ### Toast (`src/ui/Toast.js`)
+
+**Feedback toasts (task 5.4).** Applying a colour swatch toasts "Color #HEX
+applied" (success, 1.5 s); saving a user swatch toasts 'Saved swatch "name"'
+and a duplicate hex is refused ("Swatch #HEX is already saved"); an automatic
+workspace jump (`ShaderPanel.focus` → Shade, `PrintPanel._focusValidation` →
+Print) toasts "Switched to X — click to go back to Y" (click restores);
+"Export selected" with nothing selected toasts instead of running. Export
+success is toasted only by `PrintPipeline` (`toast.exportedOk`).
 - Max 4 stacked bottom-right.
 - Types: info / success / warning / error / loading.
 - `loading` shows spinning `Loader2` icon (CSS rotation), ignores duration.

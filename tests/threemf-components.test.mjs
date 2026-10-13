@@ -505,6 +505,35 @@ await test('3MF import refuses a triangle whose vertex index is out of range (no
   await assert.rejects(Loader.__test.buildContainer(scene, null, nan), /non-numeric coordinate/);
 });
 
+function limits() {
+  return { maxFileBytes: 1e9, maxZipEntries: 256, maxZipUncompressedBytes: 2e9 };
+}
+
+await test('3MF zip caps: entry count / uncompressed size / path traversal / file size rejected with a clear message', async () => {
+  // real jszip via require: the resolver hook stubs the bare 'jszip' import
+  const JSZip = (await import('node:module')).createRequire(import.meta.url)('jszip');
+  const build = (names, body = 'x') => {
+    const z = new JSZip();
+    for (const n of names) z.file(n, body);
+    return z.generateAsync({ type: 'arraybuffer' });
+  };
+  const ok = await build(['3D/3dmodel.model']);
+  assert.ok(await Loader.__test.openZip(JSZip, ok), 'a normal package opens under default limits');
+
+  const many = await build(Array.from({ length: 5 }, (_, i) => `f${i}.txt`));
+  await assert.rejects(Loader.__test.openZip(JSZip, many, { ...limits(), maxZipEntries: 4 }), /too many entries \(5; the limit is 4\)/);
+
+  const big = await build(['a.bin', 'b.bin'], 'y'.repeat(1000));
+  await assert.rejects(Loader.__test.openZip(JSZip, big, { ...limits(), maxZipUncompressedBytes: 1500 }), /expands to more than .* uncompressed/);
+
+  for (const bad of ['../evil.txt', '3D/../../evil.txt', '/abs.txt', 'C:/win.txt', '3D\\..\\evil.txt']) {
+    const z = await build([bad]);
+    await assert.rejects(Loader.__test.openZip(JSZip, z), /unsafe file path/, bad);
+  }
+
+  await assert.rejects(Loader.__test.openZip(JSZip, ok, { ...limits(), maxFileBytes: 10 }), /too large to import/);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
