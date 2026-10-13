@@ -42,6 +42,7 @@ Then read the plan section for the next task. Update this file at every safe bou
 ## Known gotchas (verified this session)
 
 - Partial staging of shared files (Blueprint.md): scratchpad helper must pipe the patch as BYTES — Python text-mode stdin on Windows turns LF→CRLF and `git apply --cached` fails.
+- Verify COMMITTED state while agents edit the tree: clean worktree `<scratchpad>/wt-head` (node_modules = junction to repo's); `git -C <wt> checkout -q --detach <sha>` then `npm test` there. Never gate a commit on `grep` succeeding — require `# fail 0`.
 - Parallel agents: give each disjoint files; agents never touch Blueprint/locales unless the task owns them — they report lines, main applies.
 
 - Stitch capture: **production build only** (`npm run build` → `npx vite preview --host 127.0.0.1 --port 5180 --strictPort`).
@@ -96,7 +97,7 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
 | 1.14 Rescale about own origin | sonnet | done e7fed24 | |
 | 1.15 Explicit export reference + mixed-scale note | opus | done 1d7864f | UI row lands in 1.3 |
-| 1.16 Effective scale | sonnet | doing | batch D logic only; UI line waits on 1.13 mockup |
+| 1.16 Effective scale | sonnet | done f4c8d88 | logic; Properties line waits on 1.13 mockup |
 | 1.17 Typed print sizes + filename tokens | opus | todo | after 1.15 (ExportContext) |
 | 1.18 Per-target cost lines | sonnet | todo | after 1.17 |
 
