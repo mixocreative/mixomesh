@@ -7,6 +7,8 @@
 //  2. The dynamic boot import. Raw (non-Vite) serving cannot load the .ts
 //     module, which lands in the catch and explains how to run the app.
 
+import { registerServiceWorker } from './pwa.js';
+
 const BOOT_FAILED = 'Failed to initialise MIXOMESH. Check DevTools for details.';
 const NEEDS_VITE = 'MIXOMESH must be served by Vite. Run npm run dev and open http://127.0.0.1:5173/index.html.';
 
@@ -24,3 +26,6 @@ import('./boot.ts').catch(err => {
   console.error('MIXOMESH boot module failed:', err);
   showBootError(NEEDS_VITE);
 });
+
+// Offline/install support (task 8.7): hosted https build only, see pwa.js.
+registerServiceWorker();

@@ -89,6 +89,8 @@ The static shell also contains `#viewport-size-guard`, a localized full-screen
 status overlay shown by CSS below 900 px width. MIXOMESH is a dense desktop
 3D/print workspace; below that width the 3D viewport and inspector columns are
 not usable, so the app declares the minimum instead of clipping controls.
+**PWA (task 8.7).** The hosted build is installable/offline: `public/manifest.webmanifest` (standalone, `start_url`/`scope` `./`, washi `#efe7d8` theme/background, PNG icons generated from the logo mark in `public/icons/`), `apple-touch-icon` + `apple-mobile-web-app-capable` in `index.html`, and `public/sw.js` (network-first for navigations/`index.html`; cache-first, filled on use, for hashed `./assets/*`, vendored `vendor/*` WASM, `env/*` HDRI and icons; versioned cache `mixomesh-<CACHE_VERSION>`, old caches deleted on activate; bump the version when vendored files change). `src/app/pwa.js` `shouldRegisterServiceWorker` registers it ONLY for http(s) + production build + non-Electron: never the Vite dev server, never `file://`/Electron. CSP needs no change (`worker-src 'self'`, manifest falls back to `default-src 'self'`).
+
 `#renderCanvas` is focusable and carries `role="application"` plus an
 accessible label because it owns custom 3D keyboard/pointer interaction.
 
@@ -155,6 +157,7 @@ hardcoded visible English text inside `src/ui` markup strings.
 ### 0.3 File Layout
 ```
 index.html                 ← Vite app shell
+public/manifest.webmanifest ← PWA manifest (task 8.7); public/sw.js ← service worker; public/icons/ ← app icons
 package.json               ← npm scripts, runtime deps, Vite deps
 .npmrc                     ← local npm cache and install policy
 vite.config.ts             ← Vite dev/build config
@@ -186,6 +189,7 @@ src/
   app/boot.ts              ← Babylon npm namespace bridge
   app/main.ts              ← app bootstrap + dependency wiring
   app/entry.js             ← pre-boot (no Babylon) check for IndexedDB / showDirectoryPicker
+  app/pwa.js               ← service-worker registration predicate (task 8.7; hosted prod build only)
   import/                  ← typed import pipeline contracts
   export/                  ← typed export pipeline contracts + export planner
   config/                  ← editable data, no code change (JSON import attrs)
