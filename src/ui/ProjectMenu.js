@@ -284,10 +284,15 @@ function _registerModals() {
       <h2 class="pm-modal-title">${_esc(data?.title ?? '')}</h2>
       <p class="pm-modal-body">${_esc(data?.body ?? '')}</p>
       <div class="pm-modal-actions">
-        <button class="btn" data-r="cancel">${_esc(t('btn.cancel'))}</button>
+        <button class="btn" data-r="cancel">${_esc(data?.cancelLabel ?? t('btn.cancel'))}</button>
         <button class="btn ${data?.danger ? 'btn-danger' : 'btn-primary'}" data-r="confirm">${_esc(data?.confirmLabel ?? t('btn.ok'))}</button>
       </div>`;
     el.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => close(b.dataset.r)));
+    // `focusConfirm`: the primary is the default (Enter) — Modal focuses the
+    // first button synchronously after render, so move focus on the microtask.
+    if (data?.focusConfirm) {
+      queueMicrotask(() => /** @type {HTMLElement|null} */ (el.querySelector('[data-r="confirm"]'))?.focus());
+    }
     return el;
   });
 

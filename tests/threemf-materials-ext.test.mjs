@@ -181,15 +181,15 @@ await test('default Mimaki target + textured mesh → Materials Extension layout
   // Content types must declare PNG so OPC consumers accept the texture parts.
   assert.match(files['[Content_Types].xml'], /Extension="png" ContentType="image\/png"/);
   // Texture binary is in the package on the contractual path.
-  assert.ok(files['3D/Textures/paint.png'], 'PNG texture entry present');
+  assert.ok(files['3D/Textures/p_baseColor.png'], 'PNG texture entry present');
   // Per-part relationships file links model → texture.
   assert.ok(files['3D/_rels/3dmodel.model.rels'], 'per-part rels present');
-  assert.match(files['3D/_rels/3dmodel.model.rels'], /Target="\/3D\/Textures\/paint\.png"/);
+  assert.match(files['3D/_rels/3dmodel.model.rels'], /Target="\/3D\/Textures\/p_baseColor\.png"/);
   assert.match(files['3D/_rels/3dmodel.model.rels'], /Type="http:\/\/schemas\.microsoft\.com\/3dmanufacturing\/2013\/01\/3dtexture"/);
 
   const model = files['3D/3dmodel.model'];
   // texture2d + texture2dgroup resources.
-  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
+  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/p_baseColor\.png" contenttype="image\/png"\/>/);
   assert.match(model, /<m:texture2dgroup id="2" texid="1">/);
   // One <m:tex2coord> per vertex, in vertex order.
   assert.match(model, /<m:tex2coord u="0\.1" v="0\.2"\/>/);
@@ -218,10 +218,10 @@ await test('Bambu target + textured mesh → Materials Extension layout (printer
 
   const files = zipInstances.at(-1).files;
   assert.match(files['[Content_Types].xml'], /Extension="png" ContentType="image\/png"/);
-  assert.ok(files['3D/Textures/paint.png'], 'PNG texture entry present');
+  assert.ok(files['3D/Textures/p_baseColor.png'], 'PNG texture entry present');
   assert.ok(files['3D/_rels/3dmodel.model.rels'], 'per-part rels present');
   const model = files['3D/3dmodel.model'];
-  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
+  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/p_baseColor\.png" contenttype="image\/png"\/>/);
   // Bambu profile → Bambu flavour (task 1.11): p:UUID + part name on the object.
   assert.match(model, /<object id="3" p:UUID="[^"]+" type="model" name="p" pid="2" pindex="0">/);
   assert.ok(files['Metadata/model_settings.config'], 'Bambu flavour resolved from the printer profile');
@@ -261,7 +261,7 @@ await test('Mimaki target + mixed (textured + solid) → both resources, distinc
   });
   await PrintManager.exportThreeMF();
   const files = zipInstances.at(-1).files;
-  assert.ok(files['3D/Textures/wood.png']);
+  assert.ok(files['3D/Textures/t_baseColor.png']);
   const model = files['3D/3dmodel.model'];
   // Resource ids: tex2d=1, tex2dgroup=2, colorgroup=3, objects=4,5.
   assert.match(model, /<m:texture2d id="1"/);

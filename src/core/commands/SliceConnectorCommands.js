@@ -1,5 +1,6 @@
 import { EVENTS } from '../events.js';
 import { getState, setState, dispatch, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
@@ -214,7 +215,7 @@ export async function performSliceConnector(meshId, options = {}) {
 
 export class SliceConnectorCommand {
   constructor({ snapshot, resultObjs, resultIds }) {
-    this.label = 'Slice & Connector';
+    this.label = t('history.sliceConnector');
     this._snapshot = snapshot;
     this._resultObjs = resultObjs;
     this._resultIds = resultIds;

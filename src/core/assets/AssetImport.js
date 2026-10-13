@@ -7,7 +7,6 @@ import { EVENTS } from '../events.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
-import { putHandle } from '../idb.js';
 import { sha256Hex } from '../hash.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
@@ -109,7 +108,9 @@ export async function loadContainer(blobUrl, ext, scene, onProgress, siblings) {
 }
 
 /**
- * Load an asset from a FileSystemFileHandle (Asset Panel drag).
+ * Load an asset from a FileSystemFileHandle (Asset Panel drag / double-click
+ * on a mounted-folder file). A folder file is a NEW import, so it gets the
+ * Decision 16 "already in this project" check.
  * @param {FileSystemFileHandle} fileHandle
  * @param {BABYLON.Vector3} [position]
  * @param {{ originalPath?: string, directoryHandleKey?: string }} [opts]
@@ -117,7 +118,94 @@ export async function loadContainer(blobUrl, ext, scene, onProgress, siblings) {
  */
 export async function loadFromHandle(fileHandle, position, opts = {}) {
   const file = await fileHandle.getFile();
-  return loadFromBlob(file, file.name, position, opts);
+  return importWithDedupe(file, file.name, position, opts);
+}
+
+// ── Re-import dedupe (Decision 16, §4.4 rule 2) ──────────────────────────
+
+/** Choices of the "already in this project" prompt. */
+export const DUPLICATE_CHOICE = Object.freeze({ COPY: 'copy', SEPARATE: 'separate' });
+
+/**
+ * In-project dedupe: the first instantiable mesh asset whose source bytes hash
+ * to `contentHash`, in library order. Library-pack items (one file → many
+ * assets) and assets without cached bytes (ghosts) never match — "add another
+ * copy" must be able to re-instantiate what it found.
+ * @param {string|null|undefined} contentHash  sha256 hex
+ * @param {object} [state]
+ * @returns {string|null} assetId
+ */
+export function findByHash(contentHash, state = getState()) {
+  if (!contentHash) return null;
+  for (const a of Object.values(state.scene?.assetLibrary ?? {})) {
+    if (!a || a.contentHash !== contentHash) continue;
+    if ((a.kind ?? 'mesh') !== 'mesh' || a.libraryItem || a.isGhost) continue;
+    if (!getBlobUrl(a.id)) continue;
+    return a.id;
+  }
+  return null;
+}
+
+/**
+ * Minimal Decision 16 prompt over the shared `confirmAction` modal:
+ * [Import as separate asset] [Add another copy] — "Add another copy" is the
+ * primary, focused default. Esc / backdrop = cancel the import.
+ * @param {{ filename: string, existingName: string }} info
+ * @returns {Promise<'copy'|'separate'|null>}
+ */
+export function askDuplicateImport({ filename, existingName }) {
+  return new Promise(resolve => {
+    dispatch(EVENTS.MODAL_OPEN, {
+      id: 'confirmAction',
+      title: t('import.duplicateTitle'),
+      body: t('import.duplicateBody', { name: filename, existing: existingName }),
+      confirmLabel: t('import.duplicateAddCopy'),
+      cancelLabel: t('import.duplicateSeparate'),
+      focusConfirm: true,
+      onClose: (r) => resolve(r === 'confirm' ? DUPLICATE_CHOICE.COPY
+        : r === 'cancel' ? DUPLICATE_CHOICE.SEPARATE : null),
+    });
+  });
+}
+
+/**
+ * New-file import entry point for UI drops / picks (OS drop, Import picker,
+ * mounted-folder file). Hashes the bytes BEFORE the progress overlay goes up
+ * (the overlay swallows input, the prompt needs it); identical bytes already
+ * in the project prompt (Decision 16):
+ *   copy     → re-instantiate the existing asset (no new AssetEntry)
+ *   separate → a normal import that mints a second asset with the same hash
+ *   dismiss  → nothing is imported
+ * Project-tab drops (`instantiateAsset`) and project load never come here,
+ * so they never prompt.
+ * @param {Blob} blob
+ * @param {string} filename
+ * @param {BABYLON.Vector3} [position]
+ * @param {object} [opts]  loadFromBlob opts
+ * @param {{ ask?: typeof askDuplicateImport }} [deps]  test seam
+ * @returns {Promise<string[]>} created meshIds
+ */
+export async function importWithDedupe(blob, filename, position, opts = {}, deps = {}) {
+  _assertNoProjectLoad();
+  let contentHash = null;
+  try { contentHash = await sha256Hex(await blob.arrayBuffer()); }
+  catch { /* no hash → no dedupe; loadFromBlob proceeds as before */ }
+  const existingId = findByHash(contentHash);
+  if (existingId) {
+    const existing = getState().scene.assetLibrary[existingId];
+    const ask = deps.ask ?? askDuplicateImport;
+    const choice = await ask({
+      filename,
+      existingName: existing?.displayName ?? existing?.filename ?? filename,
+    });
+    if (choice === DUPLICATE_CHOICE.COPY) {
+      // Re-check: a project open/new while the prompt was up can drop it.
+      if (findByHash(contentHash) === existingId) return instantiateAsset(existingId, position);
+    } else if (choice !== DUPLICATE_CHOICE.SEPARATE) {
+      return [];
+    }
+  }
+  return loadFromBlob(blob, filename, position, { ...opts, contentHash });
 }
 
 // Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
@@ -163,10 +251,10 @@ function _warnIfOverBudget(scene, container) {
  * @param {string} filename
  * @param {BABYLON.Vector3} [position]
  * @param {{ originalPath?: string, directoryHandleKey?: string,
- *           fileHandle?: FileSystemFileHandle, fileHandleKey?: string }} [opts]
- *   `fileHandle` = a single-file handle (OS drag-drop via
- *   getAsFileSystemHandle) persisted to idb so the loose asset can relink;
- *   `fileHandleKey` = an already-persisted key (project restore path).
+ *           fileHandleKey?: string, contentHash?: string|null }} [opts]
+ *   `fileHandleKey` = an already-persisted storage-adapter key for a loose
+ *   file (ViewportDrop persists the ref before calling); `contentHash` = the
+ *   sha256 `importWithDedupe` already computed (skips a second hash).
  * @returns {Promise<string[]>} created meshIds
  */
 export async function loadFromBlob(blob, filename, position, opts = {}) {
@@ -188,9 +276,11 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   try {
     // §10b texture-identity scope: hash the source bytes once. Reused as the
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
-    let sourceFileHash = null;
-    try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
-    catch { /* hash is an identity optimisation — import proceeds without it */ }
+    let sourceFileHash = opts.contentHash ?? null;
+    if (!sourceFileHash) {
+      try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
+      catch { /* hash is an identity optimisation — import proceeds without it */ }
+    }
 
     // OBJ: resolve mtllib/texture references against drop-set or directory
     // siblings (blob URLs have no usable base URL).
@@ -249,13 +339,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     bakeImportTransform(container, importScaleFactor(sourceUnit, modelRatio), position);
     hierarchy.attachFileGroup(scene);   // multi-object file → one group named after it
 
-    // OS drag-drop has no directory handle, but Chrome's
-    // DataTransferItem.getAsFileSystemHandle() yields a single FILE handle.
-    // Persisting it gives a loose drop a relink path of its own (resolved in
-    // PersistenceManager between dir-scan and the embedded snapshot). Without
-    // this a dragged file is a permanent frozen snapshot. Best-effort: idb may
-    // refuse the structured clone — the embedded copy still guarantees reopen.
-    const fileHandleKey = await _fileHandleKeyFor(assetId, opts);
+    // A loose OS drop / picked file arrives with its ref already persisted by
+    // the storage adapter (ViewportDrop) — that key is its relink path.
+    const fileHandleKey = opts.fileHandleKey ?? null;
 
     const entry = {
       id: assetId,
@@ -369,16 +455,6 @@ async function _selectImported(hierarchy, meshIds) {
   } catch { /* selection is a convenience; never fail an import over it */ }
 }
 
-async function _fileHandleKeyFor(assetId, opts = {}) {
-  let fileHandleKey = opts.fileHandleKey ?? null;
-  if (!fileHandleKey && opts.fileHandle && !opts.directoryHandleKey) {
-    fileHandleKey = `fh_${assetId}`;
-    try { await putHandle(fileHandleKey, opts.fileHandle); }
-    catch { fileHandleKey = null; }
-  }
-  return fileHandleKey;
-}
-
 function _stripExtension(filename) {
   return String(filename || 'asset').replace(/\.[^.]+$/, '');
 }
@@ -407,7 +483,7 @@ async function _tryRegisterLibraryImport({
       setBlobUrl(assetId, assetBlobUrl);
       createdIds.push(assetId);
 
-      const fileHandleKey = await _fileHandleKeyFor(assetId, opts);
+      const fileHandleKey = opts.fileHandleKey ?? null;
       const partName = _safePartName(root.name);
       entries.push({
         id: assetId,

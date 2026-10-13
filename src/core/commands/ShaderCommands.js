@@ -1,6 +1,7 @@
 // Shader / UV-override commands (split from HistoryManager.js — review L29).
 
 import { getState, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 
 /**
@@ -13,7 +14,7 @@ export class ShaderCreateCommand {
     this._partial = partial;
     this._newId   = null;
     this._entry   = null;
-    this.label = 'New Shader';
+    this.label = t('history.newShader');
   }
   execute() {
     const seed = (this._newId && this._entry) ? this._entry : this._partial;
@@ -39,7 +40,7 @@ export class ShaderAssignCommand {
     const objects  = getState().scene.objects;
     this._prev = {};
     for (const id of this._meshIds) this._prev[id] = objects[id]?.shaderId ?? null;
-    this.label = this._meshIds.length === 1 ? 'Assign Shader' : `Assign Shader (${this._meshIds.length})`;
+    this.label = this._meshIds.length === 1 ? t('history.assignShader') : t('history.assignShaderCount', { n: this._meshIds.length });
   }
   execute() {
     for (const id of this._meshIds) ShaderLibrary.assignToMesh(this._shaderId, id);
@@ -65,7 +66,7 @@ export class ShaderUpdateCommand {
     this._field    = field;
     this._prev     = prevValue;
     this._next     = nextValue;
-    this.label = `Update Shader (${field})`;
+    this.label = t('history.updateShader', { field });
   }
   execute() {
     ShaderLibrary.updateShader(this._shaderId, this._field, this._next);
@@ -86,7 +87,7 @@ export class ShaderDuplicateCommand {
     this._sourceId = sourceId;
     this._newId    = null;
     this._entry    = null;
-    this.label = 'Duplicate Shader';
+    this.label = t('history.duplicateShader');
   }
   execute() {
     if (this._newId && this._entry) {
@@ -132,7 +133,7 @@ export class ShaderConsolidateCommand {
     for (const [id, object] of Object.entries(objects)) {
       if (duplicates.has(object.shaderId)) this._previousLinks[id] = object.shaderId;
     }
-    this.label = 'Consolidate Duplicate Shaders';
+    this.label = t('history.consolidateDuplicateShaders');
   }
 
   execute() {
@@ -162,7 +163,7 @@ export class ShaderDeleteCommand {
     this._shaderId = shaderId;
     const sh = getState().scene.shaders[shaderId];
     this._snapshot = sh ? { ...sh } : null;
-    this.label = 'Delete Shader';
+    this.label = t('history.deleteShader');
   }
   execute() {
     if (!this._snapshot) return;
@@ -187,7 +188,7 @@ export class UVOverrideCommand {
     this._meshId = meshId;
     this._prev = prevUV ? { ...prevUV } : null;
     this._next = nextUV ? { ...nextUV } : null;
-    this.label = 'UV Override';
+    this.label = t('history.uvOverride');
   }
   execute() {
     if (this._next) ShaderLibrary.setUVOverride(this._meshId, this._next);
@@ -210,7 +211,7 @@ export class ColorApplyCommand {
     this._shaderId = shaderId;
     this._prev = prevHex;
     this._next = nextHex;
-    this.label = 'Apply Color';
+    this.label = t('history.applyColor');
   }
   execute() {
     ShaderLibrary.applySwatchColor(this._shaderId, this._next);

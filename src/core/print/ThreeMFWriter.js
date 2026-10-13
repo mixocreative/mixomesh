@@ -124,7 +124,7 @@ export function buildColorGroupEntries(meshList, options = {}) {
 
 /** Mimaki Materials-Extension package incl. OPC texture parts + rels. */
 export async function buildMaterialsExtEntries(meshList, options = {}) {
-  const { blobByPath, pathByMesh } = await collectMimakiTextures(_flattenEntries(meshList), BABYLON, options.state ?? undefined);
+  const { blobByPath, pathByMesh } = await collectMimakiTextures(_textureEntries(meshList), BABYLON, options.state ?? undefined);
   const bambuObjects = [];
   const modelXml = _buildMaterialsExtModel(meshList, pathByMesh, options, bambuObjects);
   const entries = _packageEntries(modelXml, options, true);
@@ -146,6 +146,17 @@ function _normaliseUnits(list) {
 
 function _flattenEntries(list) {
   return _normaliseUnits(list).flatMap(unit => unit.meshes);
+}
+
+// Entries tagged with their unit (logical object) name so texture parts are
+// named `<object>_<slot>.png` (Decision 17); the mesh reference is kept, so
+// `pathByMesh` still keys the XML `<m:texture2d path>` to the packaged part.
+function _textureEntries(list) {
+  return _normaliseUnits(list).flatMap(unit => unit.meshes.map(entry => ({
+    ...entry,
+    logicalId: entry.logicalId ?? unit.logicalId,
+    objectName: entry.objectName ?? entry.logicalName ?? unit.name ?? null,
+  })));
 }
 
 /**

@@ -32,11 +32,19 @@ const DEFAULT_OBJ_AXIS = 'y-up';
  * @returns {Promise<{kind:'zip', mime:string, filename:string, entries:Array}>}
  */
 export async function serializeOBJ(ctx) {
-  const meshes = ctx.meshes.map(e => e.mesh);
+  // Entries (not bare meshes): Decision 17 names a texture after its owning
+  // logical object (`<object>_<slot>.png`), which only the entry knows.
   const {
     blobByFilename: textureBlobs,
-    textureFilenameByMaterialName,
-  } = await collectTextureExportData(meshes, ctx.state);
+    filenameByMesh: textureFilenameByMesh,
+  } = await collectTextureExportData(ctx.meshes, ctx.state);
+  // Key by the SAME token the MTL `newmtl` / OBJ `usemtl` lines use
+  // (`_objMaterialName`), so `map_Kd` always resolves — a raw `Base Color`
+  // key used to miss the `Base_Color` lookup and silently drop the map.
+  const textureFilenameByMaterialName = new Map();
+  for (const [mesh, filename] of textureFilenameByMesh) {
+    textureFilenameByMaterialName.set(_objMaterialName(mesh), filename);
+  }
 
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
   // so Mimaki UV-inkjet (texture-first) slicers receive an image even when

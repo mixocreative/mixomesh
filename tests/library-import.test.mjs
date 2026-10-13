@@ -299,6 +299,96 @@ await test('print.repairOnImport OFF leaves a fixable import unrepaired (Task 5)
   }
 });
 
+// ── Task 4.8 / Decision 16: re-import dedupe prompt ─────────────────────
+const AssetImport = await import('../src/core/assets/AssetImport.js');
+const { subscribe } = await import('../src/core/StateManager.js');
+
+function _meshAssets() {
+  return Object.values(StateManager.getState().scene.assetLibrary).filter(a => (a.kind ?? 'mesh') === 'mesh');
+}
+
+await test('dedupe: different bytes never prompt', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  let asked = 0;
+  const ask = async () => { asked++; return 'copy'; };
+  await AssetImport.importWithDedupe(new Blob(['bytes-A']), 'a.glb', undefined, {}, { ask });
+  await AssetImport.importWithDedupe(new Blob(['bytes-B']), 'b.glb', undefined, {}, { ask });
+  assert.equal(asked, 0);
+  assert.equal(_meshAssets().length, 2);
+});
+
+await test('dedupe: same bytes → prompt; "Add another copy" reuses the existing asset', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  const first = await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+  const [asset] = _meshAssets();
+  assert.equal(AssetImport.findByHash(asset.contentHash), asset.id);
+  const prompts = [];
+  const ask = async (info) => { prompts.push(info); return AssetImport.DUPLICATE_CHOICE.COPY; };
+  const second = await AssetImport.importWithDedupe(new Blob(['same']), 'mug (1).glb', undefined, {}, { ask });
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].filename, 'mug (1).glb');
+  assert.equal(prompts[0].existingName, 'mug.glb');
+  assert.equal(_meshAssets().length, 1, 'no second AssetEntry');
+  assert.equal(second.length, first.length, 'a full second copy is instantiated');
+  const objs = StateManager.getState().scene.objects;
+  assert.ok(second.every(id => objs[id].assetId === asset.id), 'copies point at the existing asset');
+});
+
+await test('dedupe: "Import as separate asset" mints a second asset with the same hash', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+  const ask = async () => AssetImport.DUPLICATE_CHOICE.SEPARATE;
+  const ids = await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb', undefined, {}, { ask });
+  const assets = _meshAssets();
+  assert.equal(assets.length, 2);
+  assert.notEqual(assets[0].id, assets[1].id);
+  assert.equal(assets[0].contentHash, assets[1].contentHash);
+  const objs = StateManager.getState().scene.objects;
+  assert.ok(ids.every(id => objs[id].assetId === assets[1].id));
+});
+
+await test('dedupe: dismissing the prompt imports nothing', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+  const before = Object.keys(StateManager.getState().scene.objects).length;
+  const ids = await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb', undefined, {}, { ask: async () => null });
+  assert.deepEqual(ids, []);
+  assert.equal(_meshAssets().length, 1);
+  assert.equal(Object.keys(StateManager.getState().scene.objects).length, before);
+});
+
+await test('dedupe: default prompt rides the shared confirmAction modal (both buttons)', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
+  await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+  const seen = [];
+  let reply = 'confirm';
+  const off = subscribe(EVENTS.MODAL_OPEN, (payload) => {
+    seen.push(payload);
+    queueMicrotask(() => payload.onClose(reply));
+  });
+  try {
+    await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+    assert.equal(_meshAssets().length, 1, 'confirm = Add another copy');
+    reply = 'cancel';
+    await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+    assert.equal(_meshAssets().length, 2, 'cancel button = Import as separate asset');
+  } finally { off?.(); }
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0].id, 'confirmAction');
+  assert.equal(seen[0].focusConfirm, true, '"Add another copy" is the focused default');
+  assert.ok(seen[0].confirmLabel && seen[0].cancelLabel && seen[0].title);
+});
+
+await test('dedupe: library-pack items are never dedupe targets', async () => {
+  B.SceneLoader = { LoadAssetContainerAsync: async () => makeLibraryContainer() };
+  await AssetImport.importWithDedupe(new Blob(['pack']), 'beverage.glb');
+  let asked = 0;
+  await AssetImport.importWithDedupe(new Blob(['pack']), 'beverage.glb', undefined, {}, { ask: async () => { asked++; return null; } });
+  assert.equal(asked, 0);
+  const cola = _meshAssets().find(a => a.name === 'Cola');
+  assert.equal(AssetImport.findByHash(cola.contentHash), null);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

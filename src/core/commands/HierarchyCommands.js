@@ -4,6 +4,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { SceneManager } from '../SceneManager.js';
@@ -70,7 +71,7 @@ export class VisibilityCommand {
     this._ids = meshIds.slice();
     this._prev = { ...prev };
     this._next = next;
-    this.label = next ? 'Show' : 'Hide';
+    this.label = next ? t('history.show') : t('history.hide');
   }
   execute() {
     for (const id of this._ids) _setVisible(id, this._next);
@@ -94,7 +95,7 @@ export class LockCommand {
     this._ids = meshIds.slice();
     this._prev = { ...prev };
     this._next = next;
-    this.label = next ? 'Lock' : 'Unlock';
+    this.label = next ? t('history.lock') : t('history.unlock');
   }
   execute() {
     for (const id of this._ids) _setLocked(id, this._next);
@@ -127,7 +128,7 @@ function _setLocked(id, locked) {
  */
 export class RenameProjectCommand {
   constructor(prevName, nextName) {
-    this.label = 'Rename project';
+    this.label = t('history.renameProject');
     this._prev = prevName;
     this._next = nextName;
   }
@@ -143,7 +144,7 @@ function _setProjectName(name) {
 /** Rename an object or group. */
 export class RenameCommand {
   constructor(id, prevName, nextName) {
-    this.label = 'Rename';
+    this.label = t('history.rename');
     this._id = id;
     this._prev = prevName;
     this._next = nextName;
@@ -188,7 +189,7 @@ function _setName(id, requestedName) {
 /** Rename an outliner collection (display bucket). Undoable (review L30). */
 export class RenameCollectionCommand {
   constructor(collectionId, prevName, nextName) {
-    this.label = 'Rename Collection';
+    this.label = t('history.renameCollection');
     this._id = collectionId;
     this._prev = prevName;
     this._next = nextName;
@@ -240,7 +241,7 @@ export class DeleteCommand {
     this._groupsBefore = structuredClone(state.scene.groups);
     this._groupsAfter = null;
     this._prunedGroupIds = [];   // groups whose nodes are disabled: subtree + emptied imports
-    this.label = requestedCount === 1 ? 'Delete' : `Delete (${requestedCount})`;
+    this.label = requestedCount === 1 ? t('history.delete') : t('history.deleteCount', { n: requestedCount });
   }
   execute() {
     withDetachedPivot(() => {
@@ -321,7 +322,7 @@ export class DuplicateCommand {
     this._groupsBefore = null;
     this._groupsAfter = null;
     this._executed  = false;
-    this.label = requestedCount === 1 ? 'Duplicate' : `Duplicate (${requestedCount})`;
+    this.label = requestedCount === 1 ? t('history.duplicate') : t('history.duplicateCount', { n: requestedCount });
   }
   _selectNew() {
     const ids = [
@@ -509,7 +510,7 @@ export class PrintPartCommand {
     this._ids = logicalObjectCommandIds([meshId], objects);
     if (!this._ids.length) this._ids = [meshId];
     this._prevById = Object.fromEntries(this._ids.map(id => [id, id === meshId ? this._prev : !!objects[id]?.isPrintPart]));
-    this.label = this._next ? 'Mark to print' : 'Unmark as Print Part';
+    this.label = this._next ? t('history.markToPrint') : t('history.unmarkAsPrintPart');
   }
   execute() {
     for (const id of this._ids) _setPrintPart(id, this._next);
@@ -537,7 +538,7 @@ export class SmartReplaceCommand {
     this._targets  = (meshIds ?? []).filter(id => id !== activeId);
     this._executed = false;
     this._pairs    = [];   // [{ oldId, oldObj, oldMesh, oldParent, newId, newMesh }]
-    this.label = this._targets.length === 1 ? 'Replace with active' : `Replace with active (${this._targets.length})`;
+    this.label = this._targets.length === 1 ? t('history.replaceWithActive') : t('history.replaceWithActiveCount', { n: this._targets.length });
   }
   execute() {
     if (this._executed) {                       // redo

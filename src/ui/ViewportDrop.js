@@ -5,10 +5,12 @@ import { safeImport } from './ImportError.js';
 import { reportError, safeAsync } from './Status.js';
 import { t } from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
+// Decision 16: new-file imports go through the "already in this project" check.
+import { importWithDedupe } from '../core/assets/AssetImport.js';
+import { SESSION_KEY } from '../core/assets/DirMounts.js';   // one shared constant (4.9)
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
-const SESSION_KEY    = '__session__';
 // Mesh-extension support is owned by AssetLoader (single source of truth —
 // `.3mf` etc. extend there, not here).
 
@@ -74,7 +76,7 @@ export async function promptImport(position = BABYLON.Vector3.Zero()) {
   for (const { file, ref } of meshes) {
     await safeImport(async () => {
       const fileHandleKey = await _persistedKey(ref);
-      return AssetLoader.loadFromBlob(file, file.name, position, {
+      return importWithDedupe(file, file.name, position, {
         ...(fileHandleKey ? { fileHandleKey } : {}),
         ...(siblingFiles.length ? { siblingFiles } : {}),
       });
@@ -166,7 +168,7 @@ function _handleDrop(e, position) {
 
   const importOne = async ({ file, refP }) => {
     const fileHandleKey = await _persistedKey(await refP);
-    await AssetLoader.loadFromBlob(file, file.name, position, {
+    await importWithDedupe(file, file.name, position, {
       ...(fileHandleKey ? { fileHandleKey } : {}),
       ...(siblingFiles.length ? { siblingFiles } : {}),
     });

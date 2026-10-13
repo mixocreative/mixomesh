@@ -1417,6 +1417,110 @@ await test('texture export names are unique case-insensitively; MTL + 3MF refere
   for (const p of tPaths) assert.ok(rels.includes(p) || rels.includes('/' + p), `3MF references ${p}`);
 });
 
+// ── Task 4.8 / Decision 17: deterministic `<object>_<slot>.png` names ────
+
+function _texFixture() {
+  const mkTex = (id) => ({ name: id, metadata: { mixoAssetId: id }, getBaseSize: () => ({ width: 2, height: 2 }), readPixels: () => new Uint8Array(16) });
+  const mkTexMesh = (id, tex, matId = `mat-${id}`, matName = undefined) => {
+    const m = mesh(id);
+    m.material = { id: matId, name: matName, diffuseColor: { r: 1, g: 1, b: 1 }, diffuseTexture: tex };
+    m.getVerticesData = (k) => k === 'uv' ? new Float32Array([0,0, 1,0, 0,1]) : new Float32Array([0,0,0, 1,0,0, 0,1,0]);
+    const oc = m.clone;
+    m.clone = (n) => { const c = oc.call(m, n); c.material = m.material; c.getVerticesData = m.getVerticesData; return c; };
+    return m;
+  };
+  return { mkTex, mkTexMesh };
+}
+
+function _setTexLibrary(ids) {
+  StateManager.setState(s => ({
+    ...s,
+    scene: { ...s.scene, assetLibrary: Object.fromEntries(ids.map(id => [id, { kind: 'texture', filename: 'Image_0.png' }])) },
+  }), { silent: true });
+}
+
+await test('Decision 17: textures are named `<object>_<slot>.png`; MTL + 3MF reference exactly those entries', async () => {
+  const { mkTex, mkTexMesh } = _texFixture();
+  setScene({
+    objects: { m1: obj('m1', { name: 'Chair' }), m2: obj('m2', { name: 'chair' }), m3: obj('m3', { name: 'Lamp Shade' }) },
+    registry: {
+      m1: mkTexMesh('m1', mkTex('t1')),
+      m2: mkTexMesh('m2', mkTex('t2')),
+      // Whitespace in the material id: the MTL key must use the same token as `usemtl`.
+      m3: mkTexMesh('m3', mkTex('t3'), 'Base Color'),
+    },
+  });
+  _setTexLibrary(['t1', 't2', 't3']);
+  MeshValidator.validateMesh = valOK;
+
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  const texEntries = Object.keys(files).filter(k => k.startsWith('textures/')).sort();
+  assert.deepEqual(texEntries, [
+    'textures/Chair_baseColor.png',
+    'textures/Lamp_Shade_baseColor.png',
+    'textures/chair_baseColor_1.png',
+  ], 'object-named, case-insensitively unique (Chair vs chair)');
+  const mtl = files['Test_r1to1.mtl'];
+  const refs = [...mtl.matchAll(/map_Kd (\S+)/g)].map(m => m[1]).sort();
+  assert.deepEqual(refs, texEntries, 'every map_Kd names a packaged entry (incl. the `Base Color` material)');
+  assert.match(mtl, /newmtl Base_Color\n[\s\S]*?map_Kd textures\/Lamp_Shade_baseColor\.png/);
+
+  await PrintManager.exportThreeMF();
+  const tmf = zipInstances.at(-1).files;
+  const tPaths = Object.keys(tmf).filter(k => k.startsWith('3D/Textures/')).sort();
+  assert.deepEqual(tPaths, [
+    '3D/Textures/Chair_baseColor.png',
+    '3D/Textures/Lamp_Shade_baseColor.png',
+    '3D/Textures/chair_baseColor_1.png',
+  ], 'same names as OBJ');
+  const model = tmf['3D/3dmodel.model'];
+  const xmlRefs = [...model.matchAll(/<m:texture2d [^>]*path="\/([^"]+)"/g)].map(m => m[1]).sort();
+  assert.deepEqual(xmlRefs, tPaths, '3MF <m:texture2d path> = packaged parts');
+  const rels = tmf['3D/_rels/3dmodel.model.rels'];
+  for (const p of tPaths) assert.ok(rels.includes('/' + p), `rels reference ${p}`);
+});
+
+await test('Decision 17: a texture shared by several objects is named after its material', async () => {
+  const { mkTex, mkTexMesh } = _texFixture();
+  const shared = mkTex('tS');
+  setScene({
+    objects: { m1: obj('m1', { name: 'Left' }), m2: obj('m2', { name: 'Right' }) },
+    registry: {
+      m1: mkTexMesh('m1', shared, 'mat-wood', 'Wood'),
+      m2: mkTexMesh('m2', shared, 'mat-wood', 'Wood'),
+    },
+  });
+  _setTexLibrary(['tS']);
+  MeshValidator.validateMesh = valOK;
+
+  await PrintManager.exportOBJ();
+  const files = zipInstances.at(-1).files;
+  assert.deepEqual(Object.keys(files).filter(k => k.startsWith('textures/')), ['textures/Wood.png']);
+  assert.deepEqual([...files['Test_r1to1.mtl'].matchAll(/map_Kd (\S+)/g)].map(m => m[1]), ['textures/Wood.png']);
+
+  await PrintManager.exportThreeMF();
+  const tmf = zipInstances.at(-1).files;
+  assert.deepEqual(Object.keys(tmf).filter(k => k.startsWith('3D/Textures/')), ['3D/Textures/Wood.png']);
+});
+
+await test('Decision 17: names are deterministic across repeated exports', async () => {
+  const { mkTex, mkTexMesh } = _texFixture();
+  setScene({
+    objects: { m1: obj('m1', { name: 'Body' }), m2: obj('m2', { name: 'BODY' }) },
+    registry: { m1: mkTexMesh('m1', mkTex('t1')), m2: mkTexMesh('m2', mkTex('t2')) },
+  });
+  _setTexLibrary(['t1', 't2']);
+  MeshValidator.validateMesh = valOK;
+  const names = [];
+  for (let i = 0; i < 2; i++) {
+    await PrintManager.exportOBJ();
+    names.push(Object.keys(zipInstances.at(-1).files).filter(k => k.startsWith('textures/')).sort());
+  }
+  assert.deepEqual(names[0], names[1]);
+  assert.deepEqual(names[0], ['textures/BODY_baseColor_1.png', 'textures/Body_baseColor.png']);
+});
+
 await test('OBJ synthesis: individually → each per-mesh MTL gets its own map_Kd', async () => {
   setScene({
     objects: { m1: obj('m1'), m2: obj('m2') },
@@ -1658,7 +1762,7 @@ await test('WRL: textured export → zip with .wrl + packaged PNG; ImageTexture 
   assert.match(wrl, /TextureCoordinate \{ point \[\s*0\.25 0\.75,/);
   assert.match(wrl, /-1 0 0,\s*0 0 1\s*\]/, 'coords pass through PrintSpace (Z-up mm)');
   const url = /ImageTexture \{ url "([^"]+)" \}/.exec(wrl)?.[1];
-  assert.equal(url, 'textures/chk.png');
+  assert.equal(url, 'textures/t1_baseColor.png', 'Decision 17: <object>_<slot>.png');
   assert.ok(files[url], 'the referenced PNG is packaged at exactly that path');
 });
 

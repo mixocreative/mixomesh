@@ -258,9 +258,9 @@ await test('textured content keeps the Materials Extension under the Bambu flavo
   const unit = multiUnit('Body', [colouredMesh('Body_tex', RGB.white, { textured: true }), colouredMesh('Body_blue', RGB.blue)]);
   const files = byPath(await Writer.buildMaterialsExtEntries([unit], BAMBU));
   const model = files['3D/3dmodel.model'];
-  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png"/);
+  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/Body_baseColor\.png"/);
   assert.match(model, /requiredextensions="p"/);
-  assert.ok(files['3D/Textures/paint.png'] && files['3D/_rels/3dmodel.model.rels']);
+  assert.ok(files['3D/Textures/Body_baseColor.png'] && files['3D/_rels/3dmodel.model.rels']);
   const cfg = files[Bambu.BAMBU_MODEL_SETTINGS_PATH];
   assert.match(cfg, /value="Body_tex"\/>\n {3}<metadata key="extruder" value="1"/);
   assert.match(cfg, /value="Body_blue"\/>\n {3}<metadata key="extruder" value="2"/);

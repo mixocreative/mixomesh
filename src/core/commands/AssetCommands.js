@@ -3,6 +3,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, getState, setState, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
@@ -71,7 +72,7 @@ export class RelinkAssetCommand {
     this._patch = patch;
     this._prevEntry = null;      // asset entry before the first execute
     this._bound = null;          // objId -> { prevMesh, nextMesh, prevFields }
-    this.label = label ?? 'Relink Asset';
+    this.label = label ?? t('history.relinkAsset');
   }
 
   /** New content hash this command writes (also readable on the asset entry). */

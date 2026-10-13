@@ -3,6 +3,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, markDirty, getState, setState } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { applyTransforms, captureWorld, withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
@@ -36,8 +37,8 @@ function _selectionBounds(ids) {
 /** Drop/centre selected logical objects, or orient one picked face, as one undo step. */
 export class BedPlacementCommand {
   constructor(meshIds, mode, { faceNormal = null } = {}) {
-    this.label = mode === 'drop' ? 'Drop to Bed'
-      : mode === 'center' ? 'Center on Bed' : 'Place Face on Bed';
+    this.label = mode === 'drop' ? t('history.dropToBed')
+      : mode === 'center' ? t('history.centerOnBed') : t('history.placeFaceOnBed');
     this._mode = mode;
     this._prev = {};
     this._next = {};
@@ -110,7 +111,7 @@ export class AlignCommand {
     this._mode = mode;
     this._prev = {};
     this._next = {};
-    this.label = `Align ${mode} ${this._axis.toUpperCase()}`;
+    this.label = t('history.align', { mode, axis: this._axis.toUpperCase() });
 
     const objects = getState().scene.objects;
     const ax = this._axis;
@@ -183,7 +184,7 @@ export class ArrayCommand {
     this._spacing = Number(spacing) || 0;
     this._clones = [];   // [{ id, obj }]
     this._executed = false;
-    this.label = `Array (${this._count})`;
+    this.label = t('history.array', { n: this._count });
   }
 
   execute() {
@@ -237,7 +238,7 @@ export class MirrorCommand {
     const objects = getState().scene.objects;
     this._ids = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))]
       .filter(id => logicalObjectPartIds(id, objects).length === 1 && AssetLoader.getBabylonMesh(id));
-    this.label = `Mirror ${this._axis.toUpperCase()}`;
+    this.label = t('history.mirror', { axis: this._axis.toUpperCase() });
   }
 
   _apply() {
@@ -298,7 +299,7 @@ export class MateCommand {
   constructor(meshIds, activeId) {
     this._prev = {};
     this._next = {};
-    this.label = 'Mate';
+    this.label = t('history.mate');
     const objects = getState().scene.objects;
     const anchor = canonicalObjectId(activeId, objects);
     if (!anchor) return;

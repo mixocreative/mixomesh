@@ -5,6 +5,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import {
   SOURCE_UNIT_FACTORS, exportTargetsFromState, normalizeExportTarget, exportTargetsEqual,
@@ -30,7 +31,7 @@ export class SourceUnitCommand {
     this._next = nextUnit;
     const a = getState().scene.assetLibrary[assetId];
     this._prevConfirmed = a ? a.unitConfirmed !== false : true;
-    this.label = `File units (${nextUnit})`;
+    this.label = t('history.fileUnits', { unit: nextUnit });
   }
   execute() {
     _applySourceUnit(this._assetId, this._prev, this._next, /*confirmed*/ false);
@@ -124,7 +125,7 @@ export class RescaleObjectCommand {
     this._prevById = {};
     const objects = getState().scene.objects;
     for (const id of this._ids) this._prevById[id] = _positiveRatio(objects[id]?.ratio);
-    this.label = `Set ratio ${_fmtRatioLabel(this._next)}`;
+    this.label = t('history.setRatio', { ratio: _fmtRatioLabel(this._next) });
   }
   execute() {
     for (const id of this._ids) _rescaleObject(id, this._prevById[id], this._next);

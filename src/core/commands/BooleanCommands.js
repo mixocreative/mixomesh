@@ -6,6 +6,7 @@
 
 import { EVENTS } from '../events.js';
 import { getState, setState, dispatch, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
@@ -135,7 +136,7 @@ export class BooleanCommand {
     this._resultAssetId = resultAssetId;
     this._resultObj = resultObj;
     this._skipFirstExecute = true;
-    this.label = resultObj?.name ? `Boolean (${resultObj.name})` : 'Boolean';
+    this.label = resultObj?.name ? t('history.booleanNamed', { name: resultObj.name }) : t('history.boolean');
   }
 
   execute() {

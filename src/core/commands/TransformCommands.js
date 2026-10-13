@@ -2,6 +2,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { applyTransforms, captureWorld, transformedMeshIds } from './support.js';
 
@@ -20,7 +21,7 @@ import { applyTransforms, captureWorld, transformedMeshIds } from './support.js'
  */
 export class TransformCommand {
   constructor(prev, next, opts = {}) {
-    this.label = 'Transform';
+    this.label = t('history.transform');
     this._prev = prev;
     this._next = next;
     this._skipFirstExecute = !!opts.alreadyApplied;
@@ -68,7 +69,7 @@ export class TransformSwabCommand {
       this._prev[id] = captureWorld(m);
       this._next[id] = { position: { ...src.position }, rotation: { ...src.rotation }, scaling: { ...src.scaling } };
     }
-    this.label = this._targets.length === 1 ? 'Copy placement from active' : `Copy placement from active (${this._targets.length})`;
+    this.label = this._targets.length === 1 ? t('history.copyPlacementFromActive') : t('history.copyPlacementFromActiveCount', { n: this._targets.length });
   }
   execute() { applyTransforms(this._next); markDirty(); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) }); }
   undo()    { applyTransforms(this._prev); dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) }); }

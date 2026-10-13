@@ -194,7 +194,7 @@ await test('textured 3MF export keeps Materials Extension resources and componen
   const entries = await Writer.buildMaterialsExtEntries([unit(mesh, 'body')], { state: stateForHierarchy() });
   const model = entries.find(e => e.path === '3D/3dmodel.model').data;
 
-  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/paint\.png" contenttype="image\/png"\/>/);
+  assert.match(model, /<m:texture2d id="1" path="\/3D\/Textures\/body_baseColor\.png" contenttype="image\/png"\/>/);
   assert.match(model, /<m:texture2dgroup id="2" texid="1">/);
   assert.match(model, /<object id="\d+" type="model" name="Robot"><components>/);
   assert.match(model, /<component objectid="\d+" transform="1 0 0 0 1 0 0 0 1 0 0 0"\/>/);

@@ -1302,7 +1302,7 @@ Phase 4 implementations (Shader System):
 
 Phase 5 implementations:
 - `PrintPartCommand` — `{ meshId, prev, next }` — toggles `isPrintPart` boolean on a scene object, dispatches `OBJECT_UPDATED`.
-- `RescaleWorldCommand` — `{ prevRatio, nextRatio }` — re-bakes every registered mesh's vertex data by `prev/next`, scales every ancestor `TransformNode.position` (via WeakSet dedup), scales `state.scene.cursor3d`, updates `state.print.workingRatio`. Undo runs the inverse factor.
+- `RescaleObjectCommand` — `{ objectIds, nextRatio }` — per-object ratio rescale, re-bakes vertex data by the ratio factor, scales the object's position about its origin. Undo runs the inverse factor (Phase 6 overhaul 2026-06-16: replaces global `RescaleWorldCommand` with per-object rescaling).
 - `BakeTransformCommand` — REMOVED 2026-06-16. Baking a user rotation/scale into vertices + zeroing the node destroyed the editable, persisted Scale/Rotation properties and was lost on `.mixo` reload. User rotation/scale now always live on the node (`TransformCommand`), editable in Properties + saved via `_decompose`; export still flattens the world matrix so printed geometry is unchanged.
 
 Phase 6+ implementations:
@@ -2968,6 +2968,25 @@ Unused Asset Panel library entries are conveniences: they may remain linked or
 unembedded without blocking save, because they do not determine whether the
 saved scene reopens or exports. Export/readiness still blocks on ghosts and
 missing assigned textures.
+
+**Name clashes (task 4.8, Decisions 16-17).** Identity = `contentHash`.
+`importWithDedupe(blob, name, pos, opts)` (AssetImport) is the single new-file
+import entry (OS drop, picker, folder file). It hashes before the progress
+overlay; `findByHash` returns the first instantiable mesh asset (library
+order; no libraryItem, no ghosts). A match raises `confirmAction` — "Add
+another copy" (default, re-instantiates the existing asset) / "Import as
+separate asset" (second asset, same hash) / dismiss = nothing. Project-tab
+instantiation and project load never prompt. Display names
+(`assets/DisplayNames.js`, pure, persisted fields + library order → stable
+across reload): ambiguous labels (case-insensitive) get the shortest
+distinguishing parent-folder qualifier (`chair.glb · downloads`), remaining
+ties `#N`; generic texture names (`baseColor`, `Image_0`…) display as
+`<model> · baseColor`. Stored names are never rewritten; cards/rows adopt
+`qualifiedDisplayName` with the gated Source UI. Export texture names
+(Decision 17, `ExportTextures._planTextureNames`, shared by OBJ/3MF/PLY/WRL):
+one owning object → `<object>_baseColor.png`; shared → material name;
+case-insensitively unique (`_N`); MTL `map_Kd` keyed by the same `usemtl`
+token (fixes materials with spaces losing their map).
 
 **Relink / Refresh (task 4.5).** Relinking a ghost/missing asset and
 refreshing a `changed` one are ONE undoable `RelinkAssetCommand`

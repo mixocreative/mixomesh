@@ -4,6 +4,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
+import { t } from '../../i18n/index.js';
 import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
@@ -100,7 +101,7 @@ export class ReparentCommand {
     this._nodeId = nodeId;
     this._nextParentId = nextParentId ?? null;
     this._entries = null;
-    this.label = this._nextParentId ? 'Reparent' : 'Unparent';
+    this.label = this._nextParentId ? t('history.reparent') : t('history.unparent');
   }
   _ensureSnapshots() {
     if (this._entries) return;
@@ -158,7 +159,7 @@ export class ReparentCommand {
 export class UnparentCommand extends ReparentCommand {
   constructor(nodeId) {
     super(nodeId, null);
-    this.label = 'Unparent';
+    this.label = t('history.unparent');
   }
 }
 
@@ -243,7 +244,7 @@ export class CreateGroupCommand {
     this._beforeWorlds = {};
     this._groupWorld = null;
     this._didCreate = false;
-    this.label = 'Group';
+    this.label = t('history.group');
   }
   /** Id of the group this command creates (valid once executed). */
   get groupId() { return this._groupId; }
@@ -474,7 +475,7 @@ export class UngroupCommand {
   constructor(groupIds) {
     const list = Array.isArray(groupIds) ? groupIds : [groupIds];
     this._units = [...new Set(list.filter(Boolean))].map(id => new _DissolveGroup(id));
-    this.label = this._units.length > 1 ? `Ungroup (${this._units.length})` : 'Ungroup';
+    this.label = this._units.length > 1 ? t('history.ungroupCount', { n: this._units.length }) : t('history.ungroup');
   }
   static targetsFor(selectedIds) {
     const { objects, groups } = getState().scene;
@@ -560,7 +561,7 @@ export class SplitToPartsCommand {
     this._group = null;         // CreateGroupCommand
     this._reparent = null;      // ReparentCommand (group under the lead's old parent)
     this.applied = false;
-    this.label = 'Separate by material';
+    this.label = t('history.separateByMaterial');
   }
   _plan() {
     if (this._before) return true;
@@ -624,7 +625,7 @@ export class JoinCommand {
     this._reparent = null;      // ReparentCommand (parts → lead's parent)
     this._dissolves = [];       // emptied `<lead> parts` groups removed
     this.applied = false;
-    this.label = 'Join';
+    this.label = t('history.join');
   }
   _plan() {
     if (this._before) return true;

@@ -153,9 +153,14 @@ export function registerImportedTexture(texture, ctx = {}) {
   // a bookkeeping name like "data:tex_1", not a real URL, and the actual bytes
   // live only on the GPU after upload. Schedule a real thumbnail via
   // readPixels → canvas → data: URL once the texture is ready.
-  const fallbackName = (typeof texture.name === 'string' && texture.name)
+  // Never invent a name (§4.4 rule 1): an unnamed embedded image keeps the
+  // generic `texture`, which DisplayNames shows as `<model> · <slot>` (rule 4)
+  // with the original in the tooltip. The old `Texture <id-suffix>` fallback
+  // was unstable per import and leaked into export file names.
+  const fallbackName = (typeof texture.name === 'string' && texture.name
+    && !texture.name.startsWith('data:'))
     ? texture.name
-    : `Texture ${assetId.slice(-4)}`;
+    : 'texture';
   const filename = _filenameFromUrl(texture.url) || fallbackName;
   const baseName = filename.replace(/\.[^.]+$/, '') || 'Texture';
 
