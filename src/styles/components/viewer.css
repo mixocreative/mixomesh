@@ -1,0 +1,199 @@
+/* Phone viewer (overhaul 8.6). Active under 768 px (same breakpoint as
+   core/ViewerModel.js VIEWER_MAX_WIDTH); ui/ViewerMode.js owns the behaviour.
+   Read-only: every editing / export surface is hidden here, and InputManager
+   is switched to read-only by the module, so hiding is belt and braces. */
+
+#viewer-root { display: none; }
+
+@media (max-width: 767px) {
+  :root { --vm-bar-h: 52px; }
+
+  /* Editing + export chrome: gone (display:none also removes it from tab order). */
+  #header,
+  #outliner,
+  #right-panel,
+  #asset-panel,
+  #status-bar,
+  #viewport-toolbar,
+  #viewport-toggles,
+  #cursor-panel,
+  #scope-breadcrumb,
+  .viewport-empty-state,
+  .transform-sheet,
+  .sheet-tab,
+  .render-frame,
+  #onboard-root,
+  .ob-bubble,
+  #context-menu,
+  .ctx-menu { display: none !important; }
+
+  /* Bar on top, info sheet below: the viewport takes what is left, so the
+     model is never hidden behind the sheet. */
+  #app {
+    box-sizing: border-box;
+    height: 100dvh;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: var(--vm-bar-h);
+    padding-bottom: var(--vm-sheet-h, 0px);
+  }
+  #viewport { grid-column: 1; grid-row: 1; }
+
+  /* Toasts sit above the sheet instead of the (hidden) status bar. */
+  #toast-container { bottom: calc(var(--vm-sheet-h, 0px) + var(--sp-5)); right: var(--sp-5); left: var(--sp-5); }
+  #toast-container .toast { max-width: none; }
+  /* Validation toasts click through to the (hidden) Print panel: pure noise in a viewer. */
+  #toast-container .toast.toast-clickable { display: none; }
+
+  #viewer-root { display: block; }
+
+  .vm-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 60;
+    height: var(--vm-bar-h);
+    box-sizing: border-box;
+    padding: 0 var(--sp-5);
+    padding-top: env(safe-area-inset-top, 0);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-0);
+  }
+  .vm-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-lg);
+    font-weight: 600;
+    text-align: center;
+  }
+  .vm-bar-home .vm-title { text-align: left; }
+  .vm-btn {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    color: var(--text-1);
+    background: var(--ctl-bg);
+    border: 1px solid var(--ctl-border, var(--border));
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .vm-btn[hidden] { display: none; }
+  .vm-btn:active, .vm-btn[aria-expanded="true"] { background: var(--active-bg); color: var(--active); border-color: var(--active); }
+  /* Keep the bar's title centred when only one side button shows. */
+  .vm-bar-home::before { content: none; }
+
+  /* Projects + Open screen: covers the viewport. */
+  .vm-home {
+    position: fixed;
+    top: var(--vm-bar-h); left: 0; right: 0; bottom: 0;
+    z-index: 55;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-0);
+  }
+  .vm-home[hidden] { display: none; }
+  .vm-projects { flex: 1; overflow-y: auto; min-height: 0; align-content: start; display: grid; }
+  .vm-projects[hidden] { display: none; }
+  .vm-foot {
+    flex: none;
+    display: grid;
+    gap: var(--sp-4);
+    padding: var(--sp-5) var(--sp-6) calc(var(--sp-7) + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-1);
+    border-top: 1px solid var(--border);
+  }
+  .vm-open {
+    min-height: 48px;
+    font: 500 var(--fs-lg) var(--font-sans);
+    color: var(--accent-fg);
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .vm-open:active { background: var(--accent-hi); }
+  .vm-foot-hint { text-align: center; font-size: var(--fs-xs); color: var(--text-2); }
+
+  /* Rows: project list and object list share the look. */
+  .vm-item {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: center;
+    gap: var(--sp-5);
+    width: 100%;
+    min-height: 68px;
+    padding: var(--sp-4) var(--sp-6);
+    box-sizing: border-box;
+    text-align: left;
+    font: inherit;
+    color: var(--text-0);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .vm-item:active { background: var(--bg-2); }
+  .vm-item-on { background: var(--active-bg); box-shadow: inset 3px 0 0 var(--active); }
+  .vm-thumb {
+    width: 44px; height: 44px;
+    display: grid; place-items: center;
+    color: var(--text-1);
+    background: linear-gradient(135deg, var(--bg-2), var(--bg-0));
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .vm-item-text { display: grid; gap: 2px; min-width: 0; }
+  .vm-item-text b { font-size: var(--fs-lg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vm-item-text span { font-size: var(--fs-sm); color: var(--text-2); }
+  .vm-empty { margin: 0; padding: var(--sp-7) var(--sp-6); text-align: center; font-size: var(--fs-md); color: var(--text-2); }
+
+  /* Object list: a panel under the bar. */
+  .vm-list {
+    position: fixed;
+    top: var(--vm-bar-h); left: 0; right: 0;
+    z-index: 56;
+    max-height: calc(100dvh - var(--vm-bar-h) - var(--vm-sheet-h, 0px) - var(--sp-7));
+    overflow-y: auto;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+  }
+  .vm-list[hidden] { display: none; }
+
+  /* Bottom info sheet. */
+  .vm-sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 50;
+    box-sizing: border-box;
+    padding: var(--sp-4) var(--sp-6) calc(var(--sp-6) + env(safe-area-inset-bottom, 0px));
+    display: grid;
+    gap: var(--sp-4);
+    background: var(--bg-3);
+    border-top: 1px solid var(--border);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 24px rgba(62, 44, 30, 0.10);
+    color: var(--text-0);
+  }
+  .vm-sheet[hidden] { display: none; }
+  .vm-handle { width: 36px; height: 4px; margin: 0 auto var(--sp-1); border-radius: 2px; background: var(--border-strong, var(--border)); }
+  .vm-sheet h4 { margin: 0; font-size: var(--fs-lg); font-weight: 600; overflow-wrap: anywhere; }
+  .vm-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3) var(--sp-6); margin: 0; font-size: var(--fs-md); }
+  .vm-kv dt { color: var(--text-2); }
+  .vm-kv dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .vm-hint { margin: 0; text-align: center; font-size: var(--fs-sm); color: var(--text-2); }
+  .vm-sheet-hint { gap: var(--sp-2); padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
+
+  /* The nav cube stays (camera aid) but clear of the bar. */
+  #nav-cube { top: var(--sp-4); }
+}

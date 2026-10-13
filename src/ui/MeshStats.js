@@ -104,6 +104,9 @@ function _selectionMeshes(sel) {
 // exactly how many real scene walks happen.
 export { countSceneTriangles, countContainerTriangles, formatTriCount };
 
+/** Live meshes behind a selection (shared with the phone viewer's info sheet). */
+export const selectionMeshes = _selectionMeshes;
+
 /** Re-walk the scene and cache the total. Only called (debounced) from geometry events. */
 function _recomputeSceneTris() {
   const scene = SceneManager.getScene?.();

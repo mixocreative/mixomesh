@@ -13,6 +13,7 @@ import { Hover, hoverTarget } from './Hover.js';
 import { setGizmoSnap } from './scene/PivotSession.js';
 import { touchOrbit, touchPan, touchPinch } from './scene/CameraRig.js';
 import { createTouchGestures, TOUCH_LONG_PRESS_MS } from './TouchGestures.js';
+import { isReadOnlyShortcut } from './ViewerModel.js';
 import { translateSnapBU, rotateSnapRad, scaleSnapStep, snapToStep, nudgeStepMM, nudgeDirection } from './SnapUnits.js';
 
 const BABYLON = window.BABYLON;
@@ -32,6 +33,9 @@ let _modal = null;   // active modal G/R/S op (see _enterModal)
 let _bodyDrag = null; // pending / active LMB-on-mesh-body drag (see _onSelectionPointerDown)
 let _onContextMenu = null;
 let _viewportToolHandler = null;
+// Phone viewer (8.6): read-only blocks every edit path (shortcuts, body drag,
+// touch body drag, context menu). Camera + selection stay.
+let _readOnly = false;
 let _rmbPending = null;   // pending context-menu request — committed on RMB-UP if not dragged
 const RMB_DRAG_THRESHOLD_PX = 4;
 
@@ -122,6 +126,7 @@ function _handleKeyDown(e) {
   }
 
   const key = _buildKey(e);
+  if (_readOnly && !isReadOnlyShortcut(key)) return;
   const ctx = _isViewportKeyTarget(document.activeElement) ? 'viewport' : _currentContext;
   const fn  = _handlers.get(`${key}::${ctx}`) ?? _handlers.get(`${key}::global`);
   if (fn) { e.preventDefault(); fn(e); }
@@ -197,6 +202,19 @@ export function setViewportToolHandler(fn) {
 export function register(shortcut, context, callbackFn) {
   _handlers.set(`${shortcut}::${context}`, callbackFn);
 }
+
+/**
+ * Read-only mode (phone viewer, 8.6): shortcuts outside the camera / select
+ * allow-list, body drags and the context menu are ignored.
+ * @param {boolean} on
+ */
+export function setReadOnly(on) {
+  _readOnly = !!on;
+  if (_readOnly) { _bodyDrag = null; _touchBody = null; _rmbPending = null; }
+}
+
+/** @returns {boolean} */
+export function isReadOnly() { return _readOnly; }
 
 /**
  * Unregister a shortcut.
@@ -329,6 +347,9 @@ function _onSelectionPointerDown(info) {
 
   _promoteClicked(id);
 
+  // Read-only viewer: selection only, never a body drag.
+  if (_readOnly) { _canvas?.focus(); return; }
+
   // Stage a body drag. We don't engage the pivot until the pointer crosses
   // BODY_DRAG_THRESHOLD_PX so a plain click still reads as just-a-click.
   const planeY = SceneManager.getBodyDragPlaneY();
@@ -412,7 +433,7 @@ function _onTouchGesture(g) {
     const l = _canvasLocal(g.x, g.y);
     const meshId = SceneManager.pickMeshIdAt(l.x, l.y);
     const id = meshId ? hoverTarget(meshId, getState().scene, Selection.getScope()) : null;
-    if (id && Selection.contains(id) && !Selection.isEffectivelyLocked(id)) {
+    if (id && !_readOnly && Selection.contains(id) && !Selection.isEffectivelyLocked(id)) {
       _touchBody = { itemId: id, planeY: 0, startWorld: null, engaged: false };
     }
     _canvas?.focus?.();
@@ -553,6 +574,7 @@ function _onContextMenuRMB(info) {
 // Shared by RMB-up and touch long-press: (x,y) canvas px for the pick,
 // (clientX, clientY) viewport px for the menu position.
 function _openContextMenuAt(x, y, clientX, clientY) {
+  if (_readOnly) return;
   const pick = _scene.pick?.(x, y, mesh => !!mesh && mesh.isPickable !== false);
   const meshId = SceneManager.pickMeshIdAt(x, y);
   const id = meshId ? Selection.resolveClick(meshId) : null;   // same click-depth as LMB
@@ -1188,6 +1210,7 @@ function _registerAll() {
 
 export const InputManager = {
   init, register, unregister, setContext, setContextMenuHandler, setViewportToolHandler,
+  setReadOnly, isReadOnly,
   // Test seam (tests/safety-commands.test.mjs) — not part of the app API.
   __test: {
     isViewportKeyTarget: _isViewportKeyTarget,

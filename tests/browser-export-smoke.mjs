@@ -45,6 +45,8 @@ async function main() {
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
     '--use-angle=swiftshader', '--use-gl=angle', '--enable-unsafe-swiftshader',
     '--enable-experimental-web-platform-features',
+    // Desktop-sized window: the default headless window (~764 px) is the phone-viewer tier (overhaul 8.6).
+    '--window-size=1600,950',
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     `--remote-debugging-port=${debugPort}`, `--user-data-dir=${userDataDir}`,
     'about:blank',

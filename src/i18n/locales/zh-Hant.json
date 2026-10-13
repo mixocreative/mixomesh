@@ -1,7 +1,5 @@
 {
   "app.brand": "Mixomesh",
-  "app.workspaceTooNarrowTitle": "MIXOMESH 需要更寬的工作區",
-  "app.workspaceTooNarrowBody": "請在寬度 900 px 以上的 Chrome 或 Edge 使用，以保持 3D 視窗、面板與匯出控制可用。",
   "locale.en": "English",
   "locale.ja": "日本語",
   "locale.zh-Hant": "繁體中文",
@@ -1017,5 +1015,24 @@
   "transformSheet.close": "關閉",
   "transformSheet.openTitle": "以數值變形（移動 / 旋轉 / 縮放）",
   "transformSheet.badNumber": "請只輸入數字。",
-  "transformSheet.badScale": "縮放必須是大於 0 的百分比。"
+  "transformSheet.badScale": "縮放必須是大於 0 的百分比。",
+  "viewer.projects": "專案",
+  "viewer.openFile": "開啟檔案…",
+  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ ・ 僅儲存在這台裝置上",
+  "viewer.noProjects": "這裡還沒有已儲存的專案，請先開啟檔案。",
+  "viewer.toProjects": "專案",
+  "viewer.backToModel": "回到模型",
+  "viewer.objects": "物件",
+  "viewer.emptyList": "這個檔案裡還沒有內容。",
+  "viewer.tapHint": "點選物件即可查看尺寸與比例。",
+  "viewer.size": "尺寸",
+  "viewer.scale": "比例",
+  "viewer.mixedScale": "混合",
+  "viewer.contains": "包含",
+  "viewer.editedToday": "今天編輯",
+  "viewer.editedYesterday": "昨天編輯",
+  "viewer.editedOn": "{date} 編輯",
+  "sheets.outliner": "大綱",
+  "sheets.properties": "屬性",
+  "sheets.assets": "素材"
 }

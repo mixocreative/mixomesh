@@ -1,0 +1,191 @@
+/* Responsive tiers + touch sizing (overhaul 8.3). Loaded after blender.css.
+   Breakpoints mirror src/core/ViewerModel.js (layoutModeForWidth):
+     >= 1280   desktop — NOTHING in this file applies (rules are max-width / coarse only)
+     1024-1279 side panels become slide-over sheets over the viewport
+     768-1023  same, and Properties / Assets open as a bottom sheet
+     < 768     phone viewer (components/viewer.css hides the editing chrome)
+   Sheets are opened by the edge tabs from ui/PanelSheets.js (body[data-sheet]). */
+
+/* Edge tabs: created by PanelSheets, invisible on desktop. */
+.sheet-tab { display: none; }
+
+/* ── Sheets: < 1280 px ──────────────────────────────────── */
+@media (max-width: 1279px) {
+  :root {
+    --sheet-w-left: min(300px, 86vw);
+    --sheet-w-right: min(340px, 90vw);
+    --sheet-h: min(52vh, 460px);
+    --sheet-shadow: 0 0 32px rgba(62, 44, 30, 0.20);
+  }
+
+  /* The viewport takes the whole workspace; panels no longer own grid tracks. */
+  #app {
+    grid-template-rows: auto 1fr 28px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #header { grid-row: 1; }
+  #viewport { grid-column: 1; grid-row: 2; }
+  #status-bar { grid-row: 3; }
+
+  /* AppShell pins position:relative inline on the three panels, hence !important. */
+  #outliner, #right-panel, #asset-panel {
+    position: fixed !important;
+    z-index: 40;
+    background: var(--bg-1);
+    box-shadow: var(--sheet-shadow);
+    transition: transform var(--dur-med) var(--ease);
+    visibility: hidden;
+  }
+  #outliner {
+    top: var(--hdr-h, 40px);
+    bottom: 28px;
+    left: 0;
+    width: var(--sheet-w-left);
+    border-right: 1px solid var(--border);
+    transform: translateX(-104%);
+  }
+  #right-panel {
+    top: var(--hdr-h, 40px);
+    bottom: 28px;
+    right: 0;
+    width: var(--sheet-w-right);
+    border-left: 1px solid var(--border);
+    transform: translateX(104%);
+  }
+  #asset-panel {
+    left: 0;
+    right: 0;
+    bottom: 28px;
+    height: var(--sheet-h);
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    transform: translateY(104%);
+  }
+  body[data-sheet="outliner"]  #outliner,
+  body[data-sheet="inspector"] #right-panel,
+  body[data-sheet="assets"]    #asset-panel { transform: none; visibility: visible; }
+
+  /* Fixed widths: the desktop resize handles / collapse controls make no sense here. */
+  .panel-resize, .panel-collapse-btn, .ol-expand-strip, .rp-expand-strip, .ap-expand-strip { display: none !important; }
+
+  /* Toggle strip: only the NavCube column to its left, not the desktop breadcrumb reserve. */
+  .vp-toggles { max-width: calc(100% - 32px - 40px - 130px); }
+
+  /* Edge tabs. */
+  .sheet-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    z-index: 41;
+    padding: 0;
+    font: 500 var(--fs-sm) var(--font-sans);
+    color: var(--text-1);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: right var(--dur-med) var(--ease), left var(--dur-med) var(--ease), bottom var(--dur-med) var(--ease);
+  }
+  .sheet-tab.open { color: var(--active); background: var(--active-bg, var(--bg-2)); }
+  .sheet-tab-outliner,
+  .sheet-tab-inspector {
+    top: 50%;
+    width: 26px;
+    height: 96px;
+    margin-top: -48px;
+    writing-mode: vertical-rl;
+    border-radius: 0 10px 10px 0;
+    border-left: 0;
+  }
+  .sheet-tab-outliner { left: 0; }
+  .sheet-tab-inspector {
+    right: 0;
+    border-radius: 10px 0 0 10px;
+    border-left: 1px solid var(--border);
+    border-right: 0;
+    transform: rotate(180deg);
+  }
+  body[data-sheet="outliner"]  .sheet-tab-outliner  { left: var(--sheet-w-left); }
+  body[data-sheet="inspector"] .sheet-tab-inspector { right: var(--sheet-w-right); }
+  .sheet-tab-assets {
+    left: 0;
+    bottom: 28px;
+    height: 26px;
+    padding: 0 var(--sp-5);
+    border-radius: 0 10px 0 0;
+    border-left: 0;
+    border-bottom: 0;
+  }
+  body[data-sheet="assets"] .sheet-tab-assets { bottom: calc(28px + var(--sheet-h)); }
+  /* The bottom Assets sheet spans the full width: the side tabs would sit on top of it. */
+  body[data-sheet="assets"] .sheet-tab-outliner,
+  body[data-sheet="assets"] .sheet-tab-inspector { display: none; }
+}
+
+/* ── Portrait tablet: 768-1023 px — Properties is a bottom sheet ───────── */
+@media (min-width: 768px) and (max-width: 1023px) {
+  #right-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 28px;
+    width: auto;
+    height: var(--sheet-h);
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    transform: translateY(104%);
+  }
+  .sheet-tab-inspector {
+    right: auto;
+    left: 50%;
+    top: auto;
+    bottom: 28px;
+    width: 120px;
+    height: 26px;
+    margin: 0 0 0 -60px;
+    writing-mode: horizontal-tb;
+    transform: none;
+    border-radius: 10px 10px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+  }
+  body[data-sheet="inspector"] .sheet-tab-inspector { right: auto; bottom: calc(28px + var(--sheet-h)); }
+  .sheet-tab-outliner { top: 32%; }
+  .sheet-tab-assets { left: auto; right: 0; border-radius: 10px 0 0 0; border: 1px solid var(--border); border-right: 0; border-bottom: 0; }
+
+  /* One header row would overflow: workspace switcher drops to its own row. */
+  #header { flex-wrap: wrap; row-gap: 0; padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
+  #header > .pm-bar { margin-left: auto; }
+  #header > .ws-switcher { order: 5; flex: 1 0 100%; margin: var(--sp-2) 0 0; justify-content: center; }
+  #header > .ws-switcher .ws-btn { flex: 1; justify-content: center; }
+}
+
+/* Compact brand mark below 1100 px: emblem only, the wordmark would crowd the actions. */
+@media (max-width: 1099px) {
+  #app-logo { width: 26px; overflow: hidden; }
+  #app-logo svg { flex: none; width: 159px; }
+}
+
+/* ── Coarse pointers: >= 44 px touch targets, any width ─────────────────
+   --ctl-h drives every field / button / select (blender.css); the rest are
+   the rows and bespoke controls that size themselves. */
+@media (pointer: coarse) {
+  :root { --ctl-h: 44px; }
+
+  .pm-btn, .ws-btn, .pm-help-item, .pp-btn, .btn, .rp-section-header,
+  .ol-icon-btn, .ol-pill, .sb-crumb, .sheet-tab-assets { min-height: 44px; }
+  .pm-btn { min-width: 44px; }
+  .pm-btn-help { width: 44px; height: 44px; min-height: 44px; }
+  .ws-btn { padding-inline: var(--sp-6); }
+  #locale-switcher { min-height: 44px; }
+  .ol-row { min-height: 44px; }
+  .ol-icon-btn { min-width: 44px; justify-content: center; }
+  .rp-section-header { padding-block: var(--sp-4); }
+  .vp-toggles .vt-btn, .vt-btn { min-width: 44px; min-height: 44px; }
+  input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { min-height: 44px; display: inline-flex; align-items: center; gap: var(--sp-3); }
+  .sheet-tab-outliner, .sheet-tab-inspector { width: 44px; }
+  .sheet-tab-assets { height: 44px; }
+  .sheet-tab { font-size: var(--fs-md); }
+}

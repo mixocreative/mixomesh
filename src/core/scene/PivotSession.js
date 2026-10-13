@@ -26,6 +26,7 @@ let _dragSnapshot       = null;
 let _bodyDragOriginPivot = null; // pivot world position at body-drag start
 let _onTransformCommit  = null; // injected by src/app/main.ts to avoid circular imports
 let _gizmoSnapOn        = false; // Ctrl held → gizmo drags snap (overhaul 5.6)
+let _viewOnly = false;
 let _coarseInput        = false; // touch/pen is the live input → bigger gizmo handles (8.5)
 
 /** Gizmo handle size multiplier: 1 = Babylon default (mouse), larger on touch. */
@@ -382,7 +383,19 @@ export function attachToSelection(nodes, pivotMode = 'median', activeNode = null
     m.setParent(_pivotNode);
   }
 
-  _gizmos?.attachToMesh(_pivotNode);
+  _gizmos?.attachToMesh(_viewOnly ? null : _pivotNode);
+}
+
+/**
+ * View-only (phone viewer, 8.6): the gizmo never attaches, so no handle can
+ * be grabbed. The pivot parenting itself is unchanged; edits stay blocked by
+ * InputManager's read-only mode.
+ * @param {boolean} on
+ */
+export function setViewOnly(on) {
+  _viewOnly = !!on;
+  if (_viewOnly) _gizmos?.attachToMesh(null);
+  else if (_pivotNode) _gizmos?.attachToMesh(_pivotNode);
 }
 
 /** The live pivot TransformNode (null when nothing is attached). */

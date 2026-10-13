@@ -2,7 +2,6 @@ import { icon } from '../core/Icons.js';
 import { LocaleSwitcher } from './LocaleSwitcher.js';
 import { subscribe } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
-import { applyTranslations } from '../i18n/index.js';
 
 const MIN_SECTION_PX = 80;
 const OUTER_RESIZE_STEP_PX = 16;
@@ -13,12 +12,9 @@ export function init() {
   _wireRightPanelSections();
   _wireOuterPanels();
   const host = document.getElementById('locale-switcher-host');
-  const guard = document.getElementById('viewport-size-guard');
   LocaleSwitcher.mount(host);
-  applyTranslations(guard);
   subscribe(EVENTS.LOCALE_CHANGED, () => {
     LocaleSwitcher.refresh(host);
-    applyTranslations(guard);
   });
   clearBootStatus();
 }

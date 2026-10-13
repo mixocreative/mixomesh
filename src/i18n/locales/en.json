@@ -1,7 +1,5 @@
 {
   "app.brand": "Mixomesh",
-  "app.workspaceTooNarrowTitle": "MIXOMESH needs a wider workspace",
-  "app.workspaceTooNarrowBody": "Use Chrome or Edge at 900 px or wider to keep the 3D viewport, panels, and export controls usable.",
   "locale.en": "English",
   "locale.ja": "日本語",
   "locale.zh-Hant": "繁體中文",
@@ -1017,5 +1015,24 @@
   "transformSheet.close": "Close",
   "transformSheet.openTitle": "Numeric transform (Move / Rotate / Scale)",
   "transformSheet.badNumber": "Enter plain numbers only.",
-  "transformSheet.badScale": "Scale must be a positive percentage."
+  "transformSheet.badScale": "Scale must be a positive percentage.",
+  "viewer.projects": "Projects",
+  "viewer.openFile": "Open a file…",
+  "viewer.openHint": ".mixo, GLB, glTF, 3MF, OBJ · stays on this device",
+  "viewer.noProjects": "No saved projects here yet. Open a file to start.",
+  "viewer.toProjects": "Projects",
+  "viewer.backToModel": "Back to model",
+  "viewer.objects": "Objects",
+  "viewer.emptyList": "Nothing in this file yet.",
+  "viewer.tapHint": "Tap an object to see its size and scale.",
+  "viewer.size": "Size",
+  "viewer.scale": "Scale",
+  "viewer.mixedScale": "Mixed",
+  "viewer.contains": "Contains",
+  "viewer.editedToday": "Edited today",
+  "viewer.editedYesterday": "Edited yesterday",
+  "viewer.editedOn": "Edited {date}",
+  "sheets.outliner": "Outliner",
+  "sheets.properties": "Properties",
+  "sheets.assets": "Assets"
 }

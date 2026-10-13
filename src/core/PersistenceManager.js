@@ -144,6 +144,22 @@ export async function open() {
   await _loadAndBind(doc, picked.ref);
 }
 
+/**
+ * Open an already-picked project (`{ref, file}` from `storage.pickOpenProject`)
+ * with the same dirty-confirm and load pipeline as {@link open}. The phone
+ * viewer (8.6) uses it for its own file input / project list.
+ * @param {{ref:any, file:File|Blob}} picked
+ */
+export async function openPicked(picked) {
+  assertNoImportInFlight();
+  if (isDirty()) {
+    const choice = await confirmDirty();
+    if (choice === 'cancel') return;
+    if (choice === 'save' && !(await save())) return;
+  }
+  await _loadAndBind(_parseDoc(await picked.file.text()), picked.ref);
+}
+
 // Bind the save target only once the loaded state is coherent. Binding
 // BEFORE loadProject meant a torn load (world already reset, then a throw)
 // left Ctrl+S pointing at the user's good file with an empty scene — one
@@ -219,7 +235,7 @@ export async function requestClose() {
 // seam (same rationale as AssetLoader, bundle-1 plan 2026-06-11).
 export const PersistenceManager = {
   init, isDirty, isLoading,
-  save, saveAs, open, newProject, requestClose,
+  save, saveAs, open, openPicked, newProject, requestClose,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,
 };

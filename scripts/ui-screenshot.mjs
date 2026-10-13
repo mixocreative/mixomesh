@@ -2,6 +2,12 @@
 // tests/browser-smoke.mjs), imports the textured fixture so panels have
 // content, selects the mesh, and captures PNGs of the three workspaces.
 // Usage: node scripts/ui-screenshot.mjs [outDir]
+//
+// Responsive captures (overhaul 8.3 / 8.6): SIZES="1366x1024,1024x768,390x844"
+// (add a `t` suffix, e.g. 1024x768t, to emulate a coarse touch pointer). Each
+// size is captured empty, then with the fixture selected, then with whichever
+// sheet / list the layout offers opened. Default out dir becomes .tmp/shots.
+// Without SIZES the old four-workspace desktop capture at 1600x950 runs.
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +19,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
-const OUT_DIR = resolve(process.argv[2] ?? join(ROOT, 'docs', 'screens'));
+const SIZES = (process.env.SIZES ?? '').split(',').map(x => x.trim()).filter(Boolean).map(x => {
+  const m = /^(\d+)x(\d+)(t?)$/i.exec(x);
+  if (!m) throw new Error(`bad SIZES entry "${x}" (want WxH or WxHt)`);
+  return { w: +m[1], h: +m[2], touch: !!m[3] };
+});
+const OUT_DIR = resolve(process.argv[2] ?? join(ROOT, SIZES.length ? '.tmp/shots' : 'docs/screens'));
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
@@ -58,6 +69,46 @@ async function main() {
       && !!window.BABYLON?.SceneLoader
     `), 30000, 'app boot');
 
+    // The first-run tour overlays every shot; mark it seen and close it.
+    await evaluate(cdp, `(() => { try { localStorage.setItem('mx-onboard-v1', '1'); } catch { /* */ } document.querySelector('.ob-skip')?.click(); })()`);
+
+    const setSize = async ({ w, h, touch }) => {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: !!touch });
+      await cdp.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'pointer', value: touch ? 'coarse' : 'fine' }, { name: 'hover', value: touch ? 'none' : 'hover' }],
+      });
+      await sleep(500);
+    };
+    const snap = async (name) => {
+      const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      const file = join(OUT_DIR, `${name}.png`);
+      writeFileSync(file, Buffer.from(shot.data, 'base64'));
+      console.log(`wrote ${file}`);
+    };
+    // Layout health: horizontal page scroll + visible, non-fixed elements that
+    // poke past the right edge (sheets are fixed/translated off-screen on purpose).
+    const layoutProbe = () => evaluate(cdp, `(() => {
+      const de = document.documentElement;
+      const bad = [];
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.closest('#right-panel,#outliner,#asset-panel,#cursor-panel,.sheet-tab,[hidden],svg,#toast-container,#modal-root')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.right > innerWidth + 1) bad.push((el.id || String(el.className) || el.tagName).slice(0, 40) + '@' + Math.round(r.right));
+        if (bad.length > 8) break;
+      }
+      return { innerW: innerWidth, docScrollW: de.scrollWidth, hScroll: de.scrollWidth > innerWidth + 1, overflowing: bad };
+    })()`);
+
+    for (const size of SIZES) {
+      await setSize(size);
+      const tag = `${size.w}x${size.h}${size.touch ? 't' : ''}`;
+      await snap(`${tag}-0-empty`);
+      console.log('LAYOUT', tag, 'empty', JSON.stringify(await layoutProbe()));
+    }
+
     // Content so panels aren't empty: import fixture, select the mesh.
     const setup = await evaluate(cdp, `(async () => {
       try {
@@ -72,6 +123,7 @@ async function main() {
     })()`);
     if (setup?.error) throw new Error(`setup failed: ${setup.error}`);
     await sleep(800);   // settle: auto-frame animation + thumbnail
+    await evaluate(cdp, `document.querySelector('.ob-skip')?.click()`);
 
     if (process.env.PROBE) {
       const probe = await evaluate(cdp, `(() => {
@@ -85,6 +137,61 @@ async function main() {
         };
       })()`);
       console.log('PROBE', JSON.stringify(probe));
+    }
+
+    if (SIZES.length) {
+      const click = (sel) => evaluate(cdp, `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.click(); return true; })()`);
+      for (const size of SIZES) {
+        const tag = `${size.w}x${size.h}${size.touch ? 't' : ''}`;
+        await setSize(size);
+        await evaluate(cdp, `(async () => {
+          const { Workspace } = await import('/src/ui/Workspace.js');
+          Workspace.setWorkspace('layout');
+          const { Selection } = await import('/src/core/Selection.js');
+          Selection.clear();
+        })()`);
+        await sleep(300);
+        await snap(`${tag}-1-nothing-selected`);
+        console.log('LAYOUT', tag, 'nothing', JSON.stringify(await layoutProbe()));
+        await evaluate(cdp, `(async () => {
+          const { Selection } = await import('/src/core/Selection.js');
+          const { getState } = await import('/src/core/StateManager.js');
+          const id = Object.keys(getState().scene.objects)[0];
+          Selection.set([id], id);
+        })()`);
+        await sleep(500);
+        await snap(`${tag}-2-selected`);
+        console.log('LAYOUT', tag, 'selected', JSON.stringify(await layoutProbe()));
+        const mode = await evaluate(cdp, `document.body.dataset.layout ?? '(unset)'`);
+        console.log('MODE', tag, mode);
+        if (mode === 'viewer') {
+          if (await click('#viewer-root [data-vm="list"]')) { await sleep(400); await snap(`${tag}-3-object-list`); console.log('LAYOUT', tag, 'list', JSON.stringify(await layoutProbe())); await click('#viewer-root [data-vm="list"]'); }
+          // Open-a-file round trip: blank scene, feed a GLB to the viewer's file input.
+          await evaluate(cdp, `(async () => { const { resetWorld } = await import('/src/core/persist/ProjectLoader.js'); resetWorld(); })()`);
+          await sleep(300);
+          await snap(`${tag}-5-home-empty`);
+          const doc = await cdp.send('DOM.getDocument', { depth: 1 });
+          const fileInput = await cdp.send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#viewer-root .vm-file' });
+          await cdp.send('DOM.setFileInputFiles', { nodeId: fileInput.nodeId, files: [join(ROOT, 'tests/fixtures/textured-quad.glb')] });
+          await sleep(1500);
+          const opened = await evaluate(cdp, `(async () => { const { getState } = await import('/src/core/StateManager.js'); return { objects: Object.keys(getState().scene.objects).length, vm: document.querySelector('#viewer-root .vm-title')?.textContent }; })()`);
+          console.log('OPENED', tag, JSON.stringify(opened));
+          await snap(`${tag}-6-opened-file`);
+          if (await click('#viewer-root [data-vm="home"]')) { await sleep(400); await snap(`${tag}-4-home`); console.log('LAYOUT', tag, 'home', JSON.stringify(await layoutProbe())); await click('#viewer-root [data-vm="back"]'); }
+        } else if (mode !== 'full') {
+          for (const which of ['inspector', 'outliner', 'assets']) {
+            if (await click(`[data-sheet-toggle="${which}"]`)) {
+              await sleep(500);
+              await snap(`${tag}-3-sheet-${which}`);
+              console.log('LAYOUT', tag, which, JSON.stringify(await layoutProbe()));
+              await click(`[data-sheet-toggle="${which}"]`);
+              await sleep(300);
+            }
+          }
+        }
+      }
+      await cdp.close();
+      return;
     }
 
     for (const ws of ['layout', 'shade', 'scene', 'print']) {

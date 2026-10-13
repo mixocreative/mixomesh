@@ -39,7 +39,7 @@ import {
 } from './scene/CameraRig.js';
 import {
   initPivotSession, setTransformCommitHandler,
-  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection,
+  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection, setViewOnly,
   topmostTransformTargets, computePivotPosition,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 } from './scene/PivotSession.js';
@@ -57,7 +57,7 @@ export {
 };
 export {
   setTransformCommitHandler,
-  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection,
+  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection, setViewOnly,
   topmostTransformTargets, computePivotPosition,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 };
@@ -674,7 +674,7 @@ export const SceneManager = {
   init, isWebGPU, setTransformCommitHandler,
   getScene, getEngine, getShadowGenerator, getCamera,
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
-  setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection,
+  setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection, setViewOnly,
   topmostTransformTargets, computePivotPosition,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,

@@ -1,7 +1,5 @@
 {
   "app.brand": "Mixomesh",
-  "app.workspaceTooNarrowTitle": "MIXOMESH にはより広い作業領域が必要です",
-  "app.workspaceTooNarrowBody": "3D ビューポート、パネル、書き出し操作を使いやすく保つには、Chrome または Edge を幅 900 px 以上で使用してください。",
   "locale.en": "English",
   "locale.ja": "日本語",
   "locale.zh-Hant": "繁體中文",
@@ -1017,5 +1015,24 @@
   "transformSheet.close": "閉じる",
   "transformSheet.openTitle": "数値で変形（移動 / 回転 / 拡大縮小）",
   "transformSheet.badNumber": "数値のみ入力してください。",
-  "transformSheet.badScale": "拡大縮小は0より大きい割合で入力してください。"
+  "transformSheet.badScale": "拡大縮小は0より大きい割合で入力してください。",
+  "viewer.projects": "プロジェクト",
+  "viewer.openFile": "ファイルを開く…",
+  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ ・ この端末内にのみ保存されます",
+  "viewer.noProjects": "保存済みのプロジェクトはまだありません。ファイルを開いて始めましょう。",
+  "viewer.toProjects": "プロジェクト",
+  "viewer.backToModel": "モデルに戻る",
+  "viewer.objects": "オブジェクト",
+  "viewer.emptyList": "このファイルにはまだ何もありません。",
+  "viewer.tapHint": "オブジェクトをタップすると、サイズと縮尺が表示されます。",
+  "viewer.size": "サイズ",
+  "viewer.scale": "縮尺",
+  "viewer.mixedScale": "混在",
+  "viewer.contains": "含まれる数",
+  "viewer.editedToday": "今日編集",
+  "viewer.editedYesterday": "昨日編集",
+  "viewer.editedOn": "{date} に編集",
+  "sheets.outliner": "アウトライナー",
+  "sheets.properties": "プロパティ",
+  "sheets.assets": "アセット"
 }

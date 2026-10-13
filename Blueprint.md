@@ -1699,6 +1699,58 @@ back). Pinned by `tests/touch-gestures.test.mjs`.
 
 ---
 
+### Responsive tiers + phone viewer (overhaul 8.3 / 8.6)
+
+**Layout tiers (§13, shell).** One pure decision, `core/ViewerModel.js layoutModeForWidth(width)`, mirrored by the CSS media
+queries in `styles/responsive.css` and `styles/components/viewer.css` (a unit test pins the two together). `PanelSheets`
+mirrors the tier on `<body data-layout="viewer|portrait|narrow|full">` (resize listener, no polling).
+
+| Width (CSS px) | Tier | Behaviour |
+|---|---|---|
+| >= 1280 | `full` | Desktop layout, byte-for-byte unchanged: every responsive rule is `max-width` or `pointer: coarse` scoped. |
+| 1024-1279 | `narrow` | Full app. Outliner (left), Properties column (right) and Assets (bottom) are `position: fixed` slide-over sheets over a full-width viewport (grid collapses to one track). One sheet open at a time; opened/closed by edge tabs (`.sheet-tab`, `body[data-sheet]`, `ui/PanelSheets.js`); Esc closes. A panel collapsed on desktop is re-expanded through its own expand strip when its sheet opens. Resize handles / collapse buttons are hidden (fixed widths). |
+| 768-1023 | `portrait` | As above, but Properties and Assets open as a bottom sheet (`--sheet-h`), the workspace switcher drops to its own header row, header is two rows (`--hdr-h` is measured by ResizeObserver so sheets start under it). |
+| < 768 | `viewer` | Phone viewer, below. |
+
+Below 1100 px the header logo shows the emblem only. The old `#viewport-size-guard` ("needs a wider workspace", < 900 px) is
+removed; its locale keys `app.workspaceTooNarrow*` are now unused.
+
+**Touch sizing.** `@media (pointer: coarse)` raises `--ctl-h` to 44 px (every field / button / select in blender.css) and
+gives rows, header buttons, section headers, pills, toggles and the edge tabs a 44 px minimum; checkboxes/radios 22 px with
+44 px label rows. Applies at any width (an iPad Pro at 1366 px is `full` tier with touch sizing). A mouse-driven desktop is
+unaffected.
+
+**Phone viewer (`ui/ViewerMode.js`, `styles/components/viewer.css`).** Active while `(max-width: 767px)` matches (reacts to
+changes). Read-only by construction, in three layers:
+1. *Hidden:* header, Outliner, Properties/Shader/Scene/Print column, Assets, status bar, viewport toolbar + toggles, Arrange
+   drawer, breadcrumb, empty state, Transform sheet, onboarding and the context menu are `display:none` (not focusable).
+   Validation toasts (they click through to the Print panel) are hidden.
+2. *Input:* `InputManager.setReadOnly(true)` — only `isReadOnlyShortcut` keys (camera presets, F / Home, select all /
+   clear, pivot cycle) fire; no body drag (mouse or touch), no context menu / long-press menu. `SceneManager.setViewOnly(true)`
+   (PivotSession) keeps the gizmo detached. Selection and camera (touch orbit / pan / pinch from 8.4) stay live.
+3. *No dispatch:* the module itself only loads and selects. Leaving the tier (resize >= 768) restores both switches.
+
+Screens: **Projects** (list from `storage.listProjects()` when the tier provides it — OPFS — else just the Open button;
+"Open a file…" = hidden `<input type=file multiple>` accepting `.mixo .glb .gltf .3mf .obj .stl` plus `.mtl`/textures as OBJ
+siblings) and **View** (full-screen viewport, bar with back-to-projects and object-list buttons). A `.mixo` goes through
+`PersistenceManager.openPicked({ref,file})` (same dirty-confirm + load pipeline as `open()`; the OPFS tier first copies it
+into Projects via `importProjectFile`); a model goes through `importWithDedupe` under `safeImport`, after a
+`newProject()` when the scene is not empty (a viewer shows one file at a time). The object list is `topLevelItems(scene)`
+(top-level groups, then top-level objects; material parts folded into their lead); tapping a row selects it and frames the
+camera. The bottom info sheet describes the active item: name, **Size** (`W × D × H mm` from the union of world bounding boxes of
+its meshes — print X = Babylon X, depth = Z, height = Y, `BU_TO_MM`, one decimal; same mapping as the status-bar HUD, meshes
+from `MeshStats.selectionMeshes`) and **Scale** (`formatScaleRatio(objectRatio(obj))`, "Mixed" for a group with several ratios;
+groups also show their item count). The sheet height is published as `--vm-sheet-h`, which shrinks `#app` so the model is never
+hidden behind it.
+
+**Verification.** `SIZES="1366x1024,1024x768t,768x1024t,390x844t" node scripts/ui-screenshot.mjs` (`t` = coarse-pointer
+emulation) writes `.tmp/shots/<WxH>-<n>-<state>.png` and prints a `LAYOUT` health line per shot (horizontal scroll + elements
+past the right edge). `tests/viewer-model.test.mjs` covers the tier decision, shortcut allow-list, list/info formatters and the
+InputManager read-only gate; `tests/browser-smoke.mjs` asserts the 375 px viewer (chrome hidden, edit shortcuts inert, leaving
+the tier restores editing).
+
+Viewer sizes are measured at RESTING scale (`ImportBounce.withRestTransform`): a just-opened model is mid import-bounce and would otherwise report the transient pop size.
+
 ## PART 7 — SCENE MANAGER
 
 **File: `src/core/SceneManager.js`**

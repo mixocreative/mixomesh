@@ -25,6 +25,8 @@ import { SettingsStore } from '../core/SettingsStore.js';
 import { loadMaterialPresets } from '../core/print/MaterialPresets.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
+import { PanelSheets } from '../ui/PanelSheets.js';
+import { ViewerMode } from '../ui/ViewerMode.js';
 import { Workspace } from '../ui/Workspace.js';
 import { NumberScrub } from '../ui/NumberScrub.js';
 import { CursorPanel } from '../ui/CursorPanel.js';
@@ -120,6 +122,8 @@ async function bootstrap() {
   CursorPanel.init(); // 3D-cursor N-panel (Shift+N) — mounts into #viewport
   CopyPaste.init();   // Ctrl+C / Ctrl+V with aspect chooser
   SettingsStore.init(); // autosave hooks on the Scene/Print panel bodies (now mounted)
+  PanelSheets.init(); // < 1280 px: edge tabs + slide-over sheets (8.3)
+  ViewerMode.init();  // < 768 px: read-only phone viewer (8.6)
 
   const viewport = document.getElementById('viewport');
   if (!viewport) throw new Error('Viewport root missing');

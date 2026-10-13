@@ -53,6 +53,8 @@ async function main() {
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--enable-unsafe-webgpu',
+    // Desktop-sized window: the default headless window (~764 px) is the phone-viewer tier (overhaul 8.6).
+    '--window-size=1600,950',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-networking',

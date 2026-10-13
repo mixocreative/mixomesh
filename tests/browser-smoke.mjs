@@ -45,6 +45,8 @@ async function main() {
     '--use-gl=angle',
     '--enable-unsafe-swiftshader',
     '--enable-experimental-web-platform-features',
+    // Desktop-sized window: the default headless window (~764 px) is the phone-viewer tier (overhaul 8.6).
+    '--window-size=1600,950',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-networking',
@@ -378,21 +380,43 @@ async function main() {
       mobile: false,
     });
     await sleep(100);
-    const narrowGuard = await evaluate(cdp, `(() => {
-      const el = document.getElementById('viewport-size-guard');
-      if (!el) return { exists: false, visible: false, text: '' };
-      const cs = getComputedStyle(el);
-      const r = el.getBoundingClientRect();
+    // Phone width (< 768 px): the old "needs a wider workspace" wall is gone —
+    // the app becomes the read-only viewer (overhaul 8.6): editing chrome
+    // hidden, viewer bar + sheet shown, InputManager read-only.
+    const narrowViewer = await evaluate(cdp, `(async () => {
+      const { InputManager } = await import('/src/core/InputManager.js');
+      const shown = (sel) => { const el = document.querySelector(sel); return !!el && getComputedStyle(el).display !== 'none'; };
       return {
-        exists: true,
-        visible: cs.display !== 'none' && r.width >= 300 && r.height >= 300,
-        text: el.textContent.trim(),
+        viewer: document.body.dataset.viewer === '1',
+        layout: document.body.dataset.layout,
+        readOnly: InputManager.isReadOnly(),
+        guardGone: !document.getElementById('viewport-size-guard'),
+        barShown: shown('#viewer-root .vm-bar'),
+        headerHidden: !shown('#header'),
+        panelsHidden: !shown('#right-panel') && !shown('#outliner') && !shown('#asset-panel'),
+        toolbarHidden: !shown('#viewport-toolbar'),
+        hScroll: document.documentElement.scrollWidth > innerWidth + 1,
       };
     })()`);
-    assert(narrowGuard.exists && narrowGuard.visible,
-      'narrow windows should show the minimum-width workspace guard');
-    assert(/wider/i.test(narrowGuard.text),
-      `workspace guard should explain the width requirement: ${narrowGuard.text}`);
+    assert(narrowViewer.viewer && narrowViewer.layout === 'viewer' && narrowViewer.readOnly,
+      `narrow windows should switch to the read-only viewer: ${JSON.stringify(narrowViewer)}`);
+    assert(narrowViewer.guardGone && narrowViewer.barShown && narrowViewer.headerHidden && narrowViewer.panelsHidden && narrowViewer.toolbarHidden,
+      `viewer layout should hide editing chrome and show the viewer bar: ${JSON.stringify(narrowViewer)}`);
+    assert(!narrowViewer.hScroll, 'viewer layout must not scroll horizontally');
+    const viewerEdit = await evaluate(cdp, `(async () => {
+      const { getState } = await import('/src/core/StateManager.js');
+      const { Selection } = await import('/src/core/Selection.js');
+      const ids = Object.keys(getState().scene.objects);
+      if (ids.length) Selection.set([ids[0]], ids[0]);
+      const before = JSON.stringify(getState().scene.objects);
+      document.getElementById('renderCanvas')?.focus();
+      for (const key of ['Delete', 'x', 'g', 'h']) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+      return { had: ids.length, same: JSON.stringify(getState().scene.objects) === before };
+    })()`);
+    assert(viewerEdit.same, 'viewer mode must ignore edit shortcuts (Delete / X / G / H / Ctrl+Z)');
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 1366,
       height: 900,
@@ -400,6 +424,12 @@ async function main() {
       mobile: false,
     });
     await sleep(100);
+    const leftViewer = await evaluate(cdp, `(async () => {
+      const { InputManager } = await import('/src/core/InputManager.js');
+      return { readOnly: InputManager.isReadOnly(), viewer: document.body.dataset.viewer === '1', layout: document.body.dataset.layout };
+    })()`);
+    assert(!leftViewer.readOnly && !leftViewer.viewer && leftViewer.layout === 'full',
+      `widening past 768 px should leave viewer mode: ${JSON.stringify(leftViewer)}`);
 
     const localeSwitch = await evaluate(cdp, `(async () => {
       const { setLocale } = await import('/src/i18n/index.js');
