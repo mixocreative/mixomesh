@@ -157,7 +157,19 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - Desktop app (6.1): normal use under the sandbox/CSP — import, save, export, boolean, repair, video render.
 - Printer bed specs flagged by 1.1 (J55/J850, Photon Mono, Kobra 3, H2D, Prusa XL, Centauri Carbon, Form 4, MJF 580).
 
-### MOCKUP-GATED (blocked until owner OKs Stitch binding + first upload, Decision 30)
+### MOCKUP REVIEW (Stitch project 8138696085052519929, edited v2 screens — awaiting owner approval)
+| # | Screen id | Covers |
+|---|---|---|
+| 01 | 246a216849fb4edcbeed1167e645f205 | 5.1 header, 0.7 Arrange toolbar, 3.3 breadcrumb, 5.7 view toggles, status bar |
+| 02 | 1910408b2b024515b8cfe30a197ce465 | 1.2 Printer tab, 0.6 readiness strip |
+| 03 | 328602e9a9bc4273a79fb4208360ce14 | 1.3 Export tab, 1.15 reference row, 1.17 other sizes, 1.18/5.3 cost |
+| 04 | 71f220c5e00f4022b16c5a52976f0a7a | 1.13 scale control, 1.16 line, 4.6 Source row, 3.6 group active, 5.2 |
+| 05 | 16beadeaed264dd5aa20cac8f4acd414 | 3.4 Outliner group rows, 3.5 context menu |
+| 06 | 8bb7a3378f2c4bfc8e714f6441e9726e | 4.6 asset tabs/chips/card menu, 4.7 banner, 4.8 dup prompt, 5.5 coach |
+Not yet mocked: 5.4 Scene Advanced disclosure (small; follow 05/04 section style).
+v1 issues fixed in v2: invented slicing UI, 'KoboCAD' name, invented sections, Bambu-engine captions, wrong dup-dialog text.
+
+### MOCKUP-GATED (Stitch approved 2026-10-14; implement each after its screen is approved)
 0.6 readiness strip · 0.7 Arrange rename + toolbar button · 1.2 Printer tab · 1.3 Export flow (+ "Other sizes…" editor, Reference row, Print-at label, prefs objAxis/splitByMaterial/threeMFFlavour/exportFormat in ExportContext._capturePrefs, ApplyPrinterProfileCommand) · 1.13 Scale control declare vs convert (+ ratioSource hook in migrate ladder, 1.16 "→ prints as" line) · 3.3 breadcrumb · 3.4 Outliner group rows · 3.5 context menu tiering · 3.6 Properties with group · 4.6 Source status UI (+ Refresh button, applyFoundSource as command, qualifiedDisplayName on cards/rows) · 4.7 boot banner · 4.8 display parts · 5.1 header · 5.2 Properties ▸ Object everywhere · 5.3 Print polish + Cost popover · 5.4 Scene Advanced disclosure · 5.5 onboarding · 5.7 viewport toggles strip.
 
 - Owner rule: start every status report with 🟡/⛔, and ✅🎉 ALL DONE only when the whole mission is finished (memory feedback_done_emoji).
