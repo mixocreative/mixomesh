@@ -64,7 +64,8 @@ export function detectEngine(ua = '', env = {}) {
   if (/\b(iPhone|iPad|iPod)\b/.test(u)) return 'webkit';
   if (/\bMacintosh\b/.test(u) && (env.maxTouchPoints ?? 0) > 1) return 'webkit';
   if (/\bFirefox\//.test(u)) return 'gecko';
-  if (/\b(Chrome|Chromium|Edg|OPR)\//.test(u)) return 'chromium';
+  // No leading \b: `HeadlessChrome/` (automation / browser smokes) must match too.
+  if (/(Chrome|Chromium|Edg|OPR)\/\d/.test(u)) return 'chromium';
   if (/\bSafari\//.test(u) && /\bVersion\//.test(u)) return 'webkit';
   return 'other';
 }

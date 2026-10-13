@@ -75,6 +75,8 @@ test('detectEngine UA matrix', () => {
   assert.equal(detectEngine(UA.chrome), 'chromium');
   assert.equal(detectEngine(UA.edge), 'chromium');
   assert.equal(detectEngine(UA.electron), 'chromium');
+  assert.equal(detectEngine('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36'),
+    'chromium', 'headless Chrome (automation / smokes) is chromium');
   assert.equal(detectEngine('anything', { desktop: true }), 'chromium');
   assert.equal(detectEngine(UA.ipad, { maxTouchPoints: 5 }), 'webkit');
   assert.equal(detectEngine(UA.ipadDesktop, { maxTouchPoints: 5 }), 'webkit', 'iPadOS 13+ Macintosh UA + touch');
