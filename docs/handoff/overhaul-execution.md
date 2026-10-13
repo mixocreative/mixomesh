@@ -85,14 +85,14 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.1 printers.json v2 + loader (+AGENTS rule 6) | sonnet | done 2e47d4c | 20 rows; some bed specs flagged for owner double-check |
 | 1.2 Printer tab | sonnet | gated | Mockup gate; deps 1.1 |
 | 1.3 Export flow + settings scope (+ApplyPrinterProfileCommand) | opus | gated | Mockup gate; deps 1.1/1.15/1.16/1.17 |
-| 1.4 Per-printer readiness hints | sonnet | doing | batch D |
-| 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | doing | batch D (opus agent) |
+| 1.4 Per-printer readiness hints | sonnet | done 4aabce3 | thickness tests written by main (agent claimed but had none) |
+| 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | done 8bdfaca | owner eyeball checklist in commit/agent report: Bambu Studio + PrusaSlicer |
 | 1.6 PLY + WRL writers | opus | done 5c5a24c | trimesh +1000 mm³ both |
-| 1.7 OBJ through PrintSpace w/ per-printer axis | opus | doing | batch D (opus agent) |
+| 1.7 OBJ through PrintSpace w/ per-printer axis | opus | done ba786e6 | Y-up identical to old OBJExport; owner eyeball in Mimaki tool |
 | 1.8 Gate tightening | sonnet | todo | PrintPipeline/PrintPanel — after 1.5/1.6 |
 | 1.9 Texture colour-space check | sonnet | done fc71135 | conversion export-readback only (capture raw) |
-| 1.10 Dead export/scale code removal | sonnet | todo | deps 1.1 |
-| 1.11 Bambu/Orca 3MF flavour | opus | todo | after 1.5 (ThreeMFWriter) |
+| 1.10 Dead export/scale code removal | sonnet | doing | batch E |
+| 1.11 Bambu/Orca 3MF flavour | opus | doing | batch E |
 | 1.12 Blueprint §12 consistency pass | haiku | todo | last in phase |
 | 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
 | 1.14 Rescale about own origin | sonnet | done e7fed24 | |
@@ -122,5 +122,6 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 — Plan authored (Fable), audited twice (Sonnet), committed `421b8be`; all decisions accepted;
   this handoff created. Next: Phase 0, start with 0.13a/0.13b + ungated 0.1–0.5, 0.8–0.12.
 - 2026-10-14 (cont.) — Phase 0 batch A landed: 0.13a/b 2b4edff, 0.3 6d66b10, 0.4 a3da60f, 0.2+0.8+0.10 16e169a (all checks + browser/export smokes green). Batch B (0.1, 0.5, 0.9) dispatched; then 0.11 (opus, main), 0.12.
-- 2026-10-14 (cont.) — Phase 0 ungated DONE: 0.5 7efeb91, 0.1+0.9 6dbdb78, 0.11 b84bece. Remaining Phase 0: 0.12 (batch C), gated 0.6/0.7. Batch C dispatched: 0.12, 1.1, 1.6 (opus agent), 1.9, 1.14. `npm run test:electron` still to run (0.4/0.11) at Phase 0/1 close.
+- 2026-10-14 (cont.) — Phase 0 ungated DONE: 0.5 7efeb91, 0.1+0.9 6dbdb78, 0.11 b84bece. Remaining Phase 0: 0.12 (batch C), gated 0.6/0.7. Batch C dispatched: 0.12, 1.1, 1.6 (opus agent), 1.9, 1.14. 
 - 2026-10-14 (cont.) — 1.1 2e47d4c, 1.9 fc71135, 1.14 e7fed24, 1.6+0.12 5c5a24c, 1.15 1d7864f. Phase 0 ungated complete. Batch D running: 1.4, 1.5 (opus), 1.7 (opus), 1.16. Then 1.10, 1.8, 1.11, 1.17, 1.18, 1.12.
+- 2026-10-14 (cont.) — 1.16 f4c8d88, 1.4 4aabce3, 1.7 ba786e6 (amended: 1.5 tests had leaked in), 1.5 8bdfaca. Full tree green incl. browser/export/ELECTRON smokes. Pending follow-up for 1.3: ExportContext._capturePrefs must carry objAxis + splitByMaterial (+exportFormat, threeMFFlavour). Batch E: 1.10, 1.11. Then 1.8, 1.17, 1.18, 1.12.
