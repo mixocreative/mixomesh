@@ -134,10 +134,10 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 4.7 Boot banner | sonnet | gated | Mockup |
 | 4.8 Name-clash rules | opus | done c409f3d (logic) | display parts gated (cards/rows adopt qualifiedDisplayName); fixed OBJ map_Kd for names with spaces |
 | 4.9 Dead code + registry growth | sonnet | done f1ae2fd | |
-| 4.10 Blueprint §11 pass + ADR addendum | haiku | todo | last |
+| 4.10 Blueprint §11 pass + ADR addendum | haiku | done ab577a9 | main corrected 2 invented ADR claims |
 
-### Phase 5 (10): 5.8 done 30ef0bc, 5.9 done 73168df; 5.6 opus todo; 5.1-5.5, 5.7 gated (5.4 toasts ungated part todo); 5.10 haiku last
-### Phase 6 (13): 6.3 done 73168df (+fix e5c291b, 0c4eb6a), 6.5 done ff04eb9, 6.6a-d done ae96ca6 (found+fixed CreateGroup bug); 6.1 opus, 6.2 sonnet, 6.4 sonnet, 6.6e-g, 6.7 haiku todo
+### Phase 5 (10): 5.8 done 30ef0bc, 5.9 done 73168df, 5.4 toasts done 80e48d3 (Scene Advanced part gated); 5.6 opus doing; 5.1-5.3, 5.5, 5.7 gated; 5.10 haiku last
+### Phase 6 (13): 6.3 done 73168df (+fix e5c291b, 0c4eb6a), 6.5 done ff04eb9, 6.6a-d done ae96ca6 (found+fixed CreateGroup bug); 6.1+6.2 done 8b40509 (CSP; all 4 browser smokes + electron security probe green), 6.4 done d45da4a, 6.6e-g done d2b04de, 6.7 haiku todo (last)
 
 ### Phases 5–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
@@ -171,3 +171,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 2.6 3b0d6ba, 4.3 c16bb4e → Phase 2 complete. Running: 4.5, 3.1, 3.2 (opus). Next: 4.4 (after 4.5, shares ProjectLoader), 4.8 logic, 4.9, 3.7, then Phase 5/6 ungated.
 - 2026-10-14 (cont.) — 4.5 96f7e1f, 3.1 2767180, 5.8 30ef0bc, 6.5 ff04eb9, 3.2 c6c4291, 5.9+6.3 73168df, 6.6a-d ae96ca6, smoke fixes 49c6bac, 4.4 100a1c6, fixes e5c291b/0c4eb6a. FULL TREE GREEN: unit 252, browser/export/repair/group/electron smokes. Next batch: 4.8 logic, 4.9, 3.7, 6.6e-g; then 5.6, 6.1, 6.2, 6.4.
 - 2026-10-14 (cont.) — 4.9 f1ae2fd, 6.6e-g d2b04de, 4.8+3.7 c409f3d (worktree 268/268 + browser/export smokes). Running: 6.1+6.2 (opus), 6.4, 5.6 (opus), 5.4 toasts. Remaining after: 4.10, 5.10, 6.7 Blueprint passes; then ONLY mockup-gated tasks remain (need owner Stitch OK).
+- 2026-10-14 (cont.) — 5.4 80e48d3, 6.4 d45da4a, 4.10 ab577a9, 6.1+6.2 8b40509 (worktree: unit 269, browser/export/repair/group smokes, build, electron smoke incl. security probe — all green). Running: 5.6. Then 5.10 + 6.7 Blueprint passes → only mockup-gated tasks remain.
