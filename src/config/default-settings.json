@@ -41,9 +41,6 @@
     "referenceObjectId": null,
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": { "x": 508, "y": 508, "z": 305 },
-    "minWallThickness": 1.2,
-    "printMode": "fdm",
-    "chordTolerance": 0.05,
     "objBakeSolidTextures": false,
     "strictExport": false,
     "repairOnImport": false

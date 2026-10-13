@@ -145,7 +145,9 @@ export function resolveLoadedExportRatios(loadedPrint = {}) {
  * is excluded from the serialised document too (ProjectSerializer.js).
  */
 function _printWithoutLegacyScale(loadedPrint = {}) {
-  const { workingRatio, targetRatio, repairOnImport, ...rest } = loadedPrint;
+  // printMode / chordTolerance / minWallThickness: dead settings removed in
+  // task 1.10 — old files must not resurrect them into state (or re-save them).
+  const { workingRatio, targetRatio, repairOnImport, printMode, chordTolerance, minWallThickness, ...rest } = loadedPrint;
   return rest;
 }
 

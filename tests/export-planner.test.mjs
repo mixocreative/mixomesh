@@ -5,7 +5,6 @@ installEnv();
 console.error = () => {};
 
 const {
-  buildExportPlan,
   exportBaseName,
   perMeshBaseName,
   safeFilenameStem,
@@ -35,33 +34,6 @@ await test('perMeshBaseName sanitizes project and mesh names', () => {
 await test('safeFilenameStem falls back for empty or illegal names', () => {
   assert.equal(safeFilenameStem(''), 'Untitled');
   assert.equal(safeFilenameStem('a<b>c'), 'a_b_c');
-});
-
-await test('buildExportPlan resolves printer profile and export scale', () => {
-  const plan = buildExportPlan({
-    projectName: 'X',
-    printerId: 'mimaki-3duj-553',
-    sceneScale: { sceneRatio: 12 },
-    printScale: { printRatio: 35 },
-    selectedOnly: true,
-    individually: false,
-    meshes: [{ scenePartId: 'm1', displayName: 'Mesh', mesh: {} }],
-  });
-  assert.equal(plan.request.printer.displayName, 'Mimaki 3DUJ-553');
-  assert.equal(plan.request.selectedOnly, true);
-  assert.equal(plan.printExportScale, (12 / 35) * 1000);
-  assert.equal(plan.filenameSuffix, '_r12to35');
-  assert.equal(plan.meshes.length, 1);
-});
-
-await test('buildExportPlan carries printer only as build-area reference metadata', () => {
-  const mimaki = buildExportPlan({
-    printerId: 'mimaki-3duj-553',
-    sceneScale: { sceneRatio: 1 },
-    printScale: { printRatio: 1 },
-  }).request.printer;
-  assert.equal(mimaki.displayName, 'Mimaki 3DUJ-553');
-  assert.deepEqual(mimaki.bed, { x: 508, y: 508, z: 305 });
 });
 
 console.log('\n' + out.join('\n'));

@@ -7,6 +7,7 @@ import { logicalObjectCommandIds } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
+import { BU_TO_MM } from './PrintManager.js';
 
 const BABYLON = window.BABYLON;
 const PointerEventTypes = BABYLON.PointerEventTypes;
@@ -485,7 +486,7 @@ function _typedAsTranslateBU() {
   if (!_modal.typed) return null;
   const v = parseFloat(_modal.typed);
   if (!Number.isFinite(v)) return null;
-  return v * 0.001;  // mm → BU (1 BU = 1 m at workingRatio = 1000 mm of print)
+  return v / BU_TO_MM;  // mm → BU
 }
 function _typedAsRotateRad() {
   if (!_modal.typed) return null;
@@ -704,7 +705,7 @@ function _updateHint() {
   let valueStr;
   if (m.op === 'translate') {
     const v = _typedAsTranslateBU() ?? _currentTranslateAmount();
-    valueStr = `${(v * 1000).toFixed(2)} mm`;
+    valueStr = `${(v * BU_TO_MM).toFixed(2)} mm`;
   } else if (m.op === 'rotate') {
     const v = _typedAsRotateRad() ?? (_scene.pointerX - m.startX) * ROTATE_PX_SENS;
     valueStr = `${(v * 180 / Math.PI).toFixed(2)}°`;

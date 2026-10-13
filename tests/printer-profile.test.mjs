@@ -5,7 +5,7 @@ installEnv();
 console.error = () => {};
 
 const { setState } = await import('../src/core/StateManager.js');
-const { getPrinterProfile, bedDimensionsForPrinter, normalizePrinterProfile, listPrinterProfiles, printerProfileExists } = await import('../src/core/print/PrinterProfiles.js');
+const { getPrinterProfile, normalizePrinterProfile, listPrinterProfiles, printerProfileExists } = await import('../src/core/print/PrinterProfiles.js');
 const DS = (await import('../src/config/default-settings.json', { with: { type: 'json' } })).default;
 
 let passed = 0, failed = 0;
@@ -33,7 +33,7 @@ await test('#24: factory bedDimensions match the factory targetPrinterId (no con
   // default-settings.json and reset together on New — if an edit changes one
   // but not the other they silently desync (the bed preview would lie about
   // the selected printer). Pin the invariant at the config source of truth.
-  const expected = bedDimensionsForPrinter(DS.print.targetPrinterId);
+  const expected = getPrinterProfile(DS.print.targetPrinterId).bed;
   assert.deepEqual(DS.print.bedDimensions, expected,
     `default-settings bedDimensions ${JSON.stringify(DS.print.bedDimensions)} != bed of ${DS.print.targetPrinterId} ${JSON.stringify(expected)}`);
 });
@@ -63,7 +63,7 @@ await test('v1 row (displayName/vendor/bed/defaultMaterialId only) normalises wi
   assert.equal(bare.defaultMaterialId, 'pla');
 });
 
-await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, all unverified, Custom bed falls back', () => {
+await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, all unverified, Custom bed is unset', () => {
   assert.equal(getPrinterProfile('mimaki-3duj-553').export.recommended, 'obj-mtl');
   assert.equal(getPrinterProfile('bambu-x1c').export.threeMF.flavour, 'bambu');
   assert.equal(getPrinterProfile('prusa-xl').export.threeMF.flavour, 'prusa');
@@ -71,7 +71,7 @@ await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, all un
     assert.ok(printerProfileExists(id), id);
   }
   assert.ok(listPrinterProfiles().every(p => p.verified === 'unverified'));
-  assert.deepEqual(bedDimensionsForPrinter('custom'), { x: 508, y: 508, z: 305 });
+  assert.deepEqual(getPrinterProfile('custom').bed, { x: null, y: null, z: null });
 });
 
 

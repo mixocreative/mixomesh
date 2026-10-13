@@ -1366,14 +1366,14 @@ async function main() {
       // (4) dirty again, then resetAll → key cleared + state factory. A scene
       // is loaded. exportRatios is per-project CONTENT (not a setting) so it must
       // be PRESERVED through a settings reset; a real print setting
-      // (minWallThickness) resets to factory.
-      sm.setState(s => ({ ...s, print: { ...s.print, exportRatios: [9, 35], minWallThickness: 9 } }), { silent: true });
+      // (strictExport) resets to factory.
+      sm.setState(s => ({ ...s, print: { ...s.print, exportRatios: [9, 35], strictExport: true } }), { silent: true });
       ss.save();
       const sceneLoaded = Object.keys(sm.getState().scene.objects).length > 0;
       ss.resetAll();
       const keyCleared = localStorage.getItem(KEY) === null;
       const ratioPreserved = JSON.stringify(sm.getState().print.exportRatios) === JSON.stringify([9, 35]);
-      const wallReset = sm.getState().print.minWallThickness === DS.print.minWallThickness;
+      const wallReset = sm.getState().print.strictExport === DS.print.strictExport;
 
       return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioPreserved, wallReset, dsExposure: DS.render.exposure };
     })()`);

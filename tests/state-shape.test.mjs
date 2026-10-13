@@ -84,7 +84,7 @@ await test('round-trip: doc carrying targetPrinterId lands in state.print after 
   const next = { ...s.print, ...(data.print || {}) };
   assert.equal(next.targetPrinterId, 'bambu-x1c');
   assert.deepEqual(next.bedDimensions, { x: 256, y: 256, z: 256 });
-  // Other defaults preserved (chordTolerance / exportRatios etc.). Default
+  // Other defaults preserved (exportRatios etc.). Default
   // exportRatios is EMPTY = "as shown" (resolves to the active object's ratio).
   assert.deepEqual(next.exportRatios, []);
 });

@@ -42,11 +42,6 @@ export function formatScaleRatio(ratio) {
   return Math.abs(m - r) < 1e-6 ? `${r}:1` : `${(+m.toFixed(3)).toString()}:1`;
 }
 
-export function sceneScaleFromState(state) {
-  const sceneRatio = state?.scale?.sceneRatio ?? state?.print?.workingRatio;
-  return { sceneRatio: _positiveOrOne(sceneRatio) };
-}
-
 // Per-object scale (the per-object ratio redesign, 2026-06-16). An object's
 // `ratio` IS the old global workingRatio promoted to object scope; it falls
 // back to the asset's authoring `modelRatio`, then 1. Used as the scene-scale
@@ -100,19 +95,13 @@ export function objectScaleFromObject(obj) {
 
 // The user's explicit export target ratios (denominators). New default is an
 // EMPTY list, meaning "as shown" — PrintPipeline + ExportContext resolve that
-// to the active printable object's ratio. Migrated pre-redesign saves surface
-// their single `targetRatio` as one entry.
+// to the active printable object's ratio. (Pre-redesign saves are migrated by
+// ProjectLoader.resolveLoadedExportRatios.)
 export function exportRatiosFromState(state) {
   const list = state?.print?.exportRatios;
-  if (Array.isArray(list) && list.length) return list.map(_positiveOrOne);
-  const legacy = state?.print?.targetRatio;
-  return (Number.isFinite(legacy) && legacy > 0) ? [_positiveOrOne(legacy)] : [];
+  return (Array.isArray(list) && list.length) ? list.map(_positiveOrOne) : [];
 }
 
-export function printScaleFromState(state) {
-  const printRatio = state?.scale?.printRatio ?? state?.print?.targetRatio;
-  return { printRatio: _positiveOrOne(printRatio) };
-}
 
 export function authoredScaleFromAsset(asset) {
   return {

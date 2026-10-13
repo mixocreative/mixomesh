@@ -11,7 +11,7 @@ import {
   ShaderAssignCommand, ShaderDuplicateCommand, UVOverrideCommand,
   PrintPartCommand, SourceUnitCommand, RescaleObjectCommand,
 } from '../core/HistoryManager.js';
-import { SCALE_PRESETS } from '../core/PrintManager.js';
+import { SCALE_PRESETS, BU_TO_MM } from '../core/PrintManager.js';
 import { ShaderPanel, renderShaderPreview } from './ShaderPanel.js';
 import { Modal } from './Modal.js';
 import { icon, sectionIcon } from '../core/Icons.js';
@@ -186,7 +186,7 @@ function _renderTransformSection(mesh, multi, resolved = []) {
   if (!mesh) return '';
   const xform = _readTransform(mesh);
   // mm and deg view for the user.
-  const posMM = { x: xform.position.x * 1000, y: xform.position.y * 1000, z: xform.position.z * 1000 };
+  const posMM = { x: xform.position.x * BU_TO_MM, y: xform.position.y * BU_TO_MM, z: xform.position.z * BU_TO_MM };
   const rotDeg = _quatToEulerDeg(xform.rotation);
   const sc = xform.scaling;
   const dis = multi ? 'disabled' : '';
@@ -195,7 +195,7 @@ function _renderTransformSection(mesh, multi, resolved = []) {
   // model spec on the box — "1:35 hull should be ~245 mm long".
   const sizeBU = (multi || resolved.length > 1) ? _aggregateWorldSize(resolved.map(r => r.mesh))
                                                 : _hierarchyWorldSize(mesh);
-  const sizeMM = sizeBU ? { x: sizeBU.x * 1000, y: sizeBU.y * 1000, z: sizeBU.z * 1000 } : null;
+  const sizeMM = sizeBU ? { x: sizeBU.x * BU_TO_MM, y: sizeBU.y * BU_TO_MM, z: sizeBU.z * BU_TO_MM } : null;
 
   const scaleLocked = getState().ui?.scaleLocked !== false;
   const lockedCls = scaleLocked ? 'pp-locked' : '';
@@ -417,7 +417,7 @@ function _commitSizeInput(meshId, input) {
   const sizeBU = targetIds.length > 1
     ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
     : _hierarchyWorldSize(mesh);
-  const curMM = sizeBU ? sizeBU[axis] * 1000 : 0;
+  const curMM = sizeBU ? sizeBU[axis] * BU_TO_MM : 0;
   if (!Number.isFinite(newMM) || newMM <= 0 || curMM <= 1e-6) { _render(); return; }
   const factor = newMM / curMM;
   if (Math.abs(factor - 1) < 1e-9) return;
@@ -461,7 +461,7 @@ function _commitTransformInput(meshId, input) {
     prev[id] = _captureAbsolute(target);
     next[id] = _captureAbsolute(target);  // start from current; override one component
     if (which === 'position') {
-      next[id].position[axis] = value / 1000;   // mm → BU
+      next[id].position[axis] = value / BU_TO_MM;   // mm → BU
     } else if (which === 'rotation') {
       const e = _quatToEulerDeg(next[id].rotation);
       e[axis] = value;

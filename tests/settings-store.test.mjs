@@ -64,6 +64,15 @@ test('mergeSettings overlays persisted values onto a base, untouched fields surv
   assert.equal(base.scene.render.exposure, DS.render.exposure);     // base not mutated
 });
 
+test('stale localStorage with removed print keys (printMode/chordTolerance/minWallThickness) loads clean', () => {
+  const base = freshState();
+  const merged = mergeSettings(base, { print: { strictExport: true, printMode: 'fdm', chordTolerance: 0.05, minWallThickness: 1.2 } });
+  assert.equal(merged.print.strictExport, true);
+  for (const k of ['printMode', 'chordTolerance', 'minWallThickness']) {
+    assert.equal(k in merged.print, false, `${k} is ignored`);
+  }
+});
+
 test('mergeSettings rejects unknown / out-of-schema keys (corrupt blob safety)', () => {
   const base = freshState();
   const merged = mergeSettings(base, {
@@ -131,14 +140,14 @@ test('print reset restores printer SETTINGS but leaves exportRatios (per-project
   const s = freshState();
   s.scene.objects = { m: { id: 'm' } };       // scene loaded
   s.print.exportRatios = [4, 35];
-  s.print.minWallThickness = 9;
+  s.print.strictExport = true;
   const sec = applySectionToState(s, 'print');
   assert.deepEqual(sec.print.exportRatios, [4, 35], 'exportRatios is content — preserved through reset');
-  assert.equal(sec.print.minWallThickness, DS.print.minWallThickness, 'printer setting resets');
+  assert.equal(sec.print.strictExport, DS.print.strictExport, 'printer setting resets');
 
   const all = factoryState(s);
   assert.deepEqual(all.print.exportRatios, [4, 35], 'exportRatios preserved by factoryState');
-  assert.equal(all.print.minWallThickness, DS.print.minWallThickness);
+  assert.equal(all.print.strictExport, DS.print.strictExport);
 });
 
 test('exportRatios is never persisted to localStorage (per-project content)', () => {
@@ -198,17 +207,19 @@ test('print.repairOnImport never enters the .mixo document and a doc carrying it
     false,
     'the load merge strips repairOnImport from the incoming print slice',
   );
+  const stale = loaderTest._printWithoutLegacyScale({ printMode: 'fdm', chordTolerance: 0.05, minWallThickness: 1.2, strictExport: true });
+  assert.deepEqual(Object.keys(stale), ['strictExport'], 'dead 1.10 keys from old files are dropped on load');
 });
 
 test('factoryState resets every persisted slice but leaves content', () => {
   const s = freshState();
   s.scene.render.exposure = 9;
-  s.print.minWallThickness = 9;
+  s.print.strictExport = true;
   s.gizmo.snap.translate = 5;
   s.selection.pivotMode = 'world';
   const out = factoryState(s);
   assert.equal(out.scene.render.exposure, DS.render.exposure);
-  assert.equal(out.print.minWallThickness, DS.print.minWallThickness);
+  assert.equal(out.print.strictExport, DS.print.strictExport);
   assert.equal(out.gizmo.snap.translate, DS.gizmo.snap.translate);
   assert.equal(out.selection.pivotMode, DS.pivotMode);
 });

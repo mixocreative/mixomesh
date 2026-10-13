@@ -1145,7 +1145,6 @@ const initialState = {
     targetRatio:  1,            // denominator of the final print export ratio
     targetPrinterId: 'mimaki-3duj-553',
     bedDimensions: { x: 508, y: 508, z: 305 },
-    minWallThickness: 1.2, printMode: 'fdm', chordTolerance: 0.05,
     objBakeSolidTextures: false,
     strictExport: false,        // watertight-repair-and-cost task 4 — §9 Pre-Export Gate
     repairOnImport: false,      // watertight-repair-and-cost task 5 — opt-in, §9 Watertight repair.
@@ -2785,7 +2784,6 @@ Every field persisted. Restored exactly.
     "workingRatio": 12, "targetRatio": 35,         // any positive float (e.g. 0.5 for 2:1 upscale)
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": {"x":508,"y":508,"z":305},
-    "minWallThickness": 1.2, "printMode": "fdm", "chordTolerance": 0.05,
     "objBakeSolidTextures": false,
     "strictExport": false                          // watertight-repair-and-cost task 4
     /* `print.repairOnImport` is NOT in this document (2026-09-18, review I8):
@@ -3111,17 +3109,12 @@ ctx and reads no global state.
 - `PrinterProfiles.js`
   - imports `printers.json`.
   - exports `DEFAULT_PRINTER_ID = 'mimaki-3duj-553'`,
-    `DEFAULT_MIMAKI_3DUJ_553_BED`, `getPrinterProfile(id?)`,
-    `getDefaultPrinterProfile()`, `bedDimensionsForPrinter(id?)`,
-    `listPrinterProfiles()`, `getPrinterProfileMap()`, and
+    `getPrinterProfile(id?)`, `listPrinterProfiles()`, and
     `printerProfileExists(id)`.
   - Unknown ids fall back to the Mimaki default.
   - `normalizePrinterProfile(id, row)` fills v2 defaults for v1 rows; enum
     lists (`PRINTER_FORMATS` etc.) are exported for hygiene.
 - `ExportPlanner.js`
-  - `buildExportPlan(input)` resolves profile, normalizes
-    `selectedOnly/individually`, computes `printExportScale`, and carries the
-    mesh list through unchanged.
   - `scaleFilenameSuffix(sceneScale, printScale)` returns `_r{scene}to{print}`;
     non-integer tokens replace `.` with `p`.
   - `exportBaseName(projectName, sceneScale, printScale)`,
@@ -3458,9 +3451,8 @@ Consumers:
   `exportOBJ`, `exportThreeMF`, and `exportSTL`. 3MF sub-flavor is chosen by
   export content: textured meshes with UVs use Materials Extension; solid-only
   exports use colorgroup. Build-area printer selection does not switch flavor.
-- `src/core/print/ExportPlanner.js` reads printer id + scene/print scale to
-  produce filename suffixes, export scale, build-area profile metadata, and
-  the request shape tested by `tests/export-planner.test.mjs`.
+- `src/core/print/ExportPlanner.js` is pure filename math (suffixes, safe
+  stems), tested by `tests/export-planner.test.mjs`.
 
 Default seeded entry: `mimaki-3duj-553`. State default
 `state.print.targetPrinterId === 'mimaki-3duj-553'`. Each printer's `bed`
@@ -4871,7 +4863,7 @@ export async function resolve(specifier, context, nextResolve) {
 | File | Count | Covers |
 |---|---:|---|
 | `tests/export.test.mjs` | 52 | PrintManager: collection gating; per-format prep; non-destructive clone; post-fix validation; selectedOnly / individually (OBJ + STL + 3MF colorgroup + 3MF materials-ext); logical-object grouping for internal material splits; OBJ fallback material; generated MTL matching OBJ `usemtl` ids; PBR/albedo MTL support; STL CSG present/absent + non-watertight rejection; 3MF OPC structure + colorgroup + origin-centering + winding-flip + explicit-identity build item; per-object 3MF wraps each inner OPC zip in an outer `.zip`; filename pattern (`${project}${suffix}.${ext}` combined, `${project}_${mesh}${suffix}.${ext}` individually) covers OBJ + STL + 3MF colorgroup + 3MF materials-ext including OBJ `mtllib` reference; OBJ solid-colour PNG synthesis (default off, explicit on/off, dedup by RRGGBBAA, opacity-byte flow, textured-shader skip, individually-mode per-mesh map_Kd injection); progress monotonic |
-| `tests/export-planner.test.mjs` | 6 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems, explicit printer profile resolution, build-area profile metadata, export scale |
+| `tests/export-planner.test.mjs` | 4 | ExportPlanner: `_r{scene}to{print}` filename contract, safe filename stems |
 | `tests/progress-overlay.test.mjs` | 2 | ProgressOverlay blocks document-level keyboard events while visible and releases them after hide |
 | `tests/validator.test.mjs` | 4 | MeshValidator: position-welded manifold (no false positive on unwelded imports); non-manifold + inverted-normals = `warning` (not blocking) |
 | `tests/persistence.test.mjs` | 18 | PersistenceManager `__test`: base64 byte fidelity (0x8000 boundary + full 0–255); sha256; `_resolveAssetBlob` 5-tier priority (incl. `fileHandleKey` granted/denied + dir-beats-handle); `_scanDirForHash` recursion + ext filter; `_fileHandleAtPath`; `_arrToMap`; `_migrate` passthrough |

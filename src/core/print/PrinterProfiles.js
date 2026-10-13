@@ -26,7 +26,6 @@ export const PRINTER_OBJ_AXES = ['y-up', 'z-up'];
 export const PRINTER_VERIFIED = ['unverified', 'verified'];
 
 export const DEFAULT_PRINTER_ID = 'mimaki-3duj-553';
-export const DEFAULT_MIMAKI_3DUJ_553_BED = { x: 508, y: 508, z: 305 };
 
 /**
  * Fill every v2 field a v1 row (displayName/vendor/bed/defaultMaterialId) lacks.
@@ -83,25 +82,8 @@ export function getPrinterProfile(id = null) {
   return _normalized[resolvedId] || _normalized[DEFAULT_PRINTER_ID];
 }
 
-export function getDefaultPrinterProfile() {
-  return getPrinterProfile(DEFAULT_PRINTER_ID);
-}
-
-export function bedDimensionsForPrinter(id = null) {
-  const bed = getPrinterProfile(id).bed || {};
-  return {
-    x: bed.x ?? DEFAULT_MIMAKI_3DUJ_553_BED.x,
-    y: bed.y ?? DEFAULT_MIMAKI_3DUJ_553_BED.y,
-    z: bed.z ?? DEFAULT_MIMAKI_3DUJ_553_BED.z,
-  };
-}
-
 export function listPrinterProfiles() {
   return Object.values(_normalized).map(profile => ({ ...profile }));
-}
-
-export function getPrinterProfileMap() {
-  return _normalized;
 }
 
 export function printerProfileExists(id) {

@@ -31,11 +31,10 @@ await test('objectScaleFromObject: wraps objectRatio as sceneRatio', () => {
   assert.deepEqual(objectScaleFromObject({ ratio: 12 }), { sceneRatio: 12 });
 });
 
-await test('exportRatiosFromState: list wins; else legacy [targetRatio]; else [] (as-shown)', () => {
+await test('exportRatiosFromState: list wins; else [] (as-shown; legacy targetRatio is migrated by ProjectLoader)', () => {
   assert.deepEqual(exportRatiosFromState({ print: { exportRatios: [72, 144] } }), [72, 144]);
-  assert.deepEqual(exportRatiosFromState({ print: { targetRatio: 35 } }), [35]);
   assert.deepEqual(exportRatiosFromState({ print: {} }), []);
-  assert.deepEqual(exportRatiosFromState({ print: { exportRatios: [] , targetRatio: 8 } }), [8]);
+  assert.deepEqual(exportRatiosFromState({ print: { exportRatios: [], targetRatio: 8 } }), []);
 });
 
 await test('import seed cancels: ratio == modelRatio ⇒ unit-only factor', () => {

@@ -5,8 +5,6 @@ import {
   computeSceneScaleRebakeFactor,
   formatScaleRatio,
   parseScaleRatioText,
-  sceneScaleFromState,
-  printScaleFromState,
   authoredScaleFromAsset,
 } from '../src/core/scale/ScaleMath.js';
 
@@ -45,12 +43,6 @@ await test('computePrintExportScale: scene BU to exported millimeters', () => {
 
 await test('computeSceneScaleRebakeFactor: previous over next', () => {
   assert.equal(computeSceneScaleRebakeFactor(12, 24), 0.5);
-});
-
-await test('state compatibility: old persisted field names map to new runtime names', () => {
-  const state = { print: { workingRatio: 12, targetRatio: 35 } };
-  assert.deepEqual(sceneScaleFromState(state), { sceneRatio: 12 });
-  assert.deepEqual(printScaleFromState(state), { printRatio: 35 });
 });
 
 await test('asset compatibility: old modelRatio/sourceUnit map to authoredScale', () => {

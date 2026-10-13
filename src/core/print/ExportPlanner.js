@@ -1,24 +1,3 @@
-import { computePrintExportScale } from '../scale/ScaleMath.js';
-import { getPrinterProfile } from './PrinterProfiles.js';
-
-export function buildExportPlan(input) {
-  const printer = getPrinterProfile(input.printerId);
-  const sceneScale = input.sceneScale ?? { sceneRatio: 1 };
-  const printScale = input.printScale ?? { printRatio: 1 };
-  return {
-    request: {
-      selectedOnly: input.selectedOnly === true,
-      individually: input.individually === true,
-      sceneScale,
-      printScale,
-      printer,
-    },
-    printExportScale: computePrintExportScale(sceneScale, printScale),
-    filenameSuffix: scaleFilenameSuffix(sceneScale, printScale),
-    meshes: Array.isArray(input.meshes) ? input.meshes : [],
-  };
-}
-
 export function scaleFilenameSuffix(sceneScale, printScale) {
   return `_r${_ratioToken(sceneScale?.sceneRatio)}to${_ratioToken(printScale?.printRatio)}`;
 }
