@@ -1296,6 +1296,20 @@ parents and world transforms and disposes the node. After Ctrl+G the new
 group is the selection. Group transforms persist as world `{p,q,s}` and
 restore parent-first via `setParent` (world-preserving) — exact round trip.
 
+**Ungroup / Delete / Duplicate on groups (task 2.4).** `UngroupCommand`
+takes one group id or an array (`UngroupCommand.targetsFor(selection)` = every
+selected group plus the parent group of each selected object); each group is
+dissolved in turn, children move to its parent preserving world transforms and
+the freed children become the selection (undo re-selects the groups).
+`DeleteCommand` with a group selected deletes the group, nested groups and all
+objects beneath as ONE step (objects/groups already covered by a selected
+group are not processed twice; mixed selections are the union); undo restores
+objects, group state, parents and world transforms. `DuplicateCommand` with a
+group selected clones the whole subtree as a new group tree (names uniquified
+like 2.3, e.g. "Group.001"), keeps the original parent, applies the standard
+10 mm duplicate nudge, remaps `logicalObjectId` to the new lead ids, and
+selects the new root group(s); undo removes the copy, redo restores it.
+
 ### Rules
 - Stack limit 200. Drop oldest when exceeded.
 - New push clears redo stack.

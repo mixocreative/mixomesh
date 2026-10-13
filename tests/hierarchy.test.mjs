@@ -367,6 +367,196 @@ await test('group rotation+scale+position and child world positions round-trip s
   assert.deepEqual(s().groups[gid].childIds, groupsState[gid].childIds);
 });
 
+
+// ── Task 2.4: Ungroup / Delete / Duplicate accept groups ─────────────────
+const { DeleteCommand, DuplicateCommand } = History;
+const sel = () => [...StateManager.getState().selection.selectedIds];
+let cloneN = 0;
+AssetLoader.cloneMeshAsNewObject = (srcId, off) => {
+  const src = meshes.get(srcId);
+  const obj = s().objects[srcId];
+  if (!src || !obj) return null;
+  const id = `${srcId}_c${++cloneN}`;
+  const c = src.clone(id, src.parent ?? null);
+  c.metadata = { meshId: id };
+  if (off) c.position.x += off.x ?? 0;
+  meshes.set(id, c);
+  StateManager.setState(st => {
+    const groups = { ...st.scene.groups };
+    if (obj.parentId && groups[obj.parentId]) {
+      groups[obj.parentId] = { ...groups[obj.parentId], childIds: [...groups[obj.parentId].childIds, id] };
+    }
+    return { ...st, scene: { ...st.scene, groups, objects: { ...st.scene.objects, [id]: { ...obj, id, name: `${obj.name}.dup` } } } };
+  }, { silent: true });
+  return id;
+};
+AssetLoader.restoreCloneToScene = (id, obj, mesh) => {
+  meshes.set(id, mesh);
+  StateManager.setState(st => ({ ...st, scene: { ...st.scene, objects: { ...st.scene.objects, [id]: obj } } }), { silent: true });
+};
+
+/** outer(5,0,0) > [ a(1,0,0) , inner(2,0,0) > [ b(3,0,0) ] ] ; loose c at (9,0,0) */
+function nestedFixture() {
+  const outer = makeGroup('outer', [5, 0, 0]);
+  const inner = makeGroup('inner', [2, 0, 0]); inner.setParent(outer);
+  const a = makeMesh('a', [1, 0, 0]); a.setParent(outer);
+  const b = makeMesh('b', [3, 0, 0]); b.setParent(inner);
+  const c = makeMesh('c', [9, 0, 0]);
+  setState({
+    objects: {
+      a: sceneObject('a', { parentId: 'outer' }),
+      b: sceneObject('b', { parentId: 'inner' }),
+      c: sceneObject('c'),
+    },
+    groups: {
+      outer: groupState('outer', ['a']),
+      inner: groupState('inner', ['b'], { parentId: 'outer' }),
+    },
+  });
+  return { outer, inner, a, b, c };
+}
+
+await test('ungroup works on a SELECTED group: world preserved, freed children selected, undo/redo exact', () => {
+  const { a, b } = nestedFixture();
+  const wa = worldPos(a), wb = worldPos(b);
+  assert.deepEqual(UngroupCommand.targetsFor(['inner']), ['inner']);
+  const cmd = new UngroupCommand(['inner']);
+  cmd.execute();
+  assert.equal(s().groups.inner, undefined);
+  assert.equal(s().objects.b.parentId, 'outer');
+  assert.deepEqual(sel(), ['b']);
+  closeVec(worldPos(b), wb, 'b after ungroup');
+  cmd.undo();
+  assert.equal(s().objects.b.parentId, 'inner');
+  assert.equal(s().groups.inner.parentId, 'outer');
+  assert.deepEqual(sel(), ['inner']);
+  closeVec(worldPos(b), wb, 'b after undo'); closeVec(worldPos(a), wa, 'a after undo');
+  cmd.execute();
+  assert.equal(s().objects.b.parentId, 'outer');
+  closeVec(worldPos(b), wb, 'b after redo');
+});
+
+await test('ungroup of nested selected groups (outer + inner) frees everything to root; object selection maps to its parent', () => {
+  const { a, b } = nestedFixture();
+  const wa = worldPos(a), wb = worldPos(b);
+  const targets = UngroupCommand.targetsFor(['outer', 'inner', 'a']);
+  assert.deepEqual([...targets].sort(), ['inner', 'outer']);
+  const cmd = new UngroupCommand(targets);
+  cmd.execute();
+  assert.deepEqual(s().groups, {});
+  assert.equal(s().objects.a.parentId, null);
+  assert.equal(s().objects.b.parentId, null);
+  assert.deepEqual([...sel()].sort(), ['a', 'b']);
+  closeVec(worldPos(a), wa, 'a'); closeVec(worldPos(b), wb, 'b');
+  cmd.undo();
+  assert.equal(s().objects.b.parentId, 'inner');
+  assert.equal(s().groups.inner.parentId, 'outer');
+  assert.equal(s().objects.a.parentId, 'outer');
+  closeVec(worldPos(a), wa, 'a undo'); closeVec(worldPos(b), wb, 'b undo');
+  cmd.execute();
+  assert.deepEqual(s().groups, {});
+  closeVec(worldPos(b), wb, 'b redo');
+});
+
+await test('delete a selected group removes its whole subtree in one step; undo/redo restore everything', () => {
+  const { a, b, c } = nestedFixture();
+  const wa = worldPos(a), wb = worldPos(b), wc = worldPos(c);
+  // 'a' is inside the selected group: must not be processed twice.
+  const cmd = new DeleteCommand(['outer', 'a']);
+  cmd.execute();
+  assert.deepEqual(Object.keys(s().objects), ['c']);
+  assert.deepEqual(s().groups, {});
+  assert.equal(a.isEnabled(false), false);
+  assert.equal(findNode('outer').isEnabled(false), false);
+  cmd.undo();
+  assert.deepEqual(Object.keys(s().objects).sort(), ['a', 'b', 'c']);
+  assert.equal(s().objects.a.parentId, 'outer');
+  assert.equal(s().objects.b.parentId, 'inner');
+  assert.equal(s().groups.inner.parentId, 'outer');
+  assert.deepEqual(s().groups.outer.childIds, ['a']);
+  assert.equal(a.parent, findNode('outer'));
+  assert.equal(b.parent, findNode('inner'));
+  closeVec(worldPos(a), wa, 'a'); closeVec(worldPos(b), wb, 'b'); closeVec(worldPos(c), wc, 'c');
+  cmd.execute();
+  assert.deepEqual(Object.keys(s().objects), ['c']);
+  cmd.undo();
+  assert.equal(s().objects.b.parentId, 'inner');
+  closeVec(worldPos(b), wb, 'b after 2nd undo');
+});
+
+await test('delete mixed selection (group + loose object) is the union', () => {
+  nestedFixture();
+  const cmd = new DeleteCommand(['inner', 'c']);
+  cmd.execute();
+  assert.deepEqual(Object.keys(s().objects), ['a']);
+  assert.deepEqual(Object.keys(s().groups), ['outer']);
+  cmd.undo();
+  assert.deepEqual(Object.keys(s().objects).sort(), ['a', 'b', 'c']);
+  assert.deepEqual(Object.keys(s().groups).sort(), ['inner', 'outer']);
+});
+
+await test('duplicate a selected group clones the subtree as a uniquely named group; selection, undo, redo', () => {
+  const { b } = nestedFixture();
+  // multi-part logical object inside the group: b2 is a part of b.
+  const b2 = makeMesh('b2', [3, 1, 0]); b2.setParent(findNode('inner'));
+  StateManager.setState(st => ({
+    ...st,
+    scene: {
+      ...st.scene,
+      objects: {
+        ...st.scene.objects,
+        b: { ...st.scene.objects.b, logicalObjectId: 'b' },
+        b2: sceneObject('b2', { parentId: 'inner', logicalObjectId: 'b', isInternalPart: true }),
+      },
+      groups: { ...st.scene.groups, inner: { ...st.scene.groups.inner, childIds: ['b', 'b2'] } },
+    },
+  }), { silent: true });
+  const wb = worldPos(b);
+  const cmd = new DuplicateCommand(['outer', 'a']);   // 'a' lives inside the selected group
+  cmd.execute();
+  const names = Object.values(s().groups).map(g => g.name).sort();
+  assert.deepEqual(names, ['inner', 'inner.001', 'outer', 'outer.001']);
+  const newOuter = Object.values(s().groups).find(g => g.name === 'outer.001');
+  const newInner = Object.values(s().groups).find(g => g.name === 'inner.001');
+  assert.equal(newInner.parentId, newOuter.id);
+  assert.equal(newOuter.parentId, null);
+  assert.equal(Object.keys(s().objects).length, 7);   // a b b2 c + clones of a b b2
+  assert.deepEqual(sel(), [newOuter.id]);
+  const cb = Object.values(s().objects).find(o => o.name === 'b.dup');
+  const cb2 = Object.values(s().objects).find(o => o.name === 'b2.dup');
+  assert.equal(cb.parentId, newInner.id);
+  assert.equal(cb2.logicalObjectId, cb.id, 'logical part link remapped to new lead');
+  assert.deepEqual(s().groups.outer.childIds, ['a'], 'original group untouched');
+  assert.deepEqual([...newInner.childIds].sort(), [cb.id, cb2.id].sort());
+  closeVec(worldPos(b), wb, 'original b unmoved');
+  // New copy sits at the original position plus the standard duplicate nudge (+10 mm on X).
+  const cbWorld = worldPos(meshes.get(cb.id));
+  closeVec(cbWorld, [wb[0] + 0.01, wb[1], wb[2]], 'clone b world');
+  cmd.undo();
+  assert.deepEqual(Object.keys(s().groups).sort(), ['inner', 'outer']);
+  assert.equal(Object.keys(s().objects).length, 4);
+  cmd.execute();
+  assert.equal(Object.keys(s().groups).length, 4);
+  assert.equal(Object.keys(s().objects).length, 7);
+  assert.equal(meshes.get(cb.id).parent, findNode(newInner.id));
+  closeVec(worldPos(meshes.get(cb.id)), cbWorld, 'clone b after redo');
+  assert.deepEqual(sel(), [newOuter.id]);
+});
+
+await test('duplicate mixed selection (group + loose object) = union; loose clone selected too', () => {
+  nestedFixture();
+  const cmd = new DuplicateCommand(['inner', 'c']);
+  cmd.execute();
+  assert.equal(Object.keys(s().groups).length, 3);
+  assert.equal(Object.keys(s().objects).length, 5);
+  assert.equal(sel().length, 2);
+  const ng = Object.values(s().groups).find(g => g.name === 'inner.001');
+  assert.equal(ng.parentId, 'outer', 'copy sits beside the original (same parent)');
+  cmd.undo();
+  assert.equal(Object.keys(s().groups).length, 2);
+  assert.equal(Object.keys(s().objects).length, 3);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

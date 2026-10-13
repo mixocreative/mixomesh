@@ -6,17 +6,62 @@ import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
+import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { canonicalObjectId, logicalObjectCommandIds } from '../LogicalObjects.js';
 import { planHierarchyRemoval } from '../hierarchy/HierarchyIntegrity.js';
+import { uniqueGroupName } from './ParentCommands.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteTransform, findGroupNode,
-  findNodeForId, captureWorld, patchSceneObject, removeSceneObject,
+  findNodeForId, captureWorld, captureWorldNode, setParentPreserveWorld,
+  applyAbsoluteNodeTransform, patchSceneObject, removeSceneObject,
   restoreSceneObject,
 } from './support.js';
 
 function _expandedCommandIds(ids) {
   return logicalObjectCommandIds(ids, getState().scene.objects);
+}
+
+function _ancestorIds(id, state) {
+  const { objects, groups } = state.scene;
+  const out = [];
+  const seen = new Set([id]);
+  let cur = objects[id]?.parentId ?? groups[id]?.parentId ?? null;
+  while (cur && !seen.has(cur)) { out.push(cur); seen.add(cur); cur = groups[cur]?.parentId ?? null; }
+  return out;
+}
+
+/** Group + every nested group (parent-first) and every object beneath it. */
+export function collectGroupSubtree(groupId, state) {
+  const { objects, groups } = state.scene;
+  const groupIds = [];
+  const objectIds = new Set();
+  const queue = [groupId];
+  while (queue.length) {
+    const gid = queue.shift();
+    if (!groups[gid] || groupIds.includes(gid)) continue;
+    groupIds.push(gid);
+    for (const id of groups[gid].childIds ?? []) if (objects[id]) objectIds.add(id);
+    for (const o of Object.values(objects)) if (o.parentId === gid) objectIds.add(o.id);
+    for (const g of Object.values(groups)) if (g.parentId === gid) queue.push(g.id);
+  }
+  return { groupIds, objectIds: [...objectIds] };
+}
+
+/**
+ * Split a selection into top-level groups (selected, not inside another
+ * selected group) and loose objects (not inside any selected group) so nothing
+ * is processed twice. Mixed selections are the union of both.
+ */
+function _resolveSelection(ids, state) {
+  const { objects, groups } = state.scene;
+  const sel = new Set(ids);
+  const covered = id => _ancestorIds(id, state).some(a => sel.has(a));
+  const isGroup = id => !objects[id] && !!groups[id];
+  return {
+    topGroupIds: [...sel].filter(id => isGroup(id) && !covered(id)),
+    looseIds: [...sel].filter(id => objects[id] && !covered(id)),
+  };
 }
 
 /** Set isVisible on a set of meshes. `prev` is meshId → bool; `next` is bool. */
@@ -166,16 +211,26 @@ export class DeleteCommand {
   constructor(meshIds) {
     const requestedCount = meshIds.length;
     this._snapshots = [];
-    const objects = getState().scene.objects;
-    for (const id of _expandedCommandIds(meshIds)) {
+    const state = getState();
+    const objects = state.scene.objects;
+    const { topGroupIds, looseIds } = _resolveSelection(meshIds, state);
+    const subtreeGroupIds = new Set();
+    const objectIds = new Set(_expandedCommandIds(looseIds));
+    for (const gid of topGroupIds) {
+      const sub = collectGroupSubtree(gid, state);
+      sub.groupIds.forEach(id => subtreeGroupIds.add(id));
+      sub.objectIds.forEach(id => objectIds.add(id));
+    }
+    this._subtreeGroupIds = [...subtreeGroupIds];
+    for (const id of objectIds) {
       const obj  = objects[id];
       const mesh = AssetLoader.getBabylonMesh(id);
       if (!obj || !mesh) continue;
       this._snapshots.push({ id, obj: { ...obj }, mesh, prevParent: null });
     }
-    this._groupsBefore = structuredClone(getState().scene.groups);
+    this._groupsBefore = structuredClone(state.scene.groups);
     this._groupsAfter = null;
-    this._prunedGroupIds = [];
+    this._prunedGroupIds = [];   // groups whose nodes are disabled: subtree + emptied imports
     this.label = requestedCount === 1 ? 'Delete' : `Delete (${requestedCount})`;
   }
   execute() {
@@ -190,13 +245,15 @@ export class DeleteCommand {
         removeSceneObject(s.id);
       }
       if (!this._groupsAfter) {
+        const doomed = new Set(this._subtreeGroupIds);
+        const remaining = Object.fromEntries(Object.entries(this._groupsBefore).filter(([id]) => !doomed.has(id)));
         const plan = planHierarchyRemoval(
-          this._groupsBefore,
+          remaining,
           new Set(this._snapshots.map(snapshot => snapshot.id)),
         );
         this._groupsAfter = structuredClone(plan.groups);
         for (const groupId of plan.pruneIds) delete this._groupsAfter[groupId];
-        this._prunedGroupIds = plan.pruneIds;
+        this._prunedGroupIds = [...this._subtreeGroupIds, ...plan.pruneIds];
       }
       _setGroups(this._groupsAfter);
       for (const groupId of this._prunedGroupIds) {
@@ -241,46 +298,133 @@ const DUP_OFFSET_BU = 0.01;   // 10 mm of print, irrespective of workingRatio
 export class DuplicateCommand {
   constructor(sourceIds) {
     const requestedCount = sourceIds.length;
-    this._sourceIds = _expandedCommandIds(sourceIds);
+    const state = getState();
+    const { topGroupIds, looseIds } = _resolveSelection(sourceIds, state);
+    // Each selected top-level group duplicates its WHOLE subtree as a new group.
+    this._groupPlans = topGroupIds.map(rootId => ({ rootId, ...collectGroupSubtree(rootId, state) }));
+    const all = new Set(_expandedCommandIds(looseIds));
+    for (const plan of this._groupPlans) plan.objectIds.forEach(id => all.add(id));
+    this._sourceIds = [...all];
     this._instances = [];       // [{ id, mesh, obj }]
+    this._newGroupIds = [];     // every created group id
+    this._newRootIds = [];      // one per duplicated top-level group
+    this._groupObjectIds = new Set();   // clones that live inside a new group
+    this._groupsBefore = null;
+    this._groupsAfter = null;
     this._executed  = false;
     this.label = requestedCount === 1 ? 'Duplicate' : `Duplicate (${requestedCount})`;
+  }
+  _selectNew() {
+    const ids = [
+      ...this._newRootIds,
+      ...this._instances.filter(i => !this._groupObjectIds.has(i.id)).map(i => i.id),
+    ];
+    if (ids.length) Selection.set(ids, ids[ids.length - 1]);
   }
   execute() {
     if (this._executed) {
       // Redo path — clones still exist in memory, just disabled.
       withDetachedPivot(() => {
+        _setGroups(this._groupsAfter);
+        for (const gid of this._newGroupIds) findGroupNode(gid)?.setEnabled(true);
         for (const inst of this._instances) {
           inst.mesh.setEnabled(true);
+          inst.mesh.setParent(inst.obj.parentId ? findGroupNode(inst.obj.parentId) : null);
           AssetLoader.restoreCloneToScene(inst.id, inst.obj, inst.mesh);
           dispatch(EVENTS.OBJECT_RESTORED, { id: inst.id });
         }
-        const ids = this._instances.map(i => i.id);
-        Selection.set(ids, ids[ids.length - 1] ?? null);
+        for (const gid of this._newGroupIds) dispatch(EVENTS.GROUP_CREATED, { groupId: gid });
+        this._selectNew();
       });
       markDirty();
       return;
     }
 
     withDetachedPivot(() => {
-      const newIds = [];
-      const sourceObjects = getState().scene.objects;
+      const state0 = getState();
+      const sourceObjects = state0.scene.objects;
+      this._groupsBefore = structuredClone(state0.scene.groups);
+      const inPlan = new Set(this._groupPlans.flatMap(p => p.objectIds));
       const cloneIdBySourceId = new Map();
+      const sourceWorlds = new Map();
       for (const sourceId of this._sourceIds) {
-        const newId = AssetLoader.cloneMeshAsNewObject(sourceId, { x: DUP_OFFSET_BU, y: 0, z: 0 });
+        const src = AssetLoader.getBabylonMesh(sourceId);
+        if (src) sourceWorlds.set(sourceId, captureWorldNode(src));
+      }
+      const groupWorlds = new Map();
+      for (const plan of this._groupPlans) {
+        for (const gid of plan.groupIds) {
+          const n = findGroupNode(gid);
+          if (n) groupWorlds.set(gid, captureWorldNode(n));
+        }
+      }
+      // Same convention as object duplicate: a small world-X nudge.
+      const shifted = w => ({ ...w, position: { ...w.position, x: w.position.x + DUP_OFFSET_BU } });
+
+      for (const sourceId of this._sourceIds) {
+        // Objects inside a duplicated group are placed by their group (below).
+        const offset = inPlan.has(sourceId) ? undefined : { x: DUP_OFFSET_BU, y: 0, z: 0 };
+        const newId = AssetLoader.cloneMeshAsNewObject(sourceId, offset);
         if (!newId) continue;
         cloneIdBySourceId.set(sourceId, newId);
         const mesh = AssetLoader.getBabylonMesh(newId);
         const obj  = getState().scene.objects[newId];
         if (!mesh || !obj) continue;
         this._instances.push({ id: newId, mesh, obj });
-        newIds.push(newId);
       }
       _remapDuplicateLogicalObjects(this._sourceIds, cloneIdBySourceId, sourceObjects);
+
+      // Build the duplicated group subtrees (parent-first) and move the clones in.
+      const scene = SceneManager.getScene();
+      const draft = structuredClone(getState().scene.groups);
+      const reparent = new Map();   // cloneId -> new group id
+      const groupIdMap = new Map();
+      for (const plan of this._groupPlans) {
+        for (const oldGid of plan.groupIds) {
+          const old = state0.scene.groups[oldGid];
+          const newGid = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+          groupIdMap.set(oldGid, newGid);
+          const name = uniqueGroupName(old.name, { scene: { groups: draft } });
+          const parentId = oldGid === plan.rootId ? (old.parentId ?? null) : (groupIdMap.get(old.parentId) ?? null);
+          draft[newGid] = { id: newGid, name, parentId, childIds: [], origin: 'user' };
+          const node = new window.BABYLON.TransformNode(name, scene);
+          node.metadata = { ...(node.metadata ?? {}), groupId: newGid };
+          const w = groupWorlds.get(oldGid);
+          if (w) applyAbsoluteNodeTransform(node, shifted(w));
+          setParentPreserveWorld(node, parentId ? findGroupNode(parentId) : null);
+          if (w) applyAbsoluteNodeTransform(node, shifted(w));
+          this._newGroupIds.push(newGid);
+          if (oldGid === plan.rootId) this._newRootIds.push(newGid);
+        }
+        for (const oldId of plan.objectIds) {
+          const cloneId = cloneIdBySourceId.get(oldId);
+          const mesh = cloneId ? AssetLoader.getBabylonMesh(cloneId) : null;
+          const newParent = groupIdMap.get(sourceObjects[oldId].parentId);
+          if (!mesh || !newParent) continue;
+          setParentPreserveWorld(mesh, findGroupNode(newParent));
+          const w = sourceWorlds.get(oldId);
+          if (w) applyAbsoluteNodeTransform(mesh, shifted(w));
+          // cloneMeshAsNewObject registered the clone under the SOURCE parent — move it.
+          const oldParent = sourceObjects[oldId].parentId;
+          if (draft[oldParent]) draft[oldParent].childIds = draft[oldParent].childIds.filter(c => c !== cloneId);
+          draft[newParent].childIds.push(cloneId);
+          reparent.set(cloneId, newParent);
+          this._groupObjectIds.add(cloneId);
+        }
+      }
+      setState(state => {
+        const objects = { ...state.scene.objects };
+        for (const [cloneId, parentId] of reparent) {
+          if (objects[cloneId]) objects[cloneId] = { ...objects[cloneId], parentId };
+        }
+        return { ...state, scene: { ...state.scene, objects, groups: draft } };
+      }, SILENT);
       for (const inst of this._instances) {
         inst.obj = getState().scene.objects[inst.id] ?? inst.obj;
       }
-      Selection.set(newIds, newIds[newIds.length - 1] ?? null);
+      this._groupsAfter = structuredClone(getState().scene.groups);
+      for (const gid of this._newGroupIds) dispatch(EVENTS.GROUP_CREATED, { groupId: gid });
+      this._selectNew();
     });
     this._executed = true;
     markDirty();
@@ -292,6 +436,11 @@ export class DuplicateCommand {
         inst.mesh.setEnabled(false);
         removeSceneObject(inst.id);
       }
+      for (const gid of this._newGroupIds) {
+        findGroupNode(gid)?.setEnabled(false);
+        dispatch(EVENTS.GROUP_DISSOLVED, { groupId: gid });
+      }
+      if (this._groupsBefore) _setGroups(this._groupsBefore);
     });
   }
 }

@@ -768,16 +768,10 @@ function _groupSelected() {
 }
 
 function _ungroupSelected() {
-  // Pick the group(s) that contain selected meshes, ungroup each.
-  const ids = Selection.getSelectedIds();
-  const objects = getState().scene.objects;
-  const groupIds = new Set();
-  for (const id of ids) {
-    const o = objects[id];
-    if (o?.parentId) groupIds.add(o.parentId);
-  }
-  if (!groupIds.size) return;
-  for (const gid of groupIds) push(new UngroupCommand(gid));
+  // Selected groups dissolve; selected objects ungroup their parent group.
+  const groupIds = UngroupCommand.targetsFor(Selection.getSelectedIds());
+  if (!groupIds.length) return;
+  push(new UngroupCommand(groupIds));
 }
 
 function _toggleOrtho() {

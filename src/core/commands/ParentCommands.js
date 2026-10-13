@@ -6,6 +6,7 @@ import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
+import { Selection } from '../Selection.js';
 import { logicalObjectCommandIds, canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { directSubgroupIds, validateParentChange } from '../hierarchy/HierarchyIntegrity.js';
 import {
@@ -182,7 +183,7 @@ function _lowestCommonAncestor(memberIds, state) {
 }
 
 /** Unique among all groups: "Group", "Group.001", ... (Split's `.001` convention). */
-function _uniqueGroupName(baseName, state) {
+export function uniqueGroupName(baseName, state) {
   const taken = new Set(Object.values(state.scene.groups).map(g => g?.name));
   if (!taken.has(baseName)) return baseName;
   const m = baseName.match(/^(.*)\.(\d{3,})$/);
@@ -256,7 +257,7 @@ export class CreateGroupCommand {
     this._ids = this._ids.filter(id => !covered(id));
     const members = [...this._ids, ...this._groupMemberIds];
     this._parentId = _lowestCommonAncestor(members, state);
-    this._groupName = _uniqueGroupName(this._baseName, state);
+    this._groupName = uniqueGroupName(this._baseName, state);
     this._groupsBefore = structuredClone(state.scene.groups);
     const tmpState = {
       ...state,
@@ -361,14 +362,14 @@ export class CreateGroupCommand {
 export class GroupCommand extends CreateGroupCommand {}
 
 /**
- * Dissolve an existing group. Direct object children and direct subgroups move
- * to the dissolved group's parent while preserving world transforms.
+ * Dissolve ONE group. Direct object children and direct subgroups move to the
+ * dissolved group's parent while preserving world transforms. Building block
+ * of UngroupCommand (which accepts several groups).
  */
-export class UngroupCommand {
+class _DissolveGroup {
   constructor(groupId) {
     this._groupId = groupId;
     this._snapshot = null;
-    this.label = 'Ungroup';
   }
   _ensureSnapshots() {
     if (this._snapshot) return;
@@ -454,6 +455,50 @@ export class UngroupCommand {
       dispatch(EVENTS.GROUP_CREATED, { groupId: this._groupId });
       dispatch(EVENTS.PARENT_CHANGED, { id: this._groupId, parentId: snap.parentId });
     });
+  }
+}
+
+/**
+ * Ungroup (task 2.4). Accepts one group id or an array; dissolves each (nested
+ * selected groups included, in order), children keep their world transforms
+ * and become the selection. Undo restores groups exactly and re-selects them.
+ * `UngroupCommand.targetsFor(selectedIds)` resolves a selection to the groups
+ * to dissolve: every selected group plus (legacy) the parent group of each
+ * selected object.
+ */
+export class UngroupCommand {
+  constructor(groupIds) {
+    const list = Array.isArray(groupIds) ? groupIds : [groupIds];
+    this._units = [...new Set(list.filter(Boolean))].map(id => new _DissolveGroup(id));
+    this.label = this._units.length > 1 ? `Ungroup (${this._units.length})` : 'Ungroup';
+  }
+  static targetsFor(selectedIds) {
+    const { objects, groups } = getState().scene;
+    const out = new Set();
+    for (const id of selectedIds ?? []) {
+      if (!objects[id] && groups[id]) out.add(id);
+      else if (objects[id]?.parentId && groups[objects[id].parentId]) out.add(objects[id].parentId);
+    }
+    return [...out];
+  }
+  execute() {
+    for (const unit of this._units) unit.execute();
+    const { objects, groups } = getState().scene;
+    const freed = [];
+    for (const unit of this._units) {
+      const snap = unit._snapshot;
+      if (!snap) continue;
+      for (const id of [...snap.objectIds, ...snap.subgroupIds]) {
+        if ((objects[id] || groups[id]) && !freed.includes(id)) freed.push(id);
+      }
+    }
+    if (freed.length) Selection.set(freed, freed[freed.length - 1]);
+  }
+  undo() {
+    for (let i = this._units.length - 1; i >= 0; i--) this._units[i].undo();
+    const groups = getState().scene.groups;
+    const restored = this._units.filter(u => u._snapshot && groups[u._groupId]).map(u => u._groupId);
+    if (restored.length) Selection.set(restored, restored[restored.length - 1]);
   }
 }
 

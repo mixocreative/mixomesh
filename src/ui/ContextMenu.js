@@ -225,7 +225,7 @@ function _objectItems(info, selIds) {
       cls: enabled(new Set(selIds.map(id => canonicalObjectId(id, objs))).size > 1) },
     'sep',
     { label: t('context.group'),           shortcut: 'Ctrl+G',      action: 'group',   iconName: 'Folder',     cls: enabled(hasSelection) },
-    { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(someGrouped) },
+    { label: t('context.ungroup'),         shortcut: 'Ctrl+Shift+G',action: 'ungroup', iconName: 'FolderOpen', cls: enabled(UngroupCommand.targetsFor(selIds).length > 0) },
     { label: t('context.unparent'),        shortcut: '',            action: 'unparent', iconName: 'GitBranch', cls: enabled(someGrouped) },
     'sep',
     { label: t('context.selectionToCursor'), shortcut: '',         action: 'sel-to-cursor', iconName: 'Crosshair', cls: enabled(hasSelection) },
@@ -547,15 +547,9 @@ function _group() {
 }
 
 function _ungroup() {
-  const ids = Selection.getSelectedIds();
-  const objects = getState().scene.objects;
-  const groupIds = new Set();
-  for (const id of ids) {
-    const o = objects[id];
-    if (o?.parentId) groupIds.add(o.parentId);
-  }
-  if (!groupIds.size) return;
-  for (const gid of groupIds) push(new UngroupCommand(gid));
+  const groupIds = UngroupCommand.targetsFor(Selection.getSelectedIds());
+  if (!groupIds.length) return;
+  push(new UngroupCommand(groupIds));
 }
 
 function _unparent(info) {
