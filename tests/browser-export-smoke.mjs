@@ -343,6 +343,12 @@ async function main() {
     if (failures.length) throw new Error(`Runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log(`PASS browser export smoke — ${result.suggested}, texture ${texEntries[0]} (${pngBytes.length} bytes, orientation OK, OBJ export OK, round-trip OK, OBJ worker OK)`);
+  } catch (err) {
+    // Diagnose intermittent "target navigated or closed": a Vite dep
+    // re-optimisation forces a full page reload mid-test. Show what Vite said.
+    console.error(`--- vite output (tail) ---
+${viteOutput.join('').slice(-2500)}`);
+    throw err;
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);
