@@ -1,7 +1,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, dispatch } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
-import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
+import { AssetLoader, removeAsset, SESSION_KEY } from '../core/AssetLoader.js';
 import { Modal } from './Modal.js';
 import { runFindMoved } from './FindMoved.js';
 import { getAssetStatus, canFindMoved } from '../core/persist/AssetResolver.js';
@@ -23,8 +23,6 @@ import { escapeHtml as _escape, escapeAttr, safeImageSrc } from './renderSafe.js
 const BABYLON = window.BABYLON;
 
 const DRAG_MIME   = 'application/x-mixomesh-asset';
-
-const SESSION_KEY = '__session__';
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,

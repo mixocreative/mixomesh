@@ -196,4 +196,23 @@ await check('findMoved: hash walk with progress, ext filter, symlinks skipped, l
   await assert.rejects(() => reg.findMoved({ refKey: key, contentHash: 'nothex' }), /Invalid content hash/);
 });
 
-assert.equal(cases, 4);
+await check('listing / mounting / restoring the same folder twice yields the SAME tokens (registry does not grow)', async () => {
+  const fsm = memFs();
+  fsm.dir('C:\\v');
+  fsm.dir('C:\\v\\sub');
+  fsm.file('C:\\v\\a.glb', [1]);
+  const store = createMemoryStore();
+  const reg = createOpaqueFileRegistry({ ...fsm.deps, store });
+  const m1 = reg.registerMount('C:\\v');
+  assert.equal(reg.registerMount('c:\\V').ref, m1.ref, 'same folder (case-insensitive) → same mount token');
+  const first = await reg.listDirectory(m1.ref, '');
+  const second = await reg.listDirectory(m1.ref, '');
+  assert.deepEqual(second.map(e => e.ref), first.map(e => e.ref), 'relisting reuses every child token');
+  const key = await reg.persistRef(m1.ref);
+  assert.equal(await reg.restoreRef(key), m1.ref, 'restore reuses the live mount token');
+  assert.equal(await reg.restoreRef(key), m1.ref);
+  const sub = first.find(e => e.kind === 'directory');
+  assert.deepEqual((await reg.listDirectory(sub.ref, 'sub')).map(e => e.ref), [], 'empty child folder lists cleanly');
+});
+
+assert.equal(cases, 5);

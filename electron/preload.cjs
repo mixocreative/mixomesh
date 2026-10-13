@@ -60,9 +60,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     try { filePath = webUtils.getPathForFile(file); } catch { filePath = ''; }
     return filePath ? ipcRenderer.invoke('fs:registerDropped', filePath) : Promise.resolve(null);
   },
-  // Legacy path-returning dialogs — no callers; removed in task 4.9 / 6.2.
-  pickOpen: (opts) => ipcRenderer.invoke('dialog:open', opts),
-  pickSave: (opts) => ipcRenderer.invoke('dialog:save', opts),
   onCloseRequested: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('app:close-requested', listener);

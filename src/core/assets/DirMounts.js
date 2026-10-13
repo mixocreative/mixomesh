@@ -6,6 +6,9 @@
 
 import { storage } from '../storage/StorageAdapter.js';
 
+/** Pseudo mount key for the Session tab (the project working set, not a folder). */
+export const SESSION_KEY = '__session__';
+
 const _dirRefs = new Map();    // key → adapter-owned opaque ref (session)
 
 /**
@@ -26,19 +29,6 @@ export async function mountDirectory() {
   }
   _dirRefs.set(key, mounted.ref);
   return { ref: mounted.ref, handle: mounted.ref, key, name: mounted.name };
-}
-
-/**
- * Restore a previously-mounted directory by its stable key. The adapter
- * re-validates (browser: permission re-grant; desktop: exists + readable).
- * @param {string} key
- * @returns {Promise<any|null>} adapter-owned opaque ref, or null when missing
- */
-export async function restoreDirectory(key) {
-  const ref = await storage.restoreRef(key);
-  if (!ref) return null;
-  _dirRefs.set(key, ref);
-  return ref;
 }
 
 /** @param {string} key */

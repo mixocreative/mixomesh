@@ -289,9 +289,6 @@ ipcMain.handle('export:save', async (event, opts, data) => {
   return true;
 });
 
-// ── Legacy project/export dialogs (path-based fs:readFile/writeFile IPC removed — no callers) ──
-ipcMain.handle('dialog:open', async (_e, opts) => dialog.showOpenDialog(opts ?? {}));
-ipcMain.handle('dialog:save', async (_e, opts) => dialog.showSaveDialog(opts ?? {}));
 ipcMain.on('app:close-response', (event, result) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;

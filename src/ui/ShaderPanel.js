@@ -3,7 +3,7 @@ import { subscribe, getState, setState, dispatch } from '../core/StateManager.js
 import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
 import { logicalObjectCommandIds } from '../core/LogicalObjects.js';
-import { AssetLoader } from '../core/AssetLoader.js';
+import { AssetLoader, SESSION_KEY } from '../core/AssetLoader.js';
 import { DEFAULT_SWATCHES } from '../core/ShaderLibrary.js';
 import {
   push, beginBatch, endBatch,
@@ -22,7 +22,6 @@ import { createCollapseController } from './lib/sections.js';
 
 const DRAG_MIME       = 'application/x-mixomesh-asset';
 const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
-const SESSION_KEY     = '__session__';   // mirrors ui/AssetPanel.js
 
 let _bodyEl       = null;
 let _root         = null;

@@ -15,7 +15,7 @@ import {
   getContainer, removeContainer, getBabylonMesh,
   getContainerGeomMeshes, bindRestoredMesh, resetRegistry,
 } from './assets/MeshRegistry.js';
-import { mountDirectory, restoreDirectory, getDirectoryHandle } from './assets/DirMounts.js';
+import { mountDirectory, getDirectoryHandle, SESSION_KEY } from './assets/DirMounts.js';
 import { revokeObjSiblings, revokeAllObjSiblings } from './assets/ObjSiblings.js';
 import { registerAssetEntry } from './assets/AssetRegistration.js';
 import { loadFromBlob, loadFromHandle, instantiateAsset, isImporting } from './assets/AssetImport.js';
@@ -34,7 +34,7 @@ import {
 
 // ── Re-exported surface (unchanged for callers/tests) ────────────────────
 
-export { mountDirectory, restoreDirectory, getDirectoryHandle };
+export { mountDirectory, getDirectoryHandle, SESSION_KEY };
 export { loadFromBlob, loadFromHandle, instantiateAsset, isImporting };
 export { getContainer, getBabylonMesh, getContainerGeomMeshes, bindRestoredMesh };
 export {
@@ -107,7 +107,7 @@ export function resetAll() {
 // NOT frozen — monkey-patching this object (`AssetLoader.getBabylonMesh = …`)
 // is the established headless-test seam (bundle-1 plan 2026-06-11).
 export const AssetLoader = {
-  mountDirectory, restoreDirectory,
+  mountDirectory,
   loadFromHandle, loadFromBlob, isImporting,
   loadTextureFromHandle, loadTextureFromBlob, getBabylonTexture,
   registerImportedTexture, recapAllTextures,
