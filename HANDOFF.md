@@ -1,6 +1,6 @@
 # HANDOFF — Storage Adapter + Web/Windows-Electron split
 
-> **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** This file below is the earlier storage-adapter handoff (still valid background).
+> **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
 **Purpose of this file:** durable resume point. If a session is cut off mid-operation,
 THIS is the first file to read. It tracks the goal, decisions, plan, and exactly

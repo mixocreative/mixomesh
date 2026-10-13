@@ -263,9 +263,9 @@ src/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
       ProjectIntegrity.js  ← portable .mixo save gate: required asset refs + missing-byte error shape
       ProjectSerializer.js ← buildDocument + asset/object/group serialise, b64 codecs, transform (de)compose
-      AssetResolver.js     ← tiered byte resolve: live path → hash-scan → file handle → embedded → null
+      AssetResolver.js     ← tiered byte resolve: live path → file handle → embedded → null (hash-scan only user-invoked; task 4.3)
       ProjectLoader.js     ← loadProject pipeline: migrate, world reset, ghost meshes, groups, relinkAsset
-      RecentProjects.js    ← recent-projects list (idb kv) + save-time viewport thumbnail
+      RecentProjects.js    ← recent-projects list (storage adapter kv key `recent_projects`) + save-time viewport thumbnail
       Autosave.js          ← interval autosave (skipEmbed A9) + boot crash recovery, keyed by project.id
       AutosaveKeys.js      ← autosave key layout + deleteAutosave (snapshot + per-hash images)
       ProjectId.js         ← mintProjectId() — stable project identity (0.11)
@@ -492,7 +492,7 @@ types.
 | Editable presets | `src/config/scale-presets.json`, `src/config/swatches.json` | `PrintPanel`, `ShaderPanel` |
 | Default panel settings | `src/config/default-settings.json` | `StateManager` INITIAL_STATE, `SettingsStore` (seed/save/reset) |
 | Per-user settings persistence | `SettingsStore` + `localStorage['mx-settings-v1']` | seeds boot/New; File-wins on `.mixo` open; reset buttons |
-| Persistence | `.mixo` v3.1 JSON plus IndexedDB handles/kv | `PersistenceManager`, `idb.js` |
+| Persistence | `.mixo` v3.4 JSON plus storage adapter (IndexedDB/KV on web, main-only refs on desktop) | `PersistenceManager`, `StorageAdapter`, `idb.js` |
 | Export packaging | `PrintManager` orchestrator plus `src/core/print/*` seams | `PrintPanel` invokes public export entry points |
 | UI markup safety | `src/ui/renderSafe.js` | every string-template UI renderer |
 
@@ -3144,7 +3144,7 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
   crash recovery from replacing a loose drag-drop with an unrecoverable ghost.
 
 ### Recent Projects
-- Max 10. Stored under IndexedDB key `recent_projects`.
+- Max 10. Stored via storage adapter KV under key `recent_projects` (task 4.4).
 - Entry: `{ name, path, savedAt, thumbnailDataUrl }`. Thumbnail = viewport screenshot at save time (use `BABYLON.Tools.CreateScreenshot`).
 
 ---

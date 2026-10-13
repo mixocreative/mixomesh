@@ -147,3 +147,92 @@ Negative / costs:
 - **Phase 2** — Windows Electron shell + `DesktopStorageAdapter` (Node fs via IPC).
 - **Phase 3** — electron-builder (NSIS) installer, security hardening, optional auto-update.
 - **macOS** — parked.
+
+## Addendum 2026-10-14 (Overhaul Phase 4 completion)
+
+**Overhaul Phase 4** (2026-10-14) completed all asset-model refactoring:
+
+### Final StorageAdapter Surface (async/Promise-based)
+
+**Project I/O:**
+- `pickOpenProject()` → `{ref, name, file: File|Blob} | null`
+- `pickSaveProject(suggestedName)` → `{ref, name} | null`
+- `writeFile(ref, data)` → atomic write (browser: createWritable + abort; desktop: temp file + rename in main)
+
+**Asset Import & Export:**
+- `pickImportAssets({multiple?})` → `Array<{ref, name}>`
+- `saveExport(blob, suggestedName, hint?)` → boolean (false = cancelled; browser falls back to anchor download; desktop has no fallback)
+- `refForDrop(item)` → opaque ref | null (call synchronously inside drop event; desktop preload via `webUtils.getPathForFile`)
+
+**Asset Resolution & References (task 4.2, 4.3):**
+- `resolveAsset(source, {contentHash?})` → `{status: 'embedded'|'linked'|'changed'|'missing', blob: Blob|null}` — reads ONE source, never scans (Decision 3)
+- `persistRef(ref)` → stable key (`dir_`/`file_` + 32 hex)
+- `restoreRef(key)` → re-validated session ref | null
+- `deleteRef(key)` → void
+- `findMoved(source, {contentHash, onProgress?, limit?, refKey?})` → `{source: AssetSource|null, blob: Blob|null, scanned: number}` — only hash walk, user-invoked only (task 4.3)
+- `hasRef(key)` → boolean (no permission prompt; for lost-recent-project checking)
+
+**Routing & Boot (task 4.4):**
+- `ready()` → void | rejects with `storageUnavailable(...)` — browser without FSA → blocking error; IndexedDB timeout (5 s) → continue with `persistAssets=false`; desktop bridge missing or timeout (10 s) → blocking error
+- `listDirectory(ref, parentPath?)` → `Array<{name, path, kind: 'file'|'directory', ref}>`
+- `readFile(ref)` → File | Blob
+
+**Cross-Session KV (task 4.4):**
+- `kvSet(key, value)` → void
+- `kvGet(key)` → any
+- `kvDelete(key)` → void
+- `kvKeys()` → string[]
+
+### Desktop (Electron) Token Rules
+
+**Token persistence (`<userData>/mixo-refs.json`, main-process only):**
+- Desktop `persistRef` writes to a main-only registry: `{kind, absolutePath, name}` keyed by sha256(normalised path)
+- Renderer never receives or submits absolute paths; all refs are opaque session tokens (`mount_*` / `ref_*`)
+- `restoreRef` checks file exists, kind (file/directory), R_OK permission; mints fresh token or returns null
+- Relative reads cannot escape the folder; symlinks are skipped
+
+**Token capabilities:**
+- Project open/save tokens: WRITABLE (flag persists, enables recents recovery)
+- Import/mount/drop tokens: read-only
+- Write operations enforce 1 GiB cap (desktop `fs:writeFileRef` refuses oversize)
+- Session tokens never persist; persistence only via stable key → main-only registry
+
+**Browser implementation:**
+- Refs are opaque `FileSystemHandle` (web File System Access API)
+- Directory key = sha256(name + first sorted entry name); file key = sha256(name + size + lastModified)
+- Stored in IndexedDB `handles` store; `_n` suffix on collision
+- Write permission is only requested for project save/open handles; import/mount handles are used read-only
+
+### Asset Source (`storage/AssetSource.js`)
+
+Every asset entry carries an optional `source: {kind: 'folder'|'file', refKey, path?, label?}` indicating live-file linkage:
+- `kind='folder'`: mounted directory; `refKey` = persisted folder key; `path` = relative path within folder
+- `kind='file'`: loose drag-drop file; `refKey` = persisted file key; `path` unused
+- `null` = embedded-only, no live link (Snapshot)
+
+`resolveAsset(source, {contentHash})` checks ONE source (no scan, Decision 3); returns status + blob:
+- **`embedded`** — no source or source tier fails; fallback to fileData/textureImages in `.mixo`
+- **`linked`** — source resolves and matches contentHash
+- **`changed`** — source resolves but contentHash mismatch (live file modified since save); load uses the EMBEDDED copy, the user refreshes via `RelinkAssetCommand` (task 4.5)
+- **`missing`** — source refKey invalid or permission denied; fallback to embedded
+
+**Asset persistence & migration:**
+- Schema v3.4 (task 4.1): asset entry adds `source` + `displayName` derived from legacy `directoryHandleKey`, `fileHandleKey`, `originalPath`
+- Legacy fields still written for one minor version (backward compat); new `source` field authoritative for phase 4+
+- Load never scans (task 4.3): one `resolveAsset` per link; missing/changed falls through to embedded bytes
+- Explicit "Find moved file..." action (asset Properties) calls `findMoved` with progress overlay; user-invoked only
+
+### Boot Sequence (task 4.4)
+
+1. Call `await storage.ready()` before UI init
+   - Browser without File System Access → blocking "Browser not supported"
+   - IndexedDB unavailable (no response in 5 s) → log warning, continue with `persistAssets=false` (web-only, no recent projects)
+   - Desktop bridge missing or `storage:ready` > 10 s → blocking "Desktop storage unavailable"
+
+2. PersistenceManager.init() and UI init only after ready
+
+3. Folder-remount prompt (desktop only) before autosave recovery offer
+
+### Summary
+
+The StorageAdapter seam is a domain-level interface (opaque refs, no FSA/idb primitives leaking to renderer). Asset resolution is tiered (live path → file handle → embedded → ghost) but load never scans. Persistence is by stable key, with desktop main-process registry (`mixo-refs.json`) keeping absolute paths invisible to the renderer. The boot gate ensures storage is available before UI init. All calls (project open/save, import, export, KV, asset resolution) route through the adapter; direct File System Access and IndexedDB live only in `StorageAdapter.js` and `idb.js`.
