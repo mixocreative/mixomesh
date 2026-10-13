@@ -198,6 +198,14 @@ function browserHarness() {
       if (n?.kind !== 'file') throw new Error('NotFoundError');
       return new File([n.bytes], base(p), { lastModified: n.mtime });
     },
+    async createWritable() {
+      const chunks = [];
+      return {
+        async write(d) { chunks.push(typeof d === 'string' ? new TextEncoder().encode(d) : new Uint8Array(await new Blob([d]).arrayBuffer())); },
+        async close() { fs.write(p, [...chunks.flatMap(c => [...c])]); },
+        async abort() { chunks.length = 0; },
+      };
+    },
   });
   const dirHandle = p => ({
     ...common(p), kind: 'directory',
@@ -214,13 +222,27 @@ function browserHarness() {
       return fileHandle(`${p}/${name}`);
     },
   });
+  const previousWindow = globalThis.window;
+  globalThis.window = previousWindow ?? {};
+  const saved = {
+    open: window.showOpenFilePicker, save: window.showSaveFilePicker,
+  };
+  const abort = () => Object.assign(new Error('cancel'), { name: 'AbortError' });
   return {
     fs, adapter: BrowserStorageAdapter,
     mount: p => dirHandle(p),
     fileRef: p => fileHandle(p),
     denyRead() { permission = 'denied'; },
     restart() { /* IndexedDB (stub) persists; handles are re-read from it */ },
-    cleanup() { resetIdb(); },
+    // Pickers answer with these paths (null = the user cancelled).
+    answerSave(p) { window.showSaveFilePicker = async () => { if (!p) throw abort(); return fileHandle(p); }; },
+    answerOpen(paths) { window.showOpenFilePicker = async () => { if (!paths) throw abort(); return paths.map(fileHandle); }; },
+    cleanup() {
+      resetIdb();
+      window.showOpenFilePicker = saved.open;
+      window.showSaveFilePicker = saved.save;
+      if (previousWindow === undefined) delete globalThis.window;
+    },
   };
 }
 
@@ -246,6 +268,9 @@ function desktopHarness() {
       return { isDirectory: () => n.kind === 'dir', isFile: () => n.kind === 'file' };
     },
     access: async p => { if (fs.unreadable.has(norm(p))) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); },
+    writeFile: async (p, bytes) => { fs.write(p, [...bytes]); },
+    rename: async (from, to) => { fs.move(from, to); },
+    unlink: async p => { fs.remove(p); },
   });
   let registry = createOpaqueFileRegistry(deps());
   const ipc = value => (value === undefined ? undefined : structuredClone(value));
@@ -260,13 +285,22 @@ function desktopHarness() {
     deleteRef: async key => registry.deleteRef(key),
     readStoredFile: async (key, rel) => ipc(await registry.readStoredFile(key, rel)),
     findMoved: async (args, onProgress) => ipc(await registry.findMoved(structuredClone(args), onProgress)),
+    writeFileRef: async (ref, data) => registry.writeFile(ref, ipc(data)),
   };
+  const win = p => p.replace(/\//g, '\\');
   return {
     fs, adapter: DesktopStorageAdapter,
     mount: p => registry.registerMount(p.replace(/\//g, '\\')).ref,
     fileRef: p => registry.registerFile(p.replace(/\//g, '\\')).ref,
     denyRead() { fs.unreadable.add(ROOT); },
     restart() { registry = createOpaqueFileRegistry(deps()); },   // tokens die, store survives
+    answerSave(p) {
+      window.electronAPI.pickSaveProject = async () => (p ? ipc(registry.registerFile(win(p), base(p), { writable: true })) : null);
+    },
+    answerOpen(paths) {
+      window.electronAPI.pickOpenProject = async () => (paths ? ipc(registry.registerFile(win(paths[0]), base(paths[0]), { writable: true })) : null);
+      window.electronAPI.pickImportAssets = async () => (paths ? paths.map(p => ipc(registry.registerFile(win(p), base(p)))) : []);
+    },
     cleanup() {
       window.electronAPI = previousApi;
       if (previousWindow === undefined) delete globalThis.window;
@@ -388,6 +422,56 @@ async function conformance(label, makeHarness) {
     assert.equal(none.blob, null);
   });
 
+  // ── Project / import I/O (task 4.4) ──
+  const textOf = async blob => new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()));
+
+  await run('project save: pickSaveProject → writeFile → readFile; cancel → null', async (h, a) => {
+    h.answerSave(null);
+    assert.equal(await a.pickSaveProject('Untitled.mixo'), null);
+    h.answerSave(`${ROOT}/proj.mixo`);
+    const picked = await a.pickSaveProject('Untitled.mixo');
+    assert.equal(picked.name, 'proj.mixo');
+    await a.writeFile(picked.ref, '{"v":1}');
+    assert.equal(await textOf(await a.readFile(picked.ref)), '{"v":1}');
+    await a.writeFile(picked.ref, '{"v":2}');   // Ctrl+S overwrites in place
+    assert.equal(await textOf(await a.readFile(picked.ref)), '{"v":2}');
+  });
+
+  await run('recent project: persisted ref survives a restart and can be written again', async (h, a) => {
+    h.answerSave(`${ROOT}/proj.mixo`);
+    const picked = await a.pickSaveProject('proj.mixo');
+    await a.writeFile(picked.ref, 'one');
+    const key = await a.persistRef(picked.ref);
+    assert.ok(isStableKey(key) && key.startsWith('file_'), key);
+    assert.equal(await a.hasRef(key), true);
+    h.restart();
+    const ref = await a.restoreRef(key);
+    assert.equal(await textOf(await a.readFile(ref)), 'one');
+    await a.writeFile(ref, 'two');
+    assert.equal(await textOf(await a.readFile(ref)), 'two');
+    await a.deleteRef(key);
+    assert.equal(await a.hasRef(key), false);
+  });
+
+  await run('pickOpenProject returns {ref,name,file}; cancel → null', async (h, a) => {
+    h.fs.write(`${ROOT}/open.mixo`, [...new TextEncoder().encode('{"ok":true}')]);
+    h.answerOpen(null);
+    assert.equal(await a.pickOpenProject(), null);
+    h.answerOpen([`${ROOT}/open.mixo`]);
+    const picked = await a.pickOpenProject();
+    assert.equal(picked.name, 'open.mixo');
+    assert.equal(await textOf(picked.file), '{"ok":true}');
+  });
+
+  await run('pickImportAssets returns readable refs; cancel → []', async (h, a) => {
+    h.answerOpen(null);
+    assert.deepEqual(await a.pickImportAssets({ multiple: true }), []);
+    h.answerOpen([`${ROOT}/loose.stl`, `${ROOT}/parts/hull.glb`]);
+    const picked = await a.pickImportAssets({ multiple: true });
+    assert.deepEqual(picked.map(p => p.name), ['loose.stl', 'hull.glb']);
+    assert.deepEqual(await bytesOfBlob(await a.readFile(picked[1].ref)), [1, 2, 3, 4]);
+  });
+
   await run('findMoved honours the file limit', async (h, a) => {
     const key = await a.persistRef(h.mount(ROOT));
     h.fs.move(`${ROOT}/parts/hull.glb`, `${ROOT}/zz/renamed.glb`);
@@ -399,6 +483,89 @@ async function conformance(label, makeHarness) {
 
 await conformance('browser', browserHarness);
 await conformance('desktop', desktopHarness);
+
+await test('[desktop] import + mount refs are read-only; a failed write leaves the file intact', async () => {
+  const h = desktopHarness();
+  try {
+    h.answerOpen([`${ROOT}/loose.stl`]);
+    const [picked] = await h.adapter.pickImportAssets({ multiple: false });
+    await assert.rejects(h.adapter.writeFile(picked.ref, 'x'), /read-only/);
+    const listed = await h.adapter.listDirectory(h.mount(ROOT), '');
+    const file = listed.find(r => r.kind === 'file');
+    await assert.rejects(h.adapter.writeFile(file.ref, 'x'), /read-only/);
+    await assert.rejects(h.adapter.writeFile('ref_forged', 'x'), /Unknown/);
+    assert.deepEqual([...h.fs.get(`${ROOT}/loose.stl`).bytes], [5, 5, 5]);
+    // An import ref persisted + restored stays read-only.
+    h.restart();
+    h.answerOpen([`${ROOT}/loose.stl`]);
+    const [again] = await h.adapter.pickImportAssets({ multiple: false });
+    const restored = await h.adapter.restoreRef(await h.adapter.persistRef(again.ref));
+    await assert.rejects(h.adapter.writeFile(restored, 'x'), /read-only/);
+  } finally { h.cleanup(); }
+});
+
+await test('[desktop] saveExport hands bytes to main and reports cancel as false', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = previousWindow ?? {};
+  const previousApi = window.electronAPI;
+  const seen = [];
+  window.electronAPI = { saveExport: async (opts, data) => { seen.push({ opts, data: [...data] }); return seen.length === 1; } };
+  try {
+    assert.equal(await DesktopStorageAdapter.saveExport(new Blob([Uint8Array.from([1, 2])]), 'a.stl', { description: 'STL file' }), true);
+    assert.equal(await DesktopStorageAdapter.saveExport(new Blob(['z']), 'b.obj'), false);
+    assert.deepEqual(seen[0], { opts: { suggestedName: 'a.stl', ext: 'stl', description: 'STL file' }, data: [1, 2] });
+    await assert.rejects(DesktopStorageAdapter.saveExport(new Blob(['z']), 'c.obj', { forceDownload: true }));
+  } finally {
+    window.electronAPI = previousApi;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+await test('[desktop] ready(): incomplete bridge / failed handshake → storageUnavailable; full bridge → ok', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = previousWindow ?? {};
+  const previousApi = window.electronAPI;
+  const full = {};
+  for (const m of ['storageReady', 'kvSet', 'kvGet', 'kvDelete', 'kvKeys', 'mountDirectory', 'listDirectory',
+    'readFileRef', 'persistRef', 'restoreRef', 'deleteRef', 'readStoredFile', 'findMoved', 'pickOpenProject',
+    'pickSaveProject', 'writeFileRef', 'pickImportAssets', 'saveExport', 'refForDroppedFile']) full[m] = async () => null;
+  try {
+    window.electronAPI = { kvGet: async () => null };
+    await assert.rejects(DesktopStorageAdapter.ready(), e => e.storageUnavailable === true && /missing storageReady/.test(e.message));
+    window.electronAPI = { ...full, storageReady: async () => ({ ok: false, reason: 'kv locked' }) };
+    await assert.rejects(DesktopStorageAdapter.ready(), e => e.storageUnavailable && /kv locked/.test(e.message));
+    window.electronAPI = { ...full, storageReady: async () => { throw new Error('ipc down'); } };
+    await assert.rejects(DesktopStorageAdapter.ready(), e => e.storageUnavailable && /ipc down/.test(e.message));
+    window.electronAPI = { ...full, storageReady: async () => ({ ok: true }) };
+    await DesktopStorageAdapter.ready();
+  } finally {
+    window.electronAPI = previousApi;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+await test('[browser] ready(): no File System Access → blocking "Browser not supported"', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    await assert.rejects(BrowserStorageAdapter.ready(), e => e.storageUnavailable && e.title === 'Browser not supported');
+    window.showDirectoryPicker = async () => null;
+    await BrowserStorageAdapter.ready();
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+await test('preload exposes every bridge method the desktop adapter requires', () => {
+  const preload = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
+  const adapter = readFileSync(new URL('../src/core/storage/DesktopStorageAdapter.js', import.meta.url), 'utf8');
+  const required = [...adapter.match(/REQUIRED_BRIDGE = \[([\s\S]*?)\];/)[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+  assert.ok(required.length >= 19, `parsed ${required.length} names`);
+  for (const m of required) assert.match(preload, new RegExp(`\\b${m}:`), `preload must expose ${m}`);
+});
 
 await test('desktop shell declares watchFiles:false until watchAsset exists', () => {
   const preload = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');

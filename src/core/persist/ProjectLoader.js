@@ -13,7 +13,7 @@ import { Selection } from '../Selection.js';
 import { clear as historyClear, push as historyPush, RelinkAssetCommand } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
-import { getFileHandle } from '../idb.js';
+import { directoryRefFacade } from '../assets/DirMounts.js';
 import {
   applyWorld, stripFileData, bufFromB64,
   deriveAssetSource, deriveDisplayName, setPreservedTopLevelKeys,
@@ -390,11 +390,13 @@ async function _loadProjectInner(doc, previousId) {
     try {
       // OBJ: hand the live directory over so mtllib/texture siblings rebind
       // (permission was just granted in resolveAssetBlob's tier-1 attempt).
+      // Restored through the adapter and wrapped in the runtime-neutral
+      // handle facade, so desktop tokens rebind siblings too (task 4.4).
       let restoreOpts = {};
       if (a.extension === '.obj' && a.directoryHandleKey && a.originalPath) {
         try {
-          const dirHandle = await getFileHandle(a.directoryHandleKey);
-          if (dirHandle) restoreOpts = { dirHandle, originalPath: a.originalPath };
+          const dirRef = await storage.restoreRef(a.directoryHandleKey);
+          if (dirRef) restoreOpts = { dirHandle: directoryRefFacade(storage, dirRef), originalPath: a.originalPath };
         } catch { /* no live dir — OBJ restores with default material */ }
       }
       const geom = await AssetLoader.restoreContainer(
@@ -613,21 +615,16 @@ async function _loadProjectInner(doc, previousId) {
  * @param {string} assetId
  */
 export async function relinkAsset(assetId) {
-  let handle;
-  try {
-    [handle] = await window.showOpenFilePicker({ multiple: false });
-  } catch (err) {
-    if (err?.name === 'AbortError') return;
-    throw err;
-  }
-  const file = await handle.getFile();
+  const [picked] = await storage.pickImportAssets({ multiple: false });
+  if (!picked) return;
+  const file = await storage.readFile(picked.ref);
   let fileHandleKey = null;
-  try { fileHandleKey = await storage.persistRef(handle); } catch { /* embedded-only link */ }
+  try { fileHandleKey = await storage.persistRef(picked.ref); } catch { /* embedded-only link */ }
   const link = {
     directoryHandleKey: null, fileHandleKey, originalPath: null,
-    source: fileHandleKey ? { kind: 'file', refKey: fileHandleKey, path: file.name, label: file.name } : null,
+    source: fileHandleKey ? { kind: 'file', refKey: fileHandleKey, path: picked.name, label: picked.name } : null,
   };
-  const cmd = await RelinkAssetCommand.create(assetId, { blob: file, filename: file.name, link, label: 'Relink Asset' });
+  const cmd = await RelinkAssetCommand.create(assetId, { blob: file, filename: picked.name, link, label: 'Relink Asset' });
   historyPush(cmd);
   Toast.show(t('toast.assetRelinked'), 'success', 3000);
 }

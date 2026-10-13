@@ -92,3 +92,22 @@ export function setCapabilities(overrides) {
   Object.assign(caps, overrides);
   return caps;
 }
+
+/**
+ * Boot-gate failure (task 4.4): `storage.ready()` rejects with this when the
+ * runtime's storage layer cannot initialise. `title` + `message` are shown
+ * verbatim in the blocking boot screen.
+ * @param {string} title
+ * @param {string} message
+ * @param {unknown} [cause]
+ * @returns {Error & {title:string, storageUnavailable:true}}
+ */
+export function storageUnavailable(title, message, cause) {
+  const err = /** @type {Error & {title:string, storageUnavailable:true}} */ (
+    new Error(message, cause === undefined ? undefined : { cause })
+  );
+  err.name = 'StorageUnavailableError';
+  err.title = title;
+  err.storageUnavailable = true;
+  return err;
+}

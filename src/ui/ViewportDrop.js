@@ -4,6 +4,7 @@ import { Toast } from './Toast.js';
 import { safeImport } from './ImportError.js';
 import { reportError, safeAsync } from './Status.js';
 import { t } from '../i18n/index.js';
+import { storage } from '../core/storage/StorageAdapter.js';
 
 const BABYLON = window.BABYLON;
 const DRAG_MIME      = 'application/x-mixomesh-asset';
@@ -57,30 +58,34 @@ export function attach(viewportEl, scene) {
 
 /** Picker entry point shared by the viewport empty state and future menus. */
 export async function promptImport(position = BABYLON.Vector3.Zero()) {
-  let handles;
-  try {
-    handles = await window.showOpenFilePicker({ multiple: true });
-  } catch (err) {
-    if (err?.name === 'AbortError') return;
-    throw err;
-  }
-  const files = await Promise.all(handles.map(handle => handle.getFile()));
+  const picked = await storage.pickImportAssets({ multiple: true });
+  if (!picked.length) return;
+  const files = await Promise.all(picked.map(p => storage.readFile(p.ref)));
   const siblingFiles = files.filter(file => {
     const ext = _extOf(file.name);
     return ext === '.mtl' || AssetLoader.isTextureExt(ext);
   });
-  const meshes = files.map((file, index) => ({ file, handle: handles[index] }))
+  const meshes = files.map((file, index) => ({ file, ref: picked[index].ref }))
     .filter(({ file }) => AssetLoader.isMeshExt(_extOf(file.name)));
   if (!meshes.length) {
     Toast.show(t('toast.dropNeedsMesh'), 'info', 5000);
     return;
   }
-  for (const { file, handle } of meshes) {
-    await safeImport(() => AssetLoader.loadFromBlob(file, file.name, position, {
-      fileHandle: handle,
-      ...(siblingFiles.length ? { siblingFiles } : {}),
-    }), file.name);
+  for (const { file, ref } of meshes) {
+    await safeImport(async () => {
+      const fileHandleKey = await _persistedKey(ref);
+      return AssetLoader.loadFromBlob(file, file.name, position, {
+        ...(fileHandleKey ? { fileHandleKey } : {}),
+        ...(siblingFiles.length ? { siblingFiles } : {}),
+      });
+    }, file.name);
   }
+}
+
+/** Opaque ref → stable adapter key so a loose file stays linked; null = embedded-only. */
+async function _persistedKey(ref) {
+  if (!ref) return null;
+  try { return await storage.persistRef(ref); } catch { return null; }
 }
 
 // ── Predicates ───────────────────────────────────────────
@@ -116,24 +121,22 @@ function _handleDrop(e, position) {
     return;
   }
 
-  // DataTransferItem and getAsFileSystemHandle() are only valid synchronously
-  // inside the drop event — snapshot the File + handle-promise NOW, before any
-  // await. The handle (Chrome-only) lets a loose OS drop relink later instead
-  // of being a frozen snapshot. Fall back to dt.files when items is absent.
+  // DataTransferItems are only valid synchronously inside the drop event —
+  // snapshot the File + the adapter's ref-promise NOW, before any await
+  // (`storage.refForDrop` is synchronous for exactly this reason). The ref lets
+  // a loose OS drop relink later instead of being a frozen snapshot. Fall back
+  // to dt.files when items is absent.
   const entries = [];
   const items = dt.items ? Array.from(dt.items) : [];
   for (const it of items) {
     if (it.kind !== 'file') continue;
     const file = it.getAsFile();
     if (!file) continue;
-    const handleP = it.getAsFileSystemHandle
-      ? it.getAsFileSystemHandle().catch(() => null)
-      : Promise.resolve(null);
-    entries.push({ file, handleP });
+    entries.push({ file, refP: storage.refForDrop(it) });
   }
   if (!entries.length) {
     for (const f of (dt.files ? Array.from(dt.files) : [])) {
-      entries.push({ file: f, handleP: Promise.resolve(null) });
+      entries.push({ file: f, refP: Promise.resolve(null) });
     }
   }
   if (!entries.length) return;
@@ -144,10 +147,10 @@ function _handleDrop(e, position) {
   // together and they bind.
   const meshEntries = [];
   const siblingFiles = [];
-  for (const { file, handleP } of entries) {
+  for (const { file, refP } of entries) {
     const ext = _extOf(file.name);
     if (AssetLoader.isMeshExt(ext)) {
-      meshEntries.push({ file, handleP });
+      meshEntries.push({ file, refP });
     } else if (ext === '.mtl' || AssetLoader.isTextureExt(ext)) {
       siblingFiles.push(file);
     } else {
@@ -161,11 +164,10 @@ function _handleDrop(e, position) {
     return;
   }
 
-  const importOne = async ({ file, handleP }) => {
-    const h = await handleP;
-    const fileHandle = h && h.kind === 'file' ? h : null;   // dir handles ignored for now
+  const importOne = async ({ file, refP }) => {
+    const fileHandleKey = await _persistedKey(await refP);
     await AssetLoader.loadFromBlob(file, file.name, position, {
-      ...(fileHandle ? { fileHandle } : {}),
+      ...(fileHandleKey ? { fileHandleKey } : {}),
       ...(siblingFiles.length ? { siblingFiles } : {}),
     });
   };

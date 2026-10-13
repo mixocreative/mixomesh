@@ -5,7 +5,9 @@
 // persist/ProjectLoader.js, recents in persist/RecentProjects.js, autosave in
 // persist/Autosave.js, dirty tracking in persist/DirtyTracker.js. This module
 // owns only the file-handle lifecycle (save / saveAs / open / newProject /
-// openRecent) and re-exports the public API + headless-test surface.
+// openRecent) and re-exports the public API + headless-test surface. Every
+// picker / write / ref restore goes through the StorageAdapter (task 4.4):
+// `_fileRef` is an adapter-owned opaque ref (browser handle / desktop token).
 
 import { EVENTS } from './events.js';
 import { getState, setState, dispatch } from './StateManager.js';
@@ -14,9 +16,8 @@ import { SettingsStore } from './SettingsStore.js';
 import { clear as historyClear } from './HistoryManager.js';
 import { Toast } from '../ui/Toast.js';
 import { t } from '../i18n/index.js';
-import { getFileHandle } from './idb.js';
 import { sha256Hex } from './hash.js';
-import { FILE_EXT, FILE_TYPES, SILENT } from './persist/constants.js';
+import { FILE_EXT, SILENT } from './persist/constants.js';
 import { mintProjectId } from './persist/ProjectId.js';
 import { deleteAutosave } from './persist/AutosaveKeys.js';
 import { b64FromBuf, bufFromB64, extOf, buildDocument } from './persist/ProjectSerializer.js';
@@ -26,6 +27,7 @@ import {
   migrate, resolveLoadedExportRatios, resolveLoadedExportTargets, arrToMap,
 } from './persist/ProjectLoader.js';
 import { isDesktop } from './storage/capabilities.js';
+import { storage } from './storage/StorageAdapter.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
 import { startAutosave, stopAutosave, recoverAutosave } from './persist/Autosave.js';
 import { isDirty, clearDirty, confirmDirty, init } from './persist/DirtyTracker.js';
@@ -37,7 +39,7 @@ export { startAutosave, stopAutosave, recoverAutosave };
 export { isDirty, init };
 
 // Module-local — not persisted.
-let _fileHandle = null;     // FileSystemFileHandle of the open .mixo
+let _fileRef = null;        // adapter-owned opaque ref of the open .mixo
 
 // ── Public API ───────────────────────────────────────────
 
@@ -49,23 +51,11 @@ let _fileHandle = null;     // FileSystemFileHandle of the open .mixo
  *   (review H9).
  */
 export async function save() {
-  if (!_fileHandle) return saveAs();
+  if (!_fileRef) return saveAs();
   const text = JSON.stringify(await buildDocument());
-  await _writeTo(_fileHandle, text);
+  await storage.writeFile(_fileRef, text);   // atomic: a failed write never commits a half file
   await _afterWrite();
   return true;
-}
-
-async function _writeTo(handle, text) {
-  const w = await handle.createWritable();
-  try {
-    await w.write(text);
-    await w.close();
-  } catch (err) {
-    // abort() discards the swap file so a half-written .mixo is never committed.
-    try { await w.abort(); } catch { /* already closed / aborted */ }
-    throw err;
-  }
 }
 
 // Ask the browser to exempt origin storage (IndexedDB recents / autosave) from
@@ -94,7 +84,7 @@ async function _afterWrite(staleId = null) {
   // The bytes are on disk: bookkeeping failures (recents list, autosave key
   // cleanup) are reported but must never reject save().
   try {
-    await pushRecent(name, _fileHandle);
+    await pushRecent(name, _fileRef);
     const id = getState().project.id;
     await deleteAutosave(id);
     if (staleId && staleId !== id) await deleteAutosave(staleId);
@@ -114,20 +104,15 @@ async function _afterWrite(staleId = null) {
 export async function saveAs() {
   const previousName = getState().project.name || 'Untitled';
   const suggested = `${previousName}${FILE_EXT}`;
-  let handle;
-  try {
-    handle = await window.showSaveFilePicker({ suggestedName: suggested, types: FILE_TYPES });
-  } catch (err) {
-    if (err?.name === 'AbortError') return false;
-    throw err;
-  }
-  const name = handle.name.replace(/\.mixo$/i, '');
+  const picked = await storage.pickSaveProject(suggested);
+  if (!picked) return false;
+  const name = picked.name.replace(/\.mixo$/i, '');
   const previousId = getState().project.id ?? null;
   const id = mintProjectId();   // a Save As copy is a new document (own autosave identity)
   const doc = await buildDocument();
   doc.project = { ...doc.project, name, id };   // the file carries its own name + id
-  await _writeTo(handle, JSON.stringify(doc));   // throws → nothing below runs
-  _fileHandle = handle;
+  await storage.writeFile(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
+  _fileRef = picked.ref;
   setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
   await _afterWrite(previousId);
   return true;
@@ -153,26 +138,20 @@ export async function open() {
     if (choice === 'cancel') return;
     if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
-  let handle;
-  try {
-    [handle] = await window.showOpenFilePicker({ types: FILE_TYPES, multiple: false });
-  } catch (err) {
-    if (err?.name === 'AbortError') return;
-    throw err;
-  }
-  const file = await handle.getFile();
-  const doc  = _parseDoc(await file.text());
-  await _loadAndBind(doc, handle);
+  const picked = await storage.pickOpenProject();
+  if (!picked) return;
+  const doc = _parseDoc(await picked.file.text());
+  await _loadAndBind(doc, picked.ref);
 }
 
 // Bind the save target only once the loaded state is coherent. Binding
 // BEFORE loadProject meant a torn load (world already reset, then a throw)
 // left Ctrl+S pointing at the user's good file with an empty scene — one
 // keystroke from overwriting their only copy (audit 2026-09-17, C1).
-async function _loadAndBind(doc, handle) {
-  _fileHandle = null;
+async function _loadAndBind(doc, ref) {
+  _fileRef = null;
   await loadProject(doc);
-  _fileHandle = handle;
+  _fileRef = ref;
 }
 
 /** Reset to a blank project (confirm if dirty). */
@@ -185,7 +164,7 @@ export async function newProject() {
   }
   historyClear();
   resetWorld();
-  _fileHandle = null;
+  _fileRef = null;
   setState(s => ({ ...s, project: { ...s.project, id: mintProjectId(), lastSavedAt: null } }), SILENT);
   // New starts from the user's last-used settings, not raw factory (File-wins
   // applies to OPENING a .mixo, not to New). seedBootState merges the persisted
@@ -208,14 +187,19 @@ export async function openRecent(rec) {
     if (choice === 'cancel') return;
     if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
-  const handle = await getFileHandle(rec.handleKey);
-  if (!handle) { Toast.show(t('toast.recentHandleLost'), 'error', 4000); return; }
-  if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') {
+  // The key may still be stored while permission is refused (browser) — tell
+  // the two apart so the toast says which one happened.
+  if (!rec?.handleKey || !(await storage.hasRef(rec.handleKey))) {
+    Toast.show(t('toast.recentHandleLost'), 'error', 4000);
+    return;
+  }
+  const ref = await storage.restoreRef(rec.handleKey);   // re-validates (browser: read permission)
+  if (!ref) {
     Toast.show(t('toast.filePermissionDenied'), 'warning', 4000);
     return;
   }
-  const file = await handle.getFile();
-  await _loadAndBind(_parseDoc(await file.text()), handle);
+  const file = await storage.readFile(ref);
+  await _loadAndBind(_parseDoc(await file.text()), ref);
 }
 
 /**

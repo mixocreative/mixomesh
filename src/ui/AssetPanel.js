@@ -2,7 +2,6 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, dispatch } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { AssetLoader, removeAsset } from '../core/AssetLoader.js';
-import { kvSet, kvGet, getHandle } from '../core/idb.js';
 import { Modal } from './Modal.js';
 import { runFindMoved } from './FindMoved.js';
 import { getAssetStatus, canFindMoved } from '../core/persist/AssetResolver.js';
@@ -198,22 +197,22 @@ export async function promptMount() {
     const mounted = await AssetLoader.mountDirectory();
     if (!mounted) return;
     await _mountRef(mounted.key, mounted.ref, mounted.name, true);
-    await kvSet(LAST_MOUNT_KEY, { key: mounted.key, name: mounted.name });
+    await storage.kvSet(LAST_MOUNT_KEY, { key: mounted.key, name: mounted.name });
   });
 }
 
 /**
- * Boot flow: if the last-mounted folder handle is still in IndexedDB, ask the
- * user whether to re-mount it (permission re-grant needs the modal-button
- * gesture). Replaces autosave recovery on startup.
+ * Boot flow: if the last-mounted folder's ref is still stored, ask the user
+ * whether to re-mount it (browser permission re-grant needs the modal-button
+ * gesture). Routed through the StorageAdapter (task 4.4), so it runs wherever
+ * refs persist (`caps.persistAssets`) — desktop included.
  */
 export async function promptRemount() {
-  if (storage.kind !== 'browser') return;
+  if (!caps.persistAssets) return;
   let rec;
-  try { rec = await kvGet(LAST_MOUNT_KEY); } catch { return; }
+  try { rec = await storage.kvGet(LAST_MOUNT_KEY); } catch { return; }
   if (!rec?.key) return;
-  const handle = await getHandle(rec.key);
-  if (!handle) return;
+  try { if (!(await storage.hasRef(rec.key))) return; } catch { return; }
 
   const choice = await new Promise(resolve => {
     dispatch(EVENTS.MODAL_OPEN, {
@@ -225,11 +224,12 @@ export async function promptRemount() {
   if (choice !== 'mount') return;
 
   await safeAsync(async () => {
-    if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') {
+    const ref = await storage.restoreRef(rec.key);   // browser: permission prompt (gesture = the modal button)
+    if (!ref) {
       Toast.show(t('toast.folderPermissionDenied'), 'warning', 4000);
       return;
     }
-    await _mountRef(rec.key, handle, rec.name || handle.name, true);
+    await _mountRef(rec.key, ref, rec.name || ref.name, true);
   });
 }
 

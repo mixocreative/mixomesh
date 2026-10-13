@@ -5,7 +5,7 @@
 // `capabilities` is read by src/core/storage/capabilities.js → the app detects a
 // desktop runtime with full filesystem support and swaps in DesktopStorageAdapter.
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // Full filesystem tier on desktop (Node fs) — capabilities.js trusts this verbatim.
@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     watchFiles: false,
     writeFiles: true,
   },
+  // Boot gate handshake (task 4.4): resolves {ok:true} once main's stores are loaded.
+  storageReady: () => ipcRenderer.invoke('storage:ready'),
   // Cross-session KV (autosave / recent / settings) — JSON file in userData.
   kvSet: (key, value) => ipcRenderer.invoke('kv:set', key, value),
   kvGet: (key) => ipcRenderer.invoke('kv:get', key),
@@ -44,7 +46,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // User-editable config files (materials.json): <userData>/config/<name>,
   // seeded from the shipped copy on first run. Returns { text, path } or { error }.
   readUserConfig: (name) => ipcRenderer.invoke('config:read', name),
-  // Legacy project/export dialogs; migrate separately behind descriptors.
+  // Project / import / export dialogs (task 4.4). Main shows the dialog and hands
+  // back opaque tokens ({ref,name}) — never a path. Only project tokens are writable.
+  pickOpenProject: () => ipcRenderer.invoke('project:pickOpen'),
+  pickSaveProject: (opts) => ipcRenderer.invoke('project:pickSave', opts),
+  writeFileRef: (ref, data) => ipcRenderer.invoke('fs:writeFileRef', ref, data),
+  pickImportAssets: (opts) => ipcRenderer.invoke('dialog:pickImport', opts),
+  saveExport: (opts, data) => ipcRenderer.invoke('export:save', opts, data),
+  // OS drag-drop: the File's path is looked up HERE (isolated preload world) and
+  // goes straight to main; the page gets back a read-only {ref,name} token.
+  refForDroppedFile: (file) => {
+    let filePath = '';
+    try { filePath = webUtils.getPathForFile(file); } catch { filePath = ''; }
+    return filePath ? ipcRenderer.invoke('fs:registerDropped', filePath) : Promise.resolve(null);
+  },
+  // Legacy path-returning dialogs — no callers; removed in task 4.9 / 6.2.
   pickOpen: (opts) => ipcRenderer.invoke('dialog:open', opts),
   pickSave: (opts) => ipcRenderer.invoke('dialog:save', opts),
   onCloseRequested: (callback) => {

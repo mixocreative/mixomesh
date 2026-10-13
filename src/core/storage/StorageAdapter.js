@@ -11,7 +11,9 @@
 //
 // Directory mounting/listing/reading, cross-session KV and the asset-ref surface
 // (task 4.2: resolveAsset / persistRef / restoreRef / deleteRef / findMoved) are
-// implemented on both impls. Project pickers migrate in 4.4 (see ADR 0001).
+// implemented on both impls. Task 4.4 routed the last direct File System Access /
+// IndexedDB call sites through here: project open/save + write, import picker,
+// export save, `hasRef`, and the `ready()` boot gate (see ADR 0001).
 //
 // Asset refs: `persistRef(ref)` returns a STABLE key (same folder/file → same key
 // after a restart); `restoreRef(key)` re-validates and returns a fresh session ref
@@ -19,7 +21,8 @@
 // ('embedded' | 'linked' | 'changed' | 'missing') — it never scans (Decision 3).
 // `findMoved` is the only hash walk and is user-invoked only.
 
-import { caps, isDesktop } from './capabilities.js';
+import { caps, isDesktop, setCapabilities, storageUnavailable } from './capabilities.js';
+import { FILE_TYPES } from '../persist/constants.js';
 import { DesktopStorageAdapter } from './DesktopStorageAdapter.js';
 import {
   ASSET_STATUS, FIND_MOVED_LIMIT, extOfName, fileHandleAtPath, normalizeSource,
@@ -46,9 +49,22 @@ import {
  * @property {(key:string)=>Promise<any|null>} restoreRef    key → re-validated session ref | null
  * @property {(key:string)=>Promise<void>} deleteRef
  * @property {(source:AssetSource, opts:FindMovedOptions)=>Promise<FindMovedResult>} findMoved
- * — Declared, routed as LEAF sites migrate (task 4.4): —
- * pickOpenProject / pickSaveProject / readProject / writeProject
- * pickImportAssets / readAsset / watchAsset / saveExport / recentProjects
+ * @property {(key:string)=>Promise<boolean>} hasRef      key still stored (no permission prompt)
+ * Boot gate + project / import / export I/O (task 4.4):
+ * @property {()=>Promise<void>} ready   rejects with `storageUnavailable(...)` when unusable
+ * @property {()=>Promise<{ref:any,name:string,file:File|Blob}|null>} pickOpenProject   null = cancelled
+ * @property {(suggestedName:string)=>Promise<{ref:any,name:string}|null>} pickSaveProject   null = cancelled
+ * @property {(ref:any, data:string|Blob|ArrayBuffer|Uint8Array)=>Promise<void>} writeFile   atomic; project refs only on desktop
+ * @property {(opts?:{multiple?:boolean})=>Promise<Array<{ref:any,name:string}>>} pickImportAssets   [] = cancelled
+ * @property {(blob:Blob, suggestedName:string, hint?:ExportHint)=>Promise<boolean>} saveExport   false = cancelled
+ * @property {(item:DataTransferItem)=>Promise<any|null>} refForDrop   call SYNCHRONOUSLY inside the drop event
+ * — Still declared only: watchAsset (caps.watchFiles). —
+ */
+
+/**
+ * @typedef {{mime?:string, ext?:string, description?:string, forceDownload?:boolean}} ExportHint
+ *   `forceDownload` (browser) skips the save picker and hands the blob to the
+ *   browser's download manager — the fallback after a picker failure.
  */
 
 /**
@@ -100,6 +116,28 @@ async function _browserReadSource(src) {
   }
   return ref.kind === 'file' ? ref.getFile() : null;
 }
+
+/** Picker call → value, or null when the user dismissed it (AbortError). */
+async function _picked(fn) {
+  try { return await fn(); }
+  catch (err) {
+    if (err?.name === 'AbortError') return null;
+    throw err;
+  }
+}
+
+function _anchorDownload(blob, suggestedName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const IDB_PROBE_MS = 5000;
 
 /**
  * Browser adapter — File System Access + IndexedDB (current behaviour). `ref` = FileSystemHandle.
@@ -165,6 +203,90 @@ export const BrowserStorageAdapter = {
 
   async deleteRef(key) { return (await _idb()).deleteHandle(key); },
 
+  async hasRef(key) {
+    if (typeof key !== 'string' || !key) return false;
+    return !!(await (await _idb()).getHandle(key));
+  },
+
+  /**
+   * Boot gate. File System Access is the Chrome/Edge requirement (AGENTS rule 5)
+   * → blocking. IndexedDB failing to open is NOT blocking: cross-session
+   * persistence (recents / autosave / remount) degrades and `caps.persistAssets`
+   * drops to false.
+   */
+  async ready() {
+    if (typeof window === 'undefined' || !('showDirectoryPicker' in window)) {
+      throw storageUnavailable('Browser not supported',
+        'MIXOMESH requires Chrome or Edge (File System Access API).');
+    }
+    if (!caps.persistAssets) return;
+    let timer;
+    try {
+      await Promise.race([
+        BrowserStorageAdapter.kvKeys(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('IndexedDB did not open')), IDB_PROBE_MS); }),
+      ]);
+    } catch (err) {
+      console.error('Browser storage (IndexedDB) unavailable — recents/autosave disabled:', err);
+      setCapabilities({ persistAssets: false });
+    } finally { clearTimeout(timer); }
+  },
+
+  async pickOpenProject() {
+    const picked = await _picked(() => window.showOpenFilePicker({ types: FILE_TYPES, multiple: false }));
+    const handle = picked?.[0];
+    if (!handle) return null;
+    return { ref: handle, name: handle.name, file: await handle.getFile() };
+  },
+
+  async pickSaveProject(suggestedName) {
+    const handle = await _picked(() => window.showSaveFilePicker({ suggestedName, types: FILE_TYPES }));
+    return handle ? { ref: handle, name: handle.name } : null;
+  },
+
+  async writeFile(ref, data) {
+    const w = await ref.createWritable();
+    try {
+      await w.write(data);
+      await w.close();
+    } catch (err) {
+      // abort() discards the swap file so a half-written file is never committed.
+      try { await w.abort?.(); } catch { /* already closed / aborted */ }
+      throw err;
+    }
+  },
+
+  async pickImportAssets(opts = {}) {
+    const handles = await _picked(() => window.showOpenFilePicker({ multiple: opts.multiple !== false }));
+    return (handles ?? []).map(handle => ({ ref: handle, name: handle.name }));
+  },
+
+  async saveExport(blob, suggestedName, hint = {}) {
+    if (hint.forceDownload || typeof window.showSaveFilePicker !== 'function') {
+      _anchorDownload(blob, suggestedName);
+      return true;
+    }
+    const mime = hint.mime || blob.type || 'application/octet-stream';
+    const ext = hint.ext || (suggestedName.split('.').pop() || '');
+    const accept = ext ? { [mime]: [`.${ext}`] } : { [mime]: [] };
+    const handle = await _picked(() => window.showSaveFilePicker({
+      suggestedName,
+      types: [{ description: hint.description || `${ext.toUpperCase()} file`, accept }],
+    }));
+    if (!handle) return false;
+    await BrowserStorageAdapter.writeFile(handle, blob);
+    return true;
+  },
+
+  // NOT async: getAsFileSystemHandle() is only valid synchronously inside the
+  // drop event, so it is called now and only its promise is returned.
+  refForDrop(item) {
+    if (typeof item?.getAsFileSystemHandle !== 'function') return Promise.resolve(null);
+    return item.getAsFileSystemHandle()
+      .then(h => (h && h.kind === 'file' ? h : null))   // dropped folders are not linked
+      .catch(() => null);
+  },
+
   async findMoved(source, opts = {}) {
     const src = normalizeSource(source);
     const folderKey = opts.refKey ?? (src?.kind === 'folder' ? src.refKey : null);
@@ -189,8 +311,9 @@ export const BrowserStorageAdapter = {
 export { ASSET_STATUS };
 
 /**
- * The active StorageAdapter for this runtime. Desktop (Node fs) is injected at boot
- * in Phase 2; `isDesktop()` gates that swap. Browser is the only impl today.
+ * The active StorageAdapter for this runtime: DesktopStorageAdapter inside the
+ * Electron shell (`window.electronAPI` present), BrowserStorageAdapter otherwise.
+ * Boot awaits `storage.ready()` before any UI uses it (src/app/main.ts).
  * @type {StorageAdapter}
  */
 export const storage = isDesktop() ? DesktopStorageAdapter : BrowserStorageAdapter;

@@ -7,6 +7,8 @@ const fsConstants = require('node:fs').constants;
 const STABLE_KEY_RE = /^(dir|file)_[0-9a-f]{32}$/;
 const DEFAULT_FIND_LIMIT = 4000;
 const MAX_FIND_LIMIT = 20000;
+// Upper bound for one renderer-initiated write (project save) — task 4.4.
+const MAX_WRITE_BYTES = 1024 * 1024 * 1024;
 
 /** In-memory store with the KvStore surface (tests / no persistence configured). */
 function createMemoryStore() {
@@ -24,18 +26,27 @@ function createMemoryStore() {
  * paths remain inside this closure and the main-process ref store.
  *
  * deps (all optional, injectable for tests): randomUUID, readdir, readFile,
- * stat, access, platform, store ({get,set,delete} — KvStore in production).
+ * writeFile, rename, unlink, stat, access, platform, store ({get,set,delete} —
+ * KvStore in production).
+ *
+ * WRITABLE tokens (task 4.4): only files the MAIN process registered with
+ * `{writable:true}` — the project open/save dialogs, or a restored key that was
+ * persisted from such a token — accept `writeFile`. Asset files reached through
+ * a mount listing / import dialog are read-only to the renderer.
  */
 function createOpaqueFileRegistry(deps = {}) {
   const makeId = deps.randomUUID ?? randomUUID;
   const readdir = deps.readdir ?? fs.readdir;
   const readFile = deps.readFile ?? fs.readFile;
+  const writeFileFs = deps.writeFile ?? fs.writeFile;
+  const rename = deps.rename ?? fs.rename;
+  const unlink = deps.unlink ?? fs.unlink;
   const stat = deps.stat ?? fs.stat;
   const access = deps.access ?? fs.access;
   const platform = deps.platform ?? process.platform;
   const store = deps.store ?? createMemoryStore();
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
-  const refs = new Map();       // token → {kind, absolutePath, name}
+  const refs = new Map();       // token → {kind, absolutePath, name, writable}
   const tokenByPath = new Map(); // `${kind}\0${normalisedPath}` → token (bounded re-registration)
 
   const normalise = absolutePath => {
@@ -43,12 +54,16 @@ function createOpaqueFileRegistry(deps = {}) {
     return platform === 'win32' ? resolved.toLowerCase() : resolved;
   };
 
-  function register(kind, absolutePath, name, prefix = 'ref') {
+  function register(kind, absolutePath, name, prefix = 'ref', writable = false) {
     const identity = `${kind}\0${normalise(absolutePath)}`;
     const existing = tokenByPath.get(identity);
-    if (existing && refs.has(existing)) return existing;
+    if (existing && refs.has(existing)) {
+      // The user just chose this exact path in a project dialog → it may be written.
+      if (writable) refs.get(existing).writable = true;
+      return existing;
+    }
     const ref = `${prefix}_${makeId()}`;
-    refs.set(ref, { kind, absolutePath, name });
+    refs.set(ref, { kind, absolutePath, name, writable: !!writable });
     tokenByPath.set(identity, ref);
     return ref;
   }
@@ -106,9 +121,37 @@ function createOpaqueFileRegistry(deps = {}) {
       return { ref: register('directory', absolutePath, name, 'mount'), name };
     },
 
-    /** Register one file the MAIN process chose (dialog / drop) → opaque token. */
-    registerFile(absolutePath, name = pathApi.basename(absolutePath)) {
-      return { ref: register('file', absolutePath, name, 'ref'), name };
+    /**
+     * Register one file the MAIN process chose (dialog / drop) → opaque token.
+     * `writable` only for project open/save dialogs (task 4.4).
+     */
+    registerFile(absolutePath, name = pathApi.basename(absolutePath), opts = {}) {
+      return { ref: register('file', absolutePath, name, 'ref', !!opts.writable), name };
+    },
+
+    /**
+     * Atomically replace a WRITABLE file token's bytes: temp file in the same
+     * folder, then rename over the target (a crash never leaves a half file).
+     * Unknown / read-only tokens and oversize payloads are refused.
+     */
+    async writeFile(ref, data) {
+      const file = requireRef(ref, 'file');
+      if (!file.writable) throw new Error('This file is read-only to the app');
+      const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8')
+        : data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data))
+          : ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+            : null;
+      if (!bytes) throw new TypeError('writeFile expects text or bytes');
+      if (bytes.byteLength > MAX_WRITE_BYTES) throw new Error('File is too large to write');
+      const tmp = `${file.absolutePath}.${makeId()}.tmp`;
+      try {
+        await writeFileFs(tmp, bytes);
+        await rename(tmp, file.absolutePath);
+      } catch (err) {
+        try { await unlink(tmp); } catch { /* temp never created / already moved */ }
+        throw err;
+      }
+      return true;
     },
 
     async listDirectory(ref, parentPath = '') {
@@ -141,7 +184,10 @@ function createOpaqueFileRegistry(deps = {}) {
       const entry = requireRef(ref);
       const digest = createHash('sha256').update(normalise(entry.absolutePath)).digest('hex').slice(0, 32);
       const key = `${entry.kind === 'directory' ? 'dir' : 'file'}_${digest}`;
-      await store.set(key, { kind: entry.kind, absolutePath: entry.absolutePath, name: entry.name });
+      await store.set(key, {
+        kind: entry.kind, absolutePath: entry.absolutePath, name: entry.name,
+        ...(entry.writable ? { writable: true } : {}),
+      });
       return key;
     },
 
@@ -149,7 +195,8 @@ function createOpaqueFileRegistry(deps = {}) {
     async restoreRef(key) {
       const rec = await storedRecord(key);
       if (!rec) return null;
-      return register(rec.kind, rec.absolutePath, rec.name, rec.kind === 'directory' ? 'mount' : 'ref');
+      return register(rec.kind, rec.absolutePath, rec.name, rec.kind === 'directory' ? 'mount' : 'ref',
+        rec.kind === 'file' && rec.writable === true);
     },
 
     async deleteRef(key) {
@@ -217,4 +264,4 @@ function createOpaqueFileRegistry(deps = {}) {
   };
 }
 
-module.exports = { createOpaqueFileRegistry, createMemoryStore };
+module.exports = { createOpaqueFileRegistry, createMemoryStore, MAX_WRITE_BYTES };

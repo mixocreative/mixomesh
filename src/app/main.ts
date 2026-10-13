@@ -30,6 +30,7 @@ import { CursorPanel } from '../ui/CursorPanel.js';
 import { CopyPaste } from '../ui/CopyPaste.js';
 import { ViewportEmptyState } from '../ui/ViewportEmptyState.js';
 import * as i18n from '../i18n/index.js';
+import { storage } from '../core/storage/StorageAdapter.js';
 
 type TransformCommit = {
   prev: unknown;
@@ -39,12 +40,24 @@ type TransformCommit = {
 
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
 
-if (!('showDirectoryPicker' in window)) {
-  renderBlockingMessage(
-    'Browser not supported',
-    'MIXOMESH requires Chrome or Edge (File System Access API).',
-  );
-  throw new Error('Unsupported browser - Chrome/Edge required');
+// Boot gate (task 4.4): nothing touches storage — and no UI initialises —
+// until the active adapter says it is usable. Browser: Chrome/Edge File System
+// Access (AGENTS rule 5) + IndexedDB probe (non-blocking); desktop: the preload
+// bridge is complete and main answers the `storage:ready` handshake. Failure =
+// one blocking screen naming the problem, never a half-booted app.
+async function gateStorage(): Promise<boolean> {
+  try {
+    await storage.ready();
+    return true;
+  } catch (err) {
+    const e = err as { title?: string; message?: string } | null;
+    console.error('Storage unavailable:', err);
+    renderBlockingMessage(
+      e?.title || 'Storage unavailable',
+      e?.message || 'MIXOMESH could not initialise its file storage.',
+    );
+    return false;
+  }
 }
 
 async function bootstrap() {
@@ -165,7 +178,7 @@ function renderBlockingMessage(title: string, message: string) {
   document.body.appendChild(wrap);
 }
 
-bootstrap().catch((err: unknown) => {
+gateStorage().then(ok => (ok ? bootstrap() : undefined)).catch((err: unknown) => {
   console.error('Bootstrap failed:', err);
   const viewport = document.getElementById('viewport');
   if (!viewport) return;
