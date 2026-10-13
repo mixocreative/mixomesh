@@ -164,6 +164,7 @@ docs/design/stitch-capture.md ← Stitch capture recipe (prod build on :5180, fi
 scripts/
   install-deps.mjs         ← dependency bootstrap with local cache/temp paths
   ui-screenshot.mjs        ← headless 4-workspace capture harness (PROBE=1 dumps geometry)
+  i18n-check.mjs           ← validates locale key coverage (en vs ja/zh-Hant)
 public/
   env/                     ← HDRI presets: studio/neutral/outdoor .env (prefiltered cube textures)
   vendor/
@@ -184,6 +185,7 @@ public/
 src/
   app/boot.ts              ← Babylon npm namespace bridge
   app/main.ts              ← app bootstrap + dependency wiring
+  app/entry.js             ← pre-boot (no Babylon) check for IndexedDB / showDirectoryPicker
   import/                  ← typed import pipeline contracts
   export/                  ← typed export pipeline contracts + export planner
   config/                  ← editable data, no code change (JSON import attrs)
@@ -218,6 +220,10 @@ src/
       ParentCommands.js    ← Reparent/Unparent/CreateGroup/Group/Ungroup
       ShaderCommands.js    ← ShaderCreate/Assign/Update/Duplicate/Delete, UVOverride, ColorApply
       ScaleCommands.js     ← RescaleWorld + SourceUnit
+      AssetCommands.js     ← RelinkAssetCommand (undoable file refresh/find-moved)
+      BooleanCommands.js   ← CombineCommand (kitbash combine with CSG2 + embed codec)
+      PlacementCommands.js ← AlignCommand + bed-snap + drop-stagger (placement verbs)
+      SliceConnectorCommands.js ← geometry planning commands for slice + connector preview
     InputManager.js
     SceneManager.js        ← engine/lighting/overlays orchestrator (camera/pivot split into scene/)
     WorkerImport.js        ← main side of worker OBJ parse: rebuild meshes from transferables
@@ -225,7 +231,12 @@ src/
     workers/
       ObjParse.worker.js   ← Babylon OBJ/MTL loader in a NullEngine worker (no UI freeze)
       MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
+      Base64.worker.js     ← base64 codec worker for large asset round-trip (load/save)
+      base64Codec.js       ← shared b64 codec (main + worker)
     Selection.js           ← selection set + active id + pivot mode (§4b)
+    LogicalObjects.js      ← multi-part object grouping by logicalObjectId + print-unit collection
+    UnloadGuard.js         ← beforeunload hook + async import flight detection (F20)
+    CursorTools.js         ← 3D cursor manipulation: pick, move, selection↔cursor swap (undoable via command)
     BoxSelect.js           ← marquee/rubber-band select: pure screen-rect hit-test + DOM overlay (§7 Mouse)
     Hover.js               ← hover highlight driver: ≤1 pick/frame, click-depth target, budget gate, cursor (§6 Mouse, §7 outline)
     SnapUnits.js           ← snap steps in mm/deg/× → BU/rad, gizmo snap distances, arrow-nudge step + direction (§6)
@@ -233,9 +244,12 @@ src/
     AssetLoader.js         ← mesh-asset façade + release/remove/reset lifecycle (impl in assets/)
     import/
       ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
+      ImportHierarchy.js   ← group node extraction from glTF empty parents + multi-primitive stems
+      ImportLimits.js      ← per-file size/triangle budget gates (auto-skip validation on huge meshes)
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     vendorUrl.js           ← the ONE public/vendor/ URL resolver (document.baseURI-relative)
+    Base64Worker.js        ← entrypoint for Base64.worker.js (encoder/decoder for large assets)
     MeshValidator.js       ← what is WRONG with a mesh: topology via worker (inline fallback)
                              + group-union + result cache. Repair orchestration lives in
                              repair/RepairSession.js (2026-09-18, review I9) and is re-exported
@@ -253,8 +267,17 @@ src/
       Weld.js              ← the ONE vertex weld (weldMesh): merges only vertices sharing BOTH
                              position and UV, so the unconditional `weld` export prep step cannot
                              tear a textured part's seams (review I6 + C1)
+      CapLoops.js          ← reusable hole-cap algorithm for repair + export preview
+      GroupRepair.js       ← multi-part object repair (walks parts, reduces per-part result to single summary)
     BooleanService.js      ← interactive Boolean (kitbash combine): eligibility gating + CSG2 compute — §Boolean + ADR 0002
     SliceConnectorService.js ← viewport Slice & Connector geometry planning — §Slice Connector
+    hierarchy/
+      HierarchyIntegrity.js ← cycle detection + parent change validation (safe reparenting)
+    storage/
+      StorageAdapter.js    ← unified KV + mount/list/read interface for web (IDB) + desktop (Electron main)
+      DesktopStorageAdapter.cjs ← Electron-side file/mount implementation (main process via IPC)
+      capabilities.js      ← platform capability detection (persistAssets / relinkByPath / writeFiles / watchFiles)
+      AssetSource.js       ← asset source-descriptor builder (file handle / mount ref / embedded URI)
     GeometryCodec.js       ← compact .mxvd geometry codec for baked Boolean results (synthetic embedded asset)
     placement/AlignMath.js ← pure align-delta math for placement verbs — see §Placement + ADR 0003
     placement/BedPlacement.js ← pure drop/centre/face-normal quaternion math
@@ -265,13 +288,15 @@ src/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
       ProjectIntegrity.js  ← portable .mixo save gate: required asset refs + missing-byte error shape
       ProjectSerializer.js ← buildDocument + asset/object/group serialise, b64 codecs, transform (de)compose
-      AssetResolver.js     ← tiered byte resolve: live path → file handle → embedded → null (hash-scan only user-invoked; task 4.3)
+      ProjectValidator.js  ← post-load state integrity check (no orphan refs, valid ids)
       ProjectLoader.js     ← loadProject pipeline: migrate, world reset, ghost meshes, groups, relinkAsset
+      AssetResolver.js     ← tiered byte resolve: live path → file handle → embedded → null (hash-scan only user-invoked; task 4.3)
       RecentProjects.js    ← recent-projects list (storage adapter kv key `recent_projects`) + save-time viewport thumbnail
       Autosave.js          ← interval autosave (skipEmbed A9) + boot crash recovery, keyed by project.id
       AutosaveKeys.js      ← autosave key layout + deleteAutosave (snapshot + per-hash images)
       ProjectId.js         ← mintProjectId() — stable project identity (0.11)
       DirtyTracker.js      ← position-based + sticky dirty, isDirty/clearDirty, dirty-confirm modal
+      LoadGate.js          ← pre-load async gate (import flight check, unload guard, browser perms)
     PrintManager.js        ← thin façade (~50 lines; size budget in §file-size-budget) — re-exports the API surface; named exports + namespace come from one frozen API object so they cannot drift
     print/
       ExportContext.js     ← THE ONE typedef + builder; owns BU_TO_MM; previewExportContext + getExportedDimensions + getExportReference live here
@@ -280,6 +305,7 @@ src/
       PrintReadiness.js    ← stable format-independent readiness issues + live export-bounds projection
       ObjWriter.js         ← OBJ + MTL serializer + Mimaki solid-PNG synthesis (format-specific code, NOT in the orchestrator)
       ThreeMFWriter.js     ← 3MF colorgroup + Materials Extension package writers
+      ThreeMFBambu.js      ← Bambu 3MF with Production ext + per-object extruder (split-by-material delegate)
       PrintNaming.js       ← filename helpers (take ctx; no getState)
       PrintPrep.js         ← reusable clone prep steps (THROW on missing ctx.pivot/ratioFactor/unitFactor)
       PrintSpace.js        ← THE axis + winding seam (Babylon LH Y-up ↔ print RH Z-up); used by 3MF/STL writers + 3MF loader
@@ -289,18 +315,23 @@ src/
       PrintFormats.js      ← format registry: labels, prep order, serializers
       PrintPackaging.js    ← zip/blob packaging + download dispatch
       PrinterProfiles.js   ← current/explicit printer profile resolution + bed helpers
+      MaterialPresets.js   ← preset material defs by printer (not yet used; future color/filament picker)
       ExportPlanner.js     ← pure filename math (consumed by PrintNaming)
       ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared); texture file names unique case-INsensitively (first keeps casing, later get _N)
       Download.js          ← save picker + anchor fallback
       PrintCost.js         ← per-unit volume (never Boolean-unioned) × density × price +
                              support premium; overlap = AABB flag only, never subtracted —
                              see §12 Cost quote
-    scale/                 ← ScaleMath.js runtime + ScaleTypes.ts (type-only)
+    scale/
+      ScaleMath.js         ← per-object ratio, effective scale, print-size target math
+      ScaleTypes.ts        ← type-only: SourceUnit, AuthoredScale, SceneScale, PrintScale shapes
     shaders/
-      ShaderSignature.js  ← exact supported appearance identity + duplicate candidates
+      ShaderSignature.js   ← exact supported appearance identity + duplicate candidates
+      ColorSpace.js        ← sRGB/linear texture meta reading (not in-shader — authoring metadata)
     assets/
       AssetTypes.js        ← supported extensions + extension parser
       AssetIndex.js        ← immutable mounted-file index + scoped query/refresh fallback
+      DisplayNames.js      ← asset → user-visible name (escape, dedupe, locales)
       TextureReadback.js   ← shared GPU readback: Promise readPixels, float/RGB, Y-flip
       TextureAssets.js     ← texture-asset registry: user/imported, §10b dedupe + rebind, recap-all
       TextureImageStore.js ← SHA-256 → one immutable canonical encoded image blob
@@ -319,6 +350,7 @@ src/
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
       SelectionOutline.js  ← custom mask-RTT selection silhouette + post-process (GLSL + WGSL twin, picked by engine)
+      Cursor3D.js          ← 3D cursor visual: ball + billboard crosshair + ring + snap preview
       BedGrid.js           ← printer-bed floor, grid styling, FRONT tag, bed preview
       CameraRig.js         ← camera creation, CAD pointer nav, presets, framing, follow, optics
       PivotSession.js      ← GizmoManager + selectionPivot parenting + drag→TransformCommand
@@ -328,17 +360,31 @@ src/
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
+      TriangleCount.js     ← scene budget tracking: cap + color-coded budget bar
     RenderOutput.js        ← Scene ▸ Rendering façade over render/* (frozen export names)
     render/
       RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
       FrameCapture.js      ← RTT pipeline: capturePng (WebGL+WebGPU), captureFrameRGBA, offline frame renderer, furniture hide
+      RenderLock.js        ← concurrent render guard (export disables live preview, etc.)
       SweepRig.js          ← rigid camera/lights/env turntable rotation (shared by preview + recorder)
       TurntablePreview.js  ← live viewport sweep (Esc / tab-hide cancel), owns preview handle
       VideoRecorder.js     ← offline WebCodecs encode → mp4 (mp4-muxer lazy), owns recording flag
     ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
+    SnapUnits.js           ← snap steps in mm/deg/× → BU/rad, gizmo snap distances, arrow-nudge step + direction (§6)
+    Hover.js               ← hover highlight driver: ≤1 pick/frame, click-depth target, budget gate, cursor (§6 Mouse, §7 outline)
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
     hash.js                ← sha256Hex — shared §10b identity hash (AssetLoader + persistence)
     Icons.js               ← Lucide wrapper: returns SVG strings by name
+    GeometryCodec.js       ← compact .mxvd codec for baked Boolean results (synthetic embedded asset)
+  i18n/
+    index.js               ← locale API (t, applyTranslations, LOCALE_CHANGED event)
+    detect.js              ← browser language detection (fallback to en)
+    interpolate.js         ← simple message interpolation (no named params)
+    plural.js              ← plural/singular form selector
+    locales/
+      en.json              ← English UI text (canonical source)
+      ja.json              ← Japanese localization
+      zh-Hant.json         ← Traditional Chinese localization
   ui/
     lib/                     ← shared panel-wiring helpers (2026-07-17 restructure)
       fields.js              ← escEnter / wireNumbers / wireSelects / wireToggles / reflectToggle
@@ -376,8 +422,20 @@ src/
     Workspace.js           ← workspace presets (PART 13b): pill, hotkeys, scroll memory
     NumberScrub.js         ← wheel-scrub on number inputs (delegated, panel never scrolls)
     NavCube.js             ← top-left orientation widget
+    CursorPanel.js         ← N-key 3D cursor position/snap panel (Shift+N)
+    CopyPaste.js           ← Ctrl+C/V modal: aspect chooser (Location/Rotation/Scale/Loc+Rot/All)
+    LocaleSwitcher.js      ← locale picker (header button, client-side only)
+    FindMoved.js           ← file-not-found finder UI (relink modal)
+electron/                  ← Electron app shell (Windows + Linux desktop build, macOS deferred)
+  main.cjs                 ← Electron main process: window lifecycle, IPC bridges, protocol handlers
+  preload.cjs              ← Electron preload script: IPC API surface for renderer context
+  WindowSecurity.cjs       ← sandbox + CSP + BrowserWindow security config
+  DesktopStorageAdapter.cjs ← file/directory handle bridge from main → renderer via IPC
+  KvStore.cjs              ← key-value store for desktop (file-based, not IDB)
+  OpaqueFileRegistry.cjs   ← file handle persistence layer (opaque tokens for renderer)
 tests/                     ← headless harness — Node-native, no build (§14b)
   register-hooks.mjs       ← `node:module.register` entry; runner uses --import
+  cdp-harness.mjs          ← Chrome DevTools Protocol CDP launch + teardown (shared by all browser smokes)
   browser-smoke.mjs        ← Vite-backed local Chrome/Edge CDP smoke test; no package deps.
                              Beyond shell/UI checks it functionally pins the rendering stack:
                              transparent (alpha 0) + opaque (alpha 255) PNG capture, the
@@ -390,43 +448,102 @@ tests/                     ← headless harness — Node-native, no build (§14b
   browser-video-check.mjs  ← HEADED full-size turntable check (`test:video`, manual)
   browser-webgpu-check.mjs ← WebGPU backend + WGSL outline-shader check (`test:webgpu`;
                              headless SKIPs — no adapter; `WEBGPU_HEADFUL=1` for real GPU)
+  browser-export-smoke.mjs ← CDP smoke: export pipeline round-trip (3MF/OBJ/STL byte-identical checks)
+  browser-repair-smoke.mjs ← CDP smoke: import + repair + export watertight validation
+  browser-group-repair-smoke.mjs ← CDP smoke: multi-part group repair edge cases
+  electron-smoke.mjs       ← Electron app smoke (window open, project load, headless)
+  electron-security.test.mjs ← CSP + sandbox policy validation
   webcodecs-probe.mjs      ← headless VideoEncoder sanity probe (diagnostic, not in npm scripts)
+  scan-probe.mjs           ← empirical orientation verification (trimesh / PrusaSlicer CLI compare)
   render-output.test.mjs   ← RenderMath: easing/format/frame-fit/filename contracts
   hooks.mjs                ← resolver hook: 'jszip' → stub, './idb.js' → stub
   jszip-stub.mjs           ← minimal JSZip for export tests
   idb-stub.mjs             ← in-memory mirror of src/core/idb.js
   env.mjs                  ← installEnv(): Babylon shim, atob/btoa, DOMParser
   export.test.mjs          ← PrintManager export pipeline
+  export-context.test.mjs  ← ExportContext builder + freezing contracts
   export-planner.test.mjs  ← filename/profile/scale planner
-  hierarchy.test.mjs       ← hierarchy parent commands + cycle rejection
-  validator.test.mjs       ← MeshValidator severity + position-welded manifold
-  validator-group.test.mjs ← logicalObjectId union topology checks
-  persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
-  printer-profile.test.mjs ← default/fallback printer profile behavior
-  scale.test.mjs           ← ScaleMath contracts + compatibility helpers
-  split-on-import.test.mjs ← MultiMaterial split invariant
-  state-shape.test.mjs     ← default state and migration invariants
+  export-gate.test.mjs     ← exportGate button set/order/actions; Auto-fix absent when nothing is fixable
+  print-readiness.test.mjs ← readiness issue detection + live export-bounds
+  print-space.test.mjs     ← axis + winding seam contracts (LH↔RH, Y-up↔Z-up)
+  print-packaging.test.mjs ← zip/blob packaging + filename dedup
+  print-cost.test.mjs      ← PrintCost volume/overlap/quote contracts
+  threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader
   threemf-components.test.mjs ← 3MF component hierarchy import/export
-  threemf-materials-ext.test.mjs ← textured 3MF Materials Extension writer/loader contracts
-  mesh-repair.test.mjs    ← MeshRepair engine wrapper contracts (fake-engine __test seam):
-                             seam-UV survival through a merging AND a hole-filling repair (C1),
-                             the conditional winding re-tag (I1), malformed-output rejection (F2),
-                             the diagnose cap (I2), engine defaults (M7), the timeout (F4)
-  weld.test.mjs           ← the shared weldMesh: shared edges merge, (position, uv) SEAMS never do
-  export-gate.test.mjs    ← exportGate button set/order/actions; Auto-fix absent when nothing
-                             is fixable (I12 / CIA F7)
-  print-cost.test.mjs     ← PrintCost volume/overlap/quote contracts, notValidated + touching-box
-                             epsilon (CIA F5, M6)
-  mesh-stats.test.mjs     ← MeshStats HUD cache/format contracts
-  snap-units.test.mjs     ← mm snap steps → BU, gizmo snap distances, arrow-nudge step/direction,
-                             drop stagger + Array-dialog parsing (overhaul 5.6)
-  box-select.test.mjs     ← marquee hit-test + hover target/meshes/cursor + outline mask roles
-  triangle-budget.test.mjs ← caps.triangleBudget import-warning + gating contracts
-  browser-repair-smoke.mjs ← real-Chrome CDP smoke (`test:repair`): open-tetra import →
-                             validator caches a `holes` result → MeshValidator.repairObject
-                             fills it → real 3MF export → independent signed-volume +
-                             edge-used-exactly-twice watertight check → HUD + cost-block
-                             live-number assertions; numbers recorded in §9
+  threemf-loader-materials.test.mjs ← 3MF Materials Ext loader round-trip
+  threemf-bambu.test.mjs   ← Bambu flavour 3MF with Production ext
+  hierarchy.test.mjs       ← hierarchy parent commands + cycle rejection
+  hierarchy-integrity.test.mjs ← cycle detection + parent change validation
+  parent-commands.test.mjs ← Reparent/Ungroup/Duplicate/Delete/Group
+  transform-commands.test.mjs ← Transform/Scale/Rotation command contracts
+  safety-commands.test.mjs ← safe Undo/Redo/History on malformed state
+  history-pivot.test.mjs   ← pivot mode persistence through undo/redo
+  selection-scope.test.mjs ← click-depth scope navigation (click/double-click/Esc)
+  selection-groups.test.mjs ← group selection behavior
+  logical-objects.test.mjs ← multi-part object grouping by logicalObjectId
+  validator.test.mjs       ← MeshValidator severity + position-welded manifold
+  validator-group.test.mjs ← logicalObjectId union topology checks (welded seams)
+  validation-cache.test.mjs ← result cache + repaint gate + severity filtering
+  split-on-import.test.mjs ← MultiMaterial split invariant
+  split-join.test.mjs      ← Separate by material + Merge into one object commands
+  mesh-repair.test.mjs     ← MeshRepair engine wrapper contracts (fake-engine __test)
+  weld.test.mjs            ← the shared weldMesh: shared edges merge, (position, uv) SEAMS never do
+  persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
+  persistence-open.test.mjs ← project open + migrate + load pipeline
+  persistence-saveas.test.mjs ← save / saveAs / newProject workflows
+  persistence-load-guards.test.mjs ← async import flight detection (LoadGate)
+  persistence-abort.test.mjs ← write abort + recovery on browser perms revoked
+  portable-project.test.mjs ← .mixo portable sealing (no asset paths)
+  project-validator.test.mjs ← post-load state integrity checks
+  printer-profile.test.mjs ← profile resolution + default application
+  scale.test.mjs           ← ScaleMath contracts + compatibility helpers
+  per-object-ratio.test.mjs ← per-object ratio + effective scale + target printing
+  state-shape.test.mjs     ← default state and migration invariants
+  storage-adapter.test.mjs ← unified KV/mount interface for web + desktop
+  adapter-routing.test.mjs ← FSA/IDB routing through adapter
+  kv-store.test.mjs        ← desktop KV store (Electron main)
+  opaque-file-registry.test.mjs ← file handle token persistence
+  capabilities.test.mjs    ← platform capability detection
+  asset-index.test.mjs     ← mounted-file index + query/refresh
+  asset-resolve.test.mjs   ← 5-tier asset resolve (live/file-handle/hash/embedded/ghost)
+  asset-resolver-unit.test.mjs ← hash scan + tier priority
+  display-names.test.mjs   ← asset name dedup + escaping
+  library-import.test.mjs  ← GLB library mode (library=1 marker)
+  import-metadata.test.mjs ← glTF extras reader (ratio, library mode)
+  import-normalizer.test.mjs ← units/ratio bake into vertices
+  import-limits.test.mjs   ← size/triangle budget gates
+  geometry-codec.test.mjs  ← .mxvd codec (baked Boolean embed)
+  boolean-service.test.mjs ← CSG2 eligibility + combine safety
+  bed-fit.test.mjs         ← positive-XYZ bounds/overflow check
+  bed-placement.test.mjs   ← drop/centre/face-normal snap math
+  align-math.test.mjs      ← placement verb math
+  slice-connector-service.test.mjs ← cut plane + connector geometry
+  color-space.test.mjs     ← sRGB/linear metadata reading
+  shader-identity.test.mjs ← appearance identity + duplicate detection
+  shader-live-update.test.mjs ← live material edits + undo
+  texture-identity.test.mjs ← texture dedupe + rebind
+  texture-image-identity.test.mjs ← SHA-256 canonical store
+  texture-readback.test.mjs ← GPU readback (float/RGB/Y-flip)
+  texture-cap.test.mjs     ← viewport cap + export reads source
+  texture-source.test.mjs  ← full-res export-PNG per assetId
+  render-safe.test.mjs     ← HTML escaping + image data URLs
+  render-math.test.mjs     ← turntable easing/format/frame-fit
+  mesh-stats.test.mjs      ← HUD cache/format (tris/mm/watertight)
+  box-select.test.mjs      ← marquee hit-test + hover target/cursor
+  snap-units.test.mjs      ← mm snap steps + nudge directions
+  modal-queue.test.mjs     ← non-blocking MODAL_OPEN queueing (5.8)
+  progress-overlay.test.mjs ← blocking overlay + Cancel + modal priority
+  unload-guard.test.mjs    ← beforeunload hook + async import flight
+  dirty-tracking.test.mjs  ← position-based + sticky dirty
+  settings-store.test.mjs  ← per-user settings persistence
+  workspace.test.mjs       ← workspace presets + panel collapse
+  i18n.test.mjs            ← i18n API + locale detection
+  i18n-detect.test.mjs     ← browser language detection
+  i18n-plural.test.mjs     ← plural/singular form selector
+  pivot-session.test.mjs   ← GizmoManager + pivot parenting
+  triangle-budget.test.mjs ← caps.triangleBudget import gate
+  hygiene.test.mjs         ← vendor file provenance + no CDN literals
+  worker-import.test.mjs   ← ObjParse worker + mesh rebuild
   fixtures/
     make-textured-quad.mjs ← generates textured-quad.glb (2×2 PNG baseColor)
     make-open-tetra.mjs    ← generates open-tetra.glb: 4-vertex tetrahedron with 3 of 4

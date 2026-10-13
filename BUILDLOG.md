@@ -86,3 +86,46 @@ entries go at the bottom of the relevant section.
 - **Print/export structural restructure (2026-06-18):** the per-object-ratio AS-BUILT introduced 7 review bugs — 1 🔴 namespace miss (`PrintManager.getExportReference` undefined → Scale-tab TypeError) and 6 🟡 (three competing export-factor sources of truth, mutable module global `_targetOverride` coupling target loop to filename helpers, typeless ctx grab-bag with silent fallback chains, 200 lines of OBJ-specific code wedged into the format-agnostic orchestrator, PrintPanel reaching across three layers, untyped options bag silently dropping fields). Spec: `docs/superpowers/specs/2026-06-18-print-export-restructure-design.md`. Two commits: (a) **P0 hotfix** (`40e7084`) adds `getExportReference` to the `PrintManager` namespace object so the Scale tab stops crashing; (b) **structural refactor** (`64f9a38`) closes the remaining 6 by construction — new `src/core/print/ExportContext.js` (the ONE typedef + builder + preview entry + getExportedDimensions; owns `BU_TO_MM`; `Object.freeze`'d shallow so scalar fields can't drift mid-pass; csgReady is a build-time INPUT so frozen-ness holds); `PrintScale.js` renamed to `PrintNaming.js` and shrunk to just `exportBaseName`/`perMeshBaseName` (each takes a ctx; mutable `_targetOverride`, dead `exportFactor`/`scaleSummary`/`getExportedDimensions`/`resolveExportTargets` deleted; a no-caller `ratioSuffix` accessor was also carried over from PrintScale then dropped 2026-06-19); new `PrintPipeline.js` owns `_runExport`/`_runExportForTarget`/CSG/weld/validate (CSG2 init awaited BEFORE buildExportContext so ctx.csgReady is build-time truth, never reassigned mid-flight); new `ObjWriter.js` takes the 200 lines of OBJ-specific serialiser + MTL + solid-PNG out of the orchestrator; `PrintPrep.flattenWorld` THROWS on missing pivot/ratioFactor/unitFactor (no more silent world-origin fallback); `PrintManager.js` shrinks from 682 to 56 lines as a façade where named exports and the namespace come from one frozen `API` object so they cannot drift again; `PrintPanel.js` calls `previewExportContext()` ONCE and reads factor/refRatio/targetRatio/refUnit from the same object the pipeline will use (its `computePrintExportScale` cross-layer reach is gone). New `tests/export-context.test.mjs` (14 cases) pins façade parity, freeze + factor math, mutable list-field carve-out, PrintPrep strict-field throws. typecheck + 86 headless + browser export smoke all green.
 - **Progress overlay keyboard block fix (2026-06-19):** review found the full-screen export overlay only blocked pointer events reliably. Its `keydown` listener was attached to the overlay root, but keyboard events target the focused element behind the overlay and bubble through `document`, so viewport/global shortcuts could still mutate selection/transforms during export if focus stayed on the canvas or an export button. `ProgressOverlay` now installs a visibility-gated document capture blocker for `keydown`/`keyup`/`keypress` while preserving the root pointer/context-menu blockers. New `tests/progress-overlay.test.mjs` proves background keydown is prevented while visible and released after `hide()`. Focused regression passed.
 - **Storage-adapter direction — audit + ADR + Phase 1a (2026-06-17):** kicked off making MIXOMESH run as BOTH a Web build and a Windows Electron desktop app from one codebase (macOS deferred until Web+Windows are production-level). Two token-economical haiku subagents audited in parallel: (A) storage/persistence code coupling — confirmed core seams (ImportNormalizer, ScaleMath, print/ExportContext, print/PrintPipeline) are runtime-agnostic, classified LEAF modules (idb.js, persist/*, assets/DirMounts+TextureAssets, print/Download, PersistenceManager doc I/O) vs LEAKED (assets/AssetImport, assets/ObjSiblings, ui/AssetPanel scan, ui/ViewportDrop); (B) UI filesystem controls → capability-gating map. Synthesis → **ADR 0001** (`docs/adr/0001-storage-adapter-web-electron.md`): a DOMAIN-level `StorageAdapter` with OPAQUE refs — rejected the subagent's raw File-System-Access-primitive surface because it leaks the browser handle model into the Node/Electron impl; instead the interface speaks the app's domain (open/save project, import/read/resolve asset, mount, watch), `ref` is an opaque token (browser=handle, desktop=path, never inspected, never crosses runtimes), and `.mixo` carries a serialisable descriptor `{path?,contentHash,handleKey?}` re-resolved via real-path → hash-scan → embedded-bytes tiers. Electron (not Tauri) for engine parity with the Chrome/CDP test target. **Phase 1a shipped:** `src/core/storage/capabilities.js` (pure `detectCapabilities` + live `caps` singleton + `setCapabilities` override hook for Electron boot/tests; web feature-detects FSA+IDB, desktop injects caps verbatim) + `tests/capabilities.test.mjs` (5 asserts); first UI gate — AssetPanel Mount button hides behind `caps.mountDirectory` (no-op on Chrome, the pattern for the rest). Also de-flaked the `dupRT` browser-smoke (settle the source import-bounce BEFORE cloning — cloneMeshAsNewObject copies live node scaling, so a mid-bounce source handed the copy a transient scale that settle locked in) → 3× green, keeping the green-gate reliable for handoff. Docs: ADR 0001, AGENTS.md + Blueprint.md pointers, memory `storage_adapter_direction.md`, and **`HANDOFF.md`** — the cutoff-safe resume contract (locked decisions, captured audit results, phased checklist, exact Phase 1b next action, watch-outs). Branch `feat/storage-adapter` (8 commits, `master` untouched). Green: typecheck · 102 headless · build · browser smoke ×3 · export. Phase 1b next = `StorageAdapter.js` interface + BrowserStorageAdapter delegating to today's code + route the LEAF sites + gate remaining ProjectMenu controls.
+
+### 2026-10-14 — Overhaul execution (plan docs/plans/2026-10-14-mixomesh-overhaul.md)
+
+Ledger: `docs/handoff/overhaul-execution.md`. Every ungated task is done; each
+commit verified with typecheck + lint + unit tests (+ i18n) and the browser
+smokes, latest full run: 286 unit files, browser/export/repair/group smokes,
+build and Electron smoke (incl. MIXO_SMOKE=save + security probe) green.
+
+- **Phase 0:** terminology (0.1) + Material strings (0.12); write hardening
+  (0.2); input hygiene (0.3, Ctrl+I import, F2/Home/L); Electron unload/crash
+  guard (0.4); load-path integrity (0.5); texture-capture failure (0.8);
+  status-bar Undo/Redo (0.9); case-insensitive texture names (0.10); autosave
+  keyed by project.id + boot recovery (0.11); DESIGN.md + Stitch recipe (0.13).
+- **Phase 1:** printers.json v2 + AGENTS rule 6 (1.1); readiness hints (1.4);
+  3MF parts/metadata/thumbnail/alpha (1.5); PLY + WRL (1.6); OBJ via PrintSpace
+  per-printer axis (1.7); export gate in the pipeline (1.8); colour space
+  (1.9); dead code (1.10); Bambu/Orca 3MF (1.11); Blueprint pass (1.12);
+  rescale about own origin (1.14); explicit export reference (1.15); effective
+  ratio (1.16); typed print sizes (1.17); per-size cost lines (1.18).
+- **Phase 2 (complete):** group selection (2.1), rigid group transforms (2.2),
+  group creation (2.3), ungroup/delete/duplicate groups (2.4), lock (2.5,
+  Delete asks), logical-object edge cases (2.6), sourceGroupId retired (2.7).
+- **Phase 3:** multi-object file → one group (3.1); click-depth scope (3.2);
+  translated undo labels + Blueprint pass (3.7).
+- **Phase 4:** schema 3.4 + migrate ladder (4.1); adapter
+  resolveAsset/persistRef/findMoved (4.2); load never scans + Find moved file
+  (4.3); all FSA/idb routed + boot gate (4.4); RelinkAssetCommand (4.5);
+  name-clash logic (4.8); dead code (4.9); Blueprint/ADR pass (4.10).
+- **Phase 5:** feedback toasts (5.4 part); viewport upgrades (5.6); progress
+  Cancel + modal queue (5.8); undoable cursor ops (5.9); Blueprint pass (5.10).
+- **Phase 6:** Electron sandbox/CSP/guards (6.1) + descriptor dialogs (6.2);
+  boolean texture gate (6.3); import caps + worker timeout (6.4); escaping
+  test (6.5); headless coverage 6.6a-g (found + fixed a CreateGroup undo bug);
+  file layout + this entry (6.7).
+- **Root-caused flakes:** export smoke "target navigated" = Vite dependency
+  re-optimisation reload (fixed via optimizeDeps.include); restore-AABB smoke
+  measured mid import-bounce (settled explicitly).
+
+**Still pending — mockup-gated, needs owner Stitch approval (Decision 30):**
+0.6, 0.7, 1.2, 1.3, 1.13, 3.3, 3.4, 3.5, 3.6, 4.6, 4.7, 5.1, 5.2, 5.3, 5.5,
+5.7, plus the display parts of 4.8 and the Scene Advanced part of 5.4.
+Phase 7 stays deferred.
+
