@@ -2507,6 +2507,79 @@ async function main() {
     assert(printOverhaul.primaryEnabled, 'primary export button should be enabled when Ready');
     // ── end Print panel overhaul smoke ──
 
+    // ── Onboarding coach / ? sheet / Preferences smoke (overhaul 5.5) ──
+    const onboarding = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const { Modal } = await import('/src/ui/Modal.js');
+      for (let i = 0; i < 10; i++) Modal.close();
+      const st = await import('/src/core/StateManager.js');
+      const root = () => document.getElementById('onboard-root');
+      const shown = () => !!root() && !root().classList.contains('hidden') && !!root().querySelector('.ob-bubble');
+      const out = {};
+      out.freshShown = shown();
+      out.freshStep = root()?.querySelector('.ob-step')?.textContent ?? '';
+      out.importAnchored = !!document.querySelector('#btn-import.ob-target');
+      root()?.querySelector('[data-ob="skip"]')?.click();
+      await frame();
+      out.skipHid = !shown();
+      out.keySet = localStorage.getItem('mx-onboard-v1') === '1';
+      out.targetCleared = !document.querySelector('.ob-target');
+      const menuAct = async (act) => {
+        document.getElementById('btn-help').click();
+        await frame();
+        document.querySelector('.pm-help-menu [data-act="' + act + '"]').click();
+        await frame();
+      };
+      await menuAct('tour');
+      out.tourReopened = shown();
+      const steps = [];
+      for (let i = 0; i < 3; i++) {
+        steps.push(root().querySelector('.ob-step').textContent);
+        root().querySelector('[data-ob="next"]').click();
+        await frame();
+      }
+      steps.push(root().querySelector('.ob-step').textContent);
+      out.steps = steps;
+      root().querySelector('[data-ob="back"]').click();
+      await frame();
+      out.backStep = root().querySelector('.ob-step').textContent;
+      root().querySelector('[data-ob="next"]').click();
+      await frame();
+      root().querySelector('[data-ob="next"]').click();
+      await frame();
+      out.doneHid = !shown();
+      await menuAct('shortcuts');
+      out.sheetRows = document.querySelectorAll('#modal-root .hs-row').length;
+      Modal.close();
+      await frame();
+      const before = !!st.getState().print?.repairOnImport;
+      await menuAct('preferences');
+      const cb = document.querySelector('#modal-root #pref-repair-on-import');
+      out.prefChecked = cb ? cb.checked : null;
+      if (cb) { cb.checked = !before; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      out.prefFlipped = !!st.getState().print?.repairOnImport === !before;
+      Modal.close();
+      await frame();
+      if (cb) {
+        st.setState(s => ({ ...s, print: { ...s.print, repairOnImport: before } }), { silent: true });
+      }
+      out.exportTabGone = !document.getElementById('pp-repair-on-import');
+      out.before = before;
+      return out;
+    })()`);
+    assert(onboarding.freshShown && /1/.test(onboarding.freshStep) && /4/.test(onboarding.freshStep),
+      `onboarding coach should show Step 1 of 4 on a fresh profile: ${JSON.stringify(onboarding)}`);
+    assert(onboarding.importAnchored, 'step 1 should highlight the Import button');
+    assert(onboarding.skipHid && onboarding.keySet && onboarding.targetCleared, `Skip tour should hide + persist: ${JSON.stringify(onboarding)}`);
+    assert(onboarding.tourReopened, '? > Tour should reopen the coach');
+    assert(onboarding.steps.length === 4 && onboarding.steps[3].includes('4') && onboarding.backStep.includes('3') && onboarding.doneHid,
+      `coach Next/Back/Done flow: ${JSON.stringify(onboarding)}`);
+    assert(onboarding.sheetRows >= 15, `? > Keyboard shortcuts should open the sheet: ${onboarding.sheetRows} rows`);
+    assert(onboarding.prefChecked === onboarding.before && onboarding.prefFlipped,
+      `Preferences should toggle print.repairOnImport: ${JSON.stringify(onboarding)}`);
+    assert(onboarding.exportTabGone, 'Export tab should no longer carry the Auto-repair checkbox');
+    // ── end onboarding smoke ──
+
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
     console.log('PASS Vite browser smoke');

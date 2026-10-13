@@ -82,8 +82,6 @@ function _advancedHtml(print, eff, mods) {
     mods.splitByMaterial !== undefined ? modifiedDot('splitByMaterial', mods.splitByMaterial ? t('print.on') : t('print.off')) : '');
   html += _checkbox('pp-bake-solid', !!print.objBakeSolidTextures, t('print.bakeSolids'));
   html += _checkbox('pp-strict-export', !!print.strictExport, t('print.strictExport'));
-  // Stays here until 5.5 moves it to ? ▸ Preferences.
-  html += _checkbox('pp-repair-on-import', !!print.repairOnImport, t('print.repairOnImport'));
   html += '</div></div>';
   return html;
 }
@@ -152,10 +150,6 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
     setState(s => ({ ...s, print: { ...s.print, strictExport: on } }), { silent: true });
     markDirty();
     rerender();
-  });
-  wireToggles(el, '#pp-repair-on-import', (_cb, on) => {
-    // Never written into the .mixo (I8) — no dirty mark.
-    setState(s => ({ ...s, print: { ...s.print, repairOnImport: on } }), { silent: true });
   });
 
   el.querySelector('[data-act="export-primary"]')?.addEventListener('click', () => {

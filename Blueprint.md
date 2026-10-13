@@ -4502,6 +4502,10 @@ from persisted project data are only rendered when they validate as
 `data:image/png`, `data:image/jpeg`, or `data:image/webp` base64 URLs;
 otherwise the panel falls back to its placeholder icon.
 
+### Onboarding, ? sheet, Preferences (overhaul 5.5)
+
+`src/ui/Onboarding.js` runs a 4-step coach (Import, select / enter groups, pick your printer, Export) as anchored bubbles with Next / Back / Skip tour. It auto-starts once per browser profile (`localStorage` `mx-onboard-v1`, storage access wrapped in try/catch) and replays from ? > Tour. The layer is click-through; only the bubble takes pointer events, and Esc or Skip dismisses it. ? > Keyboard shortcuts (the `mx:help-sheet` event, handled in `ProjectMenu.js`) opens a curated shortcut + mouse/touch sheet; ? > Preferences opens a per-user modal holding **Repair fixable issues automatically on import** (`print.repairOnImport`, SettingsStore per-user, never in the .mixo). That checkbox no longer appears on the Export tab. Styles: `src/styles/components/onboarding.css`.
+
 ### Import bake: shared vertex buffers (2026-09-18)
 A glTF mesh whose primitives share a POSITION accessor (one vertex list,
 several index lists — one per material) comes out of Babylon's loader as

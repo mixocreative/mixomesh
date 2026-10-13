@@ -1,5 +1,5 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, getState } from '../core/StateManager.js';
+import { subscribe, getState, setState } from '../core/StateManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { HistoryManager, RenameProjectCommand } from '../core/HistoryManager.js';
@@ -11,6 +11,7 @@ import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { Workspace } from './Workspace.js';
+import { Onboarding } from './Onboarding.js';
 
 let _recentWrap = null;
 let _helpMenu = null;
@@ -42,7 +43,9 @@ export function init() {
     <div class="pm-help">
       <button class="pm-btn pm-btn-help" id="btn-help" data-act="help" aria-haspopup="menu" aria-expanded="false" data-i18n-title="project.helpTitle">?</button>
       <div class="pm-help-menu hidden" role="menu">
+        <button class="pm-help-item" role="menuitem" data-act="tour" data-i18n-key="project.tour">Tour</button>
         <button class="pm-help-item" role="menuitem" data-act="shortcuts" data-i18n-key="project.shortcuts">Keyboard shortcuts</button>
+        <button class="pm-help-item" role="menuitem" data-act="preferences" data-i18n-key="project.preferences">Preferences…</button>
         <button class="pm-help-item pm-help-danger" role="menuitem" data-act="reset-settings" data-i18n-key="project.resetSettings">Reset all settings…</button>
       </div>
     </div>
@@ -71,6 +74,8 @@ export function init() {
     if (act === 'export') _goToExport();
     if (act === 'help')   _toggleHelp();
     if (act === 'shortcuts') document.dispatchEvent(new CustomEvent('mx:help-sheet'));
+    if (act === 'tour') Onboarding.start();
+    if (act === 'preferences') Modal.open('preferences', {});
     if (act === 'new')    safeAsync(() => PersistenceManager.newProject());
     if (act === 'open')   safeAsync(() => PersistenceManager.open());
     if (act === 'save')   safeAsync(() => _runProjectSave(() => PersistenceManager.save()));
@@ -92,6 +97,9 @@ export function init() {
   }, true);
 
   _registerModals();
+  _registerHelpModals();
+  document.addEventListener('mx:help-sheet', () => Modal.open('helpSheet', {}));
+  Onboarding.init();
   _wireProjectNameEditor();
 
   const refresh = () => _refreshName();
@@ -115,6 +123,8 @@ const FALLBACK = {
   'project.exportTitle': 'Export for printing',
   'project.helpTitle': 'Help',
   'project.shortcuts': 'Keyboard shortcuts',
+  'project.tour': 'Tour',
+  'project.preferences': 'Preferences…',
   'project.resetSettings': 'Reset all settings…',
 };
 
@@ -361,6 +371,79 @@ function _registerModals() {
         }
         close(b.dataset.r);
       }));
+    return el;
+  });
+}
+
+// Curated to match Blueprint PART 6 (the registrations live in InputManager).
+const SHORTCUT_GROUPS = [
+  ['help.group.project', 'Project', [
+    ['Ctrl+Z / Ctrl+Shift+Z', 'help.undoRedo', 'Undo / redo'],
+    ['Ctrl+S', 'help.save', 'Save'],
+    ['Ctrl+O', 'help.open', 'Open'],
+    ['Ctrl+I', 'help.import', 'Import a model'],
+    ['Ctrl+Shift+1-4', 'help.workspaces', 'Switch workspace'],
+    ['N / T / \\', 'help.panels', 'Toggle right / bottom / both panels'],
+  ]],
+  ['help.group.transform', 'Transform', [
+    ['G / R / S', 'help.grs', 'Move / rotate / scale (X Y Z to constrain)'],
+    ['Ctrl (held)', 'help.snap', 'Snap while transforming'],
+    ['Arrows', 'help.nudge', 'Nudge 1 mm (Shift 10, Alt 0.1)'],
+    ['Esc / Enter', 'help.cancelConfirm', 'Cancel / confirm'],
+  ]],
+  ['help.group.selection', 'Selection', [
+    ['A / Alt+A', 'help.selectAll', 'Select all / none'],
+    ['Shift+D', 'help.duplicate', 'Duplicate'],
+    ['Ctrl+G / Ctrl+Shift+G', 'help.group', 'Group / ungroup'],
+    ['H / Alt+H', 'help.hide', 'Hide / unhide all'],
+    ['L', 'help.lock', 'Lock / unlock'],
+    ['Delete', 'help.delete', 'Delete'],
+    ['F / Home', 'help.frame', 'Frame selected / all'],
+  ]],
+];
+const MOUSE_HINTS = [
+  ['help.mouse.select', 'Click selects; double-click enters a group'],
+  ['help.mouse.box', 'Drag on empty space to box-select (Shift adds)'],
+  ['help.mouse.orbit', 'Right-drag orbit, middle-drag pan, scroll zoom'],
+  ['help.mouse.touch', 'Touch: one finger orbits, two fingers pan and zoom'],
+];
+
+function _registerHelpModals() {
+  Modal.register('helpSheet', ({ close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal hs-modal';
+    const groups = SHORTCUT_GROUPS.map(([gk, gf, rows]) => `
+      <div class="hs-group"><h3>${_esc(tr(gk, gf))}</h3>${rows.map(([keys, k, f]) =>
+    `<div class="hs-row"><kbd>${_esc(keys)}</kbd><span>${_esc(tr(k, f))}</span></div>`).join('')}</div>`).join('');
+    const mouse = `<div class="hs-group"><h3>${_esc(tr('help.group.mouse', 'Mouse and touch'))}</h3>${MOUSE_HINTS.map(([k, f]) =>
+      `<div class="hs-row"><span>${_esc(tr(k, f))}</span></div>`).join('')}</div>`;
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${_esc(tr('project.shortcuts', 'Keyboard shortcuts'))}</h2>
+      <div class="hs-grid">${groups}${mouse}</div>
+      <div class="pm-modal-actions"><button class="btn" data-r="close">${_esc(t('btn.close'))}</button></div>`;
+    el.querySelector('[data-r]').addEventListener('click', () => close('close'));
+    return el;
+  });
+
+  Modal.register('preferences', ({ close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    const on = !!getState().print?.repairOnImport;
+    el.innerHTML = `
+      <h2 class="pm-modal-title">${_esc(tr('project.preferencesTitle', 'Preferences'))}</h2>
+      <div class="pref-row">
+        <input type="checkbox" id="pref-repair-on-import"${on ? ' checked' : ''}>
+        <label for="pref-repair-on-import">${_esc(t('print.repairOnImport'))}
+          <span class="pref-hint">${_esc(tr('pref.repairHint', 'Saved on this device only; never written into project files.'))}</span></label>
+      </div>
+      <div class="pm-modal-actions"><button class="btn" data-r="close">${_esc(t('btn.close'))}</button></div>`;
+    el.querySelector('#pref-repair-on-import').addEventListener('change', (e) => {
+      // Per-user only (I8): state + SettingsStore, never the .mixo, no history.
+      const v = e.target.checked;
+      setState(s => ({ ...s, print: { ...s.print, repairOnImport: v } }), { silent: true });
+      SettingsStore.scheduleSave();
+    });
+    el.querySelector('[data-r]').addEventListener('click', () => close('close'));
     return el;
   });
 }
