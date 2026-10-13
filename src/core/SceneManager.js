@@ -40,6 +40,7 @@ import {
 import {
   initPivotSession, setTransformCommitHandler,
   setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection,
+  topmostTransformTargets, computePivotPosition,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 } from './scene/PivotSession.js';
 
@@ -57,6 +58,7 @@ export {
 export {
   setTransformCommitHandler,
   setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection,
+  topmostTransformTargets, computePivotPosition,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 };
 
@@ -673,6 +675,7 @@ export const SceneManager = {
   getScene, getEngine, getShadowGenerator, getCamera,
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection,
+  topmostTransformTargets, computePivotPosition,
   setActive, setSelected,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,

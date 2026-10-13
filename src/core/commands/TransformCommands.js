@@ -3,15 +3,20 @@
 import { EVENTS } from '../events.js';
 import { dispatch, markDirty } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
-import { applyTransforms, captureWorld } from './support.js';
+import { applyTransforms, captureWorld, transformedMeshIds } from './support.js';
 
 /**
- * Apply per-mesh absolute transforms. `prev` and `next` are objects keyed by
- * meshId with `{position, rotation:quat, scaling}` plain-object values.
+ * Apply per-NODE absolute transforms. `prev` and `next` are objects keyed by
+ * node id — an object meshId or a user groupId (overhaul 2.2) — with
+ * `{position, rotation:quat, scaling}` plain-object values. A group entry
+ * moves the group TransformNode rigidly; its children keep their locals.
  *
  * Pass `{ alreadyApplied: true }` when the change has already been made to the
  * scene (e.g. by the gizmo) — the initial execute() becomes a no-op so the
- * mesh state isn't re-applied on top of itself.
+ * node state isn't re-applied on top of itself.
+ *
+ * `TRANSFORM_COMMITTED` carries `nodeIds` (the snapshot keys) and `meshIds`
+ * (every object mesh whose world transform changed — group ids expanded).
  */
 export class TransformCommand {
   constructor(prev, next, opts = {}) {
@@ -21,20 +26,20 @@ export class TransformCommand {
     this._skipFirstExecute = !!opts.alreadyApplied;
   }
   execute() {
-    if (this._skipFirstExecute) {
-      this._skipFirstExecute = false;
-      markDirty();
-      dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) });
-      return;
-    }
-    applyTransforms(this._next);
+    if (!this._skipFirstExecute) applyTransforms(this._next);
+    this._skipFirstExecute = false;
     markDirty();
-    dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._next) });
+    _announce(this._next);
   }
   undo() {
     applyTransforms(this._prev);
-    dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: Object.keys(this._prev) });
+    _announce(this._prev);
   }
+}
+
+function _announce(snapshot) {
+  const nodeIds = Object.keys(snapshot);
+  dispatch(EVENTS.TRANSFORM_COMMITTED, { meshIds: transformedMeshIds(nodeIds), nodeIds });
 }
 
 // BakeTransformCommand (Blender-style "Apply Rotation / Apply Scale") was

@@ -93,22 +93,66 @@ function _canonLoose(id) {
   return canonicalObjectId(id, objects);
 }
 
-function _applyVisuals() {
-  const { selectedIds, activeId, pivotMode } = getState().selection;
-  const objects = getState().scene.objects;
-  // Groups are selection entries but get no gizmo/outline attention here yet
-  // (pivot attachment of group nodes is task 2.2).
-  const resolved = _resolveObjectMeshes(selectedIds);
-  // The ACTIVE object may be multi-part (multi-primitive / split) — every one
-  // of its parts gets the active tint, not just the lead.
-  const activePartIds = activeId ? new Set(logicalObjectPartIds(activeId, objects)) : new Set();
-  const activeMeshes = resolved.filter(r => activePartIds.has(r.id)).map(r => r.mesh);
-  const others = resolved.filter(r => !activePartIds.has(r.id)).map(r => r.mesh);
-  const leadMesh = (activeId && resolved.find(r => r.id === activeId)?.mesh) || activeMeshes[0] || null;
+/** Object meshes under a group node (for outline); helper meshes excluded. */
+function _groupMeshes(node) {
+  return (node?.getChildMeshes?.(false) ?? []).filter(m => m?.metadata?.meshId);
+}
 
-  SceneManager.setActive(activeMeshes);
-  SceneManager.setSelected(others);
-  SceneManager.attachToSelection(resolved.map(r => r.mesh), pivotMode, leadMesh);
+/**
+ * Transform targets of the current selection (overhaul 2.2), in selection
+ * order: every material part mesh of each selected object (`id` = part
+ * meshId) and each selected group's TransformNode (`id` = groupId). Not
+ * ancestor-filtered — the pivot drops nodes covered by a selected ancestor
+ * (`topmostTransformTargets`) once canonical parents are back in place.
+ * `activeNode` = active group node or active object's lead mesh;
+ * `activeGeometry` = nodes whose geometry defines the 'active' pivot.
+ * @returns {{ targets: { id: string, node: any, kind: 'object'|'group' }[],
+ *             activeNode: any|null, activeGeometry: any[] }}
+ */
+export function getTransformTargets() {
+  const { selectedIds, activeId } = getState().selection;
+  const objects = getState().scene.objects;
+  const targets = [];
+  let activeNode = null;
+  let activeGeometry = [];
+  for (const id of selectedIds) {
+    if (objects[id]) {
+      const parts = _resolveObjectMeshes([id]);
+      for (const r of parts) targets.push({ id: r.id, node: r.mesh, kind: 'object' });
+      if (id === activeId && parts.length) {
+        activeNode = parts.find(r => r.id === id)?.mesh ?? parts[0].mesh;
+        activeGeometry = parts.map(r => r.mesh);
+      }
+      continue;
+    }
+    const r = _resolve(id);
+    if (r?.kind !== 'group') continue;
+    targets.push(r);
+    if (id === activeId) { activeNode = r.node; activeGeometry = [r.node]; }
+  }
+  return { targets, activeNode, activeGeometry };
+}
+
+function _applyVisuals() {
+  const { activeId, pivotMode } = getState().selection;
+  const { targets, activeNode, activeGeometry } = getTransformTargets();
+  // Outline: object parts directly; a selected group outlines its member
+  // meshes. The ACTIVE entry (multi-part object or group) gets the active tint.
+  const activeSet = new Set();
+  for (const t of targets) {
+    if (t.kind === 'object' && activeGeometry.includes(t.node)) activeSet.add(t.node);
+    if (t.kind === 'group' && t.id === activeId) for (const m of _groupMeshes(t.node)) activeSet.add(m);
+  }
+  const others = new Set();
+  for (const t of targets) {
+    const ms = t.kind === 'group' ? _groupMeshes(t.node) : [t.node];
+    for (const m of ms) if (!activeSet.has(m)) others.add(m);
+  }
+
+  SceneManager.setActive([...activeSet]);
+  SceneManager.setSelected([...others]);
+  // Group nodes go under the pivot as a whole → rigid group transforms (2.2).
+  SceneManager.attachToSelection(targets.map(t => t.node), pivotMode, activeNode, activeGeometry);
 }
 
 /**
@@ -278,4 +322,5 @@ export const Selection = {
   set, add, remove, toggle, setActive, clear, selectAll,
   setPivotMode, cyclePivotMode, refresh,
   getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
+  getTransformTargets,
 };

@@ -108,8 +108,8 @@ test('getSelectedResolved() stays object-only with logical-part expansion', () =
   Selection.set(['c', 'g1', 'lead']);
   assert.deepEqual(Selection.getSelectedResolved().map(r => r.id), ['c', 'lead', 'lead.part']);
   assert.ok(Selection.getSelectedResolved().every(r => r.mesh && r.mesh.kind === 'mesh'));
-  // Visuals keep attaching meshes only (group gizmo attachment is task 2.2).
-  assert.deepEqual(visuals.attached.map(m => m.name), ['c', 'lead', 'lead.part']);
+  // Task 2.2: the pivot receives the group NODE too (rigid group transform).
+  assert.deepEqual(visuals.attached.map(m => m.name), ['c', 'g1', 'lead', 'lead.part']);
 });
 
 test('unknown ids and ghosts are ignored', () => {

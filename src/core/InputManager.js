@@ -339,39 +339,29 @@ function _placeCursorAtPick() {
 // ── Modal G / R / S ──────────────────────────────────────
 
 function _enterModal(op) {
-  const selected = Selection.getSelectedResolved();
-  if (!selected.length) {
+  const { targets, activeNode, activeGeometry } = Selection.getTransformTargets();
+  if (!targets.length) {
     Toast.show(t('toast.nothingSelected'), 'info', 2000);
     return;
   }
-  // Detach gizmo pivot so meshes are in their canonical parents during the op
+  // Detach gizmo pivot so nodes are in their canonical parents during the op
   // — we'll manipulate them directly and refresh after commit/cancel.
   SceneManager.attachToSelection([], 'median', null);
 
+  // Overhaul 2.2: a selected group's TransformNode is a target in its own
+  // right (moves rigidly); anything under a selected ancestor is dropped so
+  // nothing is transformed twice. Snapshots are keyed by NODE id.
+  const top = SceneManager.topmostTransformTargets(targets, e => e.node);
   const snapshots = {};
-  const center = new BABYLON.Vector3(0, 0, 0);
-  for (const { id, mesh } of selected) {
-    mesh.computeWorldMatrix(true);
-    snapshots[id] = _snapshotMesh(mesh);
-    const ap = mesh.getAbsolutePosition();
-    center.addInPlace(ap);
+  const nodes = new Map();
+  for (const { id, node } of top) {
+    nodes.set(id, node);
+    snapshots[id] = _snapshotMesh(node);
   }
-  center.scaleInPlace(1 / selected.length);
 
-  // Honor the pivot mode (the gizmo does — PivotSession._computePivotPosition);
-  // the keyboard G/R/S modal previously always pivoted about the median.
+  // Same pivot rule as the gizmo (PivotSession.computePivotPosition).
   const pivotMode = getState().selection?.pivotMode ?? 'median';
-  let pivot = center;
-  if (pivotMode === 'world') {
-    pivot = new BABYLON.Vector3(0, 0, 0);
-  } else if (pivotMode === 'cursor') {
-    const c = SceneManager.getCursor?.();
-    if (c) pivot = new BABYLON.Vector3(c.x, c.y, c.z);
-  } else if (pivotMode === 'active') {
-    const a = selected.find(s => s.id === Selection.getActiveId());
-    if (a) { a.mesh.computeWorldMatrix(true); pivot = a.mesh.getAbsolutePosition().clone(); }
-  }
-  // 'median' / 'individual' keep the centroid (matches the gizmo's fallback).
+  const pivot = SceneManager.computePivotPosition(top.map(e => e.node), pivotMode, activeNode, activeGeometry);
 
   _modal = {
     op,
@@ -381,7 +371,8 @@ function _enterModal(op) {
     snap: false,
     snapshots,
     pivot,
-    meshIds: selected.map(s => s.id),
+    nodes,
+    meshIds: top.map(e => e.id),   // node ids (object meshIds + group ids)
     startX: _scene.pointerX,
     startY: _scene.pointerY,
   };
@@ -393,7 +384,7 @@ function _enterModal(op) {
 function _commitModal() {
   if (!_modal) return;
   const prev = _modal.snapshots;
-  const next = _captureCurrent(_modal.meshIds);
+  const next = _captureCurrent(_modal);
   const same = _modalIsNoop(prev, next);
   _exitModal();
   if (!same) {
@@ -405,7 +396,7 @@ function _cancelModal() {
   if (!_modal) return;
   // Restore snapshots to revert any visual movement.
   for (const id of _modal.meshIds) {
-    const mesh = _meshOf(id);
+    const mesh = _modal.nodes.get(id);
     if (!mesh) continue;
     _setMeshFromSnapshot(mesh, _modal.snapshots[id]);
   }
@@ -536,7 +527,7 @@ function _applyTranslate(dx, dy) {
   }
 
   for (const id of m.meshIds) {
-    const mesh = _meshOf(id);
+    const mesh = m.nodes.get(id);
     if (!mesh) continue;
     const snap = m.snapshots[id];
     const target = {
@@ -558,7 +549,7 @@ function _applyRotate(dx, _dy) {
   const q = BABYLON.Quaternion.RotationAxis(axis, angle);
 
   for (const id of m.meshIds) {
-    const mesh = _meshOf(id);
+    const mesh = m.nodes.get(id);
     if (!mesh) continue;
     const snap = m.snapshots[id];
     // Rotate position around pivot
@@ -594,7 +585,7 @@ function _applyScale(dx, _dy) {
     : { x: factor, y: factor, z: factor };
 
   for (const id of m.meshIds) {
-    const mesh = _meshOf(id);
+    const mesh = m.nodes.get(id);
     if (!mesh) continue;
     const snap = m.snapshots[id];
     _setMeshFromSnapshot(mesh, {
@@ -656,21 +647,11 @@ function _setMeshFromSnapshot(mesh, snap) {
   mesh.setParent(parent);
 }
 
-function _meshOf(id) {
-  // Lazy import-style — avoid pulling AssetLoader into the static import graph.
-  // SceneManager already exposes pickMeshIdAt; for mesh-by-id we resolve via Selection.
-  for (const r of Selection.getSelectedResolved()) if (r.id === id) return r.mesh;
-  // Fallback: search the scene by metadata
-  if (!_scene) return null;
-  for (const m of _scene.meshes) if (m.metadata?.meshId === id) return m;
-  return null;
-}
-
-function _captureCurrent(meshIds) {
+function _captureCurrent(modal) {
   const out = {};
-  for (const id of meshIds) {
-    const mesh = _meshOf(id);
-    if (mesh) out[id] = _snapshotMesh(mesh);
+  for (const id of modal.meshIds) {
+    const node = modal.nodes.get(id);
+    if (node) out[id] = _snapshotMesh(node);
   }
   return out;
 }
@@ -781,7 +762,7 @@ function _groupSelected() {
   const ids = Selection.getSelectedIds();
   if (ids.length < 1) return;
   push(new GroupCommand(ids));
-  // Select the new group's children via their meshIds (groups aren't currently selectable).
+  // Select the new group's children via their meshIds (groups ARE selectable since 2.1 — whether Ctrl+G should select the group itself is settled in 2.3/2.4).
   Selection.set(ids, ids[ids.length - 1]);
 }
 

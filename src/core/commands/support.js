@@ -48,13 +48,40 @@ export function setParentPreserveWorld(node, parent) {
   applyAbsoluteNodeTransform(node, world);
 }
 
+/**
+ * Apply absolute transforms keyed by NODE id — an object meshId or a user
+ * groupId (overhaul 2.2: a group node moves rigidly, its children keep their
+ * local transforms). Unknown ids are skipped.
+ */
 export function applyTransforms(snapshot) {
   for (const [id, t] of Object.entries(snapshot)) {
-    const mesh = AssetLoader.getBabylonMesh(id);
-    if (!mesh) continue;
-    applyAbsoluteTransform(mesh, t);
+    const node = findNodeForId(id);
+    if (!node) continue;
+    applyAbsoluteNodeTransform(node, t);
   }
   Selection.refresh();
+}
+
+/**
+ * Object meshIds whose WORLD transform changes when the given nodes move:
+ * an object id maps to itself, a group id to every object mesh beneath its
+ * TransformNode. Used for `TRANSFORM_COMMITTED.meshIds` so validation /
+ * outliner staleness keeps its mesh-id contract when groups move.
+ * @param {string[]} nodeIds
+ * @returns {string[]}
+ */
+export function transformedMeshIds(nodeIds) {
+  const out = new Set();
+  for (const id of nodeIds ?? []) {
+    if (AssetLoader.getBabylonMesh(id)) { out.add(id); continue; }
+    const g = findGroupNode(id);
+    if (!g) continue;
+    for (const m of g.getChildMeshes?.(false) ?? []) {
+      const mid = m?.metadata?.meshId;
+      if (mid) out.add(mid);
+    }
+  }
+  return [...out];
 }
 
 export function findGroupNode(groupId) {
