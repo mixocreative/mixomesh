@@ -98,7 +98,7 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 1.9 Texture colour-space check | sonnet | done fc71135 | conversion export-readback only (capture raw) |
 | 1.10 Dead export/scale code removal | sonnet | done 498f444 | dead keys also stripped from old .mixo on load |
 | 1.11 Bambu/Orca 3MF flavour | opus | done 8446ac3 | owner eyeball checklist (Bambu Studio/Orca) before `verified` |
-| 1.12 Blueprint §12 consistency pass | haiku | todo | last in phase |
+| 1.12 Blueprint §12 consistency pass | haiku | done c4351f1 | 7 contradictions fixed; main corrected 1 agent error (3MF flavour) |
 | 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
 | 1.14 Rescale about own origin | sonnet | done e7fed24 | |
 | 1.15 Explicit export reference + mixed-scale note | opus | done 1d7864f | UI row lands in 1.3 |
@@ -111,13 +111,29 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 |---|---|---|---|
 | 2.1 Selection accepts group ids | opus | done d7843e5 | |
 | 2.2 Pivot attaches group nodes rigidly | opus | done 29667e2 | median/active pivot now bbox centre; Properties/CursorTools/Swab still mesh-only (2.4/3.6) |
-| 2.3 Group creation semantics + persistence | sonnet | todo | after 1.17 (ProjectLoader/Serializer) |
-| 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | todo | after 2.2 (InputManager) + 2.7 (HierarchyCommands) |
+| 2.3 Group creation semantics + persistence | sonnet | done 2b9c0e4 | Ctrl+G selects new group; Blueprint text in c4351f1 |
+| 2.4 Ungroup/Delete/Duplicate accept groups | sonnet | doing | |
 | 2.5 Lock enforcement | sonnet | todo | after 2.2/2.4 |
 | 2.6 Logical-object edge cases | sonnet | todo | after 2.3/2.7 (ParentCommands, MeshValidator) |
 | 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | done 55bd4f6 | legacy seed in ProjectLoader + test |
 
-### Phases 3–6
+### Phase 3 — Hierarchy UI (7): 3.1 sonnet, 3.2 opus, 3.3-3.6 gated (Mockup), 3.7 haiku — todo
+
+### Phase 4 — Asset model + name clashes (10)
+| Task | Tier | Status | Notes |
+|---|---|---|---|
+| 4.1 Schema 3.4 + real migrate() | opus | doing | ratioSource hook left for 1.13 (gated) |
+| 4.2 Adapter resolveAsset/persistRef/restoreRef/findMoved | opus | doing | |
+| 4.3 Explicit Find moved file | sonnet | todo | after 4.2 |
+| 4.4 Route remaining FSA/idb + boot gate | opus | todo | after 4.2 |
+| 4.5 RelinkAssetCommand | sonnet | todo | after 4.2 |
+| 4.6 Source status / Project-Folders tabs / Sources modal | sonnet | gated | Mockup |
+| 4.7 Boot banner | sonnet | gated | Mockup |
+| 4.8 Name-clash rules | opus | todo | logic ungated, display parts gated; after 4.1 |
+| 4.9 Dead code + registry growth | sonnet | todo | after 4.2 |
+| 4.10 Blueprint §11 pass + ADR addendum | haiku | todo | last |
+
+### Phases 5–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
 - Phase 2 — Hierarchy core (7) — todo
 - Phase 3 — Hierarchy UI (7) — todo
@@ -144,3 +160,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 1.10 498f444, 1.11 8446ac3, 2.1 d7843e5 (worktree green 170/170). Running: 1.17 (opus), 2.2 (opus), 2.7. Next: 1.8, 1.18, 1.12; 2.3-2.6 sequenced per table.
 - 2026-10-14 (cont.) — 1.17+2.7 55bd4f6 (worktree 173/173 + both smokes). Running: 2.2 (opus), 1.8, 1.18. Then 1.12 (Phase 1 close), 2.3 → 2.4 → 2.5 → 2.6.
 - 2026-10-14 (cont.) — 1.18 5faaac5, 2.2 29667e2, 1.8 0ce3ce4 + smoke ack fix. Phase 1 ungated complete except 1.12 (Blueprint pass, next). Then 2.3 → 2.4 → 2.5 → 2.6.
+- 2026-10-14 (cont.) — 2.3 2b9c0e4, 1.12 c4351f1 → Phase 1 ungated DONE (remaining 1.2/1.3/1.13 gated). Running: 2.4, 4.1 (opus), 4.2 (opus).
