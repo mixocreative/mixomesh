@@ -161,57 +161,135 @@ export class UnparentCommand extends ReparentCommand {
   }
 }
 
+/** Ancestor group ids of a node, nearest first (excludes the node itself). */
+function _ancestorChain(id, state) {
+  const chain = [];
+  const seen = new Set([id]);
+  let cur = state.scene.objects[id]?.parentId ?? state.scene.groups[id]?.parentId ?? null;
+  while (cur && !seen.has(cur)) {
+    chain.push(cur);
+    seen.add(cur);
+    cur = state.scene.groups[cur]?.parentId ?? null;
+  }
+  return chain;
+}
+
+/** Lowest common ancestor group of the given nodes, or null for scene root. */
+function _lowestCommonAncestor(memberIds, state) {
+  if (!memberIds.length) return null;
+  const chains = memberIds.map(id => _ancestorChain(id, state));
+  return chains[0].find(a => chains.every(c => c.includes(a))) ?? null;
+}
+
+/** Unique among all groups: "Group", "Group.001", ... (Split's `.001` convention). */
+function _uniqueGroupName(baseName, state) {
+  const taken = new Set(Object.values(state.scene.groups).map(g => g?.name));
+  if (!taken.has(baseName)) return baseName;
+  const m = baseName.match(/^(.*)\.(\d{3,})$/);
+  const stem = m ? m[1] : baseName;
+  for (let i = 1; i < 9999; i++) {
+    const candidate = `${stem}.${String(i).padStart(3, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${baseName}.dup`;
+}
+
+/** Bottom-centre (centre X/Z, min Y; scene is Y-up) of the combined world AABB. */
+function _bottomCentre(nodes) {
+  const min = new BABYLON.Vector3(Infinity, Infinity, Infinity);
+  const max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const node of nodes) {
+    node.computeWorldMatrix?.(true);
+    const meshes = node.getTotalVertices ? [node] : [];
+    for (const m of (node.getChildMeshes?.(false) ?? [])) meshes.push(m);
+    for (const m of meshes) {
+      m.computeWorldMatrix(true);
+      const bb = m.getBoundingInfo?.().boundingBox;
+      if (!bb) continue;
+      min.minimizeInPlace(bb.minimumWorld);
+      max.maximizeInPlace(bb.maximumWorld);
+    }
+  }
+  if (!Number.isFinite(min.x)) {
+    const c = new BABYLON.Vector3(0, 0, 0);
+    nodes.forEach(n => c.addInPlace(n.getAbsolutePosition()));
+    return c.scaleInPlace(1 / nodes.length);
+  }
+  return new BABYLON.Vector3((min.x + max.x) / 2, min.y, (min.z + max.z) / 2);
+}
+
 /**
- * Group N selected objects under a new TransformNode pivot at the median.
- * The new group's id and transform snapshot are stable across redo/undo.
+ * Group the selected objects and/or groups under a new TransformNode. The new
+ * group nests under the lowest common ancestor of the members (root when they
+ * span branches), is uniquely named, and its origin sits at the bottom-centre
+ * of the members' combined world AABB. Members keep their world transforms.
+ * Id, name and transform snapshot are stable across redo/undo.
  */
 export class CreateGroupCommand {
-  constructor(meshIds, groupName = 'Group') {
-    this._ids = _expandedCommandIds(meshIds);
+  constructor(ids, groupName = 'Group') {
+    const state = getState();
+    const isGroup = id => !state.scene.objects[id] && !!state.scene.groups[id];
+    const groupIds = [...new Set(ids.filter(isGroup))];
+    this._ids = _expandedCommandIds(ids.filter(id => !isGroup(id)));
+    this._groupMemberIds = groupIds;
     this._groupId = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    this._baseName = groupName;
     this._groupName = groupName;
+    this._parentId = null;
     this._groupsBefore = null;
     this._beforeParents = {};
+    this._beforeGroupParents = {};
     this._beforeWorlds = {};
     this._groupWorld = null;
     this._didCreate = false;
     this.label = 'Group';
   }
-  _ensureSnapshots(meshes) {
+  /** Id of the group this command creates (valid once executed). */
+  get groupId() { return this._groupId; }
+  _ensureSnapshots() {
     if (this._groupsBefore) return;
     const state = getState();
+    // Drop members already inside another selected group: the outer group moves them.
+    const memberSet = new Set([...this._ids, ...this._groupMemberIds]);
+    const covered = id => _ancestorChain(id, state).some(a => memberSet.has(a));
+    this._groupMemberIds = this._groupMemberIds.filter(id => !covered(id));
+    this._ids = this._ids.filter(id => !covered(id));
+    const members = [...this._ids, ...this._groupMemberIds];
+    this._parentId = _lowestCommonAncestor(members, state);
+    this._groupName = _uniqueGroupName(this._baseName, state);
     this._groupsBefore = structuredClone(state.scene.groups);
-    for (const id of this._ids) {
-      const obj = state.scene.objects[id];
-      if (!obj) continue;
-      validateParentChange(id, this._groupId, {
-        ...state,
-        scene: {
-          ...state.scene,
-          groups: {
-            ...state.scene.groups,
-            [this._groupId]: { id: this._groupId, name: this._groupName, parentId: null, childIds: [], origin: 'user' },
-          },
+    const tmpState = {
+      ...state,
+      scene: {
+        ...state.scene,
+        groups: {
+          ...state.scene.groups,
+          [this._groupId]: { id: this._groupId, name: this._groupName, parentId: this._parentId, childIds: [], origin: 'user' },
         },
-      });
-      this._beforeParents[id] = obj.parentId ?? null;
-      const mesh = AssetLoader.getBabylonMesh(id);
-      if (mesh) this._beforeWorlds[id] = captureWorldNode(mesh);
+      },
+    };
+    const nodes = [];
+    for (const id of members) {
+      validateParentChange(id, this._groupId, tmpState);
+      const node = findNodeForId(id);
+      if (!node) throw new Error(`Invalid hierarchy: missing runtime node "${id}"`);
+      if (state.scene.objects[id]) this._beforeParents[id] = state.scene.objects[id].parentId ?? null;
+      else this._beforeGroupParents[id] = state.scene.groups[id].parentId ?? null;
+      this._beforeWorlds[id] = captureWorldNode(node);
+      nodes.push(node);
     }
-    const center = new BABYLON.Vector3(0, 0, 0);
-    meshes.forEach(mesh => center.addInPlace(mesh.getAbsolutePosition()));
-    center.scaleInPlace(1 / meshes.length);
+    const c = _bottomCentre(nodes);
     this._groupWorld = {
-      position: { x: center.x, y: center.y, z: center.z },
+      position: { x: c.x, y: c.y, z: c.z },
       rotation: { x: 0, y: 0, z: 0, w: 1 },
       scaling: { x: 1, y: 1, z: 1 },
     };
   }
   execute() {
     withDetachedPivot(() => {
-      const meshes = this._ids.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
-      if (!meshes.length) return;
-      this._ensureSnapshots(meshes);
+      const members = [...this._ids, ...this._groupMemberIds];
+      if (!members.some(id => findNodeForId(id))) return;
+      this._ensureSnapshots();
 
       const scene = SceneManager.getScene();
       let node = findGroupNode(this._groupId);
@@ -221,12 +299,14 @@ export class CreateGroupCommand {
       }
       node.name = this._groupName;
       applyAbsoluteNodeTransform(node, this._groupWorld);
+      setParentPreserveWorld(node, _resolveNodeParent(this._parentId));
+      applyAbsoluteNodeTransform(node, this._groupWorld);
 
-      for (const id of this._ids) {
-        const mesh = AssetLoader.getBabylonMesh(id);
-        if (!mesh) continue;
-        setParentPreserveWorld(mesh, node);
-        applyAbsoluteNodeTransform(mesh, this._beforeWorlds[id]);
+      for (const id of members) {
+        const child = findNodeForId(id);
+        if (!child) continue;
+        setParentPreserveWorld(child, node);
+        applyAbsoluteNodeTransform(child, this._beforeWorlds[id]);
       }
 
       setState(state => {
@@ -237,17 +317,20 @@ export class CreateGroupCommand {
         groups[this._groupId] = {
           id: this._groupId,
           name: this._groupName,
-          parentId: null,
+          parentId: this._parentId,
           childIds: [],
           origin: 'user',
         };
+        for (const gid of this._groupMemberIds) {
+          if (groups[gid]) groups[gid] = { ...groups[gid], parentId: this._groupId };
+        }
         const objects = { ...state.scene.objects };
         for (const id of this._ids) _moveObjectParentInDraft(objects, groups, id, this._groupId);
         return { ...state, scene: { ...state.scene, groups, objects } };
       }, SILENT);
       this._didCreate = true;
       dispatch(EVENTS.GROUP_CREATED, { groupId: this._groupId });
-      dispatch(EVENTS.PARENT_CHANGED, { id: this._groupId, parentId: null });
+      dispatch(EVENTS.PARENT_CHANGED, { id: this._groupId, parentId: this._parentId });
     });
     markDirty();
   }
@@ -260,11 +343,18 @@ export class CreateGroupCommand {
         mesh.setParent(_resolveNodeParent(this._beforeParents[id] ?? null));
         applyAbsoluteNodeTransform(mesh, this._beforeWorlds[id]);
       }
+      for (const gid of this._groupMemberIds) {
+        const gnode = findGroupNode(gid);
+        if (!gnode) continue;
+        gnode.setParent(_resolveNodeParent(this._beforeGroupParents[gid] ?? null));
+        applyAbsoluteNodeTransform(gnode, this._beforeWorlds[gid]);
+      }
       findGroupNode(this._groupId)?.dispose();
       _restoreGroupsAndObjectParents(this._groupsBefore, this._beforeParents);
       dispatch(EVENTS.GROUP_DISSOLVED, { groupId: this._groupId });
-      dispatch(EVENTS.PARENT_CHANGED, { id: this._groupId, parentId: null });
+      dispatch(EVENTS.PARENT_CHANGED, { id: this._groupId, parentId: this._parentId });
     });
+    markDirty();
   }
 }
 

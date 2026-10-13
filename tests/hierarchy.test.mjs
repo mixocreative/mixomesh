@@ -18,6 +18,9 @@ const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const History = await import('../src/core/HistoryManager.js');
 const Hierarchy = await import('../src/core/hierarchy/HierarchyIntegrity.js');
+const Serializer = await import('../src/core/persist/ProjectSerializer.js');
+const Loader = await import('../src/core/persist/ProjectLoader.js');
+const findNode = (gid) => scene.transformNodes.find(n => n.metadata?.groupId === gid);
 
 const { ReparentCommand, UnparentCommand, UngroupCommand, CreateGroupCommand } = History;
 
@@ -236,6 +239,132 @@ await test('ungroup reparents direct children and subgroups without world jumps,
   assert.equal(StateManager.getState().scene.groups.arm.parentId, 'parent');
   closeVec(worldPos(body), beforeBody, 'body after redo');
   closeVec(worldPos(hand), beforeHand, 'hand after redo');
+});
+
+function s() { return StateManager.getState().scene; }
+
+await test('grouping two children of group A nests the new group inside A (lowest common ancestor)', () => {
+  const a = makeGroup('A', [10, 0, 0]);
+  const m1 = makeMesh('m1', [1, 0, 0]); m1.setParent(a);
+  const m2 = makeMesh('m2', [3, 0, 0]); m2.setParent(a);
+  makeMesh('m3', [5, 0, 0]);
+  setState({
+    objects: { m1: sceneObject('m1', { parentId: 'A' }), m2: sceneObject('m2', { parentId: 'A' }), m3: sceneObject('m3') },
+    groups: { A: groupState('A', ['m1', 'm2']) },
+  });
+  const w1 = worldPos(m1), w2 = worldPos(m2);
+  const cmd = new CreateGroupCommand(['m1', 'm2']);
+  cmd.execute();
+  const g = s().groups[cmd.groupId];
+  assert.equal(g.parentId, 'A');
+  assert.equal(s().objects.m1.parentId, cmd.groupId);
+  assert.deepEqual(s().groups.A.childIds, []);
+  closeVec(worldPos(m1), w1, 'm1 world'); closeVec(worldPos(m2), w2, 'm2 world');
+  // spanning branches -> root
+  const cmd2 = new CreateGroupCommand(['m3', 'm1']);
+  cmd2.execute();
+  assert.equal(s().groups[cmd2.groupId].parentId, null);
+});
+
+await test('group names are uniquified (Group, Group.001, Group.002)', () => {
+  for (const id of ['a', 'b', 'c']) makeMesh(id);
+  setState({ objects: { a: sceneObject('a'), b: sceneObject('b'), c: sceneObject('c') } });
+  const c1 = new CreateGroupCommand(['a']); c1.execute();
+  const c2 = new CreateGroupCommand(['b']); c2.execute();
+  const c3 = new CreateGroupCommand(['c']); c3.execute();
+  assert.deepEqual([c1, c2, c3].map(c => s().groups[c.groupId].name), ['Group', 'Group.001', 'Group.002']);
+  assert.equal(findNode(c2.groupId).name, 'Group.001');
+});
+
+await test('group origin is the bottom-centre of the combined world AABB; children keep world', () => {
+  const a = makeMesh('a', [0, 2, 0]);   // x 0..1, y 2..3, z 0
+  const b = makeMesh('b', [4, 5, 6]);   // x 4..5, y 5..6, z 6
+  setState({ objects: { a: sceneObject('a'), b: sceneObject('b') } });
+  const wa = worldPos(a), wb = worldPos(b);
+  const cmd = new CreateGroupCommand(['a', 'b']);
+  cmd.execute();
+  closeVec(worldPos(findNode(cmd.groupId)), [2.5, 2, 3], 'group origin');
+  closeVec(worldPos(a), wa, 'a world'); closeVec(worldPos(b), wb, 'b world');
+});
+
+await test('undo/redo of grouping restores parents, names and world transforms', () => {
+  const a = makeGroup('A', [10, 0, 0]);
+  const m1 = makeMesh('m1', [1, 0, 0]); m1.setParent(a);
+  const m2 = makeMesh('m2', [3, 4, 0]);
+  setState({
+    objects: { m1: sceneObject('m1', { parentId: 'A' }), m2: sceneObject('m2') },
+    groups: { A: groupState('A', ['m1']) },
+  });
+  const w1 = worldPos(m1), w2 = worldPos(m2);
+  const before = structuredClone(s().groups);
+  const cmd = new CreateGroupCommand(['m1', 'm2']);
+  cmd.execute();
+  const gid = cmd.groupId, nameAfter = s().groups[gid].name;
+  cmd.undo();
+  assert.deepEqual(s().groups, before);
+  assert.equal(s().objects.m1.parentId, 'A');
+  assert.equal(s().objects.m2.parentId, null);
+  assert.equal(findNode(gid), undefined);
+  assert.equal(m1.parent, a);
+  closeVec(worldPos(m1), w1, 'm1 undo'); closeVec(worldPos(m2), w2, 'm2 undo');
+  cmd.execute();
+  assert.equal(s().groups[gid].name, nameAfter);
+  assert.equal(s().objects.m1.parentId, gid);
+  closeVec(worldPos(m1), w1, 'm1 redo'); closeVec(worldPos(m2), w2, 'm2 redo');
+});
+
+await test('grouping an existing group nests it; undo restores its parent', () => {
+  const g1 = makeGroup('g1', [2, 0, 0]);
+  const m = makeMesh('m', [1, 0, 0]); m.setParent(g1);
+  makeMesh('o', [7, 0, 0]);
+  setState({
+    objects: { m: sceneObject('m', { parentId: 'g1' }), o: sceneObject('o') },
+    groups: { g1: groupState('g1', ['m']) },
+  });
+  const wm = worldPos(m);
+  const cmd = new CreateGroupCommand(['g1', 'o']);
+  cmd.execute();
+  assert.equal(s().groups.g1.parentId, cmd.groupId);
+  assert.equal(s().objects.o.parentId, cmd.groupId);
+  closeVec(worldPos(m), wm, 'm world');
+  cmd.undo();
+  assert.equal(s().groups.g1.parentId, null);
+  closeVec(worldPos(m), wm, 'm after undo');
+});
+
+await test('group rotation+scale+position and child world positions round-trip serialise -> load', () => {
+  const m = makeMesh('m', [1, 2, 3]);
+  const o = makeMesh('o', [-2, 0, 5]);
+  setState({ objects: { m: sceneObject('m'), o: sceneObject('o') } });
+  const cmd = new CreateGroupCommand(['m', 'o']);
+  cmd.execute();
+  const gid = cmd.groupId;
+  const node = findNode(gid);
+  node.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0.3, 1.1, -0.4);
+  node.scaling.set(2, 2, 2);
+  node.position.set(7, 1, -3);
+  const wm = worldPos(m), wo = worldPos(o), wg = worldPos(node);
+  const gq = node.rotationQuaternion.clone();
+
+  const saved = JSON.parse(JSON.stringify(Serializer.__test._serialiseGroups()));
+  const savedObjs = Object.fromEntries([m, o].map(x => [x.metadata.meshId, JSON.parse(JSON.stringify(Serializer.decompose(x)))]));
+  const groupsState = structuredClone(s().groups);
+
+  // wipe runtime hierarchy, then restore as the loader does
+  for (const x of [m, o]) { x.setParent(null); x.position.set(0, 0, 0); }
+  node.dispose();
+  for (const id of ['m', 'o']) Serializer.applyWorld(meshes.get(id), savedObjs[id]);
+  Loader.__test._restoreGroups(saved, s().objects);
+
+  const node2 = findNode(gid);
+  assert.ok(node2, 'group node restored');
+  closeVec(worldPos(node2), wg, 'group position');
+  closeVec([node2.scaling.x, node2.scaling.y, node2.scaling.z], [2, 2, 2], 'group scale');
+  const q2 = node2.rotationQuaternion;
+  assert.ok(Math.abs(Math.abs(q2.x * gq.x + q2.y * gq.y + q2.z * gq.z + q2.w * gq.w) - 1) < 1e-5, 'group rotation');
+  closeVec(worldPos(m), wm, 'm world'); closeVec(worldPos(o), wo, 'o world');
+  assert.equal(m.parent, node2);
+  assert.deepEqual(s().groups[gid].childIds, groupsState[gid].childIds);
 });
 
 console.log('\n' + out.join('\n'));

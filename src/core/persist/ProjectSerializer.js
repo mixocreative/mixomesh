@@ -300,3 +300,6 @@ export async function buildDocument(opts = {}) {
     ui: (({ workspace, panelCollapsed, ...rest }) => rest)(s.ui),
   };
 }
+
+/** Test seam: group serialisation. */
+export const __test = { _serialiseGroups };

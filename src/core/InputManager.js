@@ -761,9 +761,10 @@ function _duplicateSelected() {
 function _groupSelected() {
   const ids = Selection.getSelectedIds();
   if (ids.length < 1) return;
-  push(new GroupCommand(ids));
-  // Select the new group's children via their meshIds (groups ARE selectable since 2.1 — whether Ctrl+G should select the group itself is settled in 2.3/2.4).
-  Selection.set(ids, ids[ids.length - 1]);
+  const cmd = new GroupCommand(ids);
+  push(cmd);
+  // Groups are selectable (2.1): select the new group so one click/drag moves everything.
+  if (getState().scene.groups[cmd.groupId]) Selection.set([cmd.groupId], cmd.groupId);
 }
 
 function _ungroupSelected() {

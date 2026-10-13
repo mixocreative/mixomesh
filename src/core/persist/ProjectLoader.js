@@ -577,4 +577,4 @@ export async function relinkAsset(assetId) {
 }
 
 /** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
-export const __test = { _printWithoutLegacyScale };
+export const __test = { _printWithoutLegacyScale, _restoreGroups };
