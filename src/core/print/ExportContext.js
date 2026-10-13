@@ -22,7 +22,8 @@
  *     wraps the immutable ctx) doubles the type surface for no gain.
  */
 
-import { effectiveRatio, exportRatiosFromState } from '../scale/ScaleMath.js';
+import { effectiveRatio, exportTargetsFromState, normalizeExportTarget } from '../scale/ScaleMath.js';
+import { toPrintSpace } from './PrintSpace.js';
 import { logicalObjectLeadIds, logicalObjectPartIds } from '../LogicalObjects.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
@@ -57,9 +58,15 @@ function _capturePrefs(state) {
  * @property {Array}  units           Logical print units (one entry per object).
  * @property {Object} referenceUnit   Anchor for ratio + pivot (active printable, else first).
  * @property {number} referenceRatio  Ratio of referenceUnit (positive number).
- * @property {number} targetRatio     Output ratio (positive). Equals referenceRatio for "as shown".
+ * @property {number} targetRatio     Effective output ratio (positive) = referenceRatio / ratioFactor.
+ *                                    Equals referenceRatio for "as shown".
+ * @property {{kind:'ratio',value:number}|{kind:'factor',value:number}|{kind:'height',mm:number}|null} target
+ *                                    The typed print size this ctx renders (frozen); null = as shown.
+ * @property {number|null} referenceHeightMM  Reference unit's print-space Z extent (bed-up axis) in mm
+ *                                    at as-shown size. Measured only for a height target, else null.
  * @property {{x:number,y:number,z:number}} pivot  World-space scaling anchor.
- * @property {number} ratioFactor     referenceRatio / targetRatio (dimensionless).
+ * @property {number} ratioFactor     Size multiplier vs as shown: ratio T → ref/T; factor N → N;
+ *                                    height N mm → N / referenceHeightMM (dimensionless).
  * @property {number} unitFactor      BU→mm (always BU_TO_MM).
  * @property {number} factor          ratioFactor * unitFactor (× to convert BU dimension → mm at target).
  * @property {string} projectName     state.project.name || 'Untitled'.
@@ -105,7 +112,9 @@ function _capturePrefs(state) {
  * @param {Object} args
  * @param {Object} args.state          StateManager snapshot.
  * @param {Array}  args.units          Result of collectPrintUnits.
- * @param {number} [args.target]       Explicit target ratio; null ⇒ "as shown" (== referenceRatio).
+ * @param {Object|number|null} [args.target]  Typed print size (`{kind:'ratio',value}` |
+ *                                     `{kind:'factor',value}` | `{kind:'height',mm}`); a bare
+ *                                     number is a ratio; null ⇒ "as shown" (factor 1).
  * @param {Object} [args.options]      Caller options bag.
  * @param {boolean} [args.csgReady]    True once CSG2 init resolved.
  * @param {boolean} [args.repairReady] True once the repair engine init resolved (and the
@@ -117,10 +126,13 @@ export function buildExportContext({ state, units, target = null, options = {}, 
   if (!Array.isArray(units) || !units.length) throw new Error('buildExportContext: units required');
   const referenceUnit = _selectReferenceUnit(units, state);
   const referenceRatio = effectiveRatio(referenceUnit?.obj ?? null, _leadMesh(referenceUnit));
-  const targetRatio = _positiveOrNull(target) ?? referenceRatio;
   if (!(referenceRatio > 0)) throw new Error('buildExportContext: referenceRatio must be positive');
-  if (!(targetRatio > 0))    throw new Error('buildExportContext: targetRatio must be positive');
-  const ratioFactor = referenceRatio / targetRatio;
+  const typed = target == null ? null : normalizeExportTarget(target);
+  if (target != null && !typed) throw new Error('buildExportContext: invalid export target');
+  const referenceHeightMM = typed?.kind === 'height' ? referenceHeightMMOf(referenceUnit) : null;
+  const ratioFactor = _ratioFactorFor(typed, referenceRatio, referenceHeightMM);
+  if (!(ratioFactor > 0)) throw new Error('buildExportContext: ratioFactor must be positive');
+  const targetRatio = typed?.kind === 'ratio' ? typed.value : referenceRatio / ratioFactor;
   // Deep-freeze the nested objects a consumer might be tempted to mutate.
   // units must stay live — its Babylon mesh handles are referenced after the
   // ctx is built and Babylon mutates them itself. pivot is converted to a
@@ -136,6 +148,8 @@ export function buildExportContext({ state, units, target = null, options = {}, 
     referenceUnit,
     referenceRatio,
     targetRatio,
+    target: typed,
+    referenceHeightMM,
     pivot,
     ratioFactor,
     unitFactor: BU_TO_MM,
@@ -194,15 +208,15 @@ export function collectPrintUnits(state, selectedOnly) {
  * current state and current export-ratio list. Returns null when there are
  * no printable units (caller should render a placeholder rather than crash).
  *
- * `target` defaults to the FIRST entry in `state.print.exportRatios` (or
+ * `target` defaults to the FIRST entry in `state.print.exportTargets` (or
  * "as shown" when the list is empty). Callers showing per-target previews
- * (e.g. multi-target Scale panel) can override with an explicit ratio or
- * with `targetIndex: N` to pick the Nth entry of the list.
+ * (e.g. multi-target Scale panel) can override with an explicit typed target
+ * (or bare ratio) or with `targetIndex: N` to pick the Nth entry of the list.
  *
  * @param {{
  *   selectedOnly?:boolean,
  *   individually?:boolean,
- *   target?:number|null,
+ *   target?:Object|number|null,
  *   targetIndex?:number,
  * }} [options]
  * @returns {ExportContext|null}
@@ -211,13 +225,13 @@ export function previewExportContext(options = {}) {
   // Crashing the Scale panel because one printable object has a bad ratio
   // (or a transient state shape during load/reset) is worse than rendering
   // "no preview". The full body is wrapped so an upstream throw — from
-  // collectPrintUnits, exportRatiosFromState, or buildExportContext —
+  // collectPrintUnits, exportTargetsFromState, or buildExportContext —
   // degrades to null and the panel renders its empty-state placeholder.
   try {
     const state = getState();
     const units = collectPrintUnits(state, !!options.selectedOnly);
     if (!units.length) return null;
-    const explicit = exportRatiosFromState(state);
+    const explicit = exportTargetsFromState(state);
     let target;
     if (options.target !== undefined) {
       target = options.target;                                 // explicit override (incl. null = "as shown")
@@ -327,7 +341,36 @@ function _referencePivot(unit) {
   return t.clone();
 }
 
-function _positiveOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : null;
+function _ratioFactorFor(typed, referenceRatio, referenceHeightMM) {
+  if (!typed) return 1;                                      // as shown
+  if (typed.kind === 'ratio') return referenceRatio / typed.value;
+  if (typed.kind === 'factor') return typed.value;
+  if (!(referenceHeightMM > 0)) {
+    throw new Error('buildExportContext: height target needs a reference with a positive print-space Z extent');
+  }
+  return typed.mm / referenceHeightMM;
+}
+
+/**
+ * The reference unit's height in mm at as-shown size: its print-space Z
+ * extent (bed-up axis, via PrintSpace) over all live parts. "N mm tall"
+ * everywhere means this axis (task 1.17). Returns 0 when nothing measurable.
+ *
+ * @param {Object} unit  A print unit from collectPrintUnits.
+ * @returns {number}
+ */
+export function referenceHeightMMOf(unit) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const part of unit?.parts ?? []) {
+    part.mesh?.computeWorldMatrix?.(true);
+    const box = part.mesh?.getBoundingInfo?.()?.boundingBox;
+    if (!box?.minimumWorld || !box?.maximumWorld) continue;
+    for (const c of [box.minimumWorld, box.maximumWorld]) {
+      const z = toPrintSpace(c.x, c.y, c.z)[2];
+      lo = Math.min(lo, z);
+      hi = Math.max(hi, z);
+    }
+  }
+  return hi > lo ? (hi - lo) * BU_TO_MM : 0;
 }

@@ -127,7 +127,7 @@ function setScene({ objects = {}, registry = {}, targetPrinterId = 'mimaki-3duj-
   StateManager.setState(s => ({
     ...s,
     project: { ...s.project, name: 'MimakiTest' },
-    print: { ...s.print, exportRatios: [1], targetPrinterId },
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 1 }], targetPrinterId },
     selection: { ...s.selection, selectedIds: [] },
     scene: { ...s.scene, objects },
   }), { silent: true });

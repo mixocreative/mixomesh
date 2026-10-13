@@ -21,7 +21,7 @@ import { repairMesh, diagnoseMesh, ensureRepairEngine } from '../repair/MeshRepa
 import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
 import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
-import { exportRatiosFromState, objectRatio } from '../scale/ScaleMath.js';
+import { exportTargetsFromState, objectRatio } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits, getExportReference } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
@@ -350,11 +350,12 @@ async function _runExport(formatKey, options = {}) {
   const repairReady = await _ensureRepairRuntime(options);
   if (options.repair !== false && !repairReady) Toast.show(t('toast.repairUnavailable'), 'warning', 4000);
 
-  // One file per target ratio in print.exportRatios. Empty list = "as shown"
-  // (target = referenceRatio → factor 1000). Targets are passed into
-  // buildExportContext directly — no mutable global, no setExportTargetOverride.
+  // One file per typed print size in print.exportTargets (ratio / factor /
+  // height, task 1.17). Empty list = "as shown" (factor 1 → displayed mm).
+  // Targets are passed into buildExportContext directly — no mutable global,
+  // no setExportTargetOverride.
   const state0 = getState();
-  const explicit = exportRatiosFromState(state0);
+  const explicit = exportTargetsFromState(state0);
   const targets = explicit.length ? explicit : [null];   // null ⇒ "as shown"
   for (let ti = 0; ti < targets.length; ti++) {
     const span = (frac, msg) => progress(
@@ -414,13 +415,21 @@ export function getPrintReadiness(options = {}) {
       watertight: _watertightVerdict(ids, state),
     };
   });
-  const explicit = exportRatiosFromState(state);
-  const ratios = explicit.length ? explicit : [null];
-  const targets = units.length ? ratios.map(target => {
-    const ctx = buildExportContext({ state, units, target, options });
+  const explicit = exportTargetsFromState(state);
+  const requested = explicit.length ? explicit : [null];
+  const targets = units.length ? requested.map(target => {
+    let ctx;
+    // A height target on a flat (zero-Z) reference has no factor — it throws
+    // at export with a clear message; readiness just has no line for it.
+    try { ctx = buildExportContext({ state, units, target, options }); } catch (err) {
+      if (target?.kind === 'height') return { bounds: null };
+      throw err;
+    }
     return {
       ratio: ctx.targetRatio,
-      requestedRatio: target,
+      requestedRatio: target?.kind === 'ratio' ? target.value : null,
+      target,
+      label: _targetLabel(target),
       bounds: boundsForExportContext(ctx),
       scaleToMM: ctx.ratioFactor * ctx.unitFactor,
       objectIds: units.map(unit => unit.logicalId),
@@ -432,6 +441,14 @@ export function getPrintReadiness(options = {}) {
     parts, targets, bedDimensions: state.print.bedDimensions, reference,
     profile, strictExport: !!state.print?.strictExport,
   });
+}
+
+// Language-neutral label for non-ratio print sizes ("×2", "120 mm"); ratio
+// targets and "as shown" are labelled by their ratio (null here).
+function _targetLabel(target) {
+  if (target?.kind === 'factor') return `×${target.value}`;
+  if (target?.kind === 'height') return `${target.mm} mm`;
+  return null;
 }
 
 function _partTextures(ids, objects, state) {

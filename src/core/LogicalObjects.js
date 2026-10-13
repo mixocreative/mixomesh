@@ -4,14 +4,29 @@
  * the lead sibling is presented as the object the user selects and manages.
  */
 
-/** @param {Record<string, any>} objects */
-function _leadForSourceGroup(sourceGroupId, objects) {
-  if (!sourceGroupId) return null;
-  const matches = Object.values(objects ?? {}).filter(o => o?.sourceGroupId === sourceGroupId);
-  return matches.find(o => !o.isInternalPart && (!o.logicalObjectId || o.logicalObjectId === o.id))
-    ?? matches.find(o => !o.isInternalPart)
-    ?? matches[0]
-    ?? null;
+/**
+ * Legacy-save migration (Decision 33): files written before `logicalObjectId`
+ * existed linked split siblings only by `sourceGroupId`. Seed `logicalObjectId`
+ * / `isInternalPart` from it ONCE at load; this is the only runtime read of
+ * `sourceGroupId`. Mutates and returns `objects`. Objects that already carry a
+ * `logicalObjectId` are untouched.
+ * @param {Record<string, any>} objects
+ */
+export function seedLogicalObjectIds(objects) {
+  const byGroup = new Map();
+  for (const o of Object.values(objects ?? {})) {
+    if (!o || o.logicalObjectId || !o.sourceGroupId) continue;
+    if (!byGroup.has(o.sourceGroupId)) byGroup.set(o.sourceGroupId, []);
+    byGroup.get(o.sourceGroupId).push(o);
+  }
+  for (const members of byGroup.values()) {
+    const lead = members.find(o => !o.isInternalPart) ?? members[0];
+    for (const o of members) {
+      o.logicalObjectId = lead.id;
+      o.isInternalPart = o.id !== lead.id;
+    }
+  }
+  return objects;
 }
 
 export function isInternalPart(obj) {
@@ -26,7 +41,6 @@ export function canonicalObjectId(id, objects) {
   const obj = objects?.[id];
   if (!obj) return id ?? null;
   if (obj.logicalObjectId && objects[obj.logicalObjectId]) return obj.logicalObjectId;
-  if (obj.sourceGroupId) return _leadForSourceGroup(obj.sourceGroupId, objects)?.id ?? id;
   return id;
 }
 
@@ -36,15 +50,12 @@ export function logicalObjectPartIds(id, objects) {
   if (!lead) return [];
 
   const logicalId = lead.logicalObjectId ?? lead.id;
-  const sourceGroupId = lead.sourceGroupId ?? null;
   const ids = [];
   for (const obj of Object.values(objects ?? {})) {
     if (!obj) continue;
     if (obj.id === leadId) {
       ids.push(obj.id);
     } else if (logicalId && obj.logicalObjectId === logicalId) {
-      ids.push(obj.id);
-    } else if (!lead.logicalObjectId && sourceGroupId && obj.sourceGroupId === sourceGroupId) {
       ids.push(obj.id);
     }
   }

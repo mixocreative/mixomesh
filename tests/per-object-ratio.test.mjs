@@ -8,6 +8,8 @@ import {
   effectiveRatioInfo,
   objectScaleFromObject,
   exportRatiosFromState,
+  exportTargetsFromState,
+  normalizeExportTarget,
   computePrintExportScale,
   computeSceneNormalizationScale,
 } from '../src/core/scale/ScaleMath.js';
@@ -31,10 +33,30 @@ await test('objectScaleFromObject: wraps objectRatio as sceneRatio', () => {
   assert.deepEqual(objectScaleFromObject({ ratio: 12 }), { sceneRatio: 12 });
 });
 
-await test('exportRatiosFromState: list wins; else [] (as-shown; legacy targetRatio is migrated by ProjectLoader)', () => {
-  assert.deepEqual(exportRatiosFromState({ print: { exportRatios: [72, 144] } }), [72, 144]);
+await test('exportTargetsFromState: typed list wins; else [] (as shown; legacy lists are migrated by ProjectLoader)', () => {
+  assert.deepEqual(exportTargetsFromState({ print: { exportTargets: [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }, { kind: 'height', mm: 120 }] } }),
+    [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }, { kind: 'height', mm: 120 }]);
+  assert.deepEqual(exportTargetsFromState({ print: {} }), []);
+  assert.deepEqual(exportTargetsFromState({ print: { exportRatios: [72], targetRatio: 8 } }), [],
+    'runtime state reads only exportTargets');
+  assert.deepEqual(exportTargetsFromState({ print: { exportTargets: [
+    { kind: 'ratio', value: 0 }, { kind: 'height', mm: -1 }, { kind: 'bogus', value: 2 }, null,
+    { kind: 'factor', value: 2 }, { kind: 'factor', value: 2 },
+  ] } }), [{ kind: 'factor', value: 2 }], 'invalid dropped, duplicates collapsed');
+});
+
+await test('normalizeExportTarget: bare number = ratio; typed kinds validated', () => {
+  assert.deepEqual(normalizeExportTarget(144), { kind: 'ratio', value: 144 });
+  assert.deepEqual(normalizeExportTarget({ kind: 'height', mm: '120' }), { kind: 'height', mm: 120 });
+  assert.equal(normalizeExportTarget({ kind: 'factor', value: 0 }), null);
+  assert.equal(normalizeExportTarget(undefined), null);
+});
+
+await test('exportRatiosFromState: ratio-kind values only (the one-minor exportRatios mirror)', () => {
+  assert.deepEqual(exportRatiosFromState({ print: { exportTargets: [
+    { kind: 'ratio', value: 72 }, { kind: 'factor', value: 2 }, { kind: 'ratio', value: 144 },
+  ] } }), [72, 144]);
   assert.deepEqual(exportRatiosFromState({ print: {} }), []);
-  assert.deepEqual(exportRatiosFromState({ print: { exportRatios: [], targetRatio: 8 } }), []);
 });
 
 await test('import seed cancels: ratio == modelRatio ⇒ unit-only factor', () => {

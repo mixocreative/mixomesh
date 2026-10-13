@@ -194,15 +194,16 @@ async function _topology(positions, indices, clockwise = false) {
 // ── Group-aware helpers (split-on-import) ───────
 
 /**
- * Collect live Babylon meshes that share a sourceGroupId. Split shells of an
- * original MultiMaterial mesh stamp the same id at import time — without
+ * Collect live Babylon meshes of one logical object (by lead id). Split
+ * shells of an original MultiMaterial mesh share a logicalObjectId — without
  * concatenating them, every shell looks non-watertight by construction.
  */
-function _collectGroupSiblings(sourceGroupId) {
+function _collectGroupSiblings(logicalObjectId) {
   const objects = getState().scene.objects;
   const siblings = [];
+  const partIds = new Set(logicalObjectPartIds(logicalObjectId, objects));
   for (const [meshId, obj] of Object.entries(objects)) {
-    if (obj.sourceGroupId !== sourceGroupId) continue;
+    if (!partIds.has(meshId)) continue;
     if (obj.isGhost) continue;
     const babylonMesh = AssetLoader.getBabylonMesh?.(meshId);
     if (!babylonMesh) continue;
@@ -269,7 +270,7 @@ function _buildGroupUnionNow(siblings) {
 
 /**
  * Run topology checks on the welded union of all siblings sharing a
- * sourceGroupId. Inverted-normals is skipped on group scope — raycasting
+ * logicalObjectId. Inverted-normals is skipped on group scope — raycasting
  * against a synthetic union mesh adds complexity for a heuristic the slicer
  * also corrects, and split shells frequently mislead the per-mesh check.
  */
@@ -353,7 +354,7 @@ function _groupOrientation(siblings) {
 
 /**
  * Topology verdict for the parts of ONE multi-part object, on their WELDED
- * union. Shared by validateGroup (sourceGroupId siblings) and validateMesh's
+ * union. Shared by validateGroup (logical-object siblings) and validateMesh's
  * logical-object branch (glTF multi-primitive) — the two used to carry
  * separate copies of this and only one of them got fixed.
  *
@@ -396,10 +397,10 @@ async function _validateUnion(siblings, label) {
   return { results, thicknessBU };
 }
 
-export async function validateGroup(sourceGroupId) {
-  const siblings = _collectGroupSiblings(sourceGroupId);
+export async function validateGroup(logicalObjectId) {
+  const siblings = _collectGroupSiblings(logicalObjectId);
   if (siblings.length === 0) return [];
-  return (await _validateUnion(siblings, `group ${sourceGroupId}`)).results.map(r => ({ ...r, sourceGroupId }));
+  return (await _validateUnion(siblings, `group ${logicalObjectId}`)).results.map(r => ({ ...r, logicalObjectId }));
 }
 
 // ── Validation result cache (arch A6) ────────────────────
@@ -471,7 +472,7 @@ export function init() {
 
 /**
  * Run validation checks against a mesh. If the SceneObject carries a
- * sourceGroupId (split-on-import shell), topology checks dispatch to the
+ * logicalObjectId (split-on-import shell), topology checks dispatch to the
  * welded-union path — a single shell is non-watertight by construction.
  * Integrity checks (bed bounds) stay per-mesh.
  * @param {BABYLON.AbstractMesh} mesh
@@ -577,7 +578,7 @@ export function hasWarnings(results) {
 
 /**
  * Re-validate every mesh currently flagged as a Print Part. Grouped shells
- * (sourceGroupId set) collapse to one entry per group — the union check ran
+ * (shared logicalObjectId) collapse to one entry per group — the union check ran
  * against the same geometry for every sibling otherwise.
  * @returns {Promise<Map<string, ValidationResult[]>>}
  */
@@ -587,9 +588,9 @@ export async function validateAllPrintParts() {
   const seenGroups = new Set();
   for (const [meshId, obj] of Object.entries(objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
-    if (obj.sourceGroupId) {
-      if (seenGroups.has(obj.sourceGroupId)) continue;
-      seenGroups.add(obj.sourceGroupId);
+    if (obj.logicalObjectId) {
+      if (seenGroups.has(obj.logicalObjectId)) continue;
+      seenGroups.add(obj.logicalObjectId);
     }
     const babylonMesh = AssetLoader.getBabylonMesh(meshId);
     if (!babylonMesh) continue;

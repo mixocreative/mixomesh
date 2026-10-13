@@ -23,7 +23,7 @@ import { b64FromBuf, bufFromB64, extOf, buildDocument } from './persist/ProjectS
 import { resolveAssetBlob, scanDirForHash, fileHandleAtPath } from './persist/AssetResolver.js';
 import {
   loadProject, resetWorld, relinkAsset, isLoading, assertNoImportInFlight,
-  migrate, resolveLoadedExportRatios, arrToMap,
+  migrate, resolveLoadedExportRatios, resolveLoadedExportTargets, arrToMap,
 } from './persist/ProjectLoader.js';
 import { isDesktop } from './storage/capabilities.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
@@ -247,5 +247,6 @@ export const __test = {
   _b64FromBuf: b64FromBuf, _bufFromB64: bufFromB64, _sha256Hex: sha256Hex, _extOf: extOf,
   _resolveAssetBlob: resolveAssetBlob, _scanDirForHash: scanDirForHash, _fileHandleAtPath: fileHandleAtPath,
   _arrToMap: arrToMap, _migrate: migrate, _resolveLoadedExportRatios: resolveLoadedExportRatios,
+  _resolveLoadedExportTargets: resolveLoadedExportTargets,
   _buildDocument: buildDocument, _loadProject: loadProject,
 };

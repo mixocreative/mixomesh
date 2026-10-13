@@ -134,27 +134,27 @@ test('applySectionToState(grid) resets grid + grid/axes overlays only', () => {
   assert.equal(out.scene.overlays.printPreview, false);   // untouched
 });
 
-test('print reset restores printer SETTINGS but leaves exportRatios (per-project content) untouched', () => {
-  // exportRatios is .mixo content, not a per-user setting — it is excluded from
+test('print reset restores printer SETTINGS but leaves exportTargets (per-project content) untouched', () => {
+  // exportTargets is .mixo content, not a per-user setting — it is excluded from
   // the print SCHEMA allow-list, so a settings reset must NOT touch it.
   const s = freshState();
   s.scene.objects = { m: { id: 'm' } };       // scene loaded
-  s.print.exportRatios = [4, 35];
+  s.print.exportTargets = [{ kind: 'ratio', value: 4 }, { kind: 'factor', value: 2 }];
   s.print.strictExport = true;
   const sec = applySectionToState(s, 'print');
-  assert.deepEqual(sec.print.exportRatios, [4, 35], 'exportRatios is content — preserved through reset');
+  assert.deepEqual(sec.print.exportTargets, s.print.exportTargets, 'exportTargets is content — preserved through reset');
   assert.equal(sec.print.strictExport, DS.print.strictExport, 'printer setting resets');
 
   const all = factoryState(s);
-  assert.deepEqual(all.print.exportRatios, [4, 35], 'exportRatios preserved by factoryState');
+  assert.deepEqual(all.print.exportTargets, s.print.exportTargets, 'exportTargets preserved by factoryState');
   assert.equal(all.print.strictExport, DS.print.strictExport);
 });
 
-test('exportRatios is never persisted to localStorage (per-project content)', () => {
+test('exportTargets is never persisted to localStorage (per-project content)', () => {
   const s = freshState();
-  s.print.exportRatios = [72, 144];
-  assert.equal('exportRatios' in pickSettings(s).print, false,
-    'exportRatios must not leak into per-user settings');
+  s.print.exportTargets = [{ kind: 'ratio', value: 72 }, { kind: 'height', mm: 120 }];
+  assert.equal('exportTargets' in pickSettings(s).print, false,
+    'exportTargets must not leak into per-user settings');
 });
 
 test('print.strictExport persists per-user through pickSettings + mergeSettings', () => {

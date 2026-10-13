@@ -63,7 +63,7 @@ const INITIAL_STATE = {
     cursor3d: { x: 0, y: 0, z: 0 },
   },
   selection: { selectedIds: [], activeId: null, pivotMode: DS.pivotMode },
-  print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions }, exportRatios: [...(DS.print.exportRatios ?? [])] },
+  print: { ...DS.print, bedDimensions: { ...DS.print.bedDimensions }, exportTargets: [...(DS.print.exportTargets ?? [])] },
   // Print cost inputs (Export tab ▸ Cost). Per-user setting, NEVER persisted
   // in .mixo (ProjectSerializer.buildDocument does not sweep this slice).
   cost: { ...DS.cost },

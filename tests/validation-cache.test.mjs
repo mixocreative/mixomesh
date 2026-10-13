@@ -72,7 +72,9 @@ function seedState(objects) {
       ...s.scene,
       validation: {},
       objects: Object.fromEntries(objects.map(o => [o.id, {
-        id: o.id, name: o.id, sourceGroupId: o.sourceGroupId ?? null,
+        id: o.id, name: o.id,
+        logicalObjectId: o.sourceGroupId ? objects.find(x => x.sourceGroupId === o.sourceGroupId).id : null,
+        isInternalPart: !!o.sourceGroupId && objects.find(x => x.sourceGroupId === o.sourceGroupId).id !== o.id,
         isGhost: false, isPrintPart: true,
       }])),
     },

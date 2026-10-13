@@ -345,6 +345,46 @@ await test('buildExportContext: target=null means "as shown" (target = reference
   assert.equal(ctx.factor, 1000);
 });
 
+// ── Typed print sizes (task 1.17) ───────────────────────
+
+function tallUnit(id, ratio, heightBU) {
+  const u = unit(id, ratio);
+  u.parts[0].mesh.getBoundingInfo = () => ({ boundingBox: {
+    minimumWorld: { x: 0, y: 0, z: 0 }, maximumWorld: { x: 0.1, y: heightBU, z: 0.2 } } });
+  return u;
+}
+
+await test('buildExportContext: typed targets → ratioFactor (ratio ref/T, factor N, height N/refHeightMM)', () => {
+  const units = [tallUnit('a', 72, 0.06)];   // 60 mm tall along print-space Z (Babylon Y)
+  const r = ExportContext.buildExportContext({ state: FAKE_STATE, units, target: { kind: 'ratio', value: 144 } });
+  assert.equal(r.ratioFactor, 0.5);
+  assert.equal(r.targetRatio, 144);
+  assert.deepEqual(r.target, { kind: 'ratio', value: 144 });
+  assert.equal(r.referenceHeightMM, null, 'height is measured only for a height target');
+  const f = ExportContext.buildExportContext({ state: FAKE_STATE, units, target: { kind: 'factor', value: 2 } });
+  assert.equal(f.ratioFactor, 2);
+  assert.equal(f.factor, 2000);
+  assert.equal(f.targetRatio, 36);
+  const h = ExportContext.buildExportContext({ state: FAKE_STATE, units, target: { kind: 'height', mm: 120 } });
+  assert.ok(Math.abs(h.referenceHeightMM - 60) < 1e-9);
+  assert.ok(Math.abs(h.ratioFactor - 2) < 1e-9);
+  assert.ok(Object.isFrozen(h.target));
+});
+
+await test('buildExportContext: height target uses print-space Z (Babylon Y), not Babylon Z', () => {
+  const u = tallUnit('a', 72, 0.03);         // Babylon Z extent 0.2 must NOT be the height
+  const h = ExportContext.buildExportContext({ state: FAKE_STATE, units: [u], target: { kind: 'height', mm: 60 } });
+  assert.ok(Math.abs(h.referenceHeightMM - 30) < 1e-9);
+  assert.ok(Math.abs(h.ratioFactor - 2) < 1e-9);
+});
+
+await test('buildExportContext: invalid target / flat reference for a height target throw', () => {
+  assert.throws(() => ExportContext.buildExportContext({ state: FAKE_STATE, units: [unit('a', 72)], target: { kind: 'factor', value: -1 } }),
+    /invalid export target/);
+  assert.throws(() => ExportContext.buildExportContext({ state: FAKE_STATE, units: [tallUnit('a', 72, 0)], target: { kind: 'height', mm: 100 } }),
+    /height target/);
+});
+
 await test('getExportedDimensions rejects ctx missing state.scene', () => {
   // Round-4 tightening: a stub ctx with only .factor is no longer accepted —
   // the type guard now requires ctx.state.scene so the snapshot promise can't

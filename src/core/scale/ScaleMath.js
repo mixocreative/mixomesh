@@ -93,15 +93,65 @@ export function objectScaleFromObject(obj) {
   return { sceneRatio: objectRatio(obj) };
 }
 
-// The user's explicit export target ratios (denominators). New default is an
-// EMPTY list, meaning "as shown" — PrintPipeline + ExportContext resolve that
-// to the active printable object's ratio. (Pre-redesign saves are migrated by
-// ProjectLoader.resolveLoadedExportRatios.)
-export function exportRatiosFromState(state) {
-  const list = state?.print?.exportRatios;
-  return (Array.isArray(list) && list.length) ? list.map(_positiveOrOne) : [];
+// Typed print sizes (task 1.17 / Decision 27). `print.exportTargets` is a
+// list of `{kind:'ratio', value}` (print at 1:value), `{kind:'factor', value}`
+// (×value of the size shown) or `{kind:'height', mm}` (make the export
+// reference `mm` tall along print-space Z, the bed-up axis). An EMPTY list
+// means "as shown" — PrintPipeline + ExportContext resolve that to the
+// reference object's effective ratio (factor 1). Legacy `exportRatios` lists
+// are migrated by ProjectLoader.resolveLoadedExportTargets.
+export const EXPORT_TARGET_KINDS = Object.freeze(['ratio', 'factor', 'height']);
+
+/**
+ * Normalise one export target. Accepts a typed target or a bare positive
+ * number (legacy ratio). Returns a frozen typed target, or null when invalid.
+ */
+export function normalizeExportTarget(target) {
+  if (typeof target === 'number') {
+    return target > 0 && Number.isFinite(target) ? Object.freeze({ kind: 'ratio', value: target }) : null;
+  }
+  if (!target || typeof target !== 'object') return null;
+  if (target.kind === 'height') {
+    const mm = Number(target.mm);
+    return Number.isFinite(mm) && mm > 0 ? Object.freeze({ kind: 'height', mm }) : null;
+  }
+  if (target.kind === 'ratio' || target.kind === 'factor') {
+    const value = Number(target.value);
+    return Number.isFinite(value) && value > 0 ? Object.freeze({ kind: target.kind, value }) : null;
+  }
+  return null;
 }
 
+/** Normalised list (invalid entries dropped, duplicates collapsed). */
+export function normalizeExportTargets(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const raw of list) {
+    const t = normalizeExportTarget(raw);
+    if (t && !out.some(o => exportTargetsEqual(o, t))) out.push(t);
+  }
+  return out;
+}
+
+/** Same kind and same magnitude. */
+export function exportTargetsEqual(a, b) {
+  if (!a || !b || a.kind !== b.kind) return false;
+  return a.kind === 'height' ? a.mm === b.mm : a.value === b.value;
+}
+
+/** The project's typed print sizes; [] = as shown. */
+export function exportTargetsFromState(state) {
+  return normalizeExportTargets(state?.print?.exportTargets);
+}
+
+/**
+ * Ratio-kind target values only (denominators). Used for the one-minor
+ * `exportRatios` mirror written next to `exportTargets` in saved documents so
+ * schema-3.3 readers still see the ratio targets.
+ */
+export function exportRatiosFromState(state) {
+  return exportTargetsFromState(state).filter(t => t.kind === 'ratio').map(t => t.value);
+}
 
 export function authoredScaleFromAsset(asset) {
   return {

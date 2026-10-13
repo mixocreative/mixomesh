@@ -55,8 +55,11 @@ behaviours. Treat it that way:
 6. Export format is an explicit user choice. Selecting a printer APPLIES that printer's suggested profile defaults (export format, split-by-material, OBJ axis, 3MF flavour, bed) as one undoable step; the user may then change any of them, and choosing the printer's default profile again (**Printer default ↺**) reverts to those defaults. A profile may raise readiness hints but must never hide or disable a format. Export content still selects the representation: textured 3MF uses the Materials Extension; solid 3MF uses `<colorgroup>`; OBJ uses MTL + PNG when textures exist. Never collapse texture data merely because of a printer preset.
 7. One-mesh-one-shader is an enforced invariant. AssetLoader splits any
    `MultiMaterial` mesh into N single-material siblings at import time and
-   stamps `sourceGroupId` on the SceneObject state entries so validator +
-   exporter can re-union the part.
+   gives every sibling one shared `logicalObjectId` (the lead's id) on the
+   SceneObject state entries; validator + exporter re-union the part by
+   `logicalObjectId`. `sourceGroupId` is still stamped at split time but is
+   migrate-only at runtime (read once to seed `logicalObjectId` from legacy
+   saves; never otherwise).
 8. Module size soft targets in BLUEPRINT §0.5. Split if exceeded by 1.5×.
 
 ## Tech stack

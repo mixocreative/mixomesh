@@ -79,7 +79,7 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [
 function setScene({ objects = {}, registry = {}, selectedIds = [], workingRatio = 1, targetRatio = 1 }) {
   _registry = registry;
   // Per-object ratio redesign (2026-06-16): export "scene ratio" is the ACTIVE
-  // object's own `ratio`, and the print target is `print.exportRatios[0]`.
+  // object's own `ratio`, and the print target is `print.exportTargets[0]`.
   // Mirror the legacy global workingRatio onto each object so the export
   // factor/suffix expectations hold under the new semantics.
   const objectsWithRatio = {};
@@ -90,7 +90,7 @@ function setScene({ objects = {}, registry = {}, selectedIds = [], workingRatio 
   StateManager.setState(s => ({
     ...s,
     project: { ...s.project, name: 'Test' },
-    print: { ...s.print, exportRatios: [targetRatio] },
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: targetRatio }] },
     selection: { ...s.selection, selectedIds, activeId },
     scene: { ...s.scene, objects: objectsWithRatio },
   }), { silent: true });
@@ -647,7 +647,7 @@ await test('prep step throws → export ABORTS (no raw-BU file with a success to
 
 await test('save picker cancelled → "cancelled" info toast, NO success toast, batch stops', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
-  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [1, 2] } }), { silent: true });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 1 }, { kind: 'ratio', value: 2 }] } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   let pickerCalls = 0;
   window.showSaveFilePicker = async () => { pickerCalls++; throw Object.assign(new Error('cancel'), { name: 'AbortError' }); };
@@ -714,7 +714,7 @@ await test('readiness: missing or stale validation cache → validation-pending 
 
 await test('batch export uses ONE state snapshot (M8): a rename between pickers does not change file 2', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
-  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [1, 2] } }), { silent: true });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 1 }, { kind: 'ratio', value: 2 }] } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   let n = 0;
   window.showSaveFilePicker = async () => {
@@ -994,11 +994,11 @@ await test('filename: combined 3MF default ratio → `${project}${suffix}.3mf`',
   assert.equal(calls.downloads.at(-1), 'Test_r1to1.3mf');
 });
 
-await test('as-shown: empty exportRatios prints at the active object ratio (displayed size)', async () => {
+await test('as-shown: empty exportTargets prints at the active object ratio (displayed size)', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { size: [2, 2, 2] }) },
     workingRatio: 72, targetRatio: 72 });
   // Empty list ⇒ "as shown" ⇒ target = active object's ratio (72) ⇒ factor 1000.
-  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [] } }), { silent: true });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [] } }), { silent: true });
   const d = PrintManager.getExportedDimensions('m1');
   assert.ok(Math.abs(d.x - 2000) < 1e-6, `as-shown should be size×1000 (displayed mm), got ${d.x}`);
   MeshValidator.validateMesh = valOK;
@@ -1006,16 +1006,69 @@ await test('as-shown: empty exportRatios prints at the active object ratio (disp
   assert.equal(calls.downloads.at(-1), 'Test_r72to72.zip', `as-shown suffix should be _r72to72, got ${calls.downloads.at(-1)}`);
 });
 
-await test('batch: exportRatios list emits one file per target ratio', async () => {
+await test('batch: exportTargets list emits one file per target ratio', async () => {
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') },
     workingRatio: 72, targetRatio: 72 });
   // Two export targets; active object ratio is 72.
-  StateManager.setState(s => ({ ...s, print: { ...s.print, exportRatios: [72, 144] } }), { silent: true });
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 72 }, { kind: 'ratio', value: 144 }] } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   assert.ok(calls.downloads.includes('Test_r72to72.zip'), `missing 1:72 file, got ${calls.downloads.join()}`);
   assert.ok(calls.downloads.includes('Test_r72to144.zip'), `missing 1:144 file, got ${calls.downloads.join()}`);
   assert.equal(calls.downloads.filter(f => f.endsWith('.zip')).length, 2, 'exactly two zip outputs');
+});
+
+// ── Typed print sizes (task 1.17 / Decision 27) ─────────
+
+await test('typed targets: ratio 144 / ×2 / 120 mm on a 60 mm-tall 1:72 reference → _r72to144, _x2, _h120mm', async () => {
+  // Print-space Z (bed-up) = Babylon Y → a 0.06 BU-tall mesh is 60 mm tall as shown.
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1', { size: [0.1, 0.06, 0.2] }) },
+    workingRatio: 72, targetRatio: 72 });
+  const targets = [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }, { kind: 'height', mm: 120 }];
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: targets } }), { silent: true });
+  const factors = [0, 1, 2].map(i => PrintManager.previewExportContext({ targetIndex: i }).ratioFactor);
+  assert.deepEqual(factors.map(f => +f.toFixed(9)), [0.5, 2, 2]);
+  const h = PrintManager.previewExportContext({ targetIndex: 2 });
+  assert.ok(Math.abs(h.referenceHeightMM - 60) < 1e-9, `reference height 60 mm, got ${h.referenceHeightMM}`);
+  assert.ok(Math.abs(h.targetRatio - 36) < 1e-9, 'height target reports its effective ratio (72 / 2)');
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportOBJ();
+  const zips = calls.downloads.filter(f => f.endsWith('.zip'));
+  assert.deepEqual(zips, ['Test_r72to144.zip', 'Test_x2.zip', 'Test_h120mm.zip']);
+});
+
+await test('typed targets: as shown stays _r{ref}to{ref}; fractional tokens use p', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') }, workingRatio: 72, targetRatio: 72 });
+  StateManager.setState(s => ({ ...s, print: { ...s.print,
+    exportTargets: [{ kind: 'factor', value: 0.5 }, { kind: 'height', mm: 12.5 }] } }), { silent: true });
+  MeshValidator.validateMesh = valOK;
+  await PrintManager.exportSTL();
+  assert.deepEqual(calls.downloads.filter(f => f.endsWith('.stl')), ['Test_x0p5.stl', 'Test_h12p5mm.stl']);
+});
+
+await test('typed targets: add / remove / replace are undoable commands', async () => {
+  const { push, undo, redo, clear, AddExportTargetCommand, RemoveExportTargetCommand, ReplaceExportTargetCommand }
+    = await import('../src/core/HistoryManager.js');
+  clear();
+  StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [] } }), { silent: true });
+  const cur = () => StateManager.getState().print.exportTargets;
+  push(new AddExportTargetCommand({ kind: 'ratio', value: 144 }));
+  push(new AddExportTargetCommand({ kind: 'factor', value: 2 }));
+  push(new AddExportTargetCommand({ kind: 'factor', value: 2 }));   // duplicate collapses
+  assert.deepEqual(cur(), [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }]);
+  push(new ReplaceExportTargetCommand({ kind: 'factor', value: 2 }, { kind: 'height', mm: 120 }));
+  assert.deepEqual(cur(), [{ kind: 'ratio', value: 144 }, { kind: 'height', mm: 120 }]);
+  push(new RemoveExportTargetCommand({ kind: 'ratio', value: 144 }));
+  assert.deepEqual(cur(), [{ kind: 'height', mm: 120 }]);
+  undo();
+  assert.deepEqual(cur(), [{ kind: 'ratio', value: 144 }, { kind: 'height', mm: 120 }]);
+  undo();
+  assert.deepEqual(cur(), [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }]);
+  undo(); undo(); undo();
+  assert.deepEqual(cur(), [], 'back to as shown');
+  redo();
+  assert.deepEqual(cur(), [{ kind: 'ratio', value: 144 }]);
+  clear();
 });
 
 await test('export ratio reference ignores active object when it is not exported', async () => {
@@ -1030,7 +1083,7 @@ await test('export ratio reference ignores active object when it is not exported
   StateManager.setState(s => ({
     ...s,
     selection: { ...s.selection, selectedIds: ['m1'], activeId: 'helper' },
-    print: { ...s.print, exportRatios: [144] },
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 144 }] },
   }), { silent: true });
   const dims = PrintManager.getExportedDimensions('m1');
   assert.ok(Math.abs(dims.x - (10 * (1000 / 144))) < 1e-6,
@@ -1057,7 +1110,7 @@ await test('export target ratio scales around active printable object origin', a
   StateManager.setState(s => ({
     ...s,
     selection: { ...s.selection, selectedIds: ['active', 'other'], activeId: 'active' },
-    print: { ...s.print, exportRatios: [144] },
+    print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 144 }] },
   }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();

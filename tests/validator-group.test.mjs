@@ -73,6 +73,9 @@ AssetLoader.getBabylonMesh = (id) => meshes.get(id) ?? null;
 function seedState(objects) {
   meshes.clear();
   for (const o of objects) if (o.mesh) meshes.set(o.id, o.mesh);
+  // logicalObjectId = id of the first member sharing the (fixture) group tag.
+  const leadOf = new Map();
+  for (const o of objects) if (o.sourceGroupId && !leadOf.has(o.sourceGroupId)) leadOf.set(o.sourceGroupId, o.id);
   setState(s => ({
     ...s,
     scene: {
@@ -80,7 +83,8 @@ function seedState(objects) {
       objects: Object.fromEntries(objects.map(o => [o.id, {
         id: o.id,
         name: o.id,
-        sourceGroupId: o.sourceGroupId ?? null,
+        logicalObjectId: o.sourceGroupId ? leadOf.get(o.sourceGroupId) : null,
+        isInternalPart: !!o.sourceGroupId && leadOf.get(o.sourceGroupId) !== o.id,
         isGhost: false,
         isPrintPart: true,
       }])),
@@ -104,7 +108,7 @@ await test('split clean cube → group union is watertight (no nonManifold)', as
     { id: 'lo', sourceGroupId: 'grp_1', mesh: lo },
     { id: 'hi', sourceGroupId: 'grp_1', mesh: hi },
   ]);
-  const results = await MeshValidator.validateGroup('grp_1');
+  const results = await MeshValidator.validateGroup('lo');
   assert.equal(nm(results), undefined,
     `welded union should be closed; got ${JSON.stringify(results)}`);
 });
@@ -112,12 +116,12 @@ await test('split clean cube → group union is watertight (no nonManifold)', as
 await test('one half alone (group of 1) → reports the seam as non-manifold', async () => {
   const lo = buildHalfMesh('lo', LO_TRIS);
   seedState([{ id: 'lo', sourceGroupId: 'grp_solo', mesh: lo }]);
-  const results = await MeshValidator.validateGroup('grp_solo');
+  const results = await MeshValidator.validateGroup('lo');
   const r = nm(results);
   assert.ok(r, 'open shell should flag a boundary');
   assert.ok(r.count > 0, `expected boundary edges, got count=${r?.count}`);
   assert.equal(r.scope, 'group');
-  assert.equal(r.sourceGroupId, 'grp_solo');
+  assert.equal(r.logicalObjectId, 'lo');
 });
 
 await test('broken group (missing a face on lower half) → still flags non-manifold', async () => {
@@ -127,7 +131,7 @@ await test('broken group (missing a face on lower half) → still flags non-mani
     { id: 'lo', sourceGroupId: 'grp_2', mesh: loBroken },
     { id: 'hi', sourceGroupId: 'grp_2', mesh: hi },
   ]);
-  const results = await MeshValidator.validateGroup('grp_2');
+  const results = await MeshValidator.validateGroup('lo');
   const r = nm(results);
   assert.ok(r, 'missing-face union must flag a boundary');
   assert.ok(r.count > 0 && r.count <= 6, `small boundary edge count, got ${r?.count}`);
@@ -182,7 +186,7 @@ await test('validateGroup: open group union → holes reported, auto-fixable AS 
   R.__test.setEngine({ diagnose: () => ({ boundary: 3, nonManifold: 0, components: 1, isWatertight: false }) });
   const lo = buildHalfMesh('lo', LO_TRIS);
   seedState([{ id: 'lo', sourceGroupId: 'grp_holes', mesh: lo }]);
-  const results = await MeshValidator.validateGroup('grp_holes');
+  const results = await MeshValidator.validateGroup('lo');
   const r = holes(results);
   assert.ok(r, 'open group union should report holes');
   assert.equal(r.count, 3);
@@ -192,7 +196,7 @@ await test('validateGroup: open group union → holes reported, auto-fixable AS 
   assert.equal(r.autoFixAvailable, true, 'group results are fixable through GroupRepair');
   assert.match(r.message, /one solid/);
   assert.equal(r.scope, 'group');
-  assert.equal(r.sourceGroupId, 'grp_holes');
+  assert.equal(r.logicalObjectId, 'lo');
 });
 
 await test('validateGroup: the union is WELDED before the engine sees it — a closed split cube has no holes', async () => {
@@ -212,7 +216,7 @@ await test('validateGroup: the union is WELDED before the engine sees it — a c
     { id: 'lo', sourceGroupId: 'grp_welded', mesh: lo },
     { id: 'hi', sourceGroupId: 'grp_welded', mesh: hi },
   ]);
-  const results = await MeshValidator.validateGroup('grp_welded');
+  const results = await MeshValidator.validateGroup('lo');
   assert.equal(holes(results), undefined, 'closed split cube must report NO holes: seams are not boundaries');
 });
 

@@ -1,11 +1,15 @@
 // Scale-domain commands (split from HistoryManager.js — review L29):
-// per-object ratio rescale (RescaleObjectCommand) and per-asset source-unit
-// re-bake (SourceUnitCommand).
+// per-object ratio rescale (RescaleObjectCommand), per-asset source-unit
+// re-bake (SourceUnitCommand) and the project's typed print sizes
+// (ExportTargetCommands — task 1.17).
 
 import { EVENTS } from '../events.js';
 import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { AssetLoader } from '../AssetLoader.js';
-import { SOURCE_UNIT_FACTORS } from '../scale/ScaleMath.js';
+import {
+  SOURCE_UNIT_FACTORS, exportTargetsFromState, normalizeExportTarget, exportTargetsEqual,
+  formatScaleRatio,
+} from '../scale/ScaleMath.js';
 import { canonicalObjectId } from '../LogicalObjects.js';
 import { SILENT, withDetachedPivot } from './support.js';
 
@@ -183,4 +187,62 @@ function _rescalePosition(id, mesh, factor) {
   if (lead && !lead.parent && lead.position) {
     scaleAbout(lead.position.x, lead.position.y, lead.position.z);
   }
+}
+
+// ── Print sizes (task 1.17) ──────────────────────────────
+// `print.exportTargets` edits are undoable project edits. Every variant
+// snapshots the whole list before/after so undo restores the exact order.
+
+/**
+ * Replace the whole `print.exportTargets` list (one undo step). Invalid
+ * entries are dropped and duplicates collapsed; [] = "as shown".
+ */
+export class SetExportTargetsCommand {
+  constructor(nextTargets, label = 'Print sizes') {
+    this._prev = exportTargetsFromState(getState());
+    this._next = exportTargetsFromState({ print: { exportTargets: nextTargets } });
+    this.label = label;
+  }
+  execute() { _writeExportTargets(this._next); markDirty(); }
+  undo() { _writeExportTargets(this._prev); }
+}
+
+/** Append one typed print size (no-op list when it is already present). */
+export class AddExportTargetCommand extends SetExportTargetsCommand {
+  constructor(target) {
+    const cur = exportTargetsFromState(getState());
+    const t = normalizeExportTarget(target);
+    super(t ? [...cur, t] : cur, `Add print size ${exportTargetLabel(t)}`);
+  }
+}
+
+/** Remove one typed print size (matched by kind + magnitude). */
+export class RemoveExportTargetCommand extends SetExportTargetsCommand {
+  constructor(target) {
+    const t = normalizeExportTarget(target);
+    const cur = exportTargetsFromState(getState());
+    super(cur.filter(c => !exportTargetsEqual(c, t)), `Remove print size ${exportTargetLabel(t)}`);
+  }
+}
+
+/** Replace one typed print size in place (keeps its position in the list). */
+export class ReplaceExportTargetCommand extends SetExportTargetsCommand {
+  constructor(oldTarget, newTarget) {
+    const o = normalizeExportTarget(oldTarget);
+    const n = normalizeExportTarget(newTarget);
+    const cur = exportTargetsFromState(getState());
+    super(n ? cur.map(c => (exportTargetsEqual(c, o) ? n : c)) : cur, `Change print size ${exportTargetLabel(n)}`);
+  }
+}
+
+/** Short language-neutral label: "1:144", "×2", "120 mm". */
+export function exportTargetLabel(target) {
+  if (!target) return '';
+  if (target.kind === 'factor') return `×${target.value}`;
+  if (target.kind === 'height') return `${target.mm} mm`;
+  return formatScaleRatio(target.value);
+}
+
+function _writeExportTargets(list) {
+  setState(s => ({ ...s, print: { ...s.print, exportTargets: list.map(t => ({ ...t })) } }), SILENT);
 }

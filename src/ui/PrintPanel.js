@@ -13,7 +13,8 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import printersData from '../config/printers.json' with { type: 'json' };
-import { formatScaleRatio, parseScaleRatioText, exportRatiosFromState } from '../core/scale/ScaleMath.js';
+import { formatScaleRatio, parseScaleRatioText, exportTargetsFromState } from '../core/scale/ScaleMath.js';
+import { push, AddExportTargetCommand, RemoveExportTargetCommand, exportTargetLabel } from '../core/HistoryManager.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
 import { wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
 import * as Selection from '../core/Selection.js';
@@ -157,7 +158,10 @@ function _renderScaleTab() {
   // Everything export-shaped (reference, factor, dims) comes from ONE
   // previewExportContext() call so the panel, the export pipeline, and the
   // dimension helper cannot drift.
-  const exportRatios = exportRatiosFromState(state);
+  // Typed print sizes (task 1.17). This tab still only ADDS ratio targets;
+  // factor / height targets (the "Other sizes…" editor) arrive with task 1.3.
+  // Every edit is an undoable command (HISTORY_* events re-render the panel).
+  const exportTargets = exportTargetsFromState(state);
   const preview = PrintManager.previewExportContext();
   const referenceR = preview?.referenceRatio ?? 1;
   const referenceId = preview?.referenceUnit?.logicalId ?? null;
@@ -167,7 +171,7 @@ function _renderScaleTab() {
 
   html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
   html += '<div class="pp-ratio-list" data-export-ratios>';
-  if (exportRatios.length === 0) {
+  if (exportTargets.length === 0) {
     // Only show the "as shown · 1:R" pill when a real reference exists —
     // showing it with referenceR=1 when there are no printable parts would
     // claim a scale that isn't actually being used by anything.
@@ -175,9 +179,9 @@ function _renderScaleTab() {
       html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(referenceR))}</span>`;
     }
   } else {
-    for (const r of exportRatios) {
-      html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(formatScaleRatio(r))}</span><button class="pp-ratio-remove" data-remove-ratio="${escapeAttr(r)}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
-    }
+    exportTargets.forEach((target, i) => {
+      html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(exportTargetLabel(target))}</span><button class="pp-ratio-remove" data-remove-target="${i}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
+    });
   }
   html += '</div>';
 
@@ -225,12 +229,8 @@ function _renderScaleTab() {
 
   const addRatio = (val) => {
     if (!(Number.isFinite(val) && val > 0)) return;
-    setState(s => {
-      const cur = exportRatiosFromState(s);
-      if (cur.includes(val)) return s;
-      return { ...s, print: { ...s.print, exportRatios: [...cur, val] } };
-    });
-    _render();
+    if (exportTargets.some(tg => tg.kind === 'ratio' && tg.value === val)) return;
+    push(new AddExportTargetCommand({ kind: 'ratio', value: val }));
   };
 
   const addSel = el.querySelector('[data-add-ratio]');
@@ -255,15 +255,11 @@ function _renderScaleTab() {
     if (e.key === 'Enter')  { e.preventDefault(); commitCustom(); }
     if (e.key === 'Escape') { customInput.hidden = true; customInput.value = ''; }
   });
-  el.querySelectorAll('[data-remove-ratio]').forEach(btn => {
+  el.querySelectorAll('[data-remove-target]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const val = parseFloat(btn.dataset.removeRatio);
-      setState(s => {
-        const cur = exportRatiosFromState(s).filter(r => r !== val);
-        // Empty ⇒ back to "as shown" (print at the export reference ratio).
-        return { ...s, print: { ...s.print, exportRatios: cur } };
-      });
-      _render();
+      const target = exportTargets[Number(btn.dataset.removeTarget)];
+      // Removing the last one ⇒ back to "as shown" (print at the reference ratio).
+      if (target) push(new RemoveExportTargetCommand(target));
     });
   });
 
@@ -292,9 +288,9 @@ function _validationRows(state) {
   for (const [meshId, obj] of Object.entries(state.scene.objects)) {
     if (!obj.isPrintPart || obj.isGhost) continue;
     if (!shouldDisplayObject(obj)) continue;
-    if (obj.sourceGroupId) {
-      if (seenGroups.has(obj.sourceGroupId)) continue;
-      seenGroups.add(obj.sourceGroupId);
+    if (obj.logicalObjectId) {   // 2.7: one row per logical object (never sourceGroupId)
+      if (seenGroups.has(obj.logicalObjectId)) continue;
+      seenGroups.add(obj.logicalObjectId);
     }
     rows.push({ meshId, obj, entry: cache[meshId] ?? null });
   }
@@ -558,7 +554,7 @@ function _renderReadinessSummary(readiness) {
     html += '<div class="pp-target-list">';
     for (const target of readiness.targets) {
       const size = target.bounds.max.map((value, axis) => Math.max(0, value - target.bounds.min[axis]));
-      html += `<div class="pp-target-summary"><span>${escapeHtml(formatScaleRatio(target.ratio))}</span><span>${size.map(value => value.toFixed(1)).join('×')} mm</span></div>`;
+      html += `<div class="pp-target-summary"><span>${escapeHtml(target.label ?? formatScaleRatio(target.ratio))}</span><span>${size.map(value => value.toFixed(1)).join('×')} mm</span></div>`;
     }
     html += '</div>';
   }

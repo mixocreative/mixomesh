@@ -221,6 +221,33 @@ await test('H1: missing version (legacy) and same-major minor bump still load', 
   assert.equal(getState().project.name, 'Minor');
 });
 
+// ── Task 1.17: typed print sizes migration + one-minor mirror ──
+
+await test('1.17: legacy exportRatios:[144] loads as exportTargets [{kind:ratio,value:144}]', async () => {
+  seedCurrentScene();
+  await __test._loadProject({ ...goodDoc('Legacy ratios'), print: { exportRatios: [144] } });
+  assert.deepEqual(getState().print.exportTargets, [{ kind: 'ratio', value: 144 }]);
+  assert.equal('exportRatios' in getState().print, false, 'the ratio mirror never lives in state');
+  // typed list wins over a stale mirror; pre-redesign single targetRatio still migrates
+  assert.deepEqual(__test._resolveLoadedExportTargets({ exportTargets: [{ kind: 'factor', value: 2 }], exportRatios: [9] }),
+    [{ kind: 'factor', value: 2 }]);
+  assert.deepEqual(__test._resolveLoadedExportTargets({ targetRatio: 35 }), [{ kind: 'ratio', value: 35 }]);
+  assert.deepEqual(__test._resolveLoadedExportTargets({}), []);
+});
+
+await test('1.17: save writes exportTargets + a ratio-only exportRatios mirror; reload round-trips', async () => {
+  seedCurrentScene();
+  await __test._loadProject(goodDoc('Typed'));
+  const targets = [{ kind: 'ratio', value: 144 }, { kind: 'factor', value: 2 }, { kind: 'height', mm: 120 }];
+  setState(s => ({ ...s, print: { ...s.print, exportTargets: targets } }), { silent: true });
+  AssetLoader.getAssetBytes = async () => GLB.buffer;
+  const doc = await __test._buildDocument({ skipTextureImages: true });
+  assert.deepEqual(doc.print.exportTargets, targets);
+  assert.deepEqual(doc.print.exportRatios, [144], 'mirror carries ratio targets only (3.3 readers)');
+  await __test._loadProject({ ...goodDoc('Typed'), print: JSON.parse(JSON.stringify(doc.print)) });
+  assert.deepEqual(getState().print.exportTargets, targets);
+});
+
 await test('H1: open() with corrupt JSON → clear error, scene untouched, no handle bound', async () => {
   seedCurrentScene();
   window.showOpenFilePicker = async () => [{
@@ -536,6 +563,20 @@ await test('M2: recoverAutosave refuses while importing', async () => {
   await assert.rejects(PersistenceManager.recoverAutosave(), /import is still running/);
   d.resolve(makeContainer());
   await importing;
+});
+
+await test('2.7: a legacy save with only sourceGroupId loads with shared logicalObjectId links', async () => {
+  seedCurrentScene();
+  const doc = goodDoc('Legacy');
+  doc.sceneObjects = [
+    { ...sceneObject('lead', 'a_ok'), sourceGroupId: 'sg1' },
+    { ...sceneObject('part', 'a_ok'), sourceGroupId: 'sg1', isInternalPart: true },
+  ];
+  await __test._loadProject(doc);
+  const objs = getState().scene.objects;
+  assert.equal(objs.lead?.logicalObjectId, 'lead');
+  assert.equal(objs.part?.logicalObjectId, 'lead', 'part linked to the lead');
+  assert.equal(objs.part?.isInternalPart, true);
 });
 
 console.log('\n' + out.join('\n'));

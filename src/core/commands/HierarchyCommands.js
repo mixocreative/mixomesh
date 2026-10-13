@@ -15,14 +15,8 @@ import {
   restoreSceneObject,
 } from './support.js';
 
-let _duplicateGroupSerial = 0;
-
 function _expandedCommandIds(ids) {
   return logicalObjectCommandIds(ids, getState().scene.objects);
-}
-
-function _newDuplicateSourceGroupId() {
-  return `dup_${Date.now().toString(36)}_${++_duplicateGroupSerial}`;
 }
 
 /** Set isVisible on a set of meshes. `prev` is meshId → bool; `next` is bool. */
@@ -303,7 +297,6 @@ export class DuplicateCommand {
 }
 
 function _remapDuplicateLogicalObjects(sourceIds, cloneIdBySourceId, sourceObjects) {
-  const groupIdByOldGroup = new Map();
   const leadCloneByOldLead = new Map();
 
   for (const sourceId of sourceIds) {
@@ -327,33 +320,20 @@ function _remapDuplicateLogicalObjects(sourceIds, cloneIdBySourceId, sourceObjec
       const cloneObj = objects[newId];
       if (!newId || !sourceObj || !cloneObj) continue;
 
-      let sourceGroupId = null;
+      // Re-link logicalObjectId onto the clones (glTF multi-primitive and
+      // MultiMaterial splits alike). sourceGroupId is migrate-only (Decision
+      // 33): clones carry none, and runtime never reads it.
       let logicalObjectId = null;
-      // Mint a fresh sourceGroupId only when the source actually had one
-      // (MultiMaterial split). But re-link logicalObjectId for BOTH cases —
-      // a glTF multi-primitive object has a logicalObjectId with NO
-      // sourceGroupId, and was previously left null here, splitting the
-      // duplicate into N unlinked objects.
-      if (sourceObj.sourceGroupId) {
-        if (!groupIdByOldGroup.has(sourceObj.sourceGroupId)) {
-          groupIdByOldGroup.set(sourceObj.sourceGroupId, _newDuplicateSourceGroupId());
-        }
-        sourceGroupId = groupIdByOldGroup.get(sourceObj.sourceGroupId);
-      }
-      if (sourceObj.sourceGroupId || sourceObj.logicalObjectId) {
+      if (sourceObj.logicalObjectId) {
         logicalObjectId = leadCloneByOldLead.get(canonicalObjectId(sourceId, sourceObjects)) ?? newId;
       }
       objects[newId] = {
         ...cloneObj,
-        sourceGroupId,
+        sourceGroupId: null,
         logicalObjectId,
         isInternalPart: !!sourceObj.isInternalPart,
       };
 
-      const mesh = AssetLoader.getBabylonMesh(newId);
-      if (mesh) {
-        mesh.metadata = { ...(mesh.metadata ?? {}), sourceGroupId };
-      }
     }
     return { ...state, scene: { ...state.scene, objects } };
   }, SILENT);

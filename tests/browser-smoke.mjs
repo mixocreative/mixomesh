@@ -1364,15 +1364,15 @@ async function main() {
       const savedAfterSection = JSON.parse(localStorage.getItem(KEY))?.settings?.render?.exposure;
 
       // (4) dirty again, then resetAll → key cleared + state factory. A scene
-      // is loaded. exportRatios is per-project CONTENT (not a setting) so it must
+      // is loaded. exportTargets is per-project CONTENT (not a setting) so it must
       // be PRESERVED through a settings reset; a real print setting
       // (strictExport) resets to factory.
-      sm.setState(s => ({ ...s, print: { ...s.print, exportRatios: [9, 35], strictExport: true } }), { silent: true });
+      sm.setState(s => ({ ...s, print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 9 }, { kind: 'factor', value: 2 }], strictExport: true } }), { silent: true });
       ss.save();
       const sceneLoaded = Object.keys(sm.getState().scene.objects).length > 0;
       ss.resetAll();
       const keyCleared = localStorage.getItem(KEY) === null;
-      const ratioPreserved = JSON.stringify(sm.getState().print.exportRatios) === JSON.stringify([9, 35]);
+      const ratioPreserved = JSON.stringify(sm.getState().print.exportTargets) === JSON.stringify([{ kind: 'ratio', value: 9 }, { kind: 'factor', value: 2 }]);
       const wallReset = sm.getState().print.strictExport === DS.print.strictExport;
 
       return { logoOk, savedExposure, excludesObjects, afterSection, savedAfterSection, keyCleared, sceneLoaded, ratioPreserved, wallReset, dsExposure: DS.render.exposure };
@@ -1384,7 +1384,7 @@ async function main() {
     assert(settings.savedAfterSection === settings.dsExposure, 'resetSection did not re-persist the restored value');
     assert(settings.keyCleared, 'resetAll did not clear the settings localStorage key');
     assert(settings.sceneLoaded, 'expected a loaded scene (diag STL) for the reset check');
-    assert(settings.ratioPreserved, 'resetAll wrongly reset exportRatios — it is per-project content, not a setting');
+    assert(settings.ratioPreserved, 'resetAll wrongly reset exportTargets — it is per-project content, not a setting');
     assert(settings.wallReset, 'resetAll did not reset a print field');
 
     // ── Duplicate survives .mixo reload as a DISTINCT mesh (audit H1) ────

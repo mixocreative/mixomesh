@@ -84,9 +84,10 @@ await test('round-trip: doc carrying targetPrinterId lands in state.print after 
   const next = { ...s.print, ...(data.print || {}) };
   assert.equal(next.targetPrinterId, 'bambu-x1c');
   assert.deepEqual(next.bedDimensions, { x: 256, y: 256, z: 256 });
-  // Other defaults preserved (exportRatios etc.). Default
-  // exportRatios is EMPTY = "as shown" (resolves to the active object's ratio).
-  assert.deepEqual(next.exportRatios, []);
+  // Other defaults preserved (exportTargets etc.). Default
+  // exportTargets is EMPTY = "as shown" (resolves to the reference object's ratio).
+  assert.deepEqual(next.exportTargets, []);
+  assert.equal('exportRatios' in next, false, 'exportRatios is a save-only mirror, never runtime state');
 });
 
 await test('round-trip: doc with NO print block keeps Mimaki default after merge', () => {

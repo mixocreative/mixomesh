@@ -13,6 +13,7 @@ import { sha256Hex } from '../hash.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
+import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
 import {
   collectRequiredAssetRefs,
@@ -193,6 +194,10 @@ export async function serialiseTextureImages() {
  */
 function _serialisablePrint(print = {}) {
   const { repairOnImport, ...rest } = print;
+  // 1.17: typed print sizes + a ratio-only `exportRatios` mirror kept for one
+  // minor so schema-3.3 readers still see their ratio targets.
+  rest.exportTargets = exportTargetsFromState({ print });
+  rest.exportRatios = exportRatiosFromState({ print });
   // 1.15: never persist a reference to an object that no longer exists.
   if (rest.referenceObjectId && !getState().scene.objects[rest.referenceObjectId]) rest.referenceObjectId = null;
   return { ...rest };

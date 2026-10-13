@@ -108,6 +108,9 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
     registerMesh(meshId, mesh);
 
     const shaderId = mesh.material ? byMaterial.get(mesh.material) : null;
+    // Split-time stamp from MeshSplit / ThreeMFLoader (import grouping key
+    // only). Persisted for save-file compat; runtime never reads it back from
+    // scene state — logicalObjectId is the linkage (AGENTS rule 7).
     const sourceGroupId = mesh.metadata?.sourceGroupId ?? null;
     const parentId = hierarchy?.groupIdForMesh?.(mesh) ?? null;
 
@@ -115,7 +118,7 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
     // shows one entry and (critically) the validator welds them before the
     // manifold check. Two cases, both watertight-as-a-whole but open along the
     // seams between parts:
-    //   1. a MultiMaterial mesh split on import (shared `sourceGroupId`).
+    //   1. a MultiMaterial mesh split on import (shared split-time `sourceGroupId` stamp → one `logicalObjectId`).
     //   2. a glTF multi-primitive mesh — Babylon names the primitives
     //      `<stem>_primitive<N>` and parents them under one node, so they share
     //      a stem AND a parentId. (Most multi-shader models export this way.)

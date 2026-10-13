@@ -1,4 +1,11 @@
+// Filename scale token (BLUEPRINT §12, Decision 27). Ratio targets and
+// "as shown" keep `_r{ref}to{T}`; a factor target writes `_x{N}`; a height
+// target writes `_h{N}mm`. `printScale.target` is the typed print size (absent
+// or ratio-kind ⇒ the ratio token).
 export function scaleFilenameSuffix(sceneScale, printScale) {
+  const target = printScale?.target;
+  if (target?.kind === 'factor') return `_x${_ratioToken(target.value)}`;
+  if (target?.kind === 'height') return `_h${_ratioToken(target.mm)}mm`;
   return `_r${_ratioToken(sceneScale?.sceneRatio)}to${_ratioToken(printScale?.printRatio)}`;
 }
 

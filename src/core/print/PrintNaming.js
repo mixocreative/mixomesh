@@ -2,8 +2,9 @@
  * Export filename helpers.
  *
  * Both helpers take an ExportContext (see ExportContext.js). No getState()
- * reads, no module-level state. The ratio suffix `_r{ref}to{target}` (e.g.
- * `_r1to1` for "as shown") is appended INTERNALLY by ExportPlanner — callers
+ * reads, no module-level state. The scale suffix — `_r{ref}to{target}` for
+ * ratio targets and "as shown" (e.g. `_r1to1`), `_x{N}` for a factor target,
+ * `_h{N}mm` for a height target — is appended INTERNALLY by ExportPlanner — callers
  * never need it standalone, so there's no separate `ratioSuffix` accessor.
  *
  * Pure math + string formatting only — actual file naming policy.
@@ -28,12 +29,12 @@ function _requireCtx(ctx, where) {
 function _scales(ctx) {
   return [
     { sceneRatio: ctx.referenceRatio },
-    { printRatio: ctx.targetRatio },
+    { printRatio: ctx.targetRatio, target: ctx.target ?? null },
   ];
 }
 
 /**
- * Bundle name: `{projectName}_r{ref}to{target}`.
+ * Bundle name: `{projectName}{suffix}` (`_r{ref}to{T}` | `_x{N}` | `_h{N}mm`).
  * @param {ExportContext} ctx
  */
 export function exportBaseName(ctx) {
@@ -43,7 +44,7 @@ export function exportBaseName(ctx) {
 }
 
 /**
- * Per-part name: `{projectName}_{partName}_r{ref}to{target}`.
+ * Per-part name: `{projectName}_{partName}{suffix}`.
  * @param {ExportContext} ctx
  * @param {string} meshName
  */

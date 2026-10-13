@@ -108,14 +108,14 @@ await test('duplicate command creates an independent logical split object', () =
   assert.ok(internal, 'duplicated logical object needs its internal material part');
   assert.equal(lead.logicalObjectId, lead.id);
   assert.equal(internal.logicalObjectId, lead.id);
-  assert.equal(internal.sourceGroupId, lead.sourceGroupId);
-  assert.notEqual(lead.sourceGroupId, 'sg_mug');
+  assert.equal(lead.sourceGroupId, null, 'clones carry no sourceGroupId (migrate-only)');
+  assert.equal(internal.sourceGroupId, null);
   assert.ok(state.scene.groups.grp_1.childIds.includes(lead.id));
   assert.ok(state.scene.groups.grp_1.childIds.includes(internal.id));
   assert.deepEqual(Selection.getSelectedIds(), [lead.id]);
 });
 
-await test('duplicate keeps a glTF multi-primitive logical object linked (logicalObjectId, no sourceGroupId)', () => {
+await test('duplicate keeps a glTF multi-primitive logical object linked (logicalObjectId only)', () => {
   // The audit-found regression: parts grouped only by logicalObjectId (no
   // sourceGroupId) lost their link on duplicate → N unlinked objects.
   seedLogicalObject({
@@ -133,7 +133,7 @@ await test('duplicate keeps a glTF multi-primitive logical object linked (logica
   assert.ok(lead && internal, 'clone has a lead + internal part');
   assert.equal(lead.logicalObjectId, lead.id, 'clone lead links to itself');
   assert.equal(internal.logicalObjectId, lead.id, 'clone part links to clone lead (was null before fix → split)');
-  assert.equal(lead.sourceGroupId, null, 'no sourceGroupId minted for a multi-primitive object');
+  assert.equal(lead.sourceGroupId, null, 'no sourceGroupId minted');
   assert.equal(internal.sourceGroupId, null);
 });
 

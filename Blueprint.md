@@ -53,12 +53,14 @@ PLY / WRL) and is never hidden or blocked.
   keeping OBJ / 3MF / STL visible and manually chosen.
 - **One-mesh-one-shader is an enforced invariant.** AssetLoader splits any
   `BABYLON.MultiMaterial` mesh into N single-material siblings at import,
-  stamping `sourceGroupId` on each SceneObject. One sibling is the visible
-  logical object; the rest are material parts used by shader/export code.
-  Validator + exporter re-union the siblings by logical object.
+  stamping one shared `logicalObjectId` (the lead sibling's id) on each
+  SceneObject. One sibling is the visible logical object; the rest are
+  material parts used by shader/export code. Validator + exporter re-union the
+  siblings by `logicalObjectId`. `sourceGroupId` is still stamped at split time
+  (save-file compat) but is migrate-only at runtime (Decision 33).
 - **A multi-shader object is ONE logical object** regardless of how it arrives.
   Two cases get the same `logicalObjectId` (`_registerInstantiatedMeshes`):
-  (1) a `BABYLON.MultiMaterial` split (shared `sourceGroupId`); (2) a glTF
+  (1) a `BABYLON.MultiMaterial` split (shared split-time `sourceGroupId` stamp, used only as the import grouping key); (2) a glTF
   **multi-primitive** mesh — Babylon names primitives `<stem>_primitive<N>` and
   parents them under one node, so they share a stem + `parentId`. Most
   multi-shader models export as case 2. **Separate objects are distinct nodes
@@ -396,7 +398,7 @@ tests/                     ← headless harness — Node-native, no build (§14b
   export-planner.test.mjs  ← filename/profile/scale planner
   hierarchy.test.mjs       ← hierarchy parent commands + cycle rejection
   validator.test.mjs       ← MeshValidator severity + position-welded manifold
-  validator-group.test.mjs ← sourceGroupId union topology checks
+  validator-group.test.mjs ← logicalObjectId union topology checks
   persistence.test.mjs     ← PersistenceManager `__test` helpers + 5-tier resolve
   printer-profile.test.mjs ← default/fallback printer profile behavior
   scale.test.mjs           ← ScaleMath contracts + compatibility helpers
@@ -1715,15 +1717,14 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
   shaderId,                    // shader currently assigned (null = scene default)
   visible, locked, isGhost,    // booleans
   isPrintPart,                 // include in OBJ/STL export
-  sourceGroupId,               // uuid shared by siblings split
-                               //   from one MultiMaterial source mesh.
-                               //   Null if the mesh came in single-material.
-                               //   Group-aware validator + exporter use this
-                               //   to re-union part topology. See §0.1 +
-                               //   §9 group-aware validation.
+  sourceGroupId,               // LEGACY / migrate-only (Decision 33): uuid
+                               //   stamped at split time, kept in .mixo for
+                               //   compat. Runtime NEVER reads it; the loader
+                               //   seeds logicalObjectId from it once
+                               //   (LogicalObjects.seedLogicalObjectIds).
   logicalObjectId,             // lead meshId for a multi-part logical object.
-                               //   Set for BOTH a MultiMaterial split (shared
-                               //   sourceGroupId) AND a glTF multi-primitive
+                               //   The linkage validator + exporter re-union by.
+                               //   Set for BOTH a MultiMaterial split AND a glTF multi-primitive
                                //   mesh (parts named `<stem>_primitive<N>`
                                //   sharing a stem + parentId). Null for ordinary
                                //   single-mesh objects. logicalObjectPartIds()
@@ -1747,8 +1748,8 @@ the object lifecycle or transform surface (`DeleteCommand`, `DuplicateCommand`,
 `GroupCommand`, `ReparentCommand`, `UnparentCommand`, hide/lock toggles,
 copy/paste transform, Properties transforms, and export collection) expands
 those leads to every internal material-split part before mutating state or
-Babylon meshes. A duplicated split object receives a fresh `sourceGroupId` and
-its own lead `logicalObjectId`; it must never point back to the original logical
+Babylon meshes. A duplicated split object receives its own lead `logicalObjectId`
+(and no `sourceGroupId`); it must never point back to the original logical
 object.
 
 ### GroupNode (transform hierarchy, in `state.scene.groups[groupId]`)
@@ -2107,7 +2108,7 @@ MeshValidator.autoFix(mesh, results, report?)      → Promise<ValidationResult[
 MeshValidator.hasErrors(results)                   → boolean
 MeshValidator.hasWarnings(results)                 → boolean
 MeshValidator.validateAllPrintParts()              → Promise<Map<meshId, ValidationResult[]>>
-MeshValidator.validateGroup(sourceGroupId)         → Promise<ValidationResult[]>  // legacy sourceGroupId union (kept for API; validateMesh uses logical parts)
+MeshValidator.validateGroup(logicalObjectId)        → Promise<ValidationResult[]>  // welded union of that logical object's parts (validateMesh uses the same routine)
 MeshValidator.repairObject(meshId)                 → Promise<{holesFilled, nmFixed, applied, remaining}>  // ONE-CLICK repair; walks EVERY part of a multi-part object
 MeshValidator.repairObjects(meshIds, {onProgress}) → Promise<{holesFilled, nmFixed, repaired, failed}>      // sequential batch; one failure never loses the rest
 MeshValidator.applyGeometryFix(mesh, type, report?) → Promise<boolean>  // 'holes'/'nonManifold' → MeshFixLib.repairMesh; nonManifold falls back to the shared weld offline
@@ -2187,7 +2188,7 @@ meshes. `PrintReadiness` separately reports missing sources/textures and
 per-target build-volume fit; these are export-context concerns, not topology.
 
 **Pre-export gate** (§9 *Pre-Export Gate*) iterates print parts, but
-deduplicates by `sourceGroupId` so each part runs once even if it has 12
+deduplicates by `logicalObjectId` so each part runs once even if it has 12
 siblings. Block / confirm-anyway semantics unchanged.
 
 ### ValidationResult
@@ -2986,9 +2987,14 @@ PrintManager.SCALE_PRESETS                       → scale-presets.json passthro
 //                   (default: one combined file per format)
 ```
 
-`PrintManager` does not expose ratio setter functions. `PrintPanel` mutates
-`state.print.exportRatios` directly (per-object ratio redesign 2026-06-16).
-The old `state.print.targetRatio` is read only by `.mixo` migration.
+Print sizes are `state.print.exportTargets: [] | [{kind:'ratio',value} |
+{kind:'factor',value} | {kind:'height',mm}]` (task 1.17, Decision 27); `[]` =
+as shown. Edits go through the undoable `AddExportTargetCommand` /
+`RemoveExportTargetCommand` / `ReplaceExportTargetCommand` /
+`SetExportTargetsCommand` (`ScaleCommands.js`, whole-list snapshot undo).
+`ScaleMath.exportTargetsFromState` is the only reader (normalises, drops
+invalid, collapses duplicates). `targetRatio` / `exportRatios` are read only by
+`.mixo` migration.
 
 ### Export filenames
 
@@ -3108,8 +3114,8 @@ ctx and reads no global state.
   - The suffix is appended internally via `ExportPlanner.scaleFilenameSuffix`; no standalone `ratioSuffix` accessor (no caller ever needed one).
 - `PrintPipeline.js`
   - `exportOBJ`/`exportSTL`/`exportThreeMF` entry points.
-  - `_runExport(formatKey, options)` loops `print.exportRatios`
-    (`[null]` for "as shown"), builds one ctx per target. No mutable
+  - `_runExport(formatKey, options)` loops `exportTargetsFromState`
+    (`[null]` for "as shown"), one ctx + one file per typed target. No mutable
     module global, no `setExportTargetOverride` — target is a function
     parameter.
   - STL + 3MF inline serializers (`_serializeSTL`, `_serialize3MF` +
@@ -3286,15 +3292,23 @@ EXPORT  : ratioFactor = referenceRatio / T,   unitFactor = BU_TO_MM (1000),
             consumed by PrintNaming.exportBaseName(ctx) + PrintPrep.flattenWorld(ctx)
             + ObjWriter.serializeOBJ(ctx) + ThreeMFWriter so factor / filename / pivot
             never diverge.
-          • DEFAULT "as shown": empty print.exportRatios ⇒ T = referenceRatio
-            ⇒ ratioFactor 1 ⇒ factor 1000 ⇒ prints EXACTLY the size on screen
-          • a target T (e.g. 1:144 on a 1:72 object) rescales: 72/144 = 0.5×
+          • DEFAULT "as shown": empty print.exportTargets ⇒ ratioFactor 1
+            ⇒ factor 1000 ⇒ prints EXACTLY the size on screen
+          • ratio T: ratioFactor = ref/T (1:144 on a 1:72 object = 0.5×)
+          • factor N: ratioFactor = N (Figma-style @2x)
+          • height N mm: ratioFactor = N / referenceHeightMM, referenceHeightMM =
+            the reference unit's PRINT-SPACE Z extent (bed-up axis) at as-shown
+            size (ExportContext.referenceHeightMMOf); zero height throws
+          • ctx.targetRatio = ref / ratioFactor; ctx.target = typed target
           • mixed selection scales uniformly by the reference ratio (WYSIWYG)
             about ctx.pivot (the reference unit's world origin), then ×BU_TO_MM
-          • print.exportRatios = LIST of absolute targets ⇒ one output file per T
-          • filename suffix _r{referenceRatio}to{T}
-PERSIST : object.ratio + print.exportRatios in .mixo
-MIGRATE : old global workingRatio → each object.ratio; targetRatio → exportRatios:[old]
+          • print.exportTargets = LIST ⇒ one output file per target
+          • filename suffix: ratio/as-shown _r{ref}to{T} · factor _x{N} ·
+            height _h{N}mm (non-integer: '.' → 'p', e.g. _x0p5)
+PERSIST : object.ratio + print.exportTargets in .mixo, plus a ratio-only
+          print.exportRatios mirror for one minor version (3.3 readers)
+MIGRATE : exportTargets wins; else exportRatios:[n] → [{kind:'ratio',value:n}];
+          else targetRatio → [{kind:'ratio',value}]; workingRatio → object.ratio
 RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
           bakeImportTransform as a fresh import (unit + glTF flip + winding, at
           ratio=modelRatio seed); _loadProject bakes the per-object DELTA
@@ -3302,7 +3316,7 @@ RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
           all survive reload (byte-identical to a fresh import + saved placement)
 ```
 
-`PrintPipeline._runExport` resolves targets from `print.exportRatios` and
+`PrintPipeline._runExport` resolves targets from `exportTargetsFromState` and
 loops `buildExportContext({state, units, target, options, csgReady})` once
 per target — no mutable module global, no `setExportTargetOverride`. Empty
 list ⇒ targets = `[null]` ⇒ `targetRatio = referenceRatio` ⇒ factor 1000
@@ -4901,7 +4915,7 @@ export async function resolve(specifier, context, nextResolve) {
 | `tests/hierarchy.test.mjs` | 4 | Hierarchy commands: reparent/unparent preserve world transforms, keep `collectionId` independent, reject invalid parent edges, and ungroup direct objects/subgroups with deterministic undo/redo |
 | `tests/logical-objects.test.mjs` | 3 | Selection canonicalizes an internal split pick to the visible logical object while resolving all internal meshes for manipulation; delete removes every internal split part; duplicate creates an independent logical split object |
 | `tests/scale.test.mjs` | 8 | ScaleMath: ratio parser/formatter, Authored→Scene normalization, Scene→Print export scale, scene-scale rebake factor, v3.1 field compatibility |
-| `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; `sourceGroupId` stamped on every sibling so the group can be re-unioned downstream |
+| `tests/split-on-import.test.mjs` | 5 | AssetLoader splits MultiMaterial meshes at import time; every sibling shares one `logicalObjectId` (split-time `sourceGroupId` stamp is the import key only) so the group can be re-unioned downstream |
 | `tests/state-shape.test.mjs` | 11 | StateManager INITIAL_STATE invariants: required slots, defaults, `print.objBakeSolidTextures = false`, persistence migration shallow-merge handles missing keys |
 | `tests/texture-source.test.mjs` | 6 | TextureSource + ExportTextures: first-writer-wins full-res capture, export-prefers-source, user-loaded texture asset-id lookup + real filename, GPU fallback |
 | `tests/threemf-components.test.mjs` | 5 | 3MF components: solid/textured hierarchy export emits component objects, nested component resources are dependency-ordered, Materials Extension resources remain intact, component import creates transform groups with child meshes, and production-extension `p:path` component links load related model parts |
@@ -4986,7 +5000,7 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 
 - Printer presets are build-area data only (`displayName`, `vendor`, XYZ bed). Adding one never changes or selects an export writer.
 - Mimaki targets must never collapse textures to solid colours. Filament targets intentionally collapse to solid per-part colours.
-- One-mesh-one-shader remains an invariant. MultiMaterial imports split into single-material siblings stamped with `sourceGroupId`; validator/exporter re-union by group.
+- One-mesh-one-shader remains an invariant. MultiMaterial imports split into single-material siblings sharing a `logicalObjectId`; validator/exporter re-union by it (`sourceGroupId` is migrate-only).
 - Export prep is non-destructive: clones get unique geometry before any world flattening, welding, normal creation, CSG, or serialization.
 - Group-aware topology checks weld split siblings in validator-local buffers only; no welded data is copied back into Babylon meshes.
 - `AGENTS.md` is the active instruction authority; `CLAUDE.md` is legacy context only.

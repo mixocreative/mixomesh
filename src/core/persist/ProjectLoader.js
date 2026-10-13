@@ -23,7 +23,8 @@ import { deleteAutosave } from './AutosaveKeys.js';
 import { validateDocument } from './ProjectValidator.js';
 import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
-import { canonicalObjectId } from '../LogicalObjects.js';
+import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
+import { normalizeExportTargets } from '../scale/ScaleMath.js';
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
@@ -127,6 +128,17 @@ export function migrate(doc) {
   return doc;
 }
 
+/**
+ * Typed print sizes for a loaded `print` slice (task 1.17 migration):
+ * `exportTargets` when the document carries one; else the legacy
+ * `exportRatios: number[]` (or a pre-redesign single `targetRatio`) as
+ * `[{kind:'ratio', value}]`. [] = as shown.
+ */
+export function resolveLoadedExportTargets(loadedPrint = {}) {
+  if (Array.isArray(loadedPrint.exportTargets)) return normalizeExportTargets(loadedPrint.exportTargets);
+  return resolveLoadedExportRatios(loadedPrint).map(value => ({ kind: 'ratio', value }));
+}
+
 export function resolveLoadedExportRatios(loadedPrint = {}) {
   if (Array.isArray(loadedPrint.exportRatios)) {
     return loadedPrint.exportRatios.filter(r => Number.isFinite(r) && r > 0);
@@ -147,7 +159,10 @@ export function resolveLoadedExportRatios(loadedPrint = {}) {
 function _printWithoutLegacyScale(loadedPrint = {}) {
   // printMode / chordTolerance / minWallThickness: dead settings removed in
   // task 1.10 — old files must not resurrect them into state (or re-save them).
-  const { workingRatio, targetRatio, repairOnImport, printMode, chordTolerance, minWallThickness, ...rest } = loadedPrint;
+  // exportRatios / exportTargets: replaced by the normalised typed list
+  // (resolveLoadedExportTargets) — the ratio mirror never lives in state.
+  const { workingRatio, targetRatio, repairOnImport, printMode, chordTolerance, minWallThickness,
+    exportRatios, exportTargets, ...rest } = loadedPrint;
   return rest;
 }
 
@@ -190,10 +205,10 @@ async function _loadProjectInner(doc, previousId) {
   historyClear();
   resetWorld();
 
-  // Per-object ratio redesign migration: ensure an `exportRatios` list. New
-  // saves carry it; pre-redesign saves carry only a single `targetRatio`.
+  // Print-size migration (task 1.17): `exportTargets` (typed) wins; else the
+  // legacy `exportRatios` list; pre-redesign saves carry only `targetRatio`.
   const loadedPrint = data.print || {};
-  const exportRatios = resolveLoadedExportRatios(loadedPrint);
+  const exportTargets = resolveLoadedExportTargets(loadedPrint);
   const loadedPrintClean = _printWithoutLegacyScale(loadedPrint);
 
   setState(s => ({
@@ -206,7 +221,7 @@ async function _loadProjectInner(doc, previousId) {
       id: (typeof data.project?.id === 'string' && data.project.id) || mintProjectId(),
       lastSavedAt: data.savedAt ?? data.project?.lastSavedAt ?? null,
     },
-    print:   { ...s.print, ...loadedPrintClean, exportRatios },
+    print:   { ...s.print, ...loadedPrintClean, exportTargets },
     scene: {
       ...s.scene,
       camera:   { ...s.scene.camera, ...(data.sceneSettings?.camera || {}) },
@@ -412,6 +427,9 @@ async function _loadProjectInner(doc, previousId) {
       _savedTransform: o.transform ?? null,
     };
   }
+  // 2.7 / Decision 33: legacy saves carry only sourceGroupId — seed the
+  // logicalObjectId links once here; runtime never reads sourceGroupId again.
+  seedLogicalObjectIds(objMap);
   setState(s => ({ ...s, scene: { ...s.scene, objects: objMap } }), SILENT);
 
   // Multi-part repairs replay ONCE per logical object, and only now — the
