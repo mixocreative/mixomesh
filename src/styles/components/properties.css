@@ -355,3 +355,199 @@
   color: var(--text-2, #9aa0a6);
   font-size: var(--fs-sm);
 }
+
+/* ── Properties: Scale control — declare vs convert (1.13 / 1.16) ──
+   "Scale [1:72 ▾] [1:72] Set scale | Convert…" wraps to fit the column; the
+   default verb is the one primary (stone-brown) button. The note line under
+   it previews each verb's consequence, or the effective scale. */
+/* The control wraps to two lines; keep its label on the first line. */
+.pp-ratio-row { align-items: start; grid-template-columns: 84px minmax(0, 1fr); }
+.pp-source-row { grid-template-columns: 84px minmax(0, 1fr); }
+.pp-ratio-row > label { padding-top: 4px; }
+.pp-scale-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pp-scale-ctl .pp-preset-select { flex: 1 1 88px; width: auto; }
+.pp-body .pp-scale-ctl .pp-ratio-input {
+  flex: 1 1 56px;
+  width: auto;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+.pp-scale-verbs {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  flex: 1 1 100%;
+}
+.pp-scale-verbs .pp-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-body .pp-btn.pp-btn-primary:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.pp-body .pp-btn.pp-btn-primary:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+/* Specificity beats blender.css's section-rail padding (loaded last); the
+   indent lines the note up under the field column (rail + 84px label + gap). */
+.pp-body .pp-section > .pp-scale-note {
+  margin-bottom: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  padding-left: calc(var(--sp-4) + 84px + var(--sp-3));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.pp-scale-note[data-scale-note="nonuniform"] { color: var(--warning); }
+.pp-scale-note[data-scale-note="consequence"] { color: var(--text-1); }
+.pp-scale-note > span { display: block; }
+.pp-scale-note > span + span { color: var(--text-2); }
+
+/* XYZ rows: a thin axis-coloured edge on each field (CAD convention). */
+.pp-axes input[data-axis="x"], .pp-axes input[data-group-size="x"] { box-shadow: inset 2px 0 0 var(--axis-x); }
+.pp-axes input[data-axis="y"], .pp-axes input[data-group-size="y"] { box-shadow: inset 2px 0 0 var(--axis-y); }
+.pp-axes input[data-axis="z"], .pp-axes input[data-group-size="z"] { box-shadow: inset 2px 0 0 var(--axis-z); }
+.pp-axes input:focus { box-shadow: 0 0 0 2px var(--ring-focus); }
+
+.pp-drop-row .pp-drop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+}
+.pp-row-value { min-width: 0; display: flex; align-items: center; }
+
+/* ── Properties: Source row (4.6) — status chip · qualified name · ⋯ ── */
+.pp-source {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pp-source-chip {
+  flex: 0 1 auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-xs);
+  line-height: 18px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.pp-source-linked   { color: var(--success); background: rgba(46, 125, 50, 0.08); }
+.pp-source-changed  { color: var(--warning); background: rgba(184, 134, 11, 0.10); }
+.pp-source-missing  { color: var(--danger);  background: rgba(192, 57, 43, 0.08); }
+.pp-source-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-source-more {
+  flex-shrink: 0;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ctl-bg);
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.pp-source-more:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
+.pp-source-more:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 2px var(--ring-focus); }
+.pp-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 2px);
+  z-index: 30;
+  min-width: 170px;
+  padding: var(--sp-2) 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+.pp-menu[hidden] { display: none; }
+.pp-menu button {
+  appearance: none;
+  background: none;
+  border: none;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-0);
+  padding: var(--sp-2) var(--sp-5);
+  cursor: pointer;
+}
+.pp-menu button:hover:not(:disabled),
+.pp-menu button:focus-visible { background: var(--active-bg); outline: none; }
+.pp-menu button:disabled { color: var(--text-disabled); cursor: default; }
+
+/* ── Properties: group active (3.6) ── */
+.pp-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+  min-width: 0;
+}
+.pp-group-head svg { flex-shrink: 0; color: var(--text-2); }
+.pp-group-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pp-group-count {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.pp-group-ungroup { margin-left: auto; flex-shrink: 0; }
+.pp-section-meta {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.pp-group-material {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.pp-toggle.pp-toggle-mixed { opacity: 0.85; }

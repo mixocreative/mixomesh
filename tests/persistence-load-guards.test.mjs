@@ -37,6 +37,7 @@ const { EVENTS } = await import('../src/core/events.js');
 const { sha256Hex } = await import('../src/core/hash.js');
 const { encodeBase64 } = await import('../src/core/workers/base64Codec.js');
 const { isLoading } = await import('../src/core/persist/ProjectLoader.js');
+const { findRecoverableAutosave, discardAutosave } = await import('../src/core/persist/Autosave.js');
 
 MeshValidator.shouldAutoValidate = () => false;
 PersistenceManager.init();   // wire dirty tracking (autosave tick reads isDirty)
@@ -102,11 +103,7 @@ B.SceneLoader = { LoadAssetContainerAsync: async () => makeContainer() };
 
 // Modal capture — the flows under test dispatch MODAL_OPEN.
 const modals = [];
-let recoverChoice = 'recover';
-subscribe(EVENTS.MODAL_OPEN, (p) => {
-  modals.push(p);
-  if (p?.id === 'recoverAutosave') p.onClose?.(recoverChoice);
-});
+subscribe(EVENTS.MODAL_OPEN, (p) => { modals.push(p); });
 
 // ── Fixtures ─────────────────────────────────────────────
 const GLB = new TextEncoder().encode('glb-bytes');
@@ -271,9 +268,9 @@ await test('H3: one resolvable + one unresolvable → ghostAssets modal, warning
   assert.equal(getState().scene.objects.o_lost.isGhost, true);
   assert.equal(getState().scene.assetLibrary.a_lost.isGhost, true);
 
-  const ghostModal = modals.find(m => m.id === 'ghostAssets');
-  assert.ok(ghostModal, 'ghostAssets modal dispatched');
-  assert.deepEqual(ghostModal.assets.map(a => a.filename), ['a_lost.glb']);
+  const ghostModal = modals.find(m => m.id === 'assetSources');
+  assert.ok(ghostModal, 'Sources modal dispatched for ghosts');
+  assert.deepEqual(ghostModal.ghosts.map(a => a.filename), ['a_lost.glb']);
   assert.ok(!toasts.some(x => x.msg === 'Loaded Ghosty'), 'plain Loaded toast suppressed');
   assert.ok(toasts.some(x => x.type === 'warning'), 'warning toast shown');
 
@@ -291,13 +288,13 @@ await test('H3: one resolvable + one unresolvable → ghostAssets modal, warning
   await __test._loadProject(saved);
   assert.equal(getState().scene.objects.o_lost.isGhost, true);
   assert.equal(getState().scene.objects.o_ok.isGhost, false);
-  assert.ok(modals.find(m => m.id === 'ghostAssets'));
+  assert.ok(modals.find(m => m.id === 'assetSources'));
 });
 
 await test('H3: no ghosts → plain Loaded toast, no ghost modal', async () => {
   seedCurrentScene();
   await __test._loadProject(goodDoc('Clean'));
-  assert.ok(!modals.find(m => m.id === 'ghostAssets'));
+  assert.ok(!modals.find(m => m.id === 'assetSources'));
   assert.ok(toasts.some(x => x.type === 'success' && /Clean/.test(x.msg)));
 });
 
@@ -311,7 +308,7 @@ await test('M5: tampered embedded bytes → ghost + console.error, load complete
   await __test._loadProject(doc);
   assert.equal(getState().scene.objects.o_ok.isGhost, true, 'mismatch is unresolvable → ghost');
   assert.ok(errors.some(e => /contentHash/i.test(e)), 'mismatch logged');
-  assert.ok(modals.find(m => m.id === 'ghostAssets'));
+  assert.ok(modals.find(m => m.id === 'assetSources'));
 });
 
 // ── geometryFixes replay fault isolation (review 2026-09-17) ──
@@ -517,16 +514,33 @@ await test('0.11: tick writes autosave_<id> with no inline images; each texture 
   assert.equal((await kvGet(`autosaveimg_tick-id_${hash}`))?.sentinel, true, 'second tick did not re-encode the image');
 });
 
-await test('0.11: boot offer skipped (and key dropped) when the autosave is not newer than the last save', async () => {
+await test('0.11/4.7: boot offer skipped (and key dropped) when the autosave is not newer than the last save', async () => {
   seedCurrentScene();
+  resetIdb();
   await kvSet('autosave_old-id', { savedAt: '2026-01-01T00:00:00.000Z', doc: { ...goodDoc('Old'), project: { name: 'Old', id: 'old-id', lastSavedAt: '2026-02-01T00:00:00.000Z' } } });
-  let offered = false;
-  const off = subscribe(EVENTS.MODAL_OPEN, p => { if (p?.id === 'recoverAutosave') offered = true; });
-  try {
-    assert.equal(await PersistenceManager.recoverAutosave(), false);
-  } finally { off(); }
-  assert.equal(offered, false, 'no modal for a stale autosave');
+  const before = modals.length;
+  assert.equal(await findRecoverableAutosave(), null, 'no banner offer for a stale autosave');
   assert.equal(await kvGet('autosave_old-id'), undefined, 'stale autosave removed');
+  assert.equal(await PersistenceManager.recoverAutosave(), false);
+  assert.equal(modals.length, before, 'boot recovery never opens a modal (Decision 4)');
+});
+
+await test('4.7: findRecoverableAutosave returns the newest newer-than-saved snapshot without loading it', async () => {
+  seedCurrentScene();
+  resetIdb();
+  await kvSet('autosave_a-id', { savedAt: '2026-03-01T10:00:00.000Z', name: 'A', doc: { ...goodDoc('A'), project: { name: 'A', id: 'a-id', lastSavedAt: '2026-01-01T00:00:00.000Z' } } });
+  await kvSet('autosave_b-id', { savedAt: '2026-03-02T14:02:00.000Z', name: 'B', doc: { ...goodDoc('B'), project: { name: 'B', id: 'b-id' } } });
+  const before = modals.length;
+  const offer = await findRecoverableAutosave();
+  assert.equal(offer?.projectId, 'b-id', 'newest snapshot offered');
+  assert.equal(offer?.savedAt, '2026-03-02T14:02:00.000Z');
+  assert.equal(offer?.name, 'B');
+  assert.equal(getState().project.id, 'cur-id', 'the offer does not touch the open project');
+  assert.equal(modals.length, before, 'no modal');
+  await discardAutosave(offer);
+  assert.equal(await kvGet('autosave_b-id'), undefined, 'Discard drops the offered snapshot');
+  assert.ok(await kvGet('autosave_a-id'), 'other projects untouched');
+  resetIdb();
 });
 
 await test('0.11: recover re-attaches stored images and leaves the project dirty', async () => {
@@ -536,8 +550,9 @@ await test('0.11: recover re-attaches stored images and leaves the project dirty
   const doc = { ...goodDoc('Rec'), project: { name: 'Rec', id: 'rec-id', lastSavedAt: '2026-01-01T00:00:00.000Z' }, textureImages: [] };
   await kvSet('autosave_rec-id', { savedAt: '2026-03-01T00:00:00.000Z', doc });
   await kvSet(`autosaveimg_rec-id_${imgHash}`, { hash: imgHash, width: 1, height: 1, mimeType: 'image/png', fileData: 'BAUG' });
-  recoverChoice = 'recover';
-  assert.equal(await PersistenceManager.recoverAutosave(), true, `recovered (errors: ${errors.join(' | ')})`);
+  const offer = await findRecoverableAutosave();
+  assert.equal(offer?.projectId, 'rec-id');
+  assert.equal(await PersistenceManager.recoverAutosave(offer), true, `recovered (errors: ${errors.join(' | ')})`);
   assert.equal(getState().project.id, 'rec-id');
   assert.equal(PersistenceManager.isDirty(), true, 'recovered work is unsaved');
   const { getTextureImage } = await import('../src/core/assets/TextureImageStore.js');
@@ -547,7 +562,6 @@ await test('0.11: recover re-attaches stored images and leaves the project dirty
 await test('M2: recoverAutosave with a poisoned doc → deletes the key, returns false, error surfaced', async () => {
   seedCurrentScene();
   await kvSet('autosave_Poison', { savedAt: '2026-01-01T00:00:00Z', doc: { version: '9.0', project: { name: 'Poison' } } });
-  recoverChoice = 'recover';
   const ok = await PersistenceManager.recoverAutosave();
   assert.equal(ok, false);
   assert.ok(!(await kvKeys()).includes('autosave_Poison'), 'poisoned key deleted');
@@ -577,6 +591,31 @@ await test('2.7: a legacy save with only sourceGroupId loads with shared logical
   assert.equal(objs.lead?.logicalObjectId, 'lead');
   assert.equal(objs.part?.logicalObjectId, 'lead', 'part linked to the lead');
   assert.equal(objs.part?.isInternalPart, true);
+});
+
+// ── Task 4.6: Source status values (card chip + Sources modal) ──
+await test('4.6: load records Source status — embedded copy, missing link, ghost → embedded/missing/missing', async () => {
+  seedCurrentScene();
+  const { getAssetStatus } = await import('../src/core/persist/AssetResolver.js');
+  const { sourceStatus, SOURCE_STATUSES } = await import('../src/ui/SourcesModal.js');
+  assert.deepEqual([...SOURCE_STATUSES], ['embedded', 'linked', 'changed', 'missing']);
+  const doc = goodDoc('Status');
+  doc.assetLibrary.push(meshAsset('a_link', {
+    fileData: GLB_B64, contentHash: GLB_HASH, fileHandleKey: 'file_gone_0000',
+  }));
+  doc.assetLibrary.push(meshAsset('a_ghost'));
+  doc.sceneObjects.push(sceneObject('o_link', 'a_link'), sceneObject('o_ghost', 'a_ghost'));
+  await __test._loadProject(doc);
+  const lib = getState().scene.assetLibrary;
+  assert.equal(getAssetStatus('a_ok'), 'embedded');
+  assert.equal(sourceStatus(lib.a_ok), 'embedded', 'no link → Embedded copy');
+  assert.equal(getAssetStatus('a_link'), 'missing', 'unreachable link falls back to the embedded bytes');
+  assert.equal(sourceStatus(lib.a_link), 'missing');
+  assert.equal(lib.a_ghost?.isGhost, true);
+  assert.equal(sourceStatus(lib.a_ghost), 'missing', 'ghost (no bytes) reads Missing');
+  // Never resolved this session (fresh import): link ⇒ Linked, none ⇒ Embedded copy.
+  assert.equal(sourceStatus({ id: 'fresh1', source: { kind: 'file', refKey: 'k', path: 'x.glb', label: 'x.glb' } }), 'linked');
+  assert.equal(sourceStatus({ id: 'fresh2' }), 'embedded');
 });
 
 // ── Task 4.1: schema 3.4 through the real load/save path ──

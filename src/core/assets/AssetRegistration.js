@@ -169,6 +169,11 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
       // ratio so a fresh import sits at its authored scale. Mutated live via
       // RescaleObjectCommand; persisted per object in .mixo.
       ratio: (Number.isFinite(modelRatio) && modelRatio > 0) ? modelRatio : 1,
+      // Declare vs convert (task 1.13): a file that declared its authored
+      // scale is trusted ('file'); STL/OBJ & co. never did ('default'), so the
+      // Properties Scale control relabels by default. Mirrors
+      // ScaleCommands.seedRatioSource (inlined: no commands import here).
+      ratioSource: (Number.isFinite(modelRatio) && modelRatio > 0 && modelRatio !== 1) ? 'file' : 'default',
     };
     objectsToAdd[meshId] = sceneObject;
     if (parentId && groupsToAdd[parentId]) groupsToAdd[parentId].childIds.push(meshId);

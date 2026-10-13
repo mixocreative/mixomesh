@@ -1,10 +1,9 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, getState, setState, markDirty } from '../core/StateManager.js';
+import { subscribe, getState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
-import { PrintManager, SCALE_PRESETS } from '../core/PrintManager.js';
+import { PrintManager } from '../core/PrintManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { AssetLoader } from '../core/AssetLoader.js';
-import { SceneManager } from '../core/SceneManager.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { reportError } from './Status.js';
 import { icon, sectionIcon } from '../core/Icons.js';
@@ -13,22 +12,20 @@ import { ProgressOverlay } from './ProgressOverlay.js';
 import { Workspace } from './Workspace.js';
 import { Toast } from './Toast.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
-import printersData from '../config/printers.json' with { type: 'json' };
-import { formatScaleRatio, parseScaleRatioText, exportTargetsFromState } from '../core/scale/ScaleMath.js';
-import { push, AddExportTargetCommand, RemoveExportTargetCommand, exportTargetLabel } from '../core/HistoryManager.js';
 import { shouldDisplayObject } from '../core/LogicalObjects.js';
-import { wireNumbers, wireSelects, wireToggles, reflectToggle } from './lib/fields.js';
 import * as Selection from '../core/Selection.js';
-import { renderCostBlock } from './print/CostBlock.js';
+import { readinessStripHtml, issueLabel, renderIssueList, wireIssueRoutes } from './print/ReadinessStrip.js';
+import { renderPrinterTab } from './print/PrinterTab.js';
+import { renderExportTab } from './print/ExportTab.js';
 
-// Printer profiles maintained in `config/printers.json`; they seed build-area
-// reference dimensions only. Export format is chosen by the buttons below.
-// `custom` entry has all-null bed dims; user types XYZ manually.
-export const PRINTERS = printersData;
+// Print panel shell (tasks 0.6 / 1.2 / 1.3): tab bar, the readiness strip on
+// every tab, the Validation tab, the export runner + gate modals. The
+// Printer and Export tabs live in ui/print/*.js.
 
 let _bodyEl = null;
 let _root   = null;
-let _activeTab = 'scale'; // 'scale' | 'validation' | 'bed' | 'export'
+let _activeTab = 'printer'; // 'printer' | 'validation' | 'export'
+
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -108,32 +105,28 @@ function _focusValidation() {
 
 // ── Tabs ──────────────────────────────────────────────────
 
-function _renderTabs() {
-  // Preview controls (wireframe edges, matte/flat) moved to the viewport
-  // toggles under the NavCube (ui/ViewportToggles.js) so they're reachable
-  // from every workspace — no Preview tab.
-  const tabs = ['scale', 'validation', 'bed', 'export'];
-  const labelKeys = {
-    scale: 'print.tab.scale',
-    validation: 'print.tab.validation',
-    bed: 'print.tab.bed',
-    export: 'print.tab.export',
-  };
-  const tabIcons = {
-    scale: 'Percent',
-    validation: 'CheckCircle',
-    bed: 'Maximize',
-    export: 'FileDown',
-  };
+const TABS = ['printer', 'validation', 'export'];
 
+/** Literal t() calls so scripts/i18n-check.mjs sees every tab key. */
+function _tabLabel(tab) {
+  if (tab === 'printer') return t('print.tab.printer');
+  if (tab === 'validation') return t('print.tab.validation');
+  return t('print.tab.export');
+}
+const TAB_ICONS = { printer: 'Printer', validation: 'CheckCircle', export: 'FileDown' };
+
+function _renderTabs() {
+  // Preview controls (wireframe edges, matte/flat) live in the viewport
+  // toggles under the NavCube (ui/ViewportToggles.js) — no Preview tab. The
+  // old Scale tab folded into Export (Print at), Bed into Printer (1.2/1.3).
   let html = `<div class="pp-tabs" role="tablist" aria-label="${escapeAttr(t('print.settingsAria'))}">`;
-  for (const tab of tabs) {
+  for (const tab of TABS) {
     const active = tab === _activeTab ? ' active' : '';
     const selected = tab === _activeTab ? 'true' : 'false';
-    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(tabIcons[tab])}${escapeHtml(t(labelKeys[tab]))}</button>`;
+    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(TAB_ICONS[tab])}${escapeHtml(_tabLabel(tab))}</button>`;
   }
-  // ↺ resets the whole print settings slice (scale / bed / export) — they
-  // share one state slice, so one button covers all three settings tabs.
+  // ↺ resets the print settings (printer, bed, export options) — one button
+  // for the whole slice; print sizes + the reference are project content.
   html += `<button class="pp-tab-reset" data-act="reset-print" title="${escapeAttr(t('print.resetTitle'))}" aria-label="${escapeAttr(t('print.resetTitle'))}">${sectionIcon('RotateCcw')}</button>`;
   html += '</div>';
 
@@ -141,133 +134,12 @@ function _renderTabs() {
   el.innerHTML = html;
   el.querySelectorAll('.pp-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      _activeTab = btn.dataset.tab;
+      _activeTab = /** @type {HTMLElement} */ (btn).dataset.tab ?? 'printer';
       _render();
     });
   });
   el.querySelector('[data-act="reset-print"]')?.addEventListener('click',
     () => SettingsStore.resetSection('print'));
-
-  return el;
-}
-
-// ── Scale Tab ─────────────────────────────────────────────
-
-function _renderScaleTab() {
-  const state = getState();
-  // Per-object ratio redesign (2026-06-16): scene scale is now PER OBJECT
-  // (Properties ▸ Transform ▸ Ratio). This tab manages the export TARGET ratios.
-  // An EMPTY list = "as shown" → print at the active printable reference ratio
-  // (the size in the viewport). Adding absolute ratios rescales relative to
-  // that reference (e.g. 1:144 on a 1:72 object = half). One output per entry.
-  //
-  // Everything export-shaped (reference, factor, dims) comes from ONE
-  // previewExportContext() call so the panel, the export pipeline, and the
-  // dimension helper cannot drift.
-  // Typed print sizes (task 1.17). This tab still only ADDS ratio targets;
-  // factor / height targets (the "Other sizes…" editor) arrive with task 1.3.
-  // Every edit is an undoable command (HISTORY_* events re-render the panel).
-  const exportTargets = exportTargetsFromState(state);
-  const preview = PrintManager.previewExportContext();
-  const referenceR = preview?.referenceRatio ?? 1;
-  const referenceId = preview?.referenceUnit?.logicalId ?? null;
-
-  let html = '<div class="pp-tab-content">';
-  html += '<div class="pp-field-group">';
-
-  html += `<label>${escapeHtml(t('print.printScale'))}</label>`;
-  html += '<div class="pp-ratio-list" data-export-ratios>';
-  if (exportTargets.length === 0) {
-    // Only show the "as shown · 1:R" pill when a real reference exists —
-    // showing it with referenceR=1 when there are no printable parts would
-    // claim a scale that isn't actually being used by anything.
-    if (preview) {
-      html += `<span class="pp-ratio-pill is-asshown" title="${escapeAttr(t('print.printScaleHelp'))}">${escapeHtml(t('print.asShown'))} · ${escapeHtml(formatScaleRatio(referenceR))}</span>`;
-    }
-  } else {
-    exportTargets.forEach((target, i) => {
-      html += `<span class="pp-ratio-pill"><span class="pp-ratio-pill-label">${escapeHtml(exportTargetLabel(target))}</span><button class="pp-ratio-remove" data-remove-target="${i}" title="${escapeAttr(t('print.removeRatio'))}" aria-label="${escapeAttr(t('print.removeRatio'))}">×</button></span>`;
-    });
-  }
-  html += '</div>';
-
-  html += '<div class="pp-ratio-select">';
-  html += '<select data-add-ratio class="pp-preset-select">';
-  html += `<option value="">${escapeHtml(t('print.addRatio'))}</option>`;
-  for (const preset of SCALE_PRESETS) {
-    if (preset.ratio !== null) {
-      html += `<option value="${escapeAttr(preset.ratio)}">${escapeHtml(preset.label)}</option>`;
-    }
-  }
-  html += `<option value="custom">${escapeHtml(t('print.custom'))}</option>`;
-  html += '</select>';
-  html += `<input type="text" class="pp-ratio-input" data-add-ratio-input placeholder="${escapeAttr(t('print.customRatioPlaceholder'))}" hidden>`;
-  html += '</div>';
-  html += `<p class="pp-help">${escapeHtml(t('print.printScaleHelp'))}</p>`;
-
-  html += '</div>';
-
-  // Factor + dims come from the SAME preview context — single source of truth.
-  // When there are no printable parts, render an em-dash placeholder rather
-  // than "0.00" (which looks broken, not empty).
-  if (preview) {
-    // The internal BU→mm factor used to be printed here ("1000.00 (scene BU
-    // -> exported mm)") — an implementation constant that meant nothing to
-    // the user (owner feedback 2026-09-18). What they need is the size the
-    // reference object will actually come out at.
-    // Example dimensions — show the export reference object so the queried mesh
-    // and export factor agree even when the active selection is not printable.
-    const exampleId = referenceId ?? state.selection.activeId ?? state.selection.selectedIds?.[0] ?? null;
-    if (exampleId && state.scene.objects[exampleId]) {
-      const dims = PrintManager.getExportedDimensions(exampleId, preview);
-      if (dims) {
-        html += `<div class="pp-info"><strong>${escapeHtml(t('print.exportedSizeLabel', { name: state.scene.objects[exampleId].name }))}</strong> ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)} mm</div>`;
-      }
-    }
-  } else {
-    html += `<p class="pp-empty">${escapeHtml(t('print.noPrintParts'))}</p>`;
-  }
-
-  html += '</div>';
-
-  const el = document.createElement('div');
-  el.innerHTML = html;
-
-  const addRatio = (val) => {
-    if (!(Number.isFinite(val) && val > 0)) return;
-    if (exportTargets.some(tg => tg.kind === 'ratio' && tg.value === val)) return;
-    push(new AddExportTargetCommand({ kind: 'ratio', value: val }));
-  };
-
-  const addSel = el.querySelector('[data-add-ratio]');
-  const customInput = el.querySelector('[data-add-ratio-input]');
-  addSel?.addEventListener('change', (e) => {
-    const v = e.target.value;
-    if (v === 'custom') {
-      // Reveal the inline input; reset the select so re-picking Custom re-fires.
-      e.target.value = '';
-      if (customInput) { customInput.hidden = false; customInput.focus(); }
-    } else if (v) {
-      addRatio(parseFloat(v));          // preset → add directly (_render rebuilds)
-    }
-  });
-  const commitCustom = () => {
-    const val = parseScaleRatioText(customInput.value);
-    if (val) addRatio(val);             // valid → add (_render rebuilds, input hides)
-    else { customInput.hidden = true; customInput.value = ''; }
-  };
-  customInput?.addEventListener('change', commitCustom);
-  customInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')  { e.preventDefault(); commitCustom(); }
-    if (e.key === 'Escape') { customInput.hidden = true; customInput.value = ''; }
-  });
-  el.querySelectorAll('[data-remove-target]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const target = exportTargets[Number(btn.dataset.removeTarget)];
-      // Removing the last one ⇒ back to "as shown" (print at the reference ratio).
-      if (target) push(new RemoveExportTargetCommand(target));
-    });
-  });
 
   return el;
 }
@@ -414,6 +286,7 @@ function _renderValidationTab() {
 
   let html = '<div class="pp-tab-content">';
   html += _renderValidationStatus(summary);
+  html += renderIssueList(PrintManager.getPrintReadiness());
   html += '<div class="pp-field-group">';
   html += `<button class="pp-export-btn" id="pp-validate-all"${running || !rows.length ? ' disabled' : ''}>${icon('RefreshCw', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.validateAll'))}</button>`;
   html += `<button class="pp-export-btn pp-repair-all" id="pp-repair-all"${fixableRows.length ? '' : ' hidden'}${running ? ' disabled' : ''}>${icon('Wrench', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.repairAllN', { n: fixableRows.length }))}</button>`;
@@ -510,173 +383,7 @@ function _renderValidationTab() {
   return el;
 }
 
-// ── Export Tab ────────────────────────────────────────────
-
-function _issueLabel(issue) {
-  const key = `print.issue.${issue.code}`;
-  if (issue.code === 'bed-overflow') {
-    const amounts = Object.entries(issue.data?.overflowMM ?? {})
-      .filter(([, value]) => value > 0)
-      .map(([axis, value]) => `${axis.toUpperCase()} +${value.toFixed(1)} mm`)
-      .join(', ');
-    return `${t(key)}${amounts ? ` · ${amounts}` : ''}`;
-  }
-  if (issue.code === 'below-bed') {
-    return `${t(key)} · ${Number(issue.data?.belowBedMM ?? 0).toFixed(1)} mm`;
-  }
-  return t(key, { n: issue.objectIds?.length ?? 0 });
-}
-
-function _issueActionLabel(issue) {
-  const actions = {
-    'no-print-parts': 'print.issueAction.no-print-parts',
-    'missing-source': 'print.issueAction.missing-source',
-    'missing-texture': 'print.issueAction.missing-texture',
-    'unit-unconfirmed': 'print.issueAction.unit-unconfirmed',
-    'validation-pending': 'print.issueAction.validation-pending',
-    'bed-overflow': 'print.issueAction.bed-overflow',
-    'below-bed': 'print.issueAction.below-bed',
-    'geometry-error': 'print.issueAction.geometry',
-    'geometry-warning': 'print.issueAction.geometry',
-    'mixed-scales': 'print.issueAction.mixed-scales',
-    'texture-too-large': 'print.issueAction.texture-too-large',
-    'texture-count': 'print.issueAction.texture-count',
-    'thin-feature': 'print.issueAction.thin-feature',
-    'watertight-required': 'print.issueAction.watertight-required',
-  };
-  const key = actions[issue.code];
-  return key ? t(key) : '';
-}
-
-function _renderReadinessSummary(readiness) {
-  const statusIcon = readiness.status === 'ready' ? 'CheckCircle'
-    : readiness.status === 'warning' ? 'AlertTriangle' : 'AlertCircle';
-  let html = `<section class="pp-readiness ${escapeAttr(readiness.status)}" aria-label="${escapeAttr(t('print.readiness'))}">`;
-  html += `<div class="pp-readiness-head">${icon(statusIcon, { class: 'inline' })}<strong>${escapeHtml(t(`print.readiness.${readiness.status}`))}</strong></div>`;
-  if (!readiness.canExport) {
-    html += `<p class="pp-readiness-hint">${escapeHtml(t('print.readiness.blockedHint'))}</p>`;
-  }
-  if (readiness.targets.length) {
-    html += '<div class="pp-target-list">';
-    for (const target of readiness.targets) {
-      const size = target.bounds.max.map((value, axis) => Math.max(0, value - target.bounds.min[axis]));
-      html += `<div class="pp-target-summary"><span>${escapeHtml(target.label ?? formatScaleRatio(target.ratio))}</span><span>${size.map(value => value.toFixed(1)).join('×')} mm</span></div>`;
-    }
-    html += '</div>';
-  }
-  for (const readinessIssue of readiness.issues) {
-    const objectId = readinessIssue.objectIds?.[0] ?? '';
-    const action = _issueActionLabel(readinessIssue);
-    html += `<button type="button" class="pp-readiness-issue ${escapeAttr(readinessIssue.severity)}" data-issue-code="${escapeAttr(readinessIssue.code)}" data-object-id="${escapeAttr(objectId)}">`;
-    html += `${icon(readinessIssue.severity === 'error' ? 'AlertCircle' : readinessIssue.severity === 'info' ? 'Info' : 'AlertTriangle', { class: 'inline' })}`;
-    html += `<span class="pp-readiness-copy"><span>${escapeHtml(_issueLabel(readinessIssue))}</span>`;
-    if (action) html += `<span class="pp-readiness-action">${escapeHtml(action)}</span>`;
-    html += '</span>';
-    html += '</button>';
-  }
-  html += '</section>';
-  return html;
-}
-
-function _renderExportTab() {
-  const state = getState();
-  const bakeSolids = state.print?.objBakeSolidTextures ?? false;
-  const strictExport = state.print?.strictExport ?? false;
-  const repairOnImport = state.print?.repairOnImport ?? false;
-  const readiness = PrintManager.getPrintReadiness();
-
-  let html = '<div class="pp-tab-content">';
-
-  html += _renderReadinessSummary(readiness);
-
-  html += '<div id="pp-cost-block"></div>';
-
-  html += '<div class="pp-field-group">';
-  html += `<label>${escapeHtml(t('print.exportOptions'))}</label>`;
-
-  html += '<div class="pp-checkbox">';
-  html += '<input type="checkbox" id="pp-individually" data-option="individually">';
-  html += `<label for="pp-individually">${escapeHtml(t('print.eachIndividually'))}</label>`;
-  html += '</div>';
-
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-bake-solid" ${bakeSolids ? 'checked' : ''}>`;
-  html += `<label for="pp-bake-solid">${escapeHtml(t('print.bakeSolids'))}</label>`;
-  html += '</div>';
-
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-strict-export" ${strictExport ? 'checked' : ''}>`;
-  html += `<label for="pp-strict-export">${escapeHtml(t('print.strictExport'))}</label>`;
-  html += '</div>';
-
-  html += '<div class="pp-checkbox">';
-  html += `<input type="checkbox" id="pp-repair-on-import" ${repairOnImport ? 'checked' : ''}>`;
-  html += `<label for="pp-repair-on-import">${escapeHtml(t('print.repairOnImport'))}</label>`;
-  html += '</div>';
-
-  html += '</div>';
-
-  html += '<div class="pp-field-group">';
-  html += `<label>${escapeHtml(t('print.format'))}</label>`;
-
-  const disabledAttr = readiness.canExport ? ''
-    : ` disabled aria-disabled="true" title="${escapeAttr(t('print.exportDisabledTitle'))}"`;
-
-  html += `<button class="pp-export-btn pp-export-obj" data-format="obj"${disabledAttr}>`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportObj'))}`;
-  html += `</button>`;
-
-  html += `<button class="pp-export-btn pp-export-3mf" data-format="3mf"${disabledAttr}>`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.export3mf'))}`;
-  html += `</button>`;
-
-  html += `<button class="pp-export-btn pp-export-stl" data-format="stl"${disabledAttr}>`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportStl'))}`;
-  html += `</button>`;
-
-  html += `<button class="pp-export-btn pp-export-ply" data-format="ply"${disabledAttr}>`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportPly'))}`;
-  html += `</button>`;
-
-  html += `<button class="pp-export-btn pp-export-wrl" data-format="wrl"${disabledAttr}>`;
-  html += `${icon('Download', { class: 'inline', width: 14, height: 14 })} ${escapeHtml(t('print.exportWrl'))}`;
-  html += `</button>`;
-
-  html += '</div>';
-
-  html += '</div>';
-
-  const el = document.createElement('div');
-  el.innerHTML = html;
-
-  const costMount = el.querySelector('#pp-cost-block');
-  if (costMount) renderCostBlock(costMount, state);
-
-  el.querySelectorAll('.pp-readiness-issue').forEach(row => {
-    row.addEventListener('click', () => {
-      const code = row.dataset.issueCode;
-      _routeReadinessIssue(code);
-      const objectId = row.dataset.objectId;
-      if (objectId && !getState().scene.objects[objectId]?.isGhost) Selection.set([objectId], objectId);
-      _render();
-    });
-  });
-
-  // Collect options
-  // "Selected only" is gone from this tab (owner decision 2026-09-18): the
-  // 列印匯出 flag is the ONE truth for what the Export tab writes, so the
-  // readiness card and cost quote above always describe the file you get.
-  // A one-off export of the selection is the context menu's 匯出所選物件…
-  // (exportSelected below).
-  const getOptions = () => ({ individually: el.querySelector('#pp-individually').checked });
-
-  // Wire export buttons. Hard errors are handled INSIDE the export (post
-  // auto-fix); cached WARNINGS gate with a three-way prompt first (Blueprint
-  // §12 export gate, arch B6 + watertight-repair-and-cost task 4):
-  // Auto-fix and export / Export anyway / Cancel.
-  _wireExportTabControls(el, _runExport, getOptions);
-  return el;
-}
+// ── Export runner ─────────────────────────────────────────
 
 /**
  * Run one export through the gate: blocked readiness → modal; cached
@@ -759,42 +466,17 @@ async function _runExport(fn, opts, _regated = false) {
   }
 }
 
-function _wireExportTabControls(el, runExport, getOptions) {
-  wireToggles(el, '#pp-bake-solid', (_cb, on) => {
-    setState(s => ({ ...s, print: { ...s.print, objBakeSolidTextures: on } }), { silent: true });
-    markDirty();   // print slice is persisted wholesale in .mixo (M4)
-  });
-
-  wireToggles(el, '#pp-strict-export', (_cb, on) => {
-    setState(s => ({ ...s, print: { ...s.print, strictExport: on } }), { silent: true });
-    markDirty();   // print slice is persisted wholesale in .mixo (M4)
-  });
-
-  wireToggles(el, '#pp-repair-on-import', (_cb, on) => {
-    setState(s => ({ ...s, print: { ...s.print, repairOnImport: on } }), { silent: true });
-    markDirty();   // print slice is persisted wholesale in .mixo (M4)
-  });
-
-  el.querySelector('.pp-export-obj').addEventListener('click', () =>
-    runExport(PrintManager.exportOBJ, getOptions()));
-
-  el.querySelector('.pp-export-3mf').addEventListener('click', () =>
-    runExport(PrintManager.exportThreeMF, getOptions()));
-
-  el.querySelector('.pp-export-stl').addEventListener('click', () =>
-    runExport(PrintManager.exportSTL, getOptions()));
-
-  el.querySelector('.pp-export-ply').addEventListener('click', () =>
-    runExport(PrintManager.exportPLY, getOptions()));
-
-  el.querySelector('.pp-export-wrl').addEventListener('click', () =>
-    runExport(PrintManager.exportWRL, getOptions()));
-}
-
 const EXPORTERS = {
   obj: () => PrintManager.exportOBJ, '3mf': () => PrintManager.exportThreeMF, stl: () => PrintManager.exportSTL,
   ply: () => PrintManager.exportPLY, wrl: () => PrintManager.exportWRL,
 };
+
+/** Export tab primary button: run the writer for `format` through the gate. */
+function _exportFormat(format, opts) {
+  const fn = EXPORTERS[format]?.();
+  if (!fn) return Promise.resolve();
+  return _runExport(fn, opts);
+}
 
 /**
  * One-off export of the CURRENT SELECTION as its own file (context menu
@@ -812,140 +494,56 @@ export function exportSelected(format) {
   return _runExport(fn, { selectedOnly: true });
 }
 
-function _routeReadinessIssue(code) {
-  if (code === 'bed-overflow' || code === 'below-bed' || code === 'unit-unconfirmed') {
-    _activeTab = 'bed';
-  } else if (code === 'geometry-error' || code === 'geometry-warning') {
-    _activeTab = 'validation';
-  } else if (code === 'no-print-parts' || code === 'missing-source' || code === 'missing-texture') {
+/**
+ * Route a readiness issue (strip or issue row) to where it is fixed. An
+ * empty code (the all-clear strip) opens the Validation tab.
+ */
+function _routeReadinessIssue(code, objectId = '') {
+  if (code === 'bed-overflow' || code === 'below-bed') {
+    _activeTab = 'printer';
+  } else if (code === 'no-print-parts' || code === 'missing-source' || code === 'missing-texture'
+    || code === 'unit-unconfirmed') {   // File units live in Properties ▸ Object
     Workspace.setWorkspace('layout');
+  } else if (code === 'mixed-scales') {
+    _activeTab = 'export';
+  } else {
+    _activeTab = 'validation';
   }
-}
-
-// ── Bed Tab ──────────────────────────────────────────────
-
-function _matchPrinterByBed(dims) {
-  for (const [id, p] of Object.entries(PRINTERS)) {
-    if (id === 'custom') continue;
-    const b = p.bed;
-    if (b && b.x === dims.x && b.y === dims.y && b.z === dims.z) return id;
-  }
-  return 'custom';
-}
-
-function _renderBedTab() {
-  const state = getState();
-  const dims = state.print.bedDimensions;
-  const printerId = state.print.targetPrinterId || _matchPrinterByBed(dims);
-  const showVolume = state.scene.overlays.bedPreview ?? false;
-
-  let html = '<div class="pp-tab-content">';
-
-  html += '<div class="pp-field-group">';
-  html += `<label>${escapeHtml(t('print.targetPrinter'))}</label>`;
-  html += '<select id="pp-printer-select" class="pp-preset-select">';
-  for (const [id, p] of Object.entries(PRINTERS)) {
-    const sel = id === printerId ? ' selected' : '';
-    html += `<option value="${escapeAttr(id)}"${sel}>${escapeHtml(p.displayName)}</option>`;
-  }
-  html += '</select>';
-  const cur = PRINTERS[printerId];
-  if (cur) {
-    html += `<div class="pp-info">${escapeHtml(cur.vendor)} · ${escapeHtml(t('print.buildAreaReference'))}</div>`;
-  }
-  html += '</div>';
-
-  html += '<div class="pp-field-group">';
-  html += `<label>${escapeHtml(t('print.buildVolume'))}</label>`;
-  html += '<div class="pp-xyz-row">';
-  for (const axis of ['x', 'y', 'z']) {
-    html += `<label class="pp-xyz">${axis.toUpperCase()}`;
-    html += `<input type="number" min="1" step="1" data-bed-axis="${escapeAttr(axis)}" value="${escapeAttr(dims[axis])}"></label>`;
-  }
-  html += '</div>';
-  html += '</div>';
-
-  html += '<div class="pp-field-group">';
-  // Viewport visibility = toggle button (checkbox→toggle audit 2026-06-13).
-  html += `<button type="button" class="pp-toggle${showVolume ? ' pp-toggle-on' : ''}" id="pp-bed-show" aria-pressed="${showVolume ? 'true' : 'false'}"><span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(t('print.showBedVolume'))}</button>`;
-  html += `<div class="pp-info">${escapeHtml(t('print.bedValidationInfo'))}</div>`;
-  html += '</div>';
-
-  html += '</div>';
-
-  const el = document.createElement('div');
-  el.innerHTML = html;
-
-  // Commit target printer + bed dims to state (non-undoable metadata, like
-  // targetRatio). Re-draw the volume box live when currently shown.
-  const commit = (next) => {
-    setState(s => ({
-      ...s,
-      print: { ...s.print, targetPrinterId: next.printerId, bedDimensions: next.dims },
-    }), { silent: true });
-    markDirty();   // bed/printer are persisted in .mixo — close-without-save must not read clean (M4)
-    SceneManager.rebuildBed();
-    MeshValidator.invalidateAll();   // exceedsBed results depend on bed dims (A6)
-    if (getState().scene.overlays.bedPreview) {
-      SceneManager.updateBedPreview(next.dims);
-    }
-  };
-
-  wireSelects(el, '#pp-printer-select', (_sel, id) => {
-    const p = PRINTERS[id];
-    if (!p) return;
-    if (!p.bed || p.bed.x === null) {
-      // Custom: keep current dims, just retarget.
-      commit({ printerId: id, dims: getState().print.bedDimensions });
-    } else {
-      commit({ printerId: id, dims: { x: p.bed.x, y: p.bed.y, z: p.bed.z } });
-    }
-    _render();
-  });
-
-  // Invalid/non-positive dims restore the stored value in place (no
-  // re-render — the user keeps focus to retype).
-  const restoreBedAxis = (inp) => {
-    inp.value = getState().print.bedDimensions[inp.dataset.bedAxis];
-  };
-  wireNumbers(el, '[data-bed-axis]', (inp, v) => {
-    if (!(v > 0)) { restoreBedAxis(inp); return; }
-    const dims = { ...getState().print.bedDimensions, [inp.dataset.bedAxis]: v };
-    commit({ printerId: _matchPrinterByBed(dims), dims });
-    _render();
-  }, { onInvalid: restoreBedAxis });
-
-  wireToggles(el, '#pp-bed-show', (btn, on) => {
-    setState(s => ({
-      ...s,
-      scene: { ...s.scene, overlays: { ...s.scene.overlays, bedPreview: on } },
-    }), { silent: true });
-    SceneManager.setOverlay('bedPreview', on);
-    reflectToggle(btn, on);
-  });
-
-  return el;
+  if (objectId && !getState().scene.objects[objectId]?.isGhost) Selection.set([objectId], objectId);
+  _render();
 }
 
 // ── Main render ───────────────────────────────────────────
 
-async function _render() {
+function _render() {
   if (!_bodyEl) return;
   _bodyEl.innerHTML = '';
 
-  // Add tabs
+  // One readiness + one as-shown preview per render, shared by the strip and
+  // the tabs so every number on screen comes from the same snapshot.
+  const readiness = PrintManager.getPrintReadiness();
+  const preview = PrintManager.previewExportContext({ target: null });
+
   _bodyEl.appendChild(_renderTabs());
 
-  // Add active tab content
-  if (_activeTab === 'scale') {
-    _bodyEl.appendChild(_renderScaleTab());
+  const strip = document.createElement('div');
+  strip.className = 'pp-strip-wrap';
+  strip.innerHTML = readinessStripHtml(readiness, preview?.units?.length ?? 0);
+  _bodyEl.appendChild(strip);
+
+  if (_activeTab === 'printer') {
+    _bodyEl.appendChild(renderPrinterTab({ goExport: () => { _activeTab = 'export'; _render(); } }));
   } else if (_activeTab === 'validation') {
     _bodyEl.appendChild(_renderValidationTab());
-  } else if (_activeTab === 'bed') {
-    _bodyEl.appendChild(_renderBedTab());
-  } else if (_activeTab === 'export') {
-    _bodyEl.appendChild(_renderExportTab());
+  } else {
+    _bodyEl.appendChild(renderExportTab({
+      readiness,
+      preview,
+      runExport: _exportFormat,
+      rerender: _render,
+    }));
   }
+  wireIssueRoutes(_bodyEl, _routeReadinessIssue);
 }
 
 // ── Export gate (A6 / B6 + watertight-repair-and-cost task 4) ────────────
@@ -1017,7 +615,7 @@ export function exportGateHtml(issues, canAutoFix) {
     <div class="modal-content">
       <h3>${escapeHtml(t('print.exportGate.title'))}</h3>
       <p>${escapeHtml(canAutoFix ? t('print.validationWarningsBody') : t('print.exportGate.bodyNoFix'))}</p>
-      <ul>${warnings.map(item => `<li>${escapeHtml(_issueLabel(item))}</li>`).join('')}</ul>
+      <ul>${warnings.map(item => `<li>${escapeHtml(issueLabel(item))}</li>`).join('')}</ul>
       <div class="modal-actions">${buttons}</div>
     </div>
   `;

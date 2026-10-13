@@ -560,6 +560,62 @@ await test('duplicate mixed selection (group + loose object) = union; loose clon
   assert.equal(Object.keys(s().objects).length, 3);
 });
 
+// ── Outliner group cascade (overhaul 3.4 / 2.5) ──────────────────────────
+const Cascade = await import('../src/core/hierarchy/GroupCascade.js');
+const { Selection: SelectionApi } = await import('../src/core/Selection.js');
+const { VisibilityCommand: VisCmd, LockCommand: LockCmd } = History;
+
+await test('cascade: group visibility reaches every descendant object (nested groups included), one undo step', () => {
+  nestedFixture();
+  const scene = () => StateManager.getState().scene;
+  assert.deepEqual(Cascade.groupDescendantObjectIds('outer', scene()).sort(), ['a', 'b']);
+  assert.deepEqual(Cascade.cascadeObjectIds(['outer'], scene()).sort(), ['a', 'b']);
+  assert.deepEqual(Cascade.cascadeObjectIds(['inner', 'c'], scene()).sort(), ['b', 'c']);
+  assert.equal(Cascade.groupAnyVisible('outer', scene()), true);
+  const ids = Cascade.cascadeObjectIds(['outer'], scene());
+  const cmd = new VisCmd(ids, { a: true, b: true }, false);
+  cmd.execute();
+  assert.equal(s().objects.a.visible, false);
+  assert.equal(s().objects.b.visible, false);
+  assert.equal(s().objects.c.visible, true, 'sibling outside the group is untouched');
+  assert.equal(Cascade.groupAnyVisible('outer', scene()), false, 'all hidden -> group reads hidden');
+  assert.equal(Cascade.groupAnyVisible('inner', scene()), false);
+  cmd.undo();
+  assert.equal(s().objects.a.visible, true);
+  assert.equal(s().objects.b.visible, true);
+  assert.equal(Cascade.groupAnyVisible('outer', scene()), true);
+});
+
+await test('cascade: group lock lives on the group node and reaches descendants by ancestry; undo restores', () => {
+  nestedFixture();
+  const scene = () => StateManager.getState().scene;
+  assert.deepEqual(Cascade.cascadeLockIds(['outer', 'c'], scene()), ['outer', 'c']);
+  const cmd = new LockCmd(['outer'], { outer: false }, true);
+  cmd.execute();
+  assert.equal(s().groups.outer.locked, true);
+  assert.equal(SelectionApi.isEffectivelyLocked('a'), true, 'child of locked group');
+  assert.equal(SelectionApi.isEffectivelyLocked('b'), true, 'grandchild via nested group');
+  assert.equal(SelectionApi.isEffectivelyLocked('inner'), true);
+  assert.equal(SelectionApi.isEffectivelyLocked('c'), false, 'outside the group');
+  assert.equal(s().objects.a.locked, false, 'descendants keep their own flag (cascade is by ancestry)');
+  cmd.undo();
+  assert.equal(s().groups.outer.locked, false);
+  assert.equal(SelectionApi.isEffectivelyLocked('b'), false);
+});
+
+await test('cascade: material parts of an object expand for visibility and lock', () => {
+  makeMesh('lead'); makeMesh('part2');
+  setState({
+    objects: {
+      lead: sceneObject('lead', { logicalObjectId: 'lead' }),
+      part2: sceneObject('part2', { logicalObjectId: 'lead', isInternalPart: true }),
+    },
+  });
+  const scene = StateManager.getState().scene;
+  assert.deepEqual(Cascade.cascadeObjectIds(['lead'], scene).sort(), ['lead', 'part2']);
+  assert.deepEqual(Cascade.cascadeLockIds(['lead'], scene).sort(), ['lead', 'part2']);
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

@@ -101,56 +101,73 @@ async function _withStoredImages(projectId, doc, keys) {
 }
 
 /**
- * On boot, offer to recover the newest autosave if one exists and it is newer
- * than that project's last real save. A recovered project stays DIRTY (it is
- * unsaved work) so closing still prompts and the next tick re-snapshots it.
- * @returns {Promise<boolean>} true if a project was recovered
+ * Boot check (task 4.7, Decision 4): the newest autosave that is newer than
+ * its project's last real save, or null. Stale snapshots (not newer than the
+ * file) are deleted silently. Never opens UI and never touches the world —
+ * the boot banner renders the offer; `recoverAutosave(offer)` applies it.
+ * @returns {Promise<{key:string, projectId:string, savedAt:string, name:string}|null>}
  */
-export async function recoverAutosave() {
-  assertNoImportInFlight();   // F20: recovery resets the world like any load
+export async function findRecoverableAutosave() {
   let keys;
-  try { keys = await storage.kvKeys(); } catch { return false; }
-  keys = keys || [];
-  const auto = keys.filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_PREFIX));
-  if (!auto.length) return false;
+  try { keys = await storage.kvKeys(); } catch { return null; }
+  const auto = (keys || []).filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_PREFIX));
+  if (!auto.length) return null;
 
   let newest = null;
   for (const k of auto) {
     const v = await storage.kvGet(k);
     if (v?.savedAt && (!newest || v.savedAt > newest.savedAt)) newest = { key: k, ...v };
   }
-  if (!newest) return false;
+  if (!newest) return null;
 
+  const projectId = projectIdFromAutosaveKey(newest.key);
   const lastSaved = newest.doc?.project?.lastSavedAt;
   if (lastSaved && newest.savedAt <= lastSaved) {   // nothing newer than the file
-    await deleteAutosave(projectIdFromAutosaveKey(newest.key));
+    await deleteAutosave(projectId);
+    return null;
+  }
+  return {
+    key: newest.key, projectId, savedAt: newest.savedAt,
+    name: newest.name ?? newest.doc?.project?.name ?? '',
+  };
+}
+
+/**
+ * Recover an autosave (the banner's "Recover" action; with no `offer` the
+ * newest recoverable one is looked up first). A recovered project re-attaches
+ * its stored texture images and stays DIRTY (it is unsaved work) so closing
+ * still prompts and the next tick re-snapshots it.
+ * @param {{key:string, projectId:string}|null} [offer]  from findRecoverableAutosave()
+ * @returns {Promise<boolean>} true if a project was recovered
+ */
+export async function recoverAutosave(offer = null) {
+  assertNoImportInFlight();   // F20: recovery resets the world like any load
+  const target = offer ?? await findRecoverableAutosave();
+  if (!target) return false;
+  const { projectId } = target;
+  try {
+    const snap = await storage.kvGet(target.key);
+    if (!snap?.doc) return false;   // discarded / superseded since the offer
+    const keys = (await storage.kvKeys()) || [];
+    await loadProject(await _withStoredImages(projectId, snap.doc, keys));
+    // Recovered ≠ saved: stay dirty, and re-snapshot now — the load just
+    // cleared this project's autosave keys like any successful load.
+    dispatch(EVENTS.PROJECT_DIRTY, {});
+    autosaveTick();
+    return true;
+  } catch (err) {
+    // M2: a poisoned autosave (torn write, schema from another build) must
+    // not be re-offered on every boot — drop the key and say why.
+    await deleteAutosave(projectId);
+    reportError(err, { title: t('toast.autosaveRecoverFailed') });
     return false;
   }
+}
 
-  const choice = await new Promise(resolve => {
-    dispatch(EVENTS.MODAL_OPEN, {
-      id: 'recoverAutosave',
-      savedAt: newest.savedAt,
-      onClose: (r) => resolve(r || 'discard'),
-    });
-  });
-  const projectId = projectIdFromAutosaveKey(newest.key);
-  if (choice === 'recover') {
-    try {
-      await loadProject(await _withStoredImages(projectId, newest.doc || {}, keys));
-      // Recovered ≠ saved: stay dirty, and re-snapshot now — the load just
-      // cleared this project's autosave keys like any successful load.
-      dispatch(EVENTS.PROJECT_DIRTY, {});
-      autosaveTick();
-      return true;
-    } catch (err) {
-      // M2: a poisoned autosave (torn write, schema from another build) must
-      // not be re-offered on every boot — drop the key and say why.
-      await deleteAutosave(projectId);
-      reportError(err, { title: t('toast.autosaveRecoverFailed') });
-      return false;
-    }
-  }
-  await deleteAutosave(projectId);
-  return false;
+/**
+ * Drop an offered autosave (snapshot + its stored images) without loading it.
+ * @param {{projectId:string}|null} offer
+ */
+export async function discardAutosave(offer) {
+  if (offer?.projectId) await deleteAutosave(offer.projectId);
 }

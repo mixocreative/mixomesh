@@ -454,3 +454,60 @@
   border: 1px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
+
+/* ── Toggle strip + scope breadcrumb (overhaul 5.7 / 3.3) ──── */
+/* Strip: top-right, left of the Arrange tab; wraps instead of overflowing. */
+.vp-toggles {
+  top: 16px;
+  left: auto;
+  right: 40px;
+  width: auto;
+  max-width: calc(100% - 32px - 40px - 220px);
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 9px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+}
+.vp-toggles .vt-group { gap: 2px; flex-wrap: wrap; }
+.vp-toggles .vt-btn { background: transparent; border-color: transparent; box-shadow: none; }
+.vp-toggles .vt-btn:hover { background: var(--hud-hover-bg); }
+.vp-toggles .vt-btn.vt-on { background: var(--active-bg); color: var(--active); border-color: var(--active); text-shadow: none; }
+.vp-toggles .vt-mode { width: auto; min-width: 90px; background: transparent; border-color: var(--hud-border); box-shadow: none; }
+.vp-toggles .vt-sep { margin: 0 var(--sp-1); }
+
+/* Breadcrumb chip: right of the NavCube (top-left), only while scoped. */
+.scope-breadcrumb {
+  position: absolute;
+  top: 16px;
+  left: calc(16px + 90px + var(--sp-4));
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  max-width: calc(100% - 16px - 90px - 2 * var(--sp-4) - 40px);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 9px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  color: var(--hud-text);
+  font-size: var(--fs-sm);
+  text-shadow: var(--hud-text-shadow);
+  pointer-events: auto;
+}
+.scope-breadcrumb[hidden] { display: none; }
+.sb-crumbs { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow: hidden; white-space: nowrap; }
+.sb-crumb { background: transparent; border: none; padding: 0 var(--sp-1); font: inherit; color: var(--hud-text-dim); cursor: pointer; border-radius: var(--r-sm); }
+button.sb-crumb:hover { color: var(--hud-text-hi); background: var(--hud-hover-bg); }
+.sb-crumb-current { color: var(--active); font-weight: 600; cursor: default; }
+.sb-crumb-sep { color: var(--hud-text-dim); }
+.sb-esc { color: var(--hud-text-dim); font-size: var(--fs-xs); white-space: nowrap; border-left: 1px solid var(--hud-border); padding-left: var(--sp-4); }
+
+.np-subhead { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin-bottom: var(--sp-2); }
+@media (max-width: 900px) { .sb-esc { display: none; } }

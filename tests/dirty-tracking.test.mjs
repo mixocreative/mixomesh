@@ -135,24 +135,32 @@ await test('M4: print.bedDimensions / targetPrinterId write the way PrintPanel c
   assert.equal(PersistenceManager.isDirty(), false);
 });
 
-await test('M4: PrintPanel source routes every persisted print/geometryFixes write through markDirty()', () => {
-  // Regression guard on the source itself (PrintPanel is not importable
-  // headless): each silent setState of a .mixo-persisted field must be
+await test('M4: Print panel routes every persisted print/geometryFixes write through markDirty()', () => {
+  // Regression guard on the source itself (the Print panel is not importable
+  // headless). Since task 1.3 the per-project print settings (printer, bed,
+  // format, split, bake, individually, reference) are written ONLY through
+  // PrinterCommands (undoable), whose execute() marks dirty; the one direct
+  // .mixo-persisted print write left in the panel (strictExport) must still be
   // followed by markDirty() within a few lines.
-  const src = readFileSync(new URL('../src/ui/PrintPanel.js', import.meta.url), 'utf8');
-  const lines = src.split(/\r?\n/);
-  assert.match(src, /import \{[^}]*\bmarkDirty\b[^}]*\} from '\.\.\/core\/StateManager\.js'/,
-    'PrintPanel imports markDirty');
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const cmd = read('../src/core/commands/PrinterCommands.js');
+  assert.match(cmd, /execute\(\) \{ _applyPrintPatch\(this\._next\); markDirty\(\); \}/,
+    'SetPrintSettingsCommand.execute marks dirty');
+  for (const file of ['../src/ui/PrintPanel.js', '../src/ui/print/ExportTab.js', '../src/ui/print/PrinterTab.js']) {
+    const src = read(file);
+    for (const key of ['bedDimensions', 'objBakeSolidTextures', 'exportFormat', 'splitByMaterial', 'individually', 'targetPrinterId']) {
+      assert.ok(!src.split(/\r?\n/).some(l => l.includes('setState(') && l.includes(`${key}:`)),
+        `${file} never writes print.${key} outside a command`);
+    }
+  }
+  const lines = read('../src/ui/print/ExportTab.js').split(/\r?\n/);
+  const at0 = lines.findIndex(l => l.includes('strictExport: on'));
+  assert.ok(at0 >= 0, 'write site present: strictExport');
+  assert.match(lines.slice(at0, at0 + 6).join('\n'), /markDirty\(\)/, 'markDirty() follows the strictExport write');
+  const src = read('../src/ui/PrintPanel.js');
   // geometryFixes writes moved out of PrintPanel into RepairSession
   // (_recordGeometryFixes) when the per-result Auto-Fix button joined the
   // shared repairObjects path (2026-09-18) — guarded there below.
-  const writes = ['bedDimensions: next.dims', 'objBakeSolidTextures: on'];
-  for (const w of writes) {
-    const at = lines.findIndex(l => l.includes(w));
-    assert.ok(at >= 0, `write site present: ${w}`);
-    const win = lines.slice(at, at + 6).join('\n');
-    assert.match(win, /markDirty\(\)/, `markDirty() follows the ${w} write`);
-  }
   assert.ok(!src.includes('geometryFixes: fixes'), 'PrintPanel no longer writes geometryFixes itself');
   const rs = readFileSync(new URL('../src/core/repair/RepairSession.js', import.meta.url), 'utf8');
   const rlines = rs.split(/\r?\n/);

@@ -41,7 +41,12 @@
     "referenceObjectId": null,
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": { "x": 508, "y": 508, "z": 305 },
+    "exportFormat": null,
+    "splitByMaterial": null,
+    "objAxis": null,
+    "threeMFFlavour": null,
     "objBakeSolidTextures": false,
+    "individually": false,
     "strictExport": false,
     "repairOnImport": false
   },

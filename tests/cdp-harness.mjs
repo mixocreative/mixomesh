@@ -143,6 +143,11 @@ export class Cdp {
 }
 
 export async function evaluate(cdp, expression) {
+  // SMOKE_TRACE=1 prints each evaluation's first line — find which step hangs.
+  if (process.env.SMOKE_TRACE) {
+    const head = String(expression).replace(/\s+/g, ' ').slice(0, 140);
+    console.error(`[trace ${new Date().toISOString().slice(11, 19)}] ${head}`);
+  }
   const result = await cdp.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,

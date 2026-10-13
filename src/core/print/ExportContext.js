@@ -27,6 +27,7 @@ import { toPrintSpace } from './PrintSpace.js';
 import { logicalObjectLeadIds, logicalObjectPartIds, canonicalObjectId } from '../LogicalObjects.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
+import { effectivePrintSettings } from './PrintProfileSettings.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -46,8 +47,18 @@ export const BU_TO_MM = 1000;
  * `ctx.prefs` typedef.
  */
 function _capturePrefs(state) {
+  // Profile-driven fields resolve to their EFFECTIVE value (stored user
+  // choice, else the selected printer profile's default — task 1.3 /
+  // Decision 32), so a user override always wins over the profile here.
+  const eff = effectivePrintSettings(state.print ?? {});
   return Object.freeze({
     objBakeSolidTextures: !!state.print?.objBakeSolidTextures,
+    exportFormat: eff.exportFormat,
+    splitByMaterial: eff.splitByMaterial,
+    objAxis: eff.objAxis,
+    threeMFFlavour: eff.threeMFFlavour,
+    strictExport: !!state.print?.strictExport,
+    individually: !!state.print?.individually,
   });
 }
 
@@ -95,7 +106,11 @@ function _capturePrefs(state) {
  *                                    describe what actually shipped.
  * @property {Array} meshes           Mutated by pipeline (clone entries).
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
- * @property {{objBakeSolidTextures:boolean}} prefs  Snapshotted state.print prefs (frozen).
+ * @property {{objBakeSolidTextures:boolean, exportFormat:'obj'|'3mf'|'stl'|'ply'|'wrl',
+ *   splitByMaterial:boolean, objAxis:'y-up'|'z-up', threeMFFlavour:'core'|'bambu'|'prusa',
+ *   strictExport:boolean, individually:boolean}} prefs
+ *                                    Snapshotted state.print prefs (frozen); profile-driven
+ *                                    fields are effective values (user override, else profile).
  */
 
 /**

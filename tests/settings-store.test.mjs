@@ -193,11 +193,12 @@ test('print.repairOnImport never enters the .mixo document and a doc carrying it
   AssetLoader.getAssetBytes = async () => null;
   AssetLoader.getBabylonMesh = () => null;
 
-  setState(s => ({ ...s, print: { ...s.print, repairOnImport: true, strictExport: true } }), { silent: true });
+  setState(s => ({ ...s, print: { ...s.print, repairOnImport: true, strictExport: true, objBakeSolidTextures: true } }), { silent: true });
   const doc = await __test._buildDocument({ skipEmbed: true });
   assert.equal('repairOnImport' in doc.print, false,
     `repairOnImport must not be serialised: ${JSON.stringify(doc.print)}`);
-  assert.equal(doc.print.strictExport, true, 'the rest of the print slice still travels');
+  assert.equal('strictExport' in doc.print, false, 'strictExport is per-user too (Decision 15) — not serialised');
+  assert.equal(doc.print.objBakeSolidTextures, true, 'the rest of the print slice still travels');
   assert.equal(getState().print.repairOnImport, true, 'the live per-user setting is untouched by saving');
 
   // A document that DOES carry it (hand-written, or an older save) must be
@@ -207,8 +208,11 @@ test('print.repairOnImport never enters the .mixo document and a doc carrying it
     false,
     'the load merge strips repairOnImport from the incoming print slice',
   );
-  const stale = loaderTest._printWithoutLegacyScale({ printMode: 'fdm', chordTolerance: 0.05, minWallThickness: 1.2, strictExport: true });
-  assert.deepEqual(Object.keys(stale), ['strictExport'], 'dead 1.10 keys from old files are dropped on load');
+  const stale = loaderTest._printWithoutLegacyScale({ printMode: 'fdm', chordTolerance: 0.05, minWallThickness: 1.2, strictExport: true, objBakeSolidTextures: true });
+  assert.equal(stale.objBakeSolidTextures, true, 'project fields survive');
+  for (const k of ['printMode', 'chordTolerance', 'minWallThickness', 'strictExport']) assert.equal(k in stale, false, `${k} dropped on load`);
+  assert.equal(stale.exportFormat, null, '1.3: a missing profile field follows the printer profile');
+  assert.equal(stale.individually, false);
 });
 
 test('factoryState resets every persisted slice but leaves content', () => {
@@ -255,4 +259,57 @@ test('cost: resetSection(cost) restores factory values via applySectionToState',
 test('bg-controls: factory carries darkIntensity + lightIntensity at 1.0', () => {
   assert.equal(DEFAULTS.render.darkIntensity, 1);
   assert.equal(DEFAULTS.render.lightIntensity, 1);
+});
+
+// ── 1.3 / Decision 15: print settings scope split ──────────────────────
+test('1.3: print scope — per-project and per-user field sets are disjoint and match Decision 15', async () => {
+  const { PRINT_PROJECT_FIELDS, PRINT_USER_FIELDS } = await import('../src/core/SettingsStore.js');
+  assert.deepEqual([...PRINT_PROJECT_FIELDS].sort(), [
+    'bedDimensions', 'exportFormat', 'exportTargets', 'individually', 'objAxis', 'objBakeSolidTextures',
+    'referenceObjectId', 'splitByMaterial', 'targetPrinterId', 'threeMFFlavour',
+  ]);
+  assert.deepEqual([...PRINT_USER_FIELDS].sort(), ['repairOnImport', 'strictExport']);
+  assert.equal(PRINT_PROJECT_FIELDS.some(f => PRINT_USER_FIELDS.includes(f)), false, 'scopes are disjoint');
+  for (const f of [...PRINT_PROJECT_FIELDS, ...PRINT_USER_FIELDS]) {
+    assert.ok(f in DS.print, `default-settings.json print carries ${f}`);
+  }
+});
+
+test('1.3: profile-driven overrides + print sizes are never seeded from localStorage (per-project)', () => {
+  const s = freshState();
+  Object.assign(s.print, {
+    exportFormat: 'stl', splitByMaterial: true, objAxis: 'z-up', threeMFFlavour: 'bambu', individually: true,
+    referenceObjectId: 'x', exportTargets: [{ kind: 'factor', value: 2 }], strictExport: true,
+  });
+  const picked = pickSettings(s).print;
+  for (const k of ['exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour', 'individually', 'referenceObjectId', 'exportTargets']) {
+    assert.equal(k in picked, false, `${k} is per-project — not in per-user settings`);
+  }
+  assert.equal(picked.strictExport, true, 'per-user strictExport still persists');
+  // A stale/hand-edited blob cannot inject a per-project override either.
+  const merged = mergeSettings(freshState(), { print: { exportFormat: 'stl', strictExport: true } });
+  assert.equal(merged.print.exportFormat, DS.print.exportFormat, 'override not injected from localStorage');
+  assert.equal(merged.print.strictExport, true);
+});
+
+test('1.3: factory profile-driven fields are null (= follow the printer profile)', () => {
+  for (const k of ['exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour']) {
+    assert.equal(DS.print[k], null, `${k} defaults to null`);
+  }
+  assert.equal(DS.print.individually, false);
+});
+
+test('1.3: Print ↺ reset returns profile overrides to factory but keeps print sizes + reference', () => {
+  const s = freshState();
+  s.scene.objects = { m: { id: 'm' } };
+  Object.assign(s.print, {
+    exportFormat: 'stl', splitByMaterial: true, objAxis: 'z-up', threeMFFlavour: 'prusa', individually: true,
+    referenceObjectId: 'm', exportTargets: [{ kind: 'ratio', value: 144 }],
+  });
+  const out = applySectionToState(s, 'print');
+  for (const k of ['exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour', 'individually']) {
+    assert.deepEqual(out.print[k], DS.print[k], `${k} reset to factory`);
+  }
+  assert.equal(out.print.referenceObjectId, 'm', 'reference is project content — kept');
+  assert.deepEqual(out.print.exportTargets, [{ kind: 'ratio', value: 144 }], 'print sizes kept');
 });

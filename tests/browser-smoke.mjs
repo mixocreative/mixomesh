@@ -151,14 +151,14 @@ async function main() {
         wsButtons: document.querySelectorAll('.ws-switcher .ws-btn').length,
         wsActive: document.querySelector('.ws-switcher .ws-btn.active')?.dataset.ws,
         nPanel: {
-          mounted: !!document.querySelector('#n-panel .np-body')
-            && !!document.querySelector('#n-panel input[data-axis="x"]'),
+          mounted: !!document.querySelector('#cursor-panel .np-body')
+            && !!document.querySelector('#cursor-panel input[data-axis="x"]'),
           noSnapActions: [
             'selection-to-cursor',
             'cursor-to-selection',
             'cursor-to-origin',
-          ].every(a => !document.querySelector('#n-panel [data-act="' + a + '"]')),
-          placementLabels: [...document.querySelectorAll('#n-panel [data-place]')]
+          ].every(a => !document.querySelector('#cursor-panel [data-act="' + a + '"]')),
+          placementLabels: [...document.querySelectorAll('#cursor-panel [data-place]')]
             .map(button => button.textContent.trim()),
         },
         emptyState: {
@@ -265,7 +265,7 @@ async function main() {
         '#project-name',
         '.pm-btn[data-act="save"]',
         '.ws-btn[data-ws="print"]',
-        '#rp-print-body .pp-tab[data-tab="scale"]',
+        '#rp-print-body .pp-tab[data-tab="printer"]',
         '#viewport-toolbar button, #viewport-toggles button, .nav-cube button',
       ];
       const results = selectors.map(selector => {
@@ -433,8 +433,8 @@ async function main() {
       return { before, after };
     })()`);
     assert(localeSwitch.after.lang === 'zh-Hant', 'locale switch did not update <html lang>');
-    assert(localeSwitch.before.printTabs.includes('Scale'), 'locale regression setup missing English Print tab text');
-    assert(localeSwitch.after.printTabs.includes('比例'),
+    assert(localeSwitch.before.printTabs.includes('Printer'), 'locale regression setup missing English Print tab text');
+    assert(localeSwitch.after.printTabs.includes('印表機'),
       `locale switch did not refresh generated Print tab text: ${localeSwitch.after.printTabs.join(', ')}`);
     assert(localeSwitch.after.propertiesEmpty.includes('拖到視窗'),
       `locale switch did not refresh generated Properties empty text: ${localeSwitch.after.propertiesEmpty}`);
@@ -453,16 +453,16 @@ async function main() {
         readiness: document.querySelector('#rp-print-body .pp-readiness')?.className ?? '',
         issues: [...document.querySelectorAll('#rp-print-body .pp-readiness-issue')]
           .map(row => row.dataset.issueCode),
-        formats: [...document.querySelectorAll('#rp-print-body [data-format]')]
-          .map(button => button.dataset.format),
-        disabled: [...document.querySelectorAll('#rp-print-body [data-format]')]
-          .map(button => button.disabled),
+        // 1.3: format is a segmented control that is NEVER disabled; the one
+        // primary export button carries the blocked state.
+        formats: [...document.querySelectorAll('#rp-print-body [data-fmt]')]
+          .map(button => button.dataset.fmt),
+        disabled: [document.querySelector('#rp-print-body [data-act="export-primary"]')?.disabled],
       };
-      document.querySelector('#rp-print-body [data-tab="bed"]')?.click();
+      document.querySelector('#rp-print-body [data-tab="printer"]')?.click();
       await frame();
-      const presetLabel = document.querySelector('#pp-printer-select')?.closest('.pp-field-group')
-        ?.querySelector('label')?.textContent.trim() ?? '';
-      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      const presetLabel = document.querySelector('#rp-print-body label[for="pp-printer-select"]')?.textContent.trim() ?? '';
+      document.querySelector('#rp-print-body [data-tab="printer"]')?.click();
       await frame();
       return { exportView, presetLabel };
     })()`);
@@ -471,11 +471,11 @@ async function main() {
     assert(printReadinessUi.exportView.issues.includes('no-print-parts'),
       'empty-scene readiness issue is missing');
     assert(printReadinessUi.exportView.formats.join(',') === 'obj,3mf,stl,ply,wrl',
-      `all export buttons must remain visible: ${printReadinessUi.exportView.formats.join(',')}`);
+      `all export formats must remain visible: ${printReadinessUi.exportView.formats.join(',')}`);
     assert(printReadinessUi.exportView.disabled.every(Boolean),
-      'blocked readiness should disable export buttons instead of failing late');
-    assert(printReadinessUi.presetLabel === 'Build Volume Preset',
-      `printer selector was not simplified to Build Volume Preset: ${printReadinessUi.presetLabel}`);
+      'blocked readiness should disable the primary export button instead of failing late');
+    assert(printReadinessUi.presetLabel === 'Printer',
+      `printer selector label should read Printer: ${printReadinessUi.presetLabel}`);
 
     // ── Export tab ▸ Cost block renders + computes a live quote (task 6) ──
     const costUi = await evaluate(cdp, `(async () => {
@@ -511,7 +511,7 @@ async function main() {
         delete objects.smoke_cost_quad;
         return { ...s, scene: { ...s.scene, objects } };
       }, { silent: true });
-      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      document.querySelector('#rp-print-body [data-tab="printer"]')?.click();
       await frame();
       return out;
     })()`);
@@ -548,7 +548,7 @@ async function main() {
         delete objects.smoke_cost_box;
         return { ...s, scene: { ...s.scene, objects }, print: { ...s.print, exportTargets: [] } };
       }, { silent: true });
-      document.querySelector('#rp-print-body [data-tab="scale"]')?.click();
+      document.querySelector('#rp-print-body [data-tab="printer"]')?.click();
       await frame();
       return { rows };
     })()`);
@@ -1002,11 +1002,11 @@ async function main() {
       await new Promise(r => requestAnimationFrame(r));
       // 5.6: pivot is a <select data-select="pivot"> in the toolbar now.
       const tbCursorOn = document.querySelector('.vt-group[data-group="pivot"] select[data-select="pivot"]')?.value === 'cursor';
-      const npPivotOn  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === true;
+      const npPivotOn  = document.querySelector('#cursor-panel [data-act="pivot-cursor"]')?.checked === true;
       sel.Selection.setPivotMode('median');
       await new Promise(r => requestAnimationFrame(r));
       const tbCursorOff = document.querySelector('.vt-group[data-group="pivot"] select[data-select="pivot"]')?.value === 'median';
-      const npPivotOff  = document.querySelector('#n-panel [data-act="pivot-cursor"]')?.checked === false;
+      const npPivotOff  = document.querySelector('#cursor-panel [data-act="pivot-cursor"]')?.checked === false;
       const pivotSync = tbCursorOn && npPivotOn && tbCursorOff && npPivotOff;
 
       // (11) Gizmo-space sync: toggling space (the backtick-key path) must
@@ -1861,7 +1861,7 @@ async function main() {
 
     // ── Placement panel renders the full verb matrix (ADR 0003 consolidation) ──
     const placePanel = await evaluate(cdp, `(() => {
-      const btns = [...document.querySelectorAll('#n-panel .np-place-btn')].map(b => b.dataset.place);
+      const btns = [...document.querySelectorAll('#cursor-panel .np-place-btn')].map(b => b.dataset.place);
       return {
         count: btns.length,
         align: btns.filter(p => p.startsWith('align-')).length,
@@ -1892,12 +1892,12 @@ async function main() {
             ol_object: { id: 'ol_object', name: 'Body', assetId: 'ol_asset', collectionId: 'ol_col', parentId: 'ol_group', shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1 },
           },
         },
-        ui: { ...s.ui, outlinerCollapsed: { ...s.ui.outlinerCollapsed, ol_col: true, ol_group: true } },
+        ui: { ...s.ui, outlinerCollapsed: { ...s.ui.outlinerCollapsed, ol_group: true } },
       }), { silent: true });
       st.dispatch(ev.EVENTS.OBJECT_RESTORED, { id: 'ol_object' });
       sel.Selection.set(['ol_object'], 'ol_object');
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const collection = document.querySelector('[data-id="ol_col"]');
+      const collection = document.querySelector('[data-id="ol_col"]');   // demoted (Decision 2): must NOT render
       const group = document.querySelector('[data-id="ol_group"]');
       const object = document.querySelector('[data-id="ol_object"]');
       const empty = document.querySelector('[data-id="ol_empty"]');
@@ -1908,22 +1908,24 @@ async function main() {
       }
       const shown = id => document.querySelector('[data-id="' + id + '"]')?.hidden === false;
       const cm = await import('/src/ui/ContextMenu.js');
+      sel.Selection.set(['ol_group'], 'ol_group');
       cm.ContextMenu.open({ x: 10, y: 10, source: 'outliner', targetId: 'ol_group', targetKind: 'group' });
       const groupActions = [...document.querySelectorAll('.context-menu [data-action]')].map(item => item.dataset.action);
-      document.querySelector('.context-menu [data-action="group-select"]')?.click();
-      const groupSelectedObject = sel.Selection.getSelectedIds().includes('ol_object');
+      document.querySelector('.context-menu [data-action="enter-group"]')?.click();
+      const groupSelectedObject = sel.Selection.getScope() === 'ol_group';
+      sel.Selection.exitScope();
       cm.ContextMenu.open({ x: 10, y: 10, source: 'outliner', targetId: 'ol_object', targetKind: 'object' });
       const objectActions = [...document.querySelectorAll('.context-menu [data-action]')].map(item => item.dataset.action);
       cm.ContextMenu.close();
       return {
         objectSelected: object?.getAttribute('aria-selected') === 'true',
         groupSelected: group?.getAttribute('aria-selected') === 'true',
-        collectionExpanded: collection?.getAttribute('aria-expanded') === 'true',
+        collectionExpanded: !collection,
         groupExpanded: group?.getAttribute('aria-expanded') === 'true',
-        iconsDiffer: collection?.querySelector('.ol-icon')?.innerHTML !== group?.querySelector('.ol-icon')?.innerHTML,
+        iconsDiffer: true,
         emptyBadge: empty?.textContent.includes('Empty') ?? false,
         hasSearch: !!search,
-        searchKeepsPath: shown('ol_col') && shown('ol_group') && shown('ol_object'),
+        searchKeepsPath: shown('ol_group') && shown('ol_object'),
         groupActions,
         objectActions,
         groupSelectedObject,
@@ -1932,16 +1934,14 @@ async function main() {
     assert(outlinerSemantics.objectSelected && !outlinerSemantics.groupSelected,
       'viewport/object selection selects only the Object row');
     assert(outlinerSemantics.collectionExpanded && outlinerSemantics.groupExpanded,
-      'active Object selection reveals its Import and Group ancestors');
-    assert(outlinerSemantics.iconsDiffer, 'Import and Group rows use distinct icons');
+      'collections are not Outliner rows; active Object selection reveals its Group ancestor');
     assert(outlinerSemantics.emptyBadge, 'empty user groups are explicitly labelled Empty');
     assert(outlinerSemantics.hasSearch && outlinerSemantics.searchKeepsPath,
       'Outliner name search keeps matching objects and their ancestor path visible');
     assert(outlinerSemantics.groupSelectedObject && outlinerSemantics.groupActions.includes('select-parent'),
-      'Group context navigation selects descendants and exposes parent navigation');
-    assert(['select-parent', 'select-siblings', 'select-import', 'reveal-outliner']
-      .every(action => outlinerSemantics.objectActions.includes(action)),
-    'Object context menu exposes parent, sibling, import, and reveal navigation');
+      'Group context menu offers Enter group (scope enters the group) and parent navigation');
+    assert(['select-parent', 'rename', 'enter-group'].every(action => outlinerSemantics.objectActions.includes(action)),
+      'Object context menu exposes primary navigation (select parent, rename, enter group)');
 
     // Run late: this deliberately mutates shader identity/history, so it must
     // not perturb the rendering/import diagnostics above.
@@ -1997,6 +1997,515 @@ async function main() {
     assert(undoButton.hasRedo, 'status-bar Redo button missing');
     assert(undoButton.afterDup === undoButton.before + 1, `Duplicate should add one object (${undoButton.before} -> ${undoButton.afterDup})`);
     assert(undoButton.afterUndo === undoButton.before, `Undo button should revert the Duplicate (${undoButton.afterUndo} vs ${undoButton.before})`);
+
+    // ── Shell chrome (overhaul 5.1 / 0.7 / 3.3 / 5.7 / 5.4) ──────────────
+    const shellChrome = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const st = await import('/src/core/StateManager.js');
+      const sel = (await import('/src/core/Selection.js')).Selection;
+      const out = {};
+      // 5.1: #btn-import triggers ViewportDrop.promptImport (stubbed).
+      const vd = (await import('/src/ui/ViewportDrop.js')).ViewportDrop;
+      const realPrompt = vd.promptImport;
+      let imports = 0;
+      vd.promptImport = async () => { imports++; };
+      document.getElementById('btn-import')?.click();
+      await frame(); await frame();
+      vd.promptImport = realPrompt;
+      out.importCalls = imports;
+      out.hasHeaderParts = !!document.getElementById('btn-export') && !!document.getElementById('btn-undo')
+        && !!document.getElementById('btn-redo') && !!document.getElementById('btn-help');
+      // ? menu holds reset-all.
+      document.getElementById('btn-help')?.click();
+      out.helpHasReset = !!document.querySelector('.pm-help-menu:not(.hidden) [data-act="reset-settings"]');
+      document.getElementById('btn-help')?.click();
+      // Export -> Print workspace.
+      document.getElementById('btn-export')?.click();
+      await frame();
+      out.exportWs = st.getState().ui.workspace;
+      const { Workspace } = await import('/src/ui/Workspace.js');
+      Workspace.setWorkspace('layout');
+      await frame();
+      // 0.7: toolbar Arrange button opens #cursor-panel.
+      out.arrangeBtn = !!document.querySelector('#viewport-toolbar [data-kind="arrange"]');
+      if (document.getElementById('cursor-panel')?.classList.contains('open')) {
+        document.querySelector('#viewport-toolbar [data-kind="arrange"]')?.click();
+      }
+      document.querySelector('#viewport-toolbar [data-kind="arrange"]')?.click();
+      out.arrangeOpen = !!document.getElementById('cursor-panel')?.classList.contains('open');
+      document.querySelector('#viewport-toolbar [data-kind="arrange"]')?.click();
+      out.arrangeClosed = !document.getElementById('cursor-panel')?.classList.contains('open');
+      // 3.3: breadcrumb text after enterScope (hidden at root).
+      sel.setScope(null); await frame();
+      out.crumbHiddenAtRoot = document.getElementById('scope-breadcrumb')?.hidden === true;
+      const g = Object.values(st.getState().scene.groups).find(x => /^two(\\.\\d+)?$/.test(x.name))
+        ?? Object.values(st.getState().scene.groups)[0];
+      out.crumbGroup = g?.name;
+      sel.enterScope(g?.id); await frame();
+      const bc = document.getElementById('scope-breadcrumb');
+      out.crumbVisible = !!bc && !bc.hidden;
+      out.crumbText = bc?.querySelector('.sb-crumbs')?.textContent ?? '';
+      document.querySelector('#scope-breadcrumb button[data-scope=""]')?.click();
+      await frame();
+      out.scopeAfterCrumb = sel.getScope();
+      // 5.7: cross-section toggle flips state.scene.section.enabled.
+      const before = !!st.getState().scene.section.enabled;
+      document.querySelector('#viewport-toggles [data-feature="section"]')?.click();
+      await frame();
+      out.sectionFlipped = !!st.getState().scene.section.enabled !== before;
+      document.querySelector('#viewport-toggles [data-feature="section"]')?.click();
+      await frame();
+      out.sectionRestored = !!st.getState().scene.section.enabled === before;
+      const gridBefore = !!st.getState().scene.overlays.grid;
+      document.querySelector('#viewport-toggles [data-feature="grid"]')?.click();
+      out.gridFlipped = !!st.getState().scene.overlays.grid !== gridBefore;
+      document.querySelector('#viewport-toggles [data-feature="grid"]')?.click();
+      // 5.4: Scene Advanced disclosure - present, collapsed by default.
+      Workspace.setWorkspace('scene'); await frame();
+      const adv = document.querySelector('#rp-scene-body .pp-section[data-sec="advanced"]');
+      out.advancedPresent = !!adv;
+      out.advancedCollapsed = !!adv?.classList.contains('pp-collapsed');
+      out.advancedHoldsGrade = !!adv?.querySelector('[data-render="exposure"]');
+      Workspace.setWorkspace('layout'); await frame();
+      return out;
+    })()`);
+    assert(shellChrome.importCalls === 1, `#btn-import must call ViewportDrop.promptImport once: ${JSON.stringify(shellChrome)}`);
+    assert(shellChrome.hasHeaderParts, 'header must carry Export / Undo / Redo / ? buttons');
+    assert(shellChrome.helpHasReset, '? menu must hold "Reset all settings"');
+    assert(shellChrome.exportWs === 'print', `header Export must switch to the Print workspace: ${shellChrome.exportWs}`);
+    assert(shellChrome.arrangeBtn && shellChrome.arrangeOpen && shellChrome.arrangeClosed, `toolbar Arrange button must toggle #cursor-panel: ${JSON.stringify(shellChrome)}`);
+    assert(shellChrome.crumbHiddenAtRoot, 'scope breadcrumb must be hidden at root');
+    assert(shellChrome.crumbVisible && /^Scene\s*›\s*\S/.test(shellChrome.crumbText) && shellChrome.crumbText.includes(shellChrome.crumbGroup),
+      `breadcrumb must read "Scene › <group>" after enterScope: ${JSON.stringify(shellChrome)}`);
+    assert(shellChrome.scopeAfterCrumb === null, 'clicking the root crumb must jump out to root');
+    assert(shellChrome.sectionFlipped && shellChrome.sectionRestored, 'viewport Cross-section toggle must flip state.scene.section.enabled');
+    assert(shellChrome.gridFlipped, 'viewport Grid toggle must flip scene.overlays.grid');
+    assert(shellChrome.advancedPresent && shellChrome.advancedCollapsed && shellChrome.advancedHoldsGrade,
+      `Scene "Advanced" section must exist, start collapsed and hold the grade controls: ${JSON.stringify(shellChrome)}`);
+
+    // ── BEGIN outliner 3.4 + context menu 3.5 smoke (group rows, cascade, tiered menu) ──
+    const outlinerGroups = await evaluate(cdp, `(async () => {
+      const st = await import('/src/core/StateManager.js');
+      const ev = await import('/src/core/events.js');
+      const sel = await import('/src/core/Selection.js');
+      const cm = await import('/src/ui/ContextMenu.js');
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const search = document.querySelector('#ol-search');
+      if (search) { search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true })); }
+      const mk = (id, extra = {}) => ({ id, name: id, assetId: 'smoke_ol3', collectionId: null, parentId: null, shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true, sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1, ...extra });
+      st.setState(s => ({
+        ...s,
+        scene: {
+          ...s.scene,
+          groups: { ...s.scene.groups, smoke_g: { id: 'smoke_g', name: 'Smoke Kit', parentId: null, childIds: ['smoke_c1', 'smoke_c2'], origin: 'user' } },
+          objects: { ...s.scene.objects, smoke_c1: mk('smoke_c1', { parentId: 'smoke_g' }), smoke_c2: mk('smoke_c2', { parentId: 'smoke_g' }), smoke_loose: mk('smoke_loose') },
+        },
+        ui: { ...s.ui, outlinerCollapsed: { ...s.ui.outlinerCollapsed, smoke_g: false } },
+      }), { silent: true });
+      st.dispatch(ev.EVENTS.OBJECT_RESTORED, { id: 'smoke_c1' });
+      await frame();
+      const row = () => document.querySelector('#ol-list [data-id="smoke_g"]');
+      const noCollectionRows = document.querySelectorAll('#ol-list [data-kind="collection"]').length === 0;
+      row().querySelector('.ol-name').click();
+      await frame();
+      const groupAria = row().getAttribute('aria-selected');
+      const selectedIds = [...sel.Selection.getSelectedIds()];
+      const childCount = row().querySelector('.ol-badge')?.textContent.trim();
+      // Group eye cascades to every descendant, lock sets the group flag.
+      row().querySelector('[data-action="vis"]').click();
+      await frame();
+      const hid = ['smoke_c1', 'smoke_c2'].map(id => st.getState().scene.objects[id].visible);
+      row().querySelector('[data-action="vis"]').click();
+      await frame();
+      const shown = ['smoke_c1', 'smoke_c2'].map(id => st.getState().scene.objects[id].visible);
+      row().querySelector('[data-action="lock"]').click();
+      await frame();
+      const groupLocked = st.getState().scene.groups.smoke_g.locked === true;
+      const childLocked = sel.Selection.isEffectivelyLocked('smoke_c1');
+      row().querySelector('[data-action="lock"]').click();
+      await frame();
+      // Tiered context menu: one object selected.
+      sel.Selection.set(['smoke_loose'], 'smoke_loose');
+      cm.ContextMenu.open({ x: 40, y: 40, source: 'outliner', targetId: 'smoke_loose', targetKind: 'object' });
+      await frame();
+      const menu = document.querySelector('.context-menu:not(.cm-submenu)');
+      const top = menu.querySelectorAll(':scope > .cm-item').length;
+      const headers = [...menu.querySelectorAll(':scope > [data-submenu]')].map(h => h.dataset.submenu);
+      const primary = top - headers.length;
+      const header = menu.querySelector('[data-submenu="arrange"]');
+      header.click();
+      await frame();
+      const panel = document.querySelector('.cm-submenu[data-submenu-for="arrange"]');
+      const subOpen = !!panel && !panel.classList.contains('hidden') && panel.querySelectorAll('[data-action]').length > 0
+        && header.getAttribute('aria-expanded') === 'true';
+      const hasEnter = !!menu.querySelector('[data-action="enter-group"], [data-action="exit-group"]');
+      const noCollectionItems = !menu.querySelector('[data-action^="col-"], [data-action="select-import"]');
+      cm.ContextMenu.close();
+      const closedClean = document.querySelectorAll('.cm-submenu').length === 0;
+      st.setState(s => {
+        const objects = { ...s.scene.objects }; const groups = { ...s.scene.groups };
+        for (const id of ['smoke_c1', 'smoke_c2', 'smoke_loose']) delete objects[id];
+        delete groups.smoke_g;
+        return { ...s, scene: { ...s.scene, objects, groups } };
+      }, { silent: true });
+      sel.Selection.set([], null);
+      st.dispatch(ev.EVENTS.OBJECT_REMOVED, { id: 'smoke_c1' });
+      return { noCollectionRows, groupAria, selectedIds, childCount, hid, shown, groupLocked, childLocked, top, primary, headers, subOpen, hasEnter, noCollectionItems, closedClean };
+    })()`);
+    assert(outlinerGroups.noCollectionRows, 'Outliner renders no collection rows (Decision 2)');
+    assert(outlinerGroups.groupAria === 'true' && JSON.stringify(outlinerGroups.selectedIds) === JSON.stringify(['smoke_g']),
+      `clicking a group row selects the group itself with aria-selected: ${JSON.stringify(outlinerGroups)}`);
+    assert(outlinerGroups.childCount === '2', `group row shows its child count, got ${outlinerGroups.childCount}`);
+    assert(outlinerGroups.hid.every(v => v === false) && outlinerGroups.shown.every(v => v === true),
+      'group eye toggle cascades hide/show to every descendant object');
+    assert(outlinerGroups.groupLocked && outlinerGroups.childLocked, 'group lock toggle locks the group and cascades to its children');
+    assert(outlinerGroups.top <= 16 && outlinerGroups.primary <= 12,
+      `one-object context menu has <= 16 top-level entries (<= 12 primary), got ${outlinerGroups.top}/${outlinerGroups.primary}`);
+    assert(['arrange', 'combine', 'material', 'export'].every(k => outlinerGroups.headers.includes(k)),
+      `context menu has the four submenu headers, got ${JSON.stringify(outlinerGroups.headers)}`);
+    assert(outlinerGroups.subOpen, 'activating Arrange opens its submenu with actions');
+    assert(outlinerGroups.hasEnter && outlinerGroups.noCollectionItems, 'context menu has Enter/Exit group and no collection items');
+    assert(outlinerGroups.closedClean, 'closing the context menu removes its submenu panels');
+    // ── END outliner 3.4 + context menu 3.5 smoke ──
+
+    // ── BEGIN assets 4.6 / 4.7 / 4.8 smoke (Source chip, card menu, Sources modal, boot banner, duplicate dialog) ──
+    const assetsUi = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const { BootBanner } = await import('/src/ui/BootBanner.js');
+      const { askDuplicateImport } = await import('/src/core/assets/AssetImport.js');
+      // Earlier steps may leave a modal up (e.g. the Sources modal a ghost-asset
+      // load opens); with the 5.8 modal QUEUE a new modal would wait behind it.
+      const { Modal } = await import('/src/ui/Modal.js');
+      for (let i = 0; i < 10; i++) Modal.close();
+      const B = window.BABYLON;
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const out = {};
+      const stl = ['solid s','facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 10 0 0','vertex 0 10 0','endloop','endfacet','endsolid s',''].join('\\n');
+      await al.AssetLoader.loadFromBlob(new Blob([stl], { type: 'model/stl' }), 'src-chip.stl', new B.Vector3(0,0,0), {});
+      document.querySelector('#ap-tree .ap-tab[data-tab="session"]')?.click();
+      await frame();
+      const asset = Object.values(getState().scene.assetLibrary).find(a => a.filename === 'src-chip.stl');
+      const card = asset && document.querySelector('.asset-card[data-path="' + asset.id + '"]');
+      const chip = card?.querySelector('.src-chip');
+      out.tabText = document.querySelector('#ap-tree .ap-tab[data-tab="session"]')?.textContent.trim() ?? '';
+      out.chipStatus = chip?.dataset.sourceStatus ?? null;
+      out.chipText = chip?.textContent.trim() ?? '';
+      out.chipVisible = !!chip && chip.getBoundingClientRect().width > 0;
+      // Card ⋯ menu → Show in Sources → one Sources modal with this asset.
+      card?.querySelector('.ac-menu-btn')?.click();
+      await frame();
+      const menu = document.querySelector('.ac-menu');
+      out.menuActions = [...(menu?.querySelectorAll('.ac-menu-item') ?? [])].map(b => b.dataset.action);
+      menu?.querySelector('[data-action="sources"]')?.click();
+      await frame();
+      const sm = document.querySelector('.sm-modal');
+      out.sourcesOpen = !!sm;
+      out.sourcesRowStatus = sm?.querySelector('.sm-row[data-id="' + asset?.id + '"]')?.dataset.status ?? null;
+      out.sourcesFocused = !!sm?.querySelector('.sm-row.is-focus');
+      sm?.querySelector('[data-r="ok"]')?.click();
+      await frame();
+      out.sourcesClosed = !document.querySelector('.sm-modal');
+      // Boot banner renders the given offers; × hides it.
+      BootBanner.show({
+        remount: { key: 'dir_smoke', name: 'kits' },
+        recover: { key: 'autosave_smoke', projectId: 'smoke', savedAt: new Date().toISOString(), name: 'Demo' },
+      });
+      await frame();
+      const bb = document.getElementById('boot-banner');
+      out.bannerText = bb?.textContent.replace(/\\s+/g, ' ').trim() ?? '';
+      out.bannerButtons = [...(bb?.querySelectorAll('[data-act]') ?? [])].map(b => b.dataset.act);
+      out.bannerShift = document.body.classList.contains('has-boot-banner');
+      out.bannerAboveApp = !!bb && bb.nextElementSibling?.id === 'app';
+      bb?.querySelector('[data-act="dismiss"]')?.click();
+      await frame();
+      out.bannerGone = !document.getElementById('boot-banner') && !document.body.classList.contains('has-boot-banner');
+      // "Already in this project" dialog → 'copy' | 'separate' | null.
+      const pick = askDuplicateImport({ filename: 'chair.glb', existingName: 'chair.glb' });
+      await frame();
+      const dup = document.querySelector('.dup-modal');
+      out.dupButtons = [...(dup?.querySelectorAll('[data-r]') ?? [])].map(b => b.dataset.r);
+      out.dupFocus = document.activeElement?.dataset?.r ?? null;
+      out.openModalsBeforeDup = [...document.querySelectorAll('.modal-overlay')].map(m => m.className);
+      dup?.querySelector('[data-r="copy"]')?.click();
+      out.dupChoice = await Promise.race([pick, new Promise(r => setTimeout(() => r('timeout'), 3000))]);
+      return out;
+    })()`);
+    {
+      const { readFileSync } = await import('node:fs');
+      const en = JSON.parse(readFileSync(fileURLToPath(new URL('../src/i18n/locales/en.json', import.meta.url)), 'utf8'));
+      // Locale strings for 4.6 land via .tmp/locale-pending/assets.json; until
+      // merged, t() returns the key — accept it only while the key is absent.
+      const embeddedWord = en['asset.status.embedded'] ?? 'asset.status.embedded';
+      assert(assetsUi.chipStatus === 'embedded' && assetsUi.chipVisible,
+        `fixture card must show a visible Source chip with status embedded: ${JSON.stringify(assetsUi)}`);
+      assert(assetsUi.chipText === embeddedWord, `Source chip must read "${embeddedWord}": "${assetsUi.chipText}"`);
+      if (en['asset.status.embedded']) assert(assetsUi.chipText === 'Embedded copy', 'Source chip must read "Embedded copy"');
+      assert(['add', 'refresh', 'find', 'relink', 'sources', 'remove'].every(a => assetsUi.menuActions.includes(a)),
+        `card ⋯ menu must offer Add / Refresh / Find moved / Relink / Show in Sources / Remove: ${assetsUi.menuActions}`);
+      assert(assetsUi.sourcesOpen && assetsUi.sourcesRowStatus === 'embedded' && assetsUi.sourcesFocused && assetsUi.sourcesClosed,
+        `Show in Sources must open the Sources modal on that asset: ${JSON.stringify(assetsUi)}`);
+      assert(assetsUi.bannerText.includes('kits') && assetsUi.bannerButtons.join() === 'remount,recover,dismiss'
+        && assetsUi.bannerShift && assetsUi.bannerAboveApp,
+      `boot banner must render both offers above #app: ${JSON.stringify(assetsUi)}`);
+      assert(assetsUi.bannerGone, 'boot banner × must remove it');
+      assert(assetsUi.dupButtons.join() === 'dismiss,separate,copy' && assetsUi.dupFocus === 'copy' && assetsUi.dupChoice === 'copy',
+        `duplicate dialog must offer × / Import as separate asset / Add another copy (focused): ${JSON.stringify(assetsUi)}`);
+    }
+    // ── END assets 4.6 / 4.7 / 4.8 smoke ──
+
+    // ── Properties overhaul smoke (tasks 1.13 / 1.16 / 3.6 / 4.6 / 5.2) ──
+    // Appended block: Scale declare-vs-convert, Source row, Object section in
+    // every workspace, and a group active in Properties (Pos X moves the node).
+    const propsOverhaul = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const { getState } = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const { Selection } = await import('/src/core/Selection.js');
+      const { Workspace } = await import('/src/ui/Workspace.js');
+      const B = window.BABYLON;
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const body = () => document.getElementById('rp-properties-body');
+      const stl = (n) => ['solid ' + n,'facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 20 0 0','vertex 0 20 0','endloop','endfacet',
+        'facet normal 0 0 1','outer loop','vertex 0 0 0','vertex 0 20 0','vertex 0 0 20','endloop','endfacet','endsolid ' + n,''].join('\\n');
+      const out = {};
+      Workspace.setWorkspace('layout');
+      const [a] = await al.AssetLoader.loadFromBlob(new Blob([stl('pa')], { type: 'model/stl' }), 'props-a.stl', new B.Vector3(0.05, 0, 0), {});
+      const [b] = await al.AssetLoader.loadFromBlob(new Blob([stl('pb')], { type: 'model/stl' }), 'props-b.stl', new B.Vector3(0.12, 0, 0), {});
+      await frame();
+      Selection.set([a], a);
+      await frame();
+      out.seedSource = getState().scene.objects[a].ratioSource;
+      out.sourceStatus = body().querySelector('[data-section="object"] .pp-source-row')?.dataset.sourceStatus ?? null;
+      const row = body().querySelector('.pp-ratio-row');
+      out.defaultVerb = row?.dataset.scaleDefault ?? null;
+      const meshA = al.AssetLoader.getBabylonMesh(a);
+      const size = () => { const r = meshA.getHierarchyBoundingVectors(true); return r.max.x - r.min.x; };
+      const sizeBefore = size();
+      const sel = body().querySelector('[data-ratio-preset]');
+      sel.value = '72';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await frame();
+      out.noteKind = body().querySelector('[data-scale-note]')?.dataset.scaleNote ?? null;
+      out.stagedRatio = getState().scene.objects[a].ratio;
+      body().querySelector('[data-scale-verb="label"]')?.click();
+      await frame();
+      const oa = getState().scene.objects[a];
+      out.afterSet = { ratio: oa.ratio, ratioSource: oa.ratioSource, sizeSame: Math.abs(size() - sizeBefore) < 1e-9 };
+      hm.undo();
+      await frame();
+      out.afterUndo = { ratio: getState().scene.objects[a].ratio, ratioSource: getState().scene.objects[a].ratioSource };
+
+      // 5.2: Object section in all four workspaces.
+      out.objectShown = {};
+      for (const ws of ['layout', 'shade', 'scene', 'print']) {
+        Workspace.setWorkspace(ws);
+        await frame();
+        const panel = document.getElementById('rp-properties');
+        const obj = body().querySelector('[data-section="object"]');
+        const xf = body().querySelector('[data-section="transform"]');
+        out.objectShown[ws] = {
+          panel: !!panel && getComputedStyle(panel).display !== 'none' && panel.offsetHeight > 0,
+          object: !!obj && getComputedStyle(obj).display !== 'none' && obj.offsetHeight > 0,
+          transform: !!xf && getComputedStyle(xf).display !== 'none',
+        };
+      }
+      Workspace.setWorkspace('layout');
+      await frame();
+
+      // 3.6: a group active in Properties; Pos X edits the group node.
+      const gcmd = new hm.GroupCommand([a, b], 'Props Group');
+      hm.push(gcmd);
+      await frame();
+      const gid = gcmd.groupId;
+      Selection.set([gid], gid);
+      await frame();
+      out.groupHead = !!body().querySelector('.pp-group-head');
+      out.groupHasScale = !!body().querySelector('.pp-ratio-row');
+      const { findGroupNode } = await import('/src/core/commands/support.js');
+      const gnode = findGroupNode(gid);
+      const childBefore = al.AssetLoader.getBabylonMesh(b).getAbsolutePosition().x;
+      const nodeBefore = gnode.getAbsolutePosition().x;
+      const posX = body().querySelector('[data-group-xform="position"][data-axis="x"]');
+      posX.value = String(nodeBefore * 1000 + 25);
+      posX.dispatchEvent(new Event('change', { bubbles: true }));
+      await frame();
+      out.groupMove = {
+        node: (gnode.getAbsolutePosition().x - nodeBefore) * 1000,
+        child: (al.AssetLoader.getBabylonMesh(b).getAbsolutePosition().x - childBefore) * 1000,
+        nameField: body().querySelector('#pp-name')?.value ?? null,
+      };
+      hm.undo();   // group move
+      hm.undo();   // group create
+      await frame();
+      Selection.clear();
+      return out;
+    })()`);
+    assert(propsOverhaul.seedSource === 'default', `STL import should seed ratioSource 'default': ${propsOverhaul.seedSource}`);
+    assert(propsOverhaul.sourceStatus === 'embedded', `Properties Source row should read Embedded copy: ${propsOverhaul.sourceStatus}`);
+    assert(propsOverhaul.defaultVerb === 'label', `undeclared STL scale should default to Set scale: ${propsOverhaul.defaultVerb}`);
+    assert(propsOverhaul.noteKind === 'consequence', `picking a scale should show the consequence line first: ${propsOverhaul.noteKind}`);
+    assert(propsOverhaul.stagedRatio === 1, 'picking a scale must not apply it before a verb is clicked');
+    assert(propsOverhaul.afterSet.ratio === 72 && propsOverhaul.afterSet.ratioSource === 'user' && propsOverhaul.afterSet.sizeSame,
+      `Set scale should relabel only: ${JSON.stringify(propsOverhaul.afterSet)}`);
+    assert(propsOverhaul.afterUndo.ratio === 1 && propsOverhaul.afterUndo.ratioSource === 'default',
+      `undo should restore ratio + ratioSource: ${JSON.stringify(propsOverhaul.afterUndo)}`);
+    for (const ws of ['layout', 'shade', 'scene', 'print']) {
+      const s = propsOverhaul.objectShown[ws];
+      assert(s.panel && s.object, `Properties > Object should be visible in ${ws}: ${JSON.stringify(s)}`);
+    }
+    assert(!propsOverhaul.objectShown.scene.transform && !propsOverhaul.objectShown.print.transform,
+      'Scene/Print should show only the Object section of Properties');
+    assert(propsOverhaul.groupHead, 'group active should render the group header');
+    assert(!propsOverhaul.groupHasScale, 'group Properties must not show a Scale row');
+    assert(propsOverhaul.groupMove.nameField === 'Props Group', `group name field: ${propsOverhaul.groupMove.nameField}`);
+    assert(Math.abs(propsOverhaul.groupMove.node - 25) < 1e-3 && Math.abs(propsOverhaul.groupMove.child - 25) < 1e-3,
+      `group Pos X should move the node and its children: ${JSON.stringify(propsOverhaul.groupMove)}`);
+    // ── end Properties overhaul smoke ──
+
+    // ── Print panel overhaul smoke (tasks 0.6 / 1.2 / 1.3 / 5.3) ──
+    // Readiness strip on every tab; selecting a printer applies its profile;
+    // a format override shows the "modified" dot + Printer default ↺, which
+    // reverts in one step and Ctrl+Z restores the override; Advanced toggles
+    // persist across re-render; "Print at: the size shown"; strip reads Ready
+    // for a closed, validated fixture. Other objects are taken out of the
+    // print set for the duration and restored afterwards.
+    const printOverhaul = await evaluate(cdp, `(async () => {
+      const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const { Workspace } = await import('/src/ui/Workspace.js');
+      const st = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const al = await import('/src/core/AssetLoader.js');
+      const mv = await import('/src/core/MeshValidator.js');
+      const B = window.BABYLON;
+      const body = document.getElementById('rp-print-body');
+      const tab = async (name) => { body.querySelector('.pp-tab[data-tab="' + name + '"]')?.click(); await frame(); };
+      const label = () => body.querySelector('[data-act="export-primary"] .pp-primary-label')?.textContent.trim() ?? '';
+      const dot = () => !!body.querySelector('.pp-modified[data-field="exportFormat"]');
+      const out = {};
+      const savedPrint = st.getState().print;
+      const savedObjects = st.getState().scene.objects;
+      Workspace.setWorkspace('print');
+      st.setState(s => ({ ...s,
+        print: { ...s.print, exportTargets: [], referenceObjectId: null },
+        scene: { ...s.scene, objects: Object.fromEntries(
+          Object.entries(s.scene.objects).map(([k, o]) => [k, { ...o, isPrintPart: false }])) } }), { silent: true });
+      await frame();
+
+      out.tabs = [...body.querySelectorAll('.pp-tab')].map(b => b.dataset.tab);
+      out.stripOnEvery = [];
+      for (const name of out.tabs) { await tab(name); out.stripOnEvery.push(!!body.querySelector('.pp-readiness-strip')); }
+
+      await tab('printer');
+      const sel = body.querySelector('#pp-printer-select');
+      sel.value = 'bambu-x1c';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await frame();
+      out.bed = st.getState().print.bedDimensions;
+      out.groups = sel ? body.querySelectorAll('#pp-printer-select optgroup').length : 0;
+      await tab('export');
+      out.label1 = label();
+      out.dot0 = dot();
+      body.querySelector('[data-fmt="stl"]')?.click();
+      await frame();
+      out.label2 = label();
+      out.dot1 = dot();
+      out.revertShown = !!body.querySelector('[data-act="printer-default"]');
+      body.querySelector('[data-act="printer-default"]')?.click();
+      await frame();
+      out.fmtAfterRevert = st.getState().print.exportFormat;
+      out.dot2 = dot();
+      document.activeElement?.blur?.();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true }));
+      await frame();
+      out.fmtAfterUndo = st.getState().print.exportFormat;
+      out.dot3 = dot();
+
+      const adv = body.querySelector('[data-act="advanced"]');
+      if (adv?.getAttribute('aria-expanded') !== 'true') { adv?.click(); await frame(); }
+      body.querySelector('#pp-individually')?.click();
+      await frame();
+      await tab('printer');
+      await tab('export');
+      out.advOpen = body.querySelector('[data-act="advanced"]')?.getAttribute('aria-expanded');
+      out.individuallyChecked = !!body.querySelector('#pp-individually')?.checked;
+      out.individuallyState = st.getState().print.individually;
+      out.printAtLabel = body.querySelector('.pp-print-at-label')?.textContent.trim() ?? '';
+      out.printAtValue = body.querySelector('[data-print-at]')?.textContent.trim() ?? '';
+      out.costGear = !!body.querySelector('[data-act="cost-settings"]');
+      out.costPopHidden = !!body.querySelector('#pp-cost-pop')?.hidden;
+
+      // Restore the printer setup before the Ready fixture (Mimaki default).
+      st.setState(s => ({ ...s, print: { ...savedPrint, exportTargets: [], referenceObjectId: null,
+        targetPrinterId: 'mimaki-3duj-553', bedDimensions: { x: 508, y: 508, z: 305 }, exportFormat: null, strictExport: false } }), { silent: true });
+      sm.SceneManager.rebuildBed();
+      // A WELDED closed cube (8 shared corners): MeshBuilder boxes split
+      // vertices per face, which the validator reports as open edges.
+      const box = new B.Mesh('smoke-ready-box', sm.SceneManager.getScene());
+      const vd = new B.VertexData();
+      const h = 0.01;
+      vd.positions = [-h,-h,-h, h,-h,-h, h,h,-h, -h,h,-h, -h,-h,h, h,-h,h, h,h,h, -h,h,h];
+      vd.indices = [0,1,2, 0,2,3, 4,6,5, 4,7,6, 0,5,1, 0,4,5, 3,6,7, 3,2,6, 0,7,4, 0,3,7, 1,6,2, 1,5,6];   // Babylon (LH) front-face winding
+      vd.normals = [];
+      B.VertexData.ComputeNormals(vd.positions, vd.indices, vd.normals);
+      vd.applyToMesh(box);
+      box.position.y = 0.0101;   // rest 0.1 mm above the plate (no float-noise below-bed)
+      box.computeWorldMatrix(true);
+      box.metadata = { meshId: 'smoke_ready_box' };
+      al.AssetLoader.bindRestoredMesh('smoke_ready_box', box, 'smoke-ready-asset');
+      st.setState(s => ({
+        ...s,
+        scene: { ...s.scene, objects: { ...s.scene.objects, smoke_ready_box: {
+          id: 'smoke_ready_box', name: 'ReadyBox', assetId: 'smoke-ready-asset', collectionId: null, parentId: null,
+          shaderId: null, visible: true, locked: false, isGhost: false, isUnlinked: false, isPrintPart: true,
+          sourceGroupId: null, logicalObjectId: null, isInternalPart: false, ratio: 1,
+        } } },
+      }), { silent: true });
+      await mv.MeshValidator.validateMesh(box);
+      await tab('export');
+      const strip = body.querySelector('.pp-readiness-strip');
+      out.readyClass = strip?.className ?? '';
+      out.readyWord = strip?.querySelector('.pp-rs-word')?.textContent.trim() ?? '';
+      out.readyReadout = strip?.querySelector('.pp-rs-readout')?.textContent.trim() ?? '';
+      out.readyPrintAt = body.querySelector('[data-print-at]')?.textContent.trim() ?? '';
+      out.primaryEnabled = !body.querySelector('[data-act="export-primary"]')?.disabled;
+
+      box.dispose();
+      st.setState(s => ({ ...s, print: { ...savedPrint }, scene: { ...s.scene, objects: savedObjects } }), { silent: true });
+      sm.SceneManager.rebuildBed();
+      Workspace.setWorkspace('layout');
+      await frame();
+      return out;
+    })()`);
+    assert(printOverhaul.tabs.join(',') === 'printer,validation,export',
+      `Print tabs should be Printer / Validation / Export: ${printOverhaul.tabs.join(',')}`);
+    assert(printOverhaul.stripOnEvery.length === 3 && printOverhaul.stripOnEvery.every(Boolean),
+      `readiness strip must render on every Print tab: ${JSON.stringify(printOverhaul.stripOnEvery)}`);
+    assert(printOverhaul.groups > 3, `printer select should be grouped by vendor: ${printOverhaul.groups} groups`);
+    assert(JSON.stringify(printOverhaul.bed) === JSON.stringify({ x: 256, y: 256, z: 256 }),
+      `Bambu X1C should apply a 256³ bed: ${JSON.stringify(printOverhaul.bed)}`);
+    assert(printOverhaul.label1 === 'Export for Bambu Lab X1 Carbon (3MF)',
+      `primary label after selecting Bambu X1C: "${printOverhaul.label1}"`);
+    assert(!printOverhaul.dot0, 'no "modified" dot right after the profile is applied');
+    assert(printOverhaul.label2 === 'Export for Bambu Lab X1 Carbon (STL)', `primary label after picking STL: "${printOverhaul.label2}"`);
+    assert(printOverhaul.dot1 && printOverhaul.revertShown, 'picking STL should show the "modified" dot + Printer default ↺');
+    assert(printOverhaul.fmtAfterRevert === '3mf' && !printOverhaul.dot2,
+      `Printer default ↺ should revert to 3MF and clear the dot: ${printOverhaul.fmtAfterRevert}`);
+    assert(printOverhaul.fmtAfterUndo === 'stl' && printOverhaul.dot3,
+      `Ctrl+Z after Printer default should restore STL: ${printOverhaul.fmtAfterUndo}`);
+    assert(printOverhaul.advOpen === 'true' && printOverhaul.individuallyChecked && printOverhaul.individuallyState === true,
+      `Advanced toggles should persist across re-render: ${JSON.stringify({ open: printOverhaul.advOpen, checked: printOverhaul.individuallyChecked, state: printOverhaul.individuallyState })}`);
+    assert(printOverhaul.printAtLabel === 'Print at:' && printOverhaul.printAtValue.startsWith('the size shown'),
+      `Export tab should pin "Print at: the size shown": "${printOverhaul.printAtLabel} ${printOverhaul.printAtValue}"`);
+    assert(printOverhaul.costGear && printOverhaul.costPopHidden, 'cost settings should sit behind a closed ⚙ popover');
+    assert(printOverhaul.readyClass.includes('ready'),
+      `readiness strip should read Ready for a closed fixture: "${printOverhaul.readyClass}" / "${printOverhaul.readyWord}"`);
+    assert(/^1 to print · 20\.0 × 20\.0 × 20\.0 mm$/.test(printOverhaul.readyReadout),
+      `strip readout for the 20 mm fixture: "${printOverhaul.readyReadout}"`);
+    assert(printOverhaul.readyPrintAt === 'the size shown (1:1)', `as-shown label for a 1:1 fixture: "${printOverhaul.readyPrintAt}"`);
+    assert(printOverhaul.primaryEnabled, 'primary export button should be enabled when Ready');
+    // ── end Print panel overhaul smoke ──
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();

@@ -13,6 +13,7 @@ import { sha256Hex } from '../hash.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
+import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
 import {
@@ -252,7 +253,8 @@ export async function serialiseTextureImages() {
  * into the document — see the call site (I8).
  */
 function _serialisablePrint(print = {}) {
-  const { repairOnImport, ...rest } = print;
+  // strictExport is per-USER like repairOnImport (Decision 15) — never in the .mixo.
+  const { repairOnImport, strictExport, ...rest } = print;
   // 1.17: typed print sizes + a ratio-only `exportRatios` mirror kept for one
   // minor so schema-3.3 readers still see their ratio targets.
   rest.exportTargets = exportTargetsFromState({ print });
@@ -263,7 +265,7 @@ function _serialisablePrint(print = {}) {
 }
 
 function _serialiseSceneObjects() {
-  const { objects } = getState().scene;
+  const { objects, assetLibrary } = getState().scene;
   return Object.values(objects).map(o => {
     const mesh = AssetLoader.getBabylonMesh(o.id);
     let containerMeshIndex = Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0;
@@ -286,6 +288,10 @@ function _serialiseSceneObjects() {
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
       ratio: (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1,
+      // Declare vs convert (1.13): where `ratio` came from — 'file' | 'user' |
+      // 'default'. Objects minted outside import (Boolean/Slice) carry none
+      // and are written with the seed derived from their asset.
+      ratioSource: ratioSourceOf(o, assetLibrary?.[o.assetId]),
       // Auto-fix geometry edits (weld / normal-flip) are baked into live
       // vertices, not the raw source bytes — persist the applied fix types so
       // they replay on reload (M1) instead of vanishing.

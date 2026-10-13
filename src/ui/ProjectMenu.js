@@ -9,8 +9,11 @@ import { reportError } from './Status.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
 import { t, applyTranslations } from '../i18n/index.js';
+import { tr } from './lib/tr.js';
+import { Workspace } from './Workspace.js';
 
 let _recentWrap = null;
+let _helpMenu = null;
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -22,6 +25,7 @@ export function init() {
   const bar = document.createElement('div');
   bar.className = 'pm-bar';
   bar.innerHTML = `
+    <button class="pm-btn pm-btn-primary" id="btn-import" data-act="import" data-i18n-title="project.importTitle">${icon('Download', { width: 14, height: 14 })}<span class="pm-btn-label" data-i18n-key="project.import">Import</span></button>
     <button class="pm-btn" data-act="new"    data-i18n-title="project.newTitle">${icon('FilePlus',   { width: 15, height: 15 })}</button>
     <button class="pm-btn" data-act="open"   data-i18n-title="project.openTitle">${icon('FolderOpen', { width: 15, height: 15 })}</button>
     <button class="pm-btn" data-act="save"   data-i18n-title="project.saveTitle">${icon('Save',         { width: 15, height: 15 })}</button>
@@ -30,16 +34,43 @@ export function init() {
       <button class="pm-btn" data-act="recent" data-i18n-title="project.recentTitle">${icon('Clock', { width: 15, height: 15 })}</button>
       <div class="pm-recent-list hidden"></div>
     </div>
-    <button class="pm-btn pm-btn-reset" data-act="reset-settings" data-i18n-title="project.resetSettingsTitle">${icon('RotateCcw', { width: 15, height: 15 })}</button>
+    <span class="pm-sep" aria-hidden="true"></span>
+    <button class="pm-btn" id="btn-undo" data-act="undo" disabled>${icon('RotateCcw', { width: 15, height: 15 })}</button>
+    <button class="pm-btn" id="btn-redo" data-act="redo" disabled>${icon('RotateCw', { width: 15, height: 15 })}</button>
+    <span class="pm-sep" aria-hidden="true"></span>
+    <button class="pm-btn pm-btn-outline" id="btn-export" data-act="export" data-i18n-title="project.exportTitle">${icon('Upload', { width: 14, height: 14 })}<span class="pm-btn-label" data-i18n-key="project.export">Export</span></button>
+    <div class="pm-help">
+      <button class="pm-btn pm-btn-help" id="btn-help" data-act="help" aria-haspopup="menu" aria-expanded="false" data-i18n-title="project.helpTitle">?</button>
+      <div class="pm-help-menu hidden" role="menu">
+        <button class="pm-help-item" role="menuitem" data-act="shortcuts" data-i18n-key="project.shortcuts">Keyboard shortcuts</button>
+        <button class="pm-help-item pm-help-danger" role="menuitem" data-act="reset-settings" data-i18n-key="project.resetSettings">Reset all settings…</button>
+      </div>
+    </div>
   `;
   header.appendChild(bar);
-  applyTranslations(bar);
+  // The locale switcher lives in the bar, just before the ? menu.
+  const localeHost = document.getElementById('locale-switcher-host');
+  if (localeHost) bar.insertBefore(localeHost, bar.querySelector('.pm-help'));
+  _retranslateBar(bar);
   _recentWrap = bar.querySelector('.pm-recent-list');
+  _helpMenu = bar.querySelector('.pm-help-menu');
 
   bar.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-act]');
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
     const act = btn.dataset.act;
+    if (act !== 'help') _closeHelp();
+    if (act === 'import') {
+      safeAsync(async () => {
+        const { ViewportDrop } = await import('./ViewportDrop.js');
+        await ViewportDrop.promptImport();
+      });
+    }
+    if (act === 'undo')   HistoryManager.undo();
+    if (act === 'redo')   HistoryManager.redo();
+    if (act === 'export') _goToExport();
+    if (act === 'help')   _toggleHelp();
+    if (act === 'shortcuts') document.dispatchEvent(new CustomEvent('mx:help-sheet'));
     if (act === 'new')    safeAsync(() => PersistenceManager.newProject());
     if (act === 'open')   safeAsync(() => PersistenceManager.open());
     if (act === 'save')   safeAsync(() => _runProjectSave(() => PersistenceManager.save()));
@@ -55,6 +86,9 @@ export function init() {
         && !e.target.closest('.pm-recent')) {
       _recentWrap.classList.add('hidden');
     }
+    if (_helpMenu && !_helpMenu.classList.contains('hidden') && !e.target.closest('.pm-help')) {
+      _closeHelp();
+    }
   }, true);
 
   _registerModals();
@@ -65,8 +99,73 @@ export function init() {
   subscribe(EVENTS.PROJECT_SAVED,   refresh);
   subscribe(EVENTS.PROJECT_NEW,     refresh);
   subscribe(EVENTS.PROJECT_RENAMED, refresh);
-  subscribe(EVENTS.LOCALE_CHANGED, () => { applyTranslations(bar); _refreshName(); });
+  subscribe(EVENTS.LOCALE_CHANGED, () => { _retranslateBar(bar); _refreshName(); _syncUndoRedo(); });
+  for (const ev of [EVENTS.HISTORY_PUSHED, EVENTS.HISTORY_UNDONE, EVENTS.HISTORY_REDONE,
+    EVENTS.PROJECT_LOADED, EVENTS.PROJECT_NEW]) subscribe(ev, _syncUndoRedo);
   _refreshName();
+  _syncUndoRedo();
+}
+
+// Static labels carry English text; the fallback keeps them readable until
+// their locale keys are merged, then translations take over.
+const FALLBACK = {
+  'project.import': 'Import',
+  'project.importTitle': 'Import a model (Ctrl+I)',
+  'project.export': 'Export',
+  'project.exportTitle': 'Export for printing',
+  'project.helpTitle': 'Help',
+  'project.shortcuts': 'Keyboard shortcuts',
+  'project.resetSettings': 'Reset all settings…',
+};
+
+function _retranslateBar(bar) {
+  applyTranslations(bar);
+  bar.querySelectorAll('[data-i18n-key],[data-i18n-title]').forEach(el => {
+    const k = el.dataset.i18nKey;
+    if (k && el.textContent === k) el.textContent = tr(k, FALLBACK[k] ?? k);
+    const tk = el.dataset.i18nTitle;
+    if (tk && el.getAttribute('title') === tk) el.setAttribute('title', tr(tk, FALLBACK[tk] ?? tk));
+  });
+  const h = bar.querySelector('#btn-help');
+  if (h) h.setAttribute('aria-label', h.getAttribute('title') ?? '');
+}
+
+function _syncUndoRedo() {
+  const u = document.getElementById('btn-undo');
+  const r = document.getElementById('btn-redo');
+  if (!u || !r) return;
+  const ul = HistoryManager.getUndoLabel();
+  const rl = HistoryManager.getRedoLabel();
+  u.disabled = ul == null;
+  r.disabled = rl == null;
+  u.title = ul != null ? `${tr('status.undo', 'Undo')}: ${ul} (Ctrl+Z)` : tr('status.nothingToUndo', 'Nothing to undo');
+  r.title = rl != null ? `${tr('status.redo', 'Redo')}: ${rl} (Ctrl+Shift+Z)` : tr('status.nothingToRedo', 'Nothing to redo');
+  u.setAttribute('aria-label', u.title);
+  r.setAttribute('aria-label', r.title);
+}
+
+function _toggleHelp() {
+  if (!_helpMenu) return;
+  const open = _helpMenu.classList.contains('hidden');
+  _helpMenu.classList.toggle('hidden', !open);
+  document.getElementById('btn-help')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function _closeHelp() {
+  _helpMenu?.classList.add('hidden');
+  document.getElementById('btn-help')?.setAttribute('aria-expanded', 'false');
+}
+
+/** Header Export → Print workspace, Export tab (opens the right column). */
+function _goToExport() {
+  Workspace.setWorkspace('print');
+  if (getState().ui.panelCollapsed?.right === true) Workspace.togglePanel('right');
+  const sec = document.getElementById('rp-print');
+  if (sec?.classList.contains('collapsed')) {
+    sec.classList.remove('collapsed');
+    sec.querySelector('.rp-section-header')?.setAttribute('aria-expanded', 'true');
+  }
+  document.querySelector('#rp-print .pp-tab[data-tab="export"]')?.click();
 }
 
 function _refreshName() {
@@ -196,58 +295,6 @@ function _registerModals() {
       b.addEventListener('click', () => close(b.dataset.r)));
     return el;
   });
-
-  Modal.register('recoverAutosave', ({ data, close }) => {
-    const when = data?.savedAt ? new Date(data.savedAt).toLocaleString() : t('project.unknownTime');
-    const el = document.createElement('div');
-    el.className = 'pm-modal';
-    el.innerHTML = `
-      <h2 class="pm-modal-title">${_esc(t('project.recoverTitle'))}</h2>
-      <p class="pm-modal-body">${_esc(t('project.recoverBodyBefore'))} <strong>${_esc(when)}</strong> ${_esc(t('project.recoverBodyAfter'))}</p>
-      <div class="pm-modal-actions">
-        <button class="btn" data-r="discard">${_esc(t('project.discard'))}</button>
-        <button class="btn btn-primary" data-r="recover">${_esc(t('project.recover'))}</button>
-      </div>`;
-    el.querySelectorAll('[data-r]').forEach(b =>
-      b.addEventListener('click', () => close(b.dataset.r)));
-    return el;
-  });
-
-  // Relink-list modals share one renderer: `unmatchedAssets` (linked file
-  // missing, restored from the embedded snapshot — project still complete)
-  // and `ghostAssets` (H3: no bytes anywhere — red placeholders in the scene;
-  // relink or delete, the project saves either way with `ghost: true`).
-  const relinkListModal = (titleKey, bodyKey) => ({ data, close }) => {
-    const assets = data?.assets ?? [];
-    const el = document.createElement('div');
-    el.className = 'pm-modal';
-    el.innerHTML = `
-      <h2 class="pm-modal-title">${_esc(t(titleKey))}</h2>
-      <p class="pm-modal-body">${_esc(t(bodyKey, { n: assets.length }))}</p>
-      <div class="pm-asset-list">
-        ${assets.map(a => `
-          <div class="pm-asset-row" data-id="${escapeAttr(a.id)}">
-            <span class="pm-asset-name">${_esc(a.filename || a.name)}</span>
-            <button class="btn btn-sm" data-relink="${escapeAttr(a.id)}">${_esc(t('project.relink'))}</button>
-          </div>`).join('')}
-      </div>
-      <div class="pm-modal-actions">
-        <button class="btn btn-primary" data-r="ok">${_esc(t('btn.close'))}</button>
-      </div>`;
-    el.querySelector('[data-r="ok"]').addEventListener('click', () => close('ok'));
-    el.querySelectorAll('[data-relink]').forEach(b =>
-      b.addEventListener('click', () => {
-        const row = b.closest('.pm-asset-row');
-        safeAsync(async () => {
-          await PersistenceManager.relinkAsset(b.dataset.relink);
-          row?.remove();
-          if (!el.querySelectorAll('.pm-asset-row').length) close('ok');
-        });
-      }));
-    return el;
-  };
-  Modal.register('unmatchedAssets', relinkListModal('project.unmatchedAssetsTitle', 'project.unmatchedAssetsBody'));
-  Modal.register('ghostAssets', relinkListModal('project.ghostAssetsTitle', 'project.ghostAssetsBody'));
 
   Modal.register('portableSaveBlocked', ({ data, close }) => {
     const issues = data?.issues ?? [];

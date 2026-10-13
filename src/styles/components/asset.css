@@ -55,14 +55,16 @@
 .ap-icon-btn:focus-visible,
 .ap-tree-row:focus-visible,
 .asset-card:focus-visible,
-.ac-delete:focus-visible {
+.ac-menu-btn:focus-visible,
+.ac-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 /* Session has smart views; filesystem actions belong only to Library. */
 #ap-tree[data-tab="session"] #ap-mount-btn,
-#ap-tree[data-tab="session"] .ap-icon-btn { display: none; }
+#ap-tree[data-tab="session"] .ap-icon-btn:not(#ap-sources-btn),
+#ap-tree[data-tab="library"] #ap-sources-btn { display: none; }
 
 .ap-btn {
   background: var(--bg-3);
@@ -277,16 +279,6 @@
 }
 .ac-unit-badge.ac-unit-ok { color: var(--text-2); }
 
-.ac-link {
-  font-size: 9px;
-  letter-spacing: 0.5px;
-  padding: 1px var(--sp-2);
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-}
-.ac-link.is-linked   { background: rgba(245, 158, 11, 0.14); color: var(--accent); }
-.ac-link.is-snapshot { background: var(--bg-4); color: var(--text-2); }
 
 /* ── Viewport drag-over highlight ─────────────────────── */
 #viewport-drop-overlay {
@@ -309,26 +301,222 @@
   text-overflow: ellipsis;
 }
 
-/* ── Asset card: delete button ────────────────────────── */
-.asset-card { position: relative; }
-.ac-delete {
+/* ── Tabs: Project · Folders counts (task 4.6) ────────── */
+.ap-tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.ap-tab.active { font-weight: 600; }
+.ap-tab-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 400;
+}
+.ap-tab-count:empty { display: none; }
+
+/* ── Source chip (cards + Sources modal) ──────────────── */
+.src-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px var(--sp-2);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.src-chip svg { flex: 0 0 auto; }
+/* Healthy sources stay quiet; only problems carry colour (DESIGN §2). */
+.src-chip.is-embedded { color: var(--text-1); }
+.src-chip.is-linked   { color: var(--text-1); }
+.src-chip.is-changed  { color: var(--warning); background: rgba(184, 134, 11, 0.10); border-color: rgba(184, 134, 11, 0.35); }
+.src-chip.is-missing  { color: var(--danger);  background: rgba(192, 57, 43, 0.08);  border-color: rgba(192, 57, 43, 0.32); }
+
+/* ── Asset card layout ────────────────────────────────── */
+.ac-thumb-wrap { position: relative; }
+.ac-chip {
   position: absolute;
   top: var(--sp-2);
-  right: var(--sp-2);
-  background: var(--bg-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  color: var(--text-2);
-  width: 18px;
-  height: 18px;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  display: none;
+  left: var(--sp-2);
+  max-width: calc(100% - 2 * var(--sp-2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ac-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ac-title-row .ac-name { flex: 1 1 auto; min-width: 0; }
+.ac-label { color: var(--text-0); }
+.ac-qualifier { color: var(--text-2); }
+.ac-qualifier::before { content: " · "; }
+
+.ac-menu-btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
 }
-.asset-card:hover .ac-delete,
-.asset-card:focus-within .ac-delete { display: flex; }
-.ac-delete:hover { color: var(--danger); border-color: var(--danger); background: var(--bg-3); }
+.ac-menu-btn:hover,
+.ac-menu-btn[aria-expanded="true"] { color: var(--text-0); background: var(--bg-4); border-color: var(--border); }
+
+/* Card ⋯ popover (mounted on <body>, positioned by AssetPanel). */
+.ac-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: var(--sp-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(62, 44, 30, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.ac-menu-item {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+}
+.ac-menu-item:hover:not(:disabled),
+.ac-menu-item:focus-visible { background: var(--bg-1); outline: none; }
+.ac-menu-item:disabled { color: var(--text-disabled); cursor: default; }
+.ac-menu-item.is-danger { color: var(--danger); }
+.ac-menu-sep { height: 1px; background: var(--border); margin: var(--sp-2) 0; }
+
+/* ── "Already in this project" dialog (task 4.8) ─────── */
+.dup-modal { max-width: 440px; }
+.dup-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-4);
+  align-items: start;
+  margin-bottom: var(--sp-5);
+}
+.dup-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--active);
+  background: var(--active-bg);
+}
+.dup-heading .pm-modal-title { margin: 0 0 var(--sp-1); }
+.dup-source { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+.dup-source strong { color: var(--text-0); font-weight: 600; }
+.dup-close,
+.bb-dismiss {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 18px;
+  line-height: 1;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.dup-close:hover,
+.bb-dismiss:hover { color: var(--text-0); background: var(--bg-4); }
+.dup-body {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  line-height: 1.55;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4) var(--sp-5);
+  margin-bottom: var(--sp-5);
+}
+.dup-body p { margin: 0; }
+.dup-body .dup-hint { margin-top: var(--sp-2); color: var(--text-2); }
+.dup-modal .btn-primary { display: inline-flex; align-items: center; gap: var(--sp-2); }
+
+/* ── Sources modal (task 4.6) ─────────────────────────── */
+.sm-modal { width: min(720px, 92vw); max-width: none; }
+.sm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.sm-head .pm-modal-title { margin: 0; }
+.sm-intro { margin: var(--sp-2) 0 var(--sp-5); font-size: var(--fs-sm); color: var(--text-2); }
+.sm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+.sm-summary { font-size: var(--fs-xs); color: var(--text-2); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.sm-num { font-family: var(--font-mono); color: var(--text-0); }
+.sm-count.is-changed .sm-num { color: var(--warning); }
+.sm-count.is-missing .sm-num { color: var(--danger); }
+.sm-bulk { display: flex; gap: var(--sp-3); }
+.sm-list {
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  margin-bottom: var(--sp-5);
+}
+.sm-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.3fr) auto minmax(100px, 1.4fr) auto;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.sm-row.is-focus { background: var(--active-bg); box-shadow: inset 2px 0 0 var(--active); }
+.sm-name, .sm-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-label { color: var(--text-0); }
+.sm-qualifier { color: var(--text-2); }
+.sm-qualifier::before { content: " · "; }
+.sm-where { color: var(--text-2); font-size: var(--fs-xs); }
+.sm-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.sm-empty { padding: var(--sp-6); text-align: center; color: var(--text-2); font-size: var(--fs-sm); }
+
+/* ── Boot banner (task 4.7, Decision 4) ───────────────── */
+.boot-banner {
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+}
+body.has-boot-banner #app { height: calc(100vh - 32px); }
+.bb-icon { display: inline-flex; color: var(--text-2); flex: 0 0 auto; }
+.bb-lead { color: var(--text-0); font-weight: 600; flex: 0 0 auto; }
+.bb-sep { color: var(--text-disabled); flex: 0 0 auto; }
+.bb-items { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bb-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bb-name { color: var(--text-0); font-weight: 600; }
+.bb-time { font-family: var(--font-mono); color: var(--text-0); }
+.bb-project { color: var(--text-2); }
+.bb-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); flex: 0 0 auto; }
+.bb-btn { display: inline-flex; align-items: center; gap: var(--sp-2); }

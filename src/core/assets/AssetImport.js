@@ -148,23 +148,21 @@ export function findByHash(contentHash, state = getState()) {
 }
 
 /**
- * Minimal Decision 16 prompt over the shared `confirmAction` modal:
- * [Import as separate asset] [Add another copy] — "Add another copy" is the
- * primary, focused default. Esc / backdrop = cancel the import.
+ * Decision 16 prompt — the designed "already in this project" dialog
+ * (`duplicateImport`, rendered by AssetPanel): [Import as separate asset]
+ * [Add another copy]. "Add another copy" is the primary, focused default;
+ * × / Esc / backdrop = cancel the import.
  * @param {{ filename: string, existingName: string }} info
  * @returns {Promise<'copy'|'separate'|null>}
  */
 export function askDuplicateImport({ filename, existingName }) {
   return new Promise(resolve => {
     dispatch(EVENTS.MODAL_OPEN, {
-      id: 'confirmAction',
-      title: t('import.duplicateTitle'),
-      body: t('import.duplicateBody', { name: filename, existing: existingName }),
-      confirmLabel: t('import.duplicateAddCopy'),
-      cancelLabel: t('import.duplicateSeparate'),
-      focusConfirm: true,
-      onClose: (r) => resolve(r === 'confirm' ? DUPLICATE_CHOICE.COPY
-        : r === 'cancel' ? DUPLICATE_CHOICE.SEPARATE : null),
+      id: 'duplicateImport',
+      filename,
+      existingName,
+      onClose: (r) => resolve(r === 'copy' ? DUPLICATE_CHOICE.COPY
+        : r === 'separate' ? DUPLICATE_CHOICE.SEPARATE : null),
     });
   });
 }

@@ -4272,6 +4272,176 @@ a strict-mode blocker, exactly like `_tryRepair`'s own error path.
 
 ---
 
+### Print panel (overhaul 0.6 / 1.2 / 1.3 / 5.3)
+
+Owner/integrator: merge into Blueprint.md at the anchors named below.
+
+## §12 Printer Profiles — replace the parenthetical "(Apply/revert command + UI land in tasks 1.2/1.3; this section is the data contract.)"
+
+**Profile defaults vs per-project settings (task 1.3, Decision 32).** The
+profile-driven fields are ordinary per-project settings on `state.print`:
+`exportFormat` (`'obj'|'3mf'|'stl'|'ply'|'wrl'`), `splitByMaterial`
+(boolean), `objAxis` (`'y-up'|'z-up'`), `threeMFFlavour`
+(`'core'|'bambu'|'prusa'`) and `bedDimensions`. Factory value of the first
+four is `null` = "follow the selected printer profile" (also what every
+project saved before 1.3 carries). There is no overrides map.
+`src/core/print/PrintProfileSettings.js` (pure) is the single resolver:
+
+- `formatKeyOf(printerFormat)` — printers.json format id → writer key
+  (`obj-mtl`→`obj`, every `3mf-*`→`3mf`; the flavour is its own setting).
+- `profileDefaults(profile)` — `{exportFormat: formatKeyOf(export.recommended),
+  splitByMaterial: export.splitByMaterial || colour.mode ∈ {per-part, paint}
+  (mirrors the 3MF writer fallback), objAxis: export.obj.axis, threeMFFlavour:
+  export.threeMF.flavour, bedDimensions: bed when every axis is finite > 0,
+  else null (Custom)}`.
+- `effectivePrintSettings(print, profile)` — stored value when set and valid,
+  else the profile default (an unknown stored value can never select a bogus
+  writer).
+- `modifiedFields(print, profile)` — `{field: profileDefault}` for every field
+  whose effective value differs from the profile default, computed at read
+  time (a later printers.json edit is reflected honestly). The bed counts
+  only when the profile has a finite bed (a Custom bed is always the user's).
+
+Commands (`src/core/commands/PrinterCommands.js`, re-exported by
+HistoryManager):
+- `ApplyPrinterProfileCommand(printerId)` — sets `targetPrinterId` and every
+  profile-driven field to `profileDefaults` in ONE undo step (Custom keeps the
+  current bed — no null axis is ever written, the floor/bed code needs finite
+  dims). Selecting a printer runs it; **Printer default ↺** runs it with the
+  current printer (the revert). Ctrl+Z after either restores the previous
+  values, so Ctrl+Z after Printer default restores the user's overrides.
+- `SetPrintSettingsCommand(patch, label)` — one undoable user edit of the
+  per-project print settings (allow-list: `targetPrinterId, bedDimensions,
+  exportFormat, splitByMaterial, objAxis, threeMFFlavour, objBakeSolidTextures,
+  individually, referenceObjectId`; other keys are ignored). execute() marks
+  dirty. A bed change rebuilds the floor, invalidates the bed-fit cache
+  (`MeshValidator.invalidateAll`) and refreshes a visible bed preview, on
+  execute AND undo.
+- `SetReferenceObjectCommand(id|null)` — the explicit export reference
+  (Decision 25); null = first printable object.
+
+## §12 ExportContext — `ctx.prefs` (replace the `{objBakeSolidTextures}` typedef line)
+
+`ctx.prefs` (frozen) = `{objBakeSolidTextures, exportFormat, splitByMaterial,
+objAxis, threeMFFlavour, strictExport, individually}`; the four profile-driven
+fields are EFFECTIVE values (`effectivePrintSettings`), so a user override
+always wins over the profile and the writers' own profile fallbacks become
+belt-and-braces. Pinned by `tests/export-context.test.mjs` ("ctx.prefs
+reflects the OVERRIDDEN format, not the profile"). Follow-up for the
+PrintPipeline owner: the strict gate still reads `state.print.strictExport`
+(same snapshot) — switch it to `ctx.prefs.strictExport` so the pipeline reads
+prefs in one place.
+
+## Settings scope (Decision 15) — `## Per-user settings persistence` section
+
+`SettingsStore` exports `PRINT_PROJECT_FIELDS = [targetPrinterId,
+bedDimensions, exportFormat, objAxis, threeMFFlavour, exportTargets,
+referenceObjectId, objBakeSolidTextures, splitByMaterial, individually]` and
+`PRINT_USER_FIELDS = [strictExport, repairOnImport]` (+ the whole `cost`
+slice). localStorage carries the per-user fields plus the last-used printer
+setup (`targetPrinterId, bedDimensions, objBakeSolidTextures`) as a SEED for
+a fresh boot / New project only (file wins on open); profile-driven
+overrides, print sizes and the reference are never seeded, so a new project
+starts on its printer's defaults. The Print ↺ reset restores the seed fields
+AND returns the profile-driven fields + `individually` to factory (`null` /
+false), leaving print sizes and the reference (project content) alone.
+`default-settings.json` print gains `exportFormat/splitByMaterial/objAxis/
+threeMFFlavour: null` and `individually: false`.
+Open items for the persistence owner: (1) `strictExport` is per-user under
+Decision 15 but `ProjectSerializer._serialisablePrint` still writes it into
+the .mixo (only `repairOnImport` is stripped) — strip it on save and in
+`_printWithoutLegacyScale` on load like `repairOnImport`; (2) the loader
+merges the loaded print slice OVER the current one, so a document saved
+before 1.3 (no `exportFormat`…) inherits the previous project's overrides —
+default the missing profile-driven fields to `null` and `individually` to
+false on load.
+
+## §13 Print Panel (`src/ui/PrintPanel.js`) — replace the "Tabs: Scale / Validation / Bed / Export" line, the "The Scale tab shows…" paragraph and the "The Bed tab labels…" paragraph
+
+Tabs: **Printer / Validation / Export** (segmented). The old Scale tab folded
+into Export ("Print at"); the Bed tab became the Printer tab. Default tab:
+Printer. Module split: `PrintPanel.js` = shell (tabs, strip, Validation tab,
+export runner `_runExport`, gate + validation-error modals, `exportSelected`);
+`ui/print/ReadinessStrip.js` (strip + shared issue list + issue labels),
+`ui/print/PrinterTab.js`, `ui/print/ExportTab.js`, `ui/print/PrintSizes.js`
+(Print at / Other sizes… / Reference), `ui/print/printLabels.js` (format
+names/details, the "modified" marker), `ui/print/CostBlock.js`.
+
+**Readiness strip (task 0.6).** One row at the top of EVERY tab, computed
+from ONE `getPrintReadiness()` + ONE as-shown `previewExportContext({target:
+null})` per render (shared with the tabs): status icon + word in its
+functional colour (`print.readiness.<ready|warning|blocked>`), a monospace
+readout "N to print · W × D × H mm" (first target's PrintSpace bounds), and a
+sub-line = the most severe actionable issue (+ "+N more") or "Watertight and
+inside the build volume". Info issues (mixed-scales) never colour the strip.
+Clicking it routes to where the first issue is fixed; the all-clear strip
+opens Validation. Routing (strip and issue rows): bed-overflow / below-bed →
+Printer tab; no-print-parts / missing-source / missing-texture /
+unit-unconfirmed → Layout workspace (File units live in Properties ▸ Object);
+mixed-scales → Export; everything else → Validation; the first live related
+object is selected. The full clickable issue list renders on the Validation
+tab (under its status strip) and on the Export tab whenever there are issues.
+
+**Printer tab (task 1.2).** Printer select grouped by vendor (`<optgroup>`
+in printers.json order; vendor "—" shows as "Other"), the process name beside
+the label; a spec list: Build volume (readout "X × Y × Z mm" for a named
+printer, editable X/Y/Z inputs for a profile without a finite bed — Custom —
+with placeholder "unlimited"; an empty/invalid entry restores the stored
+value; edits are `SetPrintSettingsCommand`), Colour (sentence per
+`colour.mode`), Recommended format (writer name + detail line). Then the
+profile status line ("Profile defaults applied" / "N setting(s) changed from
+the printer default" + **Printer default ↺** when any field is modified), the
+Show-bed-volume toggle, and a quiet "Continue to Export". Selecting a printer
+pushes `ApplyPrinterProfileCommand` — an apply-defaults action, undoable.
+
+**Export tab (task 1.3, plan §4.3).** Top to bottom:
+1. **Print at:** "the size shown (1:N)" where N = the reference's EFFECTIVE
+   ratio (Decision 26), or the list of typed sizes ("1:144 · ×2 · 120 mm
+   tall"), and **Other sizes…** which toggles the editor: one row per
+   `exportTargets` entry (kind icon, label — monospace on the number only —
+   whole-print W×D×H mm at that size, remove ×), an add form (segmented Scale
+   1:X / Multiply ×N / Height mm, an affixed number field, Add; Enter adds,
+   duplicates ignored) and "One file per size". Every edit is
+   Add/RemoveExportTargetCommand (undoable). Editor/kind open state survives
+   re-renders.
+2. **Reference:** "<name> (1:N) [change]" — change opens a select of the
+   printable objects plus "Automatic (first object)"; picking one pushes
+   `SetReferenceObjectCommand`. When readiness carries `mixed-scales`, a note
+   "Other objects keep their size relative to <name>." follows.
+3. **Format** — segmented control with EVERY writer (OBJ · 3MF · STL · PLY ·
+   WRL, `data-fmt`), never hidden or disabled by the printer or by readiness;
+   a detail line (3MF detail follows the flavour); the contextual sub-row
+   "OBJ up axis" (OBJ) or "3MF type" (3MF). Each profile-driven field shows a
+   "modified" marker (`.pp-modified[data-field]`, tooltip names the profile
+   value) when it differs from the profile; **Printer default ↺** sits on the
+   Format header whenever anything is modified. Changes are
+   `SetPrintSettingsCommand`.
+4. Readiness issue list (when any).
+5. **Cost** (5.3) — header "Cost · <material> ⚙"; the quote lines stay on the
+   tab (one line per print size when there are several, 1.18); every cost
+   input (material, prices, support %, setup fee, currency, volume basis,
+   presets file line) lives in an anchored ⚙ popover (closes on Escape or an
+   outside click; open state survives re-renders).
+6. **▸ Advanced** disclosure ("N on"): Each individually (separate files),
+   Split multi-material objects into parts (AMS / MMU) [+ modified marker],
+   Bake solid colours to texture, Block export on non-watertight parts
+   (strict), and — until 5.5 moves it to ? ▸ Preferences — Repair fixable
+   issues automatically on import. Per-project ones are commands
+   (persisted in the .mixo); strict + repair-on-import are per-user state +
+   SettingsStore. Open state survives re-renders.
+7. The ONE primary action, sticky at the panel bottom: **Export for
+   <printer> (<FORMAT>)** (`data-act="export-primary"`), the effective
+   `exportFormat`'s writer through the export gate (blocked → modal; warnings
+   → three-way modal, default Repair & export), disabled with the recovery
+   title when `canExport` is false. Options: `{ individually:
+   print.individually }`. "Selected only" stays off this tab (2026-09-18
+   decision) — the context menu's export-selected is the one-off path.
+
+Design: monospace only for numbers (`.pp-num`); the stone-brown accent only
+on the primary button; bengara only for the active segment cue and the
+"modified" marker; hairlines and spacing instead of boxes; no fixed widths
+beyond tokens.
+
 ## PART 13 — UI MODULES
 
 ### UI Rendering Safety Contract
@@ -5087,6 +5257,315 @@ ProgressOverlay.hide()                      → void
 `PrintPipeline._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
 
 ---
+
+### Properties panel (overhaul 1.13 / 1.16 / 3.6 / 4.6 / 5.2)
+
+Owner/integrator: merge into Blueprint.md at the anchors named below.
+
+## §SceneObject (`state.scene.objects[meshId]`) — add one field after `isInternalPart`
+
+```js
+  ratio,                       // declared scale (1:ratio); see §12 Scale
+  ratioSource,                 // 'file' | 'user' | 'default' (task 1.13,
+                               //   Decision 24). Seeded at import by
+                               //   AssetRegistration: modelRatio ≠ 1 → 'file'
+                               //   (glTF extras.ratio), else 'default'
+                               //   (STL/OBJ never declare a scale). Any
+                               //   explicit Set scale / Convert → 'user'.
+                               //   Persisted per object in .mixo; objects
+                               //   minted outside import (Boolean / Slice)
+                               //   carry none and derive the seed from their
+                               //   asset (ScaleCommands.ratioSourceOf).
+```
+
+## §11 Persistence — migrate ladder (3.3 → 3.4 step `_migrateTo34`)
+
+Add to the per-field migrations list: **1.13** seeds every scene object's
+`ratioSource` from its asset (`seedRatioSource(asset.modelRatio)`: `'file'`
+when `modelRatio ≠ 1`, else `'default'`); an explicit valid value already on
+the object is kept (idempotent). The loader applies the same derivation to
+3.4 documents saved before the field existed (`ratioSourceOf(o, asset)`), and
+the serializer always writes the resolved value.
+
+## §12 Scale — declare vs convert (replace the Properties "Ratio" description)
+
+- Properties ▸ Transform **Scale** row: `Scale [1:72 ▾] [1:72] Set scale |
+  Convert…`. Picking a preset or typing a ratio only *stages* it; nothing is
+  applied until a verb is clicked (or Enter applies the default verb).
+- **Set scale** = `SetScaleLabelCommand(ids, ratio)`: relabels `ratio`, sets
+  `ratioSource:'user'`, touches no geometry/transform. Undo restores each
+  prior `ratio` + `ratioSource`. Emits no `OBJECT_UPDATED` (geometry is
+  unchanged, so validation must not go stale); panels re-render on
+  `HISTORY_PUSHED/UNDONE/REDONE`.
+- **Convert…** = `RescaleObjectCommand(ids, ratio)` (math unchanged: bake
+  `old/new` about the object's own origin, 1.14). It now also sets
+  `ratioSource:'user'` and restores the prior source on undo.
+- **Default verb** (primary button, Enter): relabel when EVERY target's
+  `ratioSource` is `'default'` (never declared — the STL/OBJ case), convert
+  otherwise. Both verbs are always available.
+- **Consequence line** under the row, before applying:
+  `Set scale: relabel only, size unchanged · Convert…: resize ×2.06`
+  (default verb first; mixed-ratio selections say "resize each object to the
+  new scale"). With nothing staged the line shows the **effective scale**
+  (1.16, Decision 26) from `ScaleMath.effectiveRatioInfo(obj, leadMesh)`:
+  `×2.0 → prints as 1:36` when the uniform node scale ≠ 1, `non-uniform
+  scale…` when the node scale is non-uniform, or — for an undeclared
+  (`'default'`) object at node scale 1 — a one-line hint that Set scale
+  labels without resizing.
+- Targets = selected objects expanded to every logical-object part; one undo
+  step. Groups have no Scale row (scale is declared per object).
+- The XYZ node-scale row is labelled **Scale XYZ** to keep the two nouns apart.
+- Pure helpers exported for tests: `PropertiesPanel.__test.defaultScaleVerb`,
+  `scaleConsequence`; `ScaleCommands.RATIO_SOURCE`, `seedRatioSource`,
+  `ratioSourceOf`, `SetScaleLabelCommand` (re-exported by HistoryManager).
+
+## Properties Panel (`src/ui/PropertiesPanel.js`) — replace the numbered section list
+
+Renders for the active selection:
+
+1. **Object** — name; **Source** row (single selection with an asset):
+   status chip *Embedded copy / Linked / Changed on disk / Missing*
+   (`sourceStatusFor`: ghost → missing; else `AssetResolver.getAssetStatus`
+   from the last load; else `linked` when `sourcesOf(asset)` is non-empty,
+   otherwise `embedded`), the qualified file name
+   (`DisplayNames.qualifiedDisplayName`) in mono, and a ⋯ menu:
+   **Refresh** (`ProjectLoader.refreshAsset` → `RelinkAssetCommand`; enabled
+   when the asset has a link), **Find moved file…** (`FindMoved.runFindMoved`;
+   enabled when `canFindMoved`), **Relink…** (`relinkAsset`). Esc / outside
+   click closes the menu. Then **Print** (toggle "Include when printing" —
+   formerly its own Print section), and the Visible / Locked toggles.
+2. **Transform** — Scale row (§12 above), Size (mm), Pos (mm), Rot (deg),
+   Scale XYZ (axis-coloured field edges), scale lock, **Drop to bed**
+   (`BedPlacementCommand(selection, 'drop')`).
+3. **File units** — unchanged.
+4. **Material** slots, 5. **UV Override** — unchanged.
+
+**Group active (task 3.6)** — when the active selection id is a user group:
+header `Group · <name> (N objects)` (N = non-internal objects in the subtree)
+with an **Ungroup** button (`UngroupCommand([groupId])`); **Object** = Name
+(`RenameCommand` on the group id) + **Print** toggle for the whole subtree
+(one batch of `PrintPartCommand`s for objects whose flag differs; shows
+mixed when partial); **Transform** = Size (mm) of the group's hierarchy
+bounds (edits scale the group node; scale lock applies), Pos (mm), Rot (deg)
+— each edit is ONE `TransformCommand({[groupId]: prev}, {[groupId]: next})`
+on the group TransformNode so children follow rigidly — and **Drop to bed**
+(same command shape, label "Drop to bed"). No Scale row, no material slots:
+a note reads "Material is set per object". Locked (or inside a locked
+group) → fields read-only; multi-select → fields disabled.
+
+**Workspaces (task 5.2, Decision 6)** — Properties ▸ Object is visible in all
+four workspaces. Layout: Object + Transform + File units; Shade: Object +
+Material + UV; Scene / Print: Properties shows ONLY its Object section as a
+compact strip (`flex: 0 0 auto; max-height: 45%`) above the specialist panel,
+and hides entirely when nothing is selected (`#rp-properties:has(.pp-empty)`).
+Rules live in `src/styles/layout.css` (Workspaces block).
+
+The staged ratio is module state reset whenever the selection (active id +
+selected ids) changes.
+
+### Outliner + context menu (overhaul 3.4 / 3.5)
+
+## Outliner (replaces the collection-tree description)
+- Tree = top-level groups, then top-level objects. **No collection rows or headers** (Decision 2); `scene.collections` stays in the schema for provenance only (object row tooltip "From file: ..." and the `file:name` search prefix). An import that yielded several objects is a Group named after the file stem.
+- Group rows are selectable: a plain click selects the group itself (`Selection.set([groupId])`, `aria-selected="true"` on the row; scope = the row's parent, 3.2). Shift adds, Ctrl toggles. Chevron expands/collapses (`ui.outlinerCollapsed[id]`, true = collapsed). A count badge shows direct children (objects + sub-groups).
+- Row = 24px, indent by `--ol-depth`. Selected = 2px bengara left edge (`--active`) + faint wash (`--active-bg`). Hover reveals eye / lock (/ print on objects); non-default states (hidden, locked, locked by an ancestor group, excluded from print) stay visible. Numbers (count, parts N) are monospace; nothing else.
+- Cascade (`src/core/hierarchy/GroupCascade.js`, pure): groups have no visibility flag; the eye on a group hides every object beneath it (any visible descendant -> hide all, else show all) as one `VisibilityCommand` over `cascadeObjectIds`. Lock is the group's own `locked` flag (`LockCommand([groupId])`) and reaches descendants by ancestry via `Selection.isEffectivelyLocked`; descendants keep their own flag, and show a dimmed lock when locked by an ancestor.
+- Objects with more than one material part show a "Parts N" pill and a chevron; the disclosure (session-only `_openParts`) reveals read-only part rows (click selects the lead). The old header "show internal parts" toggle is gone.
+- Status pill at row end from the A6 validation cache: "Repair" (wrench, clickable `data-action="repair"`) when auto-fixable, otherwise "Check"; stale = dimmed.
+- Footer: "N objects · N groups" + "N selected". Header title only. `Outliner.renameActive()` is exported on the `Outliner` object (F2 and the context-menu Rename share it; works for groups).
+
+## Context menu (§4.6 tiering)
+- One object selected: at most 12 primary items + four submenu headers (Arrange, Combine, Material, Export) = at most 16 top-level entries. Primary: Rename, Duplicate, Delete | Group, Ungroup, Enter group / Exit group | Hide/Show, Lock/Unlock, Focus, Select parent, Repair, and Relink (ghost) or Reveal in Outliner (viewport source).
+- Submenus are hidden sibling panels (`.context-menu.cm-submenu[data-submenu-for]`) appended to `<body>` while the menu is open (a child of the root would be clipped by its overflow); opened by hover, click, Enter/Space/ArrowRight; ArrowLeft/Esc closes. Arrange = Snap to active, Copy placement from active, Replace with active, Align centre X/Y/Z, bed placement, Mirror, Array, 3D-cursor snaps, Unparent. Combine = Union / Subtract / Intersect / Slice & Connector. Material = Separate by material, Merge into one object, Edit material. Export = 3MF / OBJ / STL of the selection.
+- Enter group = `Selection.enterScope(group, picked)` (target = the single selected group, or the parent of the single selected object); when already inside, the entry becomes Exit group = `Selection.exitScope()`.
+- Group right-click selects the group and shows the same menu; hide/lock/frame/repair/unparent act on groups through the cascade helpers. Collection menu items removed.
+
+### Asset panel, Sources modal, boot banner, duplicate dialog (overhaul 4.6 / 4.7 / 4.8)
+
+Merge into `Blueprint.md`. Each block names the section it replaces/amends.
+
+---
+
+## §0.3 file layout — add
+
+```
+src/ui/BootBanner.js     ← one non-blocking boot banner: re-mount last folder + recover newest autosave (task 4.7)
+src/ui/SourcesModal.js   ← the one Sources modal (status of every asset + Refresh / Find moved / Relink, bulk) + Source-status vocabulary (task 4.6)
+```
+
+---
+
+## Boot sequence, step 6 (≈ line 592) — replace the last sentence
+
+6. `main.ts` registers global project shortcuts (`Ctrl+S`, `Ctrl+Shift+S`,
+   `Ctrl+O`, `Ctrl+N`), reapplies overlay defaults, starts autosave, focuses the
+   canvas, then calls `BootBanner.runBootChecks()`: it looks up
+   `AssetPanel.findRemountOffer()` (last-mounted folder whose ref is still
+   stored) and `Autosave.findRecoverableAutosave()` (newest snapshot newer than
+   its project's last save) in parallel and shows ONE slim banner above the
+   header. No modal opens at boot (Decision 4).
+
+---
+
+## §11 Autosave — replace the "Boot:" bullet
+
+- Boot (task 4.7, Decision 4): `findRecoverableAutosave()` returns the newest
+  `autosave_<id>` snapshot only if its `savedAt` is newer than the snapshot
+  doc's `project.lastSavedAt` (a stale one is deleted silently) as an offer
+  `{key, projectId, savedAt, name}`; it never opens UI and never touches the
+  world. The boot banner shows "Recover unsaved work from HH:MM" (date added
+  when not today; time in monospace). **Recover** calls
+  `recoverAutosave(offer)`: re-mounts the offered folder first in the same
+  click (handle-backed assets resolve through it — autosave skips their bytes,
+  A9), asks the usual save / discard / cancel question if the open project is
+  dirty, then loads the snapshot. A recovered project re-attaches its stored
+  images, stays DIRTY and is re-snapshotted at once. A poisoned snapshot is
+  deleted and reported, never re-offered. **Dismiss (×)** only hides the banner;
+  the snapshot is kept and offered again next launch (non-destructive).
+  `discardAutosave(offer)` drops an offer explicitly. `recoverAutosave()` with
+  no argument recovers the newest recoverable snapshot (headless/tests).
+
+---
+
+## §11 Asset resolution — replace the "Liveness rule" paragraph (≈ line 3248)
+
+Source status (task 4.6; words from overhaul §7): every asset shows one of
+**Embedded copy · Linked · Changed on disk · Missing** —
+`SourcesModal.sourceStatus(asset)`:
+- `isGhost` (no bytes anywhere) → `missing`;
+- else the last load/relink resolution (`AssetResolver.getAssetStatus`,
+  session-only, not persisted): `linked` (tier 1/3 bytes match), `changed`
+  (linked file differs — embedded copy in use, Refresh offered), `missing`
+  (link unreachable — embedded copy in use, Find moved file… / Relink offered),
+  `embedded` (no link);
+- never resolved this session (fresh import): `linked` when the entry has a
+  source link (`sourcesOf(entry)`), else `embedded`.
+The old Linked/Snapshot badge is retired. The post-load `unmatchedAssets` /
+`ghostAssets` modals are superseded by the Sources modal as the place to fix
+sources (ProjectLoader still dispatches them until they are removed).
+
+---
+
+## Asset Panel (`src/ui/AssetPanel.js`) — amendments
+
+- Tabs are **Project · Folders** (i18n keys `panel.session.title` /
+  `panel.library.title` unchanged; values renamed). Each tab carries a
+  monospace count (project assets / mounted folders), hidden when zero.
+- **Project** tab (was Session): smart views All / Used / Unused / Issues;
+  Issues also includes `changed` / `missing` sources. Header shows a
+  **Sources** button (hidden on Folders) that opens the Sources modal.
+- Project card: thumbnail with the **Source chip** top-left (Embedded copy and
+  Linked are quiet neutral chips; Changed on disk = warning amber tint;
+  Missing = danger red tint; chip carries `data-source-status`), then the
+  **qualified name** — `displayNameParts(asset, assetLibrary)` label plus the
+  qualifier dimmed (`chair.glb · downloads` only while ambiguous; generic
+  texture names `<model> · <slot>`), tooltip = original filename (+ path) —
+  then a **⋯** button and the extension / imported-scale / unit badges.
+- Card **⋯ menu** (popover on `<body>`, `role="menu"`, Arrow keys, Esc returns
+  focus): Add to scene (meshes) · Refresh (enabled when `linked|changed`;
+  `ProjectLoader.refreshAsset`, undoable `RelinkAssetCommand`) · Find moved
+  file… (enabled when `canFindMoved`; `FindMoved.runFindMoved`) · Relink…
+  (meshes; `relinkAsset`, undoable) · Show in Sources (opens the modal with the
+  asset highlighted) · Remove. The hover × delete button is retired (Remove
+  lives in the menu).
+- Boot re-mount: `findRemountOffer()` (no UI, no permission prompt; null when
+  `!caps.persistAssets`, no stored ref, or already mounted) +
+  `remountLast(offer)` (must run in a user gesture — the banner button; toasts
+  on permission denial). `promptRemount` remains as a legacy alias of
+  `findRemountOffer`. The `remountFolder` modal is removed.
+- Folders card: unchanged (name, relative path, badges; no chip, no menu).
+
+---
+
+## Sources modal (`src/ui/SourcesModal.js`) — new section
+
+Modal id `assetSources`, registered by `AssetPanel.init()` via
+`SourcesModal.init()`; opened by the Project-tab **Sources** button and card
+menu **Show in Sources** (`SourcesModal.open({ focusAssetId })`).
+- Lists every `assetLibrary` entry, sorted Missing → Changed on disk → Linked →
+  Embedded copy, then by display name. Row: qualified name (dimmed qualifier,
+  original in tooltip) · Source chip · where (source path, "Was at <path>" when
+  missing, "Saved in the project" when embedded-only, "No file and no saved
+  copy" for ghosts) · actions (Refresh when `linked|changed`, Find moved file…
+  when `canFindMoved`, Relink… for meshes).
+- Summary line with monospace counts per status; bulk actions **Find moved
+  files (N)** (sequential `runFindMoved`) and **Relink missing (N)…**
+  (sequential relink pickers; stops when a picker is cancelled).
+- Re-renders on `ASSET_RELINKED / ASSET_REMOVED / ASSET_REGISTERED` while open.
+- Exports the status vocabulary used by the cards: `SOURCE_STATUSES`,
+  `sourceStatus(asset)`, `statusChipHtml(status, extraClass)`.
+
+---
+
+## Boot banner (`src/ui/BootBanner.js`) — new section
+
+One slim (32px) strip inserted before `#app`; `body.has-boot-banner` shrinks
+`#app` to `calc(100vh - 32px)`. Content: "Welcome back" · "Re-mount folder
+**<name>**" and/or "Recover unsaved work from `HH:MM` (in <project>)" ·
+[Re-mount] [Recover (primary)] [×]. Non-blocking; nothing happens until a
+click (the click is the gesture a browser folder re-grant needs). Re-mount →
+`AssetPanel.remountLast`; Recover → re-mount first if still offered, dirty
+confirm, `recoverAutosave(offer)`; × hides (autosave kept). The banner
+disappears once every offer is used. Re-renders on `LOCALE_CHANGED`. API:
+`show({remount, recover})`, `hide()`, `runBootChecks()`, `formatSavedAt(iso)`.
+
+---
+
+## Project Menu (`src/ui/ProjectMenu.js`) — modal list
+
+`recoverAutosave` is no longer dispatched (boot banner, task 4.7); drop it
+from the registered list when ProjectMenu removes the renderer.
+`unmatchedAssets` / `ghostAssets` are superseded by the Sources modal (task
+4.6) — still dispatched by ProjectLoader until removed.
+
+---
+
+## Import — "already in this project" dialog (task 4.8 display, Decision 16)
+
+`AssetImport.askDuplicateImport({filename, existingName})` dispatches modal id
+`duplicateImport` (rendered by AssetPanel): icon + title "Already in this
+project", "Source: **<filename>**", a body panel (same-content sentence + hint
+"Add another copy reuses it. Import as separate asset keeps an independent
+copy."), buttons [Import as separate asset] [Add another copy (primary,
+focused default)], × top-right. Close results `'copy' | 'separate'`; ×/Esc/
+backdrop → `null` (import cancelled). Contract `'copy'|'separate'|null`
+unchanged; it no longer rides the generic `confirmAction` modal.
+
+---
+
+## Known risks table (≈ line 5454) — replace the row
+
+| IndexedDB FS handle permission resets per session | Boot banner "Re-mount" button (AssetPanel.remountLast) re-grants via its click gesture; per-asset recovery in the Sources modal / card ⋯ menu (Refresh · Find moved file… · Relink…) |
+
+### Shell chrome (overhaul 5.1 / 0.7 / 3.3 / 5.7 / 5.4)
+
+**Header (§13/§13b).** Order: logo · project name · workspace segmented switcher (centred) · action cluster:
+Import (`#btn-import`, primary, `ViewportDrop.promptImport`, Ctrl+I) · New/Open/Save/Save As/Recent · Undo/Redo
+(`#btn-undo`/`#btn-redo`, enabled from `HistoryManager.getUndoLabel/getRedoLabel`, refreshed on HISTORY_*/PROJECT_*) ·
+Export (`#btn-export` → Print workspace, Export tab, right column opened) · locale switcher · `?` menu (`#btn-help`):
+Keyboard shortcuts (dispatches `document` CustomEvent `mx:help-sheet` for 5.5 to handle) and Reset all settings (opens the
+existing `resetSettingsConfirm` modal). Reset-all no longer has its own header button. DOM order is pinned by CSS `order`.
+
+**Arrange (0.7).** The 3D Cursor drawer is now "Arrange": root `#cursor-panel` (was `#n-panel`; class `.n-panel` unchanged),
+sections Placement then a "3D cursor" sub-section. Shift+N and the viewport-toolbar Arrange button
+(`[data-kind="arrange"]`, group `arrange`) both toggle it; `CursorPanel` exports `open/isOpen/toggle` and emits a document
+CustomEvent `mx:arrange-toggled` so the toolbar button mirrors the drawer.
+
+**Scope breadcrumb (3.3).** `src/ui/ScopeBreadcrumb.js` renders `#scope-breadcrumb` (viewport top-left, right of the NavCube):
+"Scene › group › subgroup" + "Esc to exit group", hidden at root, rebuilt on SCOPE_CHANGED / history / project events. Each
+ancestor crumb (incl. the "Scene" root crumb, `data-scope=""`) calls `Selection.setScope`; the last crumb is the current scope.
+While scoped it sets the status-bar hint (`scope.statusHint`); at root it clears it so `status.defaultHint` (now ending
+"Double-click a group to enter") shows. Initialised from `ViewportToggles.init()`.
+
+**Viewport toggle strip (5.7).** `#viewport-toggles` is a top-right HUD strip: feature toggles Grid / Axes / Build volume
+(`scene.overlays.grid|axes|bedPreview`) and Cross-section (`scene.section.enabled`, session-only, applied via
+`SceneManager.setSectionPlane`), then the display-mode select and Wireframe / Inverted-faces buttons. Toggles are viewport
+chrome only (never exported) and call `ScenePanel.refresh()` so the Scene panel mirrors them. Pivot stays in the bottom
+toolbar (plan §4.7: toolbar dropdown).
+
+**Scene Advanced (5.4).** Scene panel section key `advanced` ("Advanced"), after Environment: colour grade, lights, ambient
+occlusion, performance. Collapsed by default; collapse state persists per user in `mixomesh.scenePanel.collapsed.v1`.
+Background, HDRI and the floor stay in Environment. No new schema keys.
 
 ## PART 13b — WORKSPACES & PANEL HIERARCHY
 

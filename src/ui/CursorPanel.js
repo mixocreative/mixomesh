@@ -33,9 +33,9 @@ export function init() {
   if (!host) return;
 
   _root = document.createElement('aside');
-  _root.id = 'n-panel';
+  _root.id = 'cursor-panel';
   _root.className = 'n-panel';
-  _root.dataset.i18nAriaLabel = 'cursor.panelTitle';
+  _root.dataset.i18nAriaLabel = 'arrange.panelTitle';
   _root.innerHTML = _markup();
   host.appendChild(_root);
 
@@ -75,21 +75,9 @@ export function init() {
 
 function _markup() {
   return `
-    <button class="np-tab" data-i18n-title="cursor.panelTitleWithShortcut" data-i18n-aria-label="cursor.panelTitle">${icon('Crosshair', { width: 15, height: 15 })}</button>
+    <button class="np-tab" data-i18n-title="arrange.panelTitleWithShortcut" data-i18n-aria-label="arrange.panelTitle">${icon('Crosshair', { width: 15, height: 15 })}</button>
     <div class="np-body">
-      <header class="np-header">${icon('Crosshair', { width: 13, height: 13 })}<span data-i18n-key="cursor.panelTitle">3D Cursor</span></header>
-      <div class="np-section">
-        <div class="np-row-label" data-i18n-key="cursor.locationMm">Location (mm)</div>
-        ${['x', 'y', 'z'].map(a => `
-          <label class="np-field">
-            <span class="np-axis np-axis-${a}">${a.toUpperCase()}</span>
-            <input type="number" step="1" data-axis="${a}" />
-          </label>`).join('')}
-      </div>
-      <div class="np-section">
-        <label class="np-check"><input type="checkbox" data-act="show-cursor"> <span data-i18n-key="cursor.show">Show 3D cursor</span></label>
-        <label class="np-check"><input type="checkbox" data-act="pivot-cursor"> <span data-i18n-key="cursor.useAsPivot">Use cursor as pivot</span></label>
-      </div>
+      <header class="np-header">${icon('Crosshair', { width: 13, height: 13 })}<span data-i18n-key="arrange.panelTitle">Arrange</span></header>
       <div class="np-section np-placement">
         <div class="np-row-label" data-i18n-key="placement.title">Placement</div>
         <div class="np-place-actions">
@@ -107,6 +95,19 @@ function _markup() {
           ${['x', 'y', 'z'].map(a => `<button type="button" class="np-place-btn" data-place="array-${a}" data-i18n-title="placement.array"><span data-i18n-key="placement.array">Array</span> ${a.toUpperCase()}</button>`).join('')}
           <button type="button" class="np-place-btn" data-place="mate" data-i18n-title="context.mate"><span data-i18n-key="context.mate">Snap to active</span></button>
         </div>
+      </div>
+      <div class="np-section">
+        <div class="np-subhead" data-i18n-key="arrange.cursor">3D cursor</div>
+        <div class="np-row-label" data-i18n-key="cursor.locationMm">Location (mm)</div>
+        ${['x', 'y', 'z'].map(a => `
+          <label class="np-field">
+            <span class="np-axis np-axis-${a}">${a.toUpperCase()}</span>
+            <input type="number" step="1" data-axis="${a}" />
+          </label>`).join('')}
+      </div>
+      <div class="np-section">
+        <label class="np-check"><input type="checkbox" data-act="show-cursor"> <span data-i18n-key="cursor.show">Show 3D cursor</span></label>
+        <label class="np-check"><input type="checkbox" data-act="pivot-cursor"> <span data-i18n-key="cursor.useAsPivot">Use cursor as pivot</span></label>
       </div>
     </div>
   `;
@@ -206,9 +207,34 @@ function _renderArrayDialog({ data, close }) {
   return el;
 }
 
+// English fallbacks until the arrange.* locale keys are merged.
+const FALLBACK = {
+  'arrange.panelTitle': 'Arrange',
+  'arrange.panelTitleWithShortcut': 'Arrange (Shift+N)',
+  'arrange.cursor': '3D cursor',
+};
+
 function _retranslate(root) {
   applyTranslations(root);
+  root?.querySelectorAll('[data-i18n-key],[data-i18n-title],[data-i18n-aria-label]').forEach(el => {
+    const k = el.dataset.i18nKey;
+    if (k && FALLBACK[k] && el.textContent === k) el.textContent = FALLBACK[k];
+    for (const [d, attr] of [['i18nTitle', 'title'], ['i18nAriaLabel', 'aria-label']]) {
+      const key = el.dataset[d];
+      if (key && FALLBACK[key] && el.getAttribute(attr) === key) el.setAttribute(attr, FALLBACK[key]);
+    }
+  });
+  if (root?.dataset.i18nAriaLabel && FALLBACK[root.dataset.i18nAriaLabel]
+      && root.getAttribute('aria-label') === root.dataset.i18nAriaLabel) {
+    root.setAttribute('aria-label', FALLBACK[root.dataset.i18nAriaLabel]);
+  }
 }
+
+/** True while the Arrange drawer is slid open. */
+export function isOpen() { return _open; }
+
+/** Open the drawer (no-op when already open). */
+export function open() { if (_root && !_open) toggle(); }
 
 export function toggle() {
   _open = !_open;
@@ -221,6 +247,8 @@ export function toggle() {
     SceneManager.setCursorVisible(getState().selection.pivotMode === 'cursor');
   }
   _syncButtons();
+  // Lets the toolbar's Arrange button mirror the drawer (Shift+N toggles too).
+  document.dispatchEvent(new CustomEvent('mx:arrange-toggled', { detail: { open: _open } }));
 }
 
 function _toggleShowCursor(e) {
@@ -261,4 +289,4 @@ function _syncButtons() {
   if (showCb) showCb.checked = SceneManager.isCursorVisible();
 }
 
-export const CursorPanel = { init, toggle, parseArrayInput };
+export const CursorPanel = { init, toggle, open, isOpen, parseArrayInput };

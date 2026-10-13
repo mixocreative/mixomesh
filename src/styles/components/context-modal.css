@@ -1,12 +1,15 @@
-/* ── Context menu ─────────────────────────────────────── */
+/* ── Context menu ───────────────────────────────────────
+   Tiered (plan 4.6): <= 12 primary items + four submenu headers; the
+   submenus are sibling .cm-submenu panels. Light washi sheet, hairline,
+   active row = stone-brown fill; monospace only for shortcut keys. */
 .context-menu {
   position: fixed;
-  background: var(--bg-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-md);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgba(62, 44, 30, 0.22), 0 1px 2px rgba(62, 44, 30, 0.12);
   padding: var(--sp-2);
-  min-width: 200px;
+  min-width: 216px;
   max-height: calc(100vh - 8px);
   overflow-y: auto;
   z-index: 2000;
@@ -15,22 +18,35 @@
   user-select: none;
 }
 .context-menu.hidden { display: none; }
+.cm-submenu { z-index: 2001; min-width: 220px; }
 .cm-item {
   display: grid;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: var(--sp-4);
-  padding: var(--sp-2) var(--sp-3);
+  min-height: 26px;
+  padding: 0 var(--sp-4);
   border-radius: var(--r-sm);
   cursor: pointer;
+  outline: none;
 }
-.cm-item:hover { background: var(--bg-3); }
+.cm-item:hover,
+.cm-item:focus-visible,
+.cm-item[aria-expanded="true"] { background: var(--accent); color: var(--accent-fg); }
+.cm-item:hover .cm-icon,
+.cm-item:focus-visible .cm-icon,
+.cm-item[aria-expanded="true"] .cm-icon,
+.cm-item:hover .cm-shortcut,
+.cm-item:focus-visible .cm-shortcut,
+.cm-item[aria-expanded="true"] .cm-chevron { color: inherit; }
 .cm-item.cm-disabled { color: var(--text-disabled); pointer-events: none; }
+.cm-item.cm-disabled .cm-icon { color: var(--text-disabled); }
 .cm-item.cm-danger { color: var(--danger); }
-.cm-item.cm-danger:hover { background: rgba(239, 68, 68, 0.08); }
-.cm-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text-1); }
+.cm-item.cm-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.cm-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.cm-chevron { display: inline-flex; align-items: center; color: var(--text-2); }
 .cm-shortcut { font-size: var(--fs-xs); color: var(--text-2); font-family: var(--font-mono); }
-.cm-sep { height: 1px; background: var(--border); margin: var(--sp-2) var(--sp-2); }
+.cm-sep { height: 1px; background: var(--border); margin: var(--sp-2) var(--sp-3); }
 
 /* ── Modal-transform cursor cue ───────────────────────── */
 body.modal-translate #renderCanvas { cursor: move; }

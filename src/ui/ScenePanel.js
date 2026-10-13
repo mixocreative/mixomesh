@@ -105,7 +105,7 @@ const RESOLUTION_PRESETS = [
 // section is reachable without scrolling (UX audit P1).
 const _collapse = createCollapseController({
   storageKey: 'mixomesh.scenePanel.collapsed.v1',
-  defaults: { grid: false, environment: true, camera: true, section: true, rendering: false },
+  defaults: { grid: false, environment: true, advanced: true, camera: true, section: true, rendering: false },
 });
 let _bodyEl = null;
 let _root = null;
@@ -118,6 +118,10 @@ const _attr = (key, params) => escapeAttr(t(key, params));
 // never HTML (translator-safety rule from spec §Security).
 function _retranslate(root) {
   applyTranslations(root);
+  // English fallback until section.advanced is merged into the locale files.
+  root?.querySelectorAll('[data-i18n-key="section.advanced"]').forEach(el => {
+    if (el.textContent === 'section.advanced') el.textContent = 'Advanced';
+  });
 }
 // Render-view compose mode — session-only. navPose = where the user's free
 // navigation was when the toggle went on, restored on toggle off. While
@@ -190,7 +194,7 @@ function _exitRenderView() {
 }
 
 const SECTION_ICONS = {
-  grid: 'Grid3x3', environment: 'Sun', camera: 'Camera',
+  grid: 'Grid3x3', environment: 'Sun', advanced: 'SlidersHorizontal', camera: 'Camera',
   section: 'Scissors', rendering: 'Clapperboard',
 };
 
@@ -200,6 +204,7 @@ const SECTION_ICONS = {
 const SECTION_I18N_KEYS = {
   grid:        'section.grid',
   environment: 'section.environment',
+  advanced:    'section.advanced',
   camera:      'section.camera',
   section:     'section.cross-section',
   rendering:   'section.rendering',
@@ -311,6 +316,31 @@ function _render() {
         <label>${_txt('scene.intensity')}</label>
         <input type="number" step="0.1" min="0" max="4" data-render="hdriIntensity" value="${_fmt(render.hdriIntensity, 1)}">
       </div>` : ''}
+      ${_subhead(_txt('scene.floor'), 'FloorPlane')}
+      <div class="pp-row pp-row-inline">
+        ${_toggle('data-render-toggle', 'floorEnabled', t('scene.floor'), render.floorEnabled)}
+        ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="${_attr('scene.floorColor')}">` : ''}
+      </div>
+      ${render.floorEnabled ? `
+      <div class="pp-row">
+        <label>${_txt('scene.floorZMm')}</label>
+        <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
+      </div>
+      <div class="pp-row">
+        <label title="${_attr('scene.floorDiameterTitle')}">${_txt('scene.diameterMm')}</label>
+        <input type="number" step="10" min="0" data-render="floorDiameterMM" value="${_fmt(render.floorDiameterMM, 0)}" placeholder="${_attr('scene.auto')}">
+      </div>` : ''}
+      ${render.floorEnabled && !render.shadowsEnabled ? `
+      <div class="pp-row pp-row-inline">
+        <span class="pp-hint">${_txt('scene.shadowsOffHint')}</span>
+      </div>` : ''}
+      <div class="pp-row pp-row-inline">
+        <button type="button" class="pp-btn" data-action="render-reset">${_txt('scene.resetEnvironment')}</button>
+      </div>`;
+
+  // Advanced (overhaul 5.4): expert render tuning — colour grade, lights,
+  // ambient occlusion, performance. Collapsed by default, remembered per user.
+  const advancedSec = `
       ${_subhead(_txt('scene.grade'), 'Wand2')}
       <div class="pp-row">
         <label>${_txt('scene.exposure')}</label>
@@ -340,24 +370,6 @@ function _render() {
       <div class="pp-row">
         <label>${_txt('scene.vignetteAmount')}</label>
         <input type="number" step="0.25" min="0" max="10" data-render="vignetteWeight" value="${_fmt(render.vignetteWeight)}">
-      </div>` : ''}
-      ${_subhead(_txt('scene.floor'), 'FloorPlane')}
-      <div class="pp-row pp-row-inline">
-        ${_toggle('data-render-toggle', 'floorEnabled', t('scene.floor'), render.floorEnabled)}
-        ${render.floorEnabled ? `<input type="color" data-render-color="floorColor" value="${render.floorColor}" title="${_attr('scene.floorColor')}">` : ''}
-      </div>
-      ${render.floorEnabled ? `
-      <div class="pp-row">
-        <label>${_txt('scene.floorZMm')}</label>
-        <input type="number" step="1" data-render="floorZMM" value="${_fmt(render.floorZMM, 1)}">
-      </div>
-      <div class="pp-row">
-        <label title="${_attr('scene.floorDiameterTitle')}">${_txt('scene.diameterMm')}</label>
-        <input type="number" step="10" min="0" data-render="floorDiameterMM" value="${_fmt(render.floorDiameterMM, 0)}" placeholder="${_attr('scene.auto')}">
-      </div>` : ''}
-      ${render.floorEnabled && !render.shadowsEnabled ? `
-      <div class="pp-row pp-row-inline">
-        <span class="pp-hint">${_txt('scene.shadowsOffHint')}</span>
       </div>` : ''}
       ${_subhead(_txt('scene.lights'), 'Lightbulb')}
       <div class="pp-row pp-row-inline">
@@ -402,9 +414,6 @@ function _render() {
       </div>
       <div class="pp-row pp-row-inline">
         <span class="pp-hint">${_txt('scene.textureCapHint')}</span>
-      </div>
-      <div class="pp-row pp-row-inline">
-        <button type="button" class="pp-btn" data-action="render-reset">${_txt('scene.resetEnvironment')}</button>
       </div>`;
 
   const camSec = `
@@ -515,6 +524,7 @@ function _render() {
   _bodyEl.innerHTML =
     _section('grid', 'Grid', gridSec)
     + _section('environment', 'Environment', envSec)
+    + _section('advanced', 'Advanced', advancedSec)
     + _section('camera', 'Camera', camSec)
     + _section('section', 'Cross Section', sectionSec)
     + _section('rendering', 'Rendering', renderingSec);
@@ -845,4 +855,7 @@ function _fmt(v, dp = 2) {
   return String(parseFloat(n.toFixed(dp)));
 }
 
-export const ScenePanel = { init };
+/** Re-render from state (the viewport toggle strip flips grid/axes/bed/section). */
+export function refresh() { if (_bodyEl) _render(); }
+
+export const ScenePanel = { init, refresh };

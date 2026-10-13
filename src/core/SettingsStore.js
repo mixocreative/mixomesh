@@ -25,6 +25,28 @@ const SAVE_DEBOUNCE_MS = 300;
 /** The editable factory defaults (config file, verbatim). */
 export const DEFAULTS = DS;
 
+// ── Print settings scope (Decision 15, task 1.3) ────────
+// Per-PROJECT (persisted in the .mixo, file wins on open): the printer setup,
+// the profile-driven fields (task 1.3 — null = follow the printer profile),
+// print sizes, reference object and the export options.
+export const PRINT_PROJECT_FIELDS = Object.freeze([
+  'targetPrinterId', 'bedDimensions', 'exportFormat', 'objAxis', 'threeMFFlavour',
+  'exportTargets', 'referenceObjectId', 'objBakeSolidTextures', 'splitByMaterial', 'individually',
+]);
+// Per-USER only (localStorage; the opener's own choice): strict export and
+// repair-on-import (+ the whole `cost` slice below).
+export const PRINT_USER_FIELDS = Object.freeze(['strictExport', 'repairOnImport']);
+// What localStorage carries for `print`: the per-user fields plus the
+// last-used printer setup, which only SEEDS a fresh boot / New project (file
+// wins on open). Overrides of profile-driven fields, print sizes and the
+// reference are never seeded — a new project starts on its printer's
+// defaults.
+const PRINT_SEED_FIELDS = ['targetPrinterId', 'bedDimensions', 'objBakeSolidTextures', ...PRINT_USER_FIELDS];
+// The Print ↺ reset restores the seed fields AND returns every profile-driven
+// override + the individually option to factory (null = printer default), so
+// the reset never leaves a "modified" format behind on the factory printer.
+const PRINT_RESET_FIELDS = [...PRINT_SEED_FIELDS, 'exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour', 'individually'];
+
 // ── Schema ───────────────────────────────────────────────
 // Each entry: which state path is a persisted settings slice, and (optionally)
 // the field allow-list that narrows it. `fields: null` = the whole object is
@@ -40,7 +62,7 @@ const SCHEMA = [
   // per-PROJECT content (persisted in the .mixo, restored on load) — NOT
   // per-user settings. Narrow to genuine printer prefs so it is
   // neither written to localStorage nor reset across projects.
-  { key: 'print',     path: ['print'],              fields: ['targetPrinterId', 'bedDimensions', 'objBakeSolidTextures', 'strictExport', 'repairOnImport'] },
+  { key: 'print',     path: ['print'],              fields: PRINT_SEED_FIELDS },
   { key: 'gizmo',     path: ['gizmo'],              fields: ['space', 'snap'] },
   { key: 'pivotMode', path: ['selection', 'pivotMode'], scalar: true },
   // Per-user cost inputs (Export tab ▸ Cost). Never persisted in .mixo —
@@ -60,7 +82,7 @@ const SECTIONS = {
   environment: [{ slice: 'render', fields: RENDER_ENV_FIELDS }],
   camera:      [{ slice: 'render', fields: RENDER_CAMERA_FIELDS }],
   rendering:   [{ slice: 'renderOut' }],
-  print:       [{ slice: 'print' }],
+  print:       [{ slice: 'print', fields: PRINT_RESET_FIELDS }],
   cost:        [{ slice: 'cost' }],
 };
 /** Section keys with a reset button (for callers / docs). */
@@ -282,7 +304,7 @@ export function init() {
 }
 
 export const SettingsStore = {
-  DEFAULTS, SECTION_KEYS,
+  DEFAULTS, SECTION_KEYS, PRINT_PROJECT_FIELDS, PRINT_USER_FIELDS,
   pickSettings, mergeSettings, parseStored, applySectionToState, factoryState,
   load, save, scheduleSave, seedBootState, applyToScene,
   resetSection, resetAll, init,

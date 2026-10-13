@@ -1,5 +1,6 @@
 // Scale-domain commands (split from HistoryManager.js — review L29):
-// per-object ratio rescale (RescaleObjectCommand), per-asset source-unit
+// per-object ratio rescale (RescaleObjectCommand = "Convert"), per-object
+// scale relabel (SetScaleLabelCommand = "Set scale", task 1.13), per-asset source-unit
 // re-bake (SourceUnitCommand) and the project's typed print sizes
 // (ExportTargetCommands — task 1.17).
 
@@ -123,17 +124,90 @@ export class RescaleObjectCommand {
     this._ids = [...new Set(objectIds)];
     this._next = _positiveRatio(nextRatio);
     this._prevById = {};
+    this._prevSourceById = {};
     const objects = getState().scene.objects;
-    for (const id of this._ids) this._prevById[id] = _positiveRatio(objects[id]?.ratio);
+    for (const id of this._ids) {
+      this._prevById[id] = _positiveRatio(objects[id]?.ratio);
+      this._prevSourceById[id] = objects[id]?.ratioSource;
+    }
     this.label = t('history.setRatio', { ratio: _fmtRatioLabel(this._next) });
   }
   execute() {
-    for (const id of this._ids) _rescaleObject(id, this._prevById[id], this._next);
+    // Converting is an explicit user scale action → ratioSource 'user' (1.13).
+    for (const id of this._ids) _rescaleObject(id, this._prevById[id], this._next, RATIO_SOURCE.USER);
     markDirty();
   }
   undo() {
-    for (const id of this._ids) _rescaleObject(id, this._next, this._prevById[id]);
+    for (const id of this._ids) _rescaleObject(id, this._next, this._prevById[id], this._prevSourceById[id]);
   }
+}
+
+// ── Declare vs convert (task 1.13 / Decision 24) ─────────
+
+/** Where an object's declared `ratio` came from. */
+export const RATIO_SOURCE = Object.freeze({ FILE: 'file', USER: 'user', DEFAULT: 'default' });
+const RATIO_SOURCES = new Set(Object.values(RATIO_SOURCE));
+
+/**
+ * Seed for a freshly imported / migrated object: a file that declared its
+ * authored scale (`modelRatio ≠ 1`) is 'file', otherwise 'default' (STL/OBJ).
+ * @param {number|undefined} modelRatio
+ * @returns {'file'|'default'}
+ */
+export function seedRatioSource(modelRatio) {
+  const n = Number(modelRatio);
+  return Number.isFinite(n) && n > 0 && n !== 1 ? RATIO_SOURCE.FILE : RATIO_SOURCE.DEFAULT;
+}
+
+/**
+ * An object's ratioSource, deriving the seed from its asset when the field is
+ * absent (objects minted by Boolean / Slice paths, pre-1.13 sessions).
+ * @param {object|null|undefined} obj
+ * @param {object|null|undefined} [asset]
+ * @returns {'file'|'user'|'default'}
+ */
+export function ratioSourceOf(obj, asset = null) {
+  if (RATIO_SOURCES.has(obj?.ratioSource)) return obj.ratioSource;
+  return seedRatioSource(asset?.modelRatio);
+}
+
+/**
+ * "Set scale": relabel the objects' declared ratio WITHOUT touching geometry
+ * or transforms (the STL/OBJ case — "this kit is 1:72"). Marks every target
+ * `ratioSource: 'user'`. One undo step restores each prior ratio + source.
+ */
+export class SetScaleLabelCommand {
+  constructor(objectIds, nextRatio) {
+    this._ids = [...new Set(objectIds)];
+    this._next = _positiveRatio(nextRatio);
+    const objects = getState().scene.objects;
+    this._prev = {};
+    for (const id of this._ids) {
+      if (!objects[id]) continue;
+      this._prev[id] = { ratio: _positiveRatio(objects[id].ratio), ratioSource: objects[id].ratioSource };
+    }
+    this.label = t('history.setScaleLabel', { ratio: _fmtRatioLabel(this._next) });
+  }
+  execute() {
+    _writeRatioFields(Object.fromEntries(Object.keys(this._prev).map(id => [id, { ratio: this._next, ratioSource: RATIO_SOURCE.USER }])));
+    markDirty();
+  }
+  undo() { _writeRatioFields(this._prev); }
+}
+
+function _writeRatioFields(byId) {
+  setState(s => {
+    const objects = { ...s.scene.objects };
+    for (const [id, f] of Object.entries(byId)) {
+      if (!objects[id]) continue;
+      const next = { ...objects[id], ratio: f.ratio };
+      if (f.ratioSource === undefined) delete next.ratioSource; else next.ratioSource = f.ratioSource;
+      objects[id] = next;
+    }
+    return { ...s, scene: { ...s.scene, objects } };
+  }, SILENT);
+  // No OBJECT_UPDATED: geometry is untouched, so validation must not go
+  // stale. Panels showing the label re-render on HISTORY_* (push/undo/redo).
 }
 
 function _positiveRatio(v) {
@@ -141,7 +215,7 @@ function _positiveRatio(v) {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
-function _rescaleObject(id, fromRatio, toRatio) {
+function _rescaleObject(id, fromRatio, toRatio, ratioSource) {
   const to = _positiveRatio(toRatio);
   let updatedMesh = false;
   if (_positiveRatio(fromRatio) !== to) {
@@ -163,11 +237,16 @@ function _rescaleObject(id, fromRatio, toRatio) {
       ...s,
       scene: {
         ...s.scene,
-        objects: { ...s.scene.objects, [id]: { ...obj, ratio: to } },
+        objects: { ...s.scene.objects, [id]: _withRatioSource({ ...obj, ratio: to }, ratioSource) },
       },
     };
   }, SILENT);
   if (updatedMesh) dispatch(EVENTS.OBJECT_UPDATED, { meshId: id });
+}
+
+function _withRatioSource(obj, ratioSource) {
+  if (ratioSource === undefined) { const { ratioSource: _drop, ...rest } = obj; return rest; }
+  return { ...obj, ratioSource };
 }
 
 // Position policy for a rescale (task 1.14). Never scales about the world

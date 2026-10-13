@@ -2,8 +2,9 @@ import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { Selection } from '../core/Selection.js';
-import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, RenameCollectionCommand, ReparentCommand, UnparentCommand } from '../core/HistoryManager.js';
+import { push, beginBatch, endBatch, VisibilityCommand, LockCommand, RenameCommand, PrintPartCommand, ShaderAssignCommand, ReparentCommand, UnparentCommand } from '../core/HistoryManager.js';
 import { validateParentChange } from '../core/hierarchy/HierarchyIntegrity.js';
+import { cascadeObjectIds, cascadeLockIds, groupAnyVisible } from '../core/hierarchy/GroupCascade.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
@@ -11,14 +12,12 @@ import { repairWithOverlay } from './RepairFeedback.js';
 
 let _root  = null;
 let _listEl = null;
+let _footerEl = null;
 let _onContextMenu = null;
 let _searchQuery = '';
-// "Show internal parts": read-only rows for the parts of a multi-material
-// object under their lead (owner decision 2026-09-18). Per-user, never in
-// the .mixo.
-const PARTS_KEY = 'mx-outliner-parts-v1';
-let _showParts = false;
-try { _showParts = localStorage.getItem(PARTS_KEY) === '1'; } catch { /* private mode */ }
+// Objects whose material-part rows are disclosed (session-only; parts are
+// read-only rows under their lead, owner decision 2026-09-18).
+const _openParts = new Set();
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
 // textContent through t(). MUST use textContent — translations are plain text,
@@ -31,6 +30,8 @@ const SHADER_DRAG_MIME = 'application/x-mixomesh-shader';
 const HIERARCHY_DRAG_MIME = 'application/x-mixomesh-hierarchy-node';
 let _draggingNode = null;
 
+// Collections are no longer an Outliner level (Decision 2): the schema stays
+// for provenance, so their events are not subscribed here.
 const _SUBSCRIBE = [
   EVENTS.ASSET_INSTANTIATED,
   EVENTS.OBJECT_REMOVED,
@@ -44,12 +45,8 @@ const _SUBSCRIBE = [
   EVENTS.OBJECT_UPDATED,
   EVENTS.SELECTION_CHANGED,
   EVENTS.PROJECT_LOADED,
-  EVENTS.VALIDATION_COMPLETE,   // status icons read the A6 cache
+  EVENTS.VALIDATION_COMPLETE,   // status pills read the A6 cache
   EVENTS.TRANSFORM_COMMITTED,   // stale-marking after moves
-  EVENTS.COLLECTION_CREATED,
-  EVENTS.COLLECTION_REMOVED,
-  EVENTS.COLLECTION_RENAMED,
-  EVENTS.COLLECTION_MEMBERSHIP,
 ];
 
 // ── Init ─────────────────────────────────────────────────
@@ -60,23 +57,15 @@ export function init() {
   _root.innerHTML = `
     <div class="ol-header">
       <span class="ol-title" data-i18n-key="panel.outliner.title">Outliner</span>
-      <button type="button" class="ol-icon-btn ol-parts-toggle${_showParts ? ' ol-parts-on' : ''}" id="ol-show-parts"
-              aria-pressed="${_showParts ? 'true' : 'false'}" title="${escapeAttr(t('outliner.showParts'))}"
-              aria-label="${escapeAttr(t('outliner.showParts'))}">${icon('Layers', { width: 13, height: 13 })}</button>
     </div>
     <input class="ol-search" id="ol-search" type="search"
            placeholder="${escapeAttr(t('outliner.searchPlaceholder'))}"
            aria-label="${escapeAttr(t('outliner.searchLabel'))}">
-    <div class="ol-list" id="ol-list" role="tree" data-i18n-aria-label="outliner.sceneObjects"></div>
+    <div class="ol-list" id="ol-list" role="tree" aria-multiselectable="true" data-i18n-aria-label="outliner.sceneObjects"></div>
+    <div class="ol-footer" id="ol-footer" aria-live="polite"></div>
   `;
   _listEl = _root.querySelector('#ol-list');
-  _root.querySelector('#ol-show-parts').addEventListener('click', (e) => {
-    _showParts = !_showParts;
-    e.currentTarget.classList.toggle('ol-parts-on', _showParts);
-    e.currentTarget.setAttribute('aria-pressed', _showParts ? 'true' : 'false');
-    try { localStorage.setItem(PARTS_KEY, _showParts ? '1' : '0'); } catch { /* private mode */ }
-    _render();
-  });
+  _footerEl = _root.querySelector('#ol-footer');
   _root.querySelector('#ol-search').addEventListener('input', event => {
     _searchQuery = event.target.value;
     _render();
@@ -107,59 +96,27 @@ export function setContextMenuHandler(fn) {
 
 // ── Render ───────────────────────────────────────────────
 
+function _subgroupsOf(groupId, groups) {
+  return Object.values(groups).filter(g => g.parentId === groupId);
+}
+
 function _render() {
   if (!_listEl) return;
   const { objects, groups, collections } = getState().scene;
   const collapsed = getState().ui.outlinerCollapsed ?? {};
 
-  const groupCol = _computeGroupCollections(groups, objects);
-  const topGroups = Object.values(groups).filter(g => !g.parentId);
-
-  // Partition top-level groups by collection homogeneity.
-  const groupsByCol = new Map();        // collectionId → group[]
-  const mixedGroups = [];
-  const rootGroups = [];
-  for (const g of topGroups) {
-    const c = groupCol.get(g.id);
-    if (c === 'mixed') { mixedGroups.push(g); continue; }
-    if (c == null) { rootGroups.push(g); continue; }
-    if (!groupsByCol.has(c)) groupsByCol.set(c, []);
-    groupsByCol.get(c).push(g);
-  }
-
-  // Partition orphan (no parent group) objects by collection.
-  const objsByCol = new Map();
-  const uncolObjs = [];
-  for (const o of Object.values(objects)) {
-    if (!shouldDisplayObject(o)) continue;
-    if (o.parentId) continue;
-    const c = o.collectionId;
-    if (!c || !collections[c]) { uncolObjs.push(o); continue; }
-    if (!objsByCol.has(c)) objsByCol.set(c, []);
-    objsByCol.get(c).push(o);
-  }
-
+  // Plain tree: top-level groups, then top-level objects (Decision 2: no
+  // collection rows — an import that yielded several objects is a Group).
   const parts = [];
-  for (const col of Object.values(collections)) {
-    const memberGroups = groupsByCol.get(col.id) ?? [];
-    const memberObjs   = objsByCol.get(col.id)   ?? [];
-    if (!memberGroups.length && !memberObjs.length) continue;     // hide empty collection
-    // A file that yielded ONE object is that object: one top-level row with
-    // a file badge (provenance stays on the SceneObject for relink), not a
-    // folder row above it (owner decision 2026-09-18). Files with several
-    // objects keep their collection row.
-    if (!memberGroups.length && memberObjs.length === 1) {
-      parts.push(_renderObjectRow(memberObjs[0], 0, col.name));
-      continue;
-    }
-    parts.push(_renderCollectionBranch(col, memberGroups, memberObjs, groups, objects, collapsed));
+  for (const g of Object.values(groups)) {
+    if (!g.parentId) parts.push(_renderGroupBranch(g, groups, objects, collapsed, 0));
   }
-  // Mixed-collection groups render at outliner root with a [Mixed] badge.
-  for (const g of mixedGroups) parts.push(_renderGroupBranch(g, groups, objects, collapsed, 0, /*mixed*/ true));
-  for (const g of rootGroups)  parts.push(_renderGroupBranch(g, groups, objects, collapsed, 0, false));
-  // Uncollected orphan objects render at root.
-  for (const o of uncolObjs)   parts.push(_renderObjectRow(o, 0));
+  for (const o of Object.values(objects)) {
+    if (!shouldDisplayObject(o) || o.parentId) continue;
+    parts.push(_renderObjectRow(o, 0, collections));
+  }
 
+  _renderFooter(objects, groups);
   if (!parts.length) {
     _listEl.innerHTML = `<div class="ol-empty">${_escape(t('outliner.empty'))}</div>`;
     return;
@@ -170,12 +127,25 @@ function _render() {
   _applySearchFilter(objects, groups, collections);
 }
 
+function _renderFooter(objects, groups) {
+  if (!_footerEl) return;
+  const nObjects = Object.values(objects).filter(shouldDisplayObject).length;
+  const nGroups = Object.keys(groups).length;
+  const nSel = getState().selection.selectedIds.length;
+  _footerEl.innerHTML = `<span>${_escape(t('outliner.footerObjects', { n: nObjects }))} · ${_escape(t('outliner.footerGroups', { n: nGroups }))}</span>`
+    + `<span>${nSel ? _escape(t('outliner.footerSelected', { n: nSel })) : ''}</span>`;
+}
+
 function _applySearchFilter(objects, groups, collections) {
-  const query = _searchQuery.trim().toLocaleLowerCase();
+  let query = _searchQuery.trim().toLocaleLowerCase();
   if (!query) {
     _listEl.querySelectorAll('.ol-row').forEach(row => { row.hidden = false; });
     return;
   }
+  // `file:name` filters by the import an object came from (collections are no
+  // longer rows, Decision 2, but provenance stays searchable).
+  const fileOnly = query.startsWith('file:');
+  if (fileOnly) query = query.slice(5).trim();
   const visibleIds = new Set();
   const addGroupPath = (groupId) => {
     const seen = new Set();
@@ -188,192 +158,134 @@ function _applySearchFilter(objects, groups, collections) {
   };
   for (const object of Object.values(objects)) {
     if (!shouldDisplayObject(object)) continue;
-    const fileName = String(collections[object.collectionId]?.name ?? '').toLocaleLowerCase();
-    if (!String(object.name ?? '').toLocaleLowerCase().includes(query) && !fileName.includes(query)) continue;
+    const fileName = String(collections?.[object.collectionId]?.name ?? '').toLocaleLowerCase();
+    const hit = fileOnly
+      ? fileName.includes(query)
+      : String(object.name ?? '').toLocaleLowerCase().includes(query) || fileName.includes(query);
+    if (!hit) continue;
     visibleIds.add(object.id);
-    if (object.collectionId) visibleIds.add(object.collectionId);
     addGroupPath(object.parentId);
   }
-  const groupCollections = _computeGroupCollections(groups, objects);
-  for (const group of Object.values(groups)) {
-    if (!String(group.name ?? '').toLocaleLowerCase().includes(query)) continue;
-    addGroupPath(group.id);
-    const signature = groupCollections.get(group.id);
-    if (signature && signature !== 'mixed') visibleIds.add(signature);
-  }
-  for (const collection of Object.values(collections)) {
-    if (String(collection.name ?? '').toLocaleLowerCase().includes(query)) visibleIds.add(collection.id);
+  if (!fileOnly) {
+    for (const group of Object.values(groups)) {
+      if (String(group.name ?? '').toLocaleLowerCase().includes(query)) addGroupPath(group.id);
+    }
   }
   _listEl.querySelectorAll('.ol-row').forEach(row => {
-    row.hidden = !visibleIds.has(row.dataset.id);
+    const id = row.dataset.kind === 'part' ? row.dataset.lead : row.dataset.id;
+    row.hidden = !visibleIds.has(id);
   });
 }
 
-/**
- * For every group, compute the single collection its leaf meshes belong to,
- * or 'mixed' when leaves span multiple collections, or null when all leaves
- * are uncollected.
- */
-function _computeGroupCollections(allGroups, allObjects) {
-  const out = new Map();
-  const groupArr = Object.values(allGroups);
-  for (const g of groupArr) {
-    const colls = new Set();
-    const stack = [g];
-    while (stack.length) {
-      const cur = stack.pop();
-      for (const id of cur.childIds ?? []) {
-        const obj = allObjects[id];
-        if (obj && !shouldDisplayObject(obj)) continue;
-        if (obj?.collectionId) colls.add(obj.collectionId);
-        else if (obj)          colls.add('__none__');
-      }
-      for (const sg of groupArr) if (sg.parentId === cur.id) stack.push(sg);
-    }
-    colls.delete('__none__');
-    if (colls.size === 0) out.set(g.id, null);
-    else if (colls.size === 1) out.set(g.id, [...colls][0]);
-    else out.set(g.id, 'mixed');
-  }
-  return out;
-}
-
-function _renderCollectionBranch(col, memberGroups, memberObjs, allGroups, allObjects, collapsed) {
-  const isCollapsed = !!collapsed[col.id];
-  const count = memberGroups.length + memberObjs.length;
-  const twirl = `<span class="ol-twirl">${icon(isCollapsed ? 'ChevronRight' : 'ChevronDown', { width: 12, height: 12 })}</span>`;
-  const header = `
-    <div class="ol-row ol-row-collection"
-         data-id="${escapeAttr(col.id)}"
-         data-kind="collection"
-         data-has-children="true"
-         role="treeitem"
-         tabindex="0"
-         aria-expanded="${isCollapsed ? 'false' : 'true'}"
-         aria-selected="false"
-         style="padding-left:0px">
-      ${twirl}
-      <span class="ol-icon" title="${escapeAttr(t('outliner.typeImport'))}">${icon('Package', { width: 14, height: 14 })}</span>
-      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(col.name)}</span><span class="ol-badge" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
-    </div>
-  `;
-  if (isCollapsed) return header;
-  let html = header;
-  for (const g of memberGroups) html += _renderGroupBranch(g, allGroups, allObjects, collapsed, 1, false);
-  for (const o of memberObjs)   html += _renderObjectRow(o, 1);
-  return html;
-}
-
-function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth, mixed = false) {
+function _renderGroupBranch(group, allGroups, allObjects, collapsed, depth) {
   const isCollapsed = !!collapsed[group.id];
   const children = (group.childIds ?? []).map(id => allObjects[id]).filter(shouldDisplayObject);
-  const subgroups = Object.values(allGroups).filter(g => g.parentId === group.id);
-  const empty = children.length + subgroups.length === 0;
-  const badges = [
-    mixed ? `<span class="ol-mixed-badge">${_escape(t('outliner.mixed'))}</span>` : '',
-    empty ? `<span class="ol-empty-badge">${_escape(t('outliner.emptyGroup'))}</span>` : '',
-  ].join('');
+  const subgroups = _subgroupsOf(group.id, allGroups);
+  const count = children.length + subgroups.length;
+  const scene = getState().scene;
 
   let html = _renderRow({
     id: group.id,
     kind: 'group',
     name: group.name,
-    nameSuffix: badges,
-    visible: true,
-    locked: false,
+    count,
+    visible: groupAnyVisible(group.id, scene),
+    locked: !!group.locked,
+    inheritedLock: !group.locked && Selection.isEffectivelyLocked(group.id),
     depth,
-    hasChildren: !empty,
+    hasChildren: count > 0,
     isCollapsed,
-    iconName: 'GitBranch',
+    iconName: !isCollapsed && count > 0 ? 'FolderOpen' : 'Folder',
     typeTitle: t('outliner.typeGroup'),
   });
 
   if (!isCollapsed) {
     for (const sg of subgroups) html += _renderGroupBranch(sg, allGroups, allObjects, collapsed, depth + 1);
-    for (const c of children)   html += _renderObjectRow(c, depth + 1);
+    for (const c of children)   html += _renderObjectRow(c, depth + 1, scene.collections);
   }
   return html;
 }
 
-function _renderObjectRow(obj, depth, fileName = null) {
-  const fileBadge = fileName
-    ? `<span class="ol-file-badge" title="${escapeAttr(t('outliner.fromFile', { file: fileName }))}">${icon('Package', { width: 11, height: 11 })}</span>`
-    : '';
-  let html = _renderObjectRowOnly(obj, depth, fileBadge);
-  if (_showParts) {
-    const objects = getState().scene.objects;
-    for (const partId of logicalObjectPartIds(obj.id, objects)) {
-      if (partId === obj.id) continue;
-      const part = objects[partId];
-      if (!part) continue;
+function _renderObjectRow(obj, depth, collections = {}) {
+  const objects = getState().scene.objects;
+  const partIds = logicalObjectPartIds(obj.id, objects).filter(id => id !== obj.id && objects[id]);
+  const partCount = partIds.length ? partIds.length + 1 : 0;
+  const open = partCount > 0 && _openParts.has(obj.id);
+  const fileName = collections?.[obj.collectionId]?.name ?? '';
+  let html = _renderRow({
+    id: obj.id,
+    kind: 'object',
+    name: obj.name,
+    visible: obj.visible !== false,
+    locked: !!obj.locked,
+    inheritedLock: !obj.locked && Selection.isEffectivelyLocked(obj.id),
+    isPrintPart: !!obj.isPrintPart,
+    depth,
+    hasChildren: partCount > 0,
+    isCollapsed: !open,
+    partCount,
+    pill: _statusPill(obj.id),
+    iconName: obj.isGhost ? 'CircleAlert' : (obj.isUnlinked ? 'Link' : 'Box'),
+    typeTitle: fileName ? t('outliner.fromFile', { file: fileName }) : t('outliner.typeObject'),
+    isGhost: obj.isGhost,
+    isUnlinked: obj.isUnlinked,
+  });
+  if (open) {
+    for (const partId of partIds) {
       html += `
     <div class="ol-row ol-row-part" data-id="${escapeAttr(partId)}" data-kind="part" data-lead="${escapeAttr(obj.id)}"
          role="treeitem" tabindex="-1" draggable="false" aria-selected="false"
          title="${escapeAttr(t('outliner.internalPart', { name: obj.name }))}"
-         style="padding-left:${(depth + 1) * 14}px">
+         style="--ol-depth:${depth + 1}">
       <span class="ol-twirl ol-twirl-empty"></span>
       <span class="ol-icon">${icon('Box', { width: 14, height: 14 })}</span>
-      <span class="ol-name-cell"><span class="ol-name">${_escape(part.name)}</span></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
-      <span class="ol-icon-btn ol-print ol-print-placeholder"></span>
+      <span class="ol-name-cell"><span class="ol-name">${_escape(objects[partId].name)}</span></span>
     </div>`;
     }
   }
   return html;
 }
 
-function _renderObjectRowOnly(obj, depth, fileBadge) {
-  return _renderRow({
-    id: obj.id,
-    kind: 'object',
-    name: obj.name,
-    nameSuffix: fileBadge + _validationBadge(obj.id),
-    visible: obj.visible !== false,
-    locked: !!obj.locked,
-    isPrintPart: !!obj.isPrintPart,
-    depth,
-    hasChildren: false,
-    isCollapsed: false,
-    iconName: obj.isGhost ? 'CircleAlert' : (obj.isUnlinked ? 'Link' : 'Box'),
-    typeTitle: t('outliner.typeObject'),
-    isGhost: obj.isGhost,
-    isUnlinked: obj.isUnlinked,
-  });
-}
-
-// Validation status badge from the A6 cache (Blueprint §13 Outliner row
-// icons). Static trusted markup beside the escaped name — title carries the
-// first message, escaped.
-function _validationBadge(meshId) {
+// Validation status pill from the A6 cache (Blueprint §13 Outliner row
+// status). Static trusted markup; the title carries the first message, escaped.
+function _statusPill(meshId) {
   const e = getState().scene.validation?.[meshId];
   if (!e || !e.results.length) return '';
   const hasErr = e.results.some(r => r.severity === 'error');
   const fixable = e.results.some(r => r.autoFixAvailable && !r.fixed);
-  const name = hasErr ? 'CircleAlert' : 'AlertTriangle';
-  const cls = `ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}${fixable ? ' ol-validation-fixable' : ''}`;
+  const cls = `ol-pill ol-validation ${hasErr ? 'ol-validation-error' : 'ol-validation-warning'}${e.stale ? ' ol-validation-stale' : ''}${fixable ? ' ol-validation-fixable' : ''}`;
   const baseMessage = `${e.stale ? `${t('outliner.stalePrefix')} ` : ''}${e.results[0]?.message ?? t('outliner.validationIssue')}`;
   const title = escapeAttr(fixable ? `${baseMessage} — ${t('outliner.repairHint')}` : baseMessage);
+  const label = t(fixable ? 'outliner.statusRepair' : 'outliner.statusIssue');
+  const glyph = fixable ? icon('Wrench', { width: 10, height: 10 }) : icon(hasErr ? 'CircleAlert' : 'AlertTriangle', { width: 10, height: 10 });
+  const open = fixable ? 'button type="button"' : 'span';
+  const close = fixable ? 'button' : 'span';
   const dataAction = fixable ? ' data-action="repair"' : '';
-  return `<span class="${cls}" title="${title}"${dataAction}>${icon(name, { width: 11, height: 11 })}</span>`;
+  return `<${open} class="${cls}" title="${title}"${dataAction}>${glyph}<span>${_escape(label)}</span></${close}>`;
 }
 
-function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintPart, depth, hasChildren, isCollapsed, iconName, typeTitle = '', isGhost, isUnlinked }) {
-  const indent  = depth * 14;
-  const twirl   = hasChildren
+function _renderRow({ id, kind, name, count = 0, partCount = 0, pill = '', visible, locked, inheritedLock = false, isPrintPart, depth, hasChildren, isCollapsed, iconName, typeTitle = '', isGhost, isUnlinked }) {
+  const twirl = hasChildren
     ? `<span class="ol-twirl">${icon(isCollapsed ? 'ChevronRight' : 'ChevronDown', { width: 12, height: 12 })}</span>`
     : `<span class="ol-twirl ol-twirl-empty"></span>`;
-  const ghostCls = isGhost ? 'ol-ghost' : (isUnlinked ? 'ol-unlinked' : '');
-  const lockedCls = locked ? 'ol-locked' : '';
-  const hiddenCls = !visible ? 'ol-hidden' : '';
+  const cls = [
+    isGhost ? 'ol-ghost' : (isUnlinked ? 'ol-unlinked' : ''),
+    locked ? 'ol-locked' : '',
+    inheritedLock ? 'ol-locked-inherited' : '',
+    !visible ? 'ol-hidden' : '',
+    kind === 'object' && !isPrintPart ? 'ol-print-off' : '',
+  ].filter(Boolean).join(' ');
+  const badge = kind === 'group'
+    ? `<span class="ol-badge ol-num" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span>`
+    : '';
+  const partsPill = partCount > 0
+    ? `<button type="button" class="ol-pill ol-parts-pill" data-action="parts" title="${escapeAttr(t('outliner.showParts'))}" aria-label="${escapeAttr(t('outliner.showParts'))}">${_escape(t('outliner.partsLabel'))} <span class="ol-num">${partCount}</span></button>`
+    : '';
   const printBtn = kind === 'object'
-    ? `<button class="ol-icon-btn ol-print ${isPrintPart ? 'ol-print-on' : ''}" type="button" data-action="print" title="${escapeAttr(t(isPrintPart ? 'outliner.removeFromPrint' : 'outliner.markPrintPart'))}">${icon('Printer', { width: 13, height: 13 })}</button>`
-    : `<span class="ol-icon-btn ol-print ol-print-placeholder"></span>`;
+    ? `<button class="ol-icon-btn ol-print ${isPrintPart ? 'ol-print-on' : ''}" type="button" data-action="print" aria-pressed="${isPrintPart ? 'true' : 'false'}" title="${escapeAttr(t(isPrintPart ? 'outliner.removeFromPrint' : 'outliner.markPrintPart'))}">${icon('Printer', { width: 13, height: 13 })}</button>`
+    : '';
   return `
-    <div class="ol-row ${ghostCls} ${lockedCls} ${hiddenCls}"
+    <div class="ol-row ol-row-${escapeAttr(kind)} ${cls}"
          data-id="${escapeAttr(id)}"
          data-kind="${escapeAttr(kind)}"
          data-has-children="${hasChildren ? 'true' : 'false'}"
@@ -382,13 +294,16 @@ function _renderRow({ id, kind, name, nameSuffix = '', visible, locked, isPrintP
          draggable="${kind === 'object' || kind === 'group' ? 'true' : 'false'}"
          ${hasChildren ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''}
          aria-selected="false"
-         style="padding-left:${indent}px">
+         style="--ol-depth:${depth}">
       ${twirl}
       <span class="ol-icon" title="${escapeAttr(typeTitle)}">${icon(iconName, { width: 14, height: 14 })}</span>
-      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(name)}</span>${nameSuffix}</span>
-      <button class="ol-icon-btn ol-vis"  type="button" data-action="vis"  title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
-      <button class="ol-icon-btn ol-lock" type="button" data-action="lock" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
-      ${printBtn}
+      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(name)}</span>${kind === 'group' && count === 0 ? `<span class="ol-empty-badge">${_escape(t('outliner.emptyGroup'))}</span>` : ''}</span>
+      <span class="ol-trail">
+        ${pill}${partsPill}${badge}
+        <button class="ol-icon-btn ol-vis" type="button" data-action="vis" aria-pressed="${visible ? 'false' : 'true'}" title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
+        <button class="ol-icon-btn ol-lock" type="button" data-action="lock" aria-pressed="${locked ? 'true' : 'false'}" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
+        ${printBtn}
+      </span>
     </div>
   `;
 }
@@ -444,20 +359,25 @@ function _isValidRootDrop(node) {
   return !!currentParent;
 }
 
-function _toggleVisibility(meshId) {
-  const obj = getState().scene.objects[meshId];
-  if (!obj) return;
-  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
-  const prev = Object.fromEntries(ids.map(id => [id, !!getState().scene.objects[id]?.visible]));
-  push(new VisibilityCommand(ids, prev, !obj.visible));
+// Hide cascades down a group (any visible descendant hides the whole group,
+// else show them all); lock lives on the group node and cascades by ancestry.
+function _toggleVisibility(id) {
+  const scene = getState().scene;
+  const ids = cascadeObjectIds([id], scene);
+  if (!ids.length) return;
+  const isGroup = !scene.objects[id] && !!scene.groups[id];
+  const show = isGroup ? !groupAnyVisible(id, scene) : !scene.objects[id]?.visible;
+  const prev = Object.fromEntries(ids.map(i => [i, !!scene.objects[i]?.visible]));
+  push(new VisibilityCommand(ids, prev, show));
 }
 
-function _toggleLock(meshId) {
-  const obj = getState().scene.objects[meshId];
-  if (!obj) return;
-  const ids = logicalObjectPartIds(meshId, getState().scene.objects);
-  const prev = Object.fromEntries(ids.map(id => [id, !!getState().scene.objects[id]?.locked]));
-  push(new LockCommand(ids, prev, !obj.locked));
+function _toggleLock(id) {
+  const scene = getState().scene;
+  const ids = cascadeLockIds([id], scene);
+  if (!ids.length) return;
+  const own = scene.objects[id] ?? scene.groups[id];
+  const prev = Object.fromEntries(ids.map(i => [i, !!(scene.objects[i] ?? scene.groups[i])?.locked]));
+  push(new LockCommand(ids, prev, !own?.locked));
 }
 
 function _togglePrintPart(meshId) {
@@ -466,6 +386,7 @@ function _togglePrintPart(meshId) {
   const ids = logicalObjectPartIds(meshId, getState().scene.objects);
   beginPrintPartBatch(ids, !obj.isPrintPart);
 }
+
 
 async function _repairFromOutliner(meshId) {
   const obj = getState().scene.objects[meshId];
@@ -498,17 +419,22 @@ function _setCollapsed(id, collapsed) {
   _render();
 }
 
+function _toggleParts(id) {
+  if (_openParts.has(id)) _openParts.delete(id); else _openParts.add(id);
+  _render();
+}
+
 function _revealActiveObject() {
   reveal(getState().selection.activeId);
 }
 
-export function reveal(objectId) {
+/** Expand the ancestors of an object or group row and scroll it into view. */
+export function reveal(nodeId) {
   const state = getState();
-  const object = state.scene.objects[objectId];
-  if (!object) { _render(); return; }
+  const node = state.scene.objects[nodeId] ?? state.scene.groups[nodeId];
+  if (!node) { _render(); return; }
   const revealIds = [];
-  if (object.collectionId) revealIds.push(object.collectionId);
-  let parentId = object.parentId;
+  let parentId = node.parentId;
   const seen = new Set();
   while (parentId && !seen.has(parentId)) {
     seen.add(parentId);
@@ -524,19 +450,19 @@ export function reveal(objectId) {
   }
   _render();
   requestAnimationFrame(() => {
-    const row = _listEl?.querySelector(`[data-id="${CSS.escape(object.id)}"]`);
+    const row = _listEl?.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
     row?.scrollIntoView({ block: 'nearest' });
   });
 }
 
-/** Inline-rename the active object's row (F2 from anywhere in the viewport/outliner). */
+/** Inline-rename the active object's or group's row (F2, context-menu Rename). */
 export function renameActive() {
   const id = getState().selection.activeId;
   if (!id || !_listEl) return false;
   reveal(id);   // expand collapsed ancestors so the row exists
   const row = _listEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
   if (!row || row.dataset.kind === 'part' || row.querySelector('.ol-rename-input')) return false;
-  _beginRename(row, id, row.dataset.kind);
+  _beginRename(row, id);
   return true;
 }
 
@@ -564,12 +490,14 @@ function _onListClick(e) {
     if (action === 'lock')   _toggleLock(id);
     if (action === 'print')  _togglePrintPart(id);
     if (action === 'repair') _repairFromOutliner(id);
+    if (action === 'parts')  _toggleParts(id);
     return;
   }
   const twirl = e.target.closest?.('.ol-twirl');
   if (twirl && !twirl.classList.contains('ol-twirl-empty')) {
     e.stopPropagation();
-    _toggleCollapsed(id);
+    if (row.dataset.kind === 'group') _toggleCollapsed(id);
+    else _toggleParts(id);
     return;
   }
   _activateRow(row, e);
@@ -580,7 +508,7 @@ function _onListDblClick(e) {
   if (!row || row.dataset.kind === 'part') return;   // parts are read-only
   const nameEl = row.querySelector('[data-name]');
   if (!nameEl?.contains(e.target)) return;
-  _beginRename(row, row.dataset.id, row.dataset.kind);
+  _beginRename(row, row.dataset.id);
 }
 
 function _onListContextMenu(e) {
@@ -591,11 +519,10 @@ function _onListContextMenu(e) {
   const kind = row.dataset.kind === 'part' ? 'object' : row.dataset.kind;
   e.preventDefault();
   e.stopPropagation();
-  if (kind === 'object' && !Selection.getSelectedIds().includes(id)) {
-    Selection.set([id], id);
-  }
+  if (!Selection.getSelectedIds().includes(id)) Selection.set([id], id);
   if (_onContextMenu) _onContextMenu({ x: e.clientX, y: e.clientY, source: 'outliner', targetId: id, targetKind: kind });
 }
+
 
 function _onListDragStart(e) {
   const row = _rowFromEvent(e);
@@ -705,55 +632,30 @@ function _onListKeyDown(e) {
   } else if (e.key === 'F2') {
     e.preventDefault();
     e.stopPropagation();   // handled here; keep the global F2 binding from firing a second rename
-    _beginRename(row, row.dataset.id, row.dataset.kind);
+    if (row.dataset.kind !== 'part') _beginRename(row, row.dataset.id);
   } else if (row.dataset.hasChildren === 'true' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();
-    _setCollapsed(row.dataset.id, e.key === 'ArrowLeft');
+    const collapse = e.key === 'ArrowLeft';
+    if (row.dataset.kind === 'group') _setCollapsed(row.dataset.id, collapse);
+    else if (_openParts.has(row.dataset.id) === collapse) _toggleParts(row.dataset.id);
   }
 }
 
 function _activateRow(row, e = {}) {
   const id = row.dataset.id;
   const kind = row.dataset.kind;
+  if (kind !== 'object' && kind !== 'group') return;
   // Plain row click: scope = the row's parent group (plan §4.5, task 3.2).
   const plain = !(e.ctrlKey || e.metaKey || e.shiftKey);
-  if (plain && (kind === 'object' || kind === 'group')) Selection.scopeToParentOf(id);
-  if (kind === 'object') {
-    if (e.ctrlKey || e.metaKey) Selection.toggle(id);
-    else if (e.shiftKey)        Selection.add(id);
-    else                        Selection.set([id], id);
-  } else if (kind === 'group') {
-    _selectGroup(id);
-  } else if (kind === 'collection') {
-    _selectCollection(id);
-  }
+  if (plain) Selection.scopeToParentOf(id);
+  // A group row selects the group itself (a rigid unit, plan §4.5), never its
+  // children; Selection accepts both id kinds (2.1).
+  if (e.ctrlKey || e.metaKey) Selection.toggle(id);
+  else if (e.shiftKey)        Selection.add(id);
+  else                        Selection.set([id], id);
 }
 
-function _selectGroup(groupId) {
-  // Selecting a group selects all its descendant objects.
-  const { objects, groups } = getState().scene;
-  const g = groups[groupId];
-  if (!g) return;
-  const ids = [];
-  const stack = [g];
-  while (stack.length) {
-    const cur = stack.pop();
-    for (const id of cur.childIds ?? []) {
-      if (objects[id] && shouldDisplayObject(objects[id])) ids.push(id);
-    }
-    for (const sg of Object.values(groups)) if (sg.parentId === cur.id) stack.push(sg);
-  }
-  if (ids.length) Selection.set(ids, ids[ids.length - 1]);
-}
-
-function _selectCollection(collectionId) {
-  // Selecting a collection selects every mesh tagged with it.
-  const { objects } = getState().scene;
-  const ids = Object.values(objects).filter(o => o.collectionId === collectionId && shouldDisplayObject(o)).map(o => o.id);
-  if (ids.length) Selection.set(ids, ids[ids.length - 1]);
-}
-
-function _beginRename(rowEl, id, kind) {
+function _beginRename(rowEl, id) {
   const nameEl = rowEl.querySelector('[data-name]');
   const cur = nameEl.textContent;
   const input = document.createElement('input');
@@ -772,11 +674,7 @@ function _beginRename(rowEl, id, kind) {
     replacement.textContent = newName || cur;
     input.replaceWith(replacement);
     if (!apply || !newName || newName === cur) return;
-    if (kind === 'collection') {
-      _renameCollection(id, newName);
-    } else {
-      push(new RenameCommand(id, cur, newName));
-    }
+    push(new RenameCommand(id, cur, newName));
   };
 
   input.addEventListener('keydown', (e) => {
@@ -785,12 +683,6 @@ function _beginRename(rowEl, id, kind) {
     if (e.key === 'Escape') { e.preventDefault(); commit(false); }
   });
   input.addEventListener('blur', () => commit(true));
-}
-
-function _renameCollection(collectionId, newName) {
-  const prev = getState().scene.collections?.[collectionId]?.name;
-  if (prev == null || prev === newName) return;
-  push(new RenameCollectionCommand(collectionId, prev, newName));   // undoable (L30)
 }
 
 function _applySelectionHighlight() {
@@ -803,4 +695,4 @@ function _applySelectionHighlight() {
   });
 }
 
-export const Outliner = { init, setContextMenuHandler, reveal };
+export const Outliner = { init, setContextMenuHandler, reveal, renameActive };

@@ -5,6 +5,8 @@ import { Selection } from '../core/Selection.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
+import { tr } from './lib/tr.js';
+import { CursorPanel } from './CursorPanel.js';
 
 /**
  * Floating Fusion 360-style toolbar anchored bottom-centre of the viewport.
@@ -14,6 +16,7 @@ import { t } from '../i18n/index.js';
  *   B. Pivot mode      — dropdown: Active / Median / Cursor / World (`.` cycles)
  *   ~. Orientation     — Local ↔ World (toggle)
  *   C. Camera mode     — dropdown: Free / Follow Active / World Origin
+ *   D. Arrange         — opens the Arrange drawer (#cursor-panel; overhaul 0.7)
  *
  * Overhaul 5.6 (plan A9 rows 134/136): pivot + camera follow are native
  * <select>s reusing the panel select style (`pp-preset-select`) — a
@@ -54,6 +57,7 @@ export function init() {
     EVENTS.PROJECT_LOADED,
     EVENTS.LOCALE_CHANGED,
   ]) subscribe(ev, _render);
+  document.addEventListener('mx:arrange-toggled', _render);
 }
 
 function _render() {
@@ -63,6 +67,8 @@ function _render() {
   const gizmoSpace = s.gizmo?.space              ?? 'world';
   const pivot      = s.selection?.pivotMode      ?? 'median';
   const follow     = s.scene?.camera?.followMode ?? 'free';
+  const arrangeOpen  = CursorPanel.isOpen();
+  const arrangeTitle = tr('arrange.panelTitleWithShortcut', 'Arrange (Shift+N)');
 
   _root.innerHTML = `
     <div class="vt-group" data-group="gizmo-mode">
@@ -82,6 +88,13 @@ function _render() {
     <div class="vt-sep"></div>
     <div class="vt-group" data-group="follow">
       ${_select('follow', FOLLOW_MODES, follow, 'toolbar.follow.title', 'Orbit')}
+    </div>
+    <div class="vt-sep"></div>
+    <div class="vt-group" data-group="arrange">
+      <button class="vt-btn ${arrangeOpen ? 'vt-on' : ''}" data-kind="arrange" title="${escapeAttr(arrangeTitle)}" aria-label="${escapeAttr(arrangeTitle)}" aria-pressed="${arrangeOpen ? 'true' : 'false'}">
+        ${icon('Boxes', { width: 14, height: 14 })}
+        <span class="vt-label">${escapeHtml(tr('arrange.panelTitle', 'Arrange'))}</span>
+      </button>
     </div>
   `;
   _wire();
@@ -125,6 +138,7 @@ function _wire() {
       const kind = btn.dataset.kind;
       const mode = btn.dataset.mode;
       if (kind === 'gizmoMode') SceneManager.setGizmoMode(mode);
+      if (kind === 'arrange') CursorPanel.toggle();
       if (kind === 'space') {
         const cur = getState().gizmo?.space ?? 'world';
         SceneManager.setGizmoSpace(cur === 'world' ? 'local' : 'world');

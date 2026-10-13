@@ -1,10 +1,13 @@
 import { EVENTS } from '../core/events.js';
-import { subscribe, getState, dispatch } from '../core/StateManager.js';
+import { subscribe, getState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { AssetLoader, removeAsset, SESSION_KEY } from '../core/AssetLoader.js';
 import { Modal } from './Modal.js';
 import { runFindMoved } from './FindMoved.js';
-import { getAssetStatus, canFindMoved } from '../core/persist/AssetResolver.js';
+import { canFindMoved } from '../core/persist/AssetResolver.js';
+import { relinkAsset, refreshAsset } from '../core/persist/ProjectLoader.js';
+import { displayNameParts } from '../core/assets/DisplayNames.js';
+import { SourcesModal, sourceStatus, statusChipHtml } from './SourcesModal.js';
 import { Toast, safeAsync } from './Toast.js';
 import { safeImport } from './ImportError.js';
 import { icon } from '../core/Icons.js';
@@ -63,9 +66,12 @@ export function init() {
     <div class="ap-tree" id="ap-tree" data-tab="session">
       <div class="ap-tree-header">
         <div class="ap-tabs" role="tablist" data-i18n-aria-label="asset.source">
-          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" data-i18n-title="asset.sessionTitle"><span data-i18n-key="panel.session.title">Session</span></button>
-          <button class="ap-tab" type="button" role="tab" aria-selected="false" data-tab="library" data-i18n-title="asset.libraryTitle"><span data-i18n-key="panel.library.title">Library</span></button>
+          <button class="ap-tab active" type="button" role="tab" aria-selected="true" data-tab="session" data-i18n-title="asset.sessionTitle"><span data-i18n-key="panel.session.title">Project</span><span class="ap-tab-count" id="ap-count-session"></span></button>
+          <button class="ap-tab" type="button" role="tab" aria-selected="false" data-tab="library" data-i18n-title="asset.libraryTitle"><span data-i18n-key="panel.library.title">Folders</span><span class="ap-tab-count" id="ap-count-library"></span></button>
         </div>
+        <button class="ap-icon-btn ap-sources-btn" id="ap-sources-btn" type="button" data-i18n-title="asset.sources.openTitle" data-i18n-aria-label="asset.sources.open">
+          ${icon('Link', { width: 14, height: 14 })}
+        </button>
         <button class="ap-btn" id="ap-mount-btn" type="button" data-i18n-title="asset.mountDirectoryTitle">
           ${icon('Upload', { width: 14, height: 14 })}
           <span data-i18n-key="asset.mount">Mount</span>
@@ -110,6 +116,7 @@ export function init() {
   _mountBtn.addEventListener('click', promptMount);
   _treeWrapEl.querySelector('#ap-refresh-btn').addEventListener('click', () => safeAsync(_refreshSelectedMount));
   _treeWrapEl.querySelector('#ap-unmount-btn').addEventListener('click', _unmountSelected);
+  _treeWrapEl.querySelector('#ap-sources-btn').addEventListener('click', () => SourcesModal.open());
   // Capability-gate (ADR 0001): folder mounting needs a filesystem the runtime
   // exposes. Hidden — not shown-and-broken — when unsupported (e.g. a no-FSA
   // browser). No-op on Chrome/Edge/Electron where mountDirectory is true.
@@ -133,21 +140,11 @@ export function init() {
   // locale switch; the grid body has no section.* labels in scope for v1.
   subscribe(EVENTS.LOCALE_CHANGED, () => { _retranslate(_root); _renderTreeList(); _renderGrid(); });
 
-  Modal.register('remountFolder', ({ data, close }) => {
-    const el = document.createElement('div');
-    el.className = 'pm-modal';
-    el.innerHTML = `
-      <h2 class="pm-modal-title">${_escape(t('asset.remountTitle'))}</h2>
-      <p class="pm-modal-body">${_escape(t('asset.remountBodyBefore'))}
-        <strong>${_escape(data?.name || '')}</strong> ${_escape(t('asset.remountBodyAfter'))}</p>
-      <div class="pm-modal-actions">
-        <button class="btn" data-r="skip">${_escape(t('asset.skip'))}</button>
-        <button class="btn btn-primary" data-r="mount">${_escape(t('asset.mount'))}</button>
-      </div>`;
-    el.querySelectorAll('[data-r]').forEach(b =>
-      b.addEventListener('click', () => close(b.dataset.r)));
-    return el;
-  });
+  subscribe(EVENTS.PROJECT_LOADED,     () => _renderGrid());
+  SourcesModal.init();
+  _registerDuplicateDialog();
+  document.addEventListener('pointerdown', _onDocPointerDown, true);
+  document.addEventListener('keydown', _onDocKeyDown, true);
 
   _renderTreeList();
   _renderGrid();
@@ -200,35 +197,40 @@ export async function promptMount() {
 }
 
 /**
- * Boot flow: if the last-mounted folder's ref is still stored, ask the user
- * whether to re-mount it (browser permission re-grant needs the modal-button
- * gesture). Routed through the StorageAdapter (task 4.4), so it runs wherever
- * refs persist (`caps.persistAssets`) — desktop included.
+ * Boot check (task 4.7): the last-mounted folder whose ref is still stored,
+ * or null. No UI and no permission prompt — the boot banner offers the
+ * re-mount and its button click is the gesture `remountLast` needs. Routed
+ * through the StorageAdapter, so it runs wherever refs persist
+ * (`caps.persistAssets`) — desktop included.
+ * @returns {Promise<{key:string, name:string}|null>}
  */
-export async function promptRemount() {
-  if (!caps.persistAssets) return;
+export async function findRemountOffer() {
+  if (!caps.persistAssets) return null;
   let rec;
-  try { rec = await storage.kvGet(LAST_MOUNT_KEY); } catch { return; }
-  if (!rec?.key) return;
-  try { if (!(await storage.hasRef(rec.key))) return; } catch { return; }
+  try { rec = await storage.kvGet(LAST_MOUNT_KEY); } catch { return null; }
+  if (!rec?.key) return null;
+  try { if (!(await storage.hasRef(rec.key))) return null; } catch { return null; }
+  if (_mounts.has(rec.key)) return null;
+  return { key: rec.key, name: rec.name || '' };
+}
 
-  const choice = await new Promise(resolve => {
-    dispatch(EVENTS.MODAL_OPEN, {
-      id: 'remountFolder',
-      name: rec.name,
-      onClose: (r) => resolve(r || 'skip'),
-    });
-  });
-  if (choice !== 'mount') return;
+/** Legacy name of the boot check (kept for callers/tests); never opens UI. */
+export const promptRemount = findRemountOffer;
 
-  await safeAsync(async () => {
-    const ref = await storage.restoreRef(rec.key);   // browser: permission prompt (gesture = the modal button)
-    if (!ref) {
-      Toast.show(t('toast.folderPermissionDenied'), 'warning', 4000);
-      return;
-    }
-    await _mountRef(rec.key, ref, rec.name || ref.name, true);
-  });
+/**
+ * Re-mount the offered folder. Must run inside a user gesture (browser
+ * permission re-grant). @returns {Promise<boolean>} true when mounted
+ */
+export async function remountLast(offer) {
+  if (!offer?.key) return false;
+  if (_mounts.has(offer.key)) return true;
+  const ref = await storage.restoreRef(offer.key);   // browser: permission prompt (gesture = the banner button)
+  if (!ref) {
+    Toast.show(t('toast.folderPermissionDenied'), 'warning', 4000);
+    return false;
+  }
+  await _mountRef(offer.key, ref, offer.name || ref.name, true);
+  return true;
 }
 
 /**
@@ -370,7 +372,21 @@ function _renderTreeRow({ label, iconName, key, relPath, depth, hasChildren, ses
 
 // ── Grid rendering ───────────────────────────────────────
 
+function _renderTabCounts() {
+  const sessionEl = _treeWrapEl.querySelector('#ap-count-session');
+  const libraryEl = _treeWrapEl.querySelector('#ap-count-library');
+  const n = Object.keys(getState().scene.assetLibrary ?? {}).length;
+  if (sessionEl) sessionEl.textContent = n ? String(n) : '';
+  if (libraryEl) libraryEl.textContent = _mounts.size ? String(_mounts.size) : '';
+}
+
 function _renderGrid() {
+  _renderTabCounts();
+  _renderGridBody();
+  _reanchorCardMenu();
+}
+
+function _renderGridBody() {
   let files = [];
   let total = 0;
   const scopeEl = _gridEl.querySelector('#ap-scope-filter');
@@ -420,7 +436,8 @@ function _renderGrid() {
     return;
   }
 
-  const cards = filtered.map(f => _renderCard(f)).join('');
+  const library = getState().scene.assetLibrary;
+  const cards = filtered.map(f => _renderCard(f, library)).join('');
   _gridBodyEl.innerHTML = `<div class="ap-cards">${cards}</div>`;
 }
 
@@ -439,9 +456,9 @@ function _plural(count, word) {
   return count === 1 ? word : `${word}s`;
 }
 
-// Session = every asset registered to this project (loose drops + folder
-// loads), regardless of source. Liveness is shown per-card via the
-// Linked/Snapshot badge — not by filtering.
+// Project tab = every asset registered to this project (loose drops + folder
+// loads), regardless of source. Source status is shown per-card via the
+// Source chip — not by filtering (except the Issues smart view).
 function _sessionFiles() {
   const scene = getState().scene;
   const library = scene.assetLibrary;
@@ -455,7 +472,10 @@ function _sessionFiles() {
     const used = usedIds.has(asset.id);
     if (_sessionView === 'used') return used;
     if (_sessionView === 'unused') return !used;
-    if (_sessionView === 'issues') return issueIds.has(asset.id) || asset.unitConfirmed === false;
+    if (_sessionView === 'issues') {
+      const st = sourceStatus(asset);
+      return issueIds.has(asset.id) || asset.unitConfirmed === false || st === 'changed' || st === 'missing';
+    }
     return true;
   }).map(a => ({
     name: a.displayName ?? a.filename,
@@ -467,7 +487,19 @@ function _sessionFiles() {
   }));
 }
 
-function _renderCard(file) {
+// Name + dimmed qualifier (task 4.8 display): `chair.glb · downloads` only
+// while the name is ambiguous; generic texture names read `<model> · <slot>`.
+// The tooltip carries the original filename (and path).
+function _nameHtml(asset, fallback, library) {
+  const parts = asset ? displayNameParts(asset, library) : null;
+  if (!parts) return `<span class="ac-name" title="${escapeAttr(fallback)}">${_escape(fallback)}</span>`;
+  const qualifier = parts.qualifier
+    ? `<span class="ac-qualifier">${_escape(parts.qualifier)}</span>` : '';
+  return `<span class="ac-name" title="${escapeAttr(parts.tooltip ?? parts.text)}">`
+    + `<span class="ac-label">${_escape(parts.label)}</span>${qualifier}</span>`;
+}
+
+function _renderCard(file, library) {
   const asset = file._asset ?? _findAssetForFile(file);
   const kind  = file.kind ?? asset?.kind ?? 'mesh';
   const isSession = file.mountKey === SESSION_KEY;
@@ -486,22 +518,12 @@ function _renderCard(file) {
       badges += `<span class="ac-unit-badge" title="${escapeAttr(t('asset.sourceUnitUnconfirmed', { unit: asset.sourceUnit }))}">${icon('AlertTriangle', { width: 11, height: 11 })}${_escape(_unitShort(asset.sourceUnit))}</span>`;
     }
   }
-  // Liveness badge — only meaningful on the Session tab (Library cards are
-  // always live by definition since they're the mounted folder browser).
-  if (isSession && asset) {
-    const linked = !!(asset.directoryHandleKey || asset.fileHandleKey);
-    const st = getAssetStatus(asset.id);
-    if (linked && canFindMoved(asset.id)) {
-      const key = st === 'changed' ? 'asset.changed' : 'asset.missing';
-      badges += `<span class="ac-link is-snapshot" title="${escapeAttr(t(key + 'Title'))}">${_escape(t(key))}</span>`
-        + `<button class="ac-link is-linked ac-find-moved" type="button" data-asset-id="${escapeAttr(asset.id)}" title="${escapeAttr(t('asset.findMoved.title'))}">${_escape(t('asset.findMoved.action'))}</button>`;
-    } else badges += linked
-      ? `<span class="ac-link is-linked" title="${escapeAttr(t('asset.linkedTitle'))}">${_escape(t('asset.linked'))}</span>`
-      : `<span class="ac-link is-snapshot" title="${escapeAttr(t('asset.snapshotTitle'))}">${_escape(t('asset.snapshot'))}</span>`;
-  }
-
-  const deleteBtn = isSession && asset
-    ? `<button class="ac-delete" type="button" data-asset-id="${escapeAttr(asset.id)}" title="${escapeAttr(t('asset.remove'))}" aria-label="${escapeAttr(t('asset.removeNamed', { name: file.name }))}">×</button>`
+  // Source chip (task 4.6) — Project tab only: Folders cards ARE the live
+  // folder. Healthy words (Embedded copy / Linked) stay quiet; Changed on
+  // disk (amber) and Missing (red) carry colour.
+  const chip = isSession && asset ? statusChipHtml(sourceStatus(asset), 'ac-chip') : '';
+  const menuBtn = isSession && asset
+    ? `<button class="ac-menu-btn" type="button" data-asset-id="${escapeAttr(asset.id)}" aria-haspopup="menu" aria-expanded="false" title="${escapeAttr(t('asset.menu.title'))}" aria-label="${escapeAttr(t('asset.menu.named', { name: file.name }))}">${icon('MoreHorizontal', { width: 14, height: 14 })}</button>`
     : '';
   const label = t('asset.cardLabel', {
     name: file.name,
@@ -520,16 +542,134 @@ function _renderCard(file) {
          data-source-path="${escapeAttr(file.sourcePath ?? file.path)}"
          data-filename="${escapeAttr(file.name)}"
          data-kind="${escapeAttr(kind)}"
-         title="${escapeAttr(file.path)}">
-      ${deleteBtn}
-      ${thumbHtml}
+         ${isSession ? '' : `title="${escapeAttr(file.path)}"`}>
+      <div class="ac-thumb-wrap">${thumbHtml}${chip}</div>
       <div class="ac-meta">
-        <span class="ac-name">${_escape(file.name)}</span>
+        <div class="ac-title-row">${isSession ? _nameHtml(asset, file.name, library) : `<span class="ac-name">${_escape(file.name)}</span>`}${menuBtn}</div>
         ${isSession ? '' : `<span class="ac-path">${_escape(file.path)}</span>`}
         <span class="ac-badges">${badges}</span>
       </div>
     </div>
   `;
+}
+
+// ── Card ⋯ menu (task 4.6) ───────────────────────────────
+
+let _menuEl = null;
+let _menuBtn = null;
+
+function _menuItems(asset) {
+  const st = sourceStatus(asset);
+  const kind = asset.kind ?? 'mesh';
+  const readable = st === 'linked' || st === 'changed';
+  const findable = canFindMoved(asset.id);
+  return [
+    kind === 'mesh' && !asset.isGhost ? { action: 'add', label: t('asset.menu.add') } : null,
+    { action: 'refresh', label: t('asset.menu.refresh'), disabled: !readable, title: readable ? '' : t('asset.menu.refreshDisabled') },
+    { action: 'find', label: t('asset.findMoved.action'), disabled: !findable, title: findable ? t('asset.findMoved.title') : t('asset.menu.findDisabled') },
+    kind === 'mesh' ? { action: 'relink', label: t('project.relink') } : null,
+    { action: 'sources', label: t('asset.menu.showInSources') },
+    { sep: true },
+    { action: 'remove', label: t('asset.remove'), danger: true },
+  ].filter(Boolean);
+}
+
+function _openCardMenu(btn) {
+  const assetId = btn.dataset.assetId;
+  const asset = getState().scene.assetLibrary[assetId];
+  if (!asset) return;
+  _closeCardMenu();
+  const el = document.createElement('div');
+  el.className = 'ac-menu';
+  el.setAttribute('role', 'menu');
+  el.dataset.assetId = assetId;
+  el.innerHTML = _menuItems(asset).map(item => item.sep
+    ? '<div class="ac-menu-sep" role="separator"></div>'
+    : `<button class="ac-menu-item${item.danger ? ' is-danger' : ''}" type="button" role="menuitem" data-action="${item.action}"${item.disabled ? ' disabled' : ''}${item.title ? ` title="${escapeAttr(item.title)}"` : ''}>${_escape(item.label)}</button>`).join('');
+  document.body.appendChild(el);
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  // Open upward when the card sits near the window bottom (the asset panel
+  // usually does); stay inside the viewport horizontally.
+  const top = r.bottom + h + 4 > window.innerHeight ? Math.max(4, r.top - h - 4) : r.bottom + 4;
+  const left = Math.min(Math.max(4, r.right - w), window.innerWidth - w - 4);
+  el.style.top = `${top}px`;
+  el.style.left = `${left}px`;
+  el.addEventListener('click', (e) => {
+    const item = /** @type {HTMLButtonElement|null} */ (/** @type {HTMLElement} */ (e.target).closest?.('.ac-menu-item'));
+    if (!item || item.disabled) return;
+    const action = item.dataset.action;
+    _closeCardMenu();
+    _runCardAction(action, assetId);
+  });
+  el.addEventListener('keydown', _onMenuKeyDown);
+  _menuEl = el;
+  _menuBtn = btn;
+  btn.setAttribute('aria-expanded', 'true');
+  /** @type {HTMLElement|null} */ (el.querySelector('.ac-menu-item:not([disabled])'))?.focus();
+}
+
+// A background re-render (thumbnail, registry event) replaces the card
+// buttons; keep an open menu bound to its asset's new button, or close it
+// when the asset is gone / no longer shown.
+function _reanchorCardMenu() {
+  if (!_menuEl) return;
+  const id = _menuEl.dataset.assetId;
+  const btn = [..._gridEl.querySelectorAll('.ac-menu-btn')].find(b => /** @type {HTMLElement} */ (b).dataset.assetId === id);
+  if (!btn || !getState().scene.assetLibrary[id]) { _closeCardMenu(); return; }
+  _menuBtn = /** @type {HTMLElement} */ (btn);
+  _menuBtn.setAttribute('aria-expanded', 'true');
+}
+
+function _closeCardMenu({ restoreFocus = false } = {}) {
+  if (!_menuEl) return;
+  _menuEl.remove();
+  _menuEl = null;
+  if (_menuBtn) {
+    _menuBtn.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && _menuBtn.isConnected) _menuBtn.focus();
+  }
+  _menuBtn = null;
+}
+
+function _onMenuKeyDown(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const items = [..._menuEl.querySelectorAll('.ac-menu-item:not([disabled])')];
+  const i = items.indexOf(document.activeElement);
+  const next = items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+  /** @type {HTMLElement|undefined} */ (next)?.focus();
+}
+
+function _onDocPointerDown(e) {
+  if (!_menuEl) return;
+  if (_menuEl.contains(e.target) || _menuBtn?.contains(e.target)) return;
+  _closeCardMenu();
+}
+
+function _onDocKeyDown(e) {
+  if (!_menuEl || e.key !== 'Escape') return;
+  e.stopPropagation();
+  _closeCardMenu({ restoreFocus: true });
+}
+
+function _runCardAction(action, assetId) {
+  if (action === 'add') {
+    const name = getState().scene.assetLibrary[assetId]?.filename ?? 'asset';
+    safeImport(() => AssetLoader.instantiateAsset(assetId, new BABYLON.Vector3(0, 0, 0)), name);
+  } else if (action === 'refresh') {
+    safeAsync(async () => {
+      if (!(await refreshAsset(assetId))) Toast.show(t('asset.menu.refreshFailed'), 'warning', 4000);
+    });
+  } else if (action === 'find') {
+    runFindMoved(assetId);
+  } else if (action === 'relink') {
+    safeAsync(() => relinkAsset(assetId));
+  } else if (action === 'sources') {
+    SourcesModal.open({ focusAssetId: assetId });
+  } else if (action === 'remove') {
+    removeAsset(assetId);
+  }
 }
 
 function _onTreeClick(e) {
@@ -598,19 +738,15 @@ function _onGridChange(e) {
 }
 
 function _onGridClick(e) {
-  const findBtn = e.target.closest?.('.ac-find-moved');
-  if (findBtn && _gridEl.contains(findBtn)) {
-    e.stopPropagation();
-    runFindMoved(findBtn.dataset.assetId);
-    return;
-  }
-  const deleteBtn = e.target.closest?.('.ac-delete');
-  if (!deleteBtn || !_gridEl.contains(deleteBtn)) return;
+  const menuBtn = e.target.closest?.('.ac-menu-btn');
+  if (!menuBtn || !_gridEl.contains(menuBtn)) return;
   e.stopPropagation();
-  removeAsset(deleteBtn.dataset.assetId);
+  if (_menuBtn === menuBtn) { _closeCardMenu(); return; }
+  _openCardMenu(menuBtn);
 }
 
 function _onGridDblClick(e) {
+  if (e.target.closest?.('.ac-menu-btn')) return;
   const card = e.target.closest?.('.asset-card');
   if (!card || !_gridEl.contains(card)) return;
   _activateCard(card);
@@ -686,4 +822,41 @@ function _unitShort(unit) {
   return ({ meters: 'm', centimeters: 'cm', millimeters: 'mm', inches: 'in', feet: 'ft' })[unit] ?? unit;
 }
 
-export const AssetPanel = { init, promptMount, promptRemount, getFileHandle };
+// ── "Already in this project" dialog (task 4.8 display, Decision 16) ──
+// AssetImport.askDuplicateImport dispatches this id and maps the result:
+// 'copy' | 'separate' | anything else (× / Esc / backdrop) = cancel.
+function _registerDuplicateDialog() {
+  Modal.register('duplicateImport', ({ data, close }) => {
+    const filename = data?.filename ?? '';
+    const existing = data?.existingName ?? filename;
+    const el = document.createElement('div');
+    el.className = 'pm-modal dup-modal';
+    el.innerHTML = `
+      <div class="dup-head">
+        <span class="dup-icon" aria-hidden="true">${icon('Copy', { width: 18, height: 18 })}</span>
+        <div class="dup-heading">
+          <h2 class="pm-modal-title">${_escape(t('import.duplicateTitle'))}</h2>
+          <p class="dup-source">${_escape(t('import.duplicateSource'))} <strong>${_escape(filename)}</strong></p>
+        </div>
+        <button class="dup-close" type="button" data-r="dismiss" aria-label="${escapeAttr(t('btn.close'))}" title="${escapeAttr(t('btn.close'))}">×</button>
+      </div>
+      <div class="dup-body">
+        <p>${_escape(existing === filename
+    ? t('import.duplicateBodySame', { name: filename })
+    : t('import.duplicateBody', { name: filename, existing }))}</p>
+        <p class="dup-hint">${_escape(t('import.duplicateHint'))}</p>
+      </div>
+      <div class="pm-modal-actions">
+        <button class="btn" type="button" data-r="separate">${_escape(t('import.duplicateSeparate'))}</button>
+        <button class="btn btn-primary" type="button" data-r="copy">${icon('Copy', { width: 13, height: 13 })}<span>${_escape(t('import.duplicateAddCopy'))}</span></button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => close(/** @type {HTMLElement} */ (b).dataset.r)));
+    // "Add another copy" is the default (Enter): Modal focuses the first
+    // focusable synchronously after render (the ×), so move it on a microtask.
+    queueMicrotask(() => /** @type {HTMLElement|null} */ (el.querySelector('[data-r="copy"]'))?.focus());
+    return el;
+  });
+}
+
+export const AssetPanel = { init, promptMount, promptRemount, findRemountOffer, remountLast, getFileHandle };
+

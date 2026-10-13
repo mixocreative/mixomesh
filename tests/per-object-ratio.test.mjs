@@ -117,6 +117,55 @@ await test('RescaleObjectCommand: own-origin rescale, child local offset scales,
   assert.equal(top.verts.length, 2, 'undo re-bakes inverse');
 });
 
+await test('1.13 declare vs convert: STL at 1:1 "Set 1:72" relabels only; glTF at 1:72 "Convert 1:35" resizes x72/35', async () => {
+  const { installEnv } = await import('./env.mjs');
+  installEnv();
+  const { SetScaleLabelCommand, RescaleObjectCommand } = await import('../src/core/HistoryManager.js');
+  const { AssetLoader } = await import('../src/core/AssetLoader.js');
+  const { setState, getState } = await import('../src/core/StateManager.js');
+  const mk = (id) => ({
+    metadata: { meshId: id }, parent: null, geometry: true, position: { x: 0.1, y: 0, z: 0 },
+    bakes: [], bakeTransformIntoVertices(m) { this.bakes.push(m); }, refreshBoundingInfo() {},
+  });
+  const stl = mk('stl');
+  const gltf = mk('gltf');
+  const meshes = { stl, gltf };
+  AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
+  setState(s => ({ ...s, scene: { ...s.scene, objects: {
+    stl:  { id: 'stl',  ratio: 1,  ratioSource: 'default' },
+    gltf: { id: 'gltf', ratio: 72, ratioSource: 'file' } } } }), { silent: true });
+
+  const set = new SetScaleLabelCommand(['stl'], 72);
+  set.execute();
+  let o = getState().scene.objects.stl;
+  assert.equal(o.ratio, 72);
+  assert.equal(o.ratioSource, 'user');
+  assert.equal(stl.bakes.length, 0, 'geometry untouched');
+  assert.equal(stl.position.x, 0.1, 'position untouched');
+  set.undo();
+  o = getState().scene.objects.stl;
+  assert.equal(o.ratio, 1);
+  assert.equal(o.ratioSource, 'default', 'undo restores the prior source');
+
+  const conv = new RescaleObjectCommand(['gltf'], 35);
+  conv.execute();
+  o = getState().scene.objects.gltf;
+  assert.equal(o.ratio, 35);
+  assert.equal(o.ratioSource, 'user', 'convert is an explicit action too');
+  assert.equal(gltf.bakes.length, 1, 'geometry baked once');
+  const m0 = gltf.bakes[0];
+  const f0 = m0?.sx;
+  assert.ok(Math.abs(f0 - 72 / 35) < 1e-9, `bake factor ${f0} = 72/35`);
+  assert.equal(gltf.position.x, 0.1, 'top-level object keeps its place');
+  conv.undo();
+  o = getState().scene.objects.gltf;
+  assert.equal(o.ratio, 72);
+  assert.equal(o.ratioSource, 'file');
+  const m1 = gltf.bakes[1];
+  const f1 = m1?.sx;
+  assert.ok(Math.abs(f1 - 35 / 72) < 1e-9, 'undo bakes the inverse');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

@@ -63,3 +63,50 @@
 
 /* Workspace tab sub-label — hidden in PR1; PR3 enables the furigana view. */
 .ws-tab-sub { display: none; }
+
+/* ── Header (overhaul 5.1) — minimal: logo · name · workspace switcher
+   centred · action cluster right. DOM order is set by whoever appends
+   first, so order is pinned here. ─────────────────────────────────── */
+#header { flex-wrap: nowrap; min-width: 0; }
+#header > #app-logo { order: 0; }
+#header > #project-name { order: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#header > #dirty-indicator { order: 2; }
+#header > .ws-switcher { order: 3; margin: 0 auto; }
+#header > .pm-bar { order: 4; margin-left: 0; gap: var(--sp-2); flex: 0 0 auto; }
+
+/* Workspace switcher = segmented control (DESIGN §4 Tabs): trough, raised
+   active segment, bengara cue only on the active one. */
+.ws-switcher { background: var(--bg-0); border-radius: 6px; padding: 2px; border-color: var(--border); }
+.ws-btn { padding: 3px 14px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.ws-btn svg { display: none; }
+.ws-btn:hover { background: var(--bg-3); }
+.ws-btn.active { background: var(--ctl-bg); color: var(--active); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+
+.pm-btn { min-height: 26px; font-family: inherit; font-size: var(--fs-sm); }
+.pm-btn:disabled { color: var(--text-disabled); cursor: default; background: transparent; border-color: transparent; }
+.pm-btn-label { margin-left: var(--sp-2); font-weight: 500; }
+.pm-btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.pm-btn-primary:hover { background: var(--accent-hi); color: var(--accent-fg); border-color: var(--accent-hi); }
+.pm-btn-outline { background: var(--ctl-bg); border-color: var(--ctl-border); }
+.pm-btn-help { width: 24px; height: 24px; min-height: 24px; padding: 0; border-radius: 50%; border-color: var(--ctl-border); font-weight: 600; }
+.pm-sep { width: 1px; height: 16px; background: var(--border); margin: 0 var(--sp-2); }
+
+.pm-help { position: relative; }
+.pm-help-menu {
+  position: absolute; top: 100%; right: 0; margin-top: var(--sp-2); z-index: 200;
+  min-width: 190px; padding: var(--sp-2);
+  background: var(--bg-3); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: 0 8px 24px rgba(62, 44, 30, 0.22);
+  display: flex; flex-direction: column;
+}
+.pm-help-menu.hidden { display: none; }
+.pm-help-item {
+  background: transparent; border: none; color: var(--text-0); text-align: left;
+  font: inherit; padding: var(--sp-3); border-radius: var(--r-sm); cursor: pointer;
+}
+.pm-help-item:hover { background: var(--bg-0); }
+.pm-help-danger { color: var(--danger); border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); margin-top: var(--sp-2); }
+
+/* Narrow windows: icon-only action labels, then hide the secondary file actions. */
+@media (max-width: 1100px) { .pm-btn-label { display: none; } }
+@media (max-width: 900px)  { #header > #project-name { max-width: 20vw; } .pm-recent, .pm-sep { display: none; } }

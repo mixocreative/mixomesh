@@ -368,7 +368,8 @@
    *-outer-collapsed classes + grid variables (driven by ui/Workspace.js). */
 
 /* Each workspace shows Properties + exactly ONE specialist section — no
-   repeated sections across workspaces (they dilute the presets):
+   repeated sections across workspaces (they dilute the presets). Properties
+   is the constant: its Object section shows in ALL four (Decision 6 / 5.2);
      Layout → Properties + Asset panel (arrange focus, no specialist section)
      Shade  → Shader Library (ShaderPanel.focus auto-switches here)
      Scene  → Scene (grid / render / camera setup)
@@ -383,21 +384,30 @@ body[data-workspace="shade"]  #rp-print,
 body[data-workspace="shade"]  #rp-scene   { display: none; }
 body[data-workspace="scene"]  #rp-print,
 body[data-workspace="scene"]  #rp-shaders,
-body[data-workspace="scene"]  #rp-properties,
 body[data-workspace="scene"]  .rp-splitter { display: none; }
 body[data-workspace="print"]  #rp-shaders,
 body[data-workspace="print"]  #rp-scene,
-body[data-workspace="print"]  #rp-properties,
 body[data-workspace="print"]  .rp-splitter { display: none; }
 
 /* Properties sections are task-filtered per workspace (no shader noise while
-   arranging; no transform noise while shading). Scene/Print hide the whole
-   Properties panel above, so only Layout and Shade filter. */
+   arranging; no transform noise while shading). Scene/Print keep only the
+   Object section (below). */
 body[data-workspace="layout"] .pp-section[data-section="shader"],
 body[data-workspace="layout"] .pp-section[data-section="uv-override"] { display: none; }
 body[data-workspace="shade"]  .pp-section[data-section="transform"],
-body[data-workspace="shade"]  .pp-section[data-section="source-unit"],
-body[data-workspace="shade"]  .pp-section[data-section="print-part"] { display: none; }
+body[data-workspace="shade"]  .pp-section[data-section="source-unit"] { display: none; }
+
+/* Scene / Print (task 5.2, Decision 6): Properties shows ONLY its Object
+   section (name, Source, Print, visible/lock) as a compact strip above the
+   workspace's specialist panel; with nothing selected it hides entirely. */
+body[data-workspace="scene"] #rp-properties .pp-section:not([data-section="object"]),
+body[data-workspace="print"] #rp-properties .pp-section:not([data-section="object"]),
+body[data-workspace="scene"] #rp-properties .pp-group-material,
+body[data-workspace="print"] #rp-properties .pp-group-material,
+body[data-workspace="scene"] #rp-properties:has(.pp-empty),
+body[data-workspace="print"] #rp-properties:has(.pp-empty) { display: none; }
+body[data-workspace="scene"] #rp-properties,
+body[data-workspace="print"] #rp-properties { flex: 0 0 auto !important; max-height: 45%; }
 
 /* Scene panel: settings, not a workspace focus — compact, never greedy. */
 #rp-scene { flex: 0 1 auto; }
@@ -406,7 +416,7 @@ body[data-workspace="shade"]  .pp-section[data-section="print-part"] { display: 
    `flex: 0 0 <px>` (AppShell). That pin only makes sense in Shade — the one
    workspace where two sections share the column. Everywhere else Properties
    is alone and must fill the panel; !important beats the inline style. */
-body:not([data-workspace="shade"]) #rp-properties { flex: 1 1 0 !important; }
+body:not([data-workspace="shade"]):not([data-workspace="scene"]):not([data-workspace="print"]) #rp-properties { flex: 1 1 0 !important; }
 
 #asset-panel.ap-outer-collapsed .ap-tree,
 #asset-panel.ap-outer-collapsed .ap-grid { display: none; }

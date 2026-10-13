@@ -417,6 +417,55 @@ await test('ctx.prefs and ctx.options are SEPARATE — caller options cannot acc
   assert.equal(ctx.options.objBakeSolidTextures, false, 'caller options preserved separately');
 });
 
+// ── 1.3: profile-driven prefs (Decision 32) ─────────────
+
+await test('1.3: ctx.prefs follows the printer profile when no override is stored', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { targetPrinterId: 'bambu-x1c', exportFormat: null, splitByMaterial: null, objAxis: null, threeMFFlavour: null } },
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.prefs.exportFormat, '3mf', 'Bambu X1C recommends 3MF');
+  assert.equal(ctx.prefs.threeMFFlavour, 'bambu');
+  assert.equal(ctx.prefs.objAxis, 'z-up');
+  assert.equal(ctx.prefs.splitByMaterial, true, 'per-part colour → split by default');
+});
+
+await test('1.3: ctx.prefs reflects the OVERRIDDEN format, not the profile', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { targetPrinterId: 'bambu-x1c', exportFormat: 'stl', splitByMaterial: false, objAxis: 'y-up', threeMFFlavour: 'core' } },
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.prefs.exportFormat, 'stl');
+  assert.equal(ctx.prefs.splitByMaterial, false);
+  assert.equal(ctx.prefs.objAxis, 'y-up');
+  assert.equal(ctx.prefs.threeMFFlavour, 'core');
+});
+
+await test('1.3: ctx.prefs carries strictExport + individually (pipeline reads prefs, not live state)', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { strictExport: true, individually: true } },
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.prefs.strictExport, true);
+  assert.equal(ctx.prefs.individually, true);
+  const off = ExportContext.buildExportContext({ state: FAKE_STATE, units: [unit('a', 72)], target: null });
+  assert.equal(off.prefs.strictExport, false);
+  assert.equal(off.prefs.individually, false);
+});
+
+await test('1.3: an invalid stored value falls back to the profile default (never a bogus writer)', () => {
+  const ctx = ExportContext.buildExportContext({
+    state: { ...FAKE_STATE, print: { targetPrinterId: 'mimaki-3duj-553', exportFormat: 'gltf', objAxis: 'x-up' } },
+    units: [unit('a', 72)],
+    target: null,
+  });
+  assert.equal(ctx.prefs.exportFormat, 'obj');
+  assert.equal(ctx.prefs.objAxis, 'y-up');
+});
+
 await test('getExportedDimensions: ctx.state is read when ctx is supplied (snapshot consistency)', () => {
   // Stash the live state, then build a ctx whose state has a known object
   // we can verify is read from the ctx, not from live getState().

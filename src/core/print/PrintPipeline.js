@@ -607,7 +607,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     // Fail closed (Decision 18): strictExport blocks on a CONFIRMED
     // not-watertight clone AND on any UNKNOWN verdict (engine unavailable,
     // capped, errored, repair opted out) — "could not verify" is not "fine".
-    if (state.print?.strictExport) {
+    if (ctx.prefs?.strictExport ?? state.print?.strictExport) {
       const open = [], unknown = [];
       for (const c of clones) {
         const verdict = _reportEntryFor.get(c.mesh)?.isWatertight;

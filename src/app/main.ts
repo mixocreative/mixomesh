@@ -3,6 +3,7 @@ import { StatusBar } from '../ui/StatusBar.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { AssetPanel } from '../ui/AssetPanel.js';
+import { BootBanner } from '../ui/BootBanner.js';
 import { ViewportDrop } from '../ui/ViewportDrop.js';
 import { Outliner } from '../ui/Outliner.js';
 import { PropertiesPanel } from '../ui/PropertiesPanel.js';
@@ -131,13 +132,11 @@ async function bootstrap() {
 
   PersistenceManager.startAutosave();
   canvas.focus();
-  // Remount the last folder FIRST (recovery resolves handle-backed assets
-  // through it — autosave skips their bytes, A9), then offer the newest
-  // autosave if it is newer than its project's last save (task 0.11).
-  safeAsync(async () => {
-    await AssetPanel.promptRemount();
-    await PersistenceManager.recoverAutosave();
-  });
+  // One non-blocking boot banner (task 4.7, Decision 4): offers re-mounting
+  // the last folder and/or recovering the newest autosave that is newer than
+  // its project's last save. Recover re-mounts first (handle-backed assets
+  // resolve through the folder — autosave skips their bytes, A9).
+  safeAsync(() => BootBanner.runBootChecks());
 }
 
 function wireCloseFlow() {

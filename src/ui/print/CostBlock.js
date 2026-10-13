@@ -22,7 +22,7 @@ import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
 import { Toast } from '../Toast.js';
 import { exportTargetsFromState } from '../../core/scale/ScaleMath.js';
-import { exportTargetLabel } from '../../core/commands/ScaleCommands.js';
+import { printSizeLabel } from './PrintSizes.js';
 import { boundsForExportContext } from '../../core/print/PrintReadiness.js';
 import { withRestTransform } from '../../core/scene/ImportBounce.js';
 import { getMaterialPresets, getMaterialPresetsSource } from '../../core/print/MaterialPresets.js';
@@ -111,8 +111,17 @@ export function renderCostBlock(container, state) {
   const material = _material(state);
   const cost = state.cost ?? {};
 
+  // 5.3: the quote lines stay on the tab; every cost INPUT lives in a small
+  // ⚙ popover anchored to the Cost header (open state survives re-renders).
   let html = '<div class="pp-field-group pp-cost">';
-  html += `<label>${escapeHtml(t('print.cost.title'))}</label>`;
+  html += '<div class="pp-label-row">';
+  html += `<span class="pp-group-label">${escapeHtml(t('print.cost.title'))}</span>`;
+  if (material?.name) html += `<span class="pp-label-aside">${escapeHtml(material.name)}</span>`;
+  html += `<button type="button" class="pp-icon-btn pp-cost-gear" data-act="cost-settings" aria-expanded="${_settingsOpen}" aria-controls="pp-cost-pop"`
+    + ` title="${escapeAttr(t('print.cost.settings'))}" aria-label="${escapeAttr(t('print.cost.settings'))}">${icon('SlidersHorizontal', { width: 13, height: 13 })}</button>`;
+  html += '</div>';
+  html += '<div class="pp-cost-result" id="pp-cost-total" aria-live="polite"></div>';
+  html += `<div class="pp-cost-pop" id="pp-cost-pop" role="dialog" aria-label="${escapeAttr(t('print.cost.settings'))}"${_settingsOpen ? '' : ' hidden'}>`;
 
   html += `<label class="pp-cost-sublabel" for="pp-cost-material">${escapeHtml(t('print.cost.material'))}</label>`;
   html += '<select id="pp-cost-material" class="pp-preset-select">';
@@ -163,10 +172,11 @@ export function renderCostBlock(container, state) {
   html += `<button type="button" class="pp-seg-btn${mode === 'mesh' ? ' active' : ''}" data-mode="mesh" aria-pressed="${mode === 'mesh'}" title="${escapeAttr(t('print.cost.volumeMeshTitle'))}">${escapeHtml(t('print.cost.volumeMesh'))}</button>`;
   html += `<button type="button" class="pp-seg-btn${mode === 'bbox' ? ' active' : ''}" data-mode="bbox" aria-pressed="${mode === 'bbox'}" title="${escapeAttr(t('print.cost.volumeBoxTitle'))}">${escapeHtml(t('print.cost.volumeBox'))}</button>`;
   html += '</div></div>';
-  html += '<div class="pp-cost-result" id="pp-cost-total" aria-live="polite"></div>';
+  html += '</div>';   // .pp-cost-pop
   html += '</div>';
 
   container.innerHTML = html;
+  _wirePopover(container);
 
   const commit = (patch) => {
     setState(s => ({ ...s, cost: { ...s.cost, ...patch } }), { silent: true });
@@ -225,6 +235,37 @@ export function renderCostBlock(container, state) {
 
   _renderResult(container, state);
 }
+
+// ⚙ popover open state — module-level so a panel re-render keeps it open.
+let _settingsOpen = false;
+
+function _setPopover(container, open) {
+  _settingsOpen = open;
+  const pop = container.querySelector('#pp-cost-pop');
+  const btn = container.querySelector('[data-act="cost-settings"]');
+  if (pop) pop.hidden = !open;
+  btn?.setAttribute('aria-expanded', String(open));
+}
+
+/** Toggle on ⚙; close on Escape or a click outside the popover. */
+function _wirePopover(container) {
+  const btn = container.querySelector('[data-act="cost-settings"]');
+  btn?.addEventListener('click', () => _setPopover(container, !_settingsOpen));
+  const pop = container.querySelector('#pp-cost-pop');
+  pop?.addEventListener('keydown', (e) => {
+    if (/** @type {KeyboardEvent} */ (e).key === 'Escape') { _setPopover(container, false); /** @type {HTMLElement|null} */ (btn)?.focus(); }
+  });
+  if (_outsideHandler) document.removeEventListener('pointerdown', _outsideHandler, true);
+  _outsideHandler = (e) => {
+    if (!_settingsOpen || !container.isConnected) return;
+    const target = /** @type {Node} */ (e.target);
+    if (pop?.contains(target) || btn?.contains(target)) return;
+    _setPopover(container, false);
+  };
+  document.addEventListener('pointerdown', _outsideHandler, true);
+}
+/** @type {((e: Event) => void) | null} */
+let _outsideHandler = null;
 
 /** Read the cost fields' LIVE (possibly uncommitted) DOM values, falling back to `state.cost`. */
 function _liveCostOverride(container, state) {
@@ -295,7 +336,7 @@ function _renderPerTarget(el, state, cost, material, targets) {
   let html = '';
   let note = null;
   for (let i = 0; i < targets.length; i++) {
-    const label = exportTargetLabel(targets[i]);
+    const label = printSizeLabel(targets[i]);
     const ctx = PrintManager.previewExportContext({ targetIndex: i });
     if (!ctx) {
       el.innerHTML = `<div class="pp-cost-row pp-cost-note"><span>${escapeHtml(t('print.cost.noParts'))}</span></div>`;

@@ -10,7 +10,7 @@ import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { Selection } from '../Selection.js';
-import { clear as historyClear, push as historyPush, RelinkAssetCommand } from '../HistoryManager.js';
+import { clear as historyClear, push as historyPush, RelinkAssetCommand, seedRatioSource, ratioSourceOf } from '../HistoryManager.js';
 import { Toast } from '../../ui/Toast.js';
 import { t } from '../../i18n/index.js';
 import { directoryRefFacade } from '../assets/DirMounts.js';
@@ -185,8 +185,15 @@ function _migrateTo34(data) {
     // `sourceGroupId` — seed `logicalObjectId` / `isInternalPart` ONCE here;
     // runtime never reads `sourceGroupId` again.
     seedLogicalObjectIds(data.sceneObjects);
-    // HOOK (task 1.13, not implemented — mockup-gated): seed each object's
-    // `ratioSource` here: `asset.modelRatio !== 1 ? 'file' : 'default'`.
+    // 1.13 (Decision 24): seed each object's `ratioSource` from its asset —
+    // a file that declared its authored scale (`modelRatio ≠ 1`) is 'file',
+    // else 'default'. An explicit value already on the object is kept.
+    const modelRatioByAsset = new Map((Array.isArray(data.assetLibrary) ? data.assetLibrary : [])
+      .filter(a => a && typeof a === 'object').map(a => [a.id, a.modelRatio]));
+    data.sceneObjects = data.sceneObjects.map(o => {
+      if (!o || typeof o !== 'object' || ['file', 'user', 'default'].includes(o.ratioSource)) return o;
+      return { ...o, ratioSource: seedRatioSource(modelRatioByAsset.get(o.assetId)) };
+    });
   }
   // project.id (0.11) is formal in 3.4; a document without one gets a fresh
   // uuid from the loader (mintProjectId), never from migrate (pure).
@@ -245,8 +252,15 @@ function _printWithoutLegacyScale(loadedPrint = {}) {
   // task 1.10 — old files must not resurrect them into state (or re-save them).
   // exportRatios / exportTargets: replaced by the normalised typed list
   // (resolveLoadedExportTargets) — the ratio mirror never lives in state.
-  const { workingRatio, targetRatio, repairOnImport, printMode, chordTolerance, minWallThickness,
+  // strictExport: per-user (Decision 15) — an old file must not flip it.
+  const { workingRatio, targetRatio, repairOnImport, strictExport, printMode, chordTolerance, minWallThickness,
     exportRatios, exportTargets, ...rest } = loadedPrint;
+  // 1.3: profile-driven fields absent from the file follow the printer profile
+  // (null), instead of inheriting the PREVIOUS project's overrides.
+  for (const f of ['exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour']) {
+    if (!(f in rest)) rest[f] = null;
+  }
+  if (!('individually' in rest)) rest.individually = false;
   return rest;
 }
 
@@ -509,6 +523,9 @@ async function _loadProjectInner(doc, previousId) {
       isInternalPart: !!o.isInternalPart,
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
+      // 1.13: migrate() seeds ratioSource for pre-3.4 docs; a 3.4 doc saved
+      // before the field existed derives the same seed here.
+      ratioSource: ratioSourceOf(o, assetById[o.assetId]),
       ...(!replayFailed.has(o.id) && Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
       ...(o.sliceRecipe ? { sliceRecipe: JSON.parse(JSON.stringify(o.sliceRecipe)) } : {}),
       _savedTransform: o.transform ?? null,
@@ -591,14 +608,16 @@ async function _loadProjectInner(doc, previousId) {
   await deleteAutosave(loadedId);
   if (previousId && previousId !== loadedId) await deleteAutosave(previousId);
 
-  if (unmatched.length) {
-    dispatch(EVENTS.MODAL_OPEN, { id: 'unmatchedAssets', assets: unmatched });
+  // 4.6: unresolved links and ghosts surface in the ONE Sources modal
+  // (src/ui/SourcesModal.js), focused on the first affected asset.
+  if (unmatched.length || ghosts.length) {
+    const first = ghosts[0] ?? unmatched[0];
+    dispatch(EVENTS.MODAL_OPEN, { id: 'assetSources', focusAssetId: first?.id ?? null, ghosts, unmatched });
   }
   if (ghosts.length) {
-    // H3: never a plain "Loaded" — the scene is incomplete. The modal lists
-    // every ghost with a Relink button; the project is still saveable (ghost
-    // entries serialise with `ghost: true` and no bytes).
-    dispatch(EVENTS.MODAL_OPEN, { id: 'ghostAssets', assets: ghosts });
+    // H3: never a plain "Loaded" — the scene is incomplete. The Sources modal
+    // lists every ghost with a Relink action; the project is still saveable
+    // (ghost entries serialise with `ghost: true` and no bytes).
     Toast.show(t('toast.loadedWithGhosts', { name: loadedName, n: ghosts.length }), 'warning', 6000);
     return;
   }

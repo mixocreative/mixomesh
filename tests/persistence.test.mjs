@@ -241,6 +241,38 @@ await test('_migrate: legacy 3.1 / 3.2 still resolve (exportRatios, targetRatio,
   assert.equal(mNoVersion.assetLibrary[0].displayName, 'x.obj');
 });
 
+await test('_migrate: 1.13 seeds ratioSource from the asset modelRatio; an explicit value is kept', () => {
+  const m = _migrate({
+    version: '3.3',
+    assetLibrary: [
+      { id: 'gltf', filename: 'tank.glb', modelRatio: 72 },
+      { id: 'stl', filename: 'kit.stl', modelRatio: 1 },
+      { id: 'obj', filename: 'old.obj' },
+    ],
+    sceneObjects: [
+      { id: 'a', assetId: 'gltf', ratio: 72 },
+      { id: 'b', assetId: 'stl', ratio: 1 },
+      { id: 'c', assetId: 'obj' },
+      { id: 'd', assetId: 'stl', ratio: 72, ratioSource: 'user' },
+      { id: 'e', assetId: 'gone' },
+    ],
+  });
+  const by = Object.fromEntries(m.sceneObjects.map(o => [o.id, o.ratioSource]));
+  assert.deepEqual(by, { a: 'file', b: 'default', c: 'default', d: 'user', e: 'default' });
+  assert.deepEqual(_migrate(m).sceneObjects.map(o => o.ratioSource), ['file', 'default', 'default', 'user', 'default'],
+    'idempotent');
+});
+
+await test('ratioSourceOf / seedRatioSource: explicit wins, else derived from the asset', async () => {
+  const { ratioSourceOf, seedRatioSource } = await import('../src/core/HistoryManager.js');
+  assert.equal(seedRatioSource(72), 'file');
+  assert.equal(seedRatioSource(1), 'default');
+  assert.equal(seedRatioSource(undefined), 'default');
+  assert.equal(ratioSourceOf({ ratioSource: 'user' }, { modelRatio: 72 }), 'user');
+  assert.equal(ratioSourceOf({}, { modelRatio: 35 }), 'file');
+  assert.equal(ratioSourceOf({ ratioSource: 'bogus' }, null), 'default');
+});
+
 await test('_migrate: newer minor (3.5) loads best-effort; unknown top-level keys preserved', async () => {
   const { preservedTopLevelKeys } = await import('../src/core/persist/ProjectValidator.js');
   const doc = { version: '3.5', futureThing: { a: 1 }, assetLibrary: [{ id: 'x', filename: 'x.glb' }], print: {} };

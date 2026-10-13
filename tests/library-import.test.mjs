@@ -357,26 +357,30 @@ await test('dedupe: dismissing the prompt imports nothing', async () => {
   assert.equal(Object.keys(StateManager.getState().scene.objects).length, before);
 });
 
-await test('dedupe: default prompt rides the shared confirmAction modal (both buttons)', async () => {
+await test('dedupe: default prompt is the designed duplicateImport dialog (copy / separate / dismiss)', async () => {
   B.SceneLoader = { LoadAssetContainerAsync: async () => makeHierarchyContainer() };
   await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
   const seen = [];
-  let reply = 'confirm';
+  let reply = 'copy';
   const off = subscribe(EVENTS.MODAL_OPEN, (payload) => {
     seen.push(payload);
     queueMicrotask(() => payload.onClose(reply));
   });
   try {
     await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
-    assert.equal(_meshAssets().length, 1, 'confirm = Add another copy');
-    reply = 'cancel';
+    assert.equal(_meshAssets().length, 1, "'copy' = Add another copy");
+    reply = 'separate';
     await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
-    assert.equal(_meshAssets().length, 2, 'cancel button = Import as separate asset');
+    assert.equal(_meshAssets().length, 2, "'separate' = Import as separate asset");
+    reply = undefined;   // × / Esc / backdrop
+    const ids = await AssetImport.importWithDedupe(new Blob(['same']), 'mug.glb');
+    assert.deepEqual(ids, [], 'dismiss imports nothing');
+    assert.equal(_meshAssets().length, 2);
   } finally { off?.(); }
-  assert.equal(seen.length, 2);
-  assert.equal(seen[0].id, 'confirmAction');
-  assert.equal(seen[0].focusConfirm, true, '"Add another copy" is the focused default');
-  assert.ok(seen[0].confirmLabel && seen[0].cancelLabel && seen[0].title);
+  assert.equal(seen.length, 3);
+  assert.equal(seen[0].id, 'duplicateImport');
+  assert.equal(seen[0].filename, 'mug.glb');
+  assert.equal(seen[0].existingName, 'mug.glb');
 });
 
 await test('dedupe: library-pack items are never dedupe targets', async () => {
