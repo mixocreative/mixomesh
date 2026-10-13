@@ -43,11 +43,12 @@ Then read the plan section for the next task. Update this file at every safe bou
 
 - Partial staging of shared files (Blueprint.md): scratchpad helper must pipe the patch as BYTES — Python text-mode stdin on Windows turns LF→CRLF and `git apply --cached` fails.
 - Verify COMMITTED state while agents edit the tree: clean worktree `<scratchpad>/wt-head` (node_modules = junction to repo's); `git -C <wt> checkout -q --detach <sha>` then `npm test` there. Never gate a commit on `grep` succeeding — require `# fail 0`.
-- WATCH (flaky, passed on rerun; export smoke now dumps Vite output on failure — suspect Vite dep re-optimisation reload): browser-smoke `glTF restore AABB != fresh import` (ratio ~1.6 — suspect import-bounce timing, memory audit_2026-06-16); browser-export-smoke `Inspected target navigated or closed`. If either repeats twice in a row, investigate.
+- RESOLVED flakes (0c4eb6a + 49c6bac): export smoke 'navigated' = Vite dep re-optimisation reload → optimizeDeps.include; browser smoke AABB = measured mid import-bounce → settleImportBounce(). Old notes: browser-smoke `glTF restore AABB != fresh import` (ratio ~1.6 — suspect import-bounce timing, memory audit_2026-06-16); browser-export-smoke `Inspected target navigated or closed`. If either repeats twice in a row, investigate.
 - `browser-export-smoke` flaked once with a zlib stream error (passed on rerun) — rerun before investigating.
 - Python heredoc anchors with `\n` sometimes fail to match `console.log('
 ' + out.join('
 '))` in tests — insert by line number with `sed -i "<N>r file"` instead.
+- Smokes run against the Vite dev server: ANY file edit by a parallel agent triggers HMR reload → 'target navigated'. Run smokes in the clean worktree while agents work.
 - Parallel agents: give each disjoint files; agents never touch Blueprint/locales unless the task owns them — they report lines, main applies.
 
 - Stitch capture: **production build only** (`npm run build` → `npx vite preview --host 127.0.0.1 --port 5180 --strictPort`).
@@ -117,7 +118,7 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 2.6 Logical-object edge cases | sonnet | done 3b0d6ba | |
 | 2.7 Retire runtime sourceGroupId (+AGENTS rule 7) | sonnet | done 55bd4f6 | legacy seed in ProjectLoader + test |
 
-### Phase 3 — Hierarchy UI (7): 3.1 sonnet doing, 3.2 opus doing, 3.3-3.6 gated (Mockup), 3.7 haiku todo (after 3.1/3.2)
+### Phase 3 — Hierarchy UI (7): 3.1 done 2767180, 3.2 done c6c4291, 3.3-3.6 gated (Mockup), 3.7 haiku doing
 
 **PHASE 2 COMPLETE** (2.1-2.7).
 
@@ -127,13 +128,16 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 4.1 Schema 3.4 + real migrate() | opus | done 39ae3e4 | ratioSource hook left for 1.13 (gated) |
 | 4.2 Adapter resolveAsset/persistRef/restoreRef/findMoved | opus | done 1210b7f | load-time scan + 'changed' live bytes still on → 4.3/4.5 switch off and update persistence.test priority 1/2 cases |
 | 4.3 Explicit Find moved file | sonnet | done c16bb4e | load never scans; changed→embedded |
-| 4.4 Route remaining FSA/idb + boot gate | opus | todo | after 4.2 |
-| 4.5 RelinkAssetCommand | sonnet | doing | |
+| 4.4 Route remaining FSA/idb + boot gate | opus | done 100a1c6 | electron smoke incl. MIXO_SMOKE=save green |
+| 4.5 RelinkAssetCommand | sonnet | done 96f7e1f | Refresh button + applyFoundSource-as-command wait for 4.6 (gated) |
 | 4.6 Source status / Project-Folders tabs / Sources modal | sonnet | gated | Mockup |
 | 4.7 Boot banner | sonnet | gated | Mockup |
-| 4.8 Name-clash rules | opus | todo | logic ungated, display parts gated; after 4.1 |
-| 4.9 Dead code + registry growth | sonnet | todo | after 4.2 |
+| 4.8 Name-clash rules | opus | doing (logic) | display parts gated |
+| 4.9 Dead code + registry growth | sonnet | doing | + remove old path-returning pickOpen/pickSave bridges; AssetImport putHandle |
 | 4.10 Blueprint §11 pass + ADR addendum | haiku | todo | last |
+
+### Phase 5 (10): 5.8 done 30ef0bc, 5.9 done 73168df; 5.6 opus todo; 5.1-5.5, 5.7 gated (5.4 toasts ungated part todo); 5.10 haiku last
+### Phase 6 (13): 6.3 done 73168df (+fix e5c291b, 0c4eb6a), 6.5 done ff04eb9, 6.6a-d done ae96ca6 (found+fixed CreateGroup bug); 6.1 opus, 6.2 sonnet, 6.4 sonnet, 6.6e-g, 6.7 haiku todo
 
 ### Phases 5–6
 Copy task ids/titles from the plan into a table here when the phase starts (keeps this file short until then).
@@ -165,3 +169,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 - 2026-10-14 (cont.) — 2.3 2b9c0e4, 1.12 c4351f1 → Phase 1 ungated DONE (remaining 1.2/1.3/1.13 gated). Running: 2.4, 4.1 (opus), 4.2 (opus).
 - 2026-10-14 (cont.) — 2.4 6fcd5ee, 4.1 39ae3e4, 2.5 a242b9b, 4.2 1210b7f. Full tree: unit 174/174, browser + electron smokes green; export smoke flaky (3 clean reruns). Next: 2.6; 4.3 + 4.5 (+switch off load scan), 4.4, 4.8 logic, 4.9.
 - 2026-10-14 (cont.) — 2.6 3b0d6ba, 4.3 c16bb4e → Phase 2 complete. Running: 4.5, 3.1, 3.2 (opus). Next: 4.4 (after 4.5, shares ProjectLoader), 4.8 logic, 4.9, 3.7, then Phase 5/6 ungated.
+- 2026-10-14 (cont.) — 4.5 96f7e1f, 3.1 2767180, 5.8 30ef0bc, 6.5 ff04eb9, 3.2 c6c4291, 5.9+6.3 73168df, 6.6a-d ae96ca6, smoke fixes 49c6bac, 4.4 100a1c6, fixes e5c291b/0c4eb6a. FULL TREE GREEN: unit 252, browser/export/repair/group/electron smokes. Next batch: 4.8 logic, 4.9, 3.7, 6.6e-g; then 5.6, 6.1, 6.2, 6.4.
