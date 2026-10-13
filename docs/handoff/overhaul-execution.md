@@ -74,29 +74,29 @@ Status: `todo` · `doing` · `done <commit>` · `blocked <why>` · `gated` (awai
 | 0.9 Undo/Redo buttons + reset-all confirm | haiku | done 6dbdb78 | smoke: Undo button reverts Duplicate |
 | 0.10 Case-insensitive texture export names | sonnet | done 16e169a | |
 | 0.11 Autosave reachable, keyed by id | opus | done b84bece | also fixed: loader deleted autosave via raw IDB (missed Electron kv) |
-| 0.12 Shader → Material strings | haiku | doing | batch C |
+| 0.12 Shader → Material strings | haiku | done 5c5a24c | bundled w/ 1.6 (shared locales/smoke) |
 | 0.13a DESIGN.md | opus | done 2b4edff | stitch designMd.valid=true |
 | 0.13b Stitch gitignore + capture recipe + hygiene test | haiku | done 2b4edff | trial capture OK (scratchpad, git clean) |
 
 ### Phase 1 — Printer strategy, export flow, scale model (18)
 | Task | Tier | Status | Notes |
 |---|---|---|---|
-| 1.1 printers.json v2 + loader (+AGENTS rule 6) | sonnet | doing | batch C |
+| 1.1 printers.json v2 + loader (+AGENTS rule 6) | sonnet | done 2e47d4c | 20 rows; some bed specs flagged for owner double-check |
 | 1.2 Printer tab | sonnet | gated | Mockup gate; deps 1.1 |
 | 1.3 Export flow + settings scope (+ApplyPrinterProfileCommand) | opus | gated | Mockup gate; deps 1.1/1.15/1.16/1.17 |
-| 1.4 Per-printer readiness hints | sonnet | todo | after 1.6 (PrintReadiness) + 0.12 (locales) |
-| 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | todo | deps 1.1; ThreeMFWriter + PrintPipeline |
-| 1.6 PLY + WRL writers | opus | doing | batch C |
-| 1.7 OBJ through PrintSpace w/ per-printer axis | opus | todo | deps 1.1 |
+| 1.4 Per-printer readiness hints | sonnet | doing | batch D |
+| 1.5 3MF split-by-material / metadata / thumbnail / alpha | opus | doing | batch D (opus agent) |
+| 1.6 PLY + WRL writers | opus | done 5c5a24c | trimesh +1000 mm³ both |
+| 1.7 OBJ through PrintSpace w/ per-printer axis | opus | doing | batch D (opus agent) |
 | 1.8 Gate tightening | sonnet | todo | PrintPipeline/PrintPanel — after 1.5/1.6 |
-| 1.9 Texture colour-space check | sonnet | doing | batch C |
+| 1.9 Texture colour-space check | sonnet | done fc71135 | conversion export-readback only (capture raw) |
 | 1.10 Dead export/scale code removal | sonnet | todo | deps 1.1 |
 | 1.11 Bambu/Orca 3MF flavour | opus | todo | after 1.5 (ThreeMFWriter) |
 | 1.12 Blueprint §12 consistency pass | haiku | todo | last in phase |
 | 1.13 Scale control: declare vs convert | opus | gated | Mockup gate |
-| 1.14 Rescale about own origin | sonnet | doing | batch C |
-| 1.15 Explicit export reference + mixed-scale note | opus | todo | ExportContext |
-| 1.16 Effective scale | sonnet | todo | logic part; UI line waits on 1.13 mockup |
+| 1.14 Rescale about own origin | sonnet | done e7fed24 | |
+| 1.15 Explicit export reference + mixed-scale note | opus | done 1d7864f | UI row lands in 1.3 |
+| 1.16 Effective scale | sonnet | doing | batch D logic only; UI line waits on 1.13 mockup |
 | 1.17 Typed print sizes + filename tokens | opus | todo | after 1.15 (ExportContext) |
 | 1.18 Per-target cost lines | sonnet | todo | after 1.17 |
 
@@ -110,6 +110,9 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
 
 ## Owner queue (things waiting on the owner)
 
+- Owner rule: start every status report with 🟡/⛔, and ✅🎉 ALL DONE only when the whole mission is finished (memory feedback_done_emoji).
+- [ ] Double-check printer bed specs flagged by 1.1: Stratasys J55/J850, Anycubic Photon Mono/Kobra 3, Bambu H2D, Prusa XL, Elegoo Centauri Carbon, Formlabs Form 4, HP MJF 580.
+
 - [ ] Confirm Stitch project binding + first fixture-screen batch upload (Decision 30) — 0.13a/b DONE, asked owner 2026-10-14 (non-blocking).
 - [ ] Optional: fix `~/.codex/config.toml` so Codex audits work again.
 
@@ -119,3 +122,4 @@ Copy task ids/titles from the plan into a table here when the phase starts (keep
   this handoff created. Next: Phase 0, start with 0.13a/0.13b + ungated 0.1–0.5, 0.8–0.12.
 - 2026-10-14 (cont.) — Phase 0 batch A landed: 0.13a/b 2b4edff, 0.3 6d66b10, 0.4 a3da60f, 0.2+0.8+0.10 16e169a (all checks + browser/export smokes green). Batch B (0.1, 0.5, 0.9) dispatched; then 0.11 (opus, main), 0.12.
 - 2026-10-14 (cont.) — Phase 0 ungated DONE: 0.5 7efeb91, 0.1+0.9 6dbdb78, 0.11 b84bece. Remaining Phase 0: 0.12 (batch C), gated 0.6/0.7. Batch C dispatched: 0.12, 1.1, 1.6 (opus agent), 1.9, 1.14. `npm run test:electron` still to run (0.4/0.11) at Phase 0/1 close.
+- 2026-10-14 (cont.) — 1.1 2e47d4c, 1.9 fc71135, 1.14 e7fed24, 1.6+0.12 5c5a24c, 1.15 1d7864f. Phase 0 ungated complete. Batch D running: 1.4, 1.5 (opus), 1.7 (opus), 1.16. Then 1.10, 1.8, 1.11, 1.17, 1.18, 1.12.
