@@ -1188,6 +1188,8 @@ const initialState = {
 
 Owns `state.selection`. All selection writes are **silent against `PROJECT_DIRTY`** (clicking around must not mark the project dirty) but are still persisted in §11 schema.
 
+**Selection entries are objects OR groups** (overhaul task 2.1, Decision 1). `selectedIds` / `activeId` may hold object ids (always the logical-object lead) and user-group ids (keys of `state.scene.groups`). A group is a first-class entry: it is **never expanded into its children at selection time**. Canonicalisation lives in `LogicalObjects.canonicalSelectableId(id, scene)` (object id → lead via `canonicalObjectId`; group id → itself; unknown / ghost → `null`; on an id collision the object wins) and `LogicalObjects.isGroupId(id, groups)`.
+
 ### Public API
 ```js
 Selection.set(ids, activeId?)        → void   // replace; active defaults to last id (or null)
@@ -1202,11 +1204,18 @@ Selection.cyclePivotMode()           → void   // in the order above
 Selection.refresh()                  → void   // re-sync visuals after scene gain/loss
 Selection.getSelectedIds()           → string[]
 Selection.getActiveId()              → string|null
-Selection.getSelectedResolved()      → { id, mesh }[]   // ghost/missing dropped
+Selection.contains(id)               → boolean
+Selection.getSelectedResolved()      → { id, mesh }[]   // OBJECTS only, every material part; ghost/missing/groups dropped
+Selection.getSelectedNodes()         → { id, node, kind: 'object'|'group' }[]  // every entry in selection order
 ```
+
+`set/add/toggle/remove/setActive` accept object ids and group ids. `getSelectedResolved()` keeps its historical mesh-only contract (callers that transform/validate/export meshes are unaffected by group entries). `getSelectedNodes()` resolves each entry once: an object to its lead Babylon mesh (no part expansion), a group to its runtime `TransformNode` (found by `metadata.groupId` in `scene.transformNodes`); entries without a live node are skipped but stay selected.
 
 ### Behaviour rules
 - Resolution drops `obj.isGhost === true` and meshes `AssetLoader.getBabylonMesh` cannot find. Ghosts are *selectable in the outliner* but never receive gizmo / silhouette attention.
+- Private `_resolve(id)` → `{ id, node, kind }` or `null` (ghost, unknown, no live node). Writes (`set/add/toggle/setActive`) drop ids that canonicalise to `null`; `setActive(unknown)` is a no-op (it does not clear the active id); `setActive(null)` clears it.
+- The active id may be a group id. Event payloads are unchanged in shape (`SELECTION_CHANGED {selectedIds, activeId}`, `ACTIVE_OBJECT_CHANGED {activeId}`).
+- Visuals (`_applyVisuals`) still act on selected OBJECT meshes only; a selected group receives no gizmo/outline yet — attaching group nodes rigidly under the pivot is task 2.2, click-depth scope is task 3.2, lock enforcement is task 2.5.
 - Every selection-write call emits `EVENTS.SELECTION_CHANGED` (with `{selectedIds, activeId}`); an active-id change additionally emits `EVENTS.ACTIVE_OBJECT_CHANGED`.
 - `_applyVisuals` (private) calls `SceneManager.setActive(activeMesh)`, `SceneManager.setSelected(others)`, `SceneManager.attachToSelection(allMeshes, pivotMode, activeMesh)`. The gizmo's pivot follows `state.selection.pivotMode`.
 - `setPivotMode('cursor')` also flips `SceneManager.setCursorVisible(true)`; switching away hides it.

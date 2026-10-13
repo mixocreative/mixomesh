@@ -77,3 +77,33 @@ export function logicalObjectLeadIds(objects) {
   }
   return out;
 }
+
+/**
+ * True when `id` names a user group (`state.scene.groups`). Groups are
+ * first-class selection entries alongside objects (overhaul §4.5, task 2.1).
+ * @param {string|null|undefined} id
+ * @param {Record<string, any>} groups
+ */
+export function isGroupId(id, groups) {
+  return !!id && !!groups && Object.prototype.hasOwnProperty.call(groups, id) && !!groups[id];
+}
+
+/**
+ * Canonical selection id for `id`: group ids pass through unchanged; object
+ * ids collapse to their logical-object lead. Returns null for unknown ids
+ * and ghost objects.
+ * @param {string|null|undefined} id
+ * @param {{ objects?: Record<string, any>, groups?: Record<string, any> }} scene
+ * @returns {string|null}
+ */
+export function canonicalSelectableId(id, scene) {
+  if (id == null) return null;
+  const objects = scene?.objects ?? {};
+  // Objects win on the (pathological) id collision so object behaviour is
+  // never changed by the presence of a same-named group.
+  if (!objects[id] && isGroupId(id, scene?.groups)) return id;
+  const canonical = canonicalObjectId(id, objects);
+  const obj = canonical ? objects[canonical] : null;
+  if (!obj || obj.isGhost) return null;
+  return canonical;
+}

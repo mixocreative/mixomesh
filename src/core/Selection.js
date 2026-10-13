@@ -2,7 +2,9 @@ import { EVENTS } from './events.js';
 import { dispatch, setState, getState } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
 import { AssetLoader } from './AssetLoader.js';
-import { canonicalObjectId, logicalObjectPartIds, logicalObjectLeadIds } from './LogicalObjects.js';
+import {
+  canonicalObjectId, logicalObjectPartIds, logicalObjectLeadIds, canonicalSelectableId, isGroupId,
+} from './LogicalObjects.js';
 
 // Selection writes are silent against PROJECT_DIRTY — clicking around shouldn't
 // flag the project as needing a save. The persisted schema (BLUEPRINT §11) still
@@ -12,32 +14,91 @@ const SILENT = { silent: true };
 const VALID_PIVOTS = new Set(['world', 'median', 'active', 'individual', 'cursor']);
 
 /**
- * Resolve a list of meshIds to live Babylon meshes, dropping unknowns / ghosts.
+ * Find the runtime TransformNode for a user group (`metadata.groupId`).
+ * Inlined rather than imported from commands/support.js, which imports
+ * Selection (cycle).
+ * @param {string} groupId
+ */
+function _findGroupNode(groupId) {
+  const scene = SceneManager.getScene?.();
+  if (!scene) return null;
+  for (const t of scene.transformNodes ?? []) {
+    if (t?.metadata?.groupId === groupId) return t;
+  }
+  return null;
+}
+
+/**
+ * Resolve one selection entry to its live node.
+ * Objects resolve to their lead's Babylon mesh; groups to their TransformNode.
+ * Ghosts, unknown ids and ids without a live node return null.
+ * @param {string} id
+ * @returns {{ id: string, node: any, kind: 'object'|'group' } | null}
+ */
+function _resolve(id) {
+  const { objects, groups } = getState().scene;
+  const obj = objects[id];
+  if (obj) {
+    if (obj.isGhost) return null;
+    const mesh = AssetLoader.getBabylonMesh(id);
+    return mesh ? { id, node: mesh, kind: 'object' } : null;
+  }
+  if (isGroupId(id, groups)) {
+    const node = _findGroupNode(id);
+    return node ? { id, node, kind: 'group' } : null;
+  }
+  return null;
+}
+
+/**
+ * Resolve selected OBJECT ids to live meshes, expanding each logical object to
+ * all of its material parts and dropping unknowns / ghosts / group ids.
+ * This is the long-standing mesh-only contract of `getSelectedResolved()`.
  * @param {string[]} ids
  * @returns {{ id: string, mesh: any }[]}
  */
-function _resolve(ids) {
+function _resolveObjectMeshes(ids) {
   const out = [];
   const objects = getState().scene.objects;
   const seen = new Set();
   for (const id of ids) {
-    const partIds = logicalObjectPartIds(id, objects);
-    for (const partId of (partIds.length ? partIds : [id])) {
+    if (!objects[id]) continue;
+    for (const partId of logicalObjectPartIds(id, objects)) {
       if (seen.has(partId)) continue;
       seen.add(partId);
-      const obj = objects[partId];
-      if (!obj || obj.isGhost) continue;
-      const mesh = AssetLoader.getBabylonMesh(partId);
-      if (mesh) out.push({ id: partId, mesh });
+      const r = _resolve(partId);
+      if (r) out.push({ id: partId, mesh: r.node });
     }
   }
   return out;
 }
 
+/**
+ * Strict canonical id for WRITES: group ids as-is, object ids → lead,
+ * null for unknown / ghost.
+ * @param {string|null|undefined} id
+ */
+function _canon(id) {
+  return canonicalSelectableId(id, getState().scene);
+}
+
+/**
+ * Loose canonical id for membership checks (remove / contains): never drops
+ * the id, so stale entries can still be found.
+ * @param {string|null|undefined} id
+ */
+function _canonLoose(id) {
+  const { objects, groups } = getState().scene;
+  if (!objects[id] && isGroupId(id, groups)) return id;
+  return canonicalObjectId(id, objects);
+}
+
 function _applyVisuals() {
   const { selectedIds, activeId, pivotMode } = getState().selection;
   const objects = getState().scene.objects;
-  const resolved = _resolve(selectedIds);
+  // Groups are selection entries but get no gizmo/outline attention here yet
+  // (pivot attachment of group nodes is task 2.2).
+  const resolved = _resolveObjectMeshes(selectedIds);
   // The ACTIVE object may be multi-part (multi-primitive / split) — every one
   // of its parts gets the active tint, not just the lead.
   const activePartIds = activeId ? new Set(logicalObjectPartIds(activeId, objects)) : new Set();
@@ -51,16 +112,17 @@ function _applyVisuals() {
 }
 
 /**
- * Replace the current selection.
+ * Replace the current selection. Accepts object ids (collapsed to their
+ * logical-object lead) and group ids (`state.scene.groups`, kept as-is — never
+ * expanded into children). Unknown ids and ghosts are dropped.
  * @param {string[]} ids
  * @param {string|null} [activeId]  Defaults to last id, or null if empty.
  */
 export function set(ids, activeId) {
-  const objects = getState().scene.objects;
   const cleaned = Array.from(new Set((ids ?? [])
-    .map(id => canonicalObjectId(id, objects))
-    .filter(id => id && objects[id] && !objects[id].isGhost)));
-  const canonicalActive = activeId != null ? canonicalObjectId(activeId, objects) : null;
+    .map(_canon)
+    .filter(id => id != null)));
+  const canonicalActive = _canon(activeId);
   const newActive = canonicalActive != null && cleaned.includes(canonicalActive)
     ? canonicalActive
     : (cleaned.length ? cleaned[cleaned.length - 1] : null);
@@ -82,7 +144,8 @@ export function set(ids, activeId) {
 
 /** Add `id` to the selection (idempotent). The added id becomes active. */
 export function add(id) {
-  const canonical = canonicalObjectId(id, getState().scene.objects);
+  const canonical = _canon(id);
+  if (canonical == null) return;
   const { selectedIds } = getState().selection;
   if (selectedIds.includes(canonical)) { setActive(canonical); return; }
   set([...selectedIds, canonical], canonical);
@@ -90,7 +153,7 @@ export function add(id) {
 
 /** Remove `id` from the selection. */
 export function remove(id) {
-  const canonical = canonicalObjectId(id, getState().scene.objects);
+  const canonical = _canonLoose(id);
   const { selectedIds, activeId } = getState().selection;
   if (!selectedIds.includes(canonical)) return;
   const next = selectedIds.filter(x => x !== canonical);
@@ -100,7 +163,8 @@ export function remove(id) {
 
 /** Add or remove `id` depending on whether it's currently selected. */
 export function toggle(id) {
-  const canonical = canonicalObjectId(id, getState().scene.objects);
+  const canonical = _canon(id);
+  if (canonical == null) return;
   const { selectedIds } = getState().selection;
   if (selectedIds.includes(canonical)) remove(canonical);
   else add(canonical);
@@ -108,7 +172,8 @@ export function toggle(id) {
 
 /** Replace the active id. Must already be in the selection set. */
 export function setActive(id) {
-  const canonical = canonicalObjectId(id, getState().scene.objects);
+  const canonical = id == null ? null : _canon(id);
+  if (id != null && canonical == null) return;
   const { selectedIds, activeId } = getState().selection;
   if (canonical === activeId) return;
   if (canonical != null && !selectedIds.includes(canonical)) return;
@@ -173,13 +238,33 @@ export function getActiveId() {
 
 /** @returns {boolean} */
 export function contains(id) {
-  const canonical = canonicalObjectId(id, getState().scene.objects);
+  const canonical = _canonLoose(id);
   return getState().selection.selectedIds.includes(canonical);
 }
 
-/** @returns {{ id: string, mesh: any }[]} */
+/**
+ * Selected OBJECTS as live meshes (every material part of each logical
+ * object). Group entries are skipped — use `getSelectedNodes()` for those.
+ * @returns {{ id: string, mesh: any }[]}
+ */
 export function getSelectedResolved() {
-  return _resolve(getState().selection.selectedIds);
+  return _resolveObjectMeshes(getState().selection.selectedIds);
+}
+
+/**
+ * Every selected entry (objects and groups) resolved to its live node, in
+ * selection order. Objects resolve to their lead mesh only (no part
+ * expansion); groups to their TransformNode. Unknown / ghost / node-less ids
+ * are skipped.
+ * @returns {{ id: string, node: any, kind: 'object'|'group' }[]}
+ */
+export function getSelectedNodes() {
+  const out = [];
+  for (const id of getState().selection.selectedIds) {
+    const r = _resolve(id);
+    if (r) out.push(r);
+  }
+  return out;
 }
 
 function _eq(a, b) {
@@ -192,5 +277,5 @@ function _eq(a, b) {
 export const Selection = {
   set, add, remove, toggle, setActive, clear, selectAll,
   setPivotMode, cyclePivotMode, refresh,
-  getSelectedIds, getActiveId, contains, getSelectedResolved,
+  getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
 };
