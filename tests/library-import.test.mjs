@@ -393,6 +393,47 @@ await test('dedupe: library-pack items are never dedupe targets', async () => {
   assert.equal(AssetImport.findByHash(cola.contentHash), null);
 });
 
+
+// ── LI.3: reusable launch entry points ──
+const { storage: _storage } = await import('../src/core/storage/StorageAdapter.js');
+const _DirMounts = await import('../src/core/assets/DirMounts.js');
+
+await test('DirMounts.registerMount persists the ref and registers the directory facade', async () => {
+  const orig = _storage.persistRef;
+  _storage.persistRef = async ref => `dir_${String(ref).padEnd(32, '0')}`;
+  try {
+    const m = await _DirMounts.registerMount({ ref: 'abc', name: 'Kit' });
+    assert.equal(m.key, `dir_${'abc'.padEnd(32, '0')}`);
+    assert.equal(m.name, 'Kit');
+    assert.equal(m.ref, 'abc');
+    assert.ok(_DirMounts.getDirectoryHandle(m.key), 'registered for the session');
+    _storage.persistRef = async () => { throw new Error('nope'); };
+    const err = console.error; console.error = () => {};
+    const m2 = await _DirMounts.registerMount({ ref: 'zzz', name: 'Tmp' });
+    console.error = err;
+    assert.match(m2.key, /^session_dir_/, 'persist failure falls back to a session key');
+  } finally { _storage.persistRef = orig; }
+});
+
+await test('ViewportDrop.importPicked: empty = no-op; picked files are read via the adapter', async () => {
+  globalThis.document.getElementById = () => null;
+  globalThis.document.querySelector = () => null;
+  const { ViewportDrop } = await import('../src/ui/ViewportDrop.js');
+  assert.equal(typeof ViewportDrop.importPicked, 'function');
+  await ViewportDrop.importPicked([]);
+  const orig = _storage.readFile;
+  let reads = 0;
+  _storage.readFile = async () => { reads++; return new File(['x'], 'notes.txt'); };
+  try { await ViewportDrop.importPicked([{ ref: 'r', name: 'notes.txt' }]); }
+  finally { _storage.readFile = orig; }
+  assert.equal(reads, 1);
+});
+
+await test('AssetPanel.mountFromRef is exported on the AssetPanel facade', async () => {
+  const { AssetPanel } = await import('../src/ui/AssetPanel.js');
+  assert.equal(typeof AssetPanel.mountFromRef, 'function');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

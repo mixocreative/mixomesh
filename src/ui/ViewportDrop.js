@@ -65,7 +65,16 @@ export function attach(viewportEl, scene) {
 /** Picker entry point shared by the viewport empty state and future menus. */
 export async function promptImport(position = BABYLON.Vector3.Zero()) {
   const picked = await storage.pickImportAssets({ multiple: true });
-  if (!picked.length) return;
+  await importPicked(picked, position);
+}
+
+/**
+ * Import already-picked assets ([{ref,name}], mesh + sibling MTL/textures).
+ * Shared by the picker and launch-time file arguments.
+ * @param {Array<{ref:any, name?:string}>} picked
+ */
+export async function importPicked(picked, position = BABYLON.Vector3.Zero()) {
+  if (!picked?.length) return;
   const files = await Promise.all(picked.map(p => storage.readFile(p.ref)));
   const siblingFiles = files.filter(file => {
     const ext = _extOf(file.name);
@@ -277,4 +286,4 @@ function _extOf(filename) {
   return i === -1 ? '' : filename.slice(i).toLowerCase();
 }
 
-export const ViewportDrop = { attach, promptImport, staggerNextX };
+export const ViewportDrop = { attach, promptImport, importPicked, staggerNextX };

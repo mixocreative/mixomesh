@@ -19,6 +19,16 @@ const _dirRefs = new Map();    // key → adapter-owned opaque ref (session)
 export async function mountDirectory() {
   const mounted = await storage.mountDirectory();
   if (!mounted) return null;
+  return registerMount(mounted);
+}
+
+/**
+ * Persist an already-picked directory ref (stable key) and remember it for the
+ * session. Shared by the picker and by launch-time `--library` mounts.
+ * @param {{ref:any, name:string}} mounted
+ * @returns {Promise<{ref:any, handle:any, key:string, name:string}>}
+ */
+export async function registerMount(mounted) {
   let key;
   try {
     key = await storage.persistRef(mounted.ref);

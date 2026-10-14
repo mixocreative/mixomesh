@@ -189,11 +189,27 @@ function _setTab(tab) {
 /** Programmatically trigger the directory-mount picker (also bound to header button). */
 export async function promptMount() {
   await safeAsync(async () => {
-    const mounted = await AssetLoader.mountDirectory();
-    if (!mounted) return;
-    await _mountRef(mounted.key, mounted.ref, mounted.name, true);
-    await storage.kvSet(LAST_MOUNT_KEY, { key: mounted.key, name: mounted.name });
+    const picked = await storage.mountDirectory();
+    if (picked) await mountFromRef(picked);
   });
+}
+
+/**
+ * Mount an already-obtained directory ref ({ref,name}) exactly like the Mount
+ * button: register + index + persist as the last mount. If that folder is
+ * already mounted (same stable key), just select it.
+ * @param {{ref:any, name:string}} picked
+ */
+export async function mountFromRef(picked) {
+  const mounted = await AssetLoader.registerMount(picked);
+  if (_mounts.has(mounted.key)) {
+    _selectedKey  = mounted.key;
+    _selectedPath = _mounts.get(mounted.key).name;
+    _setTab('library');
+    return;
+  }
+  await _mountRef(mounted.key, mounted.ref, mounted.name, true);
+  await storage.kvSet(LAST_MOUNT_KEY, { key: mounted.key, name: mounted.name });
 }
 
 /**
@@ -858,5 +874,5 @@ function _registerDuplicateDialog() {
   });
 }
 
-export const AssetPanel = { init, promptMount, promptRemount, findRemountOffer, remountLast, getFileHandle };
+export const AssetPanel = { init, promptMount, mountFromRef, promptRemount, findRemountOffer, remountLast, getFileHandle };
 
