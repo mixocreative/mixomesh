@@ -1,0 +1,37 @@
+{"data":{"__schema":{
+"queryType":{"name":"Query"},"mutationType":{"name":"Mutation"},
+"types":[
+{"kind":"OBJECT","name":"Query","fields":[
+ {"name":"me","args":[],"type":{"kind":"OBJECT","name":"User","ofType":null}},
+ {"name":"creation","args":[{"name":"slug","type":{"kind":"NON_NULL","name":null,"ofType":{"kind":"SCALAR","name":"String","ofType":null}}}],"type":{"kind":"OBJECT","name":"Creation","ofType":null}},
+ {"name":"myCreations","args":[{"name":"limit","type":{"kind":"SCALAR","name":"Int","ofType":null}}],"type":{"kind":"LIST","name":null,"ofType":{"kind":"OBJECT","name":"Creation","ofType":null}}},
+ {"name":"categories","args":[],"type":{"kind":"LIST","name":null,"ofType":{"kind":"OBJECT","name":"Category","ofType":null}}}
+]},
+{"kind":"OBJECT","name":"Mutation","fields":[
+ {"name":"createCreation","args":[
+  {"name":"name","type":{"kind":"NON_NULL","name":null,"ofType":{"kind":"SCALAR","name":"String","ofType":null}}},
+  {"name":"description","type":{"kind":"SCALAR","name":"String","ofType":null}},
+  {"name":"price","type":{"kind":"INPUT_OBJECT","name":"MoneyInput","ofType":null}},
+  {"name":"license","type":{"kind":"ENUM","name":"LicenseEnum","ofType":null}},
+  {"name":"categoryId","type":{"kind":"SCALAR","name":"ID","ofType":null}},
+  {"name":"tags","type":{"kind":"LIST","name":null,"ofType":{"kind":"SCALAR","name":"String","ofType":null}}},
+  {"name":"aiGenerated","type":{"kind":"SCALAR","name":"Boolean","ofType":null}},
+  {"name":"visibility","type":{"kind":"ENUM","name":"VisibilityEnum","ofType":null}}
+ ],"type":{"kind":"OBJECT","name":"CreationPayload","ofType":null}},
+ {"name":"updateCreation","args":[{"name":"id","type":{"kind":"NON_NULL","name":null,"ofType":{"kind":"SCALAR","name":"ID","ofType":null}}},{"name":"name","type":{"kind":"SCALAR","name":"String","ofType":null}}],"type":{"kind":"OBJECT","name":"CreationPayload","ofType":null}},
+ {"name":"createSignedUpload","args":[{"name":"filename","type":{"kind":"SCALAR","name":"String","ofType":null}}],"type":{"kind":"OBJECT","name":"SignedUpload","ofType":null}}
+]},
+{"kind":"INPUT_OBJECT","name":"MoneyInput","inputFields":[
+ {"name":"amount","type":{"kind":"SCALAR","name":"Int","ofType":null}},
+ {"name":"currency","type":{"kind":"ENUM","name":"CurrencyEnum","ofType":null}}]},
+{"kind":"ENUM","name":"LicenseEnum","enumValues":[{"name":"CC_BY"},{"name":"PERSONAL"}]},
+{"kind":"ENUM","name":"CurrencyEnum","enumValues":[{"name":"EUR"},{"name":"USD"}]},
+{"kind":"ENUM","name":"VisibilityEnum","enumValues":[{"name":"DRAFT"},{"name":"PUBLISHED"}]},
+{"kind":"OBJECT","name":"Creation","fields":[
+ {"name":"id","args":[],"type":{"kind":"SCALAR","name":"ID","ofType":null}},
+ {"name":"files","args":[],"type":{"kind":"LIST","name":null,"ofType":{"kind":"OBJECT","name":"File","ofType":null}}},
+ {"name":"images","args":[],"type":{"kind":"LIST","name":null,"ofType":{"kind":"SCALAR","name":"String","ofType":null}}},
+ {"name":"publishedStatus","args":[],"type":{"kind":"SCALAR","name":"String","ofType":null}}]},
+{"kind":"OBJECT","name":"User","fields":[{"name":"nick","args":[],"type":{"kind":"SCALAR","name":"String","ofType":null}}]},
+{"kind":"OBJECT","name":"Category","fields":[{"name":"id","args":[],"type":{"kind":"SCALAR","name":"ID","ofType":null}}]}
+]}}}
