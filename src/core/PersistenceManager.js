@@ -101,10 +101,12 @@ async function _afterWrite(staleId = null) {
  * leaves the previous handle/name untouched instead of adopting a 0-byte file.
  * @returns {Promise<boolean>} true on save, false on picker cancel.
  */
-export async function saveAs() {
+export async function saveAs(presetTarget = null) {
   const previousName = getState().project.name || 'Untitled';
   const suggested = `${previousName}${FILE_EXT}`;
-  const picked = await storage.pickSaveProject(suggested);
+  // presetTarget = an already-validated `{ref, name}` (automation API: the host
+  // resolved the destination, a hidden window must not open a picker).
+  const picked = presetTarget ?? await storage.pickSaveProject(suggested);
   if (!picked) return false;
   const name = picked.name.replace(/\.mixo$/i, '');
   const previousId = getState().project.id ?? null;
@@ -117,6 +119,9 @@ export async function saveAs() {
   await _afterWrite(previousId);
   return true;
 }
+
+/** True when Save has a bound file (otherwise save() would open the Save As picker). */
+export function hasSaveTarget() { return _fileRef != null; }
 
 /**
  * Parse .mixo text. JSON errors become a user-readable message instead of a
@@ -235,7 +240,7 @@ export async function requestClose() {
 // seam (same rationale as AssetLoader, bundle-1 plan 2026-06-11).
 export const PersistenceManager = {
   init, isDirty, isLoading,
-  save, saveAs, open, openPicked, newProject, requestClose,
+  save, saveAs, open, openPicked, newProject, requestClose, hasSaveTarget,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,
 };
