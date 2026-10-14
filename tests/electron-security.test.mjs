@@ -186,4 +186,31 @@ await check('index.html: no inline scripts or event-handler attributes', () => {
   assert.doesNotMatch(indexHtml, /javascript:/i);
 });
 
-assert.equal(cases, 9);
+await check('installer: registry keys under SHELL_CONTEXT + .mixo association wired', () => {
+  const nsh = readFileSync(new URL('../electron/installer.nsh', import.meta.url), 'utf8');
+  const yml = readFileSync(new URL('../electron-builder.yml', import.meta.url), 'utf8');
+  const iAt = nsh.indexOf('!macro customInstall');
+  const uAt = nsh.indexOf('!macro customUnInstall');
+  assert.ok(iAt >= 0 && uAt > iAt, 'customInstall then customUnInstall macros present');
+  const install = nsh.slice(iAt, uAt);
+  const uninstall = nsh.slice(uAt);
+  const D = '$';
+  const BS = '\\';
+  const exe = `${D}{APP_EXECUTABLE_FILENAME}`;
+  const appPaths = String.raw`Software\Microsoft\Windows\CurrentVersion\App Paths${BS}${exe}`;
+  for (const line of [
+    String.raw`WriteRegStr SHELL_CONTEXT "${appPaths}" "" "${D}INSTDIR${BS}${exe}"`,
+    String.raw`WriteRegStr SHELL_CONTEXT "${appPaths}" "Path" "${D}INSTDIR"`,
+    String.raw`WriteRegStr SHELL_CONTEXT "Software\MIXOMESH" "InstallLocation" "${D}INSTDIR"`,
+    String.raw`WriteRegStr SHELL_CONTEXT "Software\MIXOMESH" "Version" "${D}{VERSION}"`,
+  ]) assert.ok(install.includes(line), `customInstall lacks: ${line}`);
+  for (const line of [
+    String.raw`DeleteRegKey SHELL_CONTEXT "${appPaths}"`,
+    String.raw`DeleteRegKey SHELL_CONTEXT "Software\MIXOMESH"`,
+  ]) assert.ok(uninstall.includes(line), `customUnInstall lacks: ${line}`);
+  assert.doesNotMatch(nsh, /HKLM|HKCU|HKEY_/, 'only SHELL_CONTEXT, never a hard-coded hive');
+  assert.match(yml, /^\s+include:\s*electron\/installer\.nsh\s*$/m);
+  assert.match(yml, /fileAssociations:\s*\r?\n\s*- ext:\s*mixo\b/);
+});
+
+assert.equal(cases, 10);

@@ -25,10 +25,17 @@ extraResources:
     to: listbridge/cloudflared-LICENSE.txt
 win:
   target: nsis
+  # .mixo double-click -> `MIXOMESH.exe "%1"` (launch integration LI.5; registry hooks in electron/installer.nsh).
+  fileAssociations:
+    - ext: mixo
+      name: MIXOMESH project
+      description: MIXOMESH project
+      role: Editor
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  include: electron/installer.nsh
 
 # Package the exact Electron already installed for dev (node_modules/electron) instead of
 # re-downloading it: same version as development, and no hang on its checksum download.
