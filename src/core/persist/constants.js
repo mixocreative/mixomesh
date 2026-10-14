@@ -1,11 +1,13 @@
 // Shared constants for the persistence subsystem (single source — the façade
 // and every persist/* module read these, never re-declare them).
 
+// 3.5 (marketplace publish PB.8): `project.listings[]` — listing records, no
+// secrets, no bytes. Older docs migrate to an empty list.
 // 3.4 (overhaul 4.1): AssetEntry gains a `source` descriptor + `displayName`,
 // `project.id` is formal, and ProjectLoader.migrate() is a real version ladder.
 // 3.3 separated content-addressed textureImages from texture-view AssetEntries;
 // older docs load through their per-asset fileData and source-scoped rebind.
-export const SCHEMA_VERSION = '3.4';
+export const SCHEMA_VERSION = '3.5';
 export const FILE_EXT       = '.mixo';
 export const FILE_TYPES     = [{
   description: 'MIXOMESH project',

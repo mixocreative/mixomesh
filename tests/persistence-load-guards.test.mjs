@@ -639,7 +639,7 @@ await test('4.1: 3.3 doc loads → saves as 3.4 with source/displayName; 3.4 rou
   assert.equal(lib.displayName, 'a_ok.glb');
   AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
   const saved = await __test._buildDocument({ skipTextureImages: true });
-  assert.equal(saved.version, '3.4');
+  assert.equal(saved.version, '3.5');
   assert.equal(saved.project.id, 'pid-schema');
   assert.deepEqual(saved.assetLibrary[0].source, lib.source);
   assert.equal(saved.assetLibrary[0].displayName, 'a_ok.glb');
@@ -650,13 +650,31 @@ await test('4.1: 3.3 doc loads → saves as 3.4 with source/displayName; 3.4 rou
   assert.deepEqual(_stableDoc(again), _stableDoc(saved));
 });
 
+await test('PB.8: project.listings save -> load -> save is identical; old docs load with []', async () => {
+  seedCurrentScene();
+  AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
+  const doc = goodDoc('Listed');
+  doc.project.id = 'pid-listed';
+  doc.project.listings = [{ platform: 'cults3d', accountId: 'a1', title: 'T', status: 'published', remoteId: 'R1', price: 3, apiKey: 'LEAK', tags: ['x'] }];
+  await __test._loadProject(doc);
+  assert.equal(getState().project.listings.length, 1);
+  const saved = await __test._buildDocument({ skipTextureImages: true });
+  assert.equal(saved.project.listings[0].remoteId, 'R1');
+  assert.equal(JSON.stringify(saved).includes('LEAK'), false, 'secret-like key never written');
+  await __test._loadProject(JSON.parse(JSON.stringify(saved)));
+  const again = await __test._buildDocument({ skipTextureImages: true });
+  assert.deepEqual(_stableDoc(again), _stableDoc(saved));
+  await __test._loadProject(goodDoc('NoListings'));
+  assert.deepEqual(getState().project.listings, []);
+});
+
 await test('4.1: newer-minor unknown top-level keys round-trip; a later older-doc load drops them', async () => {
   seedCurrentScene();
   AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
-  await __test._loadProject({ ...goodDoc('Future'), version: '3.5', futureThing: { a: [1, 2] } });
+  await __test._loadProject({ ...goodDoc('Future'), version: '3.6', futureThing: { a: [1, 2] } });
   const saved = await __test._buildDocument({ skipTextureImages: true });
   assert.deepEqual(saved.futureThing, { a: [1, 2] }, 'unknown key written back');
-  assert.equal(saved.version, '3.4');
+  assert.equal(saved.version, '3.5');
   await __test._loadProject({ ...goodDoc('Plain'), futureThing: 'stale' });   // 3.3: noise, not preserved
   const plain = await __test._buildDocument({ skipTextureImages: true });
   assert.equal('futureThing' in plain, false);

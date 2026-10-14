@@ -13,6 +13,7 @@ import { sha256Hex } from '../hash.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
+import { normalizeListings } from '../publish/Listings.js';
 import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
@@ -340,7 +341,7 @@ export async function buildDocument(opts = {}) {
     // id = stable identity for autosave keys (0.11; formal in schema 3.4 —
     // a uuid, never null once loaded/saved); lastSavedAt lets boot
     // offer an autosave only when it is newer than the last real save.
-    project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null },
+    project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null, listings: normalizeListings(s.project.listings) },
     sceneSettings: {
       camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
       overlays: { ...s.scene.overlays },

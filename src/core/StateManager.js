@@ -5,7 +5,7 @@ import { SCHEMA_VERSION } from './persist/constants.js';
 const DEV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 const INITIAL_STATE = {
-  project: { id: null, name: 'Untitled', isDirty: false, lastSavedAt: null, version: SCHEMA_VERSION },   // id minted on new/load/autosave (persist/ProjectId.js)
+  project: { id: null, name: 'Untitled', isDirty: false, lastSavedAt: null, version: SCHEMA_VERSION, listings: [] },   // id minted on new/load/autosave (persist/ProjectId.js)
   scene: {
     objects: {},
     groups: {},

@@ -181,7 +181,7 @@ export async function newProject() {
   historyClear();
   resetWorld();
   _fileRef = null;
-  setState(s => ({ ...s, project: { ...s.project, id: mintProjectId(), lastSavedAt: null } }), SILENT);
+  setState(s => ({ ...s, project: { ...s.project, id: mintProjectId(), lastSavedAt: null, listings: [] } }), SILENT);
   // New starts from the user's last-used settings, not raw factory (File-wins
   // applies to OPENING a .mixo, not to New). seedBootState merges the persisted
   // per-user settings onto the fresh factory state; applyToScene pushes the

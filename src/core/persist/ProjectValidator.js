@@ -50,7 +50,7 @@ export function compareSchemaVersions(a, b) {
   return 0;
 }
 
-/** True for a doc written by a NEWER minor of this major (e.g. 3.5 when we are 3.4). */
+/** True for a doc written by a NEWER minor of this major (e.g. 3.6 when we are 3.5). */
 export function isNewerMinor(version) {
   const v = parseSchemaVersion(version);
   const ours = parseSchemaVersion(SCHEMA_VERSION);
@@ -58,7 +58,7 @@ export function isNewerMinor(version) {
 }
 
 /**
- * Every top-level key this build reads or writes (schema 3.4, plus the legacy
+ * Every top-level key this build reads or writes (schema 3.5, plus the legacy
  * 3.0 `scene` block). Anything else in a newer-minor document is preserved
  * verbatim and written back on save (forward compatibility, task 4.1).
  */

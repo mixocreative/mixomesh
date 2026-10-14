@@ -22,6 +22,7 @@ import { resolveAssetBlob, sourcesOf } from './AssetResolver.js';
 import { storage } from '../storage/StorageAdapter.js';
 import { clearDirty } from './DirtyTracker.js';
 import { SILENT, SCHEMA_VERSION } from './constants.js';
+import { normalizeListings } from '../publish/Listings.js';
 import { mintProjectId } from './ProjectId.js';
 import { deleteAutosave } from './AutosaveKeys.js';
 import {
@@ -125,7 +126,7 @@ function _restoreGroups(groupDefs, objMap) {
 // is idempotent, so a document whose version stamp lagged its content (e.g. a
 // 3.3 file already carrying `exportTargets`) migrates cleanly.
 //
-// Newer-MINOR documents (3.5+) skip every step and load best-effort; their
+// Newer-MINOR documents (3.6+) skip every step and load best-effort; their
 // unknown top-level keys are preserved by the loader (preservedTopLevelKeys)
 // and written back on save. Newer-MAJOR documents never reach here
 // (validateDocument refuses them before the world is reset).
@@ -144,7 +145,15 @@ const MIGRATIONS = [
   // 3.3 → 3.4: asset provenance + every per-field migration owned by 1.13 /
   // 1.15 / 1.17 / 2.7.
   { to: '3.4', up: _migrateTo34 },
+  // 3.4 → 3.5: marketplace listings (PB.8) live under project.listings.
+  { to: '3.5', up: _migrateTo35 },
 ];
+
+function _migrateTo35(data) {
+  const project = (data.project && typeof data.project === 'object') ? { ...data.project } : {};
+  project.listings = normalizeListings(project.listings);
+  data.project = project;
+}
 
 function _migrateTo34(data) {
   // AssetEntry `source` + `displayName` (§4.4, owned by 4.1).
@@ -321,6 +330,7 @@ async function _loadProjectInner(doc, previousId) {
       name: data.project?.name || 'Untitled',
       id: (typeof data.project?.id === 'string' && data.project.id) || mintProjectId(),
       lastSavedAt: data.savedAt ?? data.project?.lastSavedAt ?? null,
+      listings: normalizeListings(data.project?.listings),
     },
     print:   { ...s.print, ...loadedPrintClean, exportTargets },
     scene: {

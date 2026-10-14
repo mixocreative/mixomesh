@@ -162,7 +162,7 @@ await test('_migrate: never mutates the caller doc; 3.1 gridSize ignored, not st
   const m = _migrate(doc);
   assert.notEqual(m, doc, 'migrate returns a new top-level object');
   assert.deepEqual(doc, snapshot, 'caller doc untouched');
-  assert.equal(m.version, '3.4');
+  assert.equal(m.version, '3.5');
   assert.deepEqual(m.scene, { gridSize: 250 });
 });
 
@@ -191,7 +191,7 @@ await test('_migrate: 3.3 → 3.4 derives source descriptor + displayName per as
   const doc = doc33();
   const snapshot = JSON.parse(JSON.stringify(doc));
   const m = _migrate(doc);
-  assert.equal(m.version, '3.4');
+  assert.equal(m.version, '3.5');
   const byId = Object.fromEntries(m.assetLibrary.map(a => [a.id, a]));
   assert.deepEqual(byId.a_dir.source, { kind: 'folder', refKey: 'dir_Parts_1700000000000', path: 'sub/hull.glb', label: 'Parts' });
   assert.deepEqual(byId.a_fh.source, { kind: 'file', refKey: 'fh_drop_1', path: 'drop.glb', label: 'drop.glb' });
@@ -236,7 +236,7 @@ await test('_migrate: legacy 3.1 / 3.2 still resolve (exportRatios, targetRatio,
   assert.equal(part.isInternalPart, true);
 
   const mNoVersion = _migrate({ assetLibrary: [{ id: 'x', filename: 'x.obj' }] });
-  assert.equal(mNoVersion.version, '3.4', 'pre-versioned save reads as 3.0 and migrates');
+  assert.equal(mNoVersion.version, '3.5', 'pre-versioned save reads as 3.0 and migrates');
   assert.equal(mNoVersion.assetLibrary[0].source, null);
   assert.equal(mNoVersion.assetLibrary[0].displayName, 'x.obj');
 });
@@ -273,15 +273,15 @@ await test('ratioSourceOf / seedRatioSource: explicit wins, else derived from th
   assert.equal(ratioSourceOf({ ratioSource: 'bogus' }, null), 'default');
 });
 
-await test('_migrate: newer minor (3.5) loads best-effort; unknown top-level keys preserved', async () => {
+await test('_migrate: newer minor (3.6) loads best-effort; unknown top-level keys preserved', async () => {
   const { preservedTopLevelKeys } = await import('../src/core/persist/ProjectValidator.js');
-  const doc = { version: '3.5', futureThing: { a: 1 }, assetLibrary: [{ id: 'x', filename: 'x.glb' }], print: {} };
+  const doc = { version: '3.6', futureThing: { a: 1 }, assetLibrary: [{ id: 'x', filename: 'x.glb' }], print: {} };
   const m = _migrate(doc);
-  assert.equal(m.version, '3.5', 'a newer minor keeps its stamp');
+  assert.equal(m.version, '3.6', 'a newer minor keeps its stamp');
   assert.deepEqual(m.futureThing, { a: 1 });
   assert.equal('source' in m.assetLibrary[0], false, 'no down-ladder steps run on a newer minor');
   assert.deepEqual(preservedTopLevelKeys(doc), { futureThing: { a: 1 } }, 'only unknown keys preserved');
-  assert.deepEqual(preservedTopLevelKeys({ version: '3.4', junk: 1 }), {}, 'same minor: nothing preserved');
+  assert.deepEqual(preservedTopLevelKeys({ version: '3.5', junk: 1 }), {}, 'same minor: nothing preserved');
   assert.deepEqual(preservedTopLevelKeys({ version: '3.3', junk: 1 }), {}, 'older minor: legacy noise dropped');
 });
 
