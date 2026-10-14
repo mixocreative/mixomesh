@@ -192,6 +192,309 @@ ESM import of `src/listbridge/index.js` resolves from `app.asar`, the one packag
 Run it once on a clean Windows user profile (the unsigned installer shows SmartScreen; the
 unpacked exe does not).
 
+## Automation: call MIXOMESH from another app
+
+The desktop MIXOMESH can be driven programmatically by another application (scripts, shop backends, Blender add-ons) to import, validate, export, and render files without opening the UI. The automation API is available via **named-pipe JSON-RPC** for live sessions or **one-shot job files** for batch conversion.
+
+### Finding the exe
+
+**Via the Windows Registry:**
+
+```cmd
+reg query "HKCU\Software\MIXOMESH" /v InstallLocation
+```
+
+Or, to launch MIXOMESH from another app:
+
+**PowerShell:**
+```powershell
+Start-Process MIXOMESH.exe -ArgumentList "--open", "C:\path\to\model.glb", "--library", "C:\parts"
+```
+
+**Python:**
+```python
+import subprocess
+subprocess.Popen([
+    "MIXOMESH.exe",
+    "--open", r"C:\path\to\model.glb",
+    "--library", r"C:\parts"
+])
+```
+
+**C#:**
+```csharp
+var proc = new ProcessStartInfo("MIXOMESH.exe")
+{
+    ArgumentList = { "--open", @"C:\path\to\model.glb", "--library", @"C:\parts" },
+    UseShellExecute = true
+};
+Process.Start(proc);
+```
+
+### Batch jobs (`--job` / `--result`)
+
+Run a series of automation API calls as a hidden batch, one-shot:
+
+**Command line:**
+```cmd
+MIXOMESH.exe --job job.json --result result.json --hidden --quit
+```
+
+**job.json schema:**
+```json
+{
+  "apiVersion": 1,
+  "steps": [
+    {
+      "method": "scene.import",
+      "params": {
+        "files": ["C:\\models\\base.glb", "C:\\models\\parts.3mf"]
+      }
+    },
+    {
+      "method": "scene.transform",
+      "params": {
+        "id": "<object id from scene.list>",
+        "position_mm": [0, 0, 50],
+        "rotation_deg": [0, 0, 45],
+        "scale": 1.5
+      }
+    },
+    {
+      "method": "validate.run",
+      "params": {}
+    },
+    {
+      "method": "export.run",
+      "params": {
+        "formats": ["3mf", "obj"],
+        "outDir": "C:\\output",
+        "overwrite": true
+      }
+    }
+  ],
+  "stopOnError": true
+}
+```
+
+**result.json (written by MIXOMESH):**
+```json
+{
+  "apiVersion": 1,
+  "ok": true,
+  "steps": [
+    {
+      "method": "scene.import",
+      "ok": true,
+      "result": {
+        "count": 2,
+        "ids": ["obj_abc123", "obj_def456"]
+      },
+      "ms": 1250
+    },
+    {
+      "method": "export.run",
+      "ok": true,
+      "result": {
+        "outDir": "C:\\output",
+        "files": [
+          {
+            "name": "project.3mf",
+            "path": "C:\\output\\project.3mf",
+            "size": 52480
+          },
+          {
+            "name": "project.obj",
+            "path": "C:\\output\\project.obj",
+            "size": 28960
+          }
+        ]
+      },
+      "ms": 5340
+    }
+  ]
+}
+```
+
+**Exit codes:**
+- `0` — success, all steps completed
+- `2` — a step failed (check `result.json` for which one)
+- `3` — invalid job file (bad JSON or missing required fields)
+- `4` — job timed out (exceeded 20 minutes or app took too long to start)
+- `5` — automation API unavailable (disabled in Preferences or not installed)
+
+### Live API via named pipe
+
+For long-running sessions or real-time monitoring, connect to a live MIXOMESH instance over a per-user Windows named pipe.
+
+**Python (≤ 25 lines):**
+```python
+import json
+import os
+
+# Read the session file
+user_data = os.path.expandvars(r"%APPDATA%\MIXOMESH\api\session.json")
+with open(user_data) as f:
+    session = json.load(f)
+
+# Connect and authenticate
+pipe = open(session['pipe'], 'r+b', buffering=0)
+pipe.write(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "hello",
+    "params": {"token": session['token'], "apiVersion": 1}
+}).encode() + b'\n')
+response = json.loads(pipe.readline())
+
+# Make a request
+pipe.write(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "scene.list",
+    "params": {"includeValidation": True}
+}).encode() + b'\n')
+result = json.loads(pipe.readline())
+print(result['result'])
+```
+
+**Node.js (≤ 25 lines):**
+```javascript
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
+
+const sessionFile = path.join(process.env.APPDATA, 'MIXOMESH', 'api', 'session.json');
+const {pipe, token} = JSON.parse(fs.readFileSync(sessionFile));
+
+const sock = net.createConnection(pipe);
+sock.write(JSON.stringify({
+  jsonrpc: '2.0', id: 1, method: 'hello',
+  params: {token, apiVersion: 1}
+}) + '\n');
+
+sock.once('data', hello => {
+  sock.write(JSON.stringify({
+    jsonrpc: '2.0', id: 2, method: 'scene.list',
+    params: {includeValidation: true}
+  }) + '\n');
+  sock.once('data', result => console.log(JSON.parse(result)));
+});
+```
+
+**C# (≤ 25 lines):**
+```csharp
+using System;
+using System.IO.Pipes;
+using System.Text.Json;
+using System.IO;
+
+var path = Path.Combine(Environment.GetFolderPath(
+    Environment.SpecialFolder.ApplicationData), "MIXOMESH", "api", "session.json");
+var json = JsonDocument.Parse(File.ReadAllText(path)).RootElement;
+var pipeName = json.GetProperty("pipe").GetString().Replace("\\\\.\\pipe\\", "");
+var token = json.GetProperty("token").GetString();
+
+var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+pipe.Connect();
+var w = new StreamWriter(pipe) {AutoFlush = true};
+
+w.WriteLine(JsonSerializer.Serialize(new {
+  jsonrpc = "2.0", id = 1, method = "hello",
+  @params = new {token, apiVersion = 1}
+}));
+
+var line = new StreamReader(pipe).ReadLine();
+Console.WriteLine(line);
+```
+
+### Methods reference
+
+**App info:**
+- `app.info` — app version, platform, API version
+- `app.capabilities` — supported methods list
+- `app.ping` — health check
+
+**Project:**
+- `project.new` — new project (clears scene if `confirm:true`)
+- `project.open` — load `.mixo` file (needs `confirm:true` if dirty)
+- `project.save` — save current project
+- `project.saveAs` — save to new `.mixo` path (needs `file` path parameter)
+- `project.info` — project name, file path, modified flag
+
+**Scene objects:**
+- `scene.list` — list all objects with bounds, triangle counts, validation status
+- `scene.get` — retrieve one object's properties
+- `scene.import` — add models to the scene (GLB, glTF, 3MF, OBJ, STL supported)
+- `scene.remove` — delete objects (needs `confirm:true`)
+- `scene.select` — set the selection (optional `additive:true` for union)
+- `scene.transform` — move/rotate/scale an object (position in mm, rotation in degrees)
+
+**Library & printer:**
+- `library.mount` — mount a folder to the Library tab
+- `library.list` — list folder contents
+- `printer.list` — list available printer profiles
+- `printer.get` — get current printer selection
+- `printer.set` — set active printer profile
+
+**Validation, repair & cost:**
+- `validate.run` — run watertight/manifold checks
+- `repair.run` — auto-fix holes and intersections (needs `confirm:true`)
+- `readiness.get` — print readiness report (watertight, manifold, size, etc.)
+- `cost.quote` — estimate material volume and cost
+
+**Export & render:**
+- `export.run` — export to 3MF, OBJ, STL, PLY, WRL (specify `formats` array and `outDir` path)
+- `render.png` — capture viewport as PNG (specify `outFile` path, `width`, `height`)
+- `render.thumbnail` — export small listing image as PNG
+
+**Events:**
+- `events.subscribe` — subscribe to push notifications (`objectAdded`, `objectRemoved`, `selectionChanged`, `validationDone`, `exportDone`, `projectOpened`, `projectSaved`, `busy`)
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `E_INVALID_PARAMS` | Parameter validation failed (missing required field, wrong type, value out of range) |
+| `E_METHOD_NOT_FOUND` | Unknown method name |
+| `E_NOT_FOUND` | Object ID does not exist (e.g. `scene.get` with invalid id) |
+| `E_PATH_REJECTED` | Path is invalid, not accessible, or outside the allowed set (network/device paths, missing parent) |
+| `E_BUSY` | Another request is in flight; serialize requests |
+| `E_CONFIRM_REQUIRED` | Destructive action needs `confirm: true` in params |
+| `E_DIRTY` | Project has unsaved changes; pass `confirm: true` to overwrite |
+| `E_CANCELLED` | User cancelled a dialog (happens in visible window only) |
+| `E_UNSUPPORTED` | Feature not available on this runtime (e.g. export on the web build) |
+| `E_EXPORT_GATE` | Export blocked by validation errors (geometry problems prevent printing) |
+| `E_LIMIT` | Too many of something: too many files, frame too large, too many steps, etc. |
+| `E_TIMEOUT` | Request took longer than 10 minutes |
+| `E_INTERNAL` | Unexpected error; check the message for details |
+
+### Limits
+
+- **4 concurrent clients** per MIXOMESH instance
+- **1 request in flight** (requests are serialized; send one, wait for response, send the next)
+- **1 MiB per JSON-RPC frame** (split large imports across multiple `scene.import` calls)
+- **32 files per `scene.import` call**
+- **1 GiB per file** (import file size limit, output file size limit)
+- **10 minutes per request** (use jobs for longer batch work)
+- **64 steps per job**, 20 minutes total per job
+- **50 events per second** (notifications are dropped if you subscribe to too many events at once)
+
+### Security notes
+
+- **Windows user only:** The named pipe is per-user; you must be the same Windows user as the running MIXOMESH.
+- **Session token required:** The 32-byte token in `<AppData>\MIXOMESH\api\session.json` authenticates every connection. Never share this file or its contents.
+- **Paths are validated:** Import/library/export paths are checked in the main process; the renderer never sees absolute paths.
+- **No overwrite by default:** Exporting to an existing file fails unless you pass `overwrite: true`.
+- **Destructive operations need consent:** Methods like `project.new`, `scene.remove`, `repair.run` return `E_CONFIRM_REQUIRED` unless you pass `confirm: true`.
+- **Disable if needed:** Toggle the automation API on/off in **Preferences**.
+
+### What is NOT available via the API
+
+- Publishing to Cults3D or other marketplaces (v2 or later)
+- Localhost HTTP / WebSocket server (security model: named pipe on Windows only)
+- Slicing or G-code generation (MIXOMESH exports, the printer's slicer generates paths)
+
 ## Dependency Notes
 
 Dependencies are project-local and installed with npm. The helper script forces

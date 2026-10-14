@@ -280,3 +280,7 @@ server, never Electron), so an iPad can install the app and open it offline.
 iPad opens on desktop with every byte embedded. WebKit coverage rests on unit tests, emulated
 touch and narrow-width smokes; real-device testing (iPad, iPhone) is an owner check. WebKit was
 never run in CI.
+
+## Addendum 2026-10-15 (launch integration + automation API)
+
+External paths enter the Electron app via **launch arguments** (`--open`, `--library`) and **automation API requests** (`scene.import.files`, `export.run.outDir`, etc.). All path validation occurs in **main** (resolve against cwd, realpath, check kind/perms/size, reject device paths/UNC/reserved names). Paths are never forwarded to the renderer; instead, `registerFile(absolutePath)` / `registerMount(absolutePath)` mint opaque **session tokens** (`mount_*` / `ref_*`) keyed by random hex. The renderer sees only `{ref, name}` and never submits paths. When rendering returns bytes (export files, rendered images), **main** validates the output target path (separate from input, with kind `outputFile` / `outputDir` and overwrite rules), writes atomically (temp + rename), and returns absolute paths to the caller only. A static test asserts no absolute path escapes to the renderer in captured frames. This extends ADR 0001's storage-adapter opaque-ref model from persistent assets to the entire API surface.

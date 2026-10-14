@@ -1797,6 +1797,32 @@ resolvers (never the local resolver, so early lookups cannot poison DNS with a c
 the public URL; on timeout (120 s: the zone's negative-cache TTL is 60 s) the host step fails with `tunnel-not-public`, nothing has been sent to
 the platform, and Retry only re-runs the wait (the tunnel is restarted only if it died).
 
+### Launch integration + automation API (ADR 0005)
+
+**Windows desktop only.** Two transports expose a runtime-agnostic method set over the same validation seams:
+
+**argv grammar** (`--open file [--open file...] [--library folder]` for single-instance handoff, LI.1–LI.6): relative paths resolve against cwd; absolute paths allowed (validated by `validateLaunchPath`, fail-closed); extensions allowlist (mixo, glb, gltf, 3mf, obj, stl); ≤32 opens; reserved device names + UNC + device prefixes rejected. Second instance forwards to the first.
+
+**Single instance + forwarding** (`electron/main.cjs` LI.2, LI.6): `app.requestSingleInstanceLock()` before boot; loser exits 0. `second-instance` event parses argv, validates paths, enqueues via `_launchQueue` per window. Renderer pulls batch via `handle('launch:pull')` after bootstrap finishes; later batches fan out via `send('launch:requests')`. `did-start-loading` resets the queue so a reloading renderer never loses a batch.
+
+**Job batch transport** (`--job job.json --result result.json [--hidden] [--quit]`, API.7): JSON file containing `{apiVersion:1, steps:[{method,params}], stopOnError?:boolean}`. Validation gate: each step's method and params are validated by the live API method; ≤64 steps, 20 min total timeout. Result written to `--result` as `{apiVersion, ok, steps:[{method, ok, result|error, ms}]}`. When an instance is running, the job is forwarded over the named pipe (the second process acts as a client); otherwise it runs locally. Exit codes: 0 (ok), 2 (step error), 3 (job malformed), 4 (timeout), 5 (API unavailable).
+
+**Live API via named pipe** (`\\.\pipe\mixomesh-<16-char-hash>`, JSON-RPC 2.0 NDJSON, API.4): per-user per-session. First frame must be `hello {token, apiVersion}` with a 32-byte token from `<userData>/api/session.json` (created on start, deleted on quit, ACL = user profile). Token verified using constant-time comparison. ≤4 clients, 1 MiB frame cap, 10 min request timeout. Methods dispatch through `ApiDispatcher` (injection-based) to existing seams: `PersistenceManager`, `ViewportDrop.importPicked`, `AssetPanel.mountFromRef`, `MeshValidator`, `PrintReadiness`, `PrintCost`, `PrintPipeline.collectExportFiles`, `RenderOutput`. Results are same bytes as the Export / Render buttons.
+
+**Path validation** (integrated with launch, API.3): Paths in `scene.import.files`, `library.mount.dir`, `project.open/saveAs.file`, `export.run.outDir`, `render.*.outFile` are validated in main (realpath, kind, permissions, size ≤1GiB) then replaced by opaque tokens (`ref`, `name` only to renderer). Output write is atomic (temp+rename) in main, refuses to overwrite unless `overwrite:true`, returns absolute paths to caller only. Renderer frames never contain OS paths; a regex test asserts this over captured frames.
+
+**Method list** (v1, API.1): `app.info/capabilities/ping` · `project.new/open/save/saveAs/info` · `scene.list/get/import/remove/select/transform` · `library.mount/list` · `printer.list/get/set` · `validate.run` · `repair.run` (behind `confirm:true` gate) · `readiness.get` · `cost.quote` · `export.run` · `render.png/thumbnail` · `events.subscribe`.
+
+**Error model** (stable contract): JSON-RPC errors with `data.code` from `{E_INVALID_PARAMS, E_METHOD_NOT_FOUND, E_NOT_FOUND, E_PATH_REJECTED, E_BUSY, E_CONFIRM_REQUIRED, E_DIRTY, E_CANCELLED, E_UNSUPPORTED, E_EXPORT_GATE, E_LIMIT, E_TIMEOUT, E_INTERNAL}`. Mapping to JSON-RPC numeric codes is fixed (−32602, −32601, −32000, −32001, …).
+
+**Consent gates** (fail-closed): destructive methods (`project.new` on dirty, `scene.remove`, `repair.run`) and outward methods (publishing in v2) return `E_CONFIRM_REQUIRED` unless the request carries `confirm:true`. A hidden instance never pops a dialog; consent is delegated to the caller.
+
+**Limits**: 4 clients, 1 MiB/frame, 32 imports/request, 1 GiB/file, 10 min/request, 64 steps + 20 min/job, 50 events/sec.
+
+**Settings toggle** (`Preferences`, `settings.api.enabled`, default true): same-user pipe + session token is the trust boundary, not the toggle (toggle is UX, convenience for disabling during dev / debugging).
+
+**Smoke modes** (test harness): `MIXO_SMOKE=launch` (unpackaged, LI.6) runs `--open` / `--library` through the queue and asserts objects populate the Outliner. `MIXO_SMOKE=api` (unpackaged, API.8) boots a hidden window, starts the API server, and allows the external smoke (`tests/electron-api-smoke.mjs`) to drive it over the pipe; end-to-end import → validate → export → render → job forwarding test.
+
 ## PART 7 — SCENE MANAGER
 
 **File: `src/core/SceneManager.js`**

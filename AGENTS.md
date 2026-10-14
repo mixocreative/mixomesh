@@ -69,6 +69,9 @@ behaviours. Treat it that way:
    (ADR 0004): desktop (Electron) only; portable architecture for future
    self-hosted shops; zero user setup beyond the platform's API key; secrets
    encrypted in main process only, never in renderer or logs.
+10. Automation API and launch integration follow BLUEPRINT § "Launch integration + automation API (ADR 0005)":
+   Windows named pipe + job files for programmatic control; paths validated in main, never forwarded
+   to renderer; opaque tokens only; consent gates on destructive operations; same-user trust model.
 
 ## Tech stack
 - Runtime: Vite + TypeScript with pinned Babylon npm packages. `src/app/boot.ts`

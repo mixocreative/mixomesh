@@ -1,6 +1,8 @@
 # ADR 0005 — Automation API: drive MIXOMESH from other apps
 
-Status: **Proposed** · Date: 2026-10-15 · Plan: `docs/plans/2026-10-15-automation-api.md` · Builds on ADR 0001 (opaque refs), ADR 0004 (Listbridge), launch integration (`docs/plans/2026-10-15-launch-integration.md`).
+Status: **Accepted** · Implemented (2026-10-15) · Date: 2026-10-15 · Plan: `docs/plans/2026-10-15-automation-api.md` · Builds on ADR 0001 (opaque refs), ADR 0004 (Listbridge), launch integration (`docs/plans/2026-10-15-launch-integration.md`).
+
+**Implemented in:** `src/core/api/ApiErrors.js` · `src/core/api/ApiSchema.js` · `src/core/api/ApiDispatcher.js` · `electron/ApiServer.cjs` · `electron/JobRunner.cjs` · `electron/LaunchArgs.cjs` · `electron/main.cjs` · `src/core/LaunchRequests.js` · `README.md` (Automation section) · `Blueprint.md` (ADR 0005 section).
 
 ## Context
 
