@@ -14,14 +14,14 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | Task | Status |
 |---|---|
 | PB.0 live schema check | waiting on owner key |
-| PB.1 ListingPackage | running (agent) |
+| PB.1 ListingPackage | done |
 | PB.2 listing shot capture | running (agent) |
 | PB.3 adapter contract + Cults payload | todo |
-| PB.4 main publish service | todo |
-| PB.5 S3 file host | running (agent) |
+| PB.4 main publish service | running (agent) |
+| PB.5 S3 file host | done |
 | PB.6 renderer bridge + caps | todo |
 | PB.7 package to disk | todo |
-| PB.8 persistence 3.5 | todo |
+| PB.8 persistence 3.5 | running (agent) |
 | PB.9 Publish tab (mockup gate) | todo |
 | PB.10 docs | todo |
 | PB.11 live publish (owner) | todo |
@@ -31,3 +31,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — owner: desktop only, Cults3D only, extensible to WooCommerce/ProcessWire. ADR 0004 + plan written.
 - 2026-10-14 — owner: name it for reuse → **Listbridge** (portable core `src/listbridge/`, Electron runner `electron/listbridge/`, MIXOMESH glue `src/core/publish/`).
 - 2026-10-14 — running in parallel: PB.1 (sonnet, src/listbridge/), PB.2 (sonnet, FrameCapture listing shot + smoke), PB.5 (opus, electron/listbridge/filehosts/s3.cjs). Main verifies + commits each. Next: PB.3 (needs PB.0 schema → owner key), PB.4, PB.6–PB.8; PB.9 mockup.
+- 2026-10-14 — PB.1 909008e (+main fix: manifest path traversal), PB.5 43e0087 (+eslint now lints electron/*.cjs). Running: PB.2, PB.4 (opus), PB.8.
