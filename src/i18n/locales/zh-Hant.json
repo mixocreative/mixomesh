@@ -1187,5 +1187,14 @@
   "launch.skippedExtraProject": "已略過（一次只能開啟一個專案）",
   "launch.busy": "已略過啟動要求：MIXOMESH 仍在載入中，請再試一次。",
   "launch.unreadable": "無法讀取檔案",
-  "publish.host.downloadTool": "正在下載連結工具（僅此一次）…"
+  "publish.host.downloadTool": "正在下載連結工具（僅此一次）…",
+  "api.toast.prefix": "外部要求：{list}",
+  "api.toast.imported": "已匯入 {n} 個檔案",
+  "api.toast.exported": "已匯出 {n} 個檔案",
+  "api.toast.changed": "已套用 {n} 項變更",
+  "api.pref.label": "允許其他應用程式控制 MIXOMESH（自動化 API）",
+  "api.pref.hint": "只有以你的 Windows 使用者身分執行、且持有工作階段金鑰的程式才能連線。",
+  "api.pref.statusOff": "關閉",
+  "api.pref.statusRunning": "已開啟並在監聽",
+  "api.pref.statusStarting": "已開啟，尚未啟動"
 }

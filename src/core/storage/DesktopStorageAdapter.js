@@ -197,6 +197,30 @@ export const DesktopStorageAdapter = {
     return typeof off === 'function' ? off : () => {};
   },
 
+  // Automation API (API.6): OPTIONAL bridge methods, feature-detected like the launch pair.
+  onApiRequest(cb) {
+    const api = _api();
+    if (typeof api?.onApiRequest !== 'function') return () => {};
+    const off = api.onApiRequest(cb);
+    return typeof off === 'function' ? off : () => {};
+  },
+  respondApi(res) {
+    const api = _api();
+    return typeof api?.respondApi === 'function' ? Promise.resolve(api.respondApi(res)) : Promise.resolve();
+  },
+  notifyApi(evt) {
+    const api = _api();
+    return typeof api?.notifyApi === 'function' ? Promise.resolve(api.notifyApi(evt)) : Promise.resolve();
+  },
+  async getApiStatus() {
+    const api = _api();
+    return typeof api?.getApiStatus === 'function' ? api.getApiStatus() : { enabled: false, running: false };
+  },
+  async setApiEnabled(enabled) {
+    const api = _api();
+    return typeof api?.setApiEnabled === 'function' ? api.setApiEnabled(!!enabled) : { enabled: false, running: false };
+  },
+
   async findMoved(source, opts = {}) {
     const src = normalizeSource(source);
     const folderKey = opts.refKey ?? (src?.kind === 'folder' ? src.refKey : null);

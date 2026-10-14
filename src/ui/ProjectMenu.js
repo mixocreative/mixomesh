@@ -10,6 +10,7 @@ import { icon } from '../core/Icons.js';
 import { escapeHtml as _esc, escapeAttr, safeImageSrc } from './renderSafe.js';
 import { t, applyTranslations } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
+import { storage } from '../core/storage/StorageAdapter.js';
 import { Workspace } from './Workspace.js';
 import { Onboarding } from './Onboarding.js';
 
@@ -436,6 +437,10 @@ function _registerHelpModals() {
         <label for="pref-repair-on-import">${_esc(t('print.repairOnImport'))}
           <span class="pref-hint">${_esc(tr('pref.repairHint', 'Saved on this device only; never written into project files.'))}</span></label>
       </div>
+      <div class="pref-row" id="pref-api-row" hidden>
+        <button type="button" class="pp-toggle pp-toggle-on" id="pref-api" aria-pressed="true"><span class="pp-toggle-dot" aria-hidden="true"></span>${_esc(tr('api.pref.label', 'Allow other apps to control MIXOMESH (automation API)'))}</button>
+        <span class="pref-hint" id="pref-api-hint">${_esc(tr('api.pref.hint', 'Only programs running as your Windows user, with the session key, can connect.'))}</span>
+      </div>
       <div class="pm-modal-actions"><button class="btn" data-r="close">${_esc(t('btn.close'))}</button></div>`;
     el.querySelector('#pref-repair-on-import').addEventListener('change', (e) => {
       // Per-user only (I8): state + SettingsStore, never the .mixo, no history.
@@ -443,8 +448,32 @@ function _registerHelpModals() {
       setState(s => ({ ...s, print: { ...s.print, repairOnImport: v } }), { silent: true });
       SettingsStore.scheduleSave();
     });
+    _wireApiToggle(el);
     el.querySelector('[data-r]').addEventListener('click', () => close('close'));
     return el;
+  });
+}
+
+/** Preferences ▸ automation API switch. Shown only when the desktop bridge reports status. */
+async function _wireApiToggle(el) {
+  if (typeof storage.getApiStatus !== 'function') return;
+  const row = el.querySelector('#pref-api-row');
+  const btn = el.querySelector('#pref-api');
+  const hint = el.querySelector('#pref-api-hint');
+  const base = tr('api.pref.hint', 'Only programs running as your Windows user, with the session key, can connect.');
+  const paint = (st) => {
+    const on = !!st?.enabled;
+    btn.classList.toggle('pp-toggle-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const state = !on ? tr('api.pref.statusOff', 'Off')
+      : st?.running ? tr('api.pref.statusRunning', 'On and listening') : tr('api.pref.statusStarting', 'On, not running yet');
+    hint.textContent = `${base} ${state}.`;
+  };
+  try { paint(await storage.getApiStatus()); row.hidden = false; } catch { return; }
+  btn.addEventListener('click', async () => {
+    const next = btn.getAttribute('aria-pressed') !== 'true';
+    btn.disabled = true;
+    try { paint(await storage.setApiEnabled(next)); } catch (err) { reportError(err); } finally { btn.disabled = false; }
   });
 }
 

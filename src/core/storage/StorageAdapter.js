@@ -63,6 +63,13 @@ import {
  * Launch integration (LI.4, optional; desktop only, browser/OPFS no-op):
  * @property {()=>Promise<LaunchBatch|null>} [pullLaunchRequests]
  * @property {(cb:(batch:LaunchBatch)=>void)=>(()=>void)} [onLaunchRequests]   returns unsubscribe
+ * Automation API (API.6, optional; desktop only, browser/OPFS no-op):
+ * @property {(cb:(req:{id:any,method:string,params:any})=>void)=>(()=>void)} [onApiRequest]   returns unsubscribe
+ * @property {(res:{id:any,result?:any,error?:any})=>Promise<void>} [respondApi]
+ * @property {(evt:any)=>Promise<void>} [notifyApi]
+ * @property {()=>Promise<{enabled:boolean,running:boolean}>} [getApiStatus]
+ * @property {(enabled:boolean)=>Promise<{enabled:boolean,running:boolean}>} [setApiEnabled]
+
  * — Still declared only: watchAsset (caps.watchFiles). —
  */
 
@@ -292,6 +299,12 @@ export const BrowserStorageAdapter = {
   // drop event, so it is called now and only its promise is returned.
   pullLaunchRequests() { return Promise.resolve(null); },
   onLaunchRequests() { return () => {}; },
+  // Automation API (API.6): desktop-only; no-op here.
+  onApiRequest() { return () => {}; },
+  respondApi() { return Promise.resolve(); },
+  notifyApi() { return Promise.resolve(); },
+  getApiStatus() { return Promise.resolve({ enabled: false, running: false }); },
+  setApiEnabled() { return Promise.resolve({ enabled: false, running: false }); },
 
   refForDrop(item) {
     if (typeof item?.getAsFileSystemHandle !== 'function') return Promise.resolve(null);

@@ -438,4 +438,10 @@ export const OpfsStorageAdapter = {
   // Launch integration (LI.4): desktop-only; no-op here.
   pullLaunchRequests() { return Promise.resolve(null); },
   onLaunchRequests() { return () => {}; },
+  // Automation API (API.6): desktop-only; no-op here.
+  onApiRequest() { return () => {}; },
+  respondApi() { return Promise.resolve(); },
+  notifyApi() { return Promise.resolve(); },
+  getApiStatus() { return Promise.resolve({ enabled: false, running: false }); },
+  setApiEnabled() { return Promise.resolve({ enabled: false, running: false }); },
 };

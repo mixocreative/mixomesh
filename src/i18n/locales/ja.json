@@ -1187,5 +1187,14 @@
   "launch.skippedExtraProject": "スキップしました（プロジェクトは一度に1つだけ開けます）",
   "launch.busy": "起動リクエストをスキップしました。MIXOMESH が読み込み中でした。もう一度お試しください。",
   "launch.unreadable": "ファイルを読み込めませんでした",
-  "publish.host.downloadTool": "リンク用ツールをダウンロードしています（初回のみ）…"
+  "publish.host.downloadTool": "リンク用ツールをダウンロードしています（初回のみ）…",
+  "api.toast.prefix": "外部からのリクエスト：{list}",
+  "api.toast.imported": "{n} 個のファイルを読み込みました",
+  "api.toast.exported": "{n} 個のファイルを書き出しました",
+  "api.toast.changed": "{n} 件の変更を適用しました",
+  "api.pref.label": "他のアプリから MIXOMESH を操作することを許可（自動化 API）",
+  "api.pref.hint": "お使いの Windows ユーザーで実行中のプログラムのうち、セッションキーを持つものだけが接続できます。",
+  "api.pref.statusOff": "オフ",
+  "api.pref.statusRunning": "オン（待機中）",
+  "api.pref.statusStarting": "オン（まだ起動していません）"
 }
