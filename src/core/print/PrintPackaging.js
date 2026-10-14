@@ -1,23 +1,30 @@
 import { triggerDownload } from './Download.js';
 
 /**
- * Package serializer output and hand it to the save picker / download.
- * @returns {Promise<boolean>} true when bytes were written, false when the
- *   user cancelled the save picker (callers must NOT report success).
+ * Serializer output -> one Blob (zip for multi-entry formats). Shared by the
+ * download path and the in-memory collect path (publish) so there is ONE
+ * packager.
  */
-export async function packageAndDownload(out, fmtLabel, progress) {
-  let blob;
+export async function buildExportBlob(out, progress = () => {}) {
   if (out.kind === 'zip') {
     progress(0.9, 'Packaging…');
     const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
     for (const e of uniqueEntryPaths(out.entries)) zip.file(e.path, e.data);
-    blob = await zip.generateAsync({ type: 'blob', mimeType: out.mime });
-  } else {
-    blob = out.data instanceof Blob
-      ? out.data
-      : new Blob([out.data], { type: out.mime || 'application/octet-stream' });
+    return zip.generateAsync({ type: 'blob', mimeType: out.mime });
   }
+  return out.data instanceof Blob
+    ? out.data
+    : new Blob([out.data], { type: out.mime || 'application/octet-stream' });
+}
+
+/**
+ * Package serializer output and hand it to the save picker / download.
+ * @returns {Promise<boolean>} true when bytes were written, false when the
+ *   user cancelled the save picker (callers must NOT report success).
+ */
+export async function packageAndDownload(out, fmtLabel, progress) {
+  const blob = await buildExportBlob(out, progress);
   progress(0.98, 'Downloading…');
   const ext = (out.filename.split('.').pop() || '').toLowerCase();
   return triggerDownload(blob, out.filename, { mime: out.mime, ext, description: `${fmtLabel} file` });

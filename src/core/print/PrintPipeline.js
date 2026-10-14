@@ -26,7 +26,7 @@ import { buildExportContext, collectPrintUnits, getExportReference } from './Exp
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
-import { packageAndDownload } from './PrintPackaging.js';
+import { packageAndDownload, buildExportBlob } from './PrintPackaging.js';
 import { buildColorGroupEntries, buildMaterialsExtEntries } from './ThreeMFWriter.js';
 import { getPrinterProfile } from './PrinterProfiles.js';
 import { serializeOBJ } from './ObjWriter.js';
@@ -635,6 +635,20 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     progress(0.82, `Writing ${fmt.label}…`);
     const out = await fmt.serialize(ctx);
 
+    // Collect mode (publish): same writers + ctx, but the bytes go to the
+    // caller's sink instead of the save picker — no second writer.
+    if (Array.isArray(options.sink)) {
+      const blob = await buildExportBlob(out, progress);
+      options.sink.push({
+        name: out.filename, mime: out.mime || blob.type || 'application/octet-stream',
+        bytes: new Uint8Array(await blob.arrayBuffer()),
+      });
+      progress(1, 'Done');
+      if (ctx.repairSkipped.length) {
+        Toast.show(t('toast.exportedWithWarnings', { names: ctx.repairSkipped.join(', ') }), 'warning', 5000);
+      }
+      return true;
+    }
     const written = await packageAndDownload(out, fmt.label, progress);
     if (!written) {
       // User cancelled the save picker: say so, never "✓ Exported" (H6).
@@ -799,6 +813,30 @@ async function _serialize3MFMaterialsExt(ctx) {
 }
 
 // ── public export entry points ───────────────────────────
+
+/**
+ * Run the SAME export pipeline for several formats but return the files in
+ * memory instead of saving them (Listbridge publish, PB.6). One entry per
+ * format x print size. Honours the readiness gate exactly like a normal
+ * export: when blocked (errors, or warnings not acknowledged) returns
+ * `{ blocked: true, code, readinessIssues }` and produces nothing.
+ * @param {Array<'obj'|'stl'|'3mf'|'ply'|'wrl'>} formatKeys
+ * @param {object} [options]  same options as exportSTL etc. (acknowledgeWarnings, selectedOnly, …)
+ * @returns {Promise<{blocked:false, files:Array<{name:string,mime:string,bytes:Uint8Array}>}
+ *   | {blocked:true, code:string, readinessIssues:any[]}>}
+ */
+export async function collectExportFiles(formatKeys, options = {}) {
+  const readiness = getPrintReadiness(options);
+  if (!readiness.canExport) {
+    return { blocked: true, code: readiness.targets.length === 0 ? 'EXPORT_NOTHING' : 'EXPORT_BLOCKED', readinessIssues: readiness.issues };
+  }
+  if (readiness.requiresAcknowledgement && options.acknowledgeWarnings !== true) {
+    return { blocked: true, code: 'EXPORT_NEEDS_ACKNOWLEDGEMENT', readinessIssues: readiness.issues };
+  }
+  const sink = [];
+  for (const key of formatKeys) await _runExport(key, { ...options, sink });
+  return { blocked: false, files: sink };
+}
 
 export const exportOBJ     = (options = {}) => _runExport('obj', options);
 export const exportSTL     = (options = {}) => _runExport('stl', options);

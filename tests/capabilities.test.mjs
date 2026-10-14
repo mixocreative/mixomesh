@@ -39,7 +39,7 @@ test('desktop → trusts injected shell capabilities verbatim (all true incl. wa
     desktopCaps: { persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true },
   });
   assert.deepEqual(c, {
-    persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true,
+    persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true, publish: false,
     triangleBudget: DESKTOP_TRIANGLE_BUDGET,
   });
 });
@@ -109,6 +109,14 @@ test('detectStorageTier is engine-aware: gecko/other never pick opfs', () => {
   assert.equal(detectStorageTier({ ...base, hasFSA: true, engine: 'chromium' }), 'browser');
   assert.equal(detectStorageTier({ ...base, desktop: true, engine: 'chromium' }), 'desktop');
   assert.equal(detectStorageTier(base), 'opfs', 'no engine given keeps the 8.2 behaviour');
+});
+
+test('publish cap: desktop shell with listbridge only', () => {
+  const dc = { persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true };
+  assert.equal(detectCapabilities({ desktop: true, desktopCaps: dc, hasListbridge: true }).publish, true);
+  assert.equal(detectCapabilities({ desktop: true, desktopCaps: dc }).publish, false);
+  assert.equal(detectCapabilities({ hasFSA: true, hasIDB: true, hasListbridge: true }).publish, false);
+  assert.equal(detectCapabilities({ hasOPFS: true, hasIDB: true, hasListbridge: true }).publish, false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

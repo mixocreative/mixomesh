@@ -51,7 +51,7 @@ await test('tier: Electron → desktop; FSA → browser; OPFS without FSA → op
 
 await test('tier: opfs caps = no mount / relink / watch, in-place writes, IDB-backed persistence', () => {
   assert.deepEqual(detectCapabilities({ hasFSA: false, hasOPFS: true, hasIDB: true }), {
-    persistAssets: true, mountDirectory: false, relinkByPath: false, watchFiles: false, writeFiles: true,
+    persistAssets: true, mountDirectory: false, relinkByPath: false, watchFiles: false, writeFiles: true, publish: false,
     triangleBudget: WEB_TRIANGLE_BUDGET,
   });
   assert.equal(detectCapabilities({ hasOPFS: true, hasIDB: false }).persistAssets, false);

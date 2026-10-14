@@ -20,6 +20,7 @@
  * @property {boolean} relinkByPath    Can relink a missing asset to a user-picked file.
  * @property {boolean} watchFiles      Can watch mounted files for external changes (desktop only).
  * @property {boolean} writeFiles      Can write to a chosen location via a picker (else blob-download).
+ * @property {boolean} publish        Marketplace publish available (Electron shell exposing `electronAPI.listbridge`; never web/opfs).
  * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade.
  */
 
@@ -35,7 +36,7 @@ export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
 
 /**
  * @typedef {'chromium'|'webkit'|'gecko'|'other'} Engine
- * @typedef {{hasFSA?:boolean, hasIDB?:boolean, hasOPFS?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>, engine?:Engine}} StorageEnv
+ * @typedef {{hasFSA?:boolean, hasIDB?:boolean, hasOPFS?:boolean, hasListbridge?:boolean, desktop?:boolean, desktopCaps?:Partial<Capabilities>, engine?:Engine}} StorageEnv
  * @typedef {'desktop'|'browser'|'opfs'} StorageTier
  */
 
@@ -114,6 +115,7 @@ export function detectStorageTier(env = {}) {
  */
 export function detectCapabilities(env = {}) {
   const { hasFSA, hasIDB, desktop, desktopCaps } = env;
+  const publish = !!desktop && !!env.hasListbridge;
   const triangleBudget = desktop ? DESKTOP_TRIANGLE_BUDGET : WEB_TRIANGLE_BUDGET;
   if (desktop && desktopCaps) {
     // Trust the desktop shell's declared capabilities (Node fs backed).
@@ -123,6 +125,7 @@ export function detectCapabilities(env = {}) {
       relinkByPath: !!desktopCaps.relinkByPath,
       watchFiles: !!desktopCaps.watchFiles,
       writeFiles: !!desktopCaps.writeFiles,
+      publish,
       triangleBudget,
     };
   }
@@ -135,6 +138,7 @@ export function detectCapabilities(env = {}) {
       relinkByPath: false,
       watchFiles: false,
       writeFiles: true,
+      publish,
       triangleBudget,
     };
   }
@@ -146,6 +150,7 @@ export function detectCapabilities(env = {}) {
     relinkByPath: !!hasFSA,
     writeFiles: !!hasFSA,
     watchFiles: false,
+    publish,
     triangleBudget,
   };
 }
@@ -158,6 +163,7 @@ function _snapshotEnv() {
     hasOPFS: typeof globalThis.navigator?.storage?.getDirectory === 'function',
     desktop: !!w && !!w.electronAPI,
     desktopCaps: w?.electronAPI?.capabilities,
+    hasListbridge: !!w?.electronAPI?.listbridge,
     engine: detectEngine(globalThis.navigator?.userAgent, {
       maxTouchPoints: globalThis.navigator?.maxTouchPoints,
       desktop: !!w && !!w.electronAPI,
