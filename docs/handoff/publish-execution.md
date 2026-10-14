@@ -1,0 +1,32 @@
+# Listbridge (Cults3D publish) — execution ledger
+
+Read first on resume. Plan: `docs/plans/2026-10-14-marketplace-publish.md` · ADR: `docs/adr/0004-marketplace-publish.md`.
+Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 0`, commit to master, update this file every task).
+
+## Owner inputs needed
+
+- [ ] Cults3D nickname + API key (https://cults3d.com/en/api/keys) — for PB.0 and PB.11. Give via env var `CULTS_USER` / `CULTS_API_KEY` in your own shell, never pasted into chat or files.
+- [ ] Cloudflare R2 bucket + access key/secret — for PB.11 (entered in the app's Connect form, stored encrypted).
+- [ ] Publish tab mockup approval — PB.9.
+
+## Tasks
+
+| Task | Status |
+|---|---|
+| PB.0 live schema check | waiting on owner key |
+| PB.1 ListingPackage | todo |
+| PB.2 listing shot capture | todo |
+| PB.3 adapter contract + Cults payload | todo |
+| PB.4 main publish service | todo |
+| PB.5 S3 file host | todo |
+| PB.6 renderer bridge + caps | todo |
+| PB.7 package to disk | todo |
+| PB.8 persistence 3.5 | todo |
+| PB.9 Publish tab (mockup gate) | todo |
+| PB.10 docs | todo |
+| PB.11 live publish (owner) | todo |
+
+## Session log
+
+- 2026-10-14 — owner: desktop only, Cults3D only, extensible to WooCommerce/ProcessWire. ADR 0004 + plan written.
+- 2026-10-14 — owner: name it for reuse → **Listbridge** (portable core `src/listbridge/`, Electron runner `electron/listbridge/`, MIXOMESH glue `src/core/publish/`).
