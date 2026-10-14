@@ -97,7 +97,7 @@ assert.equal(huge.reason, 'file too large');
 
 // ---- API.3: outputDir / outputFile ----
 assert.equal(MAX_API_IMPORTS, MAX_LAUNCH_OPENS);
-assert.deepEqual([...OUTPUT_EXTENSIONS].sort(), ['3mf', 'json', 'mtl', 'obj', 'ply', 'png', 'stl', 'wrl', 'zip']);
+assert.deepEqual([...OUTPUT_EXTENSIONS].sort(), ['3mf', 'json', 'mixo', 'mtl', 'obj', 'ply', 'png', 'stl', 'wrl', 'zip']);
 const ro = new Set(['c:\\work\\ro', 'c:\\work\\locked.stl']);
 const fso = {
   ...mkFs(
