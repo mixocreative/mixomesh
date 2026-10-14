@@ -19,7 +19,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.3 adapter contract + Cults payload | todo |
 | PB.4 main publish service | done 015a0d8 |
 | PB.5 S3 file host | done |
-| PB.5b tunnel file host (auto links) | running (agent) |
+| PB.5b tunnel file host (auto links) | done 6d9be84 (live tunnel verified) |
 | PB.6 renderer bridge + caps | done |
 | PB.7 package to disk | done |
 | PB.8 persistence 3.5 | done 0e84e0b |
@@ -43,3 +43,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — owner approved Publish mockup; owner: drop R2 → PB.5b tunnel host (cloudflared present at C:\Program Files (x86)\cloudflared). Running PB.9 + PB.5b. Cults key still not set (PB.0/PB.3 blocked).
 - 2026-10-14 — owner: "fable plan and use economical agents to implement" → Fable agent revising plan (docs/plans/2026-10-14-marketplace-publish.md + ADR 0004 edits, uncommitted until main verifies). PB.9 + PB.5b still running.
 - 2026-10-14 — Fable plan committed d8bfa6f (decisions D1–D8 proposed, recommendations used as defaults until owner overrides). Running: PB.9 (sonnet), PB.5b (opus), PB.0a (sonnet), PB.3a (sonnet; main.cjs registration deferred to main after PB.5b). Next: PB.12 (opus, after 5b), PB.13 (haiku, after 9), PB.14 (sonnet), PB.10 (haiku), PB.15.
+- 2026-10-14 — PB.0a e736310, PB.3a f27a901 (main moved ADAPTERS registry to core index), PB.5b 6d9be84 (+main registered Cults via core loader; electron security smoke now requires cults3d + default tunnel). Running: PB.9 (sonnet), PB.12 (opus; main resolved spec conflict: failed keeps tunnel only for a retry window then closes). Next: PB.14 after PB.12 (same jobs.cjs), PB.13 after PB.9, PB.10, PB.15.
