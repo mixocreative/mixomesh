@@ -13,8 +13,8 @@ const {
   isPermissionAllowed, isTrustedSender,
 } = require('../electron/WindowSecurity.cjs');
 
-const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
-const preloadSource = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
+const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');   // line-ending agnostic (Windows checkouts)
+const preloadSource = readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 // The exact policy (index.html meta). Changing it means updating BLUEPRINT §11
