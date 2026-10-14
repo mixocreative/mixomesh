@@ -1016,7 +1016,7 @@
   "transformSheet.badScale": "Scale must be a positive percentage.",
   "viewer.projects": "Projects",
   "viewer.openFile": "Open a file…",
-  "viewer.openHint": ".mixo, GLB, glTF, 3MF, OBJ · stays on this device",
+  "viewer.openHint": ".mixo, GLB, glTF, 3MF, OBJ, STL · stays on this device",
   "viewer.noProjects": "No saved projects here yet. Open a file to start.",
   "viewer.toProjects": "Projects",
   "viewer.backToModel": "Back to model",

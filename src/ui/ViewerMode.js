@@ -303,7 +303,7 @@ function _build() {
       <div class="vm-projects"></div>
       <footer class="vm-foot">
         <button type="button" class="vm-open" data-vm="open">${escapeHtml(tr('viewer.openFile', 'Open a file…'))}</button>
-        <span class="vm-foot-hint">${escapeHtml(tr('viewer.openHint', '.mixo, GLB, glTF, 3MF, OBJ · stays on this device'))}</span>
+        <span class="vm-foot-hint">${escapeHtml(tr('viewer.openHint', '.mixo, GLB, glTF, 3MF, OBJ, STL · stays on this device'))}</span>
       </footer>
     </section>
     <section class="vm-list" hidden aria-label="${escapeAttr(tr('viewer.objects', 'Objects'))}"></section>

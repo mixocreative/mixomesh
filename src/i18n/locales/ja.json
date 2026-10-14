@@ -1016,7 +1016,7 @@
   "transformSheet.badScale": "拡大縮小は0より大きい割合で入力してください。",
   "viewer.projects": "プロジェクト",
   "viewer.openFile": "ファイルを開く…",
-  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ ・ この端末内にのみ保存されます",
+  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ、STL ・ この端末内にのみ保存されます",
   "viewer.noProjects": "保存済みのプロジェクトはまだありません。ファイルを開いて始めましょう。",
   "viewer.toProjects": "プロジェクト",
   "viewer.backToModel": "モデルに戻る",

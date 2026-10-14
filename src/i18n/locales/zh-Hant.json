@@ -1016,7 +1016,7 @@
   "transformSheet.badScale": "縮放必須是大於 0 的百分比。",
   "viewer.projects": "專案",
   "viewer.openFile": "開啟檔案…",
-  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ ・ 僅儲存在這台裝置上",
+  "viewer.openHint": ".mixo、GLB、glTF、3MF、OBJ、STL ・ 僅儲存在這台裝置上",
   "viewer.noProjects": "這裡還沒有已儲存的專案，請先開啟檔案。",
   "viewer.toProjects": "專案",
   "viewer.backToModel": "回到模型",

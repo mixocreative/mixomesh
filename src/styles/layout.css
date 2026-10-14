@@ -179,7 +179,9 @@
   user-select: none;
 }
 
-.sb-left   { flex: 1; display: flex; align-items: center; gap: var(--sp-4); }
+/* One line at every width: long hints ellipsize instead of wrapping into a
+   clipped second row (the bar is 28px). */
+.sb-left   { flex: 1; display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sb-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--sp-4); }
 .sb-right  { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-5); }
 

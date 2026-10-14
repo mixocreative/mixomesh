@@ -27,6 +27,12 @@
   #viewport { grid-column: 1; grid-row: 2; }
   #status-bar { grid-row: 3; }
 
+  /* Status bar stays ONE line (hint ellipsis lives in layout.css). */
+  .sb-center { min-width: 0; overflow: hidden; white-space: nowrap; }
+  /* Toasts sit above the viewport toolbar instead of covering its end. */
+  #toast-container { bottom: calc(28px + 84px); }
+  .viewport-toolbar { max-width: calc(100% - 24px); overflow-x: auto; }
+
   /* AppShell pins position:relative inline on the three panels, hence !important. */
   #outliner, #right-panel, #asset-panel {
     position: fixed !important;
@@ -151,6 +157,12 @@
     border-bottom: 0;
   }
   body[data-sheet="inspector"] .sheet-tab-inspector { right: auto; bottom: calc(28px + var(--sheet-h)); }
+  /* Toolbar clears the bottom Properties tab (26px) above the status bar. */
+  .viewport-toolbar { bottom: 40px; }
+  /* Mouse hints (RMB/MMB/scroll) are noise here and starve the HUD + Repair. */
+  .sb-left { flex: 0 1 0; }
+  .sb-center { flex: 1 1 auto; justify-content: flex-start; }
+  #toast-container { bottom: calc(28px + 108px); }
   .sheet-tab-outliner { top: 32%; }
   .sheet-tab-assets { left: auto; right: 0; border-radius: 10px 0 0 0; border: 1px solid var(--border); border-right: 0; border-bottom: 0; }
 

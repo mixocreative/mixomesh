@@ -558,3 +558,8 @@ body.touch-input .vt-btn { min-width: 44px; height: 44px; }
 .ts-cell em { font-style: normal; font-size: 11px; opacity: 0.7; }
 .ts-actions { display: flex; justify-content: flex-end; }
 .ts-apply { min-height: 44px; min-width: 96px; }
+
+/* Toolbar selects size to their label: the shared .pp-preset-select is
+   width:100%, which in this flex row shrank them to a stub ("Fre", blank
+   pivot). Words, not numbers → UI sans, not mono (DESIGN.md §3). */
+.viewport-toolbar .pp-preset-select { width: auto; flex: none; font-family: var(--font-sans); }
