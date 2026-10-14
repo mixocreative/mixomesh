@@ -1790,6 +1790,12 @@ automatically, after which Retry re-hosts and updates the listing with fresh lin
 closes every tunnel (`closeAll()` on `will-quit`). S3-compatible hosts have no `stats()`: confirm
 polls the adapter (10 × 5 s) if it can, otherwise it is skipped; host cleanup runs only after
 confirmation (or on explicit cancel).
+Readiness gate (PB.16): at the end of `host`, before create/update hands any URL to the platform, a
+temporary-link host must pass `waitUntilPublic()` — the new hostname resolves on BOTH DNS-over-HTTPS
+resolvers (never the local resolver, so early lookups cannot poison DNS with a cached NXDOMAIN) for
+2 consecutive polls, and a hidden probe object (never in `stats()`) round-trips byte-identical through
+the public URL; on timeout (120 s: the zone's negative-cache TTL is 60 s) the host step fails with `tunnel-not-public`, nothing has been sent to
+the platform, and Retry only re-runs the wait (the tunnel is restarted only if it died).
 
 ## PART 7 — SCENE MANAGER
 

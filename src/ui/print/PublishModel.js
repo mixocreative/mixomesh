@@ -158,6 +158,7 @@ const ERROR_KEYS = Object.freeze({
   'no-file-host': 'publish.err.noFileHost',
   'cloudflared-missing': 'publish.err.cloudflaredMissing',
   'tunnel-start-timeout': 'publish.err.tunnelStartTimeout',
+  'tunnel-not-public': 'publish.err.tunnelNotPublic',
   'platform-http': 'publish.err.platformHttp',
   'platform-rejected': 'publish.err.platformRejected',
   'not-confirmed': 'publish.err.notConfirmed',
@@ -223,7 +224,10 @@ export function applyProgress(steps, event) {
       : event.status === 'failed' ? 'failed' : null;
   if (!status) return steps;
   return steps.map((s, j) => {
-    if (j === i) return { ...s, status, message: event.message ?? s.message };
+    if (j === i) {
+      const { phase: _old, ...rest } = s;
+      return { ...rest, status, message: event.message ?? s.message, ...(event.phase ? { phase: event.phase } : {}) };
+    }
     if (j < i && (s.status === 'todo' || s.status === 'run')) return { ...s, status: 'done' };
     return s;
   });

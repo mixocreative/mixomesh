@@ -52,22 +52,18 @@ const fake = {
 const before = cloudflaredPids();
 
 async function downloadAll(urls) {
-  // Like a real fetcher: a brand-new trycloudflare hostname may not resolve for a few seconds, so retry.
+  // PB.16: ONE attempt per URL, no retries, no sleeping. Like a real platform, the first lookup
+  // of the hostname poisons DNS if it happens too early, so the app's readiness gate (DoH
+  // resolve + public probe BEFORE createCreation) is what must make this pass first time.
   for (const url of urls) {
     const t0 = Date.now();
-    let last = null;
-    for (let attempt = 0; attempt < 12; attempt++) {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
-        const buf = Buffer.from(await r.arrayBuffer());
-        last = { url, status: r.status, bytes: buf.length, sha: sha256(buf), ms: Date.now() - t0, attempts: attempt + 1 };
-        if (r.status === 200) break;
-      } catch (err) {
-        last = { url, status: 0, error: String(err?.cause?.code || err?.message || err), ms: Date.now() - t0, attempts: attempt + 1 };
-      }
-      await sleep(2000);
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      const buf = Buffer.from(await r.arrayBuffer());
+      fake.downloads.push({ url, status: r.status, bytes: buf.length, sha: sha256(buf), ms: Date.now() - t0, attempts: 1 });
+    } catch (err) {
+      fake.downloads.push({ url, status: 0, error: String(err?.cause?.code || err?.message || err), ms: Date.now() - t0, attempts: 1 });
     }
-    fake.downloads.push(last);
   }
   fake.done = true;
 }
@@ -172,7 +168,7 @@ try {
       for (const f of pkg.files) sent.push({ name: f.name, bytes: f.bytes.byteLength, sha: await hex(f.bytes) });
       for (const i of pkg.images) sent.push({ name: i.name, bytes: i.bytes.byteLength, sha: await hex(i.bytes) });
       window.__reh = { events: [], sent, outcome: null, error: null };
-      Client.publish(pkg, { platform: 'cults3d', accountId: 'default', fileHostId: 'tunnel' }, e => window.__reh.events.push(e))
+      Client.publish(pkg, { platform: 'cults3d', accountId: 'default', fileHostId: 'tunnel' }, e => window.__reh.events.push({ ...e, t: Date.now() }))
         .then(o => { window.__reh.outcome = o; }, e => { window.__reh.error = String(e?.stack || e); });
       return { started: true, sent };
     } catch (err) { return { error: String(err?.stack ?? err) }; }
@@ -191,6 +187,11 @@ try {
   const out = res.reh.outcome;
   const steps = res.reh.events.filter(e => e.status === 'done').map(e => e.step);
   console.log(`steps done: ${steps.join(' > ')}`);
+  const ev = res.reh.events;
+  const tAt = f => ev.find(f)?.t;
+  const tDns = tAt(e => e.phase === 'dns'); const tProbe = tAt(e => e.phase === 'probe'); const tCreate = tAt(e => e.step === 'create' && e.status === 'running');
+  assert(tDns && tProbe && tCreate && tDns <= tProbe && tProbe <= tCreate, 'readiness gate (dns -> probe) must run before the create step');
+  console.log(`readiness gate: DoH ready ${((tProbe - tDns) / 1000).toFixed(1)} s, probe ok ${((tCreate - tProbe) / 1000).toFixed(1)} s (until create)`);
 
   assert(out.ok === true && out.status === 'done', `outcome not ok: ${JSON.stringify(out)}`);
   assert(out.result.remoteId === 'fake-cults-1', `remoteId: ${JSON.stringify(out.result)}`);
@@ -204,7 +205,7 @@ try {
   assert(urls.length === kick.sent.length, `fake got ${urls.length} urls, renderer sent ${kick.sent.length} objects`);
   assert(urls.every(u => /^https:\/\/[a-z0-9-]+\.trycloudflare\.com\//.test(u)), `urls are not public tunnel links: ${urls.join(' ')}`);
   assert(fake.downloads.length === urls.length, `downloaded ${fake.downloads.length}/${urls.length}`);
-  for (const d of fake.downloads) assert(d.status === 200, `download ${d.url} -> ${d.status} ${d.error || ''}`);
+  for (const d of fake.downloads) assert(d.status === 200 && d.attempts === 1, `download (single attempt) ${d.url} -> ${d.status} ${d.error || ''}`);
   const sentShas = kick.sent.map(s => s.sha).sort();
   assert(JSON.stringify(fake.downloads.map(d => d.sha).sort()) === JSON.stringify(sentShas), 'downloaded bytes differ from what the renderer sent');
   assert(fake.confirms >= 1, 'the confirm read-back was never polled');

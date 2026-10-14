@@ -43,6 +43,9 @@ setInterval(() => {}, 1000);
 after(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ } });
 
 const spawned = [];
+// DoH fake: every lookup resolves at once (the gate's own tests pass their own).
+const dohAllOk = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: '203.0.113.7' }] }));
+const noSleep = async () => {};
 function makeHost({ mode = 'ok', ...opts } = {}) {
   /** @type {any} */
   let host = null;
@@ -52,7 +55,7 @@ function makeHost({ mode = 'ok', ...opts } = {}) {
     return c;
   };
   const fetchImpl = (url, o) => fetch(String(url).replace(PUBLIC, host.localOrigin), o);
-  host = createTunnelFileHost({ binaryPath: FAKE, spawnImpl, fetchImpl, ...opts });
+  host = createTunnelFileHost({ binaryPath: FAKE, spawnImpl, fetchImpl, dohFetchImpl: dohAllOk, sleep: noSleep, ...opts });
   return host;
 }
 const local = (host, url) => url.replace(PUBLIC, host.localOrigin);
@@ -334,13 +337,13 @@ test('testConnection fetches a probe through the public URL, removes it, keeps t
 
   // Unreachable public URL → ok:false, message without the URL / token.
   const blocked = createTunnelFileHost({
-    binaryPath: FAKE, probeTimeoutMs: 0,
+    binaryPath: FAKE, probeTimeoutMs: 5000, dohFetchImpl: dohAllOk, sleep: noSleep,
     spawnImpl: (_b, a, o) => { const c = spawn(process.execPath, [FAKE, ...a], o); spawned.push({ child: c, args: a }); return c; },
     fetchImpl: async () => new Response('nope', { status: 502 }),
   });
   const r = await blocked.testConnection();
   assert.equal(r.ok, false);
-  assert.match(r.message, /not reachable from the internet \(HTTP 502\)/);
+  assert.match(r.message, /not reachable from the internet yet \(HTTP 502\)/);
   assert.doesNotMatch(r.message, /trycloudflare|[0-9a-f]{32}/);
   await blocked.close();
 });
@@ -372,7 +375,7 @@ function makePkg() {
   });
 }
 
-function setupRunner({ adapter, responder, holdMs = 60_000, retryWindowMs = 60_000, onSleep } = {}) {
+function setupRunner({ adapter, responder, holdMs = 60_000, retryWindowMs = 60_000, onSleep, hostOpts, publicWaitMs } = {}) {
   const clock = { t: 5_000_000 };
   const hosts = [];
   const events = [];
@@ -390,13 +393,13 @@ function setupRunner({ adapter, responder, holdMs = 60_000, retryWindowMs = 60_0
     adapters: [adapter], core, transport,
     credentials: { get: async id => (id === 'filehost:tunnel' ? { type: 'tunnel' } : null) },
     makeFileHost: () => {
-      const h = makeHost({ now: () => clock.t });
+      const h = makeHost({ now: () => clock.t, ...(hostOpts ? hostOpts(clock) : {}) });
       hosts.push(h);
       return { ...h, put: (...a) => { puts++; return h.put(...a); }, get running() { return h.running; }, get closed() { return h.closed; }, get localOrigin() { return h.localOrigin; } };
     },
     emit: e => events.push(e), now: () => clock.t,
     sleep: async ms => { clock.t += ms; await hooks.onSleep?.(); await new Promise(r => setImmediate(r)); },
-    confirm: { polls: 2, intervalMs: 5000, holdMs, retryWindowMs },
+    confirm: { polls: 2, intervalMs: 5000, holdMs, retryWindowMs, ...(publicWaitMs != null ? { publicWaitMs } : {}) },
   });
   return { runner, hosts, events, calls, clock, hooks, get puts() { return puts; } };
 }
@@ -497,6 +500,137 @@ test('runner: retry-window expiry closes the tunnel; Retry then re-hosts and UPD
   assert.notDeepEqual(update.files, ctx.calls[0].files);
   assert.equal(third.ok, true, third.error);
   assert.equal(ctx.hosts[1].closed, true);
+});
+
+// ── PB.16 readiness gate ─────────────────────────────────────────────────
+
+const nx = () => new Response(JSON.stringify({ Status: 3 }));   // NXDOMAIN
+const answer = () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: '203.0.113.7' }] }));
+
+test('PB.16 gate: waits for BOTH DoH resolvers, then 2 stable polls, then probes; DoH only (headers + URLs)', async () => {
+  // Per poll round: [cloudflare, google] → NX/NX, ok/NX, ok/ok, ok/NX (reset), ok/ok, ok/ok → ready on round 6.
+  const script = [[nx, nx], [answer, nx], [answer, answer], [answer, nx], [answer, answer], [answer, answer]];
+  const seen = []; const log = []; const sleeps = [];
+  const counts = { cf: 0, g: 0 };
+  const dohFetchImpl = async (url, o) => {
+    const u = new URL(url);
+    assert.equal(o.headers.accept, 'application/dns-json');
+    assert.equal(u.searchParams.get('type'), 'A');
+    assert.equal(u.searchParams.get('name'), 'fake-tunnel-abc.trycloudflare.com');
+    const which = u.hostname === 'cloudflare-dns.com' ? 'cf' : u.hostname === 'dns.google' ? 'g' : null;
+    assert.ok(which, `unexpected resolver ${u.hostname}`);
+    seen.push(u.origin + u.pathname);
+    const round = counts[which]++;
+    log.push(`doh:${which}`);
+    return script[Math.min(round, script.length - 1)][which === 'cf' ? 0 : 1]();
+  };
+  const host = makeHost({
+    dohFetchImpl, sleep: async ms => { sleeps.push(ms); },
+    fetchImpl: async (url, o) => { log.push('probe'); return fetch(String(url).replace(PUBLIC, host.localOrigin), o); },
+  });
+  try {
+    const phases = [];
+    const r = await host.waitUntilPublic({ onProgress: p => phases.push(p.phase) });
+    assert.deepEqual(counts, { cf: 6, g: 6 });
+    assert.deepEqual(sleeps, [1000, 1000, 1000, 1000, 1000], 'polls every 1 s');
+    assert.deepEqual(phases, ['dns', 'probe']);
+    assert.equal(log.indexOf('probe'), 12, 'probe only after all 12 DoH lookups');
+    assert.deepEqual([...new Set(seen)].sort(), ['https://cloudflare-dns.com/dns-query', 'https://dns.google/resolve']);
+    assert.ok(r.base.startsWith(PUBLIC));
+    // Second call on the same tunnel is instant (no new lookups).
+    await host.waitUntilPublic();
+    assert.equal(counts.cf, 6);
+  } finally { await host.close(); }
+});
+
+test('PB.16 probe: retries 530 with 2 s backoff then succeeds; probe is hidden from stats() and removed', async () => {
+  const sleeps = []; let n = 0; let during = null; let host = null;
+  host = makeHost({
+    sleep: async ms => { sleeps.push(ms); },
+    fetchImpl: async (url, o) => {
+      if (++n <= 2) return new Response('edge', { status: 530 });
+      during = host.stats();
+      return fetch(String(url).replace(PUBLIC, host.localOrigin), o);
+    },
+  });
+  try {
+    const { key } = await host.put('a.txt', enc('a'));
+    await host.presignGet(key);
+    await host.waitUntilPublic();
+    assert.equal(n, 3);
+    assert.deepEqual(sleeps.filter(ms => ms === 2000), [2000, 2000]);
+    assert.deepEqual(during, { served: 0, total: 1 }, 'probe object excluded while it exists');
+    assert.deepEqual(host.stats(), { served: 0, total: 1 }, 'and after');
+    // Removed: a second hidden object is gone → total unchanged and map empty of probes.
+    const only = await host.put('b.txt', enc('b'));
+    assert.deepEqual(host.stats(), { served: 0, total: 2 });
+    await host.remove(only.key);
+  } finally { await host.close(); }
+});
+
+test('PB.16 probe: a byte mismatch fails with code tunnel-not-public', async () => {
+  const host = makeHost({ fetchImpl: async () => new Response(Buffer.from('some captive portal page')) });
+  try {
+    await assert.rejects(host.waitUntilPublic({ timeoutMs: 60_000 }), e => e.code === 'tunnel-not-public' && /probe bytes differ/.test(e.message) && !/trycloudflare/.test(e.message));
+    assert.deepEqual(host.stats(), { served: 0, total: 0 });
+  } finally { await host.close(); }
+});
+
+test('PB.16 job: timeout fails the host step with tunnel-not-public, the platform got NOTHING; Retry re-runs the gate', async () => {
+  const adapter = fakeAdapter();
+  let created = 0;
+  const base = adapter.buildCreate;
+  adapter.buildCreate = (...a) => { created++; return base(...a); };
+  let dnsUp = false;
+  let sleeps = 0;
+  const ctx = setupRunner({
+    adapter, publicWaitMs: 5000,
+    hostOpts: clock => ({ dohFetchImpl: async () => (dnsUp ? answer() : nx()), sleep: async ms => { clock.t += ms; } }),
+    onSleep: async () => { if (++sleeps === 1) await platformFetchAll(ctx); },
+  });
+  const first = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
+  assert.equal(first.ok, false);
+  assert.equal(first.failedStep, 'host');
+  const failed = ctx.events.find(e => e.status === 'failed');
+  assert.equal(first.code, 'tunnel-not-public');
+  assert.ok(failed);
+  assert.equal(created, 0, 'buildCreate never called');
+  assert.equal(ctx.calls.length, 0, 'nothing sent to the platform');
+  assert.ok(ctx.events.some(e => e.step === 'host' && e.status === 'running' && e.phase === 'dns' && /reachable/.test(e.message)));
+  assert.equal(ctx.hosts[0].running, true, 'tunnel not restarted/killed');
+  const putsBefore = ctx.puts;
+
+  dnsUp = true;
+  const second = await ctx.runner.retry(first.jobId);
+  assert.equal(second.ok, true, second.error);
+  assert.equal(created, 1);
+  assert.equal(ctx.puts, putsBefore, 'hosted objects reused');
+  assert.equal(ctx.hosts.length, 1, 'same tunnel');
+  const order = ctx.events.filter(e => (e.step === 'host' && e.phase === 'probe') || e.step === 'create').map(e => `${e.step}:${e.phase || e.status}`);
+  assert.ok(order.includes('host:probe') && order.indexOf('host:probe') < order.indexOf('create:running'), 'gate precedes the publish step: ' + order.join());
+});
+
+test('PB.16 S3-style host (no waitUntilPublic): host step unchanged, no gate events', async () => {
+  const adapter = fakeAdapter();
+  const calls = [];
+  const store = new Map();
+  const runner = createPublishRunner({
+    adapters: [adapter], core,
+    transport: { request: async req => { calls.push(req.body); return { status: 200, ok: true, headers: {}, text: '', json: { data: { remoteId: 'c1', url: 'https://fake.test/c/c1' } } }; } },
+    credentials: { get: async id => (id === 'filehost:r2' ? { type: 's3' } : null) },
+    makeFileHost: () => ({
+      async put(name, bytes) { const key = `k${store.size}`; store.set(key, bytes); return { key }; },
+      async presignGet(key) { return `https://bucket.test/${key}`; },
+      async remove(key) { store.delete(key); },
+    }),
+    emit: () => {}, sleep: async () => {},
+  });
+  const events = [];
+  const id = runner.create({ platform: 'fake', accountId: 'me', fileHostId: 'r2', pkg: makePkg(), onProgress: e => events.push(e) });
+  const out = await runner.run(id);
+  assert.equal(out.ok, true, out.error);
+  assert.equal(events.some(e => e.phase), false, 'no readiness phases for hosts without the gate');
+  assert.equal(calls[0].files[0], 'https://bucket.test/k0');
 });
 
 test('tunnel host source: no electron import, no logging', () => {

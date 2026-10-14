@@ -53,6 +53,19 @@ const BUNDLE_MISSING_MESSAGE = 'The bundled cloudflared is missing. Reinstall MI
 const QUICK_URL_RE = /https:\/\/(?!api\.)([a-z0-9-]+)\.trycloudflare\.com\b/i;
 const REGISTERED_RE = /Registered tunnel connection/i;
 
+// Readiness gate (PB.16). A brand-new quick-tunnel hostname does not resolve for a few
+// seconds; anyone who looks it up early (even us, via the local resolver) gets a cached
+// NXDOMAIN for 20+ s. So the name is checked ONLY over DNS-over-HTTPS JSON APIs.
+const DOH_URLS = [
+  host => `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=A`,
+  host => `https://dns.google/resolve?name=${encodeURIComponent(host)}&type=A`,
+];
+const DEFAULT_PUBLIC_TIMEOUT_MS = 120_000;   // trycloudflare.com SOA negative-cache TTL is 60 s
+const DNS_POLL_MS = 1000;
+const DNS_STABLE_POLLS = 2;
+const PROBE_ATTEMPTS = 5;
+const PROBE_BACKOFF_MS = 2000;
+
 // Any cloudflared we spawned is killed when this process exits, even on a crash path.
 const liveChildren = new Set();
 let exitHookInstalled = false;
@@ -206,7 +219,9 @@ function defaultWhich(name) {
  * @param {string} [opts.binaryPath]                  cloudflared to run (skips resolveBinary)
  * @param {() => { path: string|null, error: string|null }} [opts.resolveBinary]
  * @param {typeof childProcess.spawn} [opts.spawnImpl]
- * @param {typeof fetch} [opts.fetchImpl]             used by testConnection's public probe
+ * @param {typeof fetch} [opts.fetchImpl]             the public-URL probe (waitUntilPublic / testConnection)
+ * @param {typeof fetch} [opts.dohFetchImpl]          DNS-over-HTTPS lookups only (never the local resolver)
+ * @param {(ms: number) => Promise<void>} [opts.sleep]
  * @param {number} [opts.startupTimeoutMs=30000]
  * @param {number} [opts.probeTimeoutMs=45000]        testConnection: how long DNS / edge may take
  * @param {() => number} [opts.now]
@@ -214,11 +229,12 @@ function defaultWhich(name) {
  */
 function createTunnelFileHost({
   binaryPath, resolveBinary = () => findCloudflared(), spawnImpl = childProcess.spawn,
-  fetchImpl = globalThis.fetch, startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS, probeTimeoutMs = 45_000,
+  fetchImpl = globalThis.fetch, dohFetchImpl = globalThis.fetch,
+  sleep = ms => new Promise(r => setTimeout(r, ms)), startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS, probeTimeoutMs = 45_000,
   now = Date.now, randomToken = () => crypto.randomBytes(16).toString('hex'),
 } = {}) {
   /** @type {Map<string, { token: string, name: string, enc: string, mime: string, bytes: Buffer, expiresAt: number,
-   *   ranges: Array<[number, number]>, served: boolean }>} */
+   *   ranges: Array<[number, number]>, served: boolean, hidden?: boolean }>} */
   const byKey = new Map();
   /** @type {Map<string, string>} token → key */
   const byToken = new Map();
@@ -345,7 +361,7 @@ function createTunnelFileHost({
         { code: err?.code === 'ENOENT' ? 'cloudflared-missing' : 'tunnel-start-timeout' })));
       proc.once('exit', code => {
         liveChildren.delete(proc);
-        if (child === proc) { child = null; publicBase = null; starting = null; }
+        if (child === proc) { child = null; publicBase = null; starting = null; readyBase = null; }
         if (!settled) {
           const last = tail.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(-1)[0] || '';
           const detail = last.replace(/https?:\/\/\S+/g, '[url]').slice(0, 200);
@@ -414,42 +430,105 @@ function createTunnelFileHost({
     byToken.delete(obj.token);
   }
 
-  // Proves the PUBLIC link works: serve a probe object and fetch it through the tunnel.
-  // A brand-new trycloudflare hostname can take a few seconds to resolve, so retry.
-  async function testConnection() {
-    let key = null;
+  // One DoH lookup: true when the resolver answers NOERROR (Status 0) with an A/AAAA/CNAME.
+  async function dohResolves(makeUrl, hostname) {
     try {
-      if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
-      const body = `listbridge probe ${crypto.randomBytes(8).toString('hex')}`;
-      ({ key } = await put('connection-test.txt', Buffer.from(body, 'utf8'), 'text/plain'));
-      const url = await presignGet(key, 300);
-      const deadline = now() + probeTimeoutMs;
-      let lastErr = 'no answer';
-      for (;;) {
+      const res = await dohFetchImpl(makeUrl(hostname), { headers: { accept: 'application/dns-json' }, signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return false;
+      const j = await res.json();
+      return j?.Status === 0 && Array.isArray(j.Answer) && j.Answer.some(x => x && (x.type === 1 || x.type === 28 || x.type === 5));
+    } catch { return false; }
+  }
+
+  let readyBase = null;   // public base already proven reachable (cleared when the tunnel dies)
+
+  /**
+   * Readiness gate: resolves once the tunnel's public hostname resolves on BOTH DoH resolvers
+   * for 2 consecutive polls AND a hidden probe object round-trips byte-identical through the
+   * public URL. Rejects with code 'tunnel-not-public' after `timeoutMs`. Starts the tunnel if
+   * it is not running (a died tunnel is restarted: callers must re-presign afterwards).
+   * @param {{ timeoutMs?: number, onProgress?: (p: { phase: 'dns'|'probe' }) => void, cancelled?: () => boolean }} [o]
+   */
+  async function waitUntilPublic({ timeoutMs = DEFAULT_PUBLIC_TIMEOUT_MS, onProgress, cancelled } = {}) {
+    if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+    const base = await ensureStarted();
+    if (readyBase === base && child) return { base, dnsMs: 0, probeMs: 0 };
+    const hostname = new URL(base).hostname;
+    const t0 = now();
+    const deadline = t0 + Math.max(0, timeoutMs);
+    let last = 'dns';
+    const fail = () => Object.assign(new Error(
+      `The temporary link is not reachable from the internet yet (${last}). Wait a moment and retry.`), { code: 'tunnel-not-public' });
+    const stop = () => { if (cancelled?.()) throw Object.assign(new Error('Publish cancelled'), { cancelled: true, code: 'cancelled' }); };
+    const note = p => { try { onProgress?.(p); } catch { /* a listener must not break the gate */ } };
+
+    note({ phase: 'dns' });
+    let stable = 0;
+    for (;;) {
+      stop();
+      const oks = await Promise.all(DOH_URLS.map(u => dohResolves(u, hostname)));
+      stable = oks.every(Boolean) ? stable + 1 : 0;
+      last = oks.every(Boolean) ? 'dns settling' : 'dns';
+      if (stable >= DNS_STABLE_POLLS) break;
+      if (now() >= deadline) throw fail();
+      await sleep(DNS_POLL_MS);
+    }
+    const tDns = now();
+
+    note({ phase: 'probe' });
+    const body = crypto.randomBytes(32);
+    const token = crypto.randomBytes(16).toString('hex');
+    const probeKey = `probe${++seq}`;
+    byKey.set(probeKey, {
+      token, name: 'probe.bin', enc: 'probe.bin', mime: 'application/octet-stream', bytes: body,
+      expiresAt: now() + 10 * 60 * 1000, ranges: [], served: false, hidden: true,
+    });
+    byToken.set(token, probeKey);
+    try {
+      const url = `${base}/${token}/probe.bin`;
+      for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
+        stop();
         try {
           const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
-          const text = await res.text();
-          if (res.ok && text === body) break;
-          lastErr = `HTTP ${res.status}`;
+          const got = Buffer.from(await res.arrayBuffer());
+          if (res.status === 200 && got.equals(body)) {
+            readyBase = base;
+            return { base, dnsMs: tDns - t0, probeMs: now() - tDns };
+          }
+          last = res.status === 200 ? 'probe bytes differ' : `HTTP ${res.status}`;
         } catch (err) {
-          lastErr = String(err?.cause?.code || err?.name || 'network error');
+          last = String(err?.cause?.code || err?.name || 'network error');
         }
-        if (now() >= deadline) throw new Error(`The temporary link is not reachable from the internet (${lastErr}).`);
-        await new Promise(r => setTimeout(r, 1500));
+        if (now() >= deadline || attempt === PROBE_ATTEMPTS - 1) break;
+        await sleep(PROBE_BACKOFF_MS);
       }
+      throw fail();
+    } finally {
+      byKey.delete(probeKey);
+      byToken.delete(token);
+    }
+  }
+
+  // Proves the PUBLIC link works (the same gate the publish job uses).
+  async function testConnection() {
+    try {
+      await waitUntilPublic({ timeoutMs: probeTimeoutMs });
       return { ok: true, message: 'Temporary link works: files can be downloaded from this computer while MIXOMESH is open.' };
     } catch (err) {
       return { ok: false, message: String(err?.message || err).replace(/https?:\/\/\S+/g, '[url]') };
-    } finally {
-      if (key) await remove(key);
     }
   }
 
   /** Ingestion evidence: how many stored objects have been fully delivered at least once. */
   function stats() {
     let served = 0;
-    for (const obj of byKey.values()) if (obj.served) served++;
-    return { served, total: byKey.size };
+    let total = 0;
+    for (const obj of byKey.values()) {
+      if (obj.hidden) continue;                 // readiness probe: not part of the listing
+      total++;
+      if (obj.served) served++;
+    }
+    return { served, total };
   }
 
   async function close() {
@@ -457,7 +536,7 @@ function createTunnelFileHost({
     byKey.clear();
     byToken.clear();
     const proc = child;
-    child = null; publicBase = null; starting = null;
+    child = null; publicBase = null; starting = null; readyBase = null;
     if (proc) await killTree(proc);
     const s = server;
     server = null; localOrigin = null;
@@ -469,7 +548,7 @@ function createTunnelFileHost({
 
   return Object.freeze({
     requiresUptime: true,
-    put, presignGet, remove, testConnection, close, stats,
+    put, presignGet, remove, testConnection, waitUntilPublic, close, stats,
     /** Local origin of the loopback server (null until started). Diagnostics / tests only. */
     get localOrigin() { return localOrigin; },
     get running() { return !!child && !closed; },

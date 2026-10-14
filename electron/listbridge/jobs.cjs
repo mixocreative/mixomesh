@@ -12,6 +12,8 @@
 //   * confirm:  adapter.buildConfirm/parseConfirm polling when the adapter has them.
 //   * cleanup:  remove hosted objects. Runs only after confirm (or on cancel); if it fails the
 //               objects are kept, the job reports it, and retry() resumes at cleanup.
+// Hosts with `waitUntilPublic` (the tunnel) must pass its readiness gate at the end of `host`,
+// BEFORE create/update hands any URL to the platform (timeout -> code `tunnel-not-public`).
 // Hosts with `requiresUptime: true` (filehosts/tunnel.cjs: links served from this computer)
 // are HELD (plan PB.12): the confirm step keeps the job (and the links) alive until
 //   * host.stats() says every hosted object (files AND images) was fully served at least
@@ -56,7 +58,7 @@ const errMessage = err => String(err?.message || err || 'unknown error');
  * @param {(event: any) => void} [deps.emit]               default progress sink
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => number} [deps.now]
- * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number }} [deps.confirm]
+ * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number, publicWaitMs?: number }} [deps.confirm]
  *   polls / intervalMs: adapter confirm polling (non-uptime hosts); intervalMs is also the hold
  *   poll interval; holdMs: uptime-host hold; retryWindowMs: failed-job link lifetime.
  */
@@ -80,6 +82,7 @@ function createPublishRunner({
   const confirmIntervalMs = confirmOpts.intervalMs ?? 5000;
   const holdMs = Math.max(0, confirmOpts.holdMs ?? HOLD_MS);
   const retryWindowMs = Math.max(0, confirmOpts.retryWindowMs ?? RETRY_WINDOW_MS);
+  const publicWaitMs = Math.max(0, confirmOpts.publicWaitMs ?? 120_000);
   const jobs = new Map();
 
   const adapterFor = platform => {
@@ -177,6 +180,24 @@ function createPublishRunner({
         rec.expiresAt = now() + PRESIGN_SEC * 1000;
         uploaded++;
         report(job, 'host', 'running', `Uploaded ${it.name} (${uploaded}/${items.length}).`);
+      }
+      // Readiness gate (PB.16): a brand-new tunnel hostname must resolve and serve before ANY
+      // URL reaches the platform, or its early lookup poisons DNS with a cached NXDOMAIN.
+      if (typeof host.waitUntilPublic === 'function') {
+        checkCancel(job);
+        const msg = 'Making the temporary links reachable…';
+        report(job, 'host', 'running', msg, { phase: 'dns' });
+        await host.waitUntilPublic({
+          timeoutMs: publicWaitMs,
+          cancelled: () => job.cancelRequested,
+          onProgress: p => report(job, 'host', 'running', msg, { phase: p.phase }),
+        });
+        checkCancel(job);
+        // The gate may have restarted a dead tunnel: links must carry the current origin.
+        for (const rec of job.hosted.values()) {
+          rec.url = await host.presignGet(rec.key, PRESIGN_SEC);
+          rec.expiresAt = now() + PRESIGN_SEC * 1000;
+        }
       }
       return `${items.length} item(s) hosted${uploaded < items.length ? ` (${items.length - uploaded} reused)` : ''}.`;
     },

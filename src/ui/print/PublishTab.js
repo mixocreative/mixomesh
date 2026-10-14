@@ -543,7 +543,7 @@ function _stepsHtml() {
     const key = M.stepLabelKey(s.id);
     h += `<li class="pub-step ${s.status}"><span class="pub-step-i" aria-hidden="true">${mark}</span>`
       + `<span>${escapeHtml(key ? t(key) : s.id)}${s.status === 'skipped' ? ` <span class="pub-hint">(${escapeHtml(t('publish.step.skipped'))})</span>` : ''}</span>`
-      + `<span class="pub-hint pp-num">${s.id === 'build' && s.status === 'done' ? escapeHtml(s.message ?? '') : ''}</span></li>`;
+      + `<span class="pub-hint pp-num">${s.id === 'build' && s.status === 'done' ? escapeHtml(s.message ?? '') : s.id === 'host' && s.status === 'run' && s.phase ? escapeHtml(t('publish.host.reachable')) : ''}</span></li>`;
   }
   h += '</ol>';
   return h;

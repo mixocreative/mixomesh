@@ -1164,5 +1164,7 @@
   "publish.err.platformRejected": "The platform rejected the listing.",
   "publish.err.notConfirmed": "The platform did not confirm the files. Retry to check again.",
   "publish.err.cleanupLeft": "Some hosted files could not be removed. Retry to remove them.",
-  "publish.err.cancelled": "Publish cancelled."
+  "publish.err.cancelled": "Publish cancelled.",
+  "publish.host.reachable": "Making the temporary links reachable…",
+  "publish.err.tunnelNotPublic": "The temporary link is not reachable from the internet yet, so nothing was sent to the platform. Wait a moment and press Retry."
 }

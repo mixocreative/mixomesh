@@ -1164,5 +1164,7 @@
   "publish.err.platformRejected": "平台拒絕了此商品上架。",
   "publish.err.notConfirmed": "平台尚未確認收到檔案。請重試以再次確認。",
   "publish.err.cleanupLeft": "無法移除某些託管檔案。請重試以移除。",
-  "publish.err.cancelled": "發佈已取消。"
+  "publish.err.cancelled": "發佈已取消。",
+  "publish.host.reachable": "正在讓暫時連結可從外部開啟…",
+  "publish.err.tunnelNotPublic": "暫時連結還無法從網際網路連上，因此尚未傳送任何內容給平台。請稍候再按「重試」。"
 }

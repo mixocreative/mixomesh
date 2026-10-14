@@ -37,7 +37,7 @@ function cloudflaredPids() {
   } catch { return new Set(); }   // pgrep exits 1 with no match
 }
 
-// The separate fetching process: HEAD (retried until the brand-new hostname resolves), then
+// The separate fetching process: HEAD (still retried, but the readiness gate should make the first try work), then
 // Range, then full GETs with a streaming sha256 + timing. Prints one JSON line.
 const CHILD = `
 const crypto = require('node:crypto');
@@ -92,6 +92,9 @@ try {
   const startS = (Date.now() - t0) / 1000;
   const pngUrl = await host.presignGet(pngKey, 600);
   console.log(`tunnel start: ${startS.toFixed(2)} s  ->  ${new URL(bigUrl).origin}`);
+  // PB.16 readiness gate: DoH-only resolve + hidden public probe, BEFORE anyone fetches the URLs.
+  const gate = await host.waitUntilPublic();
+  console.log(`readiness gate: DoH ready ${(gate.dnsMs / 1000).toFixed(1)} s, probe ok ${(gate.probeMs / 1000).toFixed(1)} s`);
 
   const ours = [...cloudflaredPids()].filter(p => !before.has(p));
   assert.ok(ours.length >= 1, 'a new cloudflared process must be running while the tunnel is up');
