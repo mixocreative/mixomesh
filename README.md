@@ -129,6 +129,41 @@ browser window for a full-size turntable recording (`VIDEO_CHECK_EDGE=1`
 forces Edge). Add targeted manual Chrome or slicer checks when changing
 browser-only file picker flows or external export compatibility.
 
+## Publishing to Cults3D (desktop app)
+
+The desktop app can publish your finished prints directly to Cults3D for sale
+— no separate upload step.
+
+**Get an API key.** Visit https://cults3d.com/en/api/keys in your Cults3D
+account and generate an API key. Keep it safe; you'll use it once to connect
+the app.
+
+**Connect your account.** In MIXOMESH, go to **Print ▸ Publish**. Select
+Cults3D, enter your Cults3D nickname and API key, then **Connect**. The key is
+stored encrypted on this PC and is only ever sent to Cults3D. **Test
+connection** checks it works.
+
+**How the temporary link works.** When you publish, your files are served from
+your PC through a short-lived Cloudflare link only while the publish runs.
+Nothing is stored anywhere else — the files stay on your machine and the link
+is removed as soon as Cults3D has downloaded them (or when MIXOMESH closes).
+Keep the app open until the publish finishes and shows your listing's address
+(with a Copy button).
+
+**Firewall note.** MIXOMESH needs outbound HTTPS on port 443 (standard internet).
+It may also use UDP port 7844 for faster tunneling, but falls back to HTTP/2
+over TCP 443 if that's blocked.
+
+**Advanced option: your own S3 or R2 bucket.** If you prefer to use your own
+object storage, you can configure it in the Publish tab under **Advanced: my
+own S3 / R2 bucket**. Enter your bucket credentials and endpoint; the files
+get short-lived links and are deleted once Cults3D has them. This is optional — the temporary link from your PC works
+fine for most people.
+
+**Web and mobile.** On the web build and iPad, you can save a listing package
+file (`.listbridge.zip`) — a complete offline package you can upload to any
+marketplace by hand.
+
 ## Dependency Notes
 
 Dependencies are project-local and installed with npm. The helper script forces

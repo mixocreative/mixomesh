@@ -65,6 +65,10 @@ behaviours. Treat it that way:
    migrate-only at runtime (read once to seed `logicalObjectId` from legacy
    saves; never otherwise).
 8. Module size soft targets in BLUEPRINT §0.5. Split if exceeded by 1.5×.
+9. Marketplace publishing (Cults3D) follows BLUEPRINT § "Listbridge publishing"
+   (ADR 0004): desktop (Electron) only; portable architecture for future
+   self-hosted shops; zero user setup beyond the platform's API key; secrets
+   encrypted in main process only, never in renderer or logs.
 
 ## Tech stack
 - Runtime: Vite + TypeScript with pinned Babylon npm packages. `src/app/boot.ts`
