@@ -15,6 +15,14 @@ files:
   # Listbridge portable core (ESM), loaded by electron/listbridge/index.cjs via import().
   - src/listbridge/**/*
   - package.json
+# Listbridge temporary links (PB.5b): ship cloudflared + its Apache-2.0 licence. Fetched and
+# SHA-256-verified into vendor/cloudflared/ by scripts/fetch-cloudflared.mjs (`npm run dist`
+# runs it first). Resolved at runtime from <resources>/listbridge/cloudflared.exe.
+extraResources:
+  - from: vendor/cloudflared/cloudflared-windows-amd64.exe
+    to: listbridge/cloudflared.exe
+  - from: vendor/cloudflared/LICENSE
+    to: listbridge/cloudflared-LICENSE.txt
 win:
   target: nsis
 nsis:

@@ -475,7 +475,8 @@ test('ipc: credentials go in, never come back out', async () => {
   const { call, dir, madeHosts } = setupIpc();
   const d = await call('publish:describe');
   assert.deepEqual(d.platforms.map(p => [p.id, p.transfer, p.credentials]), [['fake', 'url', ['user', 'apiKey']]]);
-  assert.deepEqual(d.fileHosts.map(h => h.type), ['s3']);
+  assert.deepEqual(d.fileHosts.map(h => [h.type, h.needsCredentials, h.default]), [['tunnel', false, true], ['s3', true, false]]);
+  assert.equal(d.defaultFileHost, 'tunnel');
 
   assert.equal(await call('publish:hasCredentials', 'fake:me'), false);
   const r = await call('publish:setCredentials', 'fake:me', { user: 'me', apiKey: SECRET });
@@ -548,9 +549,35 @@ test('ipc: retry / cancel are limited to the window that started the job', async
   assert.equal(c.status, 'cancelled');
 });
 
+test('ipc: URL platforms default to the temporary-link host; it needs no credentials and is closed after a test', async () => {
+  const handlers = new Map();
+  const tunnel = { ...fakeFileHost(), requiresUptime: true, closed: 0, async close() { tunnel.closed++; } };
+  let made = 0;
+  const reg = registerListbridgeIpc((c, fn) => handlers.set(c, fn), {
+    userDataDir: tmpDir(), safeStorage: fakeSafeStorage(), adapters: [fakeAdapter()],
+    transport: fakeTransport(() => created()), loadCore: async () => core,
+    makeFileHost: () => { throw new Error('s3 must not be used'); },
+    makeTunnelHost: () => { made++; return tunnel; },
+    sleep: async () => {}, hold: { maxWaitMs: 0 },
+  });
+  const call = (ch, ...a) => handlers.get(ch)({ sender: { id: 1, isDestroyed: () => false, send() {} } }, ...a);
+  assert.equal(await call('publish:hasCredentials', 'filehost:tunnel'), true);
+  await assert.rejects(call('publish:setCredentials', 'filehost:tunnel', { type: 'tunnel' }), /needs no credentials/);
+  await assert.rejects(call('publish:setCredentials', 'filehost:x', { type: 'tunnel' }), /unknown file host type/);
+  assert.deepEqual(await call('publish:testConnection', 'filehost:tunnel'), { ok: true, message: 'ok' });
+  assert.equal(tunnel.closed, 1, 'a connection test does not leave a tunnel running');
+  await call('publish:setCredentials', 'fake:me', { user: 'me', apiKey: SECRET });
+  const out = await call('publish:start', startPayload(makePkg(), { fileHostId: undefined }));
+  assert.equal(out.ok, true, out.error);
+  assert.equal(made, 2);
+  assert.equal(tunnel.puts.length, 3);
+  assert.equal(tunnel.closed, 2, 'closed when the job finished');
+  await reg.closeAll();
+});
+
 test('runner code stays host-neutral: no electron import, IPC only via the injected handle', () => {
   const dir = path.join(ROOT, 'electron', 'listbridge');
-  const files = ['credentials.cjs', 'transport.cjs', 'jobs.cjs', 'index.cjs', 'filehosts/s3.cjs'];
+  const files = ['credentials.cjs', 'transport.cjs', 'jobs.cjs', 'index.cjs', 'filehosts/s3.cjs', 'filehosts/tunnel.cjs'];
   for (const f of files) {
     const src = fs.readFileSync(path.join(dir, f), 'utf8');
     assert.doesNotMatch(src, /require\(\s*['"]electron['"]\s*\)/, `${f} imports electron`);

@@ -12,7 +12,7 @@ const {
   createOpaqueFileRegistry, sanitizeSuggestedName, exportDialogOptions, withExtension,
 } = require('./OpaqueFileRegistry.cjs');
 const { createKvStore } = require('./KvStore.cjs');
-const { registerListbridgeIpc } = require('./listbridge/index.cjs');
+const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
 const {
   SECURE_WEB_PREFERENCES, appEntryUrl, guardWebContents, denyAllPermissions, isTrustedSender,
 } = require('./WindowSecurity.cjs');
@@ -146,7 +146,7 @@ function _runSecuritySmoke(win) {
       && await workerOk(new Worker(new URL('assets/' + ${JSON.stringify(workerFile)}, document.baseURI), { type: 'module' }));
     try {
       const d = await window.electronAPI?.listbridge?.describe();
-      r.listbridge = Array.isArray(d?.platforms) && Array.isArray(d?.fileHosts);
+      r.listbridge = Array.isArray(d?.platforms) && Array.isArray(d?.fileHosts) && d.platforms.some(p => p.id === 'cults3d') && d.fileHosts.some(h => h.type === 'tunnel' && h.default);
     } catch (err) { r.listbridge = String(err?.message ?? err); }
     r.blobWorker = await workerOk(new Worker(URL.createObjectURL(new Blob(['postMessage(1)'], { type: 'text/javascript' }))));
     return r;
@@ -363,8 +363,30 @@ handle('export:save', async (event, opts, data) => {
 // ── Listbridge marketplace publishing (ADR 0004, plan PB.4) ──
 // `publish:*` channels, registered through `handle` (trusted sender) once the app is
 // ready. Credentials: safeStorage-encrypted <userData>/listbridge-credentials.bin, never
-// returned to the renderer. Platform adapters are listed here (none yet: Cults3D = PB.3).
-const LISTBRIDGE_ADAPTERS = [];
+// returned to the renderer. Platform adapters come from the portable core's ADAPTERS
+// registry (src/listbridge/index.js), loaded once at startup.
+async function _loadListbridgeAdapters() {
+  try {
+    return [...(await loadListbridgeCore()).ADAPTERS];
+  } catch (err) {
+    // Publishing unavailable is not a reason to keep the app from starting.
+    console.error('Listbridge adapters failed to load:', err?.message ?? err);
+    return [];
+  }
+}
+let _listbridge = null;
+let _tunnelsClosed = false;
+
+// Temporary-link hosts (cloudflared quick tunnels) must not outlive the app: close them
+// before quitting (bounded wait), then let the quit continue.
+app.on('will-quit', event => {
+  if (_tunnelsClosed || !_listbridge) return;
+  event.preventDefault();
+  _tunnelsClosed = true;
+  Promise.race([_listbridge.closeAll(), new Promise(r => setTimeout(r, 5000))])
+    .catch(() => {})
+    .finally(() => app.quit());
+});
 
 ipcMain.on('app:close-response', (event, result) => {
   if (!isTrustedSender(event, ENTRY_URL)) return;
@@ -385,14 +407,16 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   denyAllPermissions(session.defaultSession);
   _kv = createKvStore(path.join(app.getPath('userData'), 'mixo-kv.json'));
   _fileRefs = createOpaqueFileRegistry({
     store: createKvStore(path.join(app.getPath('userData'), 'mixo-refs.json')),
   });
-  registerListbridgeIpc(handle, {
-    userDataDir: app.getPath('userData'), safeStorage, adapters: LISTBRIDGE_ADAPTERS,
+  _listbridge = registerListbridgeIpc(handle, {
+    userDataDir: app.getPath('userData'), safeStorage, adapters: await _loadListbridgeAdapters(),
+    // Packaged: cloudflared ships in resources/listbridge/ (electron-builder extraResources).
+    resourcesPath: app.isPackaged ? process.resourcesPath : null,
   });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

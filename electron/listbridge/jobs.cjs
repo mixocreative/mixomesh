@@ -12,6 +12,13 @@
 //   * confirm:  adapter.buildConfirm/parseConfirm polling when the adapter has them.
 //   * cleanup:  remove hosted objects. Runs only after confirm (or on cancel); if it fails the
 //               objects are kept, the job reports it, and retry() resumes at cleanup.
+// Hosts with `requiresUptime: true` (filehosts/tunnel.cjs: links served from this computer)
+// are HELD: the confirm step keeps the job (and the links) alive until the platform confirms
+// it fetched the files, or — for an adapter without buildConfirm — for the whole hold window
+// (hold.maxWaitMs, default 15 min), telling the user to keep the app open. The host is
+// close()d when the job finishes or is cancelled. A failed job keeps its host so Retry reuses
+// the same URLs, but only for hold.maxWaitMs; after that (or a hold that timed out) the links
+// are gone and Retry re-hosts the files and UPDATES the listing with fresh links.
 // A failed step leaves the job resumable: retry(jobId) restarts AT that step, reusing the
 // already-hosted keys / URLs (re-presigned only if the link would expire soon).
 //
@@ -23,6 +30,7 @@ const crypto = require('node:crypto');
 const STEPS = Object.freeze(['validate', 'bundle', 'host', 'publish', 'confirm', 'cleanup']);
 const PRESIGN_SEC = 3600;
 const PRESIGN_MARGIN_MS = 10 * 60 * 1000;
+const HOLD_MAX_WAIT_MS = 15 * 60 * 1000;
 
 const errMessage = err => String(err?.message || err || 'unknown error');
 
@@ -38,11 +46,12 @@ const errMessage = err => String(err?.message || err || 'unknown error');
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => number} [deps.now]
  * @param {{ polls?: number, intervalMs?: number }} [deps.confirm]
+ * @param {{ maxWaitMs?: number }} [deps.hold]        uptime hosts: max hold / failed-job link lifetime
  */
 function createPublishRunner({
   adapters = [], credentials, transport, makeFileHost, zip, core, emit = () => {},
   sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now,
-  confirm: confirmOpts = {}, newId = () => `job_${crypto.randomBytes(8).toString('hex')}`,
+  confirm: confirmOpts = {}, hold: holdOpts = {}, newId = () => `job_${crypto.randomBytes(8).toString('hex')}`,
 } = {}) {
   if (!core || typeof core.validateListing !== 'function' || typeof core.planBundle !== 'function') {
     throw new Error('Listbridge runner: core { validateListing, planBundle } is required');
@@ -57,6 +66,7 @@ function createPublishRunner({
   }
   const confirmPolls = Math.max(1, confirmOpts.polls ?? 10);
   const confirmIntervalMs = confirmOpts.intervalMs ?? 5000;
+  const holdMaxWaitMs = Math.max(0, holdOpts.maxWaitMs ?? HOLD_MAX_WAIT_MS);
   const jobs = new Map();
 
   const adapterFor = platform => {
@@ -140,7 +150,7 @@ function createPublishRunner({
         const have = job.hosted.get(it.slot);
         if (have) {
           if (have.expiresAt - now() < PRESIGN_MARGIN_MS) {
-            have.url = host.presignGet(have.key, PRESIGN_SEC);
+            have.url = await host.presignGet(have.key, PRESIGN_SEC);
             have.expiresAt = now() + PRESIGN_SEC * 1000;
           }
           continue;
@@ -149,7 +159,7 @@ function createPublishRunner({
         // Record first, so cleanup knows about the object even if presigning throws.
         const rec = { key, url: null, expiresAt: 0 };
         job.hosted.set(it.slot, rec);
-        rec.url = host.presignGet(key, PRESIGN_SEC);
+        rec.url = await host.presignGet(key, PRESIGN_SEC);
         rec.expiresAt = now() + PRESIGN_SEC * 1000;
         uploaded++;
         report(job, 'host', 'running', `Uploaded ${it.name} (${uploaded}/${items.length}).`);
@@ -169,7 +179,9 @@ function createPublishRunner({
     },
 
     async confirm(job) {
-      if (typeof job.adapter.buildConfirm !== 'function') {
+      const hasConfirm = typeof job.adapter.buildConfirm === 'function';
+      if (job.fileHost?.requiresUptime && job.hosted.size) return holdUntilConfirmed(job, hasConfirm);
+      if (!hasConfirm) {
         return { skipped: true, message: 'Platform accepted the listing.' };
       }
       for (let i = 0; i < confirmPolls; i++) {
@@ -197,6 +209,43 @@ function createPublishRunner({
       return 'Hosted copies removed.';
     },
   };
+
+  // Uptime hosts: keep the links alive while the platform downloads (see header).
+  async function holdUntilConfirmed(job, hasConfirm) {
+    const label = job.desc.label || job.platform;
+    const mins = Math.max(1, Math.round(holdMaxWaitMs / 60000));
+    report(job, 'confirm', 'running', `Keep MIXOMESH open while ${label} downloads the files.`, { hold: true });
+    const deadline = now() + holdMaxWaitMs;
+    for (;;) {
+      checkCancel(job);
+      if (hasConfirm) {
+        const c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result), 'all')) || {};
+        if (c.confirmed) {
+          if (c.status) job.result.status = c.status;
+          if (c.url) job.result.url = c.url;
+          return 'Platform confirmed the files.';
+        }
+      }
+      const left = deadline - now();
+      if (left <= 0) break;
+      await sleep(Math.min(confirmIntervalMs, left));
+    }
+    if (!hasConfirm) return `Kept the temporary links open for ${mins} min while ${label} downloaded the files.`;
+    await closeHost(job);
+    throw new Error(`${label} did not confirm the files within ${mins} min, so the temporary links were closed. Retry to share the files again.`);
+  }
+
+  // Close an uptime host (tunnel). Its objects lived only in that host, so they are gone:
+  // forget them and remember that a retry has to host the files again.
+  async function closeHost(job) {
+    clearTimeout(job.closeTimer);
+    job.closeTimer = null;
+    const host = job.fileHost;
+    if (!host || typeof host.close !== 'function') return;
+    job.fileHost = null;
+    if (job.hosted.size) { job.hosted.clear(); job.linksLost = true; }
+    try { await host.close(); } catch { /* best effort: the process is going away anyway */ }
+  }
 
   function buildContext(job) {
     const hosted = slot => job.hosted.get(slot)?.url;
@@ -259,6 +308,8 @@ function createPublishRunner({
 
   async function runFrom(job) {
     job.status = 'running';
+    clearTimeout(job.closeTimer);
+    job.closeTimer = null;
     job.error = null; job.issues = null; job.failedStep = null; job.leftover = null;
     try {
       while (job.stepIndex < STEPS.length) {
@@ -278,10 +329,16 @@ function createPublishRunner({
           job.leftover = err?.leftover ?? null;
           job.status = 'failed';
           report(job, step, 'failed', job.error, job.issues ? { issues: job.issues } : {});
+          if (job.fileHost?.requiresUptime) {
+            // Keep the links for a Retry, but not forever.
+            job.closeTimer = setTimeout(() => { closeHost(job).catch(() => {}); }, holdMaxWaitMs);
+            job.closeTimer.unref?.();
+          }
           return outcome(job);
         }
         job.stepIndex++;
       }
+      await closeHost(job);
       job.status = 'done';
       job.pkg = null; job.deliverFiles = null;   // release bytes once published
       return outcome(job);
@@ -295,6 +352,10 @@ function createPublishRunner({
     report(job, 'cleanup', 'running', 'Cancelled — removing hosted copies…');
     let left = [];
     try { left = await removeHosted(job); } catch { left = [...job.hosted.values()].map(r => r.key); }
+    if (job.fileHost?.requiresUptime) {
+      await closeHost(job);   // objects die with the host
+      left = [];
+    }
     job.status = 'cancelled';
     job.leftover = left.length ? left : null;
     job.error = 'Publish cancelled';
@@ -318,7 +379,7 @@ function createPublishRunner({
       id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null,
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
       stepIndex: 0, status: 'pending', hosted: new Map(), deliverFiles: null, result: null,
-      fileHost: null, cancelRequested: false, abort: null, running: null,
+      fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, linksLost: false,
     });
     return id;
   }
@@ -344,6 +405,12 @@ function createPublishRunner({
       if (!job) return Promise.reject(new Error(`Listbridge: unknown job "${jobId}"`));
       if (job.status !== 'failed') return Promise.reject(new Error(`Listbridge: job is ${job.status}, nothing to retry.`));
       if (onProgress) job.onProgress = onProgress;
+      if (job.linksLost && job.stepIndex > STEPS.indexOf('host')) {
+        // The temporary links were closed: host again, then update the listing created earlier.
+        job.stepIndex = STEPS.indexOf('host');
+        if (job.result?.remoteId) job.remoteId = job.result.remoteId;
+      }
+      job.linksLost = false;
       return run(jobId);
     },
     /** Stop a job and remove its hosted objects. A finished job cannot be cancelled. */

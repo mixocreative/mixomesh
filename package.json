@@ -22,7 +22,8 @@
     "test:webgpu": "node tests/browser-webgpu-check.mjs",
     "test:electron": "node tests/electron-smoke.mjs",
     "electron": "electron electron/main.cjs",
-    "dist": "electron-builder --win",
+    "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
+    "dist": "node scripts/fetch-cloudflared.mjs && electron-builder --win",
     "i18n:check": "node scripts/i18n-check.mjs",
     "fixtures": "node tests/fixtures/make-open-tetra.mjs && node tests/fixtures/make-textured-quad.mjs"
   },

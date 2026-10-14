@@ -18,6 +18,7 @@ const { createCredentialStore } = require('./credentials.cjs');
 const { createTransport } = require('./transport.cjs');
 const { createPublishRunner } = require('./jobs.cjs');
 const { createS3FileHost } = require('./filehosts/s3.cjs');
+const { createTunnelFileHost, findCloudflared } = require('./filehosts/tunnel.cjs');
 
 const CREDENTIALS_FILE = 'listbridge-credentials.bin';
 const MAX_ITEM_BYTES = 1024 * 1024 * 1024;          // 1 GiB per file / image
@@ -26,7 +27,18 @@ const MAX_ITEMS = 64;
 const MAX_FIELD_LEN = 4096;
 
 // File host types and their credential fields (required, optional).
+// `tunnel` (PB.5b) is the DEFAULT for transfer:'url' platforms: temporary links served from
+// this computer through a Cloudflare quick tunnel; no account, no credentials (the id
+// `filehost:tunnel` always "has" credentials). `s3` stays as the advanced option.
+const TUNNEL_ID = 'tunnel';
 const FILEHOST_TYPES = Object.freeze({
+  tunnel: {
+    label: 'Temporary link from this computer (no account needed)',
+    required: [],
+    optional: [],
+    noCredentials: true,
+    requiresUptime: true,
+  },
   s3: {
     label: 'S3-compatible (Cloudflare R2, AWS S3, …)',
     required: ['endpoint', 'region', 'bucket', 'accessKeyId', 'secretAccessKey'],
@@ -83,25 +95,62 @@ function slugName(title) {
  * @param {any[]} [deps.adapters]                      Listbridge adapters to offer
  * @param {typeof fetch} [deps.fetchImpl]
  * @param {() => Promise<any>} [deps.loadCore]         resolves the portable core module
- * @param {(record: any) => any} [deps.makeFileHost]
+ * @param {(record: any) => any} [deps.makeFileHost]  S3 (credentialed) host factory
+ * @param {() => any} [deps.makeTunnelHost]           temporary-link host factory
+ * @param {string|null} [deps.resourcesPath]          packaged app: process.resourcesPath (bundled cloudflared)
+ * @param {string|null} [deps.cloudflaredPath]        explicit cloudflared (Listbridge setting, later)
  * @param {(files: any[]) => Promise<Uint8Array>} [deps.zip]
  * @param {any} [deps.transport]
  * @param {any} [deps.credentials]
  * @param {(ms: number) => Promise<void>} [deps.sleep]
+ * @param {{ maxWaitMs?: number }} [deps.hold]        runner hold for temporary links (default 15 min)
  */
 function registerListbridgeIpc(handle, deps = {}) {
   const {
     userDataDir, safeStorage, adapters = [], fetchImpl = globalThis.fetch, loadCore = defaultLoadCore,
-    zip = defaultZip, sleep,
+    zip = defaultZip, sleep, hold,
   } = deps;
-  const credentials = deps.credentials || createCredentialStore({
+  const store = deps.credentials || createCredentialStore({
     filePath: path.join(String(userDataDir), CREDENTIALS_FILE), safeStorage,
   });
+  // The tunnel host needs no secret: present a constant record for it so the runner's
+  // generic `filehost:<id>` lookup works and nothing is ever written to the store.
+  const TUNNEL_CRED = `filehost:${TUNNEL_ID}`;
+  const credentials = {
+    get: async id => (id === TUNNEL_CRED ? { type: TUNNEL_ID } : store.get(id)),
+    has: async id => (id === TUNNEL_CRED ? true : store.has(id)),
+    set: (id, rec) => store.set(id, rec),
+    clear: id => store.clear(id),
+    listIds: () => store.listIds?.(),
+  };
   const transport = deps.transport || createTransport({ fetchImpl, ...(sleep ? { sleep } : {}) });
-  const makeFileHost = deps.makeFileHost || (record => {
+  const makeS3Host = deps.makeFileHost || (record => {
     const { type: _type, ...cfg } = record;
     return createS3FileHost({ ...cfg, fetchImpl });
   });
+  const repoRoot = path.join(__dirname, '..', '..');
+  const makeTunnelHost = deps.makeTunnelHost || (() => createTunnelFileHost({
+    fetchImpl,
+    resolveBinary: () => findCloudflared({
+      settingPath: deps.cloudflaredPath || null,
+      resourcesPath: deps.resourcesPath || null,
+      repoRoot: deps.resourcesPath ? null : repoRoot,
+    }),
+  }));
+  // Every live tunnel host, so app quit can close them all (closeAll()).
+  const liveTunnels = new Set();
+  const makeFileHost = record => {
+    if (record?.type !== TUNNEL_ID) return makeS3Host(record);
+    for (const h of liveTunnels) if (h.closed) liveTunnels.delete(h);
+    const host = makeTunnelHost();
+    liveTunnels.add(host);
+    return host;
+  };
+  const closeAll = async () => {
+    const all = [...liveTunnels];
+    liveTunnels.clear();
+    await Promise.all(all.map(h => Promise.resolve().then(() => h.close()).catch(() => {})));
+  };
 
   // Validate adapters eagerly-but-async (the core is ESM); every handler awaits this.
   let readyPromise = null;
@@ -110,7 +159,7 @@ function registerListbridgeIpc(handle, deps = {}) {
       const core = await loadCore();
       for (const a of adapters) core.assertAdapter(a);
       const runner = createPublishRunner({
-        adapters, credentials, transport, makeFileHost, zip, core, ...(sleep ? { sleep } : {}),
+        adapters, credentials, transport, makeFileHost, zip, core, ...(sleep ? { sleep } : {}), ...(hold ? { hold } : {}),
       });
       return { core, runner, byId: new Map(adapters.map(a => [a.describe().id, a])) };
     })();
@@ -138,9 +187,10 @@ function registerListbridgeIpc(handle, deps = {}) {
     let required; let optional = [];
     let record;
     if (parsed.kind === 'filehost') {
+      if (parsed.name === TUNNEL_ID) throw new Error('the temporary-link file host needs no credentials');
       const type = secret.type ?? 's3';
       const spec = FILEHOST_TYPES[type];
-      if (!spec) throw new Error(`unknown file host type "${type}"`);
+      if (!spec || spec.noCredentials) throw new Error(`unknown file host type "${type}"`);
       ({ required, optional } = spec);
       record = { type };
     } else {
@@ -210,7 +260,9 @@ function registerListbridgeIpc(handle, deps = {}) {
       }),
       fileHosts: Object.entries(FILEHOST_TYPES).map(([type, s]) => ({
         type, label: s.label, credentials: [...s.required], optional: [...s.optional],
+        needsCredentials: !s.noCredentials, requiresUptime: !!s.requiresUptime, default: type === TUNNEL_ID,
       })),
+      defaultFileHost: TUNNEL_ID,
     };
   });
 
@@ -235,7 +287,10 @@ function registerListbridgeIpc(handle, deps = {}) {
     const record = await credentials.get(p.id);
     if (!record) return { ok: false, message: 'No saved credentials for this account.' };
     try {
-      if (p.kind === 'filehost') return await makeFileHost(record).testConnection();
+      if (p.kind === 'filehost') {
+        const host = makeFileHost(record);
+        try { return await host.testConnection(); } finally { if (typeof host.close === 'function') await host.close(); }
+      }
       if (typeof p.adapter.testConnection !== 'function') return { ok: false, message: `${p.platform} has no connection test.` };
       const spec = p.adapter.testConnection();
       const auth = typeof p.adapter.authHeaders === 'function' ? p.adapter.authHeaders(record) : {};
@@ -258,8 +313,10 @@ function registerListbridgeIpc(handle, deps = {}) {
     if (!adapter) throw new Error(`unknown platform "${platform}"`);
     const accountId = str(payload.accountId, 'accountId', { max: 128 });
     if (!ID_PART.test(accountId)) throw new Error('accountId has invalid characters');
-    const fileHostId = str(payload.fileHostId, 'fileHostId', { required: false, max: 128 });
+    let fileHostId = str(payload.fileHostId, 'fileHostId', { required: false, max: 128 });
     if (fileHostId && !ID_PART.test(fileHostId)) throw new Error('fileHostId has invalid characters');
+    // URL-only platforms default to the temporary-link host (no account needed).
+    if (!fileHostId && adapter.describe().transfer === 'url') fileHostId = TUNNEL_ID;
     const remoteId = str(payload.remoteId, 'remoteId', { required: false, max: 256 });
     const pkg = buildPackage(core, payload);
     const d = adapter.describe();
@@ -284,7 +341,7 @@ function registerListbridgeIpc(handle, deps = {}) {
     return runner.cancel(jobId);
   });
 
-  return { ready, credentials };
+  return { ready, credentials, closeAll };
 }
 
-module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, defaultZip };
+module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, TUNNEL_ID, defaultZip, loadListbridgeCore: defaultLoadCore };
