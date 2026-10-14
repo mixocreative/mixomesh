@@ -6,7 +6,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 ## Owner inputs needed
 
 - [ ] Cults3D nickname + API key (https://cults3d.com/en/api/keys) — for PB.0 and PB.11. Give via env var `CULTS_USER` / `CULTS_API_KEY` in your own shell, never pasted into chat or files.
-- [ ] Cloudflare R2 bucket + access key/secret — for PB.11 (entered in the app's Connect form, stored encrypted).
+- [x] ~~Cloudflare R2 bucket~~ — DROPPED by owner 2026-10-14: default host = automatic temporary link from this PC (cloudflared quick tunnel, PB.5b); S3/R2 kept as advanced option. PB.0 also checks whether Cults has a native (Rails direct) upload → then no host at all.
 - [ ] Publish tab mockup approval — PB.9.
 
 ## Tasks
@@ -19,10 +19,11 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.3 adapter contract + Cults payload | todo |
 | PB.4 main publish service | done 015a0d8 |
 | PB.5 S3 file host | done |
+| PB.5b tunnel file host (auto links) | running (agent) |
 | PB.6 renderer bridge + caps | done |
 | PB.7 package to disk | done |
 | PB.8 persistence 3.5 | done 0e84e0b |
-| PB.9 Publish tab (mockup gate) | mockup published, awaiting owner: https://claude.ai/artifact/5uS9mYViy3u4Myx3oWpJSW |
+| PB.9 Publish tab (mockup gate) | mockup APPROVED ("ok"); building (agent) |
 | PB.10 docs | todo |
 | PB.11 live publish (owner) | todo |
 
@@ -39,3 +40,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — PB.1 909008e (+main fix: manifest path traversal), PB.5 43e0087 (+eslint now lints electron/*.cjs). Running: PB.2, PB.4 (opus), PB.8.
 - 2026-10-14 — PB.2 02e7e17, PB.8 0e84e0b, PB.4 015a0d8 (full tree green: unit 401, all smokes, build, electron). Credentials file = <userData>/listbridge-credentials.bin (ADR aligned). Blueprint text pending in .tmp/blueprint-pending/listings-3.5.md → PB.10. Running PB.6+PB.7. PB.9 mockup published.
 - 2026-10-14 — PB.6+PB.7 committed (full tree green: unit 408, all smokes incl. export, build, electron). Remaining: PB.0/PB.3 (owner Cults key), PB.9 (mockup approval), PB.10 docs, PB.11 live.
+- 2026-10-14 — owner approved Publish mockup; owner: drop R2 → PB.5b tunnel host (cloudflared present at C:\Program Files (x86)\cloudflared). Running PB.9 + PB.5b. Cults key still not set (PB.0/PB.3 blocked).
