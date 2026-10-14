@@ -21,3 +21,4 @@ Protocol: cheap agents, main verifies, `# fail 0`, commit by path (never `git co
 - 2026-10-15 — API.6 committed (bridge + Preferences toggle; i18n merged). Waiting API.5.
 - 2026-10-15 — API.5 committed (main reviewed; added readiness gate: E_BUSY 'starting' until launch:pull handshake). Next: API.7 (--job/--result) then API.8 e2e smoke, API.9/10 docs.
 - 2026-10-15 — MISTAKE: 48c324f (API.5) committed with 1 failing test (security pin assumed LF; autocrlf checkout = CRLF). Fixed in next commit (test normalises EOL). Rule reaffirmed: never commit unless the log shows # fail 0. Gotcha: Python text-mode writes on Windows emit CRLF — edit source files in binary mode.
+- 2026-10-15 — API.7 dispatched (sonnet): --job/--result runner; lock-loser forwards via the pipe (exit 5 if API off/unreachable).
