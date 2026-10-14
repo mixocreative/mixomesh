@@ -1191,6 +1191,92 @@ async function main() {
     assert(b64Worker.mismatches.length === 0,
       `base64 worker diverged from the sync codec (or detached the source) at: ${b64Worker.mismatches.join(', ')}`);
 
+    // ── Listing shot (PB.2): clean hero image, no outline/hover/gizmo ────
+    // Select a freshly imported solid so the two-tone outline is ON, capture,
+    // and prove (a) size, (b) no outline-colour pixels, (c) the outline was
+    // really off DURING the render and is restored afterwards, (d) transparent
+    // mode carries alpha.
+    const listing = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const { Selection } = await import('/src/core/Selection.js');
+      const ro = await import('/src/core/RenderOutput.js');
+      const B = window.BABYLON;
+      const stl = ['solid x','facet normal 0 0 1','outer loop',
+        'vertex 0 0 0','vertex 40 0 0','vertex 0 40 0',
+        'endloop','endfacet','endsolid x',''].join('\\n');
+      const ids = await al.AssetLoader.loadFromBlob(new Blob([stl], { type: 'model/stl' }), 'listing.stl', new B.Vector3(0,0,0), {});
+      const id = ids[0];
+      // Capture immediately: the bounce may still be in flight (resting-scale path).
+      Selection.set([id], id);
+      sm.SceneManager.frameAll();
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const scene = sm.SceneManager.getScene();
+      const before = { outline: sm.SceneManager.isOutlineEnabled(), active: Selection.getActiveId?.() ?? null };
+      const seenDuring = [];
+      // Count outline-enabled reads on every frame rendered while the capture's
+      // suppression window is open (suspend..restore, observed via a wrapper).
+      let inCap = false;
+      const origSuspend = sm.SceneManager.suspendOutline;
+      { const o = origSuspend;
+        sm.SceneManager.suspendOutline = () => { const r = o(); inCap = true; return () => { inCap = false; r(); }; }; }
+      const obs = scene.onBeforeRenderObservable.add(() => { if (inCap) seenDuring.push(sm.SceneManager.isOutlineEnabled()); });
+      const decode = async (blob) => {
+        const bmp = await createImageBitmap(blob);
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(bmp, 0, 0);
+        return { w: bmp.width, h: bmp.height, d: ctx.getImageData(0, 0, bmp.width, bmp.height).data };
+      };
+      const near = (d, i, hex) => Math.abs(d[i] - ((hex >> 16) & 255)) <= 12
+        && Math.abs(d[i+1] - ((hex >> 8) & 255)) <= 12 && Math.abs(d[i+2] - (hex & 255)) <= 12;
+      const scan = (img) => {
+        let act = 0, sel = 0, translucent = 0;
+        for (let i = 0; i < img.d.length; i += 4) {
+          if (img.d[i+3] < 255) translucent++;
+          if (img.d[i+3] === 0) continue;
+          if (near(img.d, i, 0xc2410c)) act++;
+          if (near(img.d, i, 0xf59e0b)) sel++;
+        }
+        return { act, sel, translucent };
+      };
+      const studioBlob = await ro.captureListingShot({ size: 512 });
+      const duringStudio = seenDuring.length;
+      const trBlob = await ro.captureListingShot({ size: 512, background: 'transparent' });
+      sm.SceneManager.suspendOutline = origSuspend;
+      const studio = await decode(studioBlob);
+      const tr = await decode(trBlob);
+      scene.onBeforeRenderObservable.remove(obs);
+      const after = { outline: sm.SceneManager.isOutlineEnabled(), active: Selection.getActiveId?.() ?? null,
+        selected: Selection.getSelectedIds().includes(id) };
+      // Error path: a bad option throws BEFORE touching anything; outline stays on.
+      let threw = false;
+      try { await ro.captureListingShot({ background: 'nope' }); } catch { threw = true; }
+      const afterErr = sm.SceneManager.isOutlineEnabled();
+      // Cleanup so downstream tests see the scene they expect.
+      Selection.set([], null);
+      scene.meshes.filter(m => m.metadata?.meshId === id).forEach(m => m.dispose());
+      return {
+        before, after, afterErr, threw, duringStudio, duringAnyOn: seenDuring.some(Boolean),
+        studio: { w: studio.w, h: studio.h, ...scan(studio) },
+        tr: { w: tr.w, h: tr.h, ...scan(tr) },
+      };
+    })()`);
+    assert(listing.before.outline === true, 'listing-shot probe: outline should be ON for the selected object before capture');
+    assert(listing.studio.w === 512 && listing.studio.h === 512, `listing shot not 512x512: ${listing.studio.w}x${listing.studio.h}`);
+    assert(listing.tr.w === 512 && listing.tr.h === 512, 'transparent listing shot not 512x512');
+    assert(listing.duringStudio > 0 && !listing.duringAnyOn, `outline pass was live while the listing shot rendered: ${listing.duringStudio} frames, anyOn=${listing.duringAnyOn}`);
+    // The 512x512 frame has 262144 px; a leaked ring would be thousands of
+    // outline-coloured px. Allow 8 for chance matches in antialiased shading.
+    assert(listing.studio.act + listing.studio.sel <= 8,
+      `studio listing shot contains outline-coloured pixels: ${JSON.stringify(listing.studio)}`);
+    assert(listing.tr.act + listing.tr.sel <= 8,
+      `transparent listing shot contains outline-coloured pixels: ${JSON.stringify(listing.tr)}`);
+    assert(listing.tr.translucent > 0, 'transparent listing shot has no alpha < 255 pixels');
+    assert(listing.after.outline === true && listing.after.selected && listing.after.active,
+      `selection/outline not restored after listing shot: ${JSON.stringify(listing.after)}`);
+    assert(listing.threw && listing.afterErr === true, 'listing shot error path altered the outline state');
+
     // ── Per-object ratio survives .mixo save → load (audit #1) ───────────
     // Import an STL, halve it via RescaleObjectCommand (ratio 1→2, baked into
     // vertices), round-trip through the REAL _buildDocument/_loadProject, and

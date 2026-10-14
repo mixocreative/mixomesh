@@ -14,7 +14,7 @@
 
 import { EVENTS } from './events.js';
 import { subscribe } from './StateManager.js';
-import { capturePng, captureFrameRGBA } from './render/FrameCapture.js';
+import { capturePng, captureFrameRGBA, captureListingShot } from './render/FrameCapture.js';
 import {
   previewTurntable, stopPreview, isPreviewing,
   cancelForProjectSwitch as _cancelPreview,
@@ -25,7 +25,7 @@ import {
 } from './render/VideoRecorder.js';
 
 export {
-  capturePng, captureFrameRGBA,
+  capturePng, captureFrameRGBA, captureListingShot,
   previewTurntable, stopPreview, isPreviewing,
   recordTurntable, isRecording,
 };

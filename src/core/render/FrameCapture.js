@@ -20,6 +20,8 @@ import { getState } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { clampDimension } from './RenderMath.js';
 import { withRenderLock } from './RenderLock.js';
+import { settleImportBounce } from '../scene/ImportBounce.js';
+import { normalizeListingOptions, withSuppressed } from './ListingShot.js';
 
 const BABYLON = window.BABYLON;
 
@@ -32,6 +34,26 @@ const BABYLON = window.BABYLON;
  */
 export function capturePng(opts = {}) {
   return withRenderLock(() => _capturePng(opts));
+}
+
+/**
+ * Marketplace "listing shot": a clean square PNG of the CURRENT viewport
+ * framing with no UI overlay — furniture hidden (hideFurniture), selection +
+ * hover outline off, gizmo detached, import bounce settled to resting scale.
+ * Everything suppressed is restored in finally. 'studio' keeps the scene
+ * background; 'transparent' uses capturePng's alpha path.
+ * @param {{ size?: number, background?: 'studio'|'transparent' }} [opts]
+ * @returns {Promise<Blob>}
+ */
+export function captureListingShot(opts = {}) {
+  const { size, transparent } = normalizeListingOptions(opts);
+  return withRenderLock(() => withSuppressed([
+    () => SceneManager.suspendOutline(),
+    () => SceneManager.suspendGizmo(),
+  ], () => {
+    settleImportBounce();   // snap any in-flight pop to resting scale (same as save/export)
+    return _capturePng({ width: size, height: size, transparent });
+  }));
 }
 
 async function _capturePng({ width, height, transparent = false, pose = null } = {}) {

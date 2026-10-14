@@ -27,6 +27,7 @@ let _selectedColor = null;
 // 1 = additive glow (works on dark bg); 0 = alpha-blend (works on light bg —
 // additive of any color on near-white clamps to white = invisible).
 let _lightMode = 0;
+let _suspended = false;            // suspendOutline() capture window
 let _outlineActive = false;        // pass + mask RTT gated on a non-empty selection
 let _selMaskRTT          = null;   // RenderTargetTexture
 let _selMaskMatActive    = null;   // override for active mesh — full intensity
@@ -243,6 +244,7 @@ export function initSelectionOutline(scene, engine, camera) {
 // Detached, neither costs anything per frame; the common "nothing selected"
 // state is free.
 function _setOutlineEnabled(on) {
+  if (_suspended && on) return;   // listing-shot capture: stay off, whatever selection/hover does
   if (on === _outlineActive) return;
   _outlineActive = on;
   if (on) {
@@ -349,6 +351,31 @@ export function outlineEntries(active, selected, hover) {
     }
   }
   return entries;
+}
+
+/** True while the outline pass + mask RTT are live (smoke/diagnostic probe). */
+export function isOutlineEnabled() {
+  return _outlineActive;
+}
+
+/**
+ * Switch the whole outline (active / selected / hover channels) off for a
+ * capture and keep it off even if selection or hover change meanwhile.
+ * Selection/hover bookkeeping is untouched; the returned restore re-derives
+ * the pass from it. Idempotent restore.
+ * @returns {() => void}
+ */
+export function suspendOutline() {
+  if (_suspended) return () => {};
+  _suspended = true;
+  _setOutlineEnabled(false);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    _suspended = false;
+    if (_selMaskRTT) _refreshOutlineSet();
+  };
 }
 
 function _refreshOutlineSet() {

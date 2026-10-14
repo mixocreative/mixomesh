@@ -398,6 +398,22 @@ export function setViewOnly(on) {
   else if (_pivotNode) _gizmos?.attachToMesh(_pivotNode);
 }
 
+/**
+ * Detach the gizmo for a capture; the returned restore re-attaches it to the
+ * current pivot (unless view-only). Pivot parenting is untouched.
+ * @returns {() => void}
+ */
+export function suspendGizmo() {
+  if (!_gizmos || !_pivotNode || _viewOnly) return () => {};
+  _gizmos.attachToMesh(null);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    if (!_viewOnly && _pivotNode) _gizmos?.attachToMesh(_pivotNode);
+  };
+}
+
 /** The live pivot TransformNode (null when nothing is attached). */
 export function getPivotNode() {
   return _pivotNode;

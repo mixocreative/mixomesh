@@ -26,7 +26,7 @@ import {
   initEdgeOverlay, isEdgeOverlayEnabled, setWireframeEdgesMode, setWireframeEdgeColor,
 } from './scene/EdgeOverlay.js';
 import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
-import { initSelectionOutline, setActive, setSelected, setOutlineColors, setOutlineLightMode } from './scene/SelectionOutline.js';
+import { initSelectionOutline, suspendOutline, isOutlineEnabled, setActive, setSelected, setOutlineColors, setOutlineLightMode } from './scene/SelectionOutline.js';
 import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState, setCursorColor } from './scene/Cursor3D.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
@@ -39,7 +39,7 @@ import {
 } from './scene/CameraRig.js';
 import {
   initPivotSession, setTransformCommitHandler,
-  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection, setViewOnly,
+  setGizmoMode, setGizmoSpace, setScaleLock, attachToSelection, setViewOnly, suspendGizmo,
   topmostTransformTargets, computePivotPosition,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 } from './scene/PivotSession.js';
@@ -48,7 +48,7 @@ import {
 // (lights/shadows/floor/HDRI), view effects (SSAO/section), and import bounce
 // live in scene/*.js (review L29 split + §0.5 budget + audit C1); re-exported
 // so the SceneManager surface is unchanged.
-export { setActive, setSelected };
+export { setActive, setSelected, suspendOutline, isOutlineEnabled, suspendGizmo };
 export { getShadowGenerator, invalidateShadows, setFloorShadowOnly, setSectionPlane, getSectionExtentMM };
 export { setWireframeEdgeColor };
 export {
@@ -676,7 +676,7 @@ export const SceneManager = {
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection, setViewOnly,
   topmostTransformTargets, computePivotPosition,
-  setActive, setSelected,
+  setActive, setSelected, suspendOutline, isOutlineEnabled, suspendGizmo,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
   setSectionVizVisible, isSectionVizVisible, getSectionExtentMM,
