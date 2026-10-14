@@ -14,7 +14,8 @@ const {
 const { createKvStore } = require('./KvStore.cjs');
 const { parseLaunchArgv, validateLaunchPath } = require('./LaunchArgs.cjs');
 const { buildLaunchBatch, createLaunchQueue } = require('./LaunchQueue.cjs');
-const { createApiServer, apiError: makeApiError } = require('./ApiServer.cjs');
+const { createApiServer, apiError: makeApiError, METHOD_NAMES: API_METHOD_NAMES, readSessionFile: readApiSession } = require('./ApiServer.cjs');
+const { createJobRunner, LIMITS: JOB_LIMITS } = require('./JobRunner.cjs');
 const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
 const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
 const {
@@ -58,8 +59,18 @@ if (process.env.MIXO_SMOKE && !app.isPackaged) {
 // ── Single instance + launch requests (LI.2, plan D1/D4/D5) ──
 // A second `MIXOMESH.exe --open x.glb` exits at once; its argv is forwarded to this
 // instance via 'second-instance' and shown in the running window.
-const _gotLock = app.requestSingleInstanceLock();
-if (!_gotLock) app.quit();
+// Batch jobs (API.7): `--job job.json --result r.json [--hidden] [--quit]`. A job always runs hidden
+// and quits when done. The instance that LOSES the lock must not quit at once: it is the job
+// client (reads the API session file via ApiServer.readSessionFile, talks to the running app's pipe) and exits itself.
+const _launchArgs = parseLaunchArgv(process.argv, { isPackaged: app.isPackaged });
+const _jobMode = !!_launchArgs.job;
+const _jobNoResult = _jobMode && !_launchArgs.result;
+if (_jobNoResult) {
+  console.error('--job requires --result <file.json> (the result is written there)');
+  app.exit(3);
+}
+const _gotLock = _jobNoResult ? false : app.requestSingleInstanceLock();
+if (!_gotLock && !_jobMode) app.quit();
 let _kv = null;
 // Opaque file registry; its persisted ref store (`mixo-refs.json`, absolute paths)
 // is a SEPARATE file from the renderer-readable KV so kv:get/kv:keys can never
@@ -81,8 +92,13 @@ function createWindow() {
     width: 1440,
     height: 900,
     backgroundColor: '#efe7d8',
-    // Hardened (task 6.1): contextIsolation + no nodeIntegration + sandbox.
-    webPreferences: { ...SECURE_WEB_PREFERENCES, preload: path.join(__dirname, 'preload.cjs') },
+    show: !_jobMode,   // a job never shows a window
+    // Hardened (task 6.1): contextIsolation + no nodeIntegration + sandbox. A hidden job window must
+    // keep rendering (renders/thumbnails), so background throttling is off for jobs.
+    webPreferences: {
+      ...SECURE_WEB_PREFERENCES, preload: path.join(__dirname, 'preload.cjs'),
+      ...(_jobMode ? { backgroundThrottling: false } : {}),
+    },
   });
   // Launch queue (D5): per window; ready only after the renderer's launch:pull, and
   // reset on every (re)load so a reloading renderer never loses a batch.
@@ -150,6 +166,8 @@ function _askQuitDuringPublish(win, running) {
 // Renderer crash / kill / OOM: offer a reload instead of leaving a dead window.
   win.webContents.on('render-process-gone', (_event, details) => {
     if (smokeBypass()) { console.error('MIXO_SMOKE: render-process-gone', details?.reason); app.exit(3); return; }
+    // A job has nobody to answer a dialog: fail it (the runner writes the result and exits).
+    if (_jobMode && _jobRunner) { _jobRunner.abort('the app window crashed'); return; }
     if (details?.reason === 'clean-exit' || win.isDestroyed()) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: 'error',
@@ -557,6 +575,8 @@ function _handleLaunch(argv, cwd) {
 handle('launch:pull', event => _launchQueues.get(event.sender)?.pull() ?? null);
 
 app.on('second-instance', (_event, argv, workingDirectory) => {
+  // A --job client talks to the pipe, not to the window: never raise or retarget the running app for it.
+  if (parseLaunchArgv(argv, { isPackaged: app.isPackaged }).job) return;
   const win = _launchPrimaryWindow();
   if (win) {
     if (win.isMinimized()) win.restore();
@@ -685,6 +705,43 @@ handle('api:setEnabled', async (_e, enabled) => {
 });
 handle('api:status', () => _apiStatus());
 
+// -- Batch jobs (API.7) --
+let _jobRunner = null;
+let _jobFinished = false;
+async function _waitRendererReady() {
+  while (!_jobFinished) {
+    const win = _launchPrimaryWindow();
+    if (win && !win.webContents.isDestroyed() && !win.webContents.isLoading()
+        && _launchQueues.get(win.webContents)?.isReady()) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+function _runJob(mode) {
+  const fsp = require('node:fs/promises');
+  const cwd = process.cwd();
+  _jobRunner = createJobRunner({
+    fs: fsp,
+    net: require('node:net'),
+    dispatchLocal: (method, params) => _apiServer.dispatchLocal(method, params),
+    localAvailable: () => !!_apiServer,
+    readSession: () => readApiSession(fsp, app.getPath('userData')),
+    validatePath: (raw, kind) => validateLaunchPath(raw, {
+      kind, cwd, maxBytes: JOB_LIMITS.maxJobBytes,
+      realpath: p => fsp.realpath(p), stat: p => fsp.stat(p), access: (p, m) => fsp.access(p, m),
+    }),
+    clock: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: t => clearTimeout(t) },
+    waitReady: _waitRendererReady,
+    methodNames: API_METHOD_NAMES,
+    stderr: line => console.error(line),
+  });
+  return _jobRunner.run({ job: _launchArgs.job, result: _launchArgs.result, mode })
+    .then(({ exitCode }) => exitCode, err => { console.error('--job failed:', err?.message ?? err); return 2; })
+    .then(code => { _jobFinished = true; app.exit(code); });
+}
+// Lock lost + job: this process is only a pipe client of the running app (no window, no quit()).
+if (!_gotLock && _jobMode && !_jobNoResult) app.whenReady().then(() => _runJob('remote'));
+
 let _listbridge = null;
 let _tunnelsClosed = false;
 
@@ -751,6 +808,7 @@ if (_gotLock) app.whenReady().then(async () => {
   _launchServiceUp = true;
   _handleLaunch(process.argv, process.cwd());
   for (const { argv, cwd } of _deferredLaunches.splice(0)) _handleLaunch(argv, cwd);
+  if (_jobMode) _runJob('local');
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

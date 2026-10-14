@@ -124,6 +124,17 @@ function pipeNameFor(crypto, username, userDataDir) {
 }
 
 /**
+ * Read + shape-check this user's session file (<userData>/api/session.json) for the --job client
+ * (API.7). Returns {pipe, token, pid, apiVersion}; throws if absent or malformed. Callers must
+ * never log the result (it holds the token).
+ */
+async function readSessionFile(fs, userDataDir) {
+  const doc = JSON.parse(await fs.readFile(nodePath.join(userDataDir, 'api', 'session.json'), 'utf8'));
+  if (!isPlainObject(doc) || typeof doc.pipe !== 'string' || typeof doc.token !== 'string') throw new Error('malformed session file');
+  return doc;
+}
+
+/**
  * @param {object} deps
  *  net {createServer}, fs {mkdir,writeFile,rename,unlink,realpath,stat,access},
  *  crypto {randomBytes,createHash,timingSafeEqual}, setTimeout, clearTimeout,
@@ -595,6 +606,6 @@ function createApiServer(deps) {
 }
 
 module.exports = {
-  createApiServer, pipeNameFor, containsAbsolutePath, apiError, LIMITS,
+  createApiServer, pipeNameFor, readSessionFile, containsAbsolutePath, apiError, LIMITS,
   API_VERSION, ERROR_CODES, METHOD_NAMES, EVENT_TYPES, PATH_METHODS, OUTPUT_EXTENSIONS,
 };

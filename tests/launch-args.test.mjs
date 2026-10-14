@@ -11,7 +11,7 @@ const P = (argv, isPackaged = true) => parseLaunchArgv(argv, { isPackaged });
 assert.deepEqual(P(['M.exe', 'a.glb']).opens, ['a.glb']);
 assert.deepEqual(P(['electron.exe', 'main.cjs', 'a.glb'], false).opens, ['a.glb']);
 assert.deepEqual(P(['electron.exe', 'main.cjs'], false).opens, []);
-assert.deepEqual(P(['M.exe']), { opens: [], library: null, ignored: [], truncated: 0 });
+assert.deepEqual(P(['M.exe']), { opens: [], library: null, ignored: [], truncated: 0, job: null, result: null, hidden: false, quit: false });
 // flags and positionals
 assert.deepEqual(P(['M.exe', '--open', 'C:\\x\\a.glb', '--open=C:\\x\\b.stl']).opens, ['C:\\x\\a.glb', 'C:\\x\\b.stl']);
 assert.equal(P(['M.exe', '--library', 'C:\\l', '--library=C:\\m']).library, 'C:\\m');
@@ -137,3 +137,32 @@ await orej('out\\new.stl:ads', 'outputFile', 'invalid characters in path');
 await orej('\\\\.\\C:\\work\\a.stl', 'outputFile', 'device path syntax not allowed');
 await orej('con.stl', 'outputFile', 'reserved device name');
 await orej('out\\new.stl', 'outputFile', 'not writable', { access: undefined });
+
+// API.7: --job / --result / --hidden / --quit
+{
+  const j = P(['M.exe', '--job', 'j.json', '--result=r.json', '--hidden', '--quit', '--open', 'a.glb']);
+  assert.equal(j.job, 'j.json');
+  assert.equal(j.result, 'r.json');
+  assert.equal(j.hidden, true);
+  assert.equal(j.quit, true);
+  assert.deepEqual(j.opens, ['a.glb']);
+  assert.deepEqual(j.ignored, []);
+  assert.equal(P(['M.exe', '--job']).job, null);                     // missing value
+  assert.deepEqual(P(['M.exe', '--job']).ignored, ['--job']);
+  assert.equal(P(['M.exe', '--job', 'a.json', '--job', 'b.json']).job, 'b.json'); // last wins
+  assert.equal(P(['M.exe', '--hidden=1']).hidden, false);            // booleans take no value
+  assert.deepEqual(P(['M.exe', '--hidden=1']).ignored, ['--hidden=1']);
+  assert.equal(P(['M.exe', 'job.json']).job, null);                  // json is never a positional
+  const jf = (raw, o = {}) => validateLaunchPath(raw, {
+    kind: 'jobFile', cwd: 'C:\\work',
+    ...mkFs({ 'c:\\work\\j.json': F, 'c:\\work\\a.glb': F, 'c:\\work\\jd.json': D, 'c:\\work\\big.json': { t: 'f', size: 5000 } }), ...o,
+  });
+  assert.deepEqual(await jf('j.json'), { ok: true, absolutePath: 'C:\\work\\j.json', name: 'j.json', ext: 'json' });
+  assert.equal((await jf('a.glb')).reason, 'unsupported file type');
+  assert.equal((await jf('jd.json')).reason, 'not a regular file');
+  assert.equal((await jf('missing.json')).reason, 'not found or not accessible');
+  assert.equal((await jf('big.json', { maxBytes: 1000 })).reason, 'file too large');
+  // 'json' is NOT a launch (open) extension
+  assert.equal(LAUNCH_EXTENSIONS.includes('json'), false);
+  assert.equal((await validateLaunchPath('j.json', { kind: 'file', cwd: 'C:\\work', ...mkFs({ 'c:\\work\\j.json': F }) })).reason, 'unsupported file type');
+}

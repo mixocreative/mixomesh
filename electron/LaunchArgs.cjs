@@ -18,8 +18,10 @@ const hasAllowedExt = p => LAUNCH_EXTENSIONS.includes(extOf(p));
 const baseName = raw => path.basename(String(raw).replace(/\0/g, '')) || '(empty)';
 
 /**
- * argv -> { opens[], library, ignored[], truncated }. Never throws.
+ * argv -> { opens[], library, ignored[], truncated, job, result, hidden, quit }. Never throws.
  * `truncated` = number of --open/positional entries dropped past MAX_LAUNCH_OPENS.
+ * API.7: `--job <file>` / `--result <file>` (last one wins, raw strings, validated by the caller),
+ * `--hidden` / `--quit` (booleans; a job with a result implies both).
  */
 function parseLaunchArgv(argv, { isPackaged } = {}) {
   const list = Array.isArray(argv) ? argv.map(String) : [];
@@ -28,6 +30,10 @@ function parseLaunchArgv(argv, { isPackaged } = {}) {
   let library = null;
   const ignored = [];
   let truncated = 0;
+  let job = null;
+  let result = null;
+  let hidden = false;
+  let quit = false;
   const addOpen = v => {
     if (opens.length >= MAX_LAUNCH_OPENS) truncated++;
     else opens.push(v);
@@ -39,12 +45,18 @@ function parseLaunchArgv(argv, { isPackaged } = {}) {
     if (!flagsDone && a.startsWith('-')) {
       const eq = a.indexOf('=');
       const name = eq === -1 ? a : a.slice(0, eq);
-      if (name === '--open' || name === '--library') {
+      if (name === '--hidden' || name === '--quit') {
+        if (eq !== -1) { ignored.push(a); continue; }
+        if (name === '--hidden') hidden = true; else quit = true;
+      } else if (name === '--open' || name === '--library' || name === '--job' || name === '--result') {
         let value;
         if (eq !== -1) value = a.slice(eq + 1);
         else if (i + 1 < args.length) value = args[++i];
         if (!value) { ignored.push(a); continue; }
-        if (name === '--open') addOpen(value); else library = value;
+        if (name === '--open') addOpen(value);
+        else if (name === '--library') library = value;
+        else if (name === '--job') job = value;
+        else result = value;
       } else {
         ignored.push(a);
       }
@@ -52,7 +64,7 @@ function parseLaunchArgv(argv, { isPackaged } = {}) {
     }
     if (hasAllowedExt(a)) addOpen(a); else ignored.push(a);
   }
-  return { opens, library, ignored, truncated };
+  return { opens, library, ignored, truncated, job, result, hidden, quit };
 }
 
 async function writable(access, p) {
@@ -102,7 +114,7 @@ async function validateOutputFile(abs, name, { realpath, stat, access }) {
 
 /**
  * Validate one launch path (async; realpath/stat/access may be sync or async).
- * kinds: 'file' | 'directory' | 'outputDir' (existing dir, W_OK) |
+ * kinds: 'file' | 'jobFile' (existing .json, --job only) | 'directory' | 'outputDir' (existing dir, W_OK) |
  * 'outputFile' (parent exists + W_OK, ext in OUTPUT_EXTENSIONS, result carries `exists`).
  * Reasons never contain the directory part; `name` is the basename only.
  */
@@ -118,6 +130,7 @@ async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, acc
   if (raw.slice(drive ? 2 : 0).includes(':')) return fail('invalid characters in path');
   if (raw.split(/[\\/]/).some(s => RESERVED_NAME_RE.test(s))) return fail('reserved device name');
   if (kind === 'file' && !hasAllowedExt(raw)) return fail('unsupported file type');
+  if (kind === 'jobFile' && extOf(raw) !== 'json') return fail('unsupported file type');
   if (kind === 'outputFile' && !OUTPUT_EXTENSIONS.includes(extOf(raw))) return fail('unsupported file type');
   if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return fail('no working directory');
 
@@ -132,10 +145,11 @@ async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, acc
   if (/^[\\/]{2}/.test(plain)) return fail('network (UNC) paths not allowed');
   if (plain.split(/[\\/]/).some(s => RESERVED_NAME_RE.test(s))) return fail('reserved device name');
   if (kind === 'file' && !hasAllowedExt(plain)) return fail('unsupported file type');
+  if (kind === 'jobFile' && extOf(plain) !== 'json') return fail('unsupported file type');
 
   let st;
   try { st = await stat(plain); } catch { return fail('not found or not accessible'); }
-  if (kind === 'file') {
+  if (kind === 'file' || kind === 'jobFile') {
     if (!st || !st.isFile()) return fail('not a regular file');
     if (typeof st.size === 'number' && st.size > maxBytes) return fail('file too large');
   } else if (!st || !st.isDirectory()) {

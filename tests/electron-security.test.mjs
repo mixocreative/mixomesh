@@ -214,7 +214,9 @@ await check('installer: registry keys under SHELL_CONTEXT + .mixo association wi
 });
 
 await check('launch integration: single instance + trusted launch:pull + two-method preload surface', () => {
-  assert.match(mainSource, /const _gotLock = app\.requestSingleInstanceLock\(\);\s*if \(!_gotLock\) app\.quit\(\);/);
+  assert.match(mainSource, /const _gotLock = _jobNoResult \? false : app\.requestSingleInstanceLock\(\);\s*if \(!_gotLock && !_jobMode\) app\.quit\(\);/,
+    'a losing NON-job launch quits at once; a losing --job launch is a pipe client and exits itself (API.7)');
+  assert.match(mainSource, /second-instance[\s\S]{0,400}\.job\) return;/, 'a --job client never raises or retargets the running window');
   assert.match(mainSource, /if \(_gotLock\) app\.whenReady\(\)/, 'a losing instance never opens a window');
   assert.match(mainSource, /\nhandle\('launch:pull', event => /, 'launch:pull goes through the sender-checking handle');
   assert.doesNotMatch(mainSource, /ipcMain\.handle\(\s*['"]launch:/);
