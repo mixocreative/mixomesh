@@ -37,6 +37,8 @@ export function normalizeListing(raw) {
     license: _strOrNull(raw.license),
     madeWithAi: raw.madeWithAi === true,
     categoryId: _strOrNull(raw.categoryId),
+    subCategoryIds: strList(raw.subCategoryIds),
+    visibility: raw.visibility === 'public' || raw.visibility === 'secret' ? raw.visibility : null,
     remoteId: _strOrNull(raw.remoteId),
     url: _strOrNull(raw.url),
     publishedAt: _iso(raw.publishedAt),

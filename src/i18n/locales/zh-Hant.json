@@ -1166,5 +1166,21 @@
   "publish.err.cleanupLeft": "無法移除某些託管檔案。請重試以移除。",
   "publish.err.cancelled": "發佈已取消。",
   "publish.host.reachable": "正在讓暫時連結可從外部開啟…",
-  "publish.err.tunnelNotPublic": "暫時連結還無法從網際網路連上，因此尚未傳送任何內容給平台。請稍候再按「重試」。"
+  "publish.err.tunnelNotPublic": "暫時連結還無法從網際網路連上，因此尚未傳送任何內容給平台。請稍候再按「重試」。",
+  "publish.btn.secret": "以私密方式發佈到 {label} · {price}",
+  "publish.btn.secretFree": "以私密方式發佈到 {label} · 免費",
+  "publish.done.secret": "已發佈到 {label}：只有拿到連結的人看得到",
+  "publish.live.secret": "{label} 上為私密（只有拿到連結的人）",
+  "publish.field.subCategory": "子分類",
+  "publish.field.visibility": "可見度",
+  "publish.visibility.secret": "私密 — 只有拿到連結的人",
+  "publish.visibility.public": "公開",
+  "publish.options.loading": "正在載入分類與授權清單…",
+  "publish.options.failed": "無法從 {label} 載入分類與授權清單（{reason}）。請改為直接輸入分類 ID 與授權代碼。",
+  "publish.options.reload": "重新載入清單",
+  "publish.issue.categoryRequired": "請選擇分類。",
+  "publish.issue.licenseRequired": "請選擇授權。",
+  "publish.step.hostDirect": "上傳檔案到 {label}",
+  "publish.err.uploadSlotFailed": "平台沒有提供上傳位置。請檢查網路後按「重試」；已送出的檔案會保留。",
+  "publish.err.uploadFailed": "檔案傳送到平台失敗。請按「重試」；已送出的檔案不會重複傳送。"
 }

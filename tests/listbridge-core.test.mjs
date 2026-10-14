@@ -32,6 +32,19 @@ await test('createListing normalises tags, currency, defaults', () => {
   assert.equal(createListing({}).price, null);
 });
 
+await test('visibility + sub-categories: default secret, normalised, validated, in manifest', () => {
+  const p = createListing({});
+  assert.equal(p.visibility, 'secret');
+  assert.deepEqual(p.subCategoryIds, []);
+  assert.equal(createListing({ visibility: 'public' }).visibility, 'public');
+  assert.equal(createListing({ visibility: 'bogus' }).visibility, 'secret');
+  assert.deepEqual(createListing({ subCategoryIds: ['a', '', 7] }).subCategoryIds, ['a', '7']);
+  assert.ok(codes({ ...good(), visibility: 'draft' }).includes('visibility-invalid'));
+  const m = toManifest(good({ visibility: 'public', subCategoryIds: ['s1'] }));
+  assert.equal(m.visibility, 'public');
+  assert.deepEqual(m.subCategoryIds, ['s1']);
+});
+
 await test('valid listing has no issues', () => assert.deepEqual(validateListing(good()), []));
 await test('title rules', () => {
   assert.ok(codes(good({ title: '  ' })).includes('title-empty'));
@@ -117,6 +130,10 @@ await test('assertAdapter', () => {
   assert.doesNotThrow(() => assertAdapter({ ...ok, authHeaders: fn, testConnection: fn, buildConfirm: fn, parseConfirm: fn }));
   assert.throws(() => assertAdapter({ ...ok, authHeaders: 'x' }), /authHeaders/);
   assert.throws(() => assertAdapter({ ...ok, buildConfirm: fn }), /parseConfirm/);
+  assert.doesNotThrow(() => assertAdapter({ ...ok, buildUploadSlot: fn, parseUploadSlot: fn, buildListOptions: fn, parseListOptions: fn }));
+  assert.throws(() => assertAdapter({ ...ok, buildUploadSlot: fn }), /parseUploadSlot/);
+  assert.throws(() => assertAdapter({ ...ok, buildListOptions: fn }), /parseListOptions/);
+  assert.throws(() => assertAdapter({ ...ok, parseListOptions: 3 }), /parseListOptions/);
   assert.throws(() => assertAdapter(null), /object/);
 });
 

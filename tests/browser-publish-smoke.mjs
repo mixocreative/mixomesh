@@ -19,7 +19,7 @@ import {
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
 const SHOTS = process.env.SHOTS ? resolve(process.env.SHOTS) : null;
-const PENDING_FILES = ['publish-tab.json', 'publish-pb14.json'].map(f => join(ROOT, '.tmp/locale-pending', f));
+const PENDING_FILES = ['publish-tab.json', 'publish-pb14.json', 'publish-pb3b.json'].map(f => join(ROOT, '.tmp/locale-pending', f));
 const SECRET = 'sk_test_SUPER_SECRET_KEY_12345';
 
 // The fake runner. Mirrors electron/listbridge/index.cjs channel shapes.
@@ -56,13 +56,27 @@ const FAKE = `(() => {
   }
   w.electronAPI = Object.assign(w.electronAPI || {}, { listbridge: {
     describe: async () => ({
-      platforms: [{ id: 'cults3d', label: 'Cults3D', transfer: 'url', maxFiles: 10, maxImages: 10, currencies: ['EUR', 'USD'], fields: [], credentials: ['nickname', 'apiKey'], testConnection: true }],
+      platforms: [
+        { id: 'cults3d', label: 'Cults3D', transfer: 'url', maxFiles: 10, maxImages: 10, currencies: ['EUR', 'USD'], fields: [], credentials: ['nickname', 'apiKey'], testConnection: true },
+        // A native-upload platform with the PB.3b capabilities (visibility, category + license lists).
+        { id: 'directshop', label: 'DirectShop', transfer: 'direct', transfers: ['direct', 'url'], maxFiles: 10, maxImages: 10, currencies: ['EUR', 'USD'], fields: [],
+          credentials: ['nickname', 'apiKey'], testConnection: true, visibility: ['secret', 'public'], drafts: true, listOptions: true, requires: ['categoryHint', 'license'] },
+      ],
       fileHosts: [{ type: 's3', label: 'S3', credentials: ['endpoint', 'region', 'bucket', 'accessKeyId', 'secretAccessKey'], optional: ['prefix', 'style'] }],
     }),
     hasCredentials: async id => creds.has(id),
     setCredentials: async (id, secret) => { w.__lb.setCredentialsArgs.push([id, Object.keys(secret)]); creds.add(id); return { ok: true }; },
     clearCredentials: async id => ({ ok: true, removed: creds.delete(id) }),
     testConnection: async id => { w.__lb.calls.push('test:' + id); return { ok: true, message: 'Connected to Cults3D.' }; },
+    listOptions: async (platform, locale) => {
+      w.__lb.calls.push('listOptions:' + platform + ':' + locale);
+      if (w.__lb.optionsFail) return { ok: false, message: 'HTTP 500' };
+      return { ok: true,
+        categories: [{ id: 'C1', name: 'Art', children: [{ id: 'C2', name: 'Busts' }] }, { id: 'C3', name: 'Toys', children: [] }],
+        licenses: [{ code: 'free-only', name: 'Free only', free: true, priced: false, commercial: false },
+          { code: 'priced-ok', name: 'Priced ok', free: true, priced: true, commercial: false },
+          { code: 'priced-only', name: 'Priced only', free: false, priced: true, commercial: true }] };
+    },
     start: async req => { w.__lb.calls.push('start'); w.__lb.lastRequest = { platform: req.platform, accountId: req.accountId, fileHostId: req.fileHostId, remoteId: req.remoteId, title: req.manifest.title, price: req.manifest.price, files: req.files.length, images: req.images.length }; return run(0, !!req.remoteId); },
     retry: async id => { w.__lb.calls.push('retry:' + id); return run(3, false); },
     cancel: async () => { w.__lb.cancel = true; return { ok: false, status: 'cancelled' }; },
@@ -296,6 +310,54 @@ async function main() {
     // 6. Esc must not destroy anything: tab still there
     await evaluate(cdp, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     assert(await evaluate(cdp, `!!document.querySelector('#rp-print-body #pub-primary')`), 'Esc must not tear down the Publish tab');
+
+    // 7. Native-upload platform: category + license lists, visibility, wording (PB.3b)
+    await evaluate(cdp, `(() => { const s = document.querySelector('#pub-platform'); s.value = 'directshop'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body [data-cred="apiKey"]')`), 10000, 'directshop connect form');
+    assert(await evaluate(cdp, `!document.querySelector('#rp-print-body input[name="pub-host"]')`), 'a native-upload platform needs no file-delivery choice');
+    await setValue('[data-cred="nickname"]', 'mixoadrian');
+    await setValue('[data-cred="apiKey"]', SECRET);
+    assert(await click('[data-act="connect"]'), 'connect directshop');
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body select#pub-category')`), 15000, 'category select from listOptions');
+    const o1 = await evaluate(cdp, `(() => {
+      const opts = id => [...document.querySelectorAll('#' + id + ' option')].map(o => o.value + ':' + o.textContent);
+      const b = document.querySelector('#pub-primary');
+      return { calls: window.__lb.calls.filter(c => c.startsWith('listOptions')), cat: opts('pub-category'), lic: opts('pub-license'), vis: opts('pub-visibility'),
+        visSel: document.querySelector('#pub-visibility').value, label: b.textContent.trim(), sub: !!document.querySelector('#pub-subcategory'),
+        free: !!document.querySelector('#rp-print-body')?.textContent.includes('did not send a list') };
+    })()`);
+    assert(JSON.stringify(o1.calls) === '["listOptions:directshop:en"]', `listOptions called once with the locale: ${JSON.stringify(o1.calls)}`);
+    assert(JSON.stringify(o1.cat) === '[":—","C1:Art","C3:Toys"]', `categories: ${JSON.stringify(o1.cat)}`);
+    assert(JSON.stringify(o1.lic) === '[":—","free-only:Free only","priced-ok:Priced ok"]', `free listing sees free licenses only: ${JSON.stringify(o1.lic)}`);
+    assert(o1.visSel === 'secret' && o1.vis.length === 2 && o1.vis[0].includes('only people with the link'), `visibility select: ${JSON.stringify(o1)}`);
+    assert(!o1.sub && !o1.free, `no sub-category before a category, no free-text note: ${JSON.stringify(o1)}`);
+    // a category and license are required: the button says why until both are chosen
+    await setValue('#pub-title', 'Ceramic owl');
+    await setValue('#pub-desc', 'Full-colour figurine.');
+    await setValue('#pub-price', '4');
+    await evaluate(cdp, `(() => { const c = document.querySelector('#pub-category'); c.value = 'C1'; c.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#pub-subcategory')`), 5000, 'sub-category select');
+    const o2 = await evaluate(cdp, `({ blocker: document.querySelector('#pub-blocker').textContent.trim(), subs: [...document.querySelectorAll('#pub-subcategory option')].map(o => o.value) })`);
+    assert(o2.blocker === 'Choose a license.' && JSON.stringify(o2.subs) === '["","C2"]', `required license + sub-categories: ${JSON.stringify(o2)}`);
+    await evaluate(cdp, `(() => { const c = document.querySelector('#pub-license'); c.value = 'priced-ok'; c.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await sleep(150);
+    const o3 = await evaluate(cdp, `({ lic: [...document.querySelectorAll('#pub-license option')].map(o => o.value), label: document.querySelector('#pub-primary').textContent.trim(), dis: document.querySelector('#pub-primary').disabled })`);
+    assert(JSON.stringify(o3.lic) === '["","priced-ok","priced-only"]' && o3.label === 'Publish secretly on DirectShop · €4.00' && !o3.dis,
+      `priced listing: priced licenses, secret wording: ${JSON.stringify(o3)}`);
+    await evaluate(cdp, `(() => { const c = document.querySelector('#pub-visibility'); c.value = 'public'; c.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await sleep(100);
+    assert(await evaluate(cdp, `document.querySelector('#pub-primary').textContent.trim() === 'Publish live on DirectShop · €4.00'`), 'public visibility words the button "live"');
+    await snap('7-directshop');
+    // A failing list call falls back to free text with a note (publishing is never blocked by it)
+    await evaluate(cdp, `window.__lb.optionsFail = true`);
+    await click('[data-act="disconnect"]');
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body [data-cred="apiKey"]')`), 10000, 'directshop disconnected');
+    await setValue('[data-cred="nickname"]', 'mixoadrian');
+    await setValue('[data-cred="apiKey"]', SECRET);
+    await click('[data-act="connect"]');
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body input#pub-category')`), 15000, 'free-text category fallback');
+    const o4 = await evaluate(cdp, `({ note: document.querySelector('#rp-print-body .pub-help')?.textContent, reload: !!document.querySelector('[data-act="reload-options"]'), lic: document.querySelector('#pub-license').tagName })`);
+    assert(o4.note.includes('Could not load') && o4.note.includes('HTTP 500') && o4.reload && o4.lic === 'INPUT', `fallback: ${JSON.stringify(o4)}`);
 
     assert(failures.length === 0, `page errors: ${failures.join(' | ')}`);
     console.log('browser publish smoke ok');

@@ -53,6 +53,9 @@ const FILEHOST_TYPES = Object.freeze({
   },
 });
 
+const LIST_OPTIONS_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_ACCOUNT = 'default';   // the one account slot per platform (PublishModel.ACCOUNT_ID)
+
 const ID_PART = /^[A-Za-z0-9._@-]{1,128}$/;
 const PLATFORM_PART = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
@@ -110,13 +113,14 @@ function slugName(title) {
  * @param {any} [deps.transport]
  * @param {any} [deps.credentials]
  * @param {(ms: number) => Promise<void>} [deps.sleep]
+ * @param {() => number} [deps.now]                    clock for the listOptions cache (tests)
  * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number }} [deps.confirm]
  *   overrides for CONFIRM_OPTIONS (tests)
  */
 function registerListbridgeIpc(handle, deps = {}) {
   const {
     userDataDir, safeStorage, adapters = [], fetchImpl = globalThis.fetch, loadCore = defaultLoadCore,
-    zip = defaultZip, sleep,
+    zip = defaultZip, sleep, now = Date.now,
   } = deps;
   const confirm = { ...CONFIRM_OPTIONS, ...(deps.confirm || {}) };
   const store = deps.credentials || createCredentialStore({
@@ -265,6 +269,10 @@ function registerListbridgeIpc(handle, deps = {}) {
         const d = a.describe();
         return {
           id: d.id, label: d.label, transfer: d.transfer, maxFiles: d.maxFiles, maxImages: d.maxImages,
+          transfers: d.transfers ? [...d.transfers] : undefined,
+          visibility: d.visibility ? [...d.visibility] : undefined, drafts: d.drafts === true,
+          requires: d.requires ? [...d.requires] : undefined,
+          listOptions: typeof a.buildListOptions === 'function',
           currencies: d.currencies ? [...d.currencies] : undefined, fields: [...(d.fields || [])],
           credentials: [...(d.credentials || [])], testConnection: typeof a.testConnection === 'function',
         };
@@ -285,11 +293,13 @@ function registerListbridgeIpc(handle, deps = {}) {
   handle('publish:setCredentials', async (_e, id, secret) => {
     const p = await parseAccountId(id);
     await credentials.set(p.id, checkShape(p, secret));
+    dropListOptions(p.id);
     return { ok: true };   // never echo the secret back
   });
 
   handle('publish:clearCredentials', async (_e, id) => {
     const p = await parseAccountId(id);
+    dropListOptions(p.id);
     return { ok: true, removed: await credentials.clear(p.id) };
   });
 
@@ -315,6 +325,43 @@ function registerListbridgeIpc(handle, deps = {}) {
       return { ok: false, message: String(err?.message || err) };
     }
   });
+
+  // Category + license lists (needs a saved account). Never throws for platform / network trouble:
+  // { ok:false, message } lets the renderer fall back to free-text fields. Cached in memory per
+  // platform + locale for LIST_OPTIONS_TTL_MS; saving or clearing the account's credentials drops it.
+  const listOptionsCache = new Map();
+  handle('publish:listOptions', async (_e, platform, locale) => {
+    const { core: _core, byId } = await ready();
+    const adapter = byId.get(typeof platform === 'string' ? platform : '');
+    if (!adapter) throw new Error(`unknown platform "${platform}"`);
+    if (typeof adapter.buildListOptions !== 'function') return { ok: false, message: `${platform} has no category and license lists.` };
+    const loc = typeof locale === 'string' && locale.length <= 16 ? locale : 'en';
+    const cacheKey = `${platform}|${loc}`;
+    const hit = listOptionsCache.get(cacheKey);
+    if (hit && now() - hit.at < LIST_OPTIONS_TTL_MS) return hit.value;
+    try {
+      const record = await credentials.get(`${platform}:${DEFAULT_ACCOUNT}`);
+      if (!record) return { ok: false, message: 'No saved credentials for this account.' };
+      const auth = typeof adapter.authHeaders === 'function' ? adapter.authHeaders(record) : {};
+      const specs = adapter.buildListOptions({ locale: loc });
+      const responses = [];
+      for (const spec of Array.isArray(specs) ? specs : [specs]) {
+        const res = await transport.request({
+          url: spec.url, method: spec.method, body: spec.body, headers: { ...(spec.headers || {}), ...auth },
+        });
+        if (res.status >= 400) {
+          return { ok: false, message: res.status === 401 || res.status === 403 ? 'The platform rejected these credentials.' : `The platform answered HTTP ${res.status}.` };
+        }
+        responses.push(res);
+      }
+      const value = { ok: true, ...adapter.parseListOptions(responses) };
+      listOptionsCache.set(cacheKey, { at: now(), value });
+      return value;
+    } catch (err) {
+      return { ok: false, message: String(err?.message || err) };
+    }
+  });
+  const dropListOptions = id => { for (const k of [...listOptionsCache.keys()]) if (id.startsWith(`${k.split('|')[0]}:`)) listOptionsCache.delete(k); };
 
   handle('publish:start', async (event, payload) => {
     const { core, runner, byId } = await ready();

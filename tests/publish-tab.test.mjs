@@ -40,6 +40,46 @@ test('primaryAction names the consequence: live+price, free, draft, update', () 
   assert.equal(M.primaryAction({ label: 'X', amount: 4, currency: 'EUR', drafts: true, remoteId: 'r1' }).key, 'publish.btn.update');
 });
 
+test('primaryAction with a visibility choice: secret is worded "secretly", public is live', () => {
+  const base = { label: 'Cults3D', amount: 4, currency: 'EUR', drafts: true };
+  assert.deepEqual(M.primaryAction({ ...base, visibility: 'secret' }), { key: 'publish.btn.secret', params: { label: 'Cults3D', price: '€4.00' } });
+  assert.deepEqual(M.primaryAction({ ...base, amount: null, visibility: 'secret' }), { key: 'publish.btn.secretFree', params: { label: 'Cults3D' } });
+  assert.equal(M.primaryAction({ ...base, visibility: 'public' }).key, 'publish.btn.live');
+  assert.equal(M.primaryAction({ ...base, amount: null, visibility: 'public' }).key, 'publish.btn.liveFree');
+  assert.equal(M.primaryAction({ ...base, visibility: 'secret', remoteId: 'r' }).key, 'publish.btn.update');
+});
+
+test('licensesFor filters by free vs priced; subCategoriesOf; requires; step label; progress counts', () => {
+  const ls = [{ code: 'a', free: true, priced: true }, { code: 'b', free: true, priced: false }, { code: 'c', free: false, priced: true }, { code: 'd' }];
+  assert.deepEqual(M.licensesFor(ls, null).map(l => l.code), ['a', 'b', 'd']);
+  assert.deepEqual(M.licensesFor(ls, 4).map(l => l.code), ['a', 'c', 'd']);
+  assert.deepEqual(M.subCategoriesOf([{ id: '1', children: [{ id: '2' }] }], '1'), [{ id: '2' }]);
+  assert.deepEqual(M.subCategoriesOf([], '1'), []);
+  const form = { ...M.emptyForm('T', 'EUR'), description: 'd' };
+  const args = { form, hasHero: true, galleryCount: 0, fileCount: 1 };
+  assert.ok(!M.validateForm(args).some(i => i.code === 'category-required'));
+  assert.deepEqual(M.validateForm({ ...args, requires: ['categoryHint', 'license'] }).map(i => i.code), ['category-required', 'license-required']);
+  assert.deepEqual(M.validateForm({ ...args, form: { ...form, category: '1', license: 'x' }, requires: ['categoryHint', 'license'] }), []);
+  assert.equal(M.stepLabelKey('host'), 'publish.step.host');
+  assert.equal(M.stepLabelKey('host', { direct: true }), 'publish.step.hostDirect');
+  assert.equal(M.stepLabelKey('create', { direct: true }), 'publish.step.create');
+  assert.equal(M.errorKey('upload-failed'), 'publish.err.uploadFailed');
+  assert.equal(M.errorKey('upload-slot-failed'), 'publish.err.uploadSlotFailed');
+  const steps = M.applyProgress(M.initialSteps(false), { step: 'host', status: 'running', phase: 'upload', done: 1, total: 3 });
+  assert.deepEqual(steps.find(s => s.id === 'host'), { id: 'host', status: 'run', message: undefined, phase: 'upload', done: 1, total: 3 });
+});
+
+test('form <-> listing carries visibility (default secret) and the sub-category', () => {
+  assert.equal(M.emptyForm().visibility, 'secret');
+  const l = M.formToListing({ ...M.emptyForm('T'), category: '1', subCategory: ' 2 ', visibility: 'public' });
+  assert.equal(l.visibility, 'public');
+  assert.deepEqual(l.subCategoryIds, ['2']);
+  assert.deepEqual(M.formToListing(M.emptyForm('T')).subCategoryIds, []);
+  const back = M.formFromRecord({ title: 'x', visibility: 'public', subCategoryIds: ['9'], categoryId: '1' });
+  assert.deepEqual([back.visibility, back.subCategory, back.category], ['public', '9', '1']);
+  assert.equal(M.formFromRecord({ title: 'x' }).visibility, 'secret');
+});
+
 // -- tags ------------------------------------------------------------------
 
 test('addTagsFromText: commas finish tags, tail stays, dedupe ignores case', () => {

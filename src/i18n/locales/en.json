@@ -1166,5 +1166,21 @@
   "publish.err.cleanupLeft": "Some hosted files could not be removed. Retry to remove them.",
   "publish.err.cancelled": "Publish cancelled.",
   "publish.host.reachable": "Making the temporary links reachable…",
-  "publish.err.tunnelNotPublic": "The temporary link is not reachable from the internet yet, so nothing was sent to the platform. Wait a moment and press Retry."
+  "publish.err.tunnelNotPublic": "The temporary link is not reachable from the internet yet, so nothing was sent to the platform. Wait a moment and press Retry.",
+  "publish.btn.secret": "Publish secretly on {label} · {price}",
+  "publish.btn.secretFree": "Publish secretly on {label} · Free",
+  "publish.done.secret": "On {label}: only people with the link can see it",
+  "publish.live.secret": "Secret on {label} (only people with the link)",
+  "publish.field.subCategory": "Sub-category",
+  "publish.field.visibility": "Visibility",
+  "publish.visibility.secret": "Secret — only people with the link",
+  "publish.visibility.public": "Public",
+  "publish.options.loading": "Loading categories and licenses…",
+  "publish.options.failed": "Could not load the category and license lists from {label} ({reason}). Type the category id and license code instead.",
+  "publish.options.reload": "Reload lists",
+  "publish.issue.categoryRequired": "Choose a category.",
+  "publish.issue.licenseRequired": "Choose a license.",
+  "publish.step.hostDirect": "Upload files to {label}",
+  "publish.err.uploadSlotFailed": "The platform would not give an upload slot. Check your connection and press Retry; files already sent are kept.",
+  "publish.err.uploadFailed": "Sending a file to the platform failed. Press Retry: files already sent are not sent again."
 }

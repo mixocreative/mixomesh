@@ -1166,5 +1166,21 @@
   "publish.err.cleanupLeft": "ホストされたファイルの一部を削除できませんでした。削除するために再試行してください。",
   "publish.err.cancelled": "公開がキャンセルされました。",
   "publish.host.reachable": "一時リンクを外部から開けるようにしています…",
-  "publish.err.tunnelNotPublic": "一時リンクがまだインターネットから開けないため、プラットフォームには何も送信していません。少し待ってから「再試行」を押してください。"
+  "publish.err.tunnelNotPublic": "一時リンクがまだインターネットから開けないため、プラットフォームには何も送信していません。少し待ってから「再試行」を押してください。",
+  "publish.btn.secret": "{label} に限定公開で投稿 · {price}",
+  "publish.btn.secretFree": "{label} に限定公開で投稿 · 無料",
+  "publish.done.secret": "{label}：リンクを知っている人だけが見られます",
+  "publish.live.secret": "{label} で限定公開中（リンクを知っている人のみ）",
+  "publish.field.subCategory": "サブカテゴリ",
+  "publish.field.visibility": "公開範囲",
+  "publish.visibility.secret": "限定公開 — リンクを知っている人のみ",
+  "publish.visibility.public": "一般公開",
+  "publish.options.loading": "カテゴリとライセンスを読み込み中…",
+  "publish.options.failed": "{label} のカテゴリとライセンスの一覧を読み込めませんでした（{reason}）。カテゴリIDとライセンスコードを直接入力してください。",
+  "publish.options.reload": "一覧を再読み込み",
+  "publish.issue.categoryRequired": "カテゴリを選んでください。",
+  "publish.issue.licenseRequired": "ライセンスを選んでください。",
+  "publish.step.hostDirect": "{label} にファイルをアップロード",
+  "publish.err.uploadSlotFailed": "プラットフォームからアップロード枠を取得できませんでした。接続を確認して「再試行」を押してください。送信済みのファイルは保持されています。",
+  "publish.err.uploadFailed": "プラットフォームへのファイル送信に失敗しました。「再試行」を押してください。送信済みのファイルは再送されません。"
 }

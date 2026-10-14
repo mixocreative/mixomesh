@@ -486,7 +486,7 @@ const s3Record = { type: 's3', endpoint: 'https://acc.r2.cloudflarestorage.com',
 test('ipc: registers exactly the publish:* channels', () => {
   const { handlers } = setupIpc();
   assert.deepEqual([...handlers.keys()].sort(), [
-    'publish:cancel', 'publish:clearCredentials', 'publish:describe', 'publish:extendHold', 'publish:hasCredentials',
+    'publish:cancel', 'publish:clearCredentials', 'publish:describe', 'publish:extendHold', 'publish:hasCredentials', 'publish:listOptions',
     'publish:retry', 'publish:setCredentials', 'publish:start', 'publish:testConnection',
   ]);
 });

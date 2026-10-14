@@ -2,14 +2,13 @@
 //
 // `LISTBRIDGE_FAKE_PLATFORM=1` (+ `LISTBRIDGE_FAKE_URL=<local fake GraphQL endpoint>`) replaces the
 // real 'cults3d' adapter with a wrapper that keeps every real request builder / parser but sends
-// the GraphQL calls to a local fake server (tests/listbridge-rehearsal.mjs) which downloads the
-// file / image links through the public tunnel like Cults would. Nothing else changes: same
-// runner, same tunnel host, same IPC.
+// the GraphQL calls to a local fake server (tests/listbridge-rehearsal.mjs). The fake answers
+// createFileUploader / createImageUploader with a local presigned-POST target, receives the
+// multipart uploads, and serves licenses / categories / the creation(slug) read-back. Nothing else
+// changes: same runner, same IPC.
 //
 // HARD REQUIREMENT: a packaged build ignores the switch. The guard lives HERE, in the helper
 // main.cjs calls with `app.isPackaged`, and is unit-tested (tests/listbridge-fake-platform.test.mjs).
-
-const FAKE_CONFIRM_QUERY = 'query Confirm($id: ID!) {\n  creation(id: $id) { id url(locale: EN) filesIngested }\n}';
 
 /**
  * @param {object} real the real adapter (src/listbridge/adapters/cults3d.js)
@@ -17,20 +16,23 @@ const FAKE_CONFIRM_QUERY = 'query Confirm($id: ID!) {\n  creation(id: $id) { id 
  */
 function createFakeCultsAdapter(real, endpoint) {
   const redirect = spec => ({ ...spec, url: endpoint });
+  const loopbackUrl = 'https://loopback.invalid/';
   return {
     ...real,
+    // Every GraphQL request goes to the local fake; the payload builders / parsers stay the REAL ones.
     buildCreate: (...a) => redirect(real.buildCreate(...a)),
     buildUpdate: (...a) => redirect(real.buildUpdate(...a)),
     testConnection: (...a) => redirect(real.testConnection(...a)),
-    // Cults' read-back (shape is the fake's own; the real one is reconciled in PB.3b/PB.11).
-    buildConfirm: result => ({
-      method: 'POST', url: endpoint, headers: { Accept: 'application/json' },
-      body: { query: FAKE_CONFIRM_QUERY, variables: { id: result.remoteId } },
-    }),
-    parseConfirm: res => {
-      const c = res.json?.data?.creation;
-      if (!c) throw new Error('fake platform: no creation in confirm response');
-      return c.filesIngested ? { confirmed: true, status: 'published', url: c.url || undefined } : { confirmed: false };
+    buildUploadSlot: (...a) => redirect(real.buildUploadSlot(...a)),
+    buildConfirm: (...a) => redirect(real.buildConfirm(...a)),
+    buildListOptions: (...a) => real.buildListOptions(...a).map(redirect),
+    // The real parser insists on an https slot; the fake's slot is a loopback http POST target.
+    parseUploadSlot: (res, item) => {
+      const payload = res.json?.data?.createFileUploader ?? res.json?.data?.createImageUploader;
+      const url = payload?.uploader?.url;
+      if (typeof url !== 'string') return real.parseUploadSlot(res, item);
+      const swapped = { ...res, json: { data: Object.fromEntries(Object.entries(res.json.data).map(([k, v]) => [k, { ...v, uploader: { ...v.uploader, url: loopbackUrl } }])) } };
+      return { ...real.parseUploadSlot(swapped, item), url };
     },
   };
 }

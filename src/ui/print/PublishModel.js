@@ -50,16 +50,41 @@ export function formatPrice(amount, currency, locale = 'en') {
 
 /**
  * Which consequence-naming label the primary button shows, as an i18n key +
- * params (the UI calls t()).
- * @param {{ label: string, remoteId?: string|null, drafts?: boolean,
+ * params (the UI calls t()). `visibility` ('secret' | 'public') is passed only for platforms that
+ * offer a choice: secret = "only people with the link" (worded "secretly", never "draft");
+ * without it, `drafts` keeps the older "Save as draft" wording.
+ * @param {{ label: string, remoteId?: string|null, drafts?: boolean, visibility?: string|null,
  *   amount?: number|null, currency?: string, locale?: string }} a
  * @returns {{ key: string, params: Record<string,string> }}
  */
-export function primaryAction({ label, remoteId = null, drafts = false, amount = null, currency = '', locale = 'en' }) {
+export function primaryAction({ label, remoteId = null, drafts = false, visibility = null, amount = null, currency = '', locale = 'en' }) {
   if (remoteId) return { key: 'publish.btn.update', params: { label } };
-  if (drafts) return { key: 'publish.btn.draft', params: { label } };
-  if (amount == null || !(amount > 0)) return { key: 'publish.btn.liveFree', params: { label } };
-  return { key: 'publish.btn.live', params: { label, price: formatPrice(amount, currency, locale) } };
+  const free = amount == null || !(amount > 0);
+  const price = free ? null : formatPrice(amount, currency, locale);
+  if (visibility === 'secret') {
+    return free ? { key: 'publish.btn.secretFree', params: { label } } : { key: 'publish.btn.secret', params: { label, price } };
+  }
+  if (!visibility && drafts) return { key: 'publish.btn.draft', params: { label } };
+  if (free) return { key: 'publish.btn.liveFree', params: { label } };
+  return { key: 'publish.btn.live', params: { label, price } };
+}
+
+// -- category / license options (from publish:listOptions) -----------------
+
+/**
+ * Licenses offered for a listing: free listings see those valid on free designs, priced
+ * ones those valid on priced designs. A license record without the flags is always offered.
+ * @param {Array<{code:string,name:string,free?:boolean,priced?:boolean}>} licenses
+ * @param {number|null} amount price amount (null / 0 = free)
+ */
+export function licensesFor(licenses, amount) {
+  const priced = amount != null && amount > 0;
+  return (licenses ?? []).filter(l => (priced ? l.priced !== false : l.free !== false));
+}
+
+/** Children of a top-level category id (empty when unknown). */
+export function subCategoriesOf(categories, id) {
+  return (categories ?? []).find(c => c.id === id)?.children ?? [];
 }
 
 // -- tags ----------------------------------------------------------------
@@ -90,13 +115,16 @@ export const removeTag = (tags, index) => tags.filter((_, i) => i !== index);
 // -- form <-> listing ----------------------------------------------------
 
 /**
- * @typedef {{ title: string, description: string, tags: string[], category: string, license: string,
- *   price: string, currency: string, madeWithAi: boolean }} PublishForm
+ * @typedef {{ title: string, description: string, tags: string[], category: string, subCategory: string,
+ *   license: string, price: string, currency: string, madeWithAi: boolean, visibility: 'secret'|'public' }} PublishForm
  */
 
 /** @returns {PublishForm} */
 export function emptyForm(title = '', currency = 'EUR') {
-  return { title, description: '', tags: [], category: '', license: '', price: '', currency, madeWithAi: false };
+  return {
+    title, description: '', tags: [], category: '', subCategory: '', license: '', price: '', currency,
+    madeWithAi: false, visibility: 'secret',
+  };
 }
 
 /**
@@ -112,6 +140,8 @@ export function formFromRecord(record, defaults = {}) {
     description: record.description || '',
     tags: Array.isArray(record.tags) ? [...record.tags] : [],
     category: record.categoryId || '',
+    subCategory: Array.isArray(record.subCategoryIds) ? (record.subCategoryIds[0] || '') : '',
+    visibility: record.visibility === 'public' ? 'public' : 'secret',
     license: record.license || '',
     price: record.price ? String(record.price) : '',
     currency: record.currency || base.currency,
@@ -133,6 +163,8 @@ export function formToListing(form, { locale = 'en' } = {}) {
     license: form.license.trim() || null,
     madeWithAi: !!form.madeWithAi,
     categoryHint: form.category.trim() || null,
+    subCategoryIds: form.subCategory && form.subCategory.trim() ? [form.subCategory.trim()] : [],
+    visibility: form.visibility === 'public' ? 'public' : 'secret',
     locale,
   };
 }
@@ -148,6 +180,8 @@ const ISSUE_KEYS = Object.freeze({
   'price-precision': 'publish.issue.pricePrecision',
   'currency-invalid': 'publish.issue.currencyInvalid',
   'currency-unsupported': 'publish.issue.currencyUnsupported',
+  'category-required': 'publish.issue.categoryRequired',
+  'license-required': 'publish.issue.licenseRequired',
 });
 
 /** i18n key for a core issue code, or null (then the UI shows the core message). */
@@ -156,6 +190,8 @@ export const issueKey = code => ISSUE_KEYS[code] ?? null;
 const ERROR_KEYS = Object.freeze({
   'no-credentials': 'publish.err.noCredentials',
   'no-file-host': 'publish.err.noFileHost',
+  'upload-slot-failed': 'publish.err.uploadSlotFailed',
+  'upload-failed': 'publish.err.uploadFailed',
   'cloudflared-missing': 'publish.err.cloudflaredMissing',
   'tunnel-start-timeout': 'publish.err.tunnelStartTimeout',
   'tunnel-not-public': 'publish.err.tunnelNotPublic',
@@ -173,10 +209,11 @@ export const errorKey = code => ERROR_KEYS[code] ?? null;
  * Validate the form the way the main process will, without building files:
  * placeholder images / files stand in for the real bytes.
  * @param {{ form: PublishForm, hasHero: boolean, galleryCount: number, fileCount: number,
- *   limits?: { maxImages?: number, currencies?: string[] }, locale?: string }} a
+ *   limits?: { maxImages?: number, currencies?: string[] }, locale?: string,
+ *   requires?: string[] }} a  `requires` = describe().requires (listing fields the platform insists on)
  * @returns {Array<{field:string, code:string, message:string}>}
  */
-export function validateForm({ form, hasHero, galleryCount, fileCount, limits = {}, locale = 'en' }) {
+export function validateForm({ form, hasHero, galleryCount, fileCount, limits = {}, locale = 'en', requires = [] }) {
   const amount = parsePriceInput(form.price);
   const stub = { name: 'x', mime: 'application/octet-stream', bytes: new Uint8Array(0) };
   const images = [
@@ -187,7 +224,10 @@ export function validateForm({ form, hasHero, galleryCount, fileCount, limits = 
   const listing = formToListing(form, { locale });
   if (Number.isNaN(amount)) listing.price = { amount: NaN, currency: listing.price?.currency ?? form.currency };
   const pkg = createListing({ ...listing, images, files });
-  return validateListing(pkg, { maxImages: limits.maxImages, currencies: limits.currencies });
+  const issues = validateListing(pkg, { maxImages: limits.maxImages, currencies: limits.currencies });
+  if (requires.includes('categoryHint') && !pkg.categoryHint) issues.push({ field: 'category', code: 'category-required', message: 'Choose a category.' });
+  if (requires.includes('license') && !pkg.license) issues.push({ field: 'license', code: 'license-required', message: 'Choose a license.' });
+  return issues;
 }
 
 // -- steps ---------------------------------------------------------------
@@ -203,8 +243,11 @@ const STEP_LABEL_KEYS = Object.freeze({
   cleanup: 'publish.step.cleanup',
 });
 
-/** i18n key for a step id (build = renderer-side; the rest are jobs.cjs STEPS). */
-export const stepLabelKey = id => STEP_LABEL_KEYS[id] ?? null;
+/**
+ * i18n key for a step id (build = renderer-side; the rest are jobs.cjs STEPS).
+ * `direct` = the platform takes uploads itself: the host step reads "Upload files to ...".
+ */
+export const stepLabelKey = (id, { direct = false } = {}) => (direct && id === 'host' ? 'publish.step.hostDirect' : (STEP_LABEL_KEYS[id] ?? null));
 
 /** Ordered step ids; 'publish' in jobs.cjs reports as create (new) or update (remoteId). */
 export const stepPlan = isUpdate => ['build', 'validate', 'bundle', 'host', isUpdate ? 'update' : 'create', 'confirm', 'cleanup'];
@@ -225,8 +268,11 @@ export function applyProgress(steps, event) {
   if (!status) return steps;
   return steps.map((s, j) => {
     if (j === i) {
-      const { phase: _old, ...rest } = s;
-      return { ...rest, status, message: event.message ?? s.message, ...(event.phase ? { phase: event.phase } : {}) };
+      const { phase: _old, done: _d, total: _t, ...rest } = s;
+      return {
+        ...rest, status, message: event.message ?? s.message, ...(event.phase ? { phase: event.phase } : {}),
+        ...(Number.isFinite(event.done) && Number.isFinite(event.total) ? { done: event.done, total: event.total } : {}),
+      };
     }
     if (j < i && (s.status === 'todo' || s.status === 'run')) return { ...s, status: 'done' };
     return s;

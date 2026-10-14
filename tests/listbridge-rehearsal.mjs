@@ -1,12 +1,17 @@
-// PB.15 part 2: in-app dress rehearsal. Opt-in (needs network):
+// PB.15 part 2 / PB.3b: in-app dress rehearsal. Opt-in:
 //   LIVE_TUNNEL=1 node tests/listbridge-rehearsal.mjs        (npm run test:rehearsal)
 // Real dev Electron (Vite dev server + LISTBRIDGE_FAKE_PLATFORM=1, a throw-away userData dir),
 // driven over CDP. The renderer runs the REAL PublishClient (real export pipeline -> IPC ->
-// runner -> real cloudflared tunnel) against a FAKE Cults: a local GraphQL server that, like
-// Cults, downloads every fileUrl / imageUrl through the PUBLIC tunnel after createCreation and
-// answers a confirm read-back once all of them arrived.
-// Asserts: outcome ok, remoteId saved in project.listings, every object downloaded through the
-// tunnel (sha256 equal to what the renderer sent), tunnel closed after done, no stray cloudflared.
+// runner) against a FAKE Cults: a local GraphQL server that, like Cults, hands out presigned-POST
+// upload slots (createFileUploader / createImageUploader), receives the multipart uploads at a local
+// storage endpoint, then accepts createCreation(fileKeys, imageKeys) only for keys it really received
+// and answers the creation(slug) read-back (blueprints / illustrations) once everything arrived.
+// Cults now takes native uploads, so NO tunnel is involved: the test also asserts that no cloudflared
+// process is ever started (the tunnel stays the fallback for URL-only platforms; its own live test is
+// tests/listbridge-live-tunnel.mjs).
+// Asserts: outcome ok, remoteId saved in project.listings (secret -> draft record), every object
+// uploaded byte-identical (sha256), keys in createCreation match the uploads, storage never sees the
+// Basic auth header, visibility SECRET by default, no cloudflared, no renderer exceptions.
 // Never part of `npm test`.
 
 import { createServer } from 'node:http';
@@ -21,8 +26,8 @@ import {
   freePort, waitForHttp, Cdp, evaluate, waitFor, assert, sleep, removeTempDir, stopProcess,
 } from './cdp-harness.mjs';
 
-if (process.env.LIVE_TUNNEL !== '1') {
-  console.log('SKIP listbridge rehearsal (set LIVE_TUNNEL=1 to run; needs network + cloudflared)');
+if (process.env.LIVE_TUNNEL !== '1' && process.env.REHEARSAL !== '1') {
+  console.log('SKIP listbridge rehearsal (set LIVE_TUNNEL=1 or REHEARSAL=1 to run; needs Electron + Chrome-free local ports only)');
   process.exit(0);
 }
 
@@ -46,28 +51,42 @@ const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 
 // ── Fake Cults ──────────────────────────────────────────────────────────────
 const fake = {
-  creates: [], confirms: 0, ours: [], authOk: false, downloads: [],   // downloads: { url, status, bytes, sha, ms }
-  pending: null, done: false, failure: null,
+  creates: [], confirms: 0, authOk: false, slots: [], uploads: [],   // uploads: { key, filename, bytes, sha, hadAuth }
+  listOptions: 0, storageSawAuth: false,
 };
 const before = cloudflaredPids();
+let storageUrl = '';
+let slotN = 0;
 
-async function downloadAll(urls) {
-  // PB.16: ONE attempt per URL, no retries, no sleeping. Like a real platform, the first lookup
-  // of the hostname poisons DNS if it happens too early, so the app's readiness gate (DoH
-  // resolve + public probe BEFORE createCreation) is what must make this pass first time.
-  for (const url of urls) {
-    const t0 = Date.now();
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
-      const buf = Buffer.from(await r.arrayBuffer());
-      fake.downloads.push({ url, status: r.status, bytes: buf.length, sha: sha256(buf), ms: Date.now() - t0, attempts: 1 });
-    } catch (err) {
-      fake.downloads.push({ url, status: 0, error: String(err?.cause?.code || err?.message || err), ms: Date.now() - t0, attempts: 1 });
-    }
-  }
-  fake.done = true;
+function parseMultipart(buf, contentType) {
+  const boundary = /boundary=(.+)$/.exec(contentType)[1];
+  const text = buf.toString('latin1');
+  return text.split(`--${boundary}`).slice(1, -1).map(chunk => {
+    const [head, ...rest] = chunk.replace(/^\r\n/, '').split('\r\n\r\n');
+    const body = rest.join('\r\n\r\n').replace(/\r\n$/, '');
+    return { name: /name="([^"]*)"/.exec(head)[1], filename: /filename="([^"]*)"/.exec(head)?.[1], bytes: Buffer.from(body, 'latin1') };
+  });
 }
 
+// The presigned-POST target: no Authorization expected, key = the `key` field with ${filename} expanded.
+const storage = createServer((req, res) => {
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('end', () => {
+    if (req.headers.authorization) fake.storageSawAuth = true;
+    const parts = parseMultipart(Buffer.concat(chunks), req.headers['content-type'] || '');
+    const file = parts.find(p => p.name === 'file');
+    const keyField = parts.find(p => p.name === 'key');
+    if (!file || !keyField || parts.at(-1) !== file || !parts.some(p => p.name === 'policy')) { res.writeHead(400); return res.end('<Error><Code>InvalidArgument</Code></Error>'); }
+    const key = keyField.bytes.toString().split('${filename}').join(file.filename);
+    fake.uploads.push({ key, filename: file.filename, bytes: file.bytes.length, sha: sha256(file.bytes) });
+    res.writeHead(204); res.end();
+  });
+});
+await new Promise(r => storage.listen(0, '127.0.0.1', r));
+storageUrl = `http://127.0.0.1:${storage.address().port}/bucket`;
+
+const MODEL_EXT = /\.(stl|3mf|obj|ply|step|stp|amf)$/i;
 const gql = createServer((req, res) => {
   let body = '';
   req.on('data', c => { body += c; });
@@ -78,20 +97,39 @@ const gql = createServer((req, res) => {
     const expectAuth = `Basic ${Buffer.from(`${NICK}:${KEY}`).toString('base64')}`;
     if (req.headers.authorization !== expectAuth) return reply({ errors: [{ message: 'unauthorized' }] }, 401);
     fake.authOk = true;
-    if (/createCreation/.test(q.query)) {
+    const query = q.query;
+    if (/createFileUploader|createImageUploader/.test(query)) {
+      const field = /createFileUploader/.test(query) ? 'createFileUploader' : 'createImageUploader';
+      fake.slots.push(field);
+      slotN++;
+      // The slot URL is loopback http here (fakePlatform.cjs lets the real parser accept it); real Cults gives https S3.
+      return reply({ data: { [field]: { errors: [], uploader: { url: storageUrl, fields: [
+        { name: 'key', value: `uploads/${slotN}/\${filename}` }, { name: 'policy', value: 'FAKE-POLICY' }] } } } });
+    }
+    if (/createCreation/.test(query)) {
       const v = q.variables || {};
-      const urls = [...(v.fileUrls || []), ...(v.imageUrls || [])];
-      fake.creates.push({ name: v.name, urls });
-      fake.ours = [...cloudflaredPids()].filter(p => !before.has(p));   // tunnel is up right now
-      // Like Cults: answer first, ingest asynchronously.
-      setTimeout(() => { fake.pending = downloadAll(urls); }, 400);
-      return reply({ data: { createCreation: { creation: { id: 'fake-cults-1', url: 'https://cults3d.com/en/3d-model/fake/fake-cults-1' }, errors: [] } } });
+      if (v.fileUrls || v.imageUrls) return reply({ data: { createCreation: { creation: null, errors: ['fileUrls were sent: native upload expected'] } } });
+      const keys = [...(v.fileKeys || []), ...(v.imageKeys || [])];
+      const missing = keys.filter(k => !fake.uploads.some(u => u.key === k));
+      if (missing.length) return reply({ data: { createCreation: { creation: null, errors: [`unknown upload keys: ${missing.join(', ')}`] } } });
+      fake.creates.push({ name: v.name, v });
+      return reply({ data: { createCreation: { creation: { id: 'fake-cults-1', slug: 'fake-cults-1', url: 'https://cults3d.com/en/3d-model/fake/fake-cults-1', visibility: v.visibility }, errors: [] } } });
     }
-    if (/Confirm/.test(q.query)) {
+    if (/Confirm/.test(query)) {
       fake.confirms++;
-      return reply({ data: { creation: { id: q.variables?.id, url: 'https://cults3d.com/en/3d-model/fake/fake-cults-1', filesIngested: fake.done } } });
+      const c = fake.creates.at(-1);
+      const blueprints = (c?.v.fileKeys || []).filter(k => MODEL_EXT.test(k)).map((k, i) => ({ id: i, fileName: k }));
+      const illustrations = (c?.v.imageKeys || []).map((k, i) => ({ id: i }));
+      return reply({ data: { creation: { id: 'fake-cults-1', slug: 'fake-cults-1', url: 'https://cults3d.com/en/3d-model/fake/fake-cults-1', visibility: c?.v.visibility, blueprints, illustrations } } });
     }
-    return reply({ data: { myself: { user: { nick: NICK } } } });
+    if (/ListOptions/.test(query)) {
+      fake.listOptions++;
+      return reply({ data: {
+        categories: [{ id: 'C1', name: 'Art', children: [] }],
+        licenses: [{ code: 'cults_cu', name: 'Personal', allowsCommercialUse: false, availableOnFreeDesigns: true, availableOnPricedDesigns: true }],
+      } });
+    }
+    return reply({ data: { me: { nick: NICK } } });
   });
 });
 await new Promise(r => gql.listen(0, '127.0.0.1', r));
@@ -140,7 +178,7 @@ try {
 
   // The fake must really be in place (describe goes through the real IPC).
   const desc = await evaluate(cdp, `window.electronAPI.listbridge.describe().then(d => ({ ids: d.platforms.map(p => p.id), transfer: d.platforms[0]?.transfer, def: d.defaultFileHost }))`);
-  assert(desc.ids.includes('cults3d') && desc.transfer === 'url' && desc.def === 'tunnel', `describe: ${JSON.stringify(desc)}`);
+  assert(desc.ids.includes('cults3d') && desc.transfer === 'direct', `describe: ${JSON.stringify(desc)}`);
 
   // Kick the publish off (long-running: poll for the result instead of one 30 s CDP call).
   const kick = await evaluate(cdp, `(async () => {
@@ -157,7 +195,7 @@ try {
       const g = c.getContext('2d'); g.fillStyle = '#c2410c'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#fff'; g.fillRect(16, 16, 32, 32);
       const hero = await new Promise(r => c.toBlob(r, 'image/png'));
       const built = await Client.buildListingPackage({
-        listing: { title: 'Rehearsal quad', description: 'Dress rehearsal listing.', tags: ['rehearsal', 'test'], price: { amount: 4, currency: 'EUR' }, license: null, madeWithAi: false },
+        listing: { title: 'Rehearsal quad', description: 'Dress rehearsal listing.', tags: ['rehearsal', 'test'], price: { amount: 4, currency: 'EUR' }, license: 'cults_cu', categoryHint: 'C1', madeWithAi: false },
         exportSelection: { formats: ['stl', '3mf'], options: { acknowledgeWarnings: true } },
         heroBlob: hero,
       });
@@ -168,7 +206,7 @@ try {
       for (const f of pkg.files) sent.push({ name: f.name, bytes: f.bytes.byteLength, sha: await hex(f.bytes) });
       for (const i of pkg.images) sent.push({ name: i.name, bytes: i.bytes.byteLength, sha: await hex(i.bytes) });
       window.__reh = { events: [], sent, outcome: null, error: null };
-      Client.publish(pkg, { platform: 'cults3d', accountId: 'default', fileHostId: 'tunnel' }, e => window.__reh.events.push({ ...e, t: Date.now() }))
+      Client.publish(pkg, { platform: 'cults3d', accountId: 'default' }, e => window.__reh.events.push({ ...e, t: Date.now() }))
         .then(o => { window.__reh.outcome = o; }, e => { window.__reh.error = String(e?.stack || e); });
       return { started: true, sent };
     } catch (err) { return { error: String(err?.stack ?? err) }; }
@@ -188,52 +226,49 @@ try {
   const steps = res.reh.events.filter(e => e.status === 'done').map(e => e.step);
   console.log(`steps done: ${steps.join(' > ')}`);
   const ev = res.reh.events;
-  const tAt = f => ev.find(f)?.t;
-  const tDns = tAt(e => e.phase === 'dns'); const tProbe = tAt(e => e.phase === 'probe'); const tCreate = tAt(e => e.step === 'create' && e.status === 'running');
-  assert(tDns && tProbe && tCreate && tDns <= tProbe && tProbe <= tCreate, 'readiness gate (dns -> probe) must run before the create step');
-  console.log(`readiness gate: DoH ready ${((tProbe - tDns) / 1000).toFixed(1)} s, probe ok ${((tCreate - tProbe) / 1000).toFixed(1)} s (until create)`);
+  const hostDone = ev.find(e => e.step === 'host' && e.status === 'done');
+  assert(hostDone && !hostDone.skipped, 'the host step must be a real upload, not skipped');
+  const up = ev.filter(e => e.phase === 'upload');
+  assert(up.length >= 2 && up.at(-1).done === up.at(-1).total && up.at(-1).total === kick.sent.length, `upload progress: ${JSON.stringify(up.at(-1))}`);
+  assert(!ev.some(e => e.phase === 'dns' || e.phase === 'probe'), 'no tunnel readiness phases for a native-upload platform');
 
   assert(out.ok === true && out.status === 'done', `outcome not ok: ${JSON.stringify(out)}`);
   assert(out.result.remoteId === 'fake-cults-1', `remoteId: ${JSON.stringify(out.result)}`);
+  assert(out.result.status === 'secret', `first publish must be SECRET: ${JSON.stringify(out.result)}`);
   const rec = res.listings.find(l => l.platform === 'cults3d');
-  assert(rec && rec.remoteId === 'fake-cults-1' && rec.status === 'published', `project.listings: ${JSON.stringify(res.listings)}`);
+  assert(rec && rec.remoteId === 'fake-cults-1' && rec.status === 'draft' && rec.visibility === 'secret', `project.listings: ${JSON.stringify(res.listings)}`);
 
-  // Everything Cults was told to fetch was fetched through the PUBLIC tunnel, byte-identical.
+  // Every object was uploaded natively, byte-identical, and createCreation used exactly those keys.
   assert(fake.authOk, 'fake Cults never saw the Basic auth header');
+  assert(!fake.storageSawAuth, 'the storage endpoint must never receive the platform credentials');
   assert(fake.creates.length === 1, `expected exactly one createCreation, got ${fake.creates.length}`);
-  const urls = fake.creates[0].urls;
-  assert(urls.length === kick.sent.length, `fake got ${urls.length} urls, renderer sent ${kick.sent.length} objects`);
-  assert(urls.every(u => /^https:\/\/[a-z0-9-]+\.trycloudflare\.com\//.test(u)), `urls are not public tunnel links: ${urls.join(' ')}`);
-  assert(fake.downloads.length === urls.length, `downloaded ${fake.downloads.length}/${urls.length}`);
-  for (const d of fake.downloads) assert(d.status === 200 && d.attempts === 1, `download (single attempt) ${d.url} -> ${d.status} ${d.error || ''}`);
-  const sentShas = kick.sent.map(s => s.sha).sort();
-  assert(JSON.stringify(fake.downloads.map(d => d.sha).sort()) === JSON.stringify(sentShas), 'downloaded bytes differ from what the renderer sent');
-  assert(fake.confirms >= 1, 'the confirm read-back was never polled');
-  console.log(`fake Cults downloaded ${fake.downloads.length}/${urls.length} objects through the tunnel (${fake.downloads.map(d => `${d.bytes} B ${d.ms} ms`).join('; ')}), confirm polled ${fake.confirms}x`);
+  const v = fake.creates[0].v;
+  assert(v.visibility === 'SECRET' && v.locale === 'EN' && JSON.stringify(v.usages) === '["3dp"]' && v.licenseCode === 'cults_cu' && v.categoryId === 'C1', `createCreation args: ${JSON.stringify(v)}`);
+  const keys = [...v.fileKeys, ...v.imageKeys];
+  assert(keys.length === kick.sent.length, `createCreation got ${keys.length} keys, renderer sent ${kick.sent.length} objects`);
+  assert(fake.uploads.length === kick.sent.length, `uploaded ${fake.uploads.length}/${kick.sent.length}`);
+  assert(JSON.stringify(fake.uploads.map(u => u.sha).sort()) === JSON.stringify(kick.sent.map(x => x.sha).sort()), 'uploaded bytes differ from what the renderer sent');
+  assert(fake.slots.filter(x => x === 'createImageUploader').length === 1 && fake.slots.length === kick.sent.length, `slot requests: ${fake.slots.join(',')}`);
+  assert(fake.confirms >= 1, 'the creation(slug) read-back was never polled');
+  console.log(`fake Cults received ${fake.uploads.length} uploads (${fake.uploads.map(u => `${u.filename} ${u.bytes} B`).join('; ')}), confirm polled ${fake.confirms}x`);
 
-  // Tunnel closed after done, while the app is still running.
-  assert(fake.ours.length >= 1, 'no cloudflared process was seen while the tunnel was up');
-  const dl = Date.now() + 15000;
-  while (fake.ours.some(p => cloudflaredPids().has(p)) && Date.now() < dl) await sleep(300);
-  const alive = fake.ours.filter(p => cloudflaredPids().has(p));
-  assert(alive.length === 0, `tunnel not closed after done: cloudflared pid(s) ${alive.join(', ')} still alive`);
-  let publicStatus = 'unreachable';
-  try { publicStatus = (await fetch(urls[0], { signal: AbortSignal.timeout(15000) })).status; } catch { /* unreachable is fine */ }
-  assert(publicStatus !== 200, `a hosted link still answers 200 after done`);
-  console.log(`tunnel closed after done: cloudflared pid(s) ${fake.ours.join(', ')} gone; old public link now -> ${publicStatus}`);
-  console.log(`publish (renderer click to done): ${publishS.toFixed(1)} s; page errors: ${pageErrors.length}`);
+  // The renderer can load the option lists through the real IPC + adapter.
+  const lo = await evaluate(cdp, `window.electronAPI.listbridge.listOptions('cults3d', 'en')`);
+  assert(lo.ok && lo.categories[0].name === 'Art' && lo.licenses[0].code === 'cults_cu' && fake.listOptions === 1, `listOptions: ${JSON.stringify(lo)}`);
+
+  const tunnelPids = [...cloudflaredPids()].filter(p => !before.has(p));
+  assert(tunnelPids.length === 0, `a native-upload publish must not start a tunnel (cloudflared pid ${tunnelPids.join(', ')})`);
+  console.log(`publish (renderer click to done): ${publishS.toFixed(1)} s, no tunnel started; page errors: ${pageErrors.length}`);
   assert(pageErrors.length === 0, `renderer exceptions: ${pageErrors.join(' | ')}`);
 
   await cdp.close(); cdp = null;
   await stopProcess(electron); electron = null;
-  await sleep(800);
-  const stray = [...cloudflaredPids()].filter(p => !before.has(p));
-  assert(stray.length === 0, `stray cloudflared after the app exited: ${stray.join(', ')}`);
-  console.log(`PASS listbridge rehearsal (total ${((Date.now() - tAll) / 1000).toFixed(1)} s, no stray cloudflared)`);
+  await sleep(500);
+  console.log(`PASS listbridge rehearsal (direct upload, total ${((Date.now() - tAll) / 1000).toFixed(1)} s)`);
 } catch (err) {
   failed = true;
   console.error('FAIL listbridge rehearsal:', err?.stack || err);
-  console.error('fake Cults saw:', JSON.stringify({ creates: fake.creates.length, confirms: fake.confirms, downloads: fake.downloads }));
+  console.error('fake Cults saw:', JSON.stringify({ slots: fake.slots.length, uploads: fake.uploads, creates: fake.creates.length, confirms: fake.confirms }));
   try {
     const tail = await evaluate(cdp, `JSON.stringify((window.__reh?.events || []).slice(-4))`);
     console.error('last progress events:', tail);
@@ -243,6 +278,7 @@ try {
   await stopProcess(electron);
   await stopProcess(vite);
   gql.close();
+  storage.close();
   removeTempDir(userData);
   // Never leave a tunnel of ours behind, even on failure.
   for (const pid of cloudflaredPids()) if (!before.has(pid)) { try { process.kill(pid); } catch { /* gone */ } }

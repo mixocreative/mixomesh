@@ -4,9 +4,18 @@
 //   validate → bundle → host → create|update → confirm → cleanup
 //   * validate: core validateListing (adapter limits) + adapter.validate.
 //   * bundle:   planBundle(files, maxFiles); over the limit → one zip (zip is injected).
-//   * host:     only for transfer 'url': put every file + image on the file host, presign GET.
+//   * host:     transfer 'url': put every file + image on the file host, presign GET.
 //               Each hosted key is recorded the moment put() returns, so a retry never
 //               re-uploads it and cancel / cleanup can always remove it.
+//               transfer 'direct' + adapter.buildUploadSlot (PB.3b, Cults3D): the step is an UPLOAD:
+//               per file / image, ask the platform for a slot (authenticated, rate-limit aware),
+//               then POST the bytes to the slot as multipart/form-data (the slot's fields in order,
+//               then the `file` part; NO platform credentials go to that host), and record the
+//               returned key the moment the POST succeeds, so a retry never re-uploads a finished
+//               item. No file host / tunnel is involved. An UPDATE (remoteId) skips uploads: the
+//               platform's update call takes no files.
+//               Errors: slot request failed -> code `upload-slot-failed`; storage POST failed ->
+//               `upload-failed`. Progress: { step:'host', status:'running', phase:'upload', done, total }.
 //   * create:   adapter.buildCreate(pkg, ctx) + authHeaders → transport → parseResult
 //               (update: buildUpdate(remoteId, …) when the job has a remoteId).
 //   * confirm:  adapter.buildConfirm/parseConfirm polling when the adapter has them.
@@ -46,6 +55,33 @@ const RETRY_WINDOW_MS = 15 * 60 * 1000;
 const MAX_EXTEND_MS = 60 * 60 * 1000;
 
 const errMessage = err => String(err?.message || err || 'unknown error');
+
+const FILE_PART_TYPE = 'application/octet-stream';
+const quoteHeader = v => String(v).replace(/[\r\n"]/g, '_');
+
+/**
+ * multipart/form-data body for an S3-style presigned POST: every field in order, then the
+ * `file` part LAST (S3 ignores anything after it). Returns { body: Uint8Array, contentType }.
+ */
+function buildMultipart(fields, file) {
+  const boundary = `----mixomesh${crypto.randomBytes(12).toString('hex')}`;
+  const chunks = [];
+  for (const f of fields) {
+    chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${quoteHeader(f.name)}"\r\n\r\n${f.value}\r\n`, 'utf8'));
+  }
+  chunks.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${quoteHeader(file.name)}"\r\n`
+    + `Content-Type: ${file.mime || FILE_PART_TYPE}\r\n\r\n`, 'utf8'));
+  chunks.push(Buffer.from(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength));
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+  return { body: new Uint8Array(Buffer.concat(chunks)), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+// "<Code>…</Code><Message>…</Message>" from an S3 error body (nothing else: the rest can echo the policy).
+function s3Reason(text) {
+  const pick = tag => (new RegExp(`<${tag}>([^<]{1,200})</${tag}>`).exec(String(text || '')) || [])[1];
+  return [pick('Code'), pick('Message')].filter(Boolean).join(': ');
+}
 
 /**
  * @param {object} deps
@@ -155,7 +191,10 @@ function createPublishRunner({
     },
 
     async host(job) {
-      if (job.desc.transfer !== 'url') return { skipped: true, message: 'Skipped: the platform takes direct uploads.' };
+      if (job.desc.transfer !== 'url') {
+        if (typeof job.adapter.buildUploadSlot === 'function') return uploadItems(job);
+        return { skipped: true, message: 'Skipped: the platform takes direct uploads.' };
+      }
       const host = await fileHostFor(job);
       const items = [
         ...job.deliverFiles.map((f, i) => ({ slot: `file:${i}`, name: f.name, mime: f.mime, bytes: f.bytes })),
@@ -228,10 +267,10 @@ function createPublishRunner({
       }
       for (let i = 0; i < confirmPolls; i++) {
         checkCancel(job);
-        const res = await send(job, job.adapter.buildConfirm(job.result), 'all');
+        const res = await send(job, job.adapter.buildConfirm(job.result, buildContext(job)), 'all');
         let c;
         try {
-          c = job.adapter.parseConfirm(res) || {};
+          c = job.adapter.parseConfirm(res, buildContext(job)) || {};
         } catch (err) {
           const e = new Error(errMessage(err));
           /** @type {any} */ (e).code = 'platform-rejected';
@@ -260,6 +299,65 @@ function createPublishRunner({
     },
   };
 
+  // Native upload (transfer 'direct' + buildUploadSlot): slot request, then multipart POST, per item.
+  async function uploadItems(job) {
+    if (job.remoteId) return { skipped: true, message: 'Skipped: updating the listing details only (files are not re-sent).' };
+    const items = [
+      ...job.deliverFiles.map((f, i) => ({ slot: `file:${i}`, kind: 'file', name: f.name, mime: f.mime, bytes: f.bytes })),
+      ...job.pkg.images.map((im, i) => ({ slot: `image:${i}`, kind: 'image', name: im.name, mime: im.mime, bytes: im.bytes })),
+    ];
+    const total = items.length;
+    let done = items.filter(it => job.uploaded.has(it.slot)).length;
+    report(job, 'host', 'running', `Uploading (${done}/${total})…`, { phase: 'upload', done, total });
+    for (const it of items) {
+      checkCancel(job);
+      if (job.uploaded.has(it.slot)) continue;
+      const slot = await requestSlot(job, it);
+      const key = await postToSlot(job, slot, it);
+      job.uploaded.set(it.slot, { key });
+      done++;
+      report(job, 'host', 'running', `Uploaded ${it.name} (${done}/${total}).`, { phase: 'upload', done, total });
+    }
+    return `${total} item(s) uploaded.`;
+  }
+
+  async function requestSlot(job, it) {
+    try {
+      const res = await send(job, job.adapter.buildUploadSlot(it.kind, { name: it.name, mime: it.mime }), 'all');
+      return job.adapter.parseUploadSlot(res, { name: it.name, mime: it.mime });
+    } catch (err) {
+      if (err?.cancelled || job.cancelRequested || err?.code === 'no-credentials') throw err;
+      const e = new Error(errMessage(err));
+      /** @type {any} */ (e).code = 'upload-slot-failed';
+      if (err?.issues) /** @type {any} */ (e).issues = err.issues;
+      throw e;
+    }
+  }
+
+  // POST the bytes to the presigned slot. Never sends platform credentials; returns the object key.
+  async function postToSlot(job, slot, it) {
+    const { body, contentType } = buildMultipart(slot.fields, it);
+    job.abort = new AbortController();
+    let res;
+    try {
+      res = await transport.request({
+        url: slot.url, method: 'POST', body, headers: { 'Content-Type': contentType },
+        timeoutMs: Math.min(30 * 60 * 1000, Math.max(60_000, Math.ceil(it.bytes.byteLength / 50_000) * 1000)),
+        signal: job.abort.signal, retry: 'all',
+      });
+    } catch (err) {
+      if (err?.cancelled || job.cancelRequested) throw err;
+      throw Object.assign(new Error(`Uploading "${it.name}" failed: ${errMessage(err)}`), { code: 'upload-failed' });
+    } finally {
+      job.abort = null;
+    }
+    if (!res.ok) {
+      const why = s3Reason(res.text);
+      throw Object.assign(new Error(`Uploading "${it.name}" failed (HTTP ${res.status}${why ? `: ${why}` : ''}).`), { code: 'upload-failed' });
+    }
+    return slot.key;
+  }
+
   // Uptime hosts: keep the links alive while the platform downloads (see header).
   async function holdUntilConfirmed(job, hasConfirm) {
     const label = job.desc.label || job.platform;
@@ -279,7 +377,7 @@ function createPublishRunner({
       if (allServed && hasConfirm) {
         let c;
         try {
-          c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result), 'all')) || {};
+          c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result, buildContext(job)), 'all'), buildContext(job)) || {};
         } catch (err) {
           const e = new Error(errMessage(err));
           /** @type {any} */ (e).code = 'platform-rejected';
@@ -346,11 +444,16 @@ function createPublishRunner({
 
   function buildContext(job) {
     const hosted = slot => job.hosted.get(slot)?.url;
+    const keyed = slot => job.uploaded.get(slot)?.key;
+    const extra = slot => ({
+      ...(hosted(slot) ? { url: hosted(slot) } : {}),
+      ...(keyed(slot) ? { key: keyed(slot) } : {}),
+    });
     return {
-      files: job.deliverFiles.map((f, i) => ({ ...f, ...(hosted(`file:${i}`) ? { url: hosted(`file:${i}`) } : {}) })),
+      ...(job.remoteId ? { update: true } : {}),
+      files: job.deliverFiles.map((f, i) => ({ ...f, ...extra(`file:${i}`) })),
       images: job.pkg.images.map((im, i) => ({
-        name: im.name, mime: im.mime, role: im.role, bytes: im.bytes,
-        ...(hosted(`image:${i}`) ? { url: hosted(`image:${i}`) } : {}),
+        name: im.name, mime: im.mime, role: im.role, bytes: im.bytes, ...extra(`image:${i}`),
       })),
     };
   }
@@ -490,7 +593,7 @@ function createPublishRunner({
     jobs.set(id, {
       id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null,
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
-      stepIndex: 0, status: 'pending', hosted: new Map(), deliverFiles: null, result: null,
+      stepIndex: 0, status: 'pending', hosted: new Map(), uploaded: new Map(), deliverFiles: null, result: null,
       fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, closeAt: null,
       holdDeadline: null, linksLost: false, error: null, code: null, issues: null, failedStep: null, leftover: null,
     });

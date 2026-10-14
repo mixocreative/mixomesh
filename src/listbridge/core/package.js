@@ -5,6 +5,9 @@
 
 export const LISTBRIDGE_FORMAT = 1;
 
+/** Where a listing lands on platforms that distinguish: 'secret' = only people with the link. */
+export const VISIBILITIES = Object.freeze(['public', 'secret']);
+
 /**
  * @typedef {{ name: string, mime: string, bytes: Uint8Array, role: 'hero'|'gallery' }} ListingImage
  * @typedef {{ name: string, mime: string, bytes: Uint8Array }} ListingFile
@@ -17,7 +20,9 @@ export const LISTBRIDGE_FORMAT = 1;
  * @property {ListingPrice|null} price null = free
  * @property {string|null} license
  * @property {boolean} madeWithAi
- * @property {string|null} categoryHint
+ * @property {string|null} categoryHint Platform category id (top level).
+ * @property {string[]} subCategoryIds Optional platform sub-category ids.
+ * @property {'public'|'secret'} visibility Default 'secret' (first publish is never accidentally live).
  * @property {string} locale
  * @property {ListingImage[]} images
  * @property {ListingFile[]} files
@@ -67,6 +72,8 @@ export function createListing(fields = {}) {
     license: f.license == null ? null : str(f.license),
     madeWithAi: !!f.madeWithAi,
     categoryHint: f.categoryHint == null ? null : str(f.categoryHint),
+    subCategoryIds: Array.isArray(f.subCategoryIds) ? f.subCategoryIds.map(str).filter(Boolean) : [],
+    visibility: f.visibility === 'public' ? 'public' : 'secret',
     locale: f.locale ? str(f.locale) : 'en',
     images: (f.images || []).map((/** @type {any} */ i) => ({
       name: str(i.name), mime: str(i.mime), bytes: i.bytes, role: i.role === 'hero' ? 'hero' : 'gallery',
@@ -111,6 +118,8 @@ export function validateListing(pkg, limits = {}) {
   for (const t of tags) {
     if (t.length > maxTagLength) add('tags', 'tag-too-long', `Tag "${t}" is longer than ${maxTagLength} characters.`);
   }
+
+  if (!VISIBILITIES.includes(pkg.visibility)) add('visibility', 'visibility-invalid', `Visibility must be one of: ${VISIBILITIES.join(', ')}.`);
 
   if (pkg.price) {
     const { amount, currency } = pkg.price;
@@ -175,6 +184,8 @@ export function toManifest(pkg) {
     license: pkg.license,
     madeWithAi: pkg.madeWithAi,
     categoryHint: pkg.categoryHint,
+    subCategoryIds: [...(pkg.subCategoryIds || [])],
+    visibility: pkg.visibility,
     locale: pkg.locale,
     images: pkg.images.map((i) => ({
       name: i.name, mime: i.mime, role: i.role, path: `images/${i.name}`, size: i.bytes.length,

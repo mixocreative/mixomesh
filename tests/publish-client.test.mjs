@@ -183,6 +183,28 @@ test('extendHold passes through to the bridge; unavailable runtime throws clearl
   await assert.rejects(Client.extendHold('j1', 1, { ...d, caps: { publish: false } }), /desktop app/);
 });
 
+test('listOptions passes platform + locale through; bridge errors become { ok:false }', async () => {
+  const { deps } = setup();
+  const seen = [];
+  const d = { ...deps, api: { ...deps.api, listOptions: async (p, l) => { seen.push([p, l]); return { ok: true, categories: [], licenses: [] }; } } };
+  assert.deepEqual(await Client.listOptions('cults3d', 'ja', d), { ok: true, categories: [], licenses: [] });
+  assert.deepEqual(seen, [['cults3d', 'ja']]);
+  const boom = { ...deps, api: { ...deps.api, listOptions: async () => { throw new Error('ipc down'); } } };
+  assert.deepEqual(await Client.listOptions('cults3d', 'en', boom), { ok: false, message: 'ipc down' });
+  assert.equal((await Client.listOptions('cults3d', 'en', { ...deps, api: { ...deps.api, listOptions: undefined } })).ok, false);
+  await assert.rejects(Client.listOptions('cults3d', 'en', { ...d, caps: { publish: false } }), /desktop app/);
+});
+
+test('record keeps visibility + sub-categories; a secret result stays a draft record', async () => {
+  const { deps, getListings } = setup();
+  const pkg = await build(deps);
+  pkg.visibility = 'secret'; pkg.subCategoryIds = ['S1'];
+  const d = { ...deps, api: { ...deps.api, start: async () => ({ ok: true, status: 'done', result: { remoteId: 'r9', url: 'https://c/x', status: 'secret' } }), onProgress: () => () => {} } };
+  await Client.publish(pkg, { platform: 'cults3d', accountId: 'default' }, undefined, d);
+  const rec = getListings()[0];
+  assert.deepEqual([rec.remoteId, rec.status, rec.visibility, rec.subCategoryIds], ['r9', 'draft', 'secret', ['S1']]);
+});
+
 test('early remoteId: the create-done progress event persists the record BEFORE the job settles', async () => {
   const { deps, getListings, sets } = setup();
   const pkg = await build(deps);

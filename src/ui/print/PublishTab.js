@@ -79,6 +79,7 @@ const S = {
   hold: null,              // { served, total, remainingMs } while the platform downloads from the temporary link
   linksOpen: null,         // { ms, at } after a confirm failure while the links stay open
   extending: false,        // a Keep waiting request is in flight
+  options: {},             // platform id -> { status:'loading'|'ok'|'failed', categories, licenses, message } (publish:listOptions)
 };
 
 const _api = () => (typeof window !== 'undefined' ? window.electronAPI?.listbridge : undefined);
@@ -95,7 +96,7 @@ export function _resetPublishTabState() {
     editingConn: false, connBusy: false, connMsg: null, form: null, formKey: null, tagDraft: '',
     hero: null, gallery: [], transparent: false, capturing: false, heroTried: false, formats: null,
     built: [], phase: 'form', steps: [], jobId: null, outcome: null, lastPkg: null, lastReq: null,
-    blocked: null, note: null, cancelRequested: false, hold: null, linksOpen: null, extending: false,
+    blocked: null, note: null, cancelRequested: false, hold: null, linksOpen: null, extending: false, options: {},
   });
   _guardUnload(false);
 }
@@ -120,6 +121,23 @@ async function _hydrate(refresh) {
     S.descError = err?.message ? String(err.message) : String(err);
   } finally {
     S.loading = false;
+  }
+  refresh();
+}
+
+// Category + license lists, loaded once per connected platform (and again on Reload / reconnect).
+// A failure leaves the free-text fields in place with a note: publishing is never blocked by it.
+async function _loadOptions(desc, refresh) {
+  const cur = S.options[desc.id];
+  if (!desc?.listOptions || cur) return;
+  S.options[desc.id] = { status: 'loading' };
+  try {
+    const res = await Publish.listOptions(desc.id, getLocale());
+    S.options[desc.id] = res?.ok
+      ? { status: 'ok', categories: res.categories ?? [], licenses: res.licenses ?? [] }
+      : { status: 'failed', message: String(res?.message ?? '') };
+  } catch (err) {
+    S.options[desc.id] = { status: 'failed', message: err?.message ? String(err.message) : String(err) };
   }
   refresh();
 }
@@ -422,6 +440,7 @@ async function _connect(root, desc, refresh) {
       S.connMsg = { ok: false, text: String(bad.res?.message ?? t('publish.connect.failed')) };
     } else {
       S.connected[desc.id] = true;
+      delete S.options[desc.id];
       if (hostSecret) S.s3Connected = true;
       S.editingConn = false;
       S.connMsg = null;
@@ -453,6 +472,7 @@ async function _testSaved(desc, refresh) {
 async function _disconnect(desc, refresh) {
   try { await _api()?.clearCredentials(M.platformCredentialId(desc.id)); } catch { /* shown as still connected */ }
   S.connected[desc.id] = await _api()?.hasCredentials(M.platformCredentialId(desc.id)).catch(() => true);
+  delete S.options[desc.id];
   S.connMsg = null;
   refresh('#pub-status');
 }
@@ -535,15 +555,18 @@ function _acctHtml(desc, connected) {
   return h;
 }
 
-function _stepsHtml() {
+function _stepsHtml(desc) {
   let h = `<div class="pub-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(M.progressFraction(S.steps) * 100)}"><i style="width:${Math.round(M.progressFraction(S.steps) * 100)}%"></i></div>`;
   h += '<ol class="pub-steps">';
   for (const s of S.steps) {
     const mark = s.status === 'done' ? '✓' : s.status === 'run' ? '●' : s.status === 'failed' ? '!' : s.status === 'skipped' ? '–' : '○';
-    const key = M.stepLabelKey(s.id);
+    const key = M.stepLabelKey(s.id, { direct: desc?.transfer === 'direct' });
+    const hint = s.id === 'build' && s.status === 'done' ? (s.message ?? '')
+      : s.id === 'host' && s.status === 'run' && s.phase === 'upload' && s.total ? `${s.done ?? 0}/${s.total}`
+        : s.id === 'host' && s.status === 'run' && s.phase ? t('publish.host.reachable') : '';
     h += `<li class="pub-step ${s.status}"><span class="pub-step-i" aria-hidden="true">${mark}</span>`
-      + `<span>${escapeHtml(key ? t(key) : s.id)}${s.status === 'skipped' ? ` <span class="pub-hint">(${escapeHtml(t('publish.step.skipped'))})</span>` : ''}</span>`
-      + `<span class="pub-hint pp-num">${s.id === 'build' && s.status === 'done' ? escapeHtml(s.message ?? '') : s.id === 'host' && s.status === 'run' && s.phase ? escapeHtml(t('publish.host.reachable')) : ''}</span></li>`;
+      + `<span>${escapeHtml(key ? t(key, { label: desc?.label ?? '' }) : s.id)}${s.status === 'skipped' ? ` <span class="pub-hint">(${escapeHtml(t('publish.step.skipped'))})</span>` : ''}</span>`
+      + `<span class="pub-hint pp-num">${escapeHtml(hint)}</span></li>`;
   }
   h += '</ol>';
   return h;
@@ -552,7 +575,7 @@ function _stepsHtml() {
 function _runHtml(desc) {
   let h = `<div id="pub-status" tabindex="-1" class="pub-status" role="status" aria-live="polite">`;
   if (S.phase === 'publishing') {
-    h += `<p class="pub-title">${escapeHtml(t('publish.running', { label: desc.label }))}</p>${_stepsHtml()}`;
+    h += `<p class="pub-title">${escapeHtml(t('publish.running', { label: desc.label }))}</p>${_stepsHtml(desc)}`;
     if (S.hold) {
       const ht = M.holdText(S.hold, desc.label);
       h += `<p class="pub-hold" role="status">${escapeHtml(t(ht.key, ht.params))}</p>`;
@@ -561,8 +584,8 @@ function _runHtml(desc) {
     h += `<div class="pub-btns"><button type="button" class="pub-btn" data-act="cancel-run"${S.cancelRequested && !S.jobId ? ' disabled' : ''}>${escapeHtml(t('publish.cancel'))}</button></div>`;
   } else if (S.phase === 'done') {
     const res = S.outcome?.result ?? {};
-    h += _stepsHtml();
-    h += `<div class="pub-ok"><b>${icon('CheckCircle', { width: 13, height: 13 })} ${escapeHtml(t(res.status === 'published' ? 'publish.done.live' : 'publish.done.draft', { label: desc.label }))}</b>`;
+    h += _stepsHtml(desc);
+    h += `<div class="pub-ok"><b>${icon('CheckCircle', { width: 13, height: 13 })} ${escapeHtml(t(res.status === 'published' ? 'publish.done.live' : res.status === 'secret' ? 'publish.done.secret' : 'publish.done.draft', { label: desc.label }))}</b>`;
     if (res.url) {
       h += `<span class="pub-url"><input class="pp-preset-select pp-num" id="pub-url" type="text" readonly value="${escapeAttr(res.url)}" aria-label="${escapeAttr(t('publish.done.linkAria'))}">`
         + `<button type="button" class="pub-btn" data-act="copy-url">${icon('Copy', { width: 12, height: 12 })} ${escapeHtml(t('publish.copy'))}</button></span>`;
@@ -572,12 +595,12 @@ function _runHtml(desc) {
   } else if (S.phase === 'failed') {
     const o = S.outcome ?? {};
     const failed = S.steps.find(s => s.status === 'failed');
-    h += _stepsHtml();
+    h += _stepsHtml(desc);
     h += '<div class="pub-fail pub-job-fail" role="alert">';
     const errKey = M.errorKey(o.code);
     const errMsg = errKey ? t(errKey) : (o.error ?? t('publish.failed.unknown'));
     const platformMsg = (o.code === 'platform-rejected' || o.code === 'platform-http') && o.error ? ` ${escapeHtml(o.error)}` : '';
-    h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id) ?? 'publish.step.build') }) : t('publish.failed.generic'))}</b> — ${escapeHtml(errMsg)}${platformMsg}</p>`;
+    h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id, { direct: desc.transfer === 'direct' }) ?? 'publish.step.build', { label: desc.label }) }) : t('publish.failed.generic'))}</b> — ${escapeHtml(errMsg)}${platformMsg}</p>`;
     if (o.leftover?.length) h += `<p class="pub-hint">${escapeHtml(t('publish.note.cancelledLeftover', { n: o.leftover.length }))}</p>`;
     h += `<p class="pub-hint">${escapeHtml(t('publish.failed.reuse'))}</p>`;
     const openLeft = failed?.id === 'confirm' ? M.linksOpenLeft(S.linksOpen, Date.now()) : 0;
@@ -633,7 +656,7 @@ function _formHtml(desc, readiness) {
   const max = Math.max(0, (desc.maxImages ?? 10) - 1);
   let h = '';
   if (rec?.remoteId && rec.url) {
-    h += `<div class="pub-live"><b>${escapeHtml(t('publish.live.on', { label: desc.label }))}</b>`
+    h += `<div class="pub-live"><b>${escapeHtml(t(rec.visibility === 'secret' ? 'publish.live.secret' : 'publish.live.on', { label: desc.label }))}</b>`
       + `<span class="pub-url"><input class="pp-preset-select pp-num" type="text" readonly value="${escapeAttr(rec.url)}" aria-label="${escapeAttr(t('publish.done.linkAria'))}"><button type="button" class="pub-btn" data-act="copy-live">${icon('Copy', { width: 12, height: 12 })} ${escapeHtml(t('publish.copy'))}</button></span>`
       + `<span class="pub-hint">${escapeHtml(t('publish.live.again'))}</span></div>`;
   }
@@ -661,13 +684,39 @@ function _formHtml(desc, readiness) {
   h += _row('pub-desc', t('publish.field.description'), `<textarea id="pub-desc" class="pp-preset-select pub-area" rows="4">${escapeHtml(f.description)}</textarea>`);
   h += _row('pub-tag-input', t('publish.field.tags'),
     `<div class="pub-tags"><span class="pub-chips" id="pub-chips"></span><input id="pub-tag-input" class="pub-tag-input" type="text" autocomplete="off" placeholder="${escapeAttr(t('publish.tags.placeholder'))}"></div>`);
-  h += _row('pub-category', t('publish.field.category'), _optionsOrText('pub-category', desc.categories, f.category));
-  h += _row('pub-license', t('publish.field.license'), _optionsOrText('pub-license', desc.licenses, f.license));
+  const opt = S.options[desc.id];
+  const have = opt?.status === 'ok';
+  const amount = M.parsePriceInput(f.price);
+  const licenses = have ? M.licensesFor(opt.licenses, Number.isNaN(amount) ? null : amount) : null;
+  const subs = have ? M.subCategoriesOf(opt.categories, f.category) : [];
+  if (have) {   // a stale choice (list changed, or the price now needs another license) is dropped
+    if (f.category && !opt.categories.some(c => c.id === f.category)) f.category = '';
+    if (f.subCategory && !subs.some(c => c.id === f.subCategory)) f.subCategory = '';
+    if (f.license && !licenses.some(l => l.code === f.license)) f.license = '';
+  }
+  h += _row('pub-category', t('publish.field.category'),
+    _optionsOrText('pub-category', have ? opt.categories.map(c => ({ id: c.id, label: c.name })) : null, f.category));
+  if (subs.length) {
+    h += _row('pub-subcategory', t('publish.field.subCategory'),
+      _optionsOrText('pub-subcategory', subs.map(c => ({ id: c.id, label: c.name })), f.subCategory));
+  }
+  h += _row('pub-license', t('publish.field.license'),
+    _optionsOrText('pub-license', licenses ? licenses.map(l => ({ id: l.code, label: l.name })) : null, f.license));
+  if (Array.isArray(desc.visibility) && desc.visibility.length > 1) {
+    h += _row('pub-visibility', t('publish.field.visibility'),
+      `<select id="pub-visibility" class="pp-preset-select">${desc.visibility.map(v => `<option value="${escapeAttr(v)}"${v === f.visibility ? ' selected' : ''}>${escapeHtml(t(v === 'public' ? 'publish.visibility.public' : 'publish.visibility.secret'))}</option>`).join('')}</select>`);
+  }
   const cur = Array.isArray(desc.currencies) && desc.currencies.length
     ? `<select id="pub-currency" class="pp-preset-select pub-cur" aria-label="${escapeAttr(t('publish.field.currency'))}">${desc.currencies.map(c => `<option${c === f.currency ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select>`
     : `<input id="pub-currency" class="pp-preset-select pub-cur" type="text" maxlength="3" value="${escapeAttr(f.currency)}" aria-label="${escapeAttr(t('publish.field.currency'))}">`;
   h += _row('pub-price', t('publish.field.price'), `<div class="pub-price"><input id="pub-price" class="pp-preset-select pp-num" type="text" inputmode="decimal" value="${escapeAttr(f.price)}" placeholder="${escapeAttr(t('publish.price.free'))}">${cur}</div>`);
-  if (!(Array.isArray(desc.categories) && desc.categories.length)) h += `<p class="pp-help pub-help">${escapeHtml(t('publish.category.freeText'))}</p>`;
+  if (!have) {
+    const note = opt?.status === 'loading' ? t('publish.options.loading')
+      : opt?.status === 'failed' ? t('publish.options.failed', { label: desc.label, reason: opt.message || '—' })
+        : t('publish.category.freeText');
+    h += `<p class="pp-help pub-help" role="status">${escapeHtml(note)}</p>`;
+    if (opt?.status === 'failed') h += `<button type="button" class="pub-btn" data-act="reload-options">${escapeHtml(t('publish.options.reload'))}</button>`;
+  }
   h += `<div class="pp-checkbox"><input type="checkbox" id="pub-ai"${f.madeWithAi ? ' checked' : ''}><label for="pub-ai">${escapeHtml(t('publish.field.madeWithAi'))}</label></div>`;
   h += _filesHtml(readiness, false);
   const limit = M.zipLimit(desc);
@@ -693,7 +742,7 @@ function _blocker(desc, readiness) {
   const sizes = Math.max(1, readiness?.targets?.length ?? 1);
   const issues = M.validateForm({
     form: S.form, hasHero: !!S.hero, galleryCount: S.gallery.length, fileCount: formats.length * sizes,
-    limits: { maxImages: desc.maxImages, currencies: desc.currencies }, locale: getLocale(),
+    limits: { maxImages: desc.maxImages, currencies: desc.currencies }, locale: getLocale(), requires: desc.requires ?? [],
   });
   if (!issues.length) return '';
   const key = M.issueKey(issues[0].code);
@@ -752,6 +801,7 @@ export function renderPublishTab({ readiness, rerender }) {
       h += `<p class="pp-help">${escapeHtml(t('publish.savePackage.help'))}</p>`;
     }
   } else if (S.phase === 'form') {
+    if (desc.listOptions && !S.options[desc.id]) setTimeout(() => _loadOptions(desc, refresh), 0);
     h += _formHtml(desc, readiness);
   } else {
     h += _runHtml(desc);
@@ -803,7 +853,16 @@ function _wire(el, desc, readiness, refresh) {
   });
   bind('pub-title', 'title'); bind('pub-desc', 'description'); bind('pub-category', 'category');
   bind('pub-license', 'license'); bind('pub-price', 'price'); bind('pub-ai', 'madeWithAi', 'check');
-  el.querySelector('#pub-category')?.addEventListener('change', e => { f.category = /** @type {HTMLSelectElement} */ (e.target).value; paintAction(); });
+  el.querySelector('#pub-category')?.addEventListener('change', e => {
+    const tgt = /** @type {HTMLSelectElement} */ (e.target);
+    f.category = tgt.value; f.subCategory = ''; paintAction();
+    if (tgt.tagName === 'SELECT') refresh('#pub-category');   // the sub-category list depends on it
+  });
+  el.querySelector('#pub-subcategory')?.addEventListener('change', e => { f.subCategory = /** @type {HTMLSelectElement} */ (e.target).value; paintAction(); });
+  el.querySelector('#pub-visibility')?.addEventListener('change', e => { f.visibility = /** @type {HTMLSelectElement} */ (e.target).value === 'public' ? 'public' : 'secret'; paintAction(); });
+  // The license list depends on free vs priced: rebuild it when the price is committed.
+  el.querySelector('#pub-price')?.addEventListener('change', () => { if (S.options[desc.id]?.status === 'ok') refresh('#pub-price'); });
+  on('reload-options', () => { delete S.options[desc.id]; refresh(); });
   el.querySelector('#pub-license')?.addEventListener('change', e => { f.license = /** @type {HTMLSelectElement} */ (e.target).value; paintAction(); });
   el.querySelector('#pub-currency')?.addEventListener('input', e => { f.currency = /** @type {HTMLInputElement} */ (e.target).value.toUpperCase(); paintAction(); });
   el.querySelector('#pub-currency')?.addEventListener('change', e => { f.currency = /** @type {HTMLSelectElement} */ (e.target).value; paintAction(); });
@@ -857,6 +916,7 @@ function _wire(el, desc, readiness, refresh) {
     const amount = M.parsePriceInput(f.price);
     const act = M.primaryAction({
       label: desc.label, remoteId: _remoteId(desc), drafts: desc.drafts === true,
+      visibility: Array.isArray(desc.visibility) && desc.visibility.length ? f.visibility : null,
       amount: Number.isNaN(amount) ? null : amount, currency: (f.currency || '').toUpperCase(), locale: getLocale(),
     });
     const why = _blocker(desc, readiness);

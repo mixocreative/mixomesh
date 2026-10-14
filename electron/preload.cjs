@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setCredentials: (id, secret) => ipcRenderer.invoke('publish:setCredentials', id, secret),
     clearCredentials: (id) => ipcRenderer.invoke('publish:clearCredentials', id),
     testConnection: (id) => ipcRenderer.invoke('publish:testConnection', id),
+    listOptions: (platform, locale) => ipcRenderer.invoke('publish:listOptions', platform, locale),
     start: (request) => ipcRenderer.invoke('publish:start', request),
     retry: (jobId) => ipcRenderer.invoke('publish:retry', jobId),
     cancel: (jobId) => ipcRenderer.invoke('publish:cancel', jobId),

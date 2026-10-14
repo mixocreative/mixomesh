@@ -87,6 +87,8 @@ function recordFor(pkg, req, outcome, status, now) {
     license: pkg.license,
     madeWithAi: pkg.madeWithAi,
     categoryId: pkg.categoryHint,
+    subCategoryIds: pkg.subCategoryIds ?? [],
+    visibility: pkg.visibility ?? null,
     remoteId: r.remoteId ?? req.remoteId ?? null,
     url: r.url ?? null,
     publishedAt: status === 'published' ? now : null,
@@ -102,6 +104,7 @@ function recordOutcome(pkg, req, outcome, d) {
   const now = d.now();
   let rec = null;
   if (outcome.ok) {
+    // 'published' = public; anything else ('secret' = link only, or a platform draft) stays a draft record.
     const published = outcome.result?.status === 'published';
     rec = recordFor(pkg, req, outcome, published ? 'published' : 'draft', now);
   } else if (outcome.status === 'invalid') {
@@ -190,6 +193,22 @@ export async function retryPublish(jobId, pkg, req, onProgress, deps) {
   }
   recordOutcome(pkg, req, outcome, d);
   return outcome;
+}
+
+/**
+ * Category + license lists for a platform (needs a saved account). Never throws for platform
+ * trouble: resolves `{ ok:true, categories, licenses }` or `{ ok:false, message }` (the tab then
+ * falls back to free-text fields).
+ * @param {string} platform @param {string} [locale]
+ */
+export async function listOptions(platform, locale = 'en', deps) {
+  const d = requireApi(deps);
+  if (typeof d.api.listOptions !== 'function') return { ok: false, message: 'This build cannot load the lists.' };
+  try {
+    return await d.api.listOptions(platform, locale);
+  } catch (err) {
+    return { ok: false, message: String(err?.message || err) };
+  }
 }
 
 export const retry = async (jobId, deps) => requireApi(deps).api.retry(jobId);
