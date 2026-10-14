@@ -17,3 +17,6 @@ tests/fixtures/real-scans/
 
 # cloudflared shipped with the desktop app: fetched + hash-verified by scripts/fetch-cloudflared.mjs
 vendor/cloudflared/
+
+# electron-builder output (npm run dist)
+release/

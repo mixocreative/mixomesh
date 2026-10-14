@@ -29,3 +29,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+
+# Package the exact Electron already installed for dev (node_modules/electron) instead of
+# re-downloading it: same version as development, and no hang on its checksum download.
+electronDist: node_modules/electron/dist
