@@ -24,7 +24,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.7 package to disk | done |
 | PB.8 persistence 3.5 | done 0e84e0b |
 | PB.9 Publish tab (mockup gate) | done 0a1b8f2 |
-| PB.10 docs | todo |
+| PB.10 docs | done 49c08c8 (Failure model pending PB.12; ADR status after PB.11) |
 | PB.11 live publish (owner) | todo |
 
 ## Gotchas
@@ -45,3 +45,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — Fable plan committed d8bfa6f (decisions D1–D8 proposed, recommendations used as defaults until owner overrides). Running: PB.9 (sonnet), PB.5b (opus), PB.0a (sonnet), PB.3a (sonnet; main.cjs registration deferred to main after PB.5b). Next: PB.12 (opus, after 5b), PB.13 (haiku, after 9), PB.14 (sonnet), PB.10 (haiku), PB.15.
 - 2026-10-14 — PB.0a e736310, PB.3a f27a901 (main moved ADAPTERS registry to core index), PB.5b 6d9be84 (+main registered Cults via core loader; electron security smoke now requires cults3d + default tunnel). Running: PB.9 (sonnet), PB.12 (opus; main resolved spec conflict: failed keeps tunnel only for a retry window then closes). Next: PB.14 after PB.12 (same jobs.cjs), PB.13 after PB.9, PB.10, PB.15.
 - 2026-10-14 — PB.9 0a1b8f2 (main fixes: localized S3 style options, 4-tab labels fit (icons hidden, verified by screenshot), gate vs job-failure boxes, race-free publish smoke 3/3; `SHOTS=<dir> npm run test:publish` saves screenshots). Running PB.12 (opus). Starting PB.10 docs (haiku).
+- 2026-10-14 — PB.10 49c08c8: haiku draft had ~8 invented facts (fake IPC names, findExisting, runtime re-hash, "transferred" bytes, View link) — main rewrote against code. Lesson: haiku docs need line-by-line proofreading vs grep of the code.
