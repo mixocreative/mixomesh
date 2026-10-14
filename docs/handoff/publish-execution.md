@@ -13,7 +13,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 
 | Task | Status |
 |---|---|
-| PB.0 live schema check | waiting on owner key |
+| PB.0 live schema check | done fbb6b15 (owner ran script) |
 | PB.1 ListingPackage | done |
 | PB.2 listing shot capture | done 02e7e17 |
 | PB.3 adapter contract + Cults payload | todo |
@@ -56,3 +56,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — PB.13 11f9c6a (haiku; main polished ja/zh-Hant wording; unit 479, all smokes, electron). Running PB.15 (sonnet): live tunnel test + in-app rehearsal with fake Cults (dev-only switch, packaged must ignore). Remaining after: PB.0 + PB.3b + PB.11 (owner key).
 - 2026-10-14 — PB.15 3424f25: live tunnel PASS (start 4–5.6 s, ~6.5–7 MB/s). Rehearsal exposed REAL BUG: new trycloudflare host → ENOTFOUND (negative DNS cache) for 22 s after create; platform would get missing files. PB.16 (sonnet) running: DoH readiness gate (1.1.1.1 + 8.8.8.8, stable 2 polls) + public probe before any URL goes to the platform; code tunnel-not-public.
 - 2026-10-14 — PB.16 a55c2e8 (unit 488, all smokes, electron; rehearsal download-once 3/3). Readiness is bimodal: ~8–12 s or ~61–74 s (trycloudflare SOA negative TTL 60 s). Tried a 10 s first-DoH-query delay: still 74 s on 1/3 runs → slow mode is Cloudflare propagation, not our queries; reverted. UI shows "Making the temporary links reachable…" for up to ~1 min sometimes — acceptable. ALL UNBLOCKED LISTBRIDGE TASKS DONE. Remaining = owner key: PB.0 (run scripts/cults-introspect.mjs), PB.3b (reconcile adapter), PB.11 (live publish).
+- 2026-10-14 — PB.0 fbb6b15: Cults HAS native upload (createFileUploader/createImageUploader → S3 presigned POST → fileKeys/imageKeys) → tunnel not needed for Cults (fallback only). visibility PUBLIC|SECRET|DEACTIVATED (SECRET = link-only, used as D1 default), licenses + categories queries, creation(slug).blueprints read-back for confirm. Running PB.3b expanded (sonnet): reconcile adapter, upload slots in runner, listOptions IPC, category/license/visibility selects, schema-drift test. Then PB.11 live (owner).
