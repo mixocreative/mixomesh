@@ -488,6 +488,10 @@ async function main() {
         formats: [...document.querySelectorAll('#rp-print-body [data-fmt]')]
           .map(button => button.dataset.fmt),
         disabled: [document.querySelector('#rp-print-body [data-act="export-primary"]')?.disabled],
+        // PB.9: a plain browser has caps.publish false -> no Publish tab, but the
+        // account-free "Save listing package" lives in the Export tab.
+        publishTab: !!document.querySelector('#rp-print-body [data-tab="publish"]'),
+        savePackage: !!document.querySelector('#rp-print-body [data-act="save-listing-package"]'),
       };
       document.querySelector('#rp-print-body [data-tab="printer"]')?.click();
       await frame();
@@ -496,6 +500,8 @@ async function main() {
       await frame();
       return { exportView, presetLabel };
     })()`);
+    assert(printReadinessUi.exportView.publishTab === false, 'Publish tab must be absent when caps.publish is false (web build)');
+    assert(printReadinessUi.exportView.savePackage === true, 'Export tab must offer "Save listing package" on tiers without publish');
     assert(printReadinessUi.exportView.readiness.includes('blocked'),
       'empty-scene readiness summary should render as blocked');
     assert(printReadinessUi.exportView.issues.includes('no-print-parts'),

@@ -1,0 +1,173 @@
+// Publish tab (PB.9): the pure decisions in src/ui/print/PublishModel.js plus the
+// PublishClient.retryPublish persistence seam.
+//   node --import ./tests/register-hooks.mjs --test tests/publish-tab.test.mjs
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { installEnv } from './env.mjs';
+
+installEnv();
+const M = await import('../src/ui/print/PublishModel.js');
+const { retryPublish } = await import('../src/core/publish/PublishClient.js');
+
+// -- price + button label --------------------------------------------------
+
+test('parsePriceInput: empty and 0 are free, comma decimals work, junk is NaN', () => {
+  assert.equal(M.parsePriceInput(''), null);
+  assert.equal(M.parsePriceInput('  '), null);
+  assert.equal(M.parsePriceInput('0'), null);
+  assert.equal(M.parsePriceInput(undefined), null);
+  assert.equal(M.parsePriceInput('4'), 4);
+  assert.equal(M.parsePriceInput('4,50'), 4.5);
+  assert.ok(Number.isNaN(M.parsePriceInput('abc')));
+});
+
+test('formatPrice: currency symbol per locale, safe fallback for unknown codes', () => {
+  assert.equal(M.formatPrice(4, 'EUR', 'en'), '€4.00');
+  assert.equal(M.formatPrice(1234.5, 'USD', 'en'), '$1,234.50');
+  assert.match(M.formatPrice(4, 'EUR', 'ja'), /4\.00/);
+  assert.equal(M.formatPrice(4, 'ZZ', 'en'), '4.00 ZZ');
+});
+
+test('primaryAction names the consequence: live+price, free, draft, update', () => {
+  assert.deepEqual(M.primaryAction({ label: 'Cults3D', amount: 4, currency: 'EUR' }),
+    { key: 'publish.btn.live', params: { label: 'Cults3D', price: '€4.00' } });
+  assert.deepEqual(M.primaryAction({ label: 'Cults3D', amount: null, currency: 'EUR' }),
+    { key: 'publish.btn.liveFree', params: { label: 'Cults3D' } });
+  assert.equal(M.primaryAction({ label: 'X', amount: 0 }).key, 'publish.btn.liveFree');
+  assert.equal(M.primaryAction({ label: 'X', amount: 4, currency: 'EUR', drafts: true }).key, 'publish.btn.draft');
+  // an existing listing always wins: publishing again is an update
+  assert.equal(M.primaryAction({ label: 'X', amount: 4, currency: 'EUR', drafts: true, remoteId: 'r1' }).key, 'publish.btn.update');
+});
+
+// -- tags ------------------------------------------------------------------
+
+test('addTagsFromText: commas finish tags, tail stays, dedupe ignores case', () => {
+  assert.deepEqual(M.addTagsFromText([], 'owl, full colour, fig'), { tags: ['owl', 'full colour'], rest: 'fig' });
+  assert.deepEqual(M.addTagsFromText(['Owl'], 'owl, bird,'), { tags: ['Owl', 'bird'], rest: '' });
+  assert.deepEqual(M.addTagsFromText(['a'], ' b ', { commit: true }), { tags: ['a', 'b'], rest: '' });
+  assert.deepEqual(M.addTagsFromText(['a'], '  ', { commit: true }), { tags: ['a'], rest: '' });
+  assert.deepEqual(M.addTagsFromText([], 'a、b，'), { tags: ['a', 'b'], rest: '' });
+  assert.deepEqual(M.removeTag(['a', 'b', 'c'], 1), ['a', 'c']);
+});
+
+// -- form <-> listing ------------------------------------------------------
+
+test('formToListing maps price / license / category and free = null price', () => {
+  const form = { ...M.emptyForm('Owl', 'EUR'), description: 'd', tags: ['a'], category: ' Art ', license: '', price: '4,5', currency: 'eur', madeWithAi: true };
+  const l = M.formToListing(form, { locale: 'ja' });
+  assert.deepEqual(l.price, { amount: 4.5, currency: 'EUR' });
+  assert.equal(l.categoryHint, 'Art');
+  assert.equal(l.license, null);
+  assert.equal(l.madeWithAi, true);
+  assert.equal(l.locale, 'ja');
+  assert.equal(M.formToListing({ ...form, price: '' }).price, null);
+});
+
+test('formFromRecord prefills from a persisted listing, else defaults', () => {
+  assert.deepEqual(M.formFromRecord(null, { title: 'T', currency: 'USD' }), M.emptyForm('T', 'USD'));
+  const f = M.formFromRecord({ title: 'Owl', description: 'd', tags: ['x'], price: 4, currency: 'EUR', license: 'std', madeWithAi: true, categoryId: 'art' });
+  assert.equal(f.title, 'Owl'); assert.equal(f.price, '4'); assert.equal(f.category, 'art'); assert.equal(f.madeWithAi, true);
+  assert.notEqual(f.tags, undefined);
+});
+
+test('validateForm reports the first core issue without building files', () => {
+  const ok = { ...M.emptyForm('Owl'), description: 'd' };
+  assert.deepEqual(M.validateForm({ form: ok, hasHero: true, galleryCount: 0, fileCount: 1 }), []);
+  const codes = f => M.validateForm({ form: f, hasHero: true, galleryCount: 0, fileCount: 1 }).map(i => i.code);
+  assert.deepEqual(codes({ ...ok, title: ' ' }), ['title-empty']);
+  assert.deepEqual(codes({ ...ok, description: '' }), ['description-empty']);
+  assert.deepEqual(codes({ ...ok, price: 'x' }), ['price-invalid']);
+  assert.deepEqual(codes({ ...ok, price: '1.234' }), ['price-precision']);
+  assert.ok(M.validateForm({ form: ok, hasHero: false, galleryCount: 0, fileCount: 1 }).some(i => i.code === 'images-none'));
+  assert.ok(M.validateForm({ form: ok, hasHero: true, galleryCount: 0, fileCount: 0 }).some(i => i.code === 'files-none'));
+  assert.ok(M.validateForm({ form: { ...ok, price: '4', currency: 'JPY' }, hasHero: true, galleryCount: 0, fileCount: 1, limits: { currencies: ['EUR'] } })
+    .some(i => i.code === 'currency-unsupported'));
+  assert.ok(M.validateForm({ form: ok, hasHero: true, galleryCount: 3, fileCount: 1, limits: { maxImages: 2 } }).some(i => i.code === 'images-too-many'));
+  assert.equal(M.issueKey('title-empty'), 'publish.issue.titleEmpty');
+  assert.equal(M.issueKey('hero-count'), null);
+});
+
+// -- steps -----------------------------------------------------------------
+
+test('stepPlan mirrors jobs.cjs: publish reports as create or update', () => {
+  assert.deepEqual(M.stepPlan(false), ['build', 'validate', 'bundle', 'host', 'create', 'confirm', 'cleanup']);
+  assert.deepEqual(M.stepPlan(true), ['build', 'validate', 'bundle', 'host', 'update', 'confirm', 'cleanup']);
+  for (const id of M.stepPlan(false).concat(['update'])) assert.match(M.stepLabelKey(id), /^publish\.step\./);
+  assert.equal(M.stepLabelKey('nope'), null);
+});
+
+test('applyProgress folds events, closes earlier steps, handles skipped + failed', () => {
+  let s = M.initialSteps(false);
+  assert.equal(M.progressFraction(s), 0);
+  s = M.applyProgress(s, { step: 'validate', status: 'running' });
+  assert.equal(s.find(x => x.id === 'build').status, 'done');
+  assert.equal(s.find(x => x.id === 'validate').status, 'run');
+  s = M.applyProgress(s, { step: 'validate', status: 'done' });
+  s = M.applyProgress(s, { step: 'host', status: 'done', skipped: true });
+  assert.equal(s.find(x => x.id === 'host').status, 'skipped');
+  assert.equal(s.find(x => x.id === 'bundle').status, 'done');   // never reported, still closed
+  s = M.applyProgress(s, { step: 'create', status: 'failed', message: 'category is required' });
+  assert.equal(s.find(x => x.id === 'create').status, 'failed');
+  assert.equal(s.find(x => x.id === 'create').message, 'category is required');
+  assert.strictEqual(M.applyProgress(s, { step: 'unknown', status: 'running' }), s);
+  assert.ok(M.progressFraction(s) > 0.5 && M.progressFraction(s) < 1);
+});
+
+// -- credentials -----------------------------------------------------------
+
+test('credential helpers: ids, secret detection, labels, collection', () => {
+  assert.equal(M.platformCredentialId('cults3d'), 'cults3d:default');
+  assert.equal(M.fileHostCredentialId(M.TUNNEL_HOST_ID), 'filehost:tunnel');
+  assert.equal(M.fileHostCredentialId(M.S3_HOST_ID), 'filehost:default');
+  assert.ok(M.isSecretField('apiKey') && M.isSecretField('secretAccessKey'));
+  assert.ok(!M.isSecretField('nickname') && !M.isSecretField('accessKeyId') && !M.isSecretField('bucket'));
+  assert.equal(M.humanizeField('accessKeyId'), 'Access key id');
+  assert.equal(M.credentialFieldKey('apiKey'), 'publish.cred.apiKey');
+  assert.equal(M.credentialFieldKey('mystery'), null);
+  const c = M.collectCredentials({ a: ' 1 ', b: '', c: 'x' }, ['a', 'b'], ['c', 'd']);
+  assert.deepEqual(c, { secret: { a: '1', c: 'x' }, missing: ['b'] });
+  assert.equal(M.zipLimit({ maxFiles: 10 }), 10);
+  assert.equal(M.zipLimit({}), null);
+  assert.equal(M.formatBytes(8.2 * 1024 * 1024), '8.2 MB');
+  assert.equal(M.formatBytes(undefined), '—');
+});
+
+// -- retryPublish persists like publish() ----------------------------------
+
+function fakeDeps(outcome) {
+  let project = { listings: [] };
+  return {
+    deps: {
+      caps: { publish: true },
+      api: { retry: async id => { assert.equal(id, 'job1'); return outcome; }, onProgress: cb => { cb({ step: 'create', status: 'running' }); return () => {}; } },
+      getState: () => ({ project }),
+      setState: fn => { const next = fn({ project }); project = next.project; },
+      now: () => '2026-10-14T00:00:00.000Z',
+    },
+    listings: () => project.listings,
+  };
+}
+const pkg = { title: 'Owl', description: 'd', tags: [], price: { amount: 4, currency: 'EUR' }, license: null, madeWithAi: false, categoryHint: null, files: [{ name: 'a.3mf' }], images: [] };
+
+test('retryPublish: success after a retry saves the listing record', async () => {
+  const { deps, listings } = fakeDeps({ ok: true, jobId: 'job1', status: 'done', result: { remoteId: 'r9', url: 'https://x/y', status: 'published' } });
+  const seen = [];
+  const out = await retryPublish('job1', pkg, { platform: 'cults3d', accountId: 'default' }, e => seen.push(e), deps);
+  assert.equal(out.ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(listings().length, 1);
+  assert.equal(listings()[0].remoteId, 'r9');
+  assert.equal(listings()[0].status, 'published');
+});
+
+test('retryPublish: another failure with no remote listing records nothing', async () => {
+  const { deps, listings } = fakeDeps({ ok: false, jobId: 'job1', status: 'failed', error: 'nope' });
+  const out = await retryPublish('job1', pkg, { platform: 'cults3d', accountId: 'default' }, null, deps);
+  assert.equal(out.ok, false);
+  assert.deepEqual(listings(), []);
+});
+
+test('retryPublish refuses outside the desktop shell', async () => {
+  await assert.rejects(() => retryPublish('j', pkg, {}, null, { caps: { publish: false }, api: {} }), /desktop/);
+});

@@ -149,5 +149,23 @@ export async function publish(pkg, req, onProgress, deps) {
   return outcome;
 }
 
+/**
+ * Retry a failed job AND persist its outcome like publish() does (the plain
+ * `retry` below only returns the outcome). `pkg` + `req` are the ones the
+ * failed publish() used.
+ */
+export async function retryPublish(jobId, pkg, req, onProgress, deps) {
+  const d = requireApi(deps);
+  const off = typeof onProgress === 'function' ? d.api.onProgress?.(onProgress) : null;
+  let outcome;
+  try {
+    outcome = await d.api.retry(jobId);
+  } finally {
+    if (typeof off === 'function') off();
+  }
+  recordOutcome(pkg, req, outcome, d);
+  return outcome;
+}
+
 export const retry = async (jobId, deps) => requireApi(deps).api.retry(jobId);
 export const cancel = async (jobId, deps) => requireApi(deps).api.cancel(jobId);

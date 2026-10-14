@@ -27,6 +27,8 @@ import { renderCostBlock } from './CostBlock.js';
 import { renderIssueList } from './ReadinessStrip.js';
 import { printSizesHtml, wirePrintSizes } from './PrintSizes.js';
 import { wirePrinterDefault } from './PrinterTab.js';
+import { caps } from '../../core/storage/capabilities.js';
+import { saveListingPackageFromView } from './PublishTab.js';
 import { formatLabel, formatDetail, objAxisLabel, flavourLabel, modifiedDot } from './printLabels.js';
 
 // Disclosure state survives the panel's full re-render.
@@ -113,6 +115,12 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
   html += '<div class="pp-export-footer">';
   html += `<button type="button" class="pp-primary-btn" data-act="export-primary" data-export-format="${escapeAttr(eff.exportFormat)}"${disabled}>`
     + `${icon('Download', { class: 'inline', width: 14, height: 14 })}<span class="pp-primary-label">${escapeHtml(label)}</span></button>`;
+  // Tiers without publishing (web / iPad / phone) still get the account-free
+  // listing package, so a seller can upload it by hand anywhere (PB.7).
+  if (!caps.publish) {
+    html += `<button type="button" class="pub-btn pub-wide" data-act="save-listing-package">${escapeHtml(t('publish.savePackage'))}</button>`;
+    html += `<p class="pp-help">${escapeHtml(t('publish.savePackage.help'))}</p>`;
+  }
   html += '</div>';
   html += '</div>';
 
@@ -151,6 +159,8 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
     markDirty();
     rerender();
   });
+
+  el.querySelector('[data-act="save-listing-package"]')?.addEventListener('click', () => saveListingPackageFromView({ onDone: rerender }));
 
   el.querySelector('[data-act="export-primary"]')?.addEventListener('click', () => {
     const p = getState().print ?? {};

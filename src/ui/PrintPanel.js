@@ -17,6 +17,8 @@ import * as Selection from '../core/Selection.js';
 import { readinessStripHtml, issueLabel, renderIssueList, wireIssueRoutes } from './print/ReadinessStrip.js';
 import { renderPrinterTab } from './print/PrinterTab.js';
 import { renderExportTab } from './print/ExportTab.js';
+import { renderPublishTab } from './print/PublishTab.js';
+import { caps } from '../core/storage/capabilities.js';
 
 // Print panel shell (tasks 0.6 / 1.2 / 1.3): tab bar, the readiness strip on
 // every tab, the Validation tab, the export runner + gate modals. The
@@ -24,7 +26,7 @@ import { renderExportTab } from './print/ExportTab.js';
 
 let _bodyEl = null;
 let _root   = null;
-let _activeTab = 'printer'; // 'printer' | 'validation' | 'export'
+let _activeTab = 'printer'; // 'printer' | 'validation' | 'export' | 'publish' (desktop only)
 
 
 // Walk every element under `root` that carries data-i18n-key and rewrite its
@@ -105,25 +107,28 @@ function _focusValidation() {
 
 // ── Tabs ──────────────────────────────────────────────────
 
-const TABS = ['printer', 'validation', 'export'];
+const BASE_TABS = ['printer', 'validation', 'export'];
+/** The Publish tab exists only where caps.publish is true (desktop shell). */
+const _tabs = () => (caps.publish ? [...BASE_TABS, 'publish'] : BASE_TABS);
 
 /** Literal t() calls so scripts/i18n-check.mjs sees every tab key. */
 function _tabLabel(tab) {
   if (tab === 'printer') return t('print.tab.printer');
   if (tab === 'validation') return t('print.tab.validation');
+  if (tab === 'publish') return t('print.tab.publish');
   return t('print.tab.export');
 }
-const TAB_ICONS = { printer: 'Printer', validation: 'CheckCircle', export: 'FileDown' };
+const TAB_ICONS = { printer: 'Printer', validation: 'CheckCircle', export: 'FileDown', publish: 'Upload' };
 
 function _renderTabs() {
   // Preview controls (wireframe edges, matte/flat) live in the viewport
   // toggles under the NavCube (ui/ViewportToggles.js) — no Preview tab. The
   // old Scale tab folded into Export (Print at), Bed into Printer (1.2/1.3).
   let html = `<div class="pp-tabs" role="tablist" aria-label="${escapeAttr(t('print.settingsAria'))}">`;
-  for (const tab of TABS) {
+  for (const tab of _tabs()) {
     const active = tab === _activeTab ? ' active' : '';
     const selected = tab === _activeTab ? 'true' : 'false';
-    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}">${sectionIcon(TAB_ICONS[tab])}${escapeHtml(_tabLabel(tab))}</button>`;
+    html += `<button class="pp-tab${active}" data-tab="${escapeAttr(tab)}" role="tab" aria-selected="${selected}" title="${escapeAttr(_tabLabel(tab))}">${sectionIcon(TAB_ICONS[tab])}${escapeHtml(_tabLabel(tab))}</button>`;
   }
   // ↺ resets the print settings (printer, bed, export options) — one button
   // for the whole slice; print sizes + the reference are project content.
@@ -518,6 +523,7 @@ function _routeReadinessIssue(code, objectId = '') {
 function _render() {
   if (!_bodyEl) return;
   _bodyEl.innerHTML = '';
+  if (!_tabs().includes(_activeTab)) _activeTab = 'printer';
 
   // One readiness + one as-shown preview per render, shared by the strip and
   // the tabs so every number on screen comes from the same snapshot.
@@ -535,6 +541,8 @@ function _render() {
     _bodyEl.appendChild(renderPrinterTab({ goExport: () => { _activeTab = 'export'; _render(); } }));
   } else if (_activeTab === 'validation') {
     _bodyEl.appendChild(_renderValidationTab());
+  } else if (_activeTab === 'publish') {
+    _bodyEl.appendChild(renderPublishTab({ readiness, rerender: _render }));
   } else {
     _bodyEl.appendChild(renderExportTab({
       readiness,

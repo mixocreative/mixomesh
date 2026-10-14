@@ -1,0 +1,138 @@
+/* Print > Publish tab (PB.9) and the Export tab's "Save listing package".
+   Tokens only (tokens.css / blender.css); field look reuses .pp-preset-select. */
+
+.pub-tab { display: grid; gap: var(--sp-4); align-content: start; }
+.pub-row { align-items: center; }
+.pub-row > label { align-self: center; }
+
+.pub-box {
+  display: grid; gap: var(--sp-3); padding: var(--sp-4);
+  border: 1px dashed var(--border-section); border-radius: var(--r-md); background: var(--bg-4);
+}
+
+.pub-acct {
+  display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-4);
+  font-size: var(--fs-sm);
+}
+.pub-acct:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.pub-acct-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pub-acct-actions { margin-left: auto; display: inline-flex; gap: var(--sp-2); }
+.pub-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex: none; }
+.pub-dot.off { background: var(--text-disabled); }
+
+.pub-btns { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.pub-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  min-height: var(--ctl-h); padding: var(--sp-2) var(--sp-5);
+  border: 1px solid var(--border-section); border-radius: var(--r-sm);
+  background: var(--ctl-bg); color: var(--text-0); font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.pub-btn:hover:not(:disabled) { background: var(--ctl-bg-hover); }
+.pub-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.pub-btn:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.pub-wide { width: 100%; }
+.pp-primary-btn.pub-inline { width: auto; min-height: var(--ctl-h); padding: var(--sp-2) var(--sp-6); font-size: var(--fs-sm); }
+
+.pub-sub {
+  border-top: 1px solid var(--border); padding-top: var(--sp-4); margin-top: var(--sp-2);
+  font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2);
+}
+.pub-sub-aside { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pub-hint { color: var(--text-2); font-size: var(--fs-xs); }
+.pub-help { margin: 0; }
+.pub-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pub-msg { margin: 0; min-height: 1em; font-size: var(--fs-xs); color: var(--success); }
+.pub-msg.bad { color: var(--danger); }
+.pub-blocker { margin: 0; font-size: var(--fs-xs); color: var(--text-1); }
+.pub-blocker:empty { display: none; }
+.pub-note { margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); background: var(--bg-1); font-size: var(--fs-xs); color: var(--text-1); }
+
+.pub-radios { display: grid; gap: var(--sp-2); }
+.pub-radio { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
+.pub-radio-help { margin: 0 0 var(--sp-2) 22px; }
+.pub-s3 { display: grid; gap: var(--sp-3); }
+
+/* hero + gallery */
+.pub-hero {
+  position: relative; aspect-ratio: 1; border-radius: var(--r-md); overflow: hidden;
+  border: 1px solid var(--border); background: linear-gradient(180deg, #e8e6e1, #cfcbc3);
+}
+.pub-hero.transparent {
+  background: repeating-conic-gradient(var(--bg-0) 0 25%, var(--bg-3) 0 50%) 0 0 / 14px 14px;
+}
+.pub-hero img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.pub-hero-empty { display: grid; place-items: center; color: var(--text-2); font-size: var(--fs-xs); }
+.pub-cap {
+  position: absolute; left: var(--sp-3); bottom: var(--sp-3); padding: 1px var(--sp-3);
+  border-radius: var(--r-sm); background: rgba(251, 246, 236, .85); color: var(--text-1); font-size: 10px;
+}
+.pub-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pub-thumb {
+  position: relative; width: 36px; height: 36px; border-radius: var(--r-sm); overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-0); padding: 0;
+}
+.pub-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pub-thumb-add { display: grid; place-items: center; border-style: dashed; color: var(--text-2); background: var(--ctl-bg); cursor: pointer; }
+.pub-thumb-add:disabled { cursor: not-allowed; color: var(--text-disabled); }
+.pub-thumb-add:focus-visible, .pub-thumb-x:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.pub-thumb-x {
+  position: absolute; top: 0; right: 0; width: 16px; height: 16px; border: 0; padding: 0; line-height: 1;
+  background: rgba(26, 22, 18, .65); color: var(--accent-fg); font-size: 12px; cursor: pointer;
+}
+
+/* fields */
+.pub-area { resize: vertical; min-height: 64px; font-family: inherit; }
+.pub-tags {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; min-width: 0;
+  min-height: var(--ctl-h); padding: 1px var(--sp-3); background: var(--ctl-bg);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.pub-tags:focus-within { border-color: var(--accent); }
+.pub-chips { display: contents; }
+.pub-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 var(--sp-4);
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg-0); line-height: 18px; font-size: var(--fs-xs);
+}
+.pub-chip button { border: 0; background: none; color: var(--text-2); cursor: pointer; padding: 0 var(--sp-2); font: inherit; }
+.pub-chip button:hover { color: var(--danger); }
+.pub-chip button:focus-visible { outline: 2px solid var(--border-focus); border-radius: 50%; }
+.pub-tag-input { flex: 1 1 60px; min-width: 60px; border: 0; outline: none; background: transparent; color: var(--text-0); font: inherit; font-size: var(--fs-sm); }
+.pub-price { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: var(--sp-3); }
+
+/* files */
+.pub-files { border: 0; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 0; }
+.pub-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: var(--sp-3); align-items: center; padding: 2px 0; font-size: var(--fs-sm); }
+.pub-file-size { color: var(--text-2); min-width: 54px; text-align: right; }
+
+/* run states */
+.pub-status { display: grid; gap: var(--sp-4); outline: none; }
+.pub-title { margin: 0; font-weight: 600; font-size: var(--fs-sm); }
+.pub-prog { height: 4px; border-radius: 4px; background: var(--bg-0); overflow: hidden; }
+.pub-prog i { display: block; height: 100%; background: var(--active); transition: width var(--dur-fast) var(--ease); }
+.pub-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.pub-step { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; font-size: var(--fs-sm); }
+.pub-step-i { text-align: center; font-size: var(--fs-xs); }
+.pub-step.done .pub-step-i { color: var(--success); }
+.pub-step.run { font-weight: 600; }
+.pub-step.run .pub-step-i { color: var(--active); }
+.pub-step.failed { color: var(--danger); font-weight: 600; }
+.pub-step.todo, .pub-step.skipped { color: var(--text-disabled); }
+.pub-ok, .pub-live {
+  display: grid; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--success) 9%, transparent); color: var(--success);
+}
+.pub-ok .pub-hint, .pub-live .pub-hint { color: var(--text-1); }
+.pub-url { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); }
+.pub-fail {
+  display: grid; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--active) 40%, transparent); background: var(--active-bg);
+}
+.pub-fail p { margin: 0; font-size: var(--fs-sm); }
+.pub-fail b { color: var(--active); }
+
+/* Four tabs (desktop) must still fit the 300 px panel next to the reset button. */
+.pp-tabs .pp-tab { flex: 1 1 0; min-width: 0; padding-inline: var(--sp-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-tabs .pp-tab-reset { flex: none; }
+/* With the 4th (Publish) tab the icons cost the labels their room ("Validatio…"): text only. */
+.pp-tabs:has(.pp-tab[data-tab="publish"]) .pp-tab svg { display: none; }
