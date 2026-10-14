@@ -93,7 +93,7 @@ function build(over = {}) {
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     registerFile: (p, n, o) => { registered.push({ kind: 'file', p, n, o }); return { ref: `ref_${registered.length}`, name: n }; },
     registerMount: (p, n) => { registered.push({ kind: 'mount', p, n }); return { ref: `mount_${registered.length}`, name: n }; },
-    limits: over.limits,
+    limits: over.limits, mainInfo: over.mainInfo,
   });
   return { net, fs, clock, calls, registered, timingCalls, server };
 }
@@ -479,6 +479,45 @@ test('output path rejections: bad dir, wrong ext, missing parent, project.saveAs
   await settle();
   for (let i = 1; i <= 6; i++) assert.equal(reply(sock, i).error.data.code, 'E_PATH_REJECTED', `case ${i}`);
   assert.equal(ctx.calls.length, 0);
+});
+
+test('project.saveAs: validated .mixo, WRITABLE token for a new file, renderer sees {ref,name} only, no bytes written', async () => {
+  const ctx = build({ dispatch: async () => ({ saved: true }) }); await ctx.server.start();
+  const sock = await connected(ctx);
+  rpc(sock, 1, 'project.saveAs', { file: 'C:\\out\\new.mixo' }); await settle();
+  assert.deepEqual(reply(sock, 1).result, { saved: true });
+  assert.deepEqual(Object.keys(ctx.calls[0].params), ['file']);
+  assert.deepEqual(Object.keys(ctx.calls[0].params.file).sort(), ['name', 'ref']);
+  assert.equal(ctx.calls[0].params.file.name, 'new.mixo');
+  const reg = ctx.registered.at(-1);
+  assert.equal(reg.o.writable, true);
+  assert.equal(win.resolve(reg.p).toLowerCase(), 'c:\\out\\new.mixo');
+  assert.equal(ctx.fs.files.has('c:\\out\\new.mixo'), false, 'the server writes nothing for saveAs');
+  assert.ok(!ABS_RE.test(JSON.stringify(ctx.calls[0].params)));
+  // existing file: refused before dispatch unless overwrite:true (which is not forwarded)
+  ctx.fs.files.set('c:\\out\\old.mixo', Buffer.from('x'));
+  rpc(sock, 2, 'project.saveAs', { file: 'C:\\out\\old.mixo' }); await settle();
+  assert.equal(reply(sock, 2).error.data.code, 'E_PATH_REJECTED');
+  assert.equal(ctx.calls.length, 1);
+  rpc(sock, 3, 'project.saveAs', { file: 'C:\\out\\old.mixo', overwrite: true }); await settle();
+  assert.equal(reply(sock, 3).result.saved, true);
+  assert.deepEqual(Object.keys(ctx.calls[1].params), ['file']);
+  // wrong extension / relative path
+  rpc(sock, 4, 'project.saveAs', { file: 'C:\\out\\x.png' });
+  rpc(sock, 5, 'project.saveAs', { file: 'x.mixo' }); await settle();
+  assert.equal(reply(sock, 4).error.data.code, 'E_PATH_REJECTED');
+  assert.equal(reply(sock, 5).error.data.code, 'E_PATH_REJECTED');
+  assert.equal(ctx.calls.length, 2);
+});
+
+test('app.info / app.capabilities: main-side fields merged in, whitelisted, never paths', async () => {
+  const ctx = build({ dispatch: async method => (method === 'app.info' ? { name: 'MIXOMESH', version: null } : { methods: [] }), mainInfo: () => ({ appVersion: '1.2.3', platform: 'win32', pid: 77, userData: 'C:\\secret', extra: 1 }) });
+  await ctx.server.start();
+  const sock = await connected(ctx);
+  rpc(sock, 1, 'app.info'); rpc(sock, 2, 'app.capabilities'); rpc(sock, 3, 'app.ping'); await settle();
+  assert.deepEqual(reply(sock, 1).result, { name: 'MIXOMESH', version: '1.2.3', appVersion: '1.2.3', platform: 'win32', pid: 77 });
+  assert.deepEqual(reply(sock, 2).result, { methods: [], appVersion: '1.2.3', platform: 'win32', pid: 77 });
+  assert.ok(!JSON.stringify(sock.frames()).includes('secret'));
 });
 
 // ---- notifications -----------------------------------------------------------

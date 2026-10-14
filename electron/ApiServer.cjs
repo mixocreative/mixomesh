@@ -74,6 +74,9 @@ const PATH_METHODS = Object.freeze({
   'render.thumbnail': { pathKey: 'outFile', allow: ['size', 'overwrite'], consume: ['overwrite'] },
 });
 const SINGLE_OUTPUT_EXT = Object.freeze({ 'project.saveAs': 'mixo', 'render.png': 'png', 'render.thumbnail': 'png' });
+// Fields only main knows, merged into the renderer's answer to these methods. Whitelisted
+// and typed: never a path, never anything the renderer could have supplied.
+const MAIN_INFO_METHODS = Object.freeze(['app.info', 'app.capabilities']);
 
 const LIMITS = Object.freeze({
   maxClients: 4,
@@ -125,7 +128,8 @@ function pipeNameFor(crypto, username, userDataDir) {
  *  net {createServer}, fs {mkdir,writeFile,rename,unlink,realpath,stat,access},
  *  crypto {randomBytes,createHash,timingSafeEqual}, setTimeout, clearTimeout,
  *  dispatch(method, params) -> Promise<result>, registerFile, registerMount,
- *  userDataDir, username, pid?, limits? (overrides, tests only)
+ *  userDataDir, username, pid?, mainInfo?() -> {appVersion, platform, pid},
+ *  limits? (overrides, tests only)
  */
 function createApiServer(deps) {
   const {
@@ -322,6 +326,14 @@ function createApiServer(deps) {
     if (!file.ok) throw rejected(file);
     if (file.ext !== SINGLE_OUTPUT_EXT[method]) throw rejected({ name: file.name, reason: `must be a .${SINGLE_OUTPUT_EXT[method]} file` });
     if (file.exists && !overwrite) throw existsError(file.name);
+    if (method === 'project.saveAs') {
+      // The renderer saves through PersistenceManager.saveAs so the project stays bound to
+      // the file: it gets a WRITABLE token for the (possibly not-yet-existing) validated
+      // path, exactly what project:pickSave mints. No bytes come back; nothing is written here.
+      const r = registerFile(file.absolutePath, file.name, { writable: true });
+      forward.file = { ref: r.ref, name: r.name };
+      return { forward, finish: async result => result };
+    }
     return {
       forward,
       finish: result => finishSingle(file, overwrite, result),
@@ -395,12 +407,27 @@ function createApiServer(deps) {
     } finally {
       if (timer) clearT(timer);
     }
-    const out = await job.finish(result);
+    const out = mergeMainInfo(method, await job.finish(result));
     if (method === 'events.subscribe' && client) {
       const ev = Array.isArray(job.forward.events) ? job.forward.events.filter(e => EVENT_TYPES.includes(e)) : [];
       client.subs = new Set(ev.length ? ev : EVENT_TYPES);
     }
     return out;
+  }
+
+  /** app.info / app.capabilities: add the fields only main knows (typed whitelist, no paths). */
+  function mergeMainInfo(method, out) {
+    if (!MAIN_INFO_METHODS.includes(method) || !isPlainObject(out) || typeof deps.mainInfo !== 'function') return out;
+    let info;
+    try { info = deps.mainInfo(); } catch { return out; }
+    if (!isPlainObject(info)) return out;
+    const extra = {};
+    if (typeof info.appVersion === 'string' && info.appVersion.length <= 64) extra.appVersion = info.appVersion;
+    if (typeof info.platform === 'string' && info.platform.length <= 32) extra.platform = info.platform;
+    if (Number.isInteger(info.pid)) extra.pid = info.pid;
+    const merged = { ...out, ...extra };
+    if (method === 'app.info' && merged.version == null && extra.appVersion) merged.version = extra.appVersion;
+    return merged;
   }
 
   const toWireError = err => (isApiError(err) ? err : apiError('E_INTERNAL', 'internal error'));
@@ -568,6 +595,6 @@ function createApiServer(deps) {
 }
 
 module.exports = {
-  createApiServer, pipeNameFor, containsAbsolutePath, LIMITS,
+  createApiServer, pipeNameFor, containsAbsolutePath, apiError, LIMITS,
   API_VERSION, ERROR_CODES, METHOD_NAMES, EVENT_TYPES, PATH_METHODS, OUTPUT_EXTENSIONS,
 };

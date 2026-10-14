@@ -80,6 +80,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('launch:requests', listener);
     return () => ipcRenderer.removeListener('launch:requests', listener);
   },
+  // Automation API (API.5, ADR 0005): main forwards a validated request ({id, method, params};
+  // params carry opaque tokens, never paths); the renderer answers with respondApi({id,
+  // result|error}) and pushes events with notifyApi. setApiEnabled/getApiStatus back the
+  // Preferences toggle ({enabled, running}). All OPTIONAL: not part of REQUIRED_BRIDGE.
+  onApiRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('api:request', listener);
+    return () => ipcRenderer.removeListener('api:request', listener);
+  },
+  respondApi: (res) => ipcRenderer.invoke('api:response', res),
+  notifyApi: (evt) => ipcRenderer.invoke('api:notify', evt),
+  setApiEnabled: (enabled) => ipcRenderer.invoke('api:setEnabled', enabled),
+  getApiStatus: () => ipcRenderer.invoke('api:status'),
   respondToClose: (result) => ipcRenderer.send('app:close-response', result),
   // Listbridge marketplace publishing (ADR 0004). Secrets go IN only: no call returns a
   // saved credential. Listings travel as { platform, accountId, fileHostId?, remoteId?,

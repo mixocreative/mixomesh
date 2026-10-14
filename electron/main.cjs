@@ -14,6 +14,7 @@ const {
 const { createKvStore } = require('./KvStore.cjs');
 const { parseLaunchArgv, validateLaunchPath } = require('./LaunchArgs.cjs');
 const { buildLaunchBatch, createLaunchQueue } = require('./LaunchQueue.cjs');
+const { createApiServer, apiError: makeApiError } = require('./ApiServer.cjs');
 const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
 const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
 const {
@@ -33,6 +34,9 @@ const SMOKE_SAVE = process.env.MIXO_SMOKE === 'save';
 // MIXO_SMOKE_USERDATA so a SECOND process can share the single-instance lock; _runLaunchSmoke
 // observes the renderer, spawns that second process and checks the result.
 const SMOKE_LAUNCH = process.env.MIXO_SMOKE === 'launch';
+// MIXO_SMOKE=api (unpackaged only, API.5): temp (or MIXO_SMOKE_USERDATA) userData; the API server
+// starts as in a real run and the external end-to-end smoke (API.8) drives it over the pipe.
+const SMOKE_API = process.env.MIXO_SMOKE === 'api';
 const PROJECT_FILTERS = [{ name: 'MIXOMESH project', extensions: ['mixo'] }];
 let _smokeDir = null;
 let _smokeRoot = null;
@@ -42,7 +46,7 @@ let _smokeRoot = null;
 if (process.env.MIXO_SMOKE && !app.isPackaged) {
   const os = require('node:os');
   const fsSync = require('node:fs');
-  const sharedUserData = SMOKE_LAUNCH ? process.env.MIXO_SMOKE_USERDATA : '';
+  const sharedUserData = SMOKE_LAUNCH || SMOKE_API ? process.env.MIXO_SMOKE_USERDATA : '';
   const smokeRoot = sharedUserData
     ? path.dirname(sharedUserData)
     : fsSync.mkdtempSync(path.join(os.tmpdir(), 'mixo-smoke-'));
@@ -85,6 +89,8 @@ function createWindow() {
   const launchQueue = createLaunchQueue();
   _launchQueues.set(win.webContents, launchQueue);
   win.webContents.on('did-start-loading', () => launchQueue.reset());
+  // A reloading renderer can never answer what it was asked: fail in-flight API requests.
+  win.webContents.on('did-start-loading', () => _failApiRequests('reload'));
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(INDEX_PATH);
 
@@ -168,7 +174,14 @@ function _askQuitDuringPublish(win, running) {
       if (/Content Security Policy/i.test(text)) { console.error('MIXO_SMOKE: CSP violation', text); app.exit(5); }
     });
   }
-  if (SMOKE_LAUNCH && !app.isPackaged) {
+  if (SMOKE_API && !app.isPackaged) {
+    // Nothing to probe in-process: the external smoke (API.8) talks to the pipe. Just fail
+    // loudly if the page never loads, and never outlive a stuck test.
+    win.webContents.once('did-finish-load', () => console.log('MIXO_SMOKE: loaded'));
+    win.webContents.once('did-fail-load', (_e, code, desc) => { console.error('MIXO_SMOKE: fail', code, desc); app.exit(1); });
+    const failsafe = setTimeout(() => { console.error('MIXO_SMOKE: api timeout'); app.exit(2); }, 300000);
+    failsafe.unref();
+  } else if (SMOKE_LAUNCH && !app.isPackaged) {
     win.webContents.once('did-finish-load', () => { console.log('MIXO_SMOKE: loaded'); _runLaunchSmoke(win); });
     win.webContents.once('did-fail-load', (_e, code, desc) => { console.error('MIXO_SMOKE: fail', code, desc); app.exit(1); });
     setTimeout(() => { console.error('MIXO_SMOKE: launch timeout'); app.exit(2); }, 50000);
@@ -553,12 +566,133 @@ app.on('second-instance', (_event, argv, workingDirectory) => {
   _handleLaunch(argv, workingDirectory);
 });
 
+// ── Automation API (API.5, ADR 0005) ──
+// ApiServer (named pipe, session token) forwards every authenticated request here; main sends
+// it to the renderer ('api:request') and resolves it when the renderer answers 'api:response'.
+// The renderer never sees a path (ApiServer rewrites them to opaque tokens first). Enabled by
+// default; the Preferences toggle persists KV key 'api_enabled' (absent = enabled, false = off).
+const API_KV_KEY = 'api_enabled';
+const API_MAX_NOTIFY_BYTES = 64 * 1024;
+const API_PENDING_MAX_MS = 10 * 60 * 1000 + 30000;   // ApiServer times out at 10 min; this only reaps
+let _apiServer = null;
+let _apiEnabled = true;
+let _apiChain = Promise.resolve();                    // serialises start/stop
+let _apiSeq = 0;
+const _apiPending = new Map();                        // id -> {resolve, reject, sender, timer}
+
+function _failApiRequests(message) {
+  for (const [id, p] of _apiPending) {
+    clearTimeout(p.timer);
+    _apiPending.delete(id);
+    p.reject(makeApiError('E_INTERNAL', message));
+  }
+}
+
+function _apiDispatch(method, params) {
+  const win = _launchPrimaryWindow();
+  if (!win || win.webContents.isDestroyed()) return Promise.reject(makeApiError('E_BUSY', 'no window is open'));
+  if (win.webContents.isLoading()) return Promise.reject(makeApiError('E_BUSY', 'the app is still loading'));
+  // The renderer's ApiBridge subscribes during bootstrap, right after LaunchRequests pulls
+  // its queue (launch:pull) — until then a request would sit unanswered: say "starting".
+  if (!_launchQueues.get(win.webContents)?.isReady()) return Promise.reject(makeApiError('E_BUSY', 'the app is still starting'));
+  return new Promise((resolve, reject) => {
+    const id = 'r' + (++_apiSeq);
+    const timer = setTimeout(() => {
+      if (_apiPending.delete(id)) reject(makeApiError('E_TIMEOUT', method + ': timed out'));
+    }, API_PENDING_MAX_MS);
+    timer.unref();
+    _apiPending.set(id, { resolve, reject, sender: win.webContents, timer });
+    try { win.webContents.send('api:request', { id, method, params }); } catch {
+      clearTimeout(timer);
+      _apiPending.delete(id);
+      reject(makeApiError('E_INTERNAL', 'could not reach the app'));
+    }
+  });
+}
+
+function _createApiServer() {
+  const os = require('node:os');
+  let username = 'user';
+  try { username = os.userInfo().username || username; } catch { /* keep default */ }
+  return createApiServer({
+    net: require('node:net'),
+    fs: require('node:fs/promises'),
+    crypto: require('node:crypto'),
+    dispatch: _apiDispatch,
+    registerFile: (p, name, opts) => _fileRefs.registerFile(p, name, opts),
+    registerMount: (p, name) => _fileRefs.registerMount(p, name),
+    userDataDir: app.getPath('userData'),
+    username,
+    mainInfo: () => ({ appVersion: app.getVersion(), platform: process.platform, pid: process.pid }),
+  });
+}
+
+function _apiStatus() {
+  return { enabled: _apiEnabled, running: !!_apiServer };
+}
+
+function _apiApply(enabled) {
+  const run = _apiChain.then(async () => {
+    if (enabled && !_apiServer) {
+      const server = _createApiServer();
+      await server.start();
+      _apiServer = server;
+    } else if (!enabled && _apiServer) {
+      const server = _apiServer;
+      _apiServer = null;
+      _failApiRequests('api stopped');
+      await server.stop();
+    }
+  });
+  _apiChain = run.catch(() => {});
+  return run;
+}
+
+// The session file holds the pipe token and must not outlive the process. Sync on purpose:
+// will-quit / exit handlers cannot await. A hard app.exit() skips will-quit, so 'exit' too.
+function _removeApiSessionFile() {
+  const server = _apiServer;
+  if (!server) return;
+  try { require('node:fs').unlinkSync(server.sessionFile); } catch { /* already gone */ }
+}
+process.on('exit', _removeApiSessionFile);
+
+handle('api:response', (event, res) => {
+  const id = res && typeof res === 'object' && typeof res.id === 'string' ? res.id : null;
+  const p = id ? _apiPending.get(id) : null;
+  if (!p || p.sender !== event.sender) return false;   // unknown / stale / foreign id: ignore
+  clearTimeout(p.timer);
+  _apiPending.delete(id);
+  if (res.error !== undefined && res.error !== null) p.reject(res.error);
+  else p.resolve(res.result);
+  return true;
+});
+handle('api:notify', (_e, evt) => {
+  if (!_apiServer || !evt || typeof evt !== 'object') return 0;
+  let size = Infinity;
+  try { size = JSON.stringify(evt).length; } catch { /* unserialisable */ }
+  if (size > API_MAX_NOTIFY_BYTES) return 0;
+  return _apiServer.notify(evt);
+});
+handle('api:setEnabled', async (_e, enabled) => {
+  if (typeof enabled !== 'boolean') throw new Error('api:setEnabled expects a boolean');
+  _apiEnabled = enabled;
+  await _kv.set(API_KV_KEY, enabled);
+  try { await _apiApply(enabled); } catch (err) {
+    console.error('api server toggle failed:', err?.message ?? err);
+  }
+  return _apiStatus();
+});
+handle('api:status', () => _apiStatus());
+
 let _listbridge = null;
 let _tunnelsClosed = false;
 
 // Temporary-link hosts (cloudflared quick tunnels) must not outlive the app: close them
 // before quitting (bounded wait), then let the quit continue.
 app.on('will-quit', event => {
+  _removeApiSessionFile();
+  if (_apiServer) _apiServer.stop().catch(() => {});
   if (_tunnelsClosed || !_listbridge) return;
   event.preventDefault();
   _tunnelsClosed = true;
@@ -602,6 +736,18 @@ if (_gotLock) app.whenReady().then(async () => {
     userDataDir: app.getPath('userData'), safeStorage, adapters: await _loadListbridgeAdapters(),
   });
   createWindow();
+  // API server: after the window exists. Absent flag = enabled; only the explicit boolean false
+  // disables. Other smoke modes keep their exact behaviour (no pipe); MIXO_SMOKE=api requires it.
+  _apiEnabled = (await _kv.get(API_KV_KEY).catch(() => null)) !== false;
+  if (_apiEnabled && (!process.env.MIXO_SMOKE || SMOKE_API)) {
+    try {
+      await _apiApply(true);
+      if (SMOKE_API) console.log('MIXO_SMOKE: api started');
+    } catch (err) {
+      console.error('api server failed to start:', err?.message ?? err);
+      if (SMOKE_API) app.exit(7);
+    }
+  }
   _launchServiceUp = true;
   _handleLaunch(process.argv, process.cwd());
   for (const { argv, cwd } of _deferredLaunches.splice(0)) _handleLaunch(argv, cwd);

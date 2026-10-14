@@ -229,4 +229,41 @@ await check('launch integration: single instance + trusted launch:pull + two-met
   assert.doesNotMatch(preloadSource, /send\(\s*['"]launch:/, 'the renderer cannot send launch requests');
 });
 
-assert.equal(cases, 11);
+await check('automation API: sender-checked channels, five optional preload methods, session file only under userData', () => {
+  // Every API channel is registered through the sender-checking handle(); no raw ipcMain use.
+  for (const ch of ['api:response', 'api:notify', 'api:setEnabled', 'api:status']) {
+    assert.match(mainSource, new RegExp(`\\nhandle\\('${ch}', `), `${ch} via handle()`);
+  }
+  assert.doesNotMatch(mainSource, /ipcMain\.(handle|on)\(\s*['"]api:/);
+  assert.equal(mainSource.match(/ipcMain\.handle\(/g)?.length, 1);
+  assert.equal(mainSource.match(/ipcMain\.on\(/g)?.length, 1);
+  // Only main -> renderer 'api:request' is sent; the renderer answers only through invoke.
+  assert.deepEqual([...new Set([...mainSource.matchAll(/['"](api:[a-zA-Z]+)['"]/g)].map(m => m[1]))].sort(),
+    ['api:notify', 'api:request', 'api:response', 'api:setEnabled', 'api:status']);
+  // Responses are matched to the webContents that was asked; booleans only for the toggle.
+  assert.match(mainSource, /handle\('api:response'[\s\S]*?p\.sender !== event\.sender/);
+  assert.match(mainSource, /handle\('api:setEnabled'[\s\S]*?typeof enabled !== 'boolean'/);
+  // Reload fails in-flight requests; session file removed on will-quit and exit.
+  assert.match(mainSource, /on\('did-start-loading'[\s\S]*?_failApiRequests\('reload'\)/);
+  assert.match(mainSource, /app\.on\('will-quit', event => \{\s*_removeApiSessionFile\(\);/);
+  assert.match(mainSource, /process\.on\('exit', _removeApiSessionFile\)/);
+  // Server is built only on userData, from the injected registry, and starts after createWindow().
+  assert.match(mainSource, /userDataDir: app\.getPath\('userData'\)/);
+  assert.ok(mainSource.indexOf('createWindow();\n  // API server') > 0, 'API starts after createWindow()');
+  assert.doesNotMatch(mainSource, /session\.json/, 'main never builds the session path itself (ApiServer owns it under userData/api)');
+  // Preload: exactly these five new methods, mapped to exactly these channels, none takes a path.
+  const apiMethods = [...preloadSource.matchAll(/^\s{2}(onApiRequest|respondApi|notifyApi|setApiEnabled|getApiStatus):/gm)].map(m => m[1]);
+  assert.deepEqual(apiMethods, ['onApiRequest', 'respondApi', 'notifyApi', 'setApiEnabled', 'getApiStatus']);
+  const apiChannels = [...new Set([...preloadSource.matchAll(/['"](api:[a-zA-Z]+)['"]/g)].map(m => m[1]))].sort();
+  assert.deepEqual(apiChannels, ['api:notify', 'api:request', 'api:response', 'api:setEnabled', 'api:status']);
+  assert.doesNotMatch(preloadSource, /send\(\s*['"]api:/);
+  // Optional: the boot gate's required bridge is unchanged.
+  const adapter = readFileSync(new URL('../src/core/storage/DesktopStorageAdapter.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(adapter.slice(adapter.indexOf('REQUIRED_BRIDGE'), adapter.indexOf('REQUIRED_BRIDGE') + 400), /Api/);
+  // The smoke texts other modes depend on are untouched.
+  for (const text of ["'MIXO_SMOKE: loaded'", "MIXO_SMOKE: security ${ok ? 'ok' : 'FAIL'}", "'MIXO_SMOKE: saved'", "'MIXO_SMOKE: launched'"]) {
+    assert.ok(mainSource.includes(text.replace(/^'|'$/g, '')), text);
+  }
+});
+
+assert.equal(cases, 12);
