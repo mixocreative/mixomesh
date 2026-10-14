@@ -15,14 +15,14 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 |---|---|
 | PB.0 live schema check | waiting on owner key |
 | PB.1 ListingPackage | done |
-| PB.2 listing shot capture | running (agent) |
+| PB.2 listing shot capture | done 02e7e17 |
 | PB.3 adapter contract + Cults payload | todo |
-| PB.4 main publish service | running (agent) |
+| PB.4 main publish service | done 015a0d8 |
 | PB.5 S3 file host | done |
-| PB.6 renderer bridge + caps | todo |
-| PB.7 package to disk | todo |
-| PB.8 persistence 3.5 | built, unit-green isolated (369/0); HOLD commit until browser smoke on quiet machine |
-| PB.9 Publish tab (mockup gate) | todo |
+| PB.6 renderer bridge + caps | running (agent, with PB.7) |
+| PB.7 package to disk | running (agent) |
+| PB.8 persistence 3.5 | done 0e84e0b |
+| PB.9 Publish tab (mockup gate) | mockup published, awaiting owner: https://claude.ai/artifact/5uS9mYViy3u4Myx3oWpJSW |
 | PB.10 docs | todo |
 | PB.11 live publish (owner) | todo |
 
@@ -37,3 +37,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — owner: name it for reuse → **Listbridge** (portable core `src/listbridge/`, Electron runner `electron/listbridge/`, MIXOMESH glue `src/core/publish/`).
 - 2026-10-14 — running in parallel: PB.1 (sonnet, src/listbridge/), PB.2 (sonnet, FrameCapture listing shot + smoke), PB.5 (opus, electron/listbridge/filehosts/s3.cjs). Main verifies + commits each. Next: PB.3 (needs PB.0 schema → owner key), PB.4, PB.6–PB.8; PB.9 mockup.
 - 2026-10-14 — PB.1 909008e (+main fix: manifest path traversal), PB.5 43e0087 (+eslint now lints electron/*.cjs). Running: PB.2, PB.4 (opus), PB.8.
+- 2026-10-14 — PB.2 02e7e17, PB.8 0e84e0b, PB.4 015a0d8 (full tree green: unit 401, all smokes, build, electron). Credentials file = <userData>/listbridge-credentials.bin (ADR aligned). Blueprint text pending in .tmp/blueprint-pending/listings-3.5.md → PB.10. Running PB.6+PB.7. PB.9 mockup published.
