@@ -21,10 +21,15 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.5 S3 file host | done |
 | PB.6 renderer bridge + caps | todo |
 | PB.7 package to disk | todo |
-| PB.8 persistence 3.5 | running (agent) |
+| PB.8 persistence 3.5 | built, unit-green isolated (369/0); HOLD commit until browser smoke on quiet machine |
 | PB.9 Publish tab (mockup gate) | todo |
 | PB.10 docs | todo |
 | PB.11 live publish (owner) | todo |
+
+## Gotchas
+
+- **Never `git commit -a` while agents are working** — 2026-10-14 a ledger `-am` swept PB.2's half-done render files into master (without the new untracked ListingShot.js → master broken); undone with `reset --soft` before push. Stage ledger by path only.
+- Browser smokes are unreliable while agent smokes/builds run (shared Vite cache, CPU) — clean master timed out too. Verify browser only when no agent is running.
 
 ## Session log
 
