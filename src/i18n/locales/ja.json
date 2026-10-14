@@ -1186,5 +1186,6 @@
   "launch.errors": "起動リクエストから開けなかったもの：{list}",
   "launch.skippedExtraProject": "スキップしました（プロジェクトは一度に1つだけ開けます）",
   "launch.busy": "起動リクエストをスキップしました。MIXOMESH が読み込み中でした。もう一度お試しください。",
-  "launch.unreadable": "ファイルを読み込めませんでした"
+  "launch.unreadable": "ファイルを読み込めませんでした",
+  "publish.host.downloadTool": "リンク用ツールをダウンロードしています（初回のみ）…"
 }

@@ -196,6 +196,11 @@ function createPublishRunner({
         return { skipped: true, message: 'Skipped: the platform takes direct uploads.' };
       }
       const host = await fileHostFor(job);
+      // A host that needs a helper tool (the tunnel's cloudflared) fetches it once, up front.
+      if (typeof host.prepare === 'function') {
+        checkCancel(job);
+        await host.prepare({ onProgress: p => report(job, 'host', 'running', p.message, { phase: p.phase }) });
+      }
       const items = [
         ...job.deliverFiles.map((f, i) => ({ slot: `file:${i}`, name: f.name, mime: f.mime, bytes: f.bytes })),
         ...job.pkg.images.map((im, i) => ({ slot: `image:${i}`, name: im.name, mime: im.mime, bytes: im.bytes })),

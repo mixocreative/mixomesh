@@ -1186,5 +1186,6 @@
   "launch.errors": "Could not open from the launch request: {list}",
   "launch.skippedExtraProject": "skipped (only one project opens at a time)",
   "launch.busy": "Launch request skipped: MIXOMESH was still busy loading. Try again.",
-  "launch.unreadable": "the file could not be read"
+  "launch.unreadable": "the file could not be read",
+  "publish.host.downloadTool": "Downloading the link tool (one time)…"
 }

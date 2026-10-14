@@ -29,7 +29,8 @@
     "test:rehearsal": "node tests/listbridge-rehearsal.mjs",
     "electron": "electron electron/main.cjs",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
-    "dist": "node scripts/fetch-cloudflared.mjs && electron-builder --win",
+    "dist": "electron-builder --win",
+    "build:installer": "node scripts/build-installer.mjs",
     "smoke:packaged": "node scripts/packaged-smoke.mjs",
     "i18n:check": "node scripts/i18n-check.mjs",
     "fixtures": "node tests/fixtures/make-open-tetra.mjs && node tests/fixtures/make-textured-quad.mjs"

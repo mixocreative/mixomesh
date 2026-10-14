@@ -46,14 +46,24 @@ npm run build
 npm run electron
 ```
 
-To make a double-clickable Windows installer (`.exe`) for other people:
+To make a double-clickable Windows installer (`.exe`) for other people, see
+[Build the Windows installer](#build-the-windows-installer) below.
 
-```bash
-npm install --save-dev electron-builder
-npm run dist
-```
+## Build the Windows installer
 
-The installer lands in the `release/` folder.
+Double-click **`build-installer.cmd`** in the repo root (or run `npm run build:installer -- [flags]`).
+It wipes `release/` and `dist/`, warns about uncommitted changes, runs `npm test` (stops on
+failure), builds the app, runs electron-builder, and copies only the installer to
+**`installers/MIXOMESH-Setup-<version>.exe`** (plus a `.sha256` file; size and hash are
+printed). `release/` and `dist/` are wiped again afterwards.
+
+Flags: `--skip-tests` (bypass the test gate) and `--keep-build` (keep `release/` + `dist/`,
+needed to run `npm run smoke:packaged`). Exit code 0 = ok; otherwise the failing step is named.
+
+The installer is a wizard: per-user by default (`%LOCALAPPDATA%\Programs\MIXOMESH`, no admin
+needed), you can choose another folder, and it uninstalls via Settings > Apps. It registers
+the App Paths entry and the `.mixo` file association. cloudflared is not bundled: a
+URL-only publish platform downloads it once on first use (pinned, SHA-256 verified).
 
 ## Build a clean dist every time
 
@@ -167,9 +177,8 @@ marketplace by hand.
 ### Packaged-app smoke (desktop build)
 
 `npm run dist` needs `electron-builder`, which is **not** a declared dependency
-(`npm i -D electron-builder` first; it also downloads build tooling). It first runs
-`scripts/fetch-cloudflared.mjs` (network; SHA-256 verified), then writes the installer and
-`release/win-unpacked/`. To prove the packaged app can publish, run:
+(`npm i -D electron-builder` first; it also downloads build tooling). It writes the
+installer and `release/win-unpacked/` (cloudflared is no longer bundled; `npm run build:installer -- --keep-build` does this too). To prove the packaged app can publish, run:
 
 ```bash
 npm run build && npm run dist

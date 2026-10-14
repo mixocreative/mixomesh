@@ -38,6 +38,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const childProcess = require('node:child_process');
+const { ensureCloudflaredAt } = require('../cloudflaredPin.cjs');
 
 const DEFAULT_PRESIGN_SEC = 3600;
 const MAX_PRESIGN_SEC = 7 * 24 * 60 * 60;
@@ -47,7 +48,8 @@ const MAX_NAME_BYTES = 180;
 const CHUNK_BYTES = 256 * 1024;
 
 const NOT_INSTALLED_MESSAGE = 'cloudflared is not installed. Install it with: winget install --id Cloudflare.cloudflared';
-const BUNDLE_MISSING_MESSAGE = 'The bundled cloudflared is missing. Reinstall MIXOMESH to restore it.';
+const DOWNLOADING_MESSAGE = 'Downloading the link tool (one time)…';
+const DOWNLOAD_FAILED_MESSAGE = 'The link tool could not be downloaded. Check the internet connection and try again, or install it with: winget install --id Cloudflare.cloudflared';
 // Public hostname cloudflared prints for a quick tunnel (api.trycloudflare.com is the
 // service endpoint it talks to, never the tunnel itself).
 const QUICK_URL_RE = /https:\/\/(?!api\.)([a-z0-9-]+)\.trycloudflare\.com\b/i;
@@ -173,35 +175,59 @@ function addCoverage(obj, start, end) {
 const isFile = p => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 
 /**
- * Locate cloudflared. Order: explicit setting → bundled (packaged app resources) → dev
- * vendor copy → PATH (`where` / `which`) → default Windows install dirs.
- * @param {{ settingPath?: string|null, resourcesPath?: string|null, repoRoot?: string|null,
+ * Locate cloudflared. Order: explicit setting → downloaded copy
+ * (<userData>/listbridge/cloudflared.exe) → dev vendor copy → PATH (`where` / `which`) →
+ * default Windows install dirs. The installer does not bundle it; see resolveCloudflared().
+ * @param {{ settingPath?: string|null, userDataDir?: string|null, repoRoot?: string|null,
  *   env?: NodeJS.ProcessEnv, platform?: string, exists?: (p: string) => boolean,
  *   which?: (name: string) => string|null }} [opts]
  * @returns {{ path: string|null, error: string|null }}
  */
 function findCloudflared({
-  settingPath = null, resourcesPath = null, repoRoot = null, env = process.env,
+  settingPath = null, userDataDir = null, repoRoot = null, env = process.env,
   platform = process.platform, exists = isFile, which = defaultWhich,
 } = {}) {
   const exe = platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
   if (settingPath && exists(settingPath)) return { path: settingPath, error: null };
-  if (resourcesPath) {
-    const bundled = path.join(resourcesPath, 'listbridge', exe);
-    if (exists(bundled)) return { path: bundled, error: null };
-    // A packaged app must ship its own copy; a missing one is a broken install.
-    return { path: null, error: BUNDLE_MISSING_MESSAGE };
-  }
   const candidates = [];
+  if (userDataDir) candidates.push(downloadedPath(userDataDir, platform));
   if (repoRoot) candidates.push(path.join(repoRoot, 'vendor', 'cloudflared', platform === 'win32' ? 'cloudflared-windows-amd64.exe' : 'cloudflared'));
   const onPath = which('cloudflared');
   if (onPath) candidates.push(onPath);
   if (platform === 'win32') {
-    candidates.push(path.join(env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'cloudflared', 'cloudflared.exe'));
-    candidates.push(path.join(env.ProgramFiles || 'C:\\Program Files', 'cloudflared', 'cloudflared.exe'));
+    candidates.push(path.join(env['ProgramFiles(x86)'] || 'C:\Program Files (x86)', 'cloudflared', exe));
+    candidates.push(path.join(env.ProgramFiles || 'C:\Program Files', 'cloudflared', exe));
   }
   for (const c of candidates) if (c && exists(c)) return { path: c, error: null };
   return { path: null, error: NOT_INSTALLED_MESSAGE };
+}
+
+/** Where the first-use download lands. */
+function downloadedPath(userDataDir, platform = process.platform) {
+  return path.join(userDataDir, 'listbridge', platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+}
+
+/**
+ * findCloudflared(), then (Windows only, needs userDataDir) download the pinned,
+ * SHA-256-verified release once into <userData>/listbridge/ when nothing was found.
+ * Never throws: failure → { path: null, error } so the host reports 'cloudflared-missing'.
+ * @param {Parameters<typeof findCloudflared>[0] & { fetchImpl?: typeof fetch,
+ *   onProgress?: (p: { phase: 'download-tool', message: string }) => void,
+ *   pinFile?: { name: string, url: string, sha256: string } }} (pinFile: tests only) [opts]
+ */
+async function resolveCloudflared({ fetchImpl = globalThis.fetch, onProgress, pinFile, ...findOpts } = {}) {
+  const found = findCloudflared(findOpts);
+  if (found.path) return found;
+  const platform = findOpts.platform || process.platform;
+  if (!findOpts.userDataDir || platform !== 'win32') return found;
+  try { onProgress?.({ phase: 'download-tool', message: DOWNLOADING_MESSAGE }); } catch { /* listener must not break */ }
+  try {
+    const dest = downloadedPath(findOpts.userDataDir, platform);
+    await ensureCloudflaredAt(dest, { fetchImpl, file: pinFile, exists: findOpts.exists || isFile });
+    return { path: dest, error: null };
+  } catch {
+    return { path: null, error: DOWNLOAD_FAILED_MESSAGE };
+  }
 }
 
 function defaultWhich(name) {
@@ -217,7 +243,7 @@ function defaultWhich(name) {
 /**
  * @param {object} [opts]
  * @param {string} [opts.binaryPath]                  cloudflared to run (skips resolveBinary)
- * @param {() => { path: string|null, error: string|null }} [opts.resolveBinary]
+ * @param {(o?: { onProgress?: Function }) => { path: string|null, error: string|null } | Promise<{ path: string|null, error: string|null }>} [opts.resolveBinary]
  * @param {typeof childProcess.spawn} [opts.spawnImpl]
  * @param {typeof fetch} [opts.fetchImpl]             the public-URL probe (waitUntilPublic / testConnection)
  * @param {typeof fetch} [opts.dohFetchImpl]          DNS-over-HTTPS lookups only (never the local resolver)
@@ -228,7 +254,7 @@ function defaultWhich(name) {
  * @param {() => string} [opts.randomToken]            32 lowercase hex chars
  */
 function createTunnelFileHost({
-  binaryPath, resolveBinary = () => findCloudflared(), spawnImpl = childProcess.spawn,
+  binaryPath, resolveBinary = () => resolveCloudflared(), spawnImpl = childProcess.spawn,
   fetchImpl = globalThis.fetch, dohFetchImpl = globalThis.fetch,
   sleep = ms => new Promise(r => setTimeout(r, ms)), startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS, probeTimeoutMs = 45_000,
   now = Date.now, randomToken = () => crypto.randomBytes(16).toString('hex'),
@@ -309,13 +335,29 @@ function createTunnelFileHost({
     localOrigin = `http://127.0.0.1:${addr.port}`;
   }
 
-  function startTunnel() {
-    let bin = binaryPath;
-    if (!bin) {
-      const found = resolveBinary();
+  // Resolve (and, first time, download) the binary once; failures are not cached.
+  let resolvedBin = null;
+  let resolving = null;
+  async function ensureBinary(onProgress) {
+    if (binaryPath) return binaryPath;
+    if (resolvedBin) return resolvedBin;
+    resolving ||= (async () => {
+      const found = await resolveBinary({ onProgress });
       if (!found?.path) throw Object.assign(new Error(found?.error || NOT_INSTALLED_MESSAGE), { code: 'cloudflared-missing' });
-      bin = found.path;
-    }
+      resolvedBin = found.path;
+      return resolvedBin;
+    })().finally(() => { resolving = null; });
+    return resolving;
+  }
+
+  /** Get the link tool ready (downloads it on first use). Reports `download-tool` progress. */
+  async function prepare({ onProgress } = {}) {
+    if (closed) throw new Error('Temporary link host is closed.');
+    await ensureBinary(onProgress);
+  }
+
+  async function startTunnel() {
+    const bin = await ensureBinary();
     return new Promise((resolve, reject) => {
       let settled = false;
       let url = null;
@@ -548,7 +590,7 @@ function createTunnelFileHost({
 
   return Object.freeze({
     requiresUptime: true,
-    put, presignGet, remove, testConnection, waitUntilPublic, close, stats,
+    put, presignGet, remove, testConnection, waitUntilPublic, prepare, close, stats,
     /** Local origin of the loopback server (null until started). Diagnostics / tests only. */
     get localOrigin() { return localOrigin; },
     get running() { return !!child && !closed; },
@@ -557,6 +599,6 @@ function createTunnelFileHost({
 }
 
 module.exports = {
-  createTunnelFileHost, findCloudflared, NOT_INSTALLED_MESSAGE, BUNDLE_MISSING_MESSAGE,
+  createTunnelFileHost, findCloudflared, resolveCloudflared, downloadedPath, NOT_INSTALLED_MESSAGE, DOWNLOADING_MESSAGE, DOWNLOAD_FAILED_MESSAGE,
   _internal: Object.freeze({ safeFileName, contentDisposition, QUICK_URL_RE, parseRange, addCoverage }),
 };

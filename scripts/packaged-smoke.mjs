@@ -24,7 +24,11 @@ const asar = join(dirname(exe), 'resources', 'app.asar');
 const cloudflared = join(dirname(exe), 'resources', 'listbridge', 'cloudflared.exe');
 console.log(`packaged smoke: ${exe}`);
 console.log(`  app.asar present: ${existsSync(asar)}${existsSync(asar) ? ` (${(statSync(asar).size / 1048576).toFixed(1)} MB)` : ''}`);
-console.log(`  bundled cloudflared: ${existsSync(cloudflared)}`);
+console.log(`  bundled cloudflared: ${existsSync(cloudflared)} (must be false: downloaded on first use instead)`);
+if (existsSync(cloudflared)) {
+  console.error('FAIL packaged smoke: cloudflared must NOT be bundled in resources/listbridge/');
+  process.exit(1);
+}
 
 const out = [];
 const child = spawn(exe, [], { env: { ...process.env, MIXO_SMOKE: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });

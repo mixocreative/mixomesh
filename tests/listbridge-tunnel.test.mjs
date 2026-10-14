@@ -22,7 +22,7 @@ import path from 'node:path';
 import * as core from '../src/listbridge/index.js';
 
 const require = createRequire(import.meta.url);
-const { createTunnelFileHost, findCloudflared, NOT_INSTALLED_MESSAGE, BUNDLE_MISSING_MESSAGE } = require('../electron/listbridge/filehosts/tunnel.cjs');
+const { createTunnelFileHost, findCloudflared, NOT_INSTALLED_MESSAGE } = require('../electron/listbridge/filehosts/tunnel.cjs');
 const { createPublishRunner } = require('../electron/listbridge/jobs.cjs');
 
 const PUBLIC = 'https://fake-tunnel-abc.trycloudflare.com';
@@ -282,7 +282,7 @@ test('parseRange edge cases', () => {
   assert.deepEqual(parseRange('bytes=0-0', 10), { start: 0, end: 0 });
 });
 
-test('cloudflared missing → install hint; resolution order: setting, bundled, vendor, PATH, Program Files', async () => {
+test('cloudflared missing → install hint; resolution order: setting, downloaded, vendor, PATH, Program Files', async () => {
   const host = createTunnelFileHost({ resolveBinary: () => findCloudflared({ exists: () => false, which: () => null, platform: 'win32' }) });
   const { key } = await host.put('a', enc('a'));
   await assert.rejects(host.presignGet(key), e => e.message === NOT_INSTALLED_MESSAGE);
@@ -302,10 +302,10 @@ test('cloudflared missing → install hint; resolution order: setting, bundled, 
     path.join('C:\\PF86', 'cloudflared', 'cloudflared.exe'),
     path.join('C:\\PF', 'cloudflared', 'cloudflared.exe'),
   ]);
-  // Packaged app: the bundled copy wins; missing bundle = broken install, no PATH fallback.
-  const bundled = path.join('C:\\app\\resources', 'listbridge', 'cloudflared.exe');
-  assert.deepEqual(findCloudflared({ resourcesPath: 'C:\\app\\resources', exists: p => p === bundled, which: () => 'x', platform: 'win32' }), { path: bundled, error: null });
-  assert.deepEqual(findCloudflared({ resourcesPath: 'C:\\app\\resources', exists: () => false, which: () => 'C:\\bin\\cloudflared.exe', platform: 'win32' }), { path: null, error: BUNDLE_MISSING_MESSAGE });
+  // Packaged app: the downloaded copy wins over PATH; nothing bundled in resources any more.
+  const dl = path.join('U:/ud', 'listbridge', 'cloudflared.exe');
+  assert.deepEqual(findCloudflared({ userDataDir: 'U:/ud', exists: p => p === dl, which: () => 'x', platform: 'win32' }), { path: dl, error: null });
+  assert.deepEqual(findCloudflared({ userDataDir: 'U:/ud', exists: () => false, which: () => null, platform: 'win32' }), { path: null, error: NOT_INSTALLED_MESSAGE });
   assert.deepEqual(findCloudflared({ repoRoot: 'R:\\repo', exists: p => p === 'C:\\bin\\cloudflared.exe', which: () => 'C:\\bin\\cloudflared.exe', env, platform: 'win32' }), { path: 'C:\\bin\\cloudflared.exe', error: null });
 });
 

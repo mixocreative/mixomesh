@@ -18,7 +18,7 @@ const { createCredentialStore } = require('./credentials.cjs');
 const { createTransport } = require('./transport.cjs');
 const { createPublishRunner } = require('./jobs.cjs');
 const { createS3FileHost } = require('./filehosts/s3.cjs');
-const { createTunnelFileHost, findCloudflared } = require('./filehosts/tunnel.cjs');
+const { createTunnelFileHost, resolveCloudflared } = require('./filehosts/tunnel.cjs');
 
 const CREDENTIALS_FILE = 'listbridge-credentials.bin';
 const MAX_ITEM_BYTES = 1024 * 1024 * 1024;          // 1 GiB per file / image
@@ -107,7 +107,6 @@ function slugName(title) {
  * @param {() => Promise<any>} [deps.loadCore]         resolves the portable core module
  * @param {(record: any) => any} [deps.makeFileHost]  S3 (credentialed) host factory
  * @param {() => any} [deps.makeTunnelHost]           temporary-link host factory
- * @param {string|null} [deps.resourcesPath]          packaged app: process.resourcesPath (bundled cloudflared)
  * @param {string|null} [deps.cloudflaredPath]        explicit cloudflared (Listbridge setting, later)
  * @param {(files: any[]) => Promise<Uint8Array>} [deps.zip]
  * @param {any} [deps.transport]
@@ -144,10 +143,13 @@ function registerListbridgeIpc(handle, deps = {}) {
   const repoRoot = path.join(__dirname, '..', '..');
   const makeTunnelHost = deps.makeTunnelHost || (() => createTunnelFileHost({
     fetchImpl,
-    resolveBinary: () => findCloudflared({
+    // cloudflared is not bundled: downloaded once into <userData>/listbridge/ on first use.
+    resolveBinary: ({ onProgress } = {}) => resolveCloudflared({
       settingPath: deps.cloudflaredPath || null,
-      resourcesPath: deps.resourcesPath || null,
-      repoRoot: deps.resourcesPath ? null : repoRoot,
+      userDataDir: String(userDataDir),
+      repoRoot,
+      fetchImpl,
+      onProgress,
     }),
   }));
   // Every live tunnel host, so app quit can close them all (closeAll()).

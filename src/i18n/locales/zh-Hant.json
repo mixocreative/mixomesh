@@ -1186,5 +1186,6 @@
   "launch.errors": "無法從啟動要求開啟：{list}",
   "launch.skippedExtraProject": "已略過（一次只能開啟一個專案）",
   "launch.busy": "已略過啟動要求：MIXOMESH 仍在載入中，請再試一次。",
-  "launch.unreadable": "無法讀取檔案"
+  "launch.unreadable": "無法讀取檔案",
+  "publish.host.downloadTool": "正在下載連結工具（僅此一次）…"
 }

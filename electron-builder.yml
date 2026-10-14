@@ -15,14 +15,8 @@ files:
   # Listbridge portable core (ESM), loaded by electron/listbridge/index.cjs via import().
   - src/listbridge/**/*
   - package.json
-# Listbridge temporary links (PB.5b): ship cloudflared + its Apache-2.0 licence. Fetched and
-# SHA-256-verified into vendor/cloudflared/ by scripts/fetch-cloudflared.mjs (`npm run dist`
-# runs it first). Resolved at runtime from <resources>/listbridge/cloudflared.exe.
-extraResources:
-  - from: vendor/cloudflared/cloudflared-windows-amd64.exe
-    to: listbridge/cloudflared.exe
-  - from: vendor/cloudflared/LICENSE
-    to: listbridge/cloudflared-LICENSE.txt
+# cloudflared is NOT bundled (Cults3D uploads natively). A URL-only platform downloads the pinned,
+# SHA-256-verified copy once into <userData>/listbridge/ on first use (electron/listbridge/cloudflaredPin.cjs).
 win:
   target: nsis
   # .mixo double-click -> `MIXOMESH.exe "%1"` (launch integration LI.5; registry hooks in electron/installer.nsh).
@@ -36,6 +30,8 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   include: electron/installer.nsh
+  # Installer file name used by scripts/build-installer.mjs (copied to installers/).
+  artifactName: MIXOMESH-Setup-${version}.${ext}
 
 # Package the exact Electron already installed for dev (node_modules/electron) instead of
 # re-downloading it: same version as development, and no hang on its checksum download.

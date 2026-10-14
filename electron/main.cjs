@@ -457,8 +457,6 @@ app.whenReady().then(async () => {
   });
   _listbridge = registerListbridgeIpc(handle, {
     userDataDir: app.getPath('userData'), safeStorage, adapters: await _loadListbridgeAdapters(),
-    // Packaged: cloudflared ships in resources/listbridge/ (electron-builder extraResources).
-    resourcesPath: app.isPackaged ? process.resourcesPath : null,
   });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

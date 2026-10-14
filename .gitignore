@@ -20,3 +20,6 @@ vendor/cloudflared/
 
 # electron-builder output (npm run dist)
 release/
+
+# One-click installer output (scripts/build-installer.mjs)
+installers/

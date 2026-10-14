@@ -263,7 +263,16 @@ async function main() {
       assert(await click('[data-act="publish-anyway"]'), 'publish anyway');
     }
     // The fake job can reach the failure before a poll sees the running step: accept either.
-    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-step.run, #rp-print-body .pub-job-fail')`), 20000, 'running step or failure');
+    // The export-warning gate can appear after an early "running" step was already seen:
+    // acknowledge it whenever it shows up, then wait for the job to run or fail.
+    await waitFor(async () => {
+      if (await evaluate(cdp, `!!document.querySelector('[data-act="publish-anyway"]')`)) {
+        assert(!(await evaluate(cdp, `window.__lb.calls.includes('start')`)), 'nothing may be sent before the warnings are acknowledged');
+        await click('[data-act="publish-anyway"]');
+        return false;
+      }
+      return evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-step.run, #rp-print-body .pub-job-fail')`);
+    }, 20000, 'running step or failure');
     if (await evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-step.run')`)) await snap('3a-publishing');
     await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-job-fail')`), 20000, 'failure box');
     const failed = await evaluate(cdp, `({ box: document.querySelector('.pub-job-fail').textContent, steps: [...document.querySelectorAll('.pub-step')].map(s => s.className.replace('pub-step ', '')),
