@@ -19,6 +19,16 @@
 //   * keys handed to the runner are opaque counters, not tokens; nothing here logs, and no
 //     thrown message contains a token or URL.
 //
+// Ingestion evidence (plan PB.12): stats() → { served, total }. An object counts as SERVED
+// once every byte of it has been delivered at least once by GET responses that finished
+// (a full 200, or 206 single-range responses whose ranges together cover the whole object;
+// ranges are merged per object). HEAD, aborted responses, 404/410/416 never count.
+// "Delivered" means handed to the local tunnel connection in full (the response's 'finish'
+// after a backpressured stream), the strongest signal available on this side: cloudflared
+// may still lose bytes it already accepted, so the adapter's confirm query is the other half.
+// Range: single `bytes=a-b` / `a-` / `-n` ranges get 206 + Content-Range; multi-range or
+// If-Range requests get the full 200 (allowed by RFC 9110); `Accept-Ranges: bytes` is sent.
+//
 // Pure Node (node:http / node:crypto / node:child_process). The cloudflared binary, the
 // spawn function, fetch and the clock are injectable (tests/listbridge-tunnel.test.mjs runs
 // a fake cloudflared under plain node).
@@ -34,6 +44,7 @@ const MAX_PRESIGN_SEC = 7 * 24 * 60 * 60;
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const REGISTER_GRACE_MS = 10_000;        // URL seen but no "Registered tunnel connection" line
 const MAX_NAME_BYTES = 180;
+const CHUNK_BYTES = 256 * 1024;
 
 const NOT_INSTALLED_MESSAGE = 'cloudflared is not installed. Install it with: winget install --id Cloudflare.cloudflared';
 const BUNDLE_MISSING_MESSAGE = 'The bundled cloudflared is missing. Reinstall MIXOMESH to restore it.';
@@ -109,6 +120,43 @@ function contentDisposition(name) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeSegment(name)}`;
 }
 
+// One `Range: bytes=…` spec → { start, end } (inclusive), 'unsatisfiable', or null = serve
+// the whole object (no header, multi-range, malformed or reversed ranges are ignored).
+function parseRange(header, size) {
+  if (typeof header !== 'string') return null;
+  const m = /^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$/i.exec(header);
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let start; let end;
+  if (m[1] === '') {                       // suffix: last n bytes
+    const n = Number(m[2]);
+    if (n === 0) return 'unsatisfiable';
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    if (m[2] !== '' && Number(m[2]) < start) return null;
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size) return 'unsatisfiable';
+  return { start, end };
+}
+
+// Record [start, end) as delivered; merge overlapping / touching ranges.
+function addCoverage(obj, start, end) {
+  if (obj.served) return;
+  const size = obj.bytes.byteLength;
+  if (size === 0) { obj.served = true; return; }
+  const all = [...obj.ranges, [start, end]].sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [s, e] of all) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  obj.ranges = merged;
+  obj.served = merged.length === 1 && merged[0][0] === 0 && merged[0][1] >= size;
+}
+
 const isFile = p => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 
 /**
@@ -169,7 +217,8 @@ function createTunnelFileHost({
   fetchImpl = globalThis.fetch, startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS, probeTimeoutMs = 45_000,
   now = Date.now, randomToken = () => crypto.randomBytes(16).toString('hex'),
 } = {}) {
-  /** @type {Map<string, { token: string, name: string, enc: string, mime: string, bytes: Buffer, expiresAt: number }>} */
+  /** @type {Map<string, { token: string, name: string, enc: string, mime: string, bytes: Buffer, expiresAt: number,
+   *   ranges: Array<[number, number]>, served: boolean }>} */
   const byKey = new Map();
   /** @type {Map<string, string>} token → key */
   const byToken = new Map();
@@ -198,14 +247,37 @@ function createTunnelFileHost({
     if (m[2] !== obj.enc && decoded !== obj.name) return send(404);
     if (!obj.expiresAt) return send(404);         // put but never handed out
     if (now() >= obj.expiresAt) return send(410);
-    res.writeHead(200, {
+    const size = obj.bytes.byteLength;
+    const range = req.headers['if-range'] != null ? null : parseRange(req.headers.range, size);
+    if (range === 'unsatisfiable') return send(416, { 'Content-Range': `bytes */${size}`, 'Accept-Ranges': 'bytes' });
+    const start = range ? range.start : 0;
+    const end = range ? range.end + 1 : size;     // exclusive
+    res.writeHead(range ? 206 : 200, {
       'Content-Type': obj.mime,
-      'Content-Length': String(obj.bytes.byteLength),
+      'Content-Length': String(end - start),
+      ...(range ? { 'Content-Range': `bytes ${start}-${end - 1}/${size}` } : {}),
+      'Accept-Ranges': 'bytes',
       'Content-Disposition': contentDisposition(obj.name),
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
-    res.end(req.method === 'HEAD' ? undefined : obj.bytes);
+    if (req.method === 'HEAD') return res.end();
+    // Credit the bytes only once the whole response body has been handed off. The body is
+    // streamed in chunks WITH backpressure: one huge res.end(buffer) reports 'finish' at once
+    // on Windows even when the client never reads, which would fake a "served".
+    res.once('finish', () => { if (byKey.get(key) === obj) addCoverage(obj, start, end); });
+    let off = start;
+    const pump = () => {
+      while (off < end) {
+        if (res.destroyed) return;
+        const next = Math.min(off + CHUNK_BYTES, end);
+        const ok = res.write(obj.bytes.subarray(off, next));
+        off = next;
+        if (!ok) { res.once('drain', pump); return; }
+      }
+      res.end();
+    };
+    pump();
   }
 
   async function startServer() {
@@ -317,7 +389,7 @@ function createTunnelFileHost({
     byKey.set(key, {
       token, name: safe, enc: encodeSegment(safe),
       mime: typeof mime === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(mime) ? mime : 'application/octet-stream',
-      bytes: buf, expiresAt: 0,
+      bytes: buf, expiresAt: 0, ranges: [], served: false,
     });
     byToken.set(token, key);
     return { key };
@@ -370,6 +442,13 @@ function createTunnelFileHost({
     }
   }
 
+  /** Ingestion evidence: how many stored objects have been fully delivered at least once. */
+  function stats() {
+    let served = 0;
+    for (const obj of byKey.values()) if (obj.served) served++;
+    return { served, total: byKey.size };
+  }
+
   async function close() {
     closed = true;
     byKey.clear();
@@ -387,7 +466,7 @@ function createTunnelFileHost({
 
   return Object.freeze({
     requiresUptime: true,
-    put, presignGet, remove, testConnection, close,
+    put, presignGet, remove, testConnection, close, stats,
     /** Local origin of the loopback server (null until started). Diagnostics / tests only. */
     get localOrigin() { return localOrigin; },
     get running() { return !!child && !closed; },
@@ -397,5 +476,5 @@ function createTunnelFileHost({
 
 module.exports = {
   createTunnelFileHost, findCloudflared, NOT_INSTALLED_MESSAGE, BUNDLE_MISSING_MESSAGE,
-  _internal: Object.freeze({ safeFileName, contentDisposition, QUICK_URL_RE }),
+  _internal: Object.freeze({ safeFileName, contentDisposition, QUICK_URL_RE, parseRange, addCoverage }),
 };

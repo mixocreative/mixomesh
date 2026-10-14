@@ -1,5 +1,5 @@
-// Listbridge temporary-link file host (plan PB.5b): filehosts/tunnel.cjs + the runner's
-// uptime hold (jobs.cjs). Plain node, no network.
+// Listbridge temporary-link file host (plan PB.5b, PB.12): filehosts/tunnel.cjs (incl. Range
+// + served coverage / stats()) + the runner's uptime hold (jobs.cjs). Plain node, no network.
 //
 // Test seam: a FAKE cloudflared (a tiny node script written to a temp dir) is launched via
 // the injected `spawnImpl` (node <fake> tunnel --no-autoupdate --url http://127.0.0.1:<port>).
@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { test, after } from 'node:test';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -169,6 +170,115 @@ test('close() kills cloudflared and stops the server; the host is single-use', a
   await host.close();   // idempotent
 });
 
+// ── PB.12: Range support + served coverage (stats) ─────────────────────────
+const tick = () => new Promise(r => setTimeout(r, 20));
+
+test('Range: 206 + Content-Range + Accept-Ranges; suffix / open ranges; 416; multi-range and If-Range → 200', async () => {
+  const host = makeHost();
+  try {
+    const { key } = await host.put('r.bin', enc('0123456789'), 'application/octet-stream');
+    const url = local(host, await host.presignGet(key));
+    const full = await fetch(url);
+    assert.equal(full.headers.get('accept-ranges'), 'bytes');
+    await full.arrayBuffer();
+    const r1 = await fetch(url, { headers: { Range: 'bytes=2-5' } });
+    assert.equal(r1.status, 206);
+    assert.equal(r1.headers.get('content-range'), 'bytes 2-5/10');
+    assert.equal(r1.headers.get('content-length'), '4');
+    assert.equal(await r1.text(), '2345');
+    const r2 = await fetch(url, { headers: { Range: 'bytes=7-' } });
+    assert.equal(await r2.text(), '789');
+    const r3 = await fetch(url, { headers: { Range: 'bytes=-3' } });
+    assert.equal(r3.headers.get('content-range'), 'bytes 7-9/10');
+    assert.equal(await r3.text(), '789');
+    const r4 = await fetch(url, { headers: { Range: 'bytes=8-100' } });
+    assert.equal(r4.headers.get('content-range'), 'bytes 8-9/10');
+    await r4.arrayBuffer();
+    const r416 = await fetch(url, { headers: { Range: 'bytes=10-' } });
+    assert.equal(r416.status, 416);
+    assert.equal(r416.headers.get('content-range'), 'bytes */10');
+    await r416.arrayBuffer();
+    const multi = await fetch(url, { headers: { Range: 'bytes=0-1,4-5' } });
+    assert.equal(multi.status, 200);
+    assert.equal(await multi.text(), '0123456789');
+    const ifr = await fetch(url, { headers: { Range: 'bytes=0-1', 'If-Range': '"x"' } });
+    assert.equal(ifr.status, 200);
+    await ifr.arrayBuffer();
+    const headR = await fetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
+    assert.equal(headR.status, 206);
+    assert.equal(await headR.text(), '');
+  } finally { await host.close(); }
+});
+
+test('stats(): served = every byte delivered at least once by finished GETs; HEAD / 404 / 416 / aborted never count', async () => {
+  const host = makeHost();
+  try {
+    const a = (await host.put('a.3mf', enc('AAAAAAAAAA'), 'model/3mf')).key;
+    const b = (await host.put('b.png', enc('BBBB'), 'image/png')).key;
+    const ua = local(host, await host.presignGet(a));
+    const ub = local(host, await host.presignGet(b));
+    assert.deepEqual(host.stats(), { served: 0, total: 2 });
+
+    await (await fetch(ua, { method: 'HEAD' })).arrayBuffer();
+    await (await fetch(ua, { headers: { Range: 'bytes=20-' } })).arrayBuffer();     // 416
+    await (await fetch(ua.replace(/\/[^/]+$/, '/wrong.3mf'))).arrayBuffer();        // 404
+    await tick();
+    assert.deepEqual(host.stats(), { served: 0, total: 2 }, 'HEAD / 416 / 404 do not count');
+
+    // Range-only fetch: two overlapping halves, the second leaves a gap, then the gap.
+    await (await fetch(ua, { headers: { Range: 'bytes=0-4' } })).arrayBuffer();
+    await (await fetch(ua, { headers: { Range: 'bytes=3-6' } })).arrayBuffer();
+    await tick();
+    assert.equal(host.stats().served, 0, 'bytes 7-9 not delivered yet');
+    await (await fetch(ua, { headers: { Range: 'bytes=-3' } })).arrayBuffer();
+    await tick();
+    assert.deepEqual(host.stats(), { served: 1, total: 2 }, 'ranges merged → fully covered');
+
+    await (await fetch(ub)).arrayBuffer();
+    await tick();
+    assert.deepEqual(host.stats(), { served: 2, total: 2 });
+
+    await host.remove(b);
+    assert.deepEqual(host.stats(), { served: 1, total: 1 }, 'removed objects drop out of both counts');
+  } finally { await host.close(); }
+});
+
+test('stats(): a GET aborted mid-body is not counted as served', async () => {
+  const host = makeHost();
+  try {
+    const big = new Uint8Array(96 * 1024 * 1024).fill(7);
+    const { key } = await host.put('big.zip', big, 'application/zip');
+    const url = local(host, await host.presignGet(key));
+    await new Promise((resolve, reject) => {
+      // A stalled client: read nothing (backpressure), then drop the connection.
+      const req = http.get(url, res => {
+        res.pause();
+        setTimeout(() => { req.destroy(); resolve(undefined); }, 150);
+      });
+      req.on('error', err => (err.code === 'ECONNRESET' ? resolve(undefined) : reject(err)));
+    });
+    await new Promise(r => setTimeout(r, 200));
+    assert.deepEqual(host.stats(), { served: 0, total: 1 });
+    // A later complete fetch does count.
+    const res = await fetch(url);
+    assert.equal((await res.arrayBuffer()).byteLength, big.byteLength);
+    await tick();
+    assert.deepEqual(host.stats(), { served: 1, total: 1 });
+  } finally { await host.close(); }
+});
+
+test('parseRange edge cases', () => {
+  const { parseRange } = require('../electron/listbridge/filehosts/tunnel.cjs')._internal;
+  assert.equal(parseRange(undefined, 10), null);
+  assert.equal(parseRange('bytes=5-2', 10), null, 'reversed → ignored (full body)');
+  assert.equal(parseRange('items=0-1', 10), null);
+  assert.equal(parseRange('bytes=-', 10), null);
+  assert.equal(parseRange('bytes=-0', 10), 'unsatisfiable');
+  assert.equal(parseRange('bytes=0-', 0), 'unsatisfiable');
+  assert.deepEqual(parseRange('bytes=-50', 10), { start: 0, end: 9 });
+  assert.deepEqual(parseRange('bytes=0-0', 10), { start: 0, end: 0 });
+});
+
 test('cloudflared missing → install hint; resolution order: setting, bundled, vendor, PATH, Program Files', async () => {
   const host = createTunnelFileHost({ resolveBinary: () => findCloudflared({ exists: () => false, which: () => null, platform: 'win32' }) });
   const { key } = await host.put('a', enc('a'));
@@ -235,7 +345,7 @@ test('testConnection fetches a probe through the public URL, removes it, keeps t
   await blocked.close();
 });
 
-// ── runner: hold the tunnel until the platform confirms ───────────────────
+// ── runner: hold the tunnel until the platform fetched everything ─────────
 
 function fakeAdapter({ confirmAfter = 0 } = {}) {
   let confirmCalls = 0;
@@ -244,7 +354,7 @@ function fakeAdapter({ confirmAfter = 0 } = {}) {
     describe: () => ({ id: 'fake', label: 'Fake Market', transfer: 'url', maxFiles: 10, maxImages: 10, currencies: ['EUR'], fields: ['title'], credentials: [] }),
     validate: () => [],
     buildCreate: (pkg, ctx) => ({ method: 'POST', url: 'https://fake.test/gql', body: { op: 'create', files: ctx.files.map(f => f.url), images: ctx.images.map(i => i.url) } }),
-    buildUpdate: (remoteId, pkg, ctx) => ({ method: 'POST', url: 'https://fake.test/gql', body: { op: 'update', remoteId, files: ctx.files.map(f => f.url) } }),
+    buildUpdate: (remoteId, pkg, ctx) => ({ method: 'POST', url: 'https://fake.test/gql', body: { op: 'update', remoteId, files: ctx.files.map(f => f.url), images: ctx.images.map(i => i.url) } }),
     parseResult: res => res.json.data,
     ...(confirmAfter ? {
       buildConfirm: r => ({ method: 'POST', url: 'https://fake.test/gql', body: { op: 'confirm', id: r.remoteId } }),
@@ -262,11 +372,12 @@ function makePkg() {
   });
 }
 
-function setupRunner({ adapter, responder, maxWaitMs = 60_000, onSleep } = {}) {
+function setupRunner({ adapter, responder, holdMs = 60_000, retryWindowMs = 60_000, onSleep } = {}) {
   const clock = { t: 5_000_000 };
   const hosts = [];
   const events = [];
   const calls = [];
+  let puts = 0;
   const transport = {
     request: async req => {
       calls.push(req.body);
@@ -274,52 +385,73 @@ function setupRunner({ adapter, responder, maxWaitMs = 60_000, onSleep } = {}) {
       return { status: 200, ok: true, headers: {}, text: '', ...r };
     },
   };
+  const hooks = { onSleep };
   const runner = createPublishRunner({
     adapters: [adapter], core, transport,
     credentials: { get: async id => (id === 'filehost:tunnel' ? { type: 'tunnel' } : null) },
-    makeFileHost: () => { const h = makeHost({ now: () => clock.t }); hosts.push(h); return h; },
+    makeFileHost: () => {
+      const h = makeHost({ now: () => clock.t });
+      hosts.push(h);
+      return { ...h, put: (...a) => { puts++; return h.put(...a); }, get running() { return h.running; }, get closed() { return h.closed; }, get localOrigin() { return h.localOrigin; } };
+    },
     emit: e => events.push(e), now: () => clock.t,
-    sleep: async ms => { clock.t += ms; await onSleep?.(); await new Promise(r => setImmediate(r)); },
-    confirm: { polls: 2, intervalMs: 5000 }, hold: { maxWaitMs },
+    sleep: async ms => { clock.t += ms; await hooks.onSleep?.(); await new Promise(r => setImmediate(r)); },
+    confirm: { polls: 2, intervalMs: 5000, holdMs, retryWindowMs },
   });
-  return { runner, hosts, events, calls, clock };
+  return { runner, hosts, events, calls, clock, hooks, get puts() { return puts; } };
 }
 
-test('runner: the tunnel stays up (links servable) until the platform confirms, then closes', async () => {
-  const adapter = fakeAdapter({ confirmAfter: 4 });   // more polls than confirm.polls: the hold wins
-  let checks = 0;
+// Fetch every URL the platform was given (file + image), fully, through the loopback origin.
+async function platformFetchAll(ctx, call = ctx.calls[0]) {
+  for (const u of [...call.files, ...call.images]) {
+    const res = await fetch(local(ctx.hosts.at(-1), u));
+    assert.equal(res.status, 200);
+    await res.arrayBuffer();
+  }
+  await new Promise(r => setTimeout(r, 20));
+}
+
+test('runner: held until every object is served AND the platform confirms; structured progress; then closed', async () => {
+  const adapter = fakeAdapter({ confirmAfter: 2 });
+  let sleeps = 0;
   const ctx = setupRunner({
     adapter,
-    onSleep: async () => {
-      const url = ctx.calls[0].files[0];
-      const res = await fetch(local(ctx.hosts[0], url));
-      assert.equal(res.status, 200);
-      assert.equal(await res.text(), '3MF-BYTES');
-      checks++;
-    },
+    onSleep: async () => { if (++sleeps === 3) await platformFetchAll(ctx); },
   });
   const out = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
   assert.equal(out.ok, true, out.error);
-  assert.equal(adapter.confirmCalls, 4);
-  assert.equal(checks, 3, 'links served between every confirm poll');
-  assert.ok(ctx.events.some(e => e.step === 'confirm' && e.hold && /Keep MIXOMESH open while Fake Market downloads the files/.test(e.message)));
-  assert.equal(ctx.hosts[0].closed, true, 'closed after confirm + cleanup');
+  assert.equal(adapter.confirmCalls, 2, 'adapter queried only once everything was served');
+  const hold = ctx.events.filter(e => e.step === 'confirm' && e.status === 'running' && e.hold);
+  assert.deepEqual(hold.slice(0, 3).map(e => [e.served, e.total]), [[0, 2], [0, 2], [0, 2]]);
+  assert.equal(hold[0].holdRemainingMs, 60_000);
+  assert.equal(hold[1].holdRemainingMs, 55_000);
+  assert.match(hold[0].message, /Keep MIXOMESH open while Fake Market downloads the files \(0\/2\)/);
+  assert.deepEqual([hold.at(-1).served, hold.at(-1).total], [2, 2], 'served 2/2, waiting for the adapter');
+  assert.equal(ctx.hosts[0].closed, true, 'closed on done');
   assert.ok(await waitDead(spawned.at(-1).child.pid));
 });
 
-test('runner: without buildConfirm the links are held for hold.maxWaitMs, then closed', async () => {
-  const ctx = setupRunner({ adapter: fakeAdapter(), maxWaitMs: 20_000 });
-  const t0 = ctx.clock.t;
-  const out = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
-  assert.equal(out.ok, true, out.error);
-  assert.equal(ctx.clock.t - t0, 20_000);
-  assert.ok(ctx.events.some(e => e.step === 'confirm' && e.status === 'done' && /Kept the temporary links open/.test(e.message)));
-  assert.equal(ctx.hosts[0].closed, true);
+test('runner: hold expiry fails at confirm, links stay up; Retry inside the window resumes on the SAME URLs (no re-put)', async () => {
+  const ctx = setupRunner({ adapter: fakeAdapter(), holdMs: 20_000 });
+  const first = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
+  assert.equal(first.failedStep, 'confirm');
+  assert.match(first.error, /Fake Market has not finished downloading the files \(0\/2 downloaded\) after 1 min/);
+  assert.equal(ctx.hosts[0].running, true, 'links kept for Retry');
+  const failed = ctx.events.find(e => e.status === 'failed');
+  assert.equal(failed.linksOpenMs, 60_000, 'hold already over → fresh retry window');
+  const putsBefore = ctx.puts;
+  await platformFetchAll(ctx);                // the platform finally downloads
+  const second = await ctx.runner.retry(first.jobId);
+  assert.equal(second.ok, true, second.error);
+  assert.equal(ctx.puts, putsBefore, 'no re-put');
+  assert.equal(ctx.hosts.length, 1, 'same tunnel');
+  assert.deepEqual(ctx.calls.map(c => c.op), ['create'], 'no update: the platform still has the same URLs');
+  assert.equal(ctx.hosts[0].closed, true, 'closed on done');
 });
 
 test('runner: cancel during the hold closes the tunnel', async () => {
   let jobId = null;
-  const ctx = setupRunner({ adapter: fakeAdapter(), maxWaitMs: 10 * 60_000 });
+  const ctx = setupRunner({ adapter: fakeAdapter(), holdMs: 10 * 60_000 });
   let cancelP = null;
   ctx.events.push = function (e) {
     if (e.hold && !cancelP) cancelP = ctx.runner.cancel(jobId);
@@ -334,40 +466,37 @@ test('runner: cancel during the hold closes the tunnel', async () => {
   assert.ok(await waitDead(spawned.at(-1).child.pid));
 });
 
-test('runner: a failed job keeps the tunnel so Retry reuses the URLs; a hold timeout closes it and Retry re-hosts + updates', async () => {
+test('runner: retry-window expiry closes the tunnel; Retry then re-hosts and UPDATES the listing', async () => {
   let fail = true;
   const ctx = setupRunner({
-    adapter: fakeAdapter({ confirmAfter: 1000 }), maxWaitMs: 30_000,
-    responder: body => (body.op !== 'confirm' && fail ? { status: 500, ok: false } : undefined),
+    adapter: fakeAdapter(), holdMs: 20_000, retryWindowMs: 150,
+    responder: body => (body.op === 'create' && fail ? { status: 500, ok: false } : undefined),
   });
   const first = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
   assert.equal(first.failedStep, 'create');
   assert.equal(ctx.hosts[0].running, true, 'kept for retry');
   fail = false;
-  const second = await ctx.runner.retry(first.jobId);
-  // confirm never arrives → hold times out → links closed
+  const second = await ctx.runner.retry(first.jobId);        // create ok, nothing fetched → hold expires
   assert.equal(second.failedStep, 'confirm');
-  assert.match(second.error, /did not confirm the files within 1 min, so the temporary links were closed/);
   assert.equal(ctx.hosts.length, 1, 'retry reused the same host');
   assert.deepEqual(ctx.calls[0].files, ctx.calls[1].files, 'retry sent the same URLs');
-  assert.equal(ctx.hosts[0].closed, true);
+  await new Promise(r => setTimeout(r, 400));
+  assert.equal(ctx.hosts[0].closed, true, 'closed when the retry window ran out');
+  assert.ok(await waitDead(spawned.at(-1).child.pid));
 
+  // The "platform" fetches the fresh links once the update carrying them was sent.
+  let fetched = false;
+  ctx.hooks.onSleep = async () => {
+    const update = ctx.calls.find(c => c.op === 'update');
+    if (update && !fetched) { fetched = true; await platformFetchAll(ctx, update); }
+  };
   const third = await ctx.runner.retry(first.jobId);
   assert.equal(ctx.hosts.length, 2, 'new tunnel for the re-host');
   const update = ctx.calls.find(c => c.op === 'update');
   assert.equal(update.remoteId, 'c1', 'listing updated with fresh links');
   assert.notDeepEqual(update.files, ctx.calls[0].files);
-  assert.equal(third.failedStep, 'confirm');
+  assert.equal(third.ok, true, third.error);
   assert.equal(ctx.hosts[1].closed, true);
-});
-
-test('runner: a failed job closes its tunnel after hold.maxWaitMs', async () => {
-  const ctx = setupRunner({ adapter: fakeAdapter(), maxWaitMs: 150, responder: body => (body.op === 'create' ? { status: 500, ok: false } : undefined) });
-  const out = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
-  assert.equal(out.failedStep, 'create');
-  assert.equal(ctx.hosts[0].running, true);
-  await new Promise(r => setTimeout(r, 400));
-  assert.equal(ctx.hosts[0].closed, true);
 });
 
 test('tunnel host source: no electron import, no logging', () => {

@@ -13,12 +13,21 @@
 //   * cleanup:  remove hosted objects. Runs only after confirm (or on cancel); if it fails the
 //               objects are kept, the job reports it, and retry() resumes at cleanup.
 // Hosts with `requiresUptime: true` (filehosts/tunnel.cjs: links served from this computer)
-// are HELD: the confirm step keeps the job (and the links) alive until the platform confirms
-// it fetched the files, or — for an adapter without buildConfirm — for the whole hold window
-// (hold.maxWaitMs, default 15 min), telling the user to keep the app open. The host is
-// close()d when the job finishes or is cancelled. A failed job keeps its host so Retry reuses
-// the same URLs, but only for hold.maxWaitMs; after that (or a hold that timed out) the links
-// are gone and Retry re-hosts the files and UPDATES the listing with fresh links.
+// are HELD (plan PB.12): the confirm step keeps the job (and the links) alive until
+//   * host.stats() says every hosted object (files AND images) was fully served at least
+//     once, AND, when the adapter has buildConfirm/parseConfirm, the platform says ingested;
+//   * a host without stats() falls back to the adapter query, or (no adapter query either)
+//     to a plain time-box: the whole hold window, then done.
+// The hold lasts confirm.holdMs (default 15 min; extendHold(jobId, ms) adds up to 60 min per
+// call) and reports structured progress { step:'confirm', status:'running', hold:true,
+// served, total, holdRemainingMs } every poll. When it expires the job FAILS at confirm with
+// the host and its URLs kept, so Retry resumes the wait on the SAME links (no re-put).
+// Terminal paths for an uptime host:
+//   * done / cancelled -> host.close() immediately;
+//   * failed -> kept only for a retry window = the remaining hold time, or (hold already over /
+//     failure before the hold) confirm.retryWindowMs (default 15 min); then close()d
+//     automatically. After that Retry re-hosts the files and UPDATES the listing with fresh
+//     links. App quit closes every host (index.cjs closeAll()).
 // A failed step leaves the job resumable: retry(jobId) restarts AT that step, reusing the
 // already-hosted keys / URLs (re-presigned only if the link would expire soon).
 //
@@ -30,7 +39,9 @@ const crypto = require('node:crypto');
 const STEPS = Object.freeze(['validate', 'bundle', 'host', 'publish', 'confirm', 'cleanup']);
 const PRESIGN_SEC = 3600;
 const PRESIGN_MARGIN_MS = 10 * 60 * 1000;
-const HOLD_MAX_WAIT_MS = 15 * 60 * 1000;
+const HOLD_MS = 15 * 60 * 1000;
+const RETRY_WINDOW_MS = 15 * 60 * 1000;
+const MAX_EXTEND_MS = 60 * 60 * 1000;
 
 const errMessage = err => String(err?.message || err || 'unknown error');
 
@@ -45,13 +56,14 @@ const errMessage = err => String(err?.message || err || 'unknown error');
  * @param {(event: any) => void} [deps.emit]               default progress sink
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => number} [deps.now]
- * @param {{ polls?: number, intervalMs?: number }} [deps.confirm]
- * @param {{ maxWaitMs?: number }} [deps.hold]        uptime hosts: max hold / failed-job link lifetime
+ * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number }} [deps.confirm]
+ *   polls / intervalMs: adapter confirm polling (non-uptime hosts); intervalMs is also the hold
+ *   poll interval; holdMs: uptime-host hold; retryWindowMs: failed-job link lifetime.
  */
 function createPublishRunner({
   adapters = [], credentials, transport, makeFileHost, zip, core, emit = () => {},
   sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now,
-  confirm: confirmOpts = {}, hold: holdOpts = {}, newId = () => `job_${crypto.randomBytes(8).toString('hex')}`,
+  confirm: confirmOpts = {}, newId = () => `job_${crypto.randomBytes(8).toString('hex')}`,
 } = {}) {
   if (!core || typeof core.validateListing !== 'function' || typeof core.planBundle !== 'function') {
     throw new Error('Listbridge runner: core { validateListing, planBundle } is required');
@@ -66,7 +78,8 @@ function createPublishRunner({
   }
   const confirmPolls = Math.max(1, confirmOpts.polls ?? 10);
   const confirmIntervalMs = confirmOpts.intervalMs ?? 5000;
-  const holdMaxWaitMs = Math.max(0, holdOpts.maxWaitMs ?? HOLD_MAX_WAIT_MS);
+  const holdMs = Math.max(0, confirmOpts.holdMs ?? HOLD_MS);
+  const retryWindowMs = Math.max(0, confirmOpts.retryWindowMs ?? RETRY_WINDOW_MS);
   const jobs = new Map();
 
   const adapterFor = platform => {
@@ -213,26 +226,65 @@ function createPublishRunner({
   // Uptime hosts: keep the links alive while the platform downloads (see header).
   async function holdUntilConfirmed(job, hasConfirm) {
     const label = job.desc.label || job.platform;
-    const mins = Math.max(1, Math.round(holdMaxWaitMs / 60000));
-    report(job, 'confirm', 'running', `Keep MIXOMESH open while ${label} downloads the files.`, { hold: true });
-    const deadline = now() + holdMaxWaitMs;
+    const host = job.fileHost;
+    const hasStats = typeof host.stats === 'function';
+    job.holdDeadline = now() + holdMs;
+    let st = null;
     for (;;) {
       checkCancel(job);
-      if (hasConfirm) {
+      await keepLinksAlive(job, host);
+      st = hasStats ? readStats(host) : null;
+      const allServed = !st || st.served >= st.total;
+      if (st && allServed && !hasConfirm) {
+        job.holdDeadline = null;
+        return `${label} downloaded all ${st.total} file(s).`;
+      }
+      if (allServed && hasConfirm) {
         const c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result), 'all')) || {};
         if (c.confirmed) {
           if (c.status) job.result.status = c.status;
           if (c.url) job.result.url = c.url;
+          job.holdDeadline = null;
           return 'Platform confirmed the files.';
         }
       }
-      const left = deadline - now();
+      const left = Math.max(0, job.holdDeadline - now());
+      const count = st ? ` (${st.served}/${st.total})` : '';
+      report(job, 'confirm', 'running', `Keep MIXOMESH open while ${label} downloads the files${count}.`, {
+        hold: true, holdRemainingMs: left, ...(st ? { served: st.served, total: st.total } : {}),
+      });
       if (left <= 0) break;
       await sleep(Math.min(confirmIntervalMs, left));
     }
-    if (!hasConfirm) return `Kept the temporary links open for ${mins} min while ${label} downloaded the files.`;
-    await closeHost(job);
-    throw new Error(`${label} did not confirm the files within ${mins} min, so the temporary links were closed. Retry to share the files again.`);
+    job.holdDeadline = null;
+    const mins = Math.max(1, Math.round(holdMs / 60000));
+    if (!st && !hasConfirm) return `Kept the temporary links open for ${mins} min while ${label} downloaded the files.`;
+    const progress = st ? ` (${st.served}/${st.total} downloaded)` : '';
+    throw new Error(`${label} has not finished downloading the files${progress} after ${mins} min. The temporary links stay open for now: Retry to keep waiting.`);
+  }
+
+  function readStats(host) {
+    const st = host.stats() || {};
+    const total = Number(st.total) || 0;
+    return { served: Math.min(Number(st.served) || 0, total), total };
+  }
+
+  // A held link must not hit its presign expiry. Tunnel URLs are token-based, so re-presigning
+  // only moves the expiry; the URL the platform already has stays the same.
+  async function keepLinksAlive(job, host) {
+    for (const rec of job.hosted.values()) {
+      if (rec.expiresAt - now() >= PRESIGN_MARGIN_MS) continue;
+      rec.url = await host.presignGet(rec.key, PRESIGN_SEC);
+      rec.expiresAt = now() + PRESIGN_SEC * 1000;
+    }
+  }
+
+  // Failed job on an uptime host: keep the links for a Retry, but not forever.
+  function scheduleClose(job, ms) {
+    clearTimeout(job.closeTimer);
+    job.closeAt = now() + ms;
+    job.closeTimer = setTimeout(() => { closeHost(job).catch(() => {}); }, ms);
+    job.closeTimer.unref?.();
   }
 
   // Close an uptime host (tunnel). Its objects lived only in that host, so they are gone:
@@ -240,6 +292,7 @@ function createPublishRunner({
   async function closeHost(job) {
     clearTimeout(job.closeTimer);
     job.closeTimer = null;
+    job.closeAt = null;
     const host = job.fileHost;
     if (!host || typeof host.close !== 'function') return;
     job.fileHost = null;
@@ -310,6 +363,7 @@ function createPublishRunner({
     job.status = 'running';
     clearTimeout(job.closeTimer);
     job.closeTimer = null;
+    job.closeAt = null;
     job.error = null; job.issues = null; job.failedStep = null; job.leftover = null;
     try {
       while (job.stepIndex < STEPS.length) {
@@ -328,12 +382,18 @@ function createPublishRunner({
           job.issues = err?.issues ?? null;
           job.leftover = err?.leftover ?? null;
           job.status = 'failed';
-          report(job, step, 'failed', job.error, job.issues ? { issues: job.issues } : {});
+          let linksOpenMs = null;
           if (job.fileHost?.requiresUptime) {
-            // Keep the links for a Retry, but not forever.
-            job.closeTimer = setTimeout(() => { closeHost(job).catch(() => {}); }, holdMaxWaitMs);
-            job.closeTimer.unref?.();
+            // Retry window: what is left of the hold, else a fresh window.
+            const holdLeft = job.holdDeadline ? job.holdDeadline - now() : 0;
+            linksOpenMs = holdLeft > 0 ? holdLeft : retryWindowMs;
+            scheduleClose(job, linksOpenMs);
           }
+          job.holdDeadline = null;
+          report(job, step, 'failed', job.error, {
+            ...(job.issues ? { issues: job.issues } : {}),
+            ...(linksOpenMs != null ? { linksOpenMs } : {}),
+          });
           return outcome(job);
         }
         job.stepIndex++;
@@ -379,7 +439,8 @@ function createPublishRunner({
       id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null,
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
       stepIndex: 0, status: 'pending', hosted: new Map(), deliverFiles: null, result: null,
-      fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, linksLost: false,
+      fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, closeAt: null,
+      holdDeadline: null, linksLost: false,
     });
     return id;
   }
@@ -425,6 +486,28 @@ function createPublishRunner({
       }
       return finishCancel(job);
     },
+    /**
+     * "Keep waiting" (decision D2): add up to 60 min to a running hold, or to a failed job's
+     * retry window (its links stay open longer). Resolves { ok, holdRemainingMs?, linksOpenMs?, message? }.
+     */
+    async extendHold(jobId, ms) {
+      const job = jobs.get(jobId);
+      if (!job) throw new Error(`Listbridge: unknown job "${jobId}"`);
+      const n = Number(ms);
+      if (!Number.isFinite(n) || n <= 0) throw new Error('Listbridge: extendHold needs a positive number of milliseconds.');
+      const add = Math.min(n, MAX_EXTEND_MS);
+      if (job.status === 'running' && job.holdDeadline) {
+        job.holdDeadline += add;
+        return { ok: true, holdRemainingMs: Math.max(0, job.holdDeadline - now()) };
+      }
+      if (job.status === 'failed' && job.closeTimer && job.fileHost) {
+        const left = Math.max(0, (job.closeAt ?? now()) - now()) + add;
+        scheduleClose(job, left);
+        try { await keepLinksAlive(job, job.fileHost); } catch { /* links keep their old expiry */ }
+        return { ok: true, linksOpenMs: left };
+      }
+      return { ok: false, message: 'This publish is not waiting for the platform.' };
+    },
     get(jobId) {
       const job = jobs.get(jobId);
       return job ? outcome(job) : null;
@@ -433,4 +516,4 @@ function createPublishRunner({
   });
 }
 
-module.exports = { createPublishRunner, STEPS };
+module.exports = { createPublishRunner, STEPS, MAX_EXTEND_MS };

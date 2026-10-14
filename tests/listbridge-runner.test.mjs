@@ -466,7 +466,7 @@ const s3Record = { type: 's3', endpoint: 'https://acc.r2.cloudflarestorage.com',
 test('ipc: registers exactly the publish:* channels', () => {
   const { handlers } = setupIpc();
   assert.deepEqual([...handlers.keys()].sort(), [
-    'publish:cancel', 'publish:clearCredentials', 'publish:describe', 'publish:hasCredentials',
+    'publish:cancel', 'publish:clearCredentials', 'publish:describe', 'publish:extendHold', 'publish:hasCredentials',
     'publish:retry', 'publish:setCredentials', 'publish:start', 'publish:testConnection',
   ]);
 });
@@ -558,7 +558,7 @@ test('ipc: URL platforms default to the temporary-link host; it needs no credent
     transport: fakeTransport(() => created()), loadCore: async () => core,
     makeFileHost: () => { throw new Error('s3 must not be used'); },
     makeTunnelHost: () => { made++; return tunnel; },
-    sleep: async () => {}, hold: { maxWaitMs: 0 },
+    sleep: async () => {}, confirm: { holdMs: 0 },
   });
   const call = (ch, ...a) => handlers.get(ch)({ sender: { id: 1, isDestroyed: () => false, send() {} } }, ...a);
   assert.equal(await call('publish:hasCredentials', 'filehost:tunnel'), true);
@@ -575,6 +575,195 @@ test('ipc: URL platforms default to the temporary-link host; it needs no credent
   await reg.closeAll();
 });
 
+// ── PB.12: ingestion confirm + hold for uptime hosts (fake host with stats()) ──
+
+// A fake temporary-link host: `served` is what the platform has fully downloaded so far.
+function fakeUptimeHost({ withStats = true } = {}) {
+  const base = fakeFileHost();
+  const host = {
+    ...base, requiresUptime: true, closes: 0, served: 0,
+    put: (...a) => base.put(...a), presignGet: k => `https://tunnel.test/${k}`, remove: k => base.remove(k),
+    async close() { host.closes++; },
+    get puts() { return base.puts; },
+  };
+  if (withStats) host.stats = () => ({ served: host.served, total: base.puts.length - base.removed.length });
+  return host;
+}
+
+function setupHold({ adapter = fakeAdapter(), host = fakeUptimeHost(), responder = () => created(), holdMs = 60_000, retryWindowMs = 60_000, onSleep } = {}) {
+  const clock = { t: 1_000_000 };
+  const events = [];
+  const transport = fakeTransport(responder);
+  const hooks = { onSleep };
+  const runner = createPublishRunner({
+    adapters: [adapter], credentials: fakeCreds({ 'filehost:tunnel': { type: 'tunnel' } }), transport, core,
+    makeFileHost: () => host, emit: e => events.push(e), now: () => clock.t,
+    sleep: async ms => { clock.t += ms; await hooks.onSleep?.(); },
+    confirm: { polls: 3, intervalMs: 5000, holdMs, retryWindowMs },
+  });
+  const start = () => runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
+  return { runner, events, transport, host, clock, hooks, start };
+}
+const holdEvents = events => events.filter(e => e.step === 'confirm' && e.status === 'running' && e.hold);
+
+test('hold: everything already served → confirmed without an adapter query; host closed on done', async () => {
+  const ctx = setupHold();
+  ctx.host.served = 3;                     // 2 files + 1 image fetched during create
+  const out = await ctx.start();
+  assert.equal(out.ok, true, out.error);
+  assert.deepEqual(ctx.transport.calls.map(c => c.body.op), ['create']);
+  assert.ok(ctx.events.some(e => e.step === 'confirm' && e.status === 'done' && /downloaded all 3 file/.test(e.message)));
+  assert.equal(ctx.host.closes, 1, 'close() on done');
+});
+
+test('hold: partial → structured progress while held → served later → adapter confirms → done', async () => {
+  let ticks = 0;
+  const ctx = setupHold({ adapter: fakeAdapter({ confirmAfter: 2 }), onSleep: () => { ticks++; if (ticks === 1) ctx.host.served = 1; if (ticks === 3) ctx.host.served = 3; } });
+  const out = await ctx.start();
+  assert.equal(out.ok, true, out.error);
+  assert.equal(out.result.status, 'published');
+  const h = holdEvents(ctx.events);
+  assert.deepEqual(h.map(e => [e.served, e.total, e.holdRemainingMs]), [
+    [0, 3, 60_000], [1, 3, 55_000], [1, 3, 50_000], [3, 3, 45_000],
+  ]);
+  assert.match(h[1].message, /Keep MIXOMESH open while Fake Market downloads the files \(1\/3\)/);
+  assert.deepEqual(ctx.transport.calls.map(c => c.body.op), ['create', 'confirm', 'confirm'], 'adapter asked only once all 3 were served');
+  assert.equal(ctx.host.closes, 1);
+});
+
+test('hold: all served but the adapter keeps saying not ingested → hold expiry fails at confirm', async () => {
+  const ctx = setupHold({ adapter: fakeAdapter({ confirmAfter: 1000 }), holdMs: 10_000 });
+  ctx.host.served = 3;
+  const out = await ctx.start();
+  assert.equal(out.failedStep, 'confirm');
+  assert.match(out.error, /has not finished downloading the files \(3\/3 downloaded\)/);
+  assert.equal(ctx.host.closes, 0, 'kept for the retry window');
+  await ctx.runner.cancel(out.jobId);
+  assert.equal(ctx.host.closes, 1, 'close() on cancel');
+});
+
+test('hold: expiry → failed + resumable with the host kept; Retry inside the window reuses the SAME URLs, no re-put', async () => {
+  const ctx = setupHold({ holdMs: 20_000, retryWindowMs: 60_000 });
+  const first = await ctx.start();
+  assert.equal(first.ok, false);
+  assert.equal(first.failedStep, 'confirm');
+  const failed = ctx.events.find(e => e.status === 'failed');
+  assert.equal(failed.linksOpenMs, 60_000, 'hold over → fresh retry window');
+  assert.equal(ctx.host.closes, 0);
+  assert.equal(ctx.host.removed.length, 0, 'hosted copies kept');
+  const puts = ctx.host.puts.length;
+  ctx.host.served = 3;
+  const second = await ctx.runner.retry(first.jobId);
+  assert.equal(second.ok, true, second.error);
+  assert.equal(ctx.host.puts.length, puts, 'no re-put');
+  assert.deepEqual(ctx.transport.calls.map(c => c.body.op), ['create'], 'no update: same URLs');
+  assert.equal(ctx.host.closes, 1, 'close() on done');
+});
+
+test('hold: retry-window expiry after a failure closes the host; Retry then re-hosts on a fresh host', async () => {
+  let fail = true;
+  const ctx = setupHold({ retryWindowMs: 60, responder: req => (req.body.op === 'create' && fail ? { status: 500, ok: false } : created()) });
+  const first = await ctx.start();
+  assert.equal(first.failedStep, 'create');
+  assert.equal(ctx.events.find(e => e.status === 'failed').linksOpenMs, 60, 'failure before the hold → retry window');
+  assert.equal(ctx.host.closes, 0);
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(ctx.host.closes, 1, 'close() when the retry window ran out');
+  fail = false;
+  ctx.host.served = 0;
+  ctx.hooks.onSleep = () => { ctx.host.served = 6; };
+  const second = await ctx.runner.retry(first.jobId);
+  assert.equal(second.ok, true, second.error);
+  assert.equal(ctx.host.puts.length, 6, 're-hosted');
+  assert.deepEqual(ctx.transport.calls.map(c => c.body.op), ['create', 'create'], 'create never succeeded, so it is sent again with the fresh links');
+  assert.equal(ctx.host.closes, 2);
+});
+
+test('hold: a failure DURING the hold keeps the links for the remaining hold time only', async () => {
+  let n = 0;
+  const ctx = setupHold({
+    adapter: fakeAdapter({ confirmAfter: 5 }), holdMs: 60_000,
+    responder: req => (req.body.op === 'confirm' && ++n === 2 ? { status: 500, ok: false } : created()),
+    onSleep: () => { ctx.host.served = 3; },
+  });
+  ctx.host.served = 3;
+  const out = await ctx.start();
+  assert.equal(out.failedStep, 'confirm');
+  assert.match(out.error, /HTTP 500/);
+  assert.equal(ctx.events.find(e => e.status === 'failed').linksOpenMs, 55_000, 'remaining hold');
+  await ctx.runner.cancel(out.jobId);
+  assert.equal(ctx.host.closes, 1);
+});
+
+test('hold: cancel during the hold → cleanup, close()', async () => {
+  const ctx = setupHold();
+  let jobId = null;
+  let cancelP = null;
+  ctx.hooks.onSleep = () => { cancelP ||= ctx.runner.cancel(jobId); };
+  jobId = ctx.runner.create({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
+  const out = await ctx.runner.run(jobId);
+  assert.equal(out.status, 'cancelled');
+  assert.equal((await cancelP).status, 'cancelled');
+  assert.equal(ctx.host.closes, 1);
+  assert.equal(out.leftover, undefined);
+});
+
+test('hold: host without stats() + no adapter confirm keeps the time-box (done after holdMs)', async () => {
+  const ctx = setupHold({ host: fakeUptimeHost({ withStats: false }), holdMs: 15_000 });
+  const t0 = ctx.clock.t;
+  const out = await ctx.start();
+  assert.equal(out.ok, true, out.error);
+  assert.equal(ctx.clock.t - t0, 15_000);
+  assert.equal(holdEvents(ctx.events)[0].served, undefined);
+  assert.equal(ctx.host.closes, 1);
+});
+
+test('extendHold: adds to a running hold (capped at 60 min per call) and to a failed job\'s retry window', async () => {
+  let jobId = null;
+  let ext = null;
+  const ctx = setupHold({ holdMs: 10_000 });
+  ctx.hooks.onSleep = async () => {
+    if (!ext) ext = await ctx.runner.extendHold(jobId, 5 * 60 * 60 * 1000);
+  };
+  jobId = ctx.runner.create({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
+  const t0 = ctx.clock.t;
+  const out = await ctx.runner.run(jobId);
+  assert.equal(out.failedStep, 'confirm');
+  assert.equal(ext.ok, true);
+  assert.equal(ext.holdRemainingMs, 5_000 + 60 * 60 * 1000, 'capped at +60 min');
+  assert.equal(ctx.clock.t - t0, 10_000 + 60 * 60 * 1000);
+  const w = await ctx.runner.extendHold(jobId, 1000);
+  assert.deepEqual(w, { ok: true, linksOpenMs: 61_000 });
+  await assert.rejects(ctx.runner.extendHold(jobId, -1), /positive number/);
+  await assert.rejects(ctx.runner.extendHold('nope', 1000), /unknown job/);
+  await ctx.runner.cancel(jobId);
+  assert.equal((await ctx.runner.extendHold(jobId, 1000)).ok, false, 'nothing to extend once cancelled');
+});
+
+test('ipc: extendHold is owner-only; closeAll (app quit) closes a failed job\'s kept tunnel', async () => {
+  const handlers = new Map();
+  const tunnel = fakeUptimeHost();
+  const reg = registerListbridgeIpc((c, fn) => handlers.set(c, fn), {
+    userDataDir: tmpDir(), safeStorage: fakeSafeStorage(), adapters: [fakeAdapter()],
+    transport: fakeTransport(() => ({ status: 500, ok: false })), loadCore: async () => core,
+    makeTunnelHost: () => tunnel, sleep: async () => {},
+  });
+  const ev = (id = 1) => ({ sender: { id, isDestroyed: () => false, send() {} } });
+  const call = (ch, ...a) => handlers.get(ch)(ev(), ...a);
+  await call('publish:setCredentials', 'fake:me', { user: 'me', apiKey: SECRET });
+  const out = await call('publish:start', startPayload(makePkg(), { fileHostId: undefined }));
+  assert.equal(out.failedStep, 'create');
+  assert.equal(tunnel.closes, 0, 'kept for Retry');
+  await assert.rejects(handlers.get('publish:extendHold')(ev(2), out.jobId, 1000), /another window/);
+  await assert.rejects(call('publish:extendHold', out.jobId, 'x'), /positive number/);
+  const r = await call('publish:extendHold', out.jobId, 60_000);
+  assert.equal(r.ok, true);
+  const want = 15 * 60 * 1000 + 60_000;   // default retry window (CONFIRM_OPTIONS) + extension, real clock
+  assert.ok(r.linksOpenMs <= want && r.linksOpenMs > want - 5000, String(r.linksOpenMs));
+  await reg.closeAll();
+  assert.equal(tunnel.closes, 1, 'close() on quit');
+});
+
 test('runner code stays host-neutral: no electron import, IPC only via the injected handle', () => {
   const dir = path.join(ROOT, 'electron', 'listbridge');
   const files = ['credentials.cjs', 'transport.cjs', 'jobs.cjs', 'index.cjs', 'filehosts/s3.cjs', 'filehosts/tunnel.cjs'];
@@ -587,7 +776,7 @@ test('runner code stays host-neutral: no electron import, IPC only via the injec
   const main = fs.readFileSync(path.join(ROOT, 'electron', 'main.cjs'), 'utf8');
   assert.match(main, /registerListbridgeIpc\(handle,/);
   const preload = fs.readFileSync(path.join(ROOT, 'electron', 'preload.cjs'), 'utf8');
-  for (const m of ['describe', 'hasCredentials', 'setCredentials', 'clearCredentials', 'testConnection', 'start', 'retry', 'cancel', 'onProgress']) {
+  for (const m of ['describe', 'hasCredentials', 'setCredentials', 'clearCredentials', 'testConnection', 'start', 'retry', 'cancel', 'extendHold', 'onProgress']) {
     assert.match(preload, new RegExp(`\\b${m}:`), `preload listbridge.${m}`);
   }
   const builder = fs.readFileSync(path.join(ROOT, 'electron-builder.yml'), 'utf8');

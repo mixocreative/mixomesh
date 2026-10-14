@@ -1772,7 +1772,24 @@ Viewer sizes are measured at RESTING scale (`ImportBounce.withRestTransform`): a
 **Capability gate.** `caps.publish` is true only in the desktop shell with the Listbridge bridge present; false on web, OPFS (iPad/iPhone) and phone viewer. The Electron security smoke asserts the bridge, the Cults3D adapter and the default tunnel host are registered.
 
 #### Failure model
-_Pending PB.12 (ingestion confirm + hold) — filled in when it lands._
+A publish is one resumable job: validate → bundle → host → create|update →
+confirm → cleanup; every step reports progress and a failed step resumes at that step on
+Retry, reusing hosted objects (never re-uploaded). For a temporary-link host (the default
+`tunnel`: files served from this PC through a Cloudflare quick tunnel) the confirm step HOLDS
+the job: it is confirmed only when the host's `stats()` shows every hosted object (files and
+images) fully delivered at least once — a full GET, or single-range 206 responses that together
+cover every byte; HEAD and aborted transfers never count — AND, when the adapter has
+`buildConfirm`/`parseConfirm`, the platform reports the files ingested. While held it emits
+`{ step:'confirm', status:'running', hold:true, served, total, holdRemainingMs }` every poll
+(5 s). The hold lasts `confirm.holdMs` (15 min); `publish:extendHold` (≤ +60 min per call, owner window
+only) extends it — the Publish tab "Keep waiting" button is not wired yet (PublishClient pass-through pending). When it expires the job FAILS at confirm with the host
+and URLs kept, so Retry resumes the wait on the same links. The tunnel is closed immediately on
+done and on cancel; after a failure it stays up only for a retry window (the remaining hold, or
+`confirm.retryWindowMs` = 15 min if the hold was over or never started) and is then closed
+automatically, after which Retry re-hosts and updates the listing with fresh links. App quit
+closes every tunnel (`closeAll()` on `will-quit`). S3-compatible hosts have no `stats()`: confirm
+polls the adapter (10 × 5 s) if it can, otherwise it is skipped; host cleanup runs only after
+confirmation (or on explicit cancel).
 
 ## PART 7 — SCENE MANAGER
 

@@ -26,6 +26,13 @@ const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;     // 2 GiB per listing
 const MAX_ITEMS = 64;
 const MAX_FIELD_LEN = 4096;
 
+// Confirm / hold policy for the runner (plan PB.12). intervalMs is both the adapter confirm
+// poll and the hold poll; holdMs = how long a temporary link waits for the platform to fetch
+// everything; retryWindowMs = how long a failed job's temporary links stay up for a Retry.
+const CONFIRM_OPTIONS = Object.freeze({
+  polls: 10, intervalMs: 5000, holdMs: 15 * 60 * 1000, retryWindowMs: 15 * 60 * 1000,
+});
+
 // File host types and their credential fields (required, optional).
 // `tunnel` (PB.5b) is the DEFAULT for transfer:'url' platforms: temporary links served from
 // this computer through a Cloudflare quick tunnel; no account, no credentials (the id
@@ -103,13 +110,15 @@ function slugName(title) {
  * @param {any} [deps.transport]
  * @param {any} [deps.credentials]
  * @param {(ms: number) => Promise<void>} [deps.sleep]
- * @param {{ maxWaitMs?: number }} [deps.hold]        runner hold for temporary links (default 15 min)
+ * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number }} [deps.confirm]
+ *   overrides for CONFIRM_OPTIONS (tests)
  */
 function registerListbridgeIpc(handle, deps = {}) {
   const {
     userDataDir, safeStorage, adapters = [], fetchImpl = globalThis.fetch, loadCore = defaultLoadCore,
-    zip = defaultZip, sleep, hold,
+    zip = defaultZip, sleep,
   } = deps;
+  const confirm = { ...CONFIRM_OPTIONS, ...(deps.confirm || {}) };
   const store = deps.credentials || createCredentialStore({
     filePath: path.join(String(userDataDir), CREDENTIALS_FILE), safeStorage,
   });
@@ -159,7 +168,7 @@ function registerListbridgeIpc(handle, deps = {}) {
       const core = await loadCore();
       for (const a of adapters) core.assertAdapter(a);
       const runner = createPublishRunner({
-        adapters, credentials, transport, makeFileHost, zip, core, ...(sleep ? { sleep } : {}), ...(hold ? { hold } : {}),
+        adapters, credentials, transport, makeFileHost, zip, core, confirm, ...(sleep ? { sleep } : {}),
       });
       return { core, runner, byId: new Map(adapters.map(a => [a.describe().id, a])) };
     })();
@@ -341,7 +350,15 @@ function registerListbridgeIpc(handle, deps = {}) {
     return runner.cancel(jobId);
   });
 
+  // "Keep waiting" (decision D2): extend a temporary-link hold by up to 60 min per call.
+  handle('publish:extendHold', async (event, jobId, ms) => {
+    const { runner } = await ready();
+    assertOwner(event, jobId);
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) throw new Error('publish:extendHold needs a positive number of milliseconds');
+    return runner.extendHold(jobId, ms);
+  });
+
   return { ready, credentials, closeAll };
 }
 
-module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, TUNNEL_ID, defaultZip, loadListbridgeCore: defaultLoadCore };
+module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, TUNNEL_ID, CONFIRM_OPTIONS, defaultZip, loadListbridgeCore: defaultLoadCore };
