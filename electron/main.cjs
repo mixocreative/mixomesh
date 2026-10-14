@@ -29,16 +29,25 @@ const ENTRY_URL = appEntryUrl({ devUrl: DEV_URL, indexPath: INDEX_PATH });
 // dialog is answered with a temp file, and the smoke drives Ctrl+Shift+S then
 // checks the written .mixo + that the renderer-readable KV holds no OS path.
 const SMOKE_SAVE = process.env.MIXO_SMOKE === 'save';
+// MIXO_SMOKE=launch (unpackaged only, LI.6): the test pre-creates the temp root and passes
+// MIXO_SMOKE_USERDATA so a SECOND process can share the single-instance lock; _runLaunchSmoke
+// observes the renderer, spawns that second process and checks the result.
+const SMOKE_LAUNCH = process.env.MIXO_SMOKE === 'launch';
 const PROJECT_FILTERS = [{ name: 'MIXOMESH project', extensions: ['mixo'] }];
 let _smokeDir = null;
+let _smokeRoot = null;
 // Every unpackaged smoke mode gets a temp userData (also scopes the single-instance
 // lock, so a smoke run never collides with a running dev/real app); only `save`
 // keeps the dir for its own checks.
 if (process.env.MIXO_SMOKE && !app.isPackaged) {
   const os = require('node:os');
   const fsSync = require('node:fs');
-  const smokeRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mixo-smoke-'));
-  app.setPath('userData', path.join(smokeRoot, 'userData'));
+  const sharedUserData = SMOKE_LAUNCH ? process.env.MIXO_SMOKE_USERDATA : '';
+  const smokeRoot = sharedUserData
+    ? path.dirname(sharedUserData)
+    : fsSync.mkdtempSync(path.join(os.tmpdir(), 'mixo-smoke-'));
+  app.setPath('userData', sharedUserData || path.join(smokeRoot, 'userData'));
+  _smokeRoot = smokeRoot;
   if (SMOKE_SAVE) _smokeDir = smokeRoot;
 }
 
@@ -159,7 +168,11 @@ function _askQuitDuringPublish(win, running) {
       if (/Content Security Policy/i.test(text)) { console.error('MIXO_SMOKE: CSP violation', text); app.exit(5); }
     });
   }
-  if (_smokeDir) {
+  if (SMOKE_LAUNCH && !app.isPackaged) {
+    win.webContents.once('did-finish-load', () => { console.log('MIXO_SMOKE: loaded'); _runLaunchSmoke(win); });
+    win.webContents.once('did-fail-load', (_e, code, desc) => { console.error('MIXO_SMOKE: fail', code, desc); app.exit(1); });
+    setTimeout(() => { console.error('MIXO_SMOKE: launch timeout'); app.exit(2); }, 50000);
+  } else if (_smokeDir) {
     win.webContents.once('did-finish-load', () => { console.log('MIXO_SMOKE: loaded'); _runSaveSmoke(win); });
     win.webContents.once('did-fail-load', (_e, code, desc) => { console.error('MIXO_SMOKE: fail', code, desc); app.exit(1); });
     setTimeout(() => { console.error('MIXO_SMOKE: save timeout'); app.exit(2); }, 40000);
@@ -253,6 +266,74 @@ function _runSaveSmoke(win) {
     setTimeout(() => app.exit(0), 200);
   };
   setTimeout(tick, 1500);
+}
+
+// Launch smoke (LI.6): first instance was started with --open/--library args (+ one bad
+// --open). Wait until the renderer shows >=2 objects, the Library tab lists the temp
+// folder and ONE toast names only the bad file's basename; then start a SECOND process
+// on the same userData (hits the single-instance lock, must exit 0 fast) and wait for
+// the object count to grow by one. Finally: no OS path in renderer-visible state.
+function _runLaunchSmoke(win) {
+  const fsSync = require('node:fs');
+  const { spawn } = require('node:child_process');
+  const libName = process.env.MIXO_SMOKE_LIBNAME ?? '';
+  const badName = process.env.MIXO_SMOKE_BADNAME ?? '';
+  const second = process.env.MIXO_SMOKE_SECOND ?? '';
+  const token = path.basename(_smokeRoot);       // present in every absolute path the test made
+  const fail = (msg, extra) => { console.error('MIXO_SMOKE: launch FAIL', msg, extra ? JSON.stringify(extra) : ''); app.exit(4); };
+  const probe = () => win.webContents.executeJavaScript(`(() => ({
+    objects: document.querySelectorAll('#outliner .ol-row[data-kind="object"]').length,
+    library: document.getElementById('ap-tree-list')?.textContent ?? '',
+    toasts: [...document.querySelectorAll('.toast .toast-msg')].map(e => e.textContent),
+  }))()`).catch(() => null);
+  const until = async (pred, ms, what) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      if (win.isDestroyed()) return null;
+      const r = await probe();
+      if (r && pred(r)) return r;
+      if (Date.now() > end) { fail(`timeout waiting for ${what}`, r && { objects: r.objects, toasts: r.toasts }); return null; }
+      await new Promise(res => setTimeout(res, 300));
+    }
+  };
+  (async () => {
+    const t0 = Date.now();
+    const first = await until(r => r.objects >= 2 && r.library.includes(libName)
+      && r.toasts.some(m => m.includes(badName)), 25000, 'objects>=2 + library + bad-arg toast');
+    if (!first) return;
+    const t1 = Date.now();
+    const badToasts = first.toasts.filter(m => m.includes(badName));
+    if (badToasts.length !== 1 || badToasts[0].includes(token) || /[\\/]/.test(badToasts[0])) {
+      return fail('bad-arg toast must be exactly one and basename-only', badToasts);
+    }
+    const before = first.objects;
+    const ts = Date.now();
+    const child = spawn(process.execPath, [path.join(__dirname, 'main.cjs'), '--open', second], {
+      env: { ...process.env }, stdio: 'ignore',
+    });
+    const code = await new Promise(res => {
+      const timer = setTimeout(() => { child.kill(); res('timeout'); }, 10000);
+      child.on('exit', c => { clearTimeout(timer); res(c); });
+      child.on('error', () => { clearTimeout(timer); res('error'); });
+    });
+    const secondMs = Date.now() - ts;
+    if (code !== 0) return fail('second instance did not exit 0 within 10s', { code });
+    const after = await until(r => r.objects === before + 1, 15000, 'object count +1 after second instance');
+    if (!after) return;
+    // Leak check: nothing renderer-visible may carry the temp path (main-side refs may).
+    const visible = await win.webContents.executeJavaScript(
+      `JSON.stringify({ls: {...localStorage}, text: document.body.innerText})`);
+    const kvFile = path.join(app.getPath('userData'), 'mixo-kv.json');
+    const kvText = fsSync.existsSync(kvFile) ? fsSync.readFileSync(kvFile, 'utf8') : '';
+    const refsFile = path.join(app.getPath('userData'), 'mixo-refs.json');
+    const refsHasPaths = fsSync.existsSync(refsFile) && fsSync.readFileSync(refsFile, 'utf8').includes(token);
+    const leaked = visible.includes(token) || kvText.includes(token);
+    if (leaked) return fail('OS path leaked into renderer-visible state / mixo-kv.json', { visible: visible.includes(token), kv: kvText.includes(token) });
+    console.log('MIXO_SMOKE: launched', JSON.stringify({
+      objects: before, afterSecond: after.objects, firstMs: t1 - t0, secondExitMs: secondMs, secondExit: code, refsHoldPaths: refsHasPaths,
+    }));
+    setTimeout(() => app.exit(0), 200);
+  })().catch(err => fail('probe threw', { message: err?.message ?? String(err) }));
 }
 
 // ── User-editable config files (materials.json) ──
