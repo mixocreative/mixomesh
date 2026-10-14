@@ -25,6 +25,8 @@
     "test:video": "node tests/browser-video-check.mjs",
     "test:webgpu": "node tests/browser-webgpu-check.mjs",
     "test:electron": "node tests/electron-smoke.mjs",
+    "test:live-tunnel": "node tests/listbridge-live-tunnel.mjs",
+    "test:rehearsal": "node tests/listbridge-rehearsal.mjs",
     "electron": "electron electron/main.cjs",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
     "dist": "node scripts/fetch-cloudflared.mjs && electron-builder --win",

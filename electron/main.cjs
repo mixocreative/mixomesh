@@ -13,6 +13,7 @@ const {
 } = require('./OpaqueFileRegistry.cjs');
 const { createKvStore } = require('./KvStore.cjs');
 const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
+const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
 const {
   SECURE_WEB_PREFERENCES, appEntryUrl, guardWebContents, denyAllPermissions, isTrustedSender,
 } = require('./WindowSecurity.cjs');
@@ -400,7 +401,9 @@ handle('export:save', async (event, opts, data) => {
 // registry (src/listbridge/index.js), loaded once at startup.
 async function _loadListbridgeAdapters() {
   try {
-    return [...(await loadListbridgeCore()).ADAPTERS];
+    const real = [...(await loadListbridgeCore()).ADAPTERS];
+    // PB.15 dress rehearsal: a fake Cults may replace the real adapter (UNPACKAGED builds only; see fakePlatform.cjs).
+    return fakePlatformAdapters({ isPackaged: app.isPackaged, env: process.env, realAdapters: real }) ?? real;
   } catch (err) {
     // Publishing unavailable is not a reason to keep the app from starting.
     console.error('Listbridge adapters failed to load:', err?.message ?? err);
