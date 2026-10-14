@@ -435,4 +435,7 @@ export const OpfsStorageAdapter = {
   // Not async (same contract as the other tiers). WebKit has no
   // getAsFileSystemHandle: drops carry Files only; the caller reads the bytes.
   refForDrop() { return Promise.resolve(null); },
+  // Launch integration (LI.4): desktop-only; no-op here.
+  pullLaunchRequests() { return Promise.resolve(null); },
+  onLaunchRequests() { return () => {}; },
 };

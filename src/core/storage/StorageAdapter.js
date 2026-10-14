@@ -60,7 +60,15 @@ import {
  * @property {(opts?:{multiple?:boolean})=>Promise<Array<{ref:any,name:string}>>} pickImportAssets   [] = cancelled
  * @property {(blob:Blob, suggestedName:string, hint?:ExportHint)=>Promise<boolean>} saveExport   false = cancelled
  * @property {(item:DataTransferItem)=>Promise<any|null>} refForDrop   call SYNCHRONOUSLY inside the drop event
+ * Launch integration (LI.4, optional; desktop only, browser/OPFS no-op):
+ * @property {()=>Promise<LaunchBatch|null>} [pullLaunchRequests]
+ * @property {(cb:(batch:LaunchBatch)=>void)=>(()=>void)} [onLaunchRequests]   returns unsubscribe
  * — Still declared only: watchAsset (caps.watchFiles). —
+ */
+
+/**
+ * @typedef {{id:string|number, items:Array<{kind:'project'|'import', ref:any, name:string}>,
+ *   library:{ref:any,name:string}|null, errors:Array<{name:string, reason:string}>}} LaunchBatch
  */
 
 /**
@@ -282,6 +290,9 @@ export const BrowserStorageAdapter = {
 
   // NOT async: getAsFileSystemHandle() is only valid synchronously inside the
   // drop event, so it is called now and only its promise is returned.
+  pullLaunchRequests() { return Promise.resolve(null); },
+  onLaunchRequests() { return () => {}; },
+
   refForDrop(item) {
     if (typeof item?.getAsFileSystemHandle !== 'function') return Promise.resolve(null);
     return item.getAsFileSystemHandle()

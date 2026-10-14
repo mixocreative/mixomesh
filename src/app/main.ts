@@ -26,6 +26,7 @@ import { loadMaterialPresets } from '../core/print/MaterialPresets.js';
 import { ProjectMenu } from '../ui/ProjectMenu.js';
 import { AppShell } from '../ui/AppShell.js';
 import { PanelSheets } from '../ui/PanelSheets.js';
+import { LaunchRequests } from '../core/LaunchRequests.js';
 import { ViewerMode } from '../ui/ViewerMode.js';
 import { Workspace } from '../ui/Workspace.js';
 import { NumberScrub } from '../ui/NumberScrub.js';
@@ -149,6 +150,9 @@ async function bootstrap() {
   // its project's last save. Recover re-mounts first (handle-backed assets
   // resolve through the folder — autosave skips their bytes, A9).
   safeAsync(() => BootBanner.runBootChecks());
+  // Desktop launch args (LI.4): pull the queued batch + subscribe — AFTER the boot
+  // checks are kicked off, same tick (plan D5). No-op without the bridge.
+  safeAsync(() => LaunchRequests.init());
 }
 
 function wireCloseFlow() {

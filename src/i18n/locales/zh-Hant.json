@@ -1182,5 +1182,9 @@
   "publish.issue.licenseRequired": "請選擇授權。",
   "publish.step.hostDirect": "上傳檔案到 {label}",
   "publish.err.uploadSlotFailed": "平台沒有提供上傳位置。請檢查網路後按「重試」；已送出的檔案會保留。",
-  "publish.err.uploadFailed": "檔案傳送到平台失敗。請按「重試」；已送出的檔案不會重複傳送。"
+  "publish.err.uploadFailed": "檔案傳送到平台失敗。請按「重試」；已送出的檔案不會重複傳送。",
+  "launch.errors": "無法從啟動要求開啟：{list}",
+  "launch.skippedExtraProject": "已略過（一次只能開啟一個專案）",
+  "launch.busy": "已略過啟動要求：MIXOMESH 仍在載入中，請再試一次。",
+  "launch.unreadable": "無法讀取檔案"
 }

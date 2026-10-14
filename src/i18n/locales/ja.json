@@ -1182,5 +1182,9 @@
   "publish.issue.licenseRequired": "ライセンスを選んでください。",
   "publish.step.hostDirect": "{label} にファイルをアップロード",
   "publish.err.uploadSlotFailed": "プラットフォームからアップロード枠を取得できませんでした。接続を確認して「再試行」を押してください。送信済みのファイルは保持されています。",
-  "publish.err.uploadFailed": "プラットフォームへのファイル送信に失敗しました。「再試行」を押してください。送信済みのファイルは再送されません。"
+  "publish.err.uploadFailed": "プラットフォームへのファイル送信に失敗しました。「再試行」を押してください。送信済みのファイルは再送されません。",
+  "launch.errors": "起動リクエストから開けなかったもの：{list}",
+  "launch.skippedExtraProject": "スキップしました（プロジェクトは一度に1つだけ開けます）",
+  "launch.busy": "起動リクエストをスキップしました。MIXOMESH が読み込み中でした。もう一度お試しください。",
+  "launch.unreadable": "ファイルを読み込めませんでした"
 }

@@ -183,6 +183,20 @@ export const DesktopStorageAdapter = {
       .catch(() => null);
   },
 
+  // Launch integration (LI.4): OPTIONAL bridge methods (not in REQUIRED_BRIDGE — an older
+  // preload must still boot). Feature-detected at call time; absent → no batch / no-op.
+  async pullLaunchRequests() {
+    const api = _api();
+    return typeof api?.pullLaunchRequests === 'function' ? ((await api.pullLaunchRequests()) ?? null) : null;
+  },
+
+  onLaunchRequests(cb) {
+    const api = _api();
+    if (typeof api?.onLaunchRequests !== 'function') return () => {};
+    const off = api.onLaunchRequests(cb);
+    return typeof off === 'function' ? off : () => {};
+  },
+
   async findMoved(source, opts = {}) {
     const src = normalizeSource(source);
     const folderKey = opts.refKey ?? (src?.kind === 'folder' ? src.refKey : null);
