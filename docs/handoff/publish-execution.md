@@ -21,7 +21,8 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.12 ingestion confirm + hold | done 3116af9 |
 | PB.14 quit safety + packaged smoke | done a1ed7c9 + build fix 6fc54a8 |
 | PB.13 error codes → i18n | done 11f9c6a |
-| PB.15 dress rehearsal | running (sonnet) |
+| PB.15 dress rehearsal | done 3424f25 |
+| PB.16 tunnel public-readiness gate (bug from PB.15) | running (sonnet) |
 | PB.5 S3 file host | done |
 | PB.5b tunnel file host (auto links) | done 6d9be84 (live tunnel verified) |
 | PB.6 renderer bridge + caps | done |
@@ -53,3 +54,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — PB.12 3116af9 (full tree green: unit 466, browser/publish smokes, build, electron; live tunnel Range coverage verified; Windows res.end false-finish bug found+fixed). Blueprint failure model merged. Running PB.14 (sonnet, + Keep-waiting UI wiring). Then PB.13 (error codes → i18n), PB.15 rehearsal.
 - 2026-10-14 — PB.14 a1ed7c9 (early remoteId, quit prompt, Keep waiting). `npm run dist` was broken since 179b4dc (electron-builder never declared) → 6fc54a8: electron-builder 26.15.3 devDep, package version 0.1.0, electronDist=node_modules/electron (skips the hanging Electron checksum download). Full installer built: release/MIXOMESH Setup 0.1.0.exe (129 MB, unsigned → SmartScreen expected). PACKAGED SMOKE PASS: boots from app.asar, security ok, publish:describe lists cults3d + tunnel, cloudflared bundled. Next: PB.13 (haiku), PB.15 (sonnet).
 - 2026-10-14 — PB.13 11f9c6a (haiku; main polished ja/zh-Hant wording; unit 479, all smokes, electron). Running PB.15 (sonnet): live tunnel test + in-app rehearsal with fake Cults (dev-only switch, packaged must ignore). Remaining after: PB.0 + PB.3b + PB.11 (owner key).
+- 2026-10-14 — PB.15 3424f25: live tunnel PASS (start 4–5.6 s, ~6.5–7 MB/s). Rehearsal exposed REAL BUG: new trycloudflare host → ENOTFOUND (negative DNS cache) for 22 s after create; platform would get missing files. PB.16 (sonnet) running: DoH readiness gate (1.1.1.1 + 8.8.8.8, stable 2 polls) + public probe before any URL goes to the platform; code tunnel-not-public.
