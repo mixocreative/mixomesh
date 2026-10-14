@@ -15,3 +15,4 @@ Protocol: cheap agents, main verifies, `# fail 0`, commit by path (never `git co
 - 2026-10-15 — API.3 committed (outputDir/outputFile kinds).
 - 2026-10-15 — API.1 committed (27 methods, 13 codes). Next G2: API.2 dispatcher ∥ API.4 pipe server (security review).
 - 2026-10-15 — G2 dispatched: API.2 dispatcher (sonnet), API.4 named-pipe server (sonnet; main reviews line by line).
+- 2026-10-15 — API.4 committed (main reviewed hello/token/rewrite/write; fixed API.3 gap: mixo missing from OUTPUT_EXTENSIONS → saveAs impossible). Waiting API.2.
