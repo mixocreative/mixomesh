@@ -7,6 +7,9 @@ const { MAX_WRITE_BYTES } = require('./OpaqueFileRegistry.cjs');
 
 const LAUNCH_EXTENSIONS = Object.freeze(['mixo', 'glb', 'gltf', '3mf', 'obj', 'stl']);
 const MAX_LAUNCH_OPENS = 32;
+const MAX_API_IMPORTS = MAX_LAUNCH_OPENS;
+const OUTPUT_EXTENSIONS = Object.freeze(['3mf', 'obj', 'stl', 'ply', 'wrl', 'zip', 'png', 'mtl', 'json']);
+const W_OK = 2; // fs.constants.W_OK, inlined to keep this module fs-free
 const RESERVED_NAME_RE = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9]|lpt[0-9])(\..*)?$/i;
 const DEVICE_PREFIX_RE = /^[\\/]{2}[?.][\\/]/;
 
@@ -52,11 +55,58 @@ function parseLaunchArgv(argv, { isPackaged } = {}) {
   return { opens, library, ignored, truncated };
 }
 
+async function writable(access, p) {
+  if (typeof access !== 'function') return false; // fail closed
+  try { await access(p, W_OK); return true; } catch { return false; }
+}
+
+const plainOf = real => String(real).replace(/^\\\\\?\\(?=[a-zA-Z]:\\)/, '');
+const unsafeReal = plain => {
+  if (DEVICE_PREFIX_RE.test(plain)) return 'device path syntax not allowed';
+  if (/^[\\/]{2}/.test(plain)) return 'network (UNC) paths not allowed';
+  if (plain.split(/[\\/]/).some(s => RESERVED_NAME_RE.test(s))) return 'reserved device name';
+  return null;
+};
+
+/** outputFile: parent must be an existing writable dir; the file itself may not exist yet. */
+async function validateOutputFile(abs, name, { realpath, stat, access }) {
+  const fail = reason => ({ ok: false, name, reason });
+  let parentReal;
+  try { parentReal = await realpath(path.dirname(abs)); } catch { return fail('not found or not accessible'); }
+  if (typeof parentReal !== 'string' || parentReal === '') return fail('not found or not accessible');
+  const parent = plainOf(parentReal);
+  const bad = unsafeReal(parent);
+  if (bad) return fail(bad);
+  let pst;
+  try { pst = await stat(parent); } catch { return fail('not found or not accessible'); }
+  if (!pst || !pst.isDirectory()) return fail('not a directory');
+  let target = path.join(parent, path.basename(abs));
+  let treal = null;
+  try { treal = await realpath(target); } catch { treal = null; }
+  let exists = false;
+  if (typeof treal === 'string' && treal !== '') {
+    target = plainOf(treal);
+    const badT = unsafeReal(target);
+    if (badT) return fail(badT);
+    if (!OUTPUT_EXTENSIONS.includes(extOf(target))) return fail('unsupported file type');
+    let tst;
+    try { tst = await stat(target); } catch { return fail('not found or not accessible'); }
+    if (!tst || !tst.isFile()) return fail('not a regular file');
+    exists = true;
+    if (!(await writable(access, target))) return fail('not writable');
+  } else if (!(await writable(access, parent))) {
+    return fail('not writable');
+  }
+  return { ok: true, absolutePath: target, name, ext: extOf(target), exists };
+}
+
 /**
- * Validate one launch path (async; realpath/stat may be sync or async).
+ * Validate one launch path (async; realpath/stat/access may be sync or async).
+ * kinds: 'file' | 'directory' | 'outputDir' (existing dir, W_OK) |
+ * 'outputFile' (parent exists + W_OK, ext in OUTPUT_EXTENSIONS, result carries `exists`).
  * Reasons never contain the directory part; `name` is the basename only.
  */
-async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, maxBytes = MAX_WRITE_BYTES } = {}) {
+async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, access, maxBytes = MAX_WRITE_BYTES } = {}) {
   const name = baseName(raw);
   const fail = reason => ({ ok: false, name, reason });
   if (typeof raw !== 'string' || raw.trim() === '') return fail('empty path');
@@ -68,9 +118,11 @@ async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, max
   if (raw.slice(drive ? 2 : 0).includes(':')) return fail('invalid characters in path');
   if (raw.split(/[\\/]/).some(s => RESERVED_NAME_RE.test(s))) return fail('reserved device name');
   if (kind === 'file' && !hasAllowedExt(raw)) return fail('unsupported file type');
+  if (kind === 'outputFile' && !OUTPUT_EXTENSIONS.includes(extOf(raw))) return fail('unsupported file type');
   if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return fail('no working directory');
 
   const abs = path.resolve(cwd, raw);
+  if (kind === 'outputFile') return validateOutputFile(abs, name, { realpath, stat, access });
   let real;
   try { real = await realpath(abs); } catch { return fail('not found or not accessible'); }
   if (typeof real !== 'string' || real === '') return fail('not found or not accessible');
@@ -89,7 +141,8 @@ async function validateLaunchPath(raw, { kind = 'file', cwd, realpath, stat, max
   } else if (!st || !st.isDirectory()) {
     return fail('not a directory');
   }
+  if (kind === 'outputDir' && !(await writable(access, plain))) return fail('not writable');
   return { ok: true, absolutePath: plain, name, ext: extOf(plain) };
 }
 
-module.exports = { parseLaunchArgv, validateLaunchPath, LAUNCH_EXTENSIONS, MAX_LAUNCH_OPENS };
+module.exports = { parseLaunchArgv, validateLaunchPath, LAUNCH_EXTENSIONS, MAX_LAUNCH_OPENS, MAX_API_IMPORTS, OUTPUT_EXTENSIONS };

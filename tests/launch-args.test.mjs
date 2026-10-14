@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { parseLaunchArgv, validateLaunchPath, LAUNCH_EXTENSIONS, MAX_LAUNCH_OPENS } = require('../electron/LaunchArgs.cjs');
+const { parseLaunchArgv, validateLaunchPath, LAUNCH_EXTENSIONS, MAX_LAUNCH_OPENS, MAX_API_IMPORTS, OUTPUT_EXTENSIONS } = require('../electron/LaunchArgs.cjs');
 const { MAX_WRITE_BYTES } = require('../electron/OpaqueFileRegistry.cjs');
 
 const P = (argv, isPackaged = true) => parseLaunchArgv(argv, { isPackaged });
@@ -94,3 +94,46 @@ assert.equal(dirAsFile.reason, 'not a regular file');
 assert.equal(MAX_WRITE_BYTES, 1024 ** 3);
 const huge = await validateLaunchPath('h.glb', { kind: 'file', cwd: 'C:\\work', ...mkFs({ 'c:\\work\\h.glb': { t: 'f', size: MAX_WRITE_BYTES + 1 } }) });
 assert.equal(huge.reason, 'file too large');
+
+// ---- API.3: outputDir / outputFile ----
+assert.equal(MAX_API_IMPORTS, MAX_LAUNCH_OPENS);
+assert.deepEqual([...OUTPUT_EXTENSIONS].sort(), ['3mf', 'json', 'mtl', 'obj', 'ply', 'png', 'stl', 'wrl', 'zip']);
+const ro = new Set(['c:\\work\\ro', 'c:\\work\\locked.stl']);
+const fso = {
+  ...mkFs(
+    { 'c:\\work': D, 'c:\\work\\out': D, 'c:\\work\\ro': D, 'c:\\work\\f.stl': F, 'c:\\work\\locked.stl': F, 'c:\\work\\x.glb': F, 'c:\\work\\d.stl': D, 'c:\\work\\out\\a.3mf': F },
+    { 'c:\\work\\ln.stl': 'C:\\work\\x.glb' },
+  ),
+  access: async (p, mode) => { assert.equal(mode, 2); if (ro.has(p.toLowerCase())) throw new Error('EACCES'); },
+};
+const O = (raw, kind, o = {}) => validateLaunchPath(raw, { kind, cwd: 'C:\\work', ...fso, ...o });
+const orej = async (raw, kind, reason, o) => {
+  const r = await O(raw, kind, o);
+  assert.equal(r.ok, false, raw);
+  assert.equal(r.reason, reason, raw);
+  assert.equal(/[\\/]/.test(r.reason + r.name), false, 'leaks directory');
+};
+assert.deepEqual(await O('out', 'outputDir'), { ok: true, absolutePath: 'C:\\work\\out', name: 'out', ext: '' });
+await orej('f.stl', 'outputDir', 'not a directory');
+await orej('nope', 'outputDir', 'not found or not accessible');
+await orej('ro', 'outputDir', 'not writable');
+await orej('out', 'outputDir', 'not writable', { access: undefined });
+await orej('\\\\.\\C:\\work\\out', 'outputDir', 'device path syntax not allowed');
+await orej('\\\\srv\\s\\o', 'outputDir', 'network (UNC) paths not allowed');
+await orej('NUL', 'outputDir', 'reserved device name');
+// outputFile
+assert.deepEqual(await O('out\\new.stl', 'outputFile'), { ok: true, absolutePath: 'C:\\work\\out\\new.stl', name: 'new.stl', ext: 'stl', exists: false });
+const ex = await O('out\\a.3mf', 'outputFile');
+assert.deepEqual([ex.ok, ex.exists, ex.absolutePath], [true, true, 'C:\\work\\out\\a.3mf']);
+await orej('out\\new.glb', 'outputFile', 'unsupported file type');
+await orej('out\\new', 'outputFile', 'unsupported file type');
+await orej('nodir\\new.stl', 'outputFile', 'not found or not accessible');
+await orej('f.stl\\new.stl', 'outputFile', 'not a directory');
+await orej('d.stl', 'outputFile', 'not a regular file');
+await orej('ro\\new.stl', 'outputFile', 'not writable');
+await orej('locked.stl', 'outputFile', 'not writable');
+await orej('ln.stl', 'outputFile', 'unsupported file type'); // symlink target ext is checked
+await orej('out\\new.stl:ads', 'outputFile', 'invalid characters in path');
+await orej('\\\\.\\C:\\work\\a.stl', 'outputFile', 'device path syntax not allowed');
+await orej('con.stl', 'outputFile', 'reserved device name');
+await orej('out\\new.stl', 'outputFile', 'not writable', { access: undefined });
