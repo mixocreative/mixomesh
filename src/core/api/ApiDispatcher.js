@@ -209,11 +209,16 @@ export function createDispatcher(deps) {
    * Path params must be `{ref,name}` tokens. Substitute the token's `name` so the
    * schema validator (which expects path strings) can run, then put the tokens back.
    */
+  const HOST_ONLY_OUTPUT = { 'export.run': 'outDir', 'render.png': 'outFile', 'render.thumbnail': 'outFile' };
   function validateWithRefs(spec, params) {
     const p = params === undefined || params === null ? {} : params;
     if (typeof p !== 'object' || Array.isArray(p)) return spec.validate(p);
     const tokens = {};
     const shadow = { ...p };
+    // Output paths never reach the renderer (main validates + writes them and strips the key),
+    // so the schema's required path is satisfied by a placeholder that is dropped again.
+    const hostOnly = HOST_ONLY_OUTPUT[spec.name];
+    if (hostOnly && !(hostOnly in p)) shadow[hostOnly] = 'host-managed';
     for (const [k, f] of Object.entries(spec.params)) {
       if (!(k in p)) continue;
       const v = p[k];
@@ -232,6 +237,7 @@ export function createDispatcher(deps) {
       }
     }
     const out = spec.validate(shadow);
+    if (hostOnly && !(hostOnly in p)) delete out[hostOnly];
     for (const k of Object.keys(tokens)) out[k] = tokens[k];
     return out;
   }

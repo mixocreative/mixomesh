@@ -15,11 +15,14 @@
 // plus one bad `--open`; main's probe waits for 2 objects + the Library listing + a
 // basename-only error toast, spawns a SECOND instance on the same temp userData (single-
 // instance lock -> exit 0, argv forwarded) and waits for the object count to grow by one.
+// Then MIXO_SMOKE=api (API.8): tests/electron-api-smoke.mjs drives the real named pipe end to end
+// (hello, import, list, validate, export, thumbnail, saveAs, refusals, a forwarded --job, shutdown).
 
 import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { EOL, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { runApiSmoke } from './electron-api-smoke.mjs';
 
 if (!existsSync('dist/index.html')) {
   console.error('electron smoke: run `npm run build` first (no dist/index.html)');
@@ -97,4 +100,5 @@ function runLaunch() {
 const booted = await run('1', 'built app boots in the Electron shell');
 const saved = booted && await run('save', 'Save As writes a .mixo through the adapter, no OS path in KV');
 const launched = saved && await runLaunch();
-process.exit(booted && saved && launched ? 0 : 1);
+const apiOk = launched && await runApiSmoke({ bin, label: 'api: automation pipe end to end, forwarded --job, clean shutdown' });
+process.exit(booted && saved && launched && apiOk ? 0 : 1);
