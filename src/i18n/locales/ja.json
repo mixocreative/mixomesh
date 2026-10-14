@@ -1155,5 +1155,14 @@
   "publish.hold.keepWaiting": "待ち続ける（+15 分）",
   "publish.hold.linksOpen": "リンクはあと約 {min} 分間有効です — 再試行するか、待ち続けてください",
   "publish.hold.extendFailed": "待機時間を延長できませんでした",
-  "publish.hold.notWaiting": "この公開は、すでにプラットフォームの応答待ちではありません。"
+  "publish.hold.notWaiting": "この公開は、すでにプラットフォームの応答待ちではありません。",
+  "publish.err.noCredentials": "アカウント認証情報がありません。アカウントに接続してもう一度試してください。",
+  "publish.err.noFileHost": "ファイルホストが構成されていません。公開前にファイルホストを選択してください。",
+  "publish.err.cloudflaredMissing": "同梱の cloudflared が見つかりません。MIXOMESH を再インストールしてください。",
+  "publish.err.tunnelStartTimeout": "一時リンクが起動しませんでした。インターネット接続を確認して、もう一度試してください。",
+  "publish.err.platformHttp": "プラットフォームが正しく応答しませんでした。",
+  "publish.err.platformRejected": "プラットフォームが出品を拒否しました。",
+  "publish.err.notConfirmed": "プラットフォームがファイルを確認しませんでした。確認するために再試行してください。",
+  "publish.err.cleanupLeft": "ホストされたファイルの一部を削除できませんでした。削除するために再試行してください。",
+  "publish.err.cancelled": "公開がキャンセルされました。"
 }

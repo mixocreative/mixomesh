@@ -574,7 +574,10 @@ function _runHtml(desc) {
     const failed = S.steps.find(s => s.status === 'failed');
     h += _stepsHtml();
     h += '<div class="pub-fail pub-job-fail" role="alert">';
-    h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id) ?? 'publish.step.build') }) : t('publish.failed.generic'))}</b> — ${escapeHtml(o.error ?? t('publish.failed.unknown'))}</p>`;
+    const errKey = M.errorKey(o.code);
+    const errMsg = errKey ? t(errKey) : (o.error ?? t('publish.failed.unknown'));
+    const platformMsg = (o.code === 'platform-rejected' || o.code === 'platform-http') && o.error ? ` ${escapeHtml(o.error)}` : '';
+    h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id) ?? 'publish.step.build') }) : t('publish.failed.generic'))}</b> — ${escapeHtml(errMsg)}${platformMsg}</p>`;
     if (o.leftover?.length) h += `<p class="pub-hint">${escapeHtml(t('publish.note.cancelledLeftover', { n: o.leftover.length }))}</p>`;
     h += `<p class="pub-hint">${escapeHtml(t('publish.failed.reuse'))}</p>`;
     const openLeft = failed?.id === 'confirm' ? M.linksOpenLeft(S.linksOpen, Date.now()) : 0;

@@ -431,6 +431,26 @@ test('runner: missing account credentials or file host fail cleanly', async () =
   assert.throws(() => runner.create({ platform: 'nope', accountId: 'me', pkg: makePkg() }), /no adapter/);
 });
 
+test('runner: error codes attached to failures', async () => {
+  const { runner } = setupRunner();
+  const noCreds = await runner.start({ platform: 'fake', accountId: 'nobody', fileHostId: 'r2', pkg: makePkg() });
+  assert.equal(noCreds.code, 'no-credentials', 'missing account credentials → no-credentials');
+  const noHost = await runner.start({ platform: 'fake', accountId: 'me', pkg: makePkg() });
+  assert.equal(noHost.code, 'no-file-host', 'no file host configured → no-file-host');
+  const badAdapter = setupRunner({ responder: () => ({ json: { errors: [{ message: 'Invalid field' }] } }) });
+  const rejected = await badAdapter.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'r2', pkg: makePkg() });
+  assert.equal(rejected.code, 'platform-rejected', 'adapter error → platform-rejected');
+  // cancellation test: create job, then cancel it
+  let release;
+  const gate = () => new Promise(r => { release = r; });
+  const { runner: runner2 } = setupRunner({ host: fakeFileHost({ gate }) });
+  const jobId = runner2.create({ platform: 'fake', accountId: 'me', fileHostId: 'r2', pkg: makePkg() });
+  const running = runner2.run(jobId);
+  setTimeout(() => release?.(), 0);
+  const cancelled = await Promise.race([running.catch(() => null), runner2.cancel(jobId)]);
+  assert.equal(cancelled?.code, 'cancelled', 'cancellation → cancelled');
+});
+
 test('runner: default zip (jszip) produces a real zip archive', async () => {
   const z = await defaultZip([{ name: 'a.stl', bytes: bytes(1, 2, 3) }, { name: 'b.stl', bytes: bytes(4) }]);
   assert.ok(z instanceof Uint8Array);

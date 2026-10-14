@@ -153,6 +153,21 @@ const ISSUE_KEYS = Object.freeze({
 /** i18n key for a core issue code, or null (then the UI shows the core message). */
 export const issueKey = code => ISSUE_KEYS[code] ?? null;
 
+const ERROR_KEYS = Object.freeze({
+  'no-credentials': 'publish.err.noCredentials',
+  'no-file-host': 'publish.err.noFileHost',
+  'cloudflared-missing': 'publish.err.cloudflaredMissing',
+  'tunnel-start-timeout': 'publish.err.tunnelStartTimeout',
+  'platform-http': 'publish.err.platformHttp',
+  'platform-rejected': 'publish.err.platformRejected',
+  'not-confirmed': 'publish.err.notConfirmed',
+  'cleanup-left': 'publish.err.cleanupLeft',
+  'cancelled': 'publish.err.cancelled',
+});
+
+/** i18n key for a job error code, or null (then the UI shows the raw error message). */
+export const errorKey = code => ERROR_KEYS[code] ?? null;
+
 /**
  * Validate the form the way the main process will, without building files:
  * placeholder images / files stand in for the real bytes.

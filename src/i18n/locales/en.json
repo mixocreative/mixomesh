@@ -1155,5 +1155,14 @@
   "publish.hold.keepWaiting": "Keep waiting (+15 min)",
   "publish.hold.linksOpen": "Links stay open for ~{min} min — Retry or Keep waiting",
   "publish.hold.extendFailed": "Could not extend the wait",
-  "publish.hold.notWaiting": "This publish is no longer waiting for the platform."
+  "publish.hold.notWaiting": "This publish is no longer waiting for the platform.",
+  "publish.err.noCredentials": "Account credentials are missing. Connect your account and try again.",
+  "publish.err.noFileHost": "No file host is configured. Choose a file host before publishing.",
+  "publish.err.cloudflaredMissing": "The bundled cloudflared is missing. Reinstall MIXOMESH to restore it.",
+  "publish.err.tunnelStartTimeout": "The temporary link did not start. Check your internet connection and try again.",
+  "publish.err.platformHttp": "The platform did not respond correctly.",
+  "publish.err.platformRejected": "The platform rejected the listing.",
+  "publish.err.notConfirmed": "The platform did not confirm the files. Retry to check again.",
+  "publish.err.cleanupLeft": "Some hosted files could not be removed. Retry to remove them.",
+  "publish.err.cancelled": "Publish cancelled."
 }

@@ -88,6 +88,38 @@ test('validateForm reports the first core issue without building files', () => {
   assert.equal(M.issueKey('hero-count'), null);
 });
 
+test('errorKey maps all error codes, returns null for unknown', () => {
+  assert.equal(M.errorKey('no-credentials'), 'publish.err.noCredentials');
+  assert.equal(M.errorKey('no-file-host'), 'publish.err.noFileHost');
+  assert.equal(M.errorKey('cloudflared-missing'), 'publish.err.cloudflaredMissing');
+  assert.equal(M.errorKey('tunnel-start-timeout'), 'publish.err.tunnelStartTimeout');
+  assert.equal(M.errorKey('platform-http'), 'publish.err.platformHttp');
+  assert.equal(M.errorKey('platform-rejected'), 'publish.err.platformRejected');
+  assert.equal(M.errorKey('not-confirmed'), 'publish.err.notConfirmed');
+  assert.equal(M.errorKey('cleanup-left'), 'publish.err.cleanupLeft');
+  assert.equal(M.errorKey('cancelled'), 'publish.err.cancelled');
+  assert.equal(M.errorKey('unknown-code'), null);
+});
+
+test('pending error translations file has all codes in all three locales', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const pendingFile = path.join(root, '.tmp', 'locale-pending', 'publish-errors.json');
+  const content = await fs.readFile(pendingFile, 'utf8');
+  const pending = JSON.parse(content);
+  const locales = ['en', 'ja', 'zh-Hant'];
+  const codes = ['no-credentials', 'no-file-host', 'cloudflared-missing', 'tunnel-start-timeout', 'platform-http', 'platform-rejected', 'not-confirmed', 'cleanup-left', 'cancelled'];
+  for (const code of codes) {
+    const key = M.errorKey(code);
+    assert.ok(key, `errorKey(${code}) must return a key`);
+    for (const locale of locales) {
+      assert.ok(pending[locale]?.[key], `pending translations must have ${key} for locale ${locale}`);
+    }
+  }
+});
+
 // -- steps -----------------------------------------------------------------
 
 test('stepPlan mirrors jobs.cjs: publish reports as create or update', () => {

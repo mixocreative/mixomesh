@@ -1155,5 +1155,14 @@
   "publish.hold.keepWaiting": "繼續等待（+15 分鐘）",
   "publish.hold.linksOpen": "連結還會保持開啟約 {min} 分鐘 — 可以重試或繼續等待",
   "publish.hold.extendFailed": "無法延長等待時間",
-  "publish.hold.notWaiting": "這次上架已經不是在等平台回應了。"
+  "publish.hold.notWaiting": "這次上架已經不是在等平台回應了。",
+  "publish.err.noCredentials": "缺少帳戶認證資訊。請連結您的帳戶後再試一次。",
+  "publish.err.noFileHost": "未設定檔案主機。發佈前請選擇檔案主機。",
+  "publish.err.cloudflaredMissing": "找不到內附的 cloudflared。請重新安裝 MIXOMESH。",
+  "publish.err.tunnelStartTimeout": "暫時連結未能啟動。請檢查您的網際網路連線並重試。",
+  "publish.err.platformHttp": "平台未能正確回應。",
+  "publish.err.platformRejected": "平台拒絕了此商品上架。",
+  "publish.err.notConfirmed": "平台尚未確認收到檔案。請重試以再次確認。",
+  "publish.err.cleanupLeft": "無法移除某些託管檔案。請重試以移除。",
+  "publish.err.cancelled": "發佈已取消。"
 }

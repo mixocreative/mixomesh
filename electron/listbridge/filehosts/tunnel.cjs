@@ -297,7 +297,7 @@ function createTunnelFileHost({
     let bin = binaryPath;
     if (!bin) {
       const found = resolveBinary();
-      if (!found?.path) throw new Error(found?.error || NOT_INSTALLED_MESSAGE);
+      if (!found?.path) throw Object.assign(new Error(found?.error || NOT_INSTALLED_MESSAGE), { code: 'cloudflared-missing' });
       bin = found.path;
     }
     return new Promise((resolve, reject) => {
@@ -322,8 +322,9 @@ function createTunnelFileHost({
           reject(err);
         } else resolve(value);
       };
-      const timer = setTimeout(() => finish(new Error(
-        `The temporary link did not start within ${Math.round(startupTimeoutMs / 1000)} s. Check the internet connection and try again.`)),
+      const timer = setTimeout(() => finish(Object.assign(new Error(
+        `The temporary link did not start within ${Math.round(startupTimeoutMs / 1000)} s. Check the internet connection and try again.`),
+        { code: 'tunnel-start-timeout' })),
       startupTimeoutMs);
       const onData = chunk => {
         if (settled) return;
@@ -339,15 +340,17 @@ function createTunnelFileHost({
       };
       proc.stdout?.on('data', onData);
       proc.stderr?.on('data', onData);
-      proc.once('error', err => finish(new Error(
-        err?.code === 'ENOENT' ? NOT_INSTALLED_MESSAGE : `cloudflared could not start: ${err?.message || err}`)));
+      proc.once('error', err => finish(Object.assign(new Error(
+        err?.code === 'ENOENT' ? NOT_INSTALLED_MESSAGE : `cloudflared could not start: ${err?.message || err}`),
+        { code: err?.code === 'ENOENT' ? 'cloudflared-missing' : 'tunnel-start-timeout' })));
       proc.once('exit', code => {
         liveChildren.delete(proc);
         if (child === proc) { child = null; publicBase = null; starting = null; }
         if (!settled) {
           const last = tail.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(-1)[0] || '';
           const detail = last.replace(/https?:\/\/\S+/g, '[url]').slice(0, 200);
-          finish(new Error(`cloudflared exited before the temporary link was ready (code ${code})${detail ? `: ${detail}` : ''}.`));
+          finish(Object.assign(new Error(`cloudflared exited before the temporary link was ready (code ${code})${detail ? `: ${detail}` : ''}.`),
+            { code: 'tunnel-start-timeout' }));
         }
       });
     });

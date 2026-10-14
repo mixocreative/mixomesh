@@ -96,6 +96,7 @@ function createPublishRunner({
   function cancelledError() {
     const e = new Error('Publish cancelled');
     /** @type {any} */ (e).cancelled = true;
+    /** @type {any} */ (e).code = 'cancelled';
     return e;
   }
   const checkCancel = job => { if (job.cancelRequested) throw cancelledError(); };
@@ -103,16 +104,16 @@ function createPublishRunner({
   async function authHeadersFor(job) {
     if (typeof job.adapter.authHeaders !== 'function') return {};
     const record = await credentials.get(`${job.platform}:${job.accountId}`);
-    if (!record) throw new Error(`No saved credentials for ${job.platform} account "${job.accountId}".`);
+    if (!record) throw Object.assign(new Error(`No saved credentials for ${job.platform} account "${job.accountId}".`), { code: 'no-credentials' });
     return job.adapter.authHeaders(record) || {};
   }
 
   async function fileHostFor(job) {
     if (job.fileHost) return job.fileHost;
-    if (typeof makeFileHost !== 'function') throw new Error('Listbridge: no file host is configured.');
-    if (!job.fileHostId) throw new Error('This platform needs a file host: choose one before publishing.');
+    if (typeof makeFileHost !== 'function') throw Object.assign(new Error('Listbridge: no file host is configured.'), { code: 'no-file-host' });
+    if (!job.fileHostId) throw Object.assign(new Error('This platform needs a file host: choose one before publishing.'), { code: 'no-file-host' });
     const record = await credentials.get(`filehost:${job.fileHostId}`);
-    if (!record) throw new Error(`No saved credentials for file host "${job.fileHostId}".`);
+    if (!record) throw Object.assign(new Error(`No saved credentials for file host "${job.fileHostId}".`), { code: 'no-credentials' });
     job.fileHost = makeFileHost(record);
     return job.fileHost;
   }
@@ -186,8 +187,15 @@ function createPublishRunner({
         ? job.adapter.buildUpdate(job.remoteId, job.pkg, ctx)
         : job.adapter.buildCreate(job.pkg, ctx);
       const res = await send(job, spec);
-      job.result = job.adapter.parseResult(res);
-      if (!job.result || !job.result.remoteId) throw new Error('The platform response did not include a listing id.');
+      try {
+        job.result = job.adapter.parseResult(res);
+      } catch (err) {
+        // parseResult failed: the platform rejected/reported an error
+        const e = new Error(errMessage(err));
+        /** @type {any} */ (e).code = 'platform-rejected';
+        throw e;
+      }
+      if (!job.result || !job.result.remoteId) throw Object.assign(new Error('The platform response did not include a listing id.'), { code: 'platform-rejected' });
       return `${job.remoteId ? 'Updated' : 'Created'} listing ${job.result.remoteId}.`;
     },
 
@@ -200,7 +208,14 @@ function createPublishRunner({
       for (let i = 0; i < confirmPolls; i++) {
         checkCancel(job);
         const res = await send(job, job.adapter.buildConfirm(job.result), 'all');
-        const c = job.adapter.parseConfirm(res) || {};
+        let c;
+        try {
+          c = job.adapter.parseConfirm(res) || {};
+        } catch (err) {
+          const e = new Error(errMessage(err));
+          /** @type {any} */ (e).code = 'platform-rejected';
+          throw e;
+        }
         if (c.confirmed) {
           if (c.status) job.result.status = c.status;
           if (c.url) job.result.url = c.url;
@@ -208,7 +223,7 @@ function createPublishRunner({
         }
         if (i < confirmPolls - 1) await sleep(confirmIntervalMs);
       }
-      throw new Error('The platform has not confirmed the files yet. Retry to check again; hosted files are kept until then.');
+      throw Object.assign(new Error('The platform has not confirmed the files yet. Retry to check again; hosted files are kept until then.'), { code: 'not-confirmed' });
     },
 
     async cleanup(job) {
@@ -217,6 +232,7 @@ function createPublishRunner({
       if (left.length) {
         const e = new Error(`${left.length} hosted file(s) could not be removed yet; retry to remove them.`);
         /** @type {any} */ (e).leftover = left;
+        /** @type {any} */ (e).code = 'cleanup-left';
         throw e;
       }
       return 'Hosted copies removed.';
@@ -240,7 +256,14 @@ function createPublishRunner({
         return `${label} downloaded all ${st.total} file(s).`;
       }
       if (allServed && hasConfirm) {
-        const c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result), 'all')) || {};
+        let c;
+        try {
+          c = job.adapter.parseConfirm(await send(job, job.adapter.buildConfirm(job.result), 'all')) || {};
+        } catch (err) {
+          const e = new Error(errMessage(err));
+          /** @type {any} */ (e).code = 'platform-rejected';
+          throw e;
+        }
         if (c.confirmed) {
           if (c.status) job.result.status = c.status;
           if (c.url) job.result.url = c.url;
@@ -260,7 +283,7 @@ function createPublishRunner({
     const mins = Math.max(1, Math.round(holdMs / 60000));
     if (!st && !hasConfirm) return `Kept the temporary links open for ${mins} min while ${label} downloaded the files.`;
     const progress = st ? ` (${st.served}/${st.total} downloaded)` : '';
-    throw new Error(`${label} has not finished downloading the files${progress} after ${mins} min. The temporary links stay open for now: Retry to keep waiting.`);
+    throw Object.assign(new Error(`${label} has not finished downloading the files${progress} after ${mins} min. The temporary links stay open for now: Retry to keep waiting.`), { code: 'not-confirmed' });
   }
 
   function readStats(host) {
@@ -322,7 +345,9 @@ function createPublishRunner({
       });
       if (res.status >= 400 && res.status !== 422) {
         // 422 / GraphQL errors are the adapter's to explain; other HTTP failures are generic.
-        throw new Error(`The platform answered HTTP ${res.status}${res.status === 401 || res.status === 403 ? ' (check the account credentials)' : ''}.`);
+        const e = new Error(`The platform answered HTTP ${res.status}${res.status === 401 || res.status === 403 ? ' (check the account credentials)' : ''}.`);
+        /** @type {any} */ (e).code = 'platform-http';
+        throw e;
       }
       return res;
     } finally {
@@ -352,7 +377,7 @@ function createPublishRunner({
     const base = { jobId: job.id, status: job.status };
     if (job.status === 'done') return { ...base, ok: true, result: { ...job.result } };
     return {
-      ...base, ok: false, failedStep: job.failedStep, error: job.error,
+      ...base, ok: false, failedStep: job.failedStep, error: job.error, code: job.code ?? null,
       ...(job.issues ? { issues: job.issues } : {}),
       ...(job.result ? { result: { ...job.result } } : {}),
       ...(job.leftover ? { leftover: [...job.leftover] } : {}),
@@ -383,6 +408,7 @@ function createPublishRunner({
           if (err?.cancelled || job.cancelRequested) throw cancelledError();
           job.failedStep = step;
           job.error = errMessage(err);
+          job.code = err?.code ?? null;
           job.issues = err?.issues ?? null;
           job.leftover = err?.leftover ?? null;
           job.status = 'failed';
@@ -421,6 +447,7 @@ function createPublishRunner({
       left = [];
     }
     job.status = 'cancelled';
+    job.code = 'cancelled';
     job.leftover = left.length ? left : null;
     job.error = 'Publish cancelled';
     job.pkg = null; job.deliverFiles = null;
@@ -444,7 +471,7 @@ function createPublishRunner({
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
       stepIndex: 0, status: 'pending', hosted: new Map(), deliverFiles: null, result: null,
       fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, closeAt: null,
-      holdDeadline: null, linksLost: false,
+      holdDeadline: null, linksLost: false, error: null, code: null, issues: null, failedStep: null, leftover: null,
     });
     return id;
   }
