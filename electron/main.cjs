@@ -12,6 +12,8 @@ const {
   createOpaqueFileRegistry, sanitizeSuggestedName, exportDialogOptions, withExtension,
 } = require('./OpaqueFileRegistry.cjs');
 const { createKvStore } = require('./KvStore.cjs');
+const { parseLaunchArgv, validateLaunchPath } = require('./LaunchArgs.cjs');
+const { buildLaunchBatch, createLaunchQueue } = require('./LaunchQueue.cjs');
 const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
 const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
 const {
@@ -29,18 +31,31 @@ const ENTRY_URL = appEntryUrl({ devUrl: DEV_URL, indexPath: INDEX_PATH });
 const SMOKE_SAVE = process.env.MIXO_SMOKE === 'save';
 const PROJECT_FILTERS = [{ name: 'MIXOMESH project', extensions: ['mixo'] }];
 let _smokeDir = null;
-if (SMOKE_SAVE && !app.isPackaged) {
+// Every unpackaged smoke mode gets a temp userData (also scopes the single-instance
+// lock, so a smoke run never collides with a running dev/real app); only `save`
+// keeps the dir for its own checks.
+if (process.env.MIXO_SMOKE && !app.isPackaged) {
   const os = require('node:os');
   const fsSync = require('node:fs');
-  _smokeDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mixo-smoke-'));
-  app.setPath('userData', path.join(_smokeDir, 'userData'));
+  const smokeRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mixo-smoke-'));
+  app.setPath('userData', path.join(smokeRoot, 'userData'));
+  if (SMOKE_SAVE) _smokeDir = smokeRoot;
 }
+
+// ── Single instance + launch requests (LI.2, plan D1/D4/D5) ──
+// A second `MIXOMESH.exe --open x.glb` exits at once; its argv is forwarded to this
+// instance via 'second-instance' and shown in the running window.
+const _gotLock = app.requestSingleInstanceLock();
+if (!_gotLock) app.quit();
 let _kv = null;
 // Opaque file registry; its persisted ref store (`mixo-refs.json`, absolute paths)
 // is a SEPARATE file from the renderer-readable KV so kv:get/kv:keys can never
 // expose an OS path. Created on app ready (needs userData).
 let _fileRefs = null;
 const _approvedClose = new WeakSet();
+const _launchQueues = new WeakMap();   // webContents → launch queue
+let _launchServiceUp = false;          // registry exists + window created
+const _deferredLaunches = [];          // {argv, cwd} seen before the service was up
 // Windows whose user already accepted "quit anyway" for a running publish (PB.14); the
 // publish is cancelled only once the close is really approved (save/discard answered).
 const _publishQuitAck = new WeakSet();
@@ -56,6 +71,11 @@ function createWindow() {
     // Hardened (task 6.1): contextIsolation + no nodeIntegration + sandbox.
     webPreferences: { ...SECURE_WEB_PREFERENCES, preload: path.join(__dirname, 'preload.cjs') },
   });
+  // Launch queue (D5): per window; ready only after the renderer's launch:pull, and
+  // reset on every (re)load so a reloading renderer never loses a batch.
+  const launchQueue = createLaunchQueue();
+  _launchQueues.set(win.webContents, launchQueue);
+  win.webContents.on('did-start-loading', () => launchQueue.reset());
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(INDEX_PATH);
 
@@ -410,6 +430,48 @@ async function _loadListbridgeAdapters() {
     return [];
   }
 }
+// ── Launch requests: argv → validated → opaque tokens → queue/push to the window ──
+// Paths never leave main: the renderer gets only {kind, ref, name} + basename-only errors.
+function _launchPrimaryWindow() {
+  return BrowserWindow.getAllWindows().find(w => !w.isDestroyed()) ?? null;
+}
+async function _processLaunch(argv, cwd) {
+  const fsp = require('node:fs/promises');
+  const win = _launchPrimaryWindow();
+  const queue = win ? _launchQueues.get(win.webContents) : null;
+  if (!win || !queue) return;
+  const parsed = parseLaunchArgv(argv, { isPackaged: app.isPackaged });
+  if (!parsed.opens.length && !parsed.library && !parsed.ignored.some(a => !a.startsWith('-'))) return;
+  const batch = await buildLaunchBatch(parsed, {
+    id: queue.nextId(),
+    validate: (raw, kind) => validateLaunchPath(raw, {
+      kind, cwd, realpath: p => fsp.realpath(p), stat: p => fsp.stat(p),
+    }),
+    registerFile: (p, name, opts) => _fileRefs.registerFile(p, name, opts),
+    registerMount: (p, name) => _fileRefs.registerMount(p, name),
+  });
+  if (win.isDestroyed()) return;
+  const push = queue.enqueue(batch);
+  if (push) win.webContents.send('launch:requests', push);
+}
+function _handleLaunch(argv, cwd) {
+  if (!_launchServiceUp) { _deferredLaunches.push({ argv, cwd }); return; }
+  _processLaunch(argv, cwd).catch(err => console.error('launch request failed:', err?.message ?? err));
+}
+// Renderer marks itself ready by pulling after bootstrap; the reply is every queued
+// batch merged into one (or null). Later batches arrive via 'launch:requests'.
+handle('launch:pull', event => _launchQueues.get(event.sender)?.pull() ?? null);
+
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  const win = _launchPrimaryWindow();
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  _handleLaunch(argv, workingDirectory);
+});
+
 let _listbridge = null;
 let _tunnelsClosed = false;
 
@@ -449,7 +511,7 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-app.whenReady().then(async () => {
+if (_gotLock) app.whenReady().then(async () => {
   denyAllPermissions(session.defaultSession);
   _kv = createKvStore(path.join(app.getPath('userData'), 'mixo-kv.json'));
   _fileRefs = createOpaqueFileRegistry({
@@ -459,6 +521,9 @@ app.whenReady().then(async () => {
     userDataDir: app.getPath('userData'), safeStorage, adapters: await _loadListbridgeAdapters(),
   });
   createWindow();
+  _launchServiceUp = true;
+  _handleLaunch(process.argv, process.cwd());
+  for (const { argv, cwd } of _deferredLaunches.splice(0)) _handleLaunch(argv, cwd);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

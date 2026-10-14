@@ -213,4 +213,20 @@ await check('installer: registry keys under SHELL_CONTEXT + .mixo association wi
   assert.match(yml, /fileAssociations:\s*\r?\n\s*- ext:\s*mixo\b/);
 });
 
-assert.equal(cases, 10);
+await check('launch integration: single instance + trusted launch:pull + two-method preload surface', () => {
+  assert.match(mainSource, /const _gotLock = app\.requestSingleInstanceLock\(\);\s*if \(!_gotLock\) app\.quit\(\);/);
+  assert.match(mainSource, /if \(_gotLock\) app\.whenReady\(\)/, 'a losing instance never opens a window');
+  assert.match(mainSource, /\nhandle\('launch:pull', event => /, 'launch:pull goes through the sender-checking handle');
+  assert.doesNotMatch(mainSource, /ipcMain\.handle\(\s*['"]launch:/);
+  assert.match(mainSource, /app\.on\('second-instance'[\s\S]*?isMinimized\(\)[\s\S]*?win\.restore\(\)[\s\S]*?win\.focus\(\)/);
+  assert.match(mainSource, /on\('did-start-loading', \(\) => launchQueue\.reset\(\)\)/);
+  // Only the two methods; neither takes a path-like argument into main.
+  assert.match(preloadSource, /pullLaunchRequests:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('launch:pull'\)/);
+  assert.match(preloadSource, /onLaunchRequests:\s*\(callback\)\s*=>/);
+  const launchChannels = [...new Set([...preloadSource.matchAll(/['"](launch:[a-z-]+)['"]/g)].map(m => m[1]))].sort();
+  assert.deepEqual(launchChannels, ['launch:pull', 'launch:requests']);
+  assert.equal(preloadSource.match(/invoke\('launch:/g)?.length, 1);
+  assert.doesNotMatch(preloadSource, /send\(\s*['"]launch:/, 'the renderer cannot send launch requests');
+});
+
+assert.equal(cases, 11);

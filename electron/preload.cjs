@@ -72,6 +72,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('app:close-requested', listener);
     return () => ipcRenderer.removeListener('app:close-requested', listener);
   },
+  // Launch requests (LI.2): another app ran `MIXOMESH.exe --open/--library`. Batches carry
+  // opaque tokens + basenames only; pull = renderer-ready handshake, on = later batches.
+  pullLaunchRequests: () => ipcRenderer.invoke('launch:pull'),
+  onLaunchRequests: (callback) => {
+    const listener = (_event, batch) => callback(batch);
+    ipcRenderer.on('launch:requests', listener);
+    return () => ipcRenderer.removeListener('launch:requests', listener);
+  },
   respondToClose: (result) => ipcRenderer.send('app:close-response', result),
   // Listbridge marketplace publishing (ADR 0004). Secrets go IN only: no call returns a
   // saved credential. Listings travel as { platform, accountId, fileHostId?, remoteId?,
