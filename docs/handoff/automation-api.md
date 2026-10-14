@@ -13,3 +13,4 @@ Protocol: cheap agents, main verifies, `# fail 0`, commit by path (never `git co
 - 2026-10-15 — Plan + ADR 0005 committed 72da8bd. OWNER ACCEPTED all 9 recommendations ("Ok"): API on by default + Preferences toggle; confirm:true for destructive; repair.run in v1 behind confirm; NO publish.* in v1; NO localhost HTTP; --job + --result ⇒ --hidden --quit; refuse overwrite by default; limits 4 clients / 1 MiB / 32 imports / 10 min; web embed LATER. Next: G1 API.1 (ApiErrors+ApiSchema) ∥ API.3 (LaunchArgs output-path kinds). API.0 = this file.
 - 2026-10-15 — G1 dispatched: API.1 (sonnet), API.3 (sonnet). Full installer build (with tests) running in background as a check.
 - 2026-10-15 — API.3 committed (outputDir/outputFile kinds).
+- 2026-10-15 — API.1 committed (27 methods, 13 codes). Next G2: API.2 dispatcher ∥ API.4 pipe server (security review).
