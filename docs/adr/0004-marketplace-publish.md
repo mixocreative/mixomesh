@@ -46,7 +46,7 @@ Three layers, each replaceable on its own:
 
 **Security (follows 6.1/6.2).** Network calls and secrets live only in the Electron main
 process (`electron/listbridge/`). Credentials are encrypted with `safeStorage` (DPAPI) in
-`<userData>/publish-credentials.bin`, never in the renderer, `.mixo`, localStorage or logs.
+`<userData>/listbridge-credentials.bin`, never in the renderer, `.mixo`, localStorage or logs.
 The renderer sends a descriptor over one validated IPC channel (`publish:*`); bytes are passed
 as transferred `ArrayBuffer`s, never as paths. The web build gets `caps.publish = false` and
 the UI is hidden (capability-gated, ADR 0001).

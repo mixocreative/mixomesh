@@ -73,4 +73,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('app:close-requested', listener);
   },
   respondToClose: (result) => ipcRenderer.send('app:close-response', result),
+  // Listbridge marketplace publishing (ADR 0004). Secrets go IN only: no call returns a
+  // saved credential. Listings travel as { platform, accountId, fileHostId?, remoteId?,
+  // manifest, images: [bytes], files: [bytes] } — typed arrays, never file paths.
+  // start / retry / cancel resolve with the job outcome; onProgress(event) receives
+  // { jobId, step, status, message } for every step and returns an unsubscribe.
+  listbridge: {
+    describe: () => ipcRenderer.invoke('publish:describe'),
+    hasCredentials: (id) => ipcRenderer.invoke('publish:hasCredentials', id),
+    setCredentials: (id, secret) => ipcRenderer.invoke('publish:setCredentials', id, secret),
+    clearCredentials: (id) => ipcRenderer.invoke('publish:clearCredentials', id),
+    testConnection: (id) => ipcRenderer.invoke('publish:testConnection', id),
+    start: (request) => ipcRenderer.invoke('publish:start', request),
+    retry: (jobId) => ipcRenderer.invoke('publish:retry', jobId),
+    cancel: (jobId) => ipcRenderer.invoke('publish:cancel', jobId),
+    onProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('publish:progress', listener);
+      return () => ipcRenderer.removeListener('publish:progress', listener);
+    },
+  },
 });

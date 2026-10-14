@@ -12,6 +12,8 @@ directories:
 files:
   - dist/**/*
   - electron/**/*
+  # Listbridge portable core (ESM), loaded by electron/listbridge/index.cjs via import().
+  - src/listbridge/**/*
   - package.json
 win:
   target: nsis

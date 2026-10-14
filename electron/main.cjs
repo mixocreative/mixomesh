@@ -6,12 +6,13 @@
 // (dev, with `npm run dev` running) or `npm run build` then `npx electron electron/main.cjs` (built).
 // See docs/handoff/electron.md.
 
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
 const path = require('node:path');
 const {
   createOpaqueFileRegistry, sanitizeSuggestedName, exportDialogOptions, withExtension,
 } = require('./OpaqueFileRegistry.cjs');
 const { createKvStore } = require('./KvStore.cjs');
+const { registerListbridgeIpc } = require('./listbridge/index.cjs');
 const {
   SECURE_WEB_PREFERENCES, appEntryUrl, guardWebContents, denyAllPermissions, isTrustedSender,
 } = require('./WindowSecurity.cjs');
@@ -143,6 +144,10 @@ function _runSecuritySmoke(win) {
     } catch (err) { r.manifold = String(err); }
     r.moduleWorker = ${JSON.stringify(workerFile)} !== ''
       && await workerOk(new Worker(new URL('assets/' + ${JSON.stringify(workerFile)}, document.baseURI), { type: 'module' }));
+    try {
+      const d = await window.electronAPI?.listbridge?.describe();
+      r.listbridge = Array.isArray(d?.platforms) && Array.isArray(d?.fileHosts);
+    } catch (err) { r.listbridge = String(err?.message ?? err); }
     r.blobWorker = await workerOk(new Worker(URL.createObjectURL(new Blob(['postMessage(1)'], { type: 'text/javascript' }))));
     return r;
   })()`;
@@ -152,7 +157,7 @@ function _runSecuritySmoke(win) {
     await new Promise(res => setTimeout(res, 800));
     r.navigationDenied = win.webContents.getURL() === before;
     const ok = r.booted && r.noNode && r.bridge && r.csp && r.popupDenied && r.manifold === true
-      && r.moduleWorker && r.blobWorker && r.navigationDenied;
+      && r.moduleWorker && r.blobWorker && r.navigationDenied && r.listbridge === true;
     console.log(`MIXO_SMOKE: security ${ok ? 'ok' : 'FAIL'}`, JSON.stringify(r));
     setTimeout(() => app.exit(ok ? 0 : 6), 200);
   }, err => { console.error('MIXO_SMOKE: security probe threw', err?.message ?? err); app.exit(6); });
@@ -355,6 +360,12 @@ handle('export:save', async (event, opts, data) => {
   return true;
 });
 
+// ── Listbridge marketplace publishing (ADR 0004, plan PB.4) ──
+// `publish:*` channels, registered through `handle` (trusted sender) once the app is
+// ready. Credentials: safeStorage-encrypted <userData>/listbridge-credentials.bin, never
+// returned to the renderer. Platform adapters are listed here (none yet: Cults3D = PB.3).
+const LISTBRIDGE_ADAPTERS = [];
+
 ipcMain.on('app:close-response', (event, result) => {
   if (!isTrustedSender(event, ENTRY_URL)) return;
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -379,6 +390,9 @@ app.whenReady().then(() => {
   _kv = createKvStore(path.join(app.getPath('userData'), 'mixo-kv.json'));
   _fileRefs = createOpaqueFileRegistry({
     store: createKvStore(path.join(app.getPath('userData'), 'mixo-refs.json')),
+  });
+  registerListbridgeIpc(handle, {
+    userDataDir: app.getPath('userData'), safeStorage, adapters: LISTBRIDGE_ADAPTERS,
   });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

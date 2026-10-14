@@ -114,6 +114,9 @@ await test('assertAdapter', () => {
   assert.doesNotThrow(() => assertAdapter({ ...ok, listCategories: fn }));
   assert.throws(() => assertAdapter({ describe: fn }), /validate, buildCreate, buildUpdate, parseResult/);
   assert.throws(() => assertAdapter({ ...ok, listCategories: 1 }), /listCategories/);
+  assert.doesNotThrow(() => assertAdapter({ ...ok, authHeaders: fn, testConnection: fn, buildConfirm: fn, parseConfirm: fn }));
+  assert.throws(() => assertAdapter({ ...ok, authHeaders: 'x' }), /authHeaders/);
+  assert.throws(() => assertAdapter({ ...ok, buildConfirm: fn }), /parseConfirm/);
   assert.throws(() => assertAdapter(null), /object/);
 });
 
