@@ -40,9 +40,20 @@ Three layers, each replaceable on its own:
    Payload builders are pure (unit-tested against fixtures); transport is injected.
    Cults3D = `transfer: 'url'`. WooCommerce / ProcessWire = `'direct'` (future, no host needed).
 
-3. **File host (only for `transfer: 'url'`).** S3-compatible presigned PUT + short-lived
-   presigned GET (Cloudflare R2 default). Uploaded under a random prefix, deleted after the
-   platform confirms ingestion. Paid files are never left at a permanent public URL.
+3. **File host (only for `transfer: 'url'`).** Owner rule (2026-10-14): **zero user setup
+   beyond the platform's own API key** — no object-storage account, nothing to install.
+   Default host = **temporary link from the user's PC**: the job's files stay in memory, a
+   `node:http` server on `127.0.0.1` serves them at `/<random token>/<name>`, and a Cloudflare
+   **quick** tunnel (`cloudflared tunnel --url`, no account) exposes it as
+   `https://<words>.trycloudflare.com` for the life of the job only. `cloudflared` is **bundled**
+   with the installer (pinned version, SHA-256 verified at build time; `extraResources`, never
+   inside asar). The link works only while MIXOMESH runs, so the runner **holds** the job open
+   until ingestion is confirmed (every object fully served at least once, plus the platform's
+   read-back when it has one), then closes server + tunnel. If PB.0 finds a native upload
+   mutation on Cults, that becomes `transfer: 'direct'` and no host is used at all.
+   S3-compatible presigned PUT/GET (R2, AWS…) remains as an **advanced** option (`filehosts/s3.cjs`):
+   random prefix, short-lived GET, deleted after confirmation. Either way, paid files are never
+   left at a permanent public URL.
 
 **Security (follows 6.1/6.2).** Network calls and secrets live only in the Electron main
 process (`electron/listbridge/`). Credentials are encrypted with `safeStorage` (DPAPI) in
@@ -86,12 +97,20 @@ readable by another.
   credential form; the package, capture, UI and persistence are reused unchanged.
 - The disk export of a listing package works for every platform, including ones with no API
   (Printables).
-- Cults3D publishing needs a file-host account (R2 bucket + keys) in addition to the Cults key.
+- Cults3D publishing needs only the Cults API key. The installer grows by the bundled
+  `cloudflared` (~50–70 MB, Apache-2.0 licence shipped). TryCloudflare has no SLA and its
+  hostnames can be blocklisted; the S3 advanced option and "Save listing package → upload by
+  hand" are the fallbacks (plan, decision D3).
 - Real end-to-end publishing is an owner check (one real listing); automated tests use a fake
-  GraphQL server and a fake S3 endpoint.
+  GraphQL server, a fake S3 endpoint and a fake `cloudflared` (the real binary is never spawned
+  by `npm test`; an opt-in live-tunnel check exists for the dress rehearsal).
 
 ## Rejected
 
 - Browser-side publishing (key exposure, CORS) and GitHub Pages hosting (no server).
 - GitHub Release / permanent public links as the file host (leaks paid files).
+- Requiring the user to create an R2/S3 bucket as the default (2026-10-14: too much setup for a
+  hobbyist tool; kept only as the advanced option).
+- Named Cloudflare tunnels (need an account) and localtunnel/ngrok-style services (account or
+  rate limits, no pinned binary we can hash).
 - One "Cults" module doing packaging + transport + hosting (blocks reuse for self-hosted shops).
