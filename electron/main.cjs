@@ -40,6 +40,10 @@ let _kv = null;
 // expose an OS path. Created on app ready (needs userData).
 let _fileRefs = null;
 const _approvedClose = new WeakSet();
+// Windows whose user already accepted "quit anyway" for a running publish (PB.14); the
+// publish is cancelled only once the close is really approved (save/discard answered).
+const _publishQuitAck = new WeakSet();
+let _publishPromptOpen = false;
 // MIXO_SMOKE bypasses the unload/close/crash guards ONLY in unpackaged builds.
 const smokeBypass = () => !!process.env.MIXO_SMOKE && !app.isPackaged;
 
@@ -57,6 +61,11 @@ function createWindow() {
   win.on('close', event => {
     if (_approvedClose.has(win) || smokeBypass()) return;
     event.preventDefault();
+    const running = _listbridge?.runningJobs() ?? [];
+    if (running.length && !_publishQuitAck.has(win)) {
+      _askQuitDuringPublish(win, running);
+      return;
+    }
     win.webContents.send('app:close-requested');
   });
 
@@ -66,19 +75,43 @@ function createWindow() {
     // ignore the prevention = leave. An approved close already went through the
     // renderer's save/discard dialog — don't ask twice.
     if (smokeBypass() || _approvedClose.has(win)) { event.preventDefault(); return; }
+    const publishing = !!_listbridge?.hasRunningJobs();
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
       buttons: ['Leave', 'Stay'],
       defaultId: 1,
       cancelId: 1,
-      title: 'Leave without saving?',
-      message: 'Leave without saving?',
-      detail: 'This project has unsaved changes that will be lost.',
+      title: publishing ? 'Reload during a publish?' : 'Leave without saving?',
+      message: publishing ? 'A publish is still running.' : 'Leave without saving?',
+      detail: publishing
+        ? 'Reloading hides its progress. The publish keeps running, but you cannot cancel or retry it from the reloaded window.'
+        : 'This project has unsaved changes that will be lost.',
     });
     if (choice === 0) event.preventDefault(); // preventDefault here = proceed with unload
   });
 
-  // Renderer crash / kill / OOM: offer a reload instead of leaving a dead window.
+  // Closing the window while a publish is transferring files: ask first (PB.14). "Quit anyway"
+// continues into the normal save/discard flow; the publish is cancelled when the close is approved.
+function _askQuitDuringPublish(win, running) {
+  if (_publishPromptOpen) return;
+  _publishPromptOpen = true;
+  const names = [...new Set(running.map(j => j.label))].join(', ');
+  dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Keep waiting', 'Quit anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Publish in progress',
+    message: `A publish to ${names} is still transferring files — quitting will break it.`,
+    detail: 'Quitting cancels the publish and removes its temporary download links. The listing may be left incomplete on the platform.',
+  }).then(({ response }) => {
+    if (response !== 1 || win.isDestroyed()) return;
+    _publishQuitAck.add(win);
+    win.close();   // re-enters 'close': now goes on to the renderer's save/discard dialog
+  }).catch(() => {}).finally(() => { _publishPromptOpen = false; });
+}
+
+// Renderer crash / kill / OOM: offer a reload instead of leaving a dead window.
   win.webContents.on('render-process-gone', (_event, details) => {
     if (smokeBypass()) { console.error('MIXO_SMOKE: render-process-gone', details?.reason); app.exit(3); return; }
     if (details?.reason === 'clean-exit' || win.isDestroyed()) return;
@@ -394,9 +427,15 @@ ipcMain.on('app:close-response', (event, result) => {
   if (!win) return;
   const approved = result?.action === 'discard'
     || result?.action === 'save' && result?.saved === true;
-  if (!approved) return;
-  _approvedClose.add(win);
-  win.close();
+  if (!approved) { _publishQuitAck.delete(win); return; }
+  // Discard = quit for real: cancel any running publish first (bounded wait), then close.
+  Promise.race([_listbridge?.cancelAll() ?? null, new Promise(r => setTimeout(r, 4000))])
+    .catch(() => {})
+    .finally(() => {
+      if (win.isDestroyed()) return;
+      _approvedClose.add(win);
+      win.close();
+    });
 });
 
 // Every webContents (the window, and anything a bug might create) gets the

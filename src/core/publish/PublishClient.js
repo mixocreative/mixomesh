@@ -120,6 +120,31 @@ function recordOutcome(pkg, req, outcome, d) {
 }
 
 /**
+ * Early persistence (PB.14): the moment a create/update step reports `remoteId`, write the
+ * listing record (status 'failed' = "exists remotely, publish not finished"), so a crash,
+ * reload or quit before confirm/cleanup cannot lose the id (the next publish would create a
+ * duplicate). recordOutcome() upgrades it to published/draft when the job settles. An update
+ * of a record that already has this remoteId changes nothing early.
+ */
+function persistEarly(pkg, req, ev, d) {
+  if (!ev || ev.status !== 'done' || !ev.remoteId) return;
+  if (ev.step !== 'create' && ev.step !== 'update') return;
+  const existing = findListing(d.getState().project?.listings, req.platform, req.accountId);
+  if (existing && existing.remoteId === ev.remoteId) return;
+  const rec = recordFor(pkg, req, { result: { remoteId: ev.remoteId, url: ev.url ?? null } }, 'failed', d.now());
+  d.setState(s => ({ ...s, project: { ...s.project, listings: upsertListing(s.project?.listings, rec) } }));
+}
+
+/** Subscribe to progress: early persistence first, then the caller's listener. Returns unsubscribe. */
+function watchProgress(pkg, req, onProgress, d) {
+  const listener = ev => {
+    try { persistEarly(pkg, req, ev, d); } catch { /* the outcome write below is the fallback */ }
+    if (typeof onProgress === 'function') onProgress(ev);
+  };
+  return d.api.onProgress?.(listener) ?? null;
+}
+
+/**
  * Publish (or update, when `remoteId` is given) a package.
  * @param {object} pkg ListingPackage
  * @param {{ platform: string, accountId: string, remoteId?: string, fileHostId?: string }} req
@@ -138,7 +163,7 @@ export async function publish(pkg, req, onProgress, deps) {
     images: pkg.images.map(i => i.bytes),
     files: pkg.files.map(f => f.bytes),
   };
-  const off = typeof onProgress === 'function' ? d.api.onProgress?.(onProgress) : null;
+  const off = watchProgress(pkg, req, onProgress, d);
   let outcome;
   try {
     outcome = await d.api.start(request);
@@ -156,7 +181,7 @@ export async function publish(pkg, req, onProgress, deps) {
  */
 export async function retryPublish(jobId, pkg, req, onProgress, deps) {
   const d = requireApi(deps);
-  const off = typeof onProgress === 'function' ? d.api.onProgress?.(onProgress) : null;
+  const off = watchProgress(pkg, req, onProgress, d);
   let outcome;
   try {
     outcome = await d.api.retry(jobId);
@@ -169,3 +194,8 @@ export async function retryPublish(jobId, pkg, req, onProgress, deps) {
 
 export const retry = async (jobId, deps) => requireApi(deps).api.retry(jobId);
 export const cancel = async (jobId, deps) => requireApi(deps).api.cancel(jobId);
+/**
+ * "Keep waiting": add `ms` (the main process caps one call at 60 min) to a temporary-link hold,
+ * or to a failed job's retry window. Resolves { ok, holdRemainingMs?, linksOpenMs?, message? }.
+ */
+export const extendHold = async (jobId, ms, deps) => requireApi(deps).api.extendHold(jobId, ms);

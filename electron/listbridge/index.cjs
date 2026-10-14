@@ -163,6 +163,7 @@ function registerListbridgeIpc(handle, deps = {}) {
 
   // Validate adapters eagerly-but-async (the core is ESM); every handler awaits this.
   let readyPromise = null;
+  let liveRunner = null;   // set once ready() resolved; sync access for the quit / close prompts
   const ready = () => {
     readyPromise ||= (async () => {
       const core = await loadCore();
@@ -170,6 +171,7 @@ function registerListbridgeIpc(handle, deps = {}) {
       const runner = createPublishRunner({
         adapters, credentials, transport, makeFileHost, zip, core, confirm, ...(sleep ? { sleep } : {}),
       });
+      liveRunner = runner;
       return { core, runner, byId: new Map(adapters.map(a => [a.describe().id, a])) };
     })();
     return readyPromise;
@@ -358,7 +360,16 @@ function registerListbridgeIpc(handle, deps = {}) {
     return runner.extendHold(jobId, ms);
   });
 
-  return { ready, credentials, closeAll };
+  // App close / quit safety (PB.14): is a publish still transferring, and cancel them all
+  // (hosted copies removed, temporary links closed) when the user chose to quit anyway.
+  const hasRunningJobs = () => !!liveRunner?.hasRunningJobs();
+  const runningJobs = () => (liveRunner ? liveRunner.runningJobs() : []);
+  const cancelAll = async () => {
+    if (!liveRunner) return;
+    await Promise.all(liveRunner.runningJobs().map(j => liveRunner.cancel(j.jobId).catch(() => {})));
+  };
+
+  return { ready, credentials, closeAll, hasRunningJobs, runningJobs, cancelAll };
 }
 
 module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, TUNNEL_ID, CONFIRM_OPTIONS, defaultZip, loadListbridgeCore: defaultLoadCore };

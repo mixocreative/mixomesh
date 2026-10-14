@@ -272,3 +272,46 @@ export function formatBytes(n) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+// -- temporary-link hold ("Keep waiting", PB.14) --------------------------
+
+/** One "Keep waiting" press adds this much (the main process caps a call at 60 min). */
+export const KEEP_WAITING_MS = 15 * 60 * 1000;
+
+/** Whole minutes for display, rounded up, never below 1. */
+export const minutesLeft = ms => Math.max(1, Math.ceil((Number(ms) || 0) / 60000));
+
+/**
+ * The hold state after one progress event: set by the runner's structured
+ * { step:'confirm', status:'running', hold:true, served?, total?, holdRemainingMs } event,
+ * cleared by any other event of the job. Pure.
+ * @returns {{ served: number|null, total: number|null, remainingMs: number }|null}
+ */
+export function nextHold(prev, ev) {
+  if (ev?.step === 'confirm' && ev.status === 'running' && ev.hold === true) {
+    const n = v => (Number.isFinite(v) ? v : null);
+    return { served: n(ev.served), total: n(ev.total), remainingMs: Math.max(0, Number(ev.holdRemainingMs) || 0) };
+  }
+  return ev ? null : prev;
+}
+
+/** i18n key + params for the hold line (the UI calls t()). */
+export function holdText(hold, label) {
+  const min = minutesLeft(hold.remainingMs);
+  return hold.total != null && hold.served != null
+    ? { key: 'publish.hold.status', params: { label, served: hold.served, total: hold.total, min } }
+    : { key: 'publish.hold.statusNoCount', params: { label, min } };
+}
+
+/**
+ * Links-still-open info after a failed event: only a confirm-step failure that reports
+ * linksOpenMs > 0 qualifies. `at` is when it was observed (for the countdown). Pure.
+ * @returns {{ ms: number, at: number }|null}
+ */
+export function linksOpenFromEvent(ev, at) {
+  if (ev?.step === 'confirm' && ev.status === 'failed' && Number(ev.linksOpenMs) > 0) return { ms: Number(ev.linksOpenMs), at };
+  return null;
+}
+
+/** Milliseconds the links stay open from now (0 once gone). */
+export const linksOpenLeft = (info, now) => (info ? Math.max(0, info.ms - (now - info.at)) : 0);

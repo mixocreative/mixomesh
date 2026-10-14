@@ -76,6 +76,9 @@ const S = {
   blocked: null,           // build refused by the export gate
   note: null,              // one-line notice on the form (cancelled, invalid...)
   cancelRequested: false,
+  hold: null,              // { served, total, remainingMs } while the platform downloads from the temporary link
+  linksOpen: null,         // { ms, at } after a confirm failure while the links stay open
+  extending: false,        // a Keep waiting request is in flight
 };
 
 const _api = () => (typeof window !== 'undefined' ? window.electronAPI?.listbridge : undefined);
@@ -92,8 +95,9 @@ export function _resetPublishTabState() {
     editingConn: false, connBusy: false, connMsg: null, form: null, formKey: null, tagDraft: '',
     hero: null, gallery: [], transparent: false, capturing: false, heroTried: false, formats: null,
     built: [], phase: 'form', steps: [], jobId: null, outcome: null, lastPkg: null, lastReq: null,
-    blocked: null, note: null, cancelRequested: false,
+    blocked: null, note: null, cancelRequested: false, hold: null, linksOpen: null, extending: false,
   });
+  _guardUnload(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,12 +247,46 @@ function _onProgress(refresh) {
   return ev => {
     if (ev?.jobId) S.jobId = ev.jobId;
     S.steps = M.applyProgress(S.steps, ev);
+    S.hold = M.nextHold(S.hold, ev);
+    const open = M.linksOpenFromEvent(ev, Date.now());
+    if (open) S.linksOpen = open; else if (ev?.status === 'running') S.linksOpen = null;
     refresh();
   };
 }
 
+// A running publish must survive an accidental reload: the renderer dies on reload but the job
+// keeps running in the main process, so ask first (main.cjs words the Electron prompt).
+const _unloadGuard = e => { e.preventDefault(); e.returnValue = ''; };
+let _guarding = false;
+function _guardUnload(on) {
+  if (typeof window === 'undefined' || on === _guarding) return;
+  _guarding = on;
+  if (on) window.addEventListener('beforeunload', _unloadGuard);
+  else window.removeEventListener('beforeunload', _unloadGuard);
+}
+
+/** "Keep waiting": +15 min on the running hold, or on the failed job's open links. */
+async function _keepWaiting(refresh) {
+  if (!S.jobId || S.extending) return;
+  S.extending = true;
+  refresh();
+  try {
+    const r = await Publish.extendHold(S.jobId, M.KEEP_WAITING_MS);
+    if (!r?.ok) throw new Error(String(r?.message ?? t('publish.hold.notWaiting')));
+    if (r.holdRemainingMs != null && S.hold) S.hold = { ...S.hold, remainingMs: r.holdRemainingMs };
+    if (r.linksOpenMs != null) S.linksOpen = { ms: r.linksOpenMs, at: Date.now() };
+  } catch (err) {
+    reportError(err, { title: t('publish.hold.extendFailed') });
+  } finally {
+    S.extending = false;
+    refresh();
+  }
+}
+
 function _settle(outcome, refresh) {
   S.outcome = outcome;
+  S.hold = null;
+  if (outcome?.ok || outcome?.status === 'cancelled' || outcome?.status === 'invalid') S.linksOpen = null;
   if (outcome?.ok) {
     S.phase = 'done'; S.lastPkg = null;
   } else if (outcome?.status === 'cancelled') {
@@ -260,6 +298,7 @@ function _settle(outcome, refresh) {
   } else {
     S.phase = 'failed';
   }
+  _guardUnload(S.phase === 'publishing');
   refresh();
 }
 
@@ -267,7 +306,8 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
   const form = S.form;
   const isUpdate = !!_remoteId(desc);
   S.phase = 'publishing'; S.steps = M.initialSteps(isUpdate); S.jobId = null; S.outcome = null;
-  S.blocked = null; S.note = null; S.cancelRequested = false;
+  S.blocked = null; S.note = null; S.cancelRequested = false; S.hold = null; S.linksOpen = null;
+  _guardUnload(true);
   S.steps = M.applyProgress(S.steps, { step: 'build', status: 'running' });
   refresh('#pub-status');
   try {
@@ -280,6 +320,7 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
     });
     if (res.blocked) {
       S.phase = 'form'; S.blocked = res;
+      _guardUnload(false);
       refresh();
       return;
     }
@@ -287,6 +328,7 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
     S.steps = M.applyProgress(S.steps, { step: 'build', status: 'done', message: String(res.pkg.files.length) });
     if (S.cancelRequested) {
       S.phase = 'form'; S.note = t('publish.note.cancelled');
+      _guardUnload(false);
       refresh();
       return;
     }
@@ -295,7 +337,8 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
     refresh();
     _settle(await Publish.publish(res.pkg, S.lastReq, _onProgress(refresh)), refresh);
   } catch (err) {
-    S.phase = 'failed';
+    S.phase = 'failed'; S.hold = null;
+    _guardUnload(false);
     S.outcome = { ok: false, error: err?.message ? String(err.message) : String(err) };
     refresh('#pub-status');
   }
@@ -303,13 +346,15 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
 
 async function _retry(desc, refresh) {
   if (!S.jobId || !S.lastPkg) return _publish(desc, refresh);
-  S.phase = 'publishing';
+  S.phase = 'publishing'; S.linksOpen = null; S.hold = null;
+  _guardUnload(true);
   S.steps = S.steps.map(s => (s.status === 'failed' ? { ...s, status: 'todo' } : s));
   refresh('#pub-status');
   try {
     _settle(await Publish.retryPublish(S.jobId, S.lastPkg, S.lastReq, _onProgress(refresh)), refresh);
   } catch (err) {
-    S.phase = 'failed';
+    S.phase = 'failed'; S.hold = null;
+    _guardUnload(false);
     S.outcome = { ...S.outcome, ok: false, error: err?.message ? String(err.message) : String(err) };
     refresh('#pub-status');
   }
@@ -322,7 +367,8 @@ async function _cancel(refresh) {
     _settle(await Publish.cancel(S.jobId), refresh);
   } catch (err) {
     S.outcome = { ok: false, error: err?.message ? String(err.message) : String(err) };
-    S.phase = 'failed';
+    S.phase = 'failed'; S.hold = null;
+    _guardUnload(false);
     refresh('#pub-status');
   }
 }
@@ -507,6 +553,11 @@ function _runHtml(desc) {
   let h = `<div id="pub-status" tabindex="-1" class="pub-status" role="status" aria-live="polite">`;
   if (S.phase === 'publishing') {
     h += `<p class="pub-title">${escapeHtml(t('publish.running', { label: desc.label }))}</p>${_stepsHtml()}`;
+    if (S.hold) {
+      const ht = M.holdText(S.hold, desc.label);
+      h += `<p class="pub-hold" role="status">${escapeHtml(t(ht.key, ht.params))}</p>`;
+      h += `<div class="pub-btns"><button type="button" class="pub-btn" data-act="keep-waiting"${S.extending ? ' disabled' : ''}>${escapeHtml(t('publish.hold.keepWaiting'))}</button></div>`;
+    }
     h += `<div class="pub-btns"><button type="button" class="pub-btn" data-act="cancel-run"${S.cancelRequested && !S.jobId ? ' disabled' : ''}>${escapeHtml(t('publish.cancel'))}</button></div>`;
   } else if (S.phase === 'done') {
     const res = S.outcome?.result ?? {};
@@ -526,7 +577,10 @@ function _runHtml(desc) {
     h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id) ?? 'publish.step.build') }) : t('publish.failed.generic'))}</b> — ${escapeHtml(o.error ?? t('publish.failed.unknown'))}</p>`;
     if (o.leftover?.length) h += `<p class="pub-hint">${escapeHtml(t('publish.note.cancelledLeftover', { n: o.leftover.length }))}</p>`;
     h += `<p class="pub-hint">${escapeHtml(t('publish.failed.reuse'))}</p>`;
+    const openLeft = failed?.id === 'confirm' ? M.linksOpenLeft(S.linksOpen, Date.now()) : 0;
+    if (openLeft > 0) h += `<p class="pub-hint pub-links-open">${escapeHtml(t('publish.hold.linksOpen', { min: M.minutesLeft(openLeft) }))}</p>`;
     h += `<div class="pub-btns"><button type="button" class="pp-primary-btn pub-inline" data-act="retry">${escapeHtml(t('publish.retry'))}</button>`
+      + (openLeft > 0 ? `<button type="button" class="pub-btn" data-act="keep-waiting"${S.extending ? ' disabled' : ''}>${escapeHtml(t('publish.hold.keepWaiting'))}</button>` : '')
       + `<button type="button" class="pub-btn" data-act="cancel-clean">${escapeHtml(t('publish.cancelClean'))}</button></div></div>`;
   }
   return `${h}</div>`;
@@ -730,8 +784,9 @@ function _wire(el, desc, readiness, refresh) {
   // run states
   on('cancel-run', () => _cancel(refresh));
   on('retry', () => _retry(desc, refresh));
+  on('keep-waiting', () => _keepWaiting(refresh));
   on('cancel-clean', () => _cancel(refresh).then(() => { S.phase = 'form'; refresh(); }));
-  on('back', () => { S.phase = 'form'; S.steps = []; S.outcome = null; S.jobId = null; refresh('#pub-title'); });
+  on('back', () => { S.phase = 'form'; S.steps = []; S.outcome = null; S.jobId = null; S.hold = null; S.linksOpen = null; refresh('#pub-title'); });
   on('copy-url', () => _copy(S.outcome?.result?.url));
   on('copy-live', () => _copy(findListing(getState().project?.listings, desc.id, M.ACCOUNT_ID)?.url));
 

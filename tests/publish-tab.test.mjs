@@ -171,3 +171,42 @@ test('retryPublish: another failure with no remote listing records nothing', asy
 test('retryPublish refuses outside the desktop shell', async () => {
   await assert.rejects(() => retryPublish('j', pkg, {}, null, { caps: { publish: false }, api: {} }), /desktop/);
 });
+
+// -- PB.14: Keep waiting model helpers --------------------------------------
+
+test('nextHold: only the structured confirm hold event sets it; any other event clears it', () => {
+  const ev = { step: 'confirm', status: 'running', hold: true, served: 1, total: 3, holdRemainingMs: 125000 };
+  assert.deepEqual(M.nextHold(null, ev), { served: 1, total: 3, remainingMs: 125000 });
+  assert.deepEqual(M.nextHold(null, { ...ev, served: undefined, total: undefined }), { served: null, total: null, remainingMs: 125000 });
+  const held = M.nextHold(null, ev);
+  assert.equal(M.nextHold(held, { step: 'confirm', status: 'done' }), null);
+  assert.equal(M.nextHold(held, { step: 'confirm', status: 'failed', linksOpenMs: 5 }), null);
+  assert.equal(M.nextHold(held, { step: 'confirm', status: 'running' }), null, 'plain running (no hold flag) is not a hold');
+  assert.equal(M.nextHold(held, undefined), held, 'no event: unchanged');
+});
+
+test('minutesLeft rounds up and never shows 0; holdText picks the counted or plain wording', () => {
+  assert.equal(M.minutesLeft(0), 1);
+  assert.equal(M.minutesLeft(59_000), 1);
+  assert.equal(M.minutesLeft(60_001), 2);
+  assert.equal(M.minutesLeft(15 * 60_000), 15);
+  assert.equal(M.minutesLeft(undefined), 1);
+  assert.deepEqual(M.holdText({ served: 2, total: 5, remainingMs: 600_000 }, 'Cults3D'),
+    { key: 'publish.hold.status', params: { label: 'Cults3D', served: 2, total: 5, min: 10 } });
+  assert.deepEqual(M.holdText({ served: null, total: null, remainingMs: 30_000 }, 'Cults3D'),
+    { key: 'publish.hold.statusNoCount', params: { label: 'Cults3D', min: 1 } });
+  assert.equal(M.KEEP_WAITING_MS, 900000);
+});
+
+test('linksOpenFromEvent: only a confirm failure with linksOpenMs > 0; countdown never goes negative', () => {
+  const fail = { step: 'confirm', status: 'failed', linksOpenMs: 600000 };
+  const info = M.linksOpenFromEvent(fail, 1000);
+  assert.deepEqual(info, { ms: 600000, at: 1000 });
+  assert.equal(M.linksOpenFromEvent({ ...fail, step: 'create' }, 1), null);
+  assert.equal(M.linksOpenFromEvent({ ...fail, linksOpenMs: 0 }, 1), null);
+  assert.equal(M.linksOpenFromEvent({ ...fail, linksOpenMs: undefined }, 1), null);
+  assert.equal(M.linksOpenFromEvent({ ...fail, status: 'running' }, 1), null);
+  assert.equal(M.linksOpenLeft(info, 61000), 540000);
+  assert.equal(M.linksOpenLeft(info, 9e9), 0);
+  assert.equal(M.linksOpenLeft(null, 5), 0);
+});

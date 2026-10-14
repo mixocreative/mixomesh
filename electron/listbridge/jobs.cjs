@@ -374,7 +374,11 @@ function createPublishRunner({
         try {
           const r = await steps[name](job);
           const msg = typeof r === 'string' ? r : r?.message;
-          report(job, step, 'done', msg, r?.skipped ? { skipped: true } : {});
+          // create / update: carry the remote id so the renderer can persist it immediately,
+          // before confirm / cleanup, and a crash or quit after this point cannot duplicate (PB.14).
+          const created = name === 'publish' && job.result?.remoteId
+            ? { remoteId: job.result.remoteId, ...(job.result.url ? { url: job.result.url } : {}) } : {};
+          report(job, step, 'done', msg, { ...(r?.skipped ? { skipped: true } : {}), ...created });
         } catch (err) {
           if (err?.cancelled || job.cancelRequested) throw cancelledError();
           job.failedStep = step;
@@ -513,6 +517,10 @@ function createPublishRunner({
       return job ? outcome(job) : null;
     },
     has: jobId => jobs.has(jobId),
+    /** Jobs that are executing right now (a failed job waiting for Retry is not running). */
+    runningJobs: () => [...jobs.values()].filter(j => j.status === 'running')
+      .map(j => ({ jobId: j.id, platform: j.platform, label: j.desc.label || j.platform })),
+    hasRunningJobs: () => [...jobs.values()].some(j => j.status === 'running'),
   });
 }
 

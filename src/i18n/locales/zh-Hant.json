@@ -1149,5 +1149,11 @@
   "publish.note.cancelled": "已取消。沒有發佈任何內容，暫時連結也已移除。",
   "publish.note.cancelledLeftover": "已取消，但有 {n} 個暫時檔案無法移除。",
   "publish.s3.style.path": "路徑式（R2、多數主機）",
-  "publish.s3.style.virtual": "虛擬主機式（AWS）"
+  "publish.s3.style.virtual": "虛擬主機式（AWS）",
+  "publish.hold.status": "{label} 正在下載檔案（{served}/{total}）· 約剩 {min} 分鐘",
+  "publish.hold.statusNoCount": "{label} 正在下載檔案 · 約剩 {min} 分鐘",
+  "publish.hold.keepWaiting": "繼續等待（+15 分鐘）",
+  "publish.hold.linksOpen": "連結還會保持開啟約 {min} 分鐘 — 可以重試或繼續等待",
+  "publish.hold.extendFailed": "無法延長等待時間",
+  "publish.hold.notWaiting": "這次上架已經不是在等平台回應了。"
 }

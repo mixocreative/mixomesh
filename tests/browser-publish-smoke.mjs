@@ -19,7 +19,7 @@ import {
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
 const SHOTS = process.env.SHOTS ? resolve(process.env.SHOTS) : null;
-const PENDING = join(ROOT, '.tmp/locale-pending/publish-tab.json');
+const PENDING_FILES = ['publish-tab.json', 'publish-pb14.json'].map(f => join(ROOT, '.tmp/locale-pending', f));
 const SECRET = 'sk_test_SUPER_SECRET_KEY_12345';
 
 // The fake runner. Mirrors electron/listbridge/index.cjs channel shapes.
@@ -27,7 +27,7 @@ const FAKE = `(() => {
   const creds = new Set();
   const listeners = new Set();
   const w = window;
-  w.__lb = { calls: [], failFirst: true, delay: 250, setCredentialsArgs: [] };
+  w.__lb = { calls: [], failFirst: true, delay: 250, setCredentialsArgs: [], hold: true, holdRelease: false, holdRemaining: 600000, extendCalls: [] };
   const emit = e => listeners.forEach(cb => cb(e));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const STEPS = ['validate', 'bundle', 'host', 'create', 'confirm', 'cleanup'];
@@ -36,13 +36,21 @@ const FAKE = `(() => {
       const step = STEPS[i] === 'create' && update ? 'update' : STEPS[i];
       emit({ jobId: 'job1', step, status: 'running', message: step + '...' });
       await sleep(w.__lb.delay);
+      // Temporary-link hold (PB.12/PB.14): structured progress until the test releases it.
+      if (STEPS[i] === 'confirm' && w.__lb.hold) {
+        while (!w.__lb.holdRelease && !w.__lb.cancel) {
+          emit({ jobId: 'job1', step, status: 'running', message: 'Keep MIXOMESH open', hold: true, served: 1, total: 3, holdRemainingMs: w.__lb.holdRemaining });
+          await sleep(300);
+        }
+      }
       if (STEPS[i] === 'create' && w.__lb.failFirst) {
         w.__lb.failFirst = false;
         emit({ jobId: 'job1', step, status: 'failed', message: 'category is required' });
         return { ok: false, jobId: 'job1', status: 'failed', failedStep: step, error: 'Cults3D answered: category is required' };
       }
       if (w.__lb.cancel) { return { ok: false, jobId: 'job1', status: 'cancelled', error: 'Publish cancelled' }; }
-      emit({ jobId: 'job1', step, status: 'done', message: 'ok', ...(STEPS[i] === 'host' ? { skipped: true } : {}) });
+      emit({ jobId: 'job1', step, status: 'done', message: 'ok', ...(STEPS[i] === 'host' ? { skipped: true } : {}),
+        ...(STEPS[i] === 'create' ? { remoteId: 'remote-1', url: 'https://cults3d.com/en/3d-model/art/ceramic-owl' } : {}) });
     }
     return { ok: true, jobId: 'job1', status: 'done', result: { remoteId: 'remote-1', url: 'https://cults3d.com/en/3d-model/art/ceramic-owl', status: 'published' } };
   }
@@ -58,6 +66,7 @@ const FAKE = `(() => {
     start: async req => { w.__lb.calls.push('start'); w.__lb.lastRequest = { platform: req.platform, accountId: req.accountId, fileHostId: req.fileHostId, remoteId: req.remoteId, title: req.manifest.title, price: req.manifest.price, files: req.files.length, images: req.images.length }; return run(0, !!req.remoteId); },
     retry: async id => { w.__lb.calls.push('retry:' + id); return run(3, false); },
     cancel: async () => { w.__lb.cancel = true; return { ok: false, status: 'cancelled' }; },
+    extendHold: async (id, ms) => { w.__lb.extendCalls.push([id, ms]); w.__lb.holdRemaining += ms; return { ok: true, holdRemainingMs: w.__lb.holdRemaining }; },
     onProgress: cb => { listeners.add(cb); return () => listeners.delete(cb); },
   } });
 })()`;
@@ -93,7 +102,12 @@ async function main() {
     const failures = [];
     // Locale strings still pending a merge into src/i18n/locales/*.json: serve the
     // merged tables to the page (idempotent once the real files already hold them).
-    const pending = existsSync(PENDING) ? JSON.parse(readFileSync(PENDING, 'utf8')) : {};
+    const pending = {};
+    for (const file of PENDING_FILES) {
+      if (!existsSync(file)) continue;
+      const part = JSON.parse(readFileSync(file, 'utf8'));
+      for (const lang of Object.keys(part)) pending[lang] = { ...(pending[lang] ?? {}), ...part[lang] };
+    }
     const LOCALE_FILES = { 'en.json': 'en', 'ja.json': 'ja', 'zh-Hant.json': 'zh-Hant' };
     cdp.onEvent = (msg) => {
       if (msg.method === 'Fetch.requestPaused') {
@@ -246,6 +260,20 @@ async function main() {
     assert(failed.hostLabel.includes('Make temporary download links'), `host step label: ${failed.hostLabel}`);
     await snap('3b-failed');
     assert(await click('[data-act="retry"]'), 'retry');
+    // Hold: Cults3D is downloading from the temporary link. Structured text, Keep waiting, early remoteId.
+    await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-hold')`), 20000, 'hold line');
+    const hold = await evaluate(cdp, `(async () => { const { getState } = await import('/src/core/StateManager.js');
+      return { text: document.querySelector('.pub-hold').textContent.trim(), btn: document.querySelector('[data-act="keep-waiting"]')?.textContent.trim(),
+        early: getState().project.listings.map(l => ({ remoteId: l.remoteId, status: l.status })) }; })()`);
+    assert(hold.text === 'Cults3D is downloading the files (1/3) · ~10 min left', `hold text: ${hold.text}`);
+    assert(hold.btn === 'Keep waiting (+15 min)', `keep waiting button: ${hold.btn}`);
+    assert(hold.early.length === 1 && hold.early[0].remoteId === 'remote-1' && hold.early[0].status === 'failed',
+      `remoteId must be saved the moment create succeeds: ${JSON.stringify(hold.early)}`);
+    await snap('3b2-hold');
+    assert(await click('[data-act="keep-waiting"]'), 'keep waiting');
+    await waitFor(() => evaluate(cdp, `document.querySelector('.pub-hold')?.textContent.includes('~25 min left')`), 10000, 'extended hold line');
+    assert(await evaluate(cdp, `JSON.stringify(window.__lb.extendCalls) === '[["job1",900000]]'`), 'extendHold(jobId, 15 min) reached the bridge');
+    await evaluate(cdp, `window.__lb.holdRelease = true`);
     await waitFor(() => evaluate(cdp, `!!document.querySelector('#rp-print-body .pub-ok')`), 20000, 'success box');
     const done = await evaluate(cdp, `(async () => { const { getState } = await import('/src/core/StateManager.js');
       return { ok: document.querySelector('.pub-ok').textContent, url: document.querySelector('#pub-url')?.value,

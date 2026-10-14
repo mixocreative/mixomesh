@@ -164,6 +164,25 @@ fine for most people.
 file (`.listbridge.zip`) — a complete offline package you can upload to any
 marketplace by hand.
 
+### Packaged-app smoke (desktop build)
+
+`npm run dist` needs `electron-builder`, which is **not** a declared dependency
+(`npm i -D electron-builder` first; it also downloads build tooling). It first runs
+`scripts/fetch-cloudflared.mjs` (network; SHA-256 verified), then writes the installer and
+`release/win-unpacked/`. To prove the packaged app can publish, run:
+
+```bash
+npm run build && npm run dist
+npm run smoke:packaged        # = node scripts/packaged-smoke.mjs [path to MIXOMESH.exe]
+```
+
+It launches the unpacked `MIXOMESH.exe` with `MIXO_SMOKE=1` (the same security probe as
+`npm run test:electron`, run from inside `app.asar`) and passes only if the window boots and
+`publish:describe` lists `cults3d` plus the default `tunnel` file host. That also proves the
+ESM import of `src/listbridge/index.js` resolves from `app.asar`, the one packaging risk.
+Run it once on a clean Windows user profile (the unsigned installer shows SmartScreen; the
+unpacked exe does not).
+
 ## Dependency Notes
 
 Dependencies are project-local and installed with npm. The helper script forces

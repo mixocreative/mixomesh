@@ -171,3 +171,68 @@ test('package zip round-trips through fromManifest; save goes through storage.sa
   assert.equal(saved[0][2].ext, 'zip');
   assert.equal(Pkg.listingPackageFileName({ title: 'a/b:c' }), 'a_b_c.listbridge.zip');
 });
+
+// ── PB.14: early remoteId persistence + Keep waiting ─────────────────────
+
+test('extendHold passes through to the bridge; unavailable runtime throws clearly', async () => {
+  const { deps } = setup();
+  const seen = [];
+  const d = { ...deps, api: { ...deps.api, extendHold: async (id, ms) => { seen.push([id, ms]); return { ok: true, holdRemainingMs: ms }; } } };
+  assert.deepEqual(await Client.extendHold('j1', 900000, d), { ok: true, holdRemainingMs: 900000 });
+  assert.deepEqual(seen, [['j1', 900000]]);
+  await assert.rejects(Client.extendHold('j1', 1, { ...d, caps: { publish: false } }), /desktop app/);
+});
+
+test('early remoteId: the create-done progress event persists the record BEFORE the job settles', async () => {
+  const { deps, getListings, sets } = setup();
+  const pkg = await build(deps);
+  let during = null;
+  // The job reports create-done, then the renderer "dies" (start never resolves with an outcome).
+  const listeners = new Set();
+  const crashing = {
+    ...deps,
+    api: {
+      ...deps.api,
+      onProgress: cb => { listeners.add(cb); return () => listeners.delete(cb); },
+      start: async () => {
+        listeners.forEach(cb => cb({ jobId: 'j', step: 'create', status: 'done', message: 'x', remoteId: 'R9', url: 'https://fake.test/c/R9' }));
+        during = JSON.parse(JSON.stringify(getListings()));
+        throw new Error('window reloaded');
+      },
+    },
+  };
+  await assert.rejects(Client.publish(pkg, { platform: 'fake', accountId: 'me' }, null, crashing), /window reloaded/);
+  assert.equal(during.length, 1, 'written while the job was still running');
+  assert.equal(during[0].remoteId, 'R9');
+  assert.equal(during[0].status, 'failed');
+  assert.equal(during[0].url, 'https://fake.test/c/R9');
+  assert.equal(getListings().length, 1);
+  assert.equal(listeners.size, 0, 'unsubscribed even when start throws');
+  assert.equal(sets.length, 1);
+});
+
+test('early remoteId: the outcome upgrades the early record in place; an update of a known remoteId writes nothing early', async () => {
+  const { deps, getListings, sets } = setup();
+  const pkg = await build(deps);
+  const events = [];
+  await Client.publish(pkg, { platform: 'fake', accountId: 'me' }, e => events.push(e), deps);
+  assert.ok(events.some(e => e.step === 'create' && e.status === 'done' && e.remoteId === 'R1'), 'forwarded to the caller too');
+  assert.equal(getListings().length, 1);
+  assert.equal(getListings()[0].status, 'published', 'upgraded on outcome');
+  assert.equal(sets.length, 2, 'early write + outcome write');
+  const before = sets.length;
+  await Client.publish(pkg, { platform: 'fake', accountId: 'me', remoteId: 'R1' }, null, deps);
+  assert.equal(sets.length, before + 1, 'update: only the outcome write');
+  assert.equal(getListings().length, 1);
+});
+
+test('early remoteId: retryPublish persists it too (links-lost retry creates nothing new, but a first create on retry is kept)', async () => {
+  const { deps, getListings } = setup();
+  const pkg = await build(deps);
+  const listeners = new Set();
+  const d = { ...deps, api: { ...deps.api, onProgress: cb => { listeners.add(cb); return () => listeners.delete(cb); },
+    retry: async () => { listeners.forEach(cb => cb({ jobId: 'j', step: 'create', status: 'done', remoteId: 'R2' })); throw new Error('quit'); } } };
+  await assert.rejects(Client.retryPublish('j', pkg, { platform: 'fake', accountId: 'me' }, null, d), /quit/);
+  assert.equal(getListings()[0].remoteId, 'R2');
+  assert.equal(listeners.size, 0);
+});

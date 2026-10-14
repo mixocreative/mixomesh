@@ -40,6 +40,7 @@
 }
 .pub-sub-aside { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .pub-hint { color: var(--text-2); font-size: var(--fs-xs); }
+.pub-hold { margin: 0; font-size: var(--fs-sm, var(--fs-xs)); color: var(--text-1); }
 .pub-help { margin: 0; }
 .pub-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .pub-msg { margin: 0; min-height: 1em; font-size: var(--fs-xs); color: var(--success); }

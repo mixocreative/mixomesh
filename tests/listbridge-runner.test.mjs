@@ -783,3 +783,60 @@ test('runner code stays host-neutral: no electron import, IPC only via the injec
   assert.match(builder, /- src\/listbridge\/\*\*\/\*/, 'packaged build ships the ESM core');
 });
 
+
+// ── PB.14: early remoteId + quit safety ─────────────────────────────────
+
+test('runner: the create/update done event carries remoteId + url (renderer persists it before confirm)', async () => {
+  const ctx = setupHold({ adapter: fakeAdapter({ confirmAfter: 1 }) });
+  ctx.host.served = 3;
+  const out = await ctx.start();
+  assert.equal(out.ok, true, out.error);
+  const done = ctx.events.filter(e => e.status === 'done' && (e.step === 'create' || e.step === 'update'));
+  assert.equal(done.length, 1);
+  assert.equal(done[0].remoteId, 'c1');
+  assert.equal(done[0].url, 'https://fake.test/c/c1');
+  const idx = e => ctx.events.indexOf(e);
+  assert.ok(idx(done[0]) < idx(ctx.events.find(e => e.step === 'confirm' && e.status === 'running')), 'before confirm starts');
+  assert.ok(ctx.events.filter(e => e.step !== 'create' && e.step !== 'update').every(e => e.remoteId === undefined), 'other steps never carry it');
+  const upd = setupHold();
+  upd.host.served = 3;
+  await upd.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', remoteId: 'old-1', pkg: makePkg() });
+  assert.equal(upd.events.find(e => e.step === 'update' && e.status === 'done').remoteId, 'c1');
+});
+
+test('runner: runningJobs / hasRunningJobs are true only while a job executes (a failed job awaiting Retry is not running)', async () => {
+  const seen = [];
+  const ctx = setupHold({ holdMs: 10_000 });
+  ctx.hooks.onSleep = () => { seen.push([ctx.runner.hasRunningJobs(), ctx.runner.runningJobs().map(j => j.label)]); };
+  assert.equal(ctx.runner.hasRunningJobs(), false);
+  const out = await ctx.start();
+  assert.equal(out.failedStep, 'confirm');
+  assert.ok(seen.length > 0 && seen.every(([r, l]) => r === true && l.length === 1 && l[0] === 'Fake Market'));
+  assert.equal(ctx.runner.hasRunningJobs(), false, 'failed = waiting for Retry, not transferring');
+  assert.deepEqual(ctx.runner.runningJobs(), []);
+  await ctx.runner.cancel(out.jobId);
+});
+
+test('ipc: hasRunningJobs / cancelAll (app close) cancel a publish mid-hold and close its tunnel', async () => {
+  const tunnel = fakeUptimeHost();
+  const handlersOf = new Map();
+  let reg = null;
+  let cancelled = null;
+  let ticks = 0;
+  reg = registerListbridgeIpc((c, fn) => handlersOf.set(c, fn), {
+    userDataDir: tmpDir(), safeStorage: fakeSafeStorage(), adapters: [fakeAdapter()],
+    transport: fakeTransport(() => created()), loadCore: async () => core,
+    makeTunnelHost: () => tunnel,
+    sleep: async () => { if (ticks++ === 0) { assert.equal(reg.hasRunningJobs(), true); cancelled = reg.cancelAll(); } },
+  });
+  assert.equal(reg.hasRunningJobs(), false, 'nothing before the runner exists');
+  assert.deepEqual(reg.runningJobs(), []);
+  await reg.cancelAll();   // no runner yet: a no-op, never throws
+  const ev = { sender: { id: 1, isDestroyed: () => false, send() {} } };
+  await handlersOf.get('publish:setCredentials')(ev, 'fake:me', { user: 'me', apiKey: SECRET });
+  const out = await handlersOf.get('publish:start')(ev, startPayload(makePkg(), { fileHostId: undefined }));
+  await cancelled;
+  assert.equal(out.status, 'cancelled');
+  assert.equal(tunnel.closes, 1);
+  assert.equal(reg.hasRunningJobs(), false);
+});

@@ -1149,5 +1149,11 @@
   "publish.note.cancelled": "キャンセルしました。何も公開されておらず、一時リンクも削除しました。",
   "publish.note.cancelledLeftover": "キャンセルしましたが、一時ファイル {n} 件を削除できませんでした。",
   "publish.s3.style.path": "パス形式（R2・多くのホスト）",
-  "publish.s3.style.virtual": "仮想ホスト形式（AWS）"
+  "publish.s3.style.virtual": "仮想ホスト形式（AWS）",
+  "publish.hold.status": "{label} がファイルをダウンロード中です（{served}/{total}）· 残り約 {min} 分",
+  "publish.hold.statusNoCount": "{label} がファイルをダウンロード中です · 残り約 {min} 分",
+  "publish.hold.keepWaiting": "待ち続ける（+15 分）",
+  "publish.hold.linksOpen": "リンクはあと約 {min} 分間有効です — 再試行するか、待ち続けてください",
+  "publish.hold.extendFailed": "待機時間を延長できませんでした",
+  "publish.hold.notWaiting": "この公開は、すでにプラットフォームの応答待ちではありません。"
 }

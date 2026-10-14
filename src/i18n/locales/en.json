@@ -1149,5 +1149,11 @@
   "publish.note.cancelled": "Cancelled. Nothing was published and temporary links were removed.",
   "publish.note.cancelledLeftover": "Cancelled, but {n} temporary file(s) could not be removed.",
   "publish.s3.style.path": "Path-style (R2, most hosts)",
-  "publish.s3.style.virtual": "Virtual-hosted (AWS)"
+  "publish.s3.style.virtual": "Virtual-hosted (AWS)",
+  "publish.hold.status": "{label} is downloading the files ({served}/{total}) · ~{min} min left",
+  "publish.hold.statusNoCount": "{label} is downloading the files · ~{min} min left",
+  "publish.hold.keepWaiting": "Keep waiting (+15 min)",
+  "publish.hold.linksOpen": "Links stay open for ~{min} min — Retry or Keep waiting",
+  "publish.hold.extendFailed": "Could not extend the wait",
+  "publish.hold.notWaiting": "This publish is no longer waiting for the platform."
 }
