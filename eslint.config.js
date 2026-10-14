@@ -27,6 +27,25 @@ export default [
     }
   },
   {
+    // Electron main/preload + the Listbridge host-side runner (CommonJS, Node).
+    files: ['electron/**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'commonjs',
+      globals: { ...globals.node }
+    },
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }],
+      'no-undef': 'error',
+      'no-var': 'error',
+      'prefer-const': 'error',
+      'no-dupe-keys': 'error',
+      'no-unreachable': 'error',
+      'no-async-promise-executor': 'error',
+      'no-fallthrough': 'error'
+    }
+  },
+  {
     // Test harnesses and dev scripts report via stdout by design.
     files: ['tests/**/*.mjs', 'scripts/**/*.mjs'],
     rules: { 'no-console': 'off' }
