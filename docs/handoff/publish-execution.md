@@ -5,9 +5,9 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 
 ## Owner inputs needed
 
-- [ ] Cults3D nickname + API key (https://cults3d.com/en/api/keys) — for PB.0 and PB.11. Give via env var `CULTS_USER` / `CULTS_API_KEY` in your own shell, never pasted into chat or files.
+- [x] Cults3D nickname + API key — PB.0 done by owner (fbb6b15); owner enters it again in the app (Print ▸ Publish ▸ Connect) for PB.11. Give via env var `CULTS_USER` / `CULTS_API_KEY` in your own shell, never pasted into chat or files.
 - [x] ~~Cloudflare R2 bucket~~ — DROPPED by owner 2026-10-14: default host = automatic temporary link from this PC (cloudflared quick tunnel, PB.5b); S3/R2 kept as advanced option. PB.0 also checks whether Cults has a native (Rails direct) upload → then no host at all.
-- [ ] Publish tab mockup approval — PB.9.
+- [x] Publish tab mockup approval — approved ("ok"), built in PB.9.
 
 ## Tasks
 
@@ -16,7 +16,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.0 live schema check | done fbb6b15 (owner ran script) |
 | PB.1 ListingPackage | done |
 | PB.2 listing shot capture | done 02e7e17 |
-| PB.3 adapter contract + Cults payload | todo |
+| PB.3 adapter contract + Cults payload | done — PB.3a f27a901 (community schema) + PB.3b 7f26911 (live schema, native upload) |
 | PB.4 main publish service | done 015a0d8 |
 | PB.12 ingestion confirm + hold | done 3116af9 |
 | PB.14 quit safety + packaged smoke | done a1ed7c9 + build fix 6fc54a8 |
@@ -29,7 +29,7 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 | PB.7 package to disk | done |
 | PB.8 persistence 3.5 | done 0e84e0b |
 | PB.9 Publish tab (mockup gate) | done 0a1b8f2 |
-| PB.10 docs | done 49c08c8 (Failure model pending PB.12; ADR status after PB.11) |
+| PB.10 docs | done 49c08c8 (+ failure model 3116af9); ADR 0004 status → shipped after PB.11 |
 | PB.11 live publish (owner) | todo |
 
 ## Gotchas
@@ -59,3 +59,4 @@ Protocol: same as `overhaul-execution.md` (cheap agents, main verifies, `# fail 
 - 2026-10-14 — PB.0 fbb6b15: Cults HAS native upload (createFileUploader/createImageUploader → S3 presigned POST → fileKeys/imageKeys) → tunnel not needed for Cults (fallback only). visibility PUBLIC|SECRET|DEACTIVATED (SECRET = link-only, used as D1 default), licenses + categories queries, creation(slug).blueprints read-back for confirm. Running PB.3b expanded (sonnet): reconcile adapter, upload slots in runner, listOptions IPC, category/license/visibility selects, schema-drift test. Then PB.11 live (owner).
 - 2026-10-14 — PB.3b committed (unit 511, all smokes, electron, rehearsal direct-upload PASS 5.5 s). Unconfirmed until live (U1–U8 in cults3d.js header): fileKeys = presign key verbatim?, file/size limits, accepted extensions, tag limits, description format, zip/pdf as blueprint, price minimum, me null vs error on bad key. Direct→tunnel automatic fallback not wired (upload-slot-failed shown). NEXT: PB.11 live publish with owner (Secret listing).
 - 2026-10-15 — owner "build and push": npm run build + npm run dist OK (release/MIXOMESH Setup 0.1.0.exe, 129 MB, includes PB.3b), packaged smoke PASS, pushed 3a6f494..d768e3b (39 commits). Waiting: PB.11 live publish by owner.
+- 2026-10-15 — (new session) Ledger tidied: owner inputs + PB.3 row were stale. ONLY OPEN ITEM: PB.11 live publish by owner (Secret listing). After it: confirm U1–U8 in src/listbridge/adapters/cults3d.js header + docs/reference/cults3d-findings.md, ADR 0004 → Accepted (shipped).
