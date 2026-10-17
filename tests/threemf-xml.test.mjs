@@ -2,10 +2,26 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseThreeMFXml } from '../src/core/import/ThreeMFXml.js';
 import { IMPORT_LIMITS, assertZipSafe } from '../src/core/import/ImportLimits.js';
+import { SaxesParser } from 'saxes';
 
 const model = body => `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1"><mesh>${body}</mesh></object></resources><build><item objectid="1"/></build></model>`;
 const vertex = '<vertex x="0" y="1.25" z="-2e-3"/>';
 const triangles = '<triangles><triangle v1="0" v2="0" v3="0" p1="2"/></triangles>';
+
+test('document whitespace remains legal XML for strict browser parsers', async () => {
+  const source = '<?xml version="1.0"?>\n\t' + model(`<vertices>${vertex}</vertices>${triangles}`) + '\n';
+  const parsed = await parseThreeMFXml(source);
+  assert.match(parsed.xml, /^\n\t<model/);
+  assert.match(parsed.xml, /<\/model>\n$/);
+  assert.doesNotThrow(() => new SaxesParser({ xmlns: true }).write(parsed.xml).close());
+});
+
+test('text whitespace stays literal while attribute whitespace round-trips through references', async () => {
+  const parsed = await parseThreeMFXml('<model><metadata name="A&#10;B&#9;C">A\nB\tC &amp; &lt;D&gt;</metadata></model>');
+  assert.match(parsed.xml, /name="A&#10;B&#9;C"/);
+  assert.match(parsed.xml, />A\nB\tC &amp; &lt;D&gt;</);
+  assert.doesNotThrow(() => new SaxesParser({ xmlns: true }).write(parsed.xml).close());
+});
 
 test('geometry stays in typed arrays, not millions of XML DOM elements', async () => {
   const parsed = await parseThreeMFXml(model(`<vertices>${vertex.repeat(10000)}</vertices>${triangles}`));

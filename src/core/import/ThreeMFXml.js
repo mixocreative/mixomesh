@@ -24,9 +24,13 @@ function bufferBuilder() {
   };
 }
 
-function escapeXml(value) {
+function escapeXmlText(value) {
   return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeXml(value) {
+  return escapeXmlText(value).replace(/"/g, '&quot;')
     .replace(/\r/g, '&#13;').replace(/\n/g, '&#10;').replace(/\t/g, '&#9;');
 }
 
@@ -96,7 +100,9 @@ export async function parseThreeMFXml(xml, { triangleBudget = 0, yieldControl = 
     }
     if (name === 'object') objectId = null;
   });
-  const onText = text => { if (!suppressed) skeleton.push(escapeXml(text)); };
+  // Attribute whitespace needs references; document whitespace must stay literal.
+  // A character reference before/after the root is invalid XML in browser DOMParser.
+  const onText = text => { if (!suppressed) skeleton.push(escapeXmlText(text)); };
   parser.on('text', onText);
   parser.on('cdata', onText);
   for (let offset = 0; offset < xml.length; offset += CHUNK_CHARS) {

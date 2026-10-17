@@ -2254,6 +2254,11 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    `node scripts/probe-3mf-import.mjs /path/to/model.3mf` for a real-package
    headless import with geometry/material/timing/memory statistics. This is
    a CPU/parser check, not a GPU-render or Windows-installer certification.
+   XML skeleton text preserves literal whitespace, including before/after the
+   root; only attributes encode whitespace as character references. Encoding
+   document-level newlines as `&#10;` is invalid XML in browser DOMParser even
+   though the headless DOM may accept it. Regressions reparse the skeleton with
+   a strict XML parser and cover XML declarations plus surrounding whitespace.
 4. Read import metadata via `src/core/import/ImportMetadata.js`. It scans
    Babylon's `node.metadata.gltf.extras` on meshes and transform nodes with
    normalized key matching.
