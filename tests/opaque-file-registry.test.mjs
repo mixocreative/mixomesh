@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createOpaqueFileRegistry } = require('../electron/OpaqueFileRegistry.cjs');
@@ -41,7 +42,7 @@ const payload = await registry.readFile(file.ref);
 assert.equal(payload.name, 'part.glb');
 assert.deepEqual([...new Uint8Array(payload.bytes)], [1, 2, 3]);
 assert.equal(JSON.stringify(payload).includes('private'), false);
-assert.deepEqual(seen[1], ['read', 'C:\\private\\Library\\part.glb']);
+assert.deepEqual(seen[1], ['read', path.join('C:\\private\\Library', 'part.glb')]);
 
 await assert.rejects(() => registry.listDirectory('C:\\private\\Library', ''), /Unknown directory reference/);
 await assert.rejects(() => registry.readFile('C:\\private\\Library\\part.glb'), /Unknown file reference/);

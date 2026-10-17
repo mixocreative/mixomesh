@@ -8,6 +8,7 @@ import { Modal } from './Modal.js';
 import { reportError, guard } from './Status.js';
 import { escapeHtml } from './renderSafe.js';
 import { t } from '../i18n/index.js';
+import { classifyImportFailure } from '../core/import/ImportFailure.js';
 
 // Owns the `importError` modal RENDERER; the error POLICY (when to show it)
 // lives in Status (reportError modal route / guard). safeImport is the import
@@ -36,34 +37,18 @@ export function safeImport(fn, filename, loadingToastId) {
   return guard(fn, { title: t('import.failed'), modal: true, filename, loadingToastId });
 }
 
-// Map common failure messages to an actionable hint.
-function _hintFor(message) {
-  if (/unsupported file type/i.test(message)) {
-    return t('import.hint.supportedFormats');
-  }
-  if (/mtl|texture|sibling|material/i.test(message)) {
-    return t('import.hint.dropSiblings');
-  }
-  if (/handle|permission|not available/i.test(message)) {
-    return t('import.hint.permission');
-  }
-  if (/import|parse|load|read|glb|gltf|stl|3mf|obj/i.test(message)) {
-    return t('import.hint.parse');
-  }
-  return t('import.hint.details');
-}
-
 function _render({ data, close }) {
   const filename = data?.filename ?? 'file';
   const message = data?.message ?? 'Unknown error';
-  const detail = data?.detail ?? '';
+  const detail = [message, data?.detail].filter(Boolean).join('\n\n');
+  const failure = classifyImportFailure(message, filename);
   const el = document.createElement('div');
   el.className = 'modal-content import-error';
   el.innerHTML = `
     <h3>${escapeHtml(t('import.failed'))}</h3>
     <p class="import-error-file">${escapeHtml(filename)}</p>
-    <p class="import-error-msg">${escapeHtml(message)}</p>
-    <p class="import-error-hint">${escapeHtml(_hintFor(message))}</p>
+    <p class="import-error-msg">${escapeHtml(t(failure.reasonKey))}</p>
+    <p class="import-error-hint">${escapeHtml(t(failure.hintKey))}</p>
     ${detail ? `<details class="import-error-details"><summary>${escapeHtml(t('import.technicalDetails'))}</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
     <div class="modal-actions">
       <button class="btn btn-primary" data-action="close" type="button">${escapeHtml(t('btn.close'))}</button>

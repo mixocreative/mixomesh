@@ -24,7 +24,8 @@
  * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade.
  */
 
-// Triangle-budget tiering (watertight-repair-and-cost task 7). Desktop's Node-fs
+// Triangle-budget tiering (watertight-repair-and-cost task 7).
+// Imports warn above this budget and reject above 4x (ImportLimits). Desktop's Node-fs
 // backed shell can push more triangles through a session than a browser tab
 // before layout/GC pressure makes imports crawl or the tab crashes — same
 // reasoning as DEFAULT_BOOLEAN_TRIANGLE_CAP's desktop-raises-the-cap note and

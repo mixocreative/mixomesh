@@ -9,80 +9,16 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 
-const BABYLON = await import('@babylonjs/core');
+const BABYLON = { ...await import('@babylonjs/core') };
+BABYLON.Texture = class { constructor(url) { this.url = url; } };
 globalThis.window.BABYLON = BABYLON;
 globalThis.window.removeEventListener = () => {};
 globalThis.document.addEventListener = () => {};
 globalThis.document.removeEventListener = () => {};
 console.error = () => {};
 
-class XmlNode {
-  constructor(tagName, attrs = {}, parent = null) {
-    this.tagName = tagName;
-    this.nodeName = tagName;
-    this.localName = tagName.includes(':') ? tagName.split(':').at(-1) : tagName;
-    this.attributes = attrs;
-    this.parentNode = parent;
-    this.children = [];
-  }
-  getAttribute(name) { return Object.hasOwn(this.attributes, name) ? this.attributes[name] : null; }
-  getElementsByTagName(name) { return collect(this, n => n.localName === name || n.tagName === name); }
-  getElementsByTagNameNS(_ns, name) { return collect(this, n => n.localName === name); }
-}
-
-class SimpleXmlDoc extends XmlNode {
-  constructor(root) {
-    super('#document');
-    if (root) {
-      this.children.push(root);
-      root.parentNode = this;
-    }
-  }
-}
-
-function collect(root, pred) {
-  const out = [];
-  const stack = [...(root.children ?? [])];
-  while (stack.length) {
-    const n = stack.shift();
-    if (pred(n)) out.push(n);
-    stack.unshift(...(n.children ?? []));
-  }
-  return out;
-}
-
-function parseAttrs(raw) {
-  const attrs = {};
-  const re = /([\w:-]+)="([^"]*)"/g;
-  for (const m of raw.matchAll(re)) attrs[m[1]] = m[2];
-  return attrs;
-}
-
-globalThis.DOMParser = class {
-  parseFromString(xml) {
-    const stack = [];
-    let root = null;
-    const re = /<([^!?][^>]*?)>/g;
-    for (const m of xml.matchAll(re)) {
-      let token = m[1].trim();
-      if (!token || token.startsWith('/')) {
-        if (token.startsWith('/')) stack.pop();
-        continue;
-      }
-      const selfClosing = token.endsWith('/');
-      if (selfClosing) token = token.slice(0, -1).trim();
-      const space = token.search(/\s/);
-      const name = space === -1 ? token : token.slice(0, space);
-      const attrs = parseAttrs(space === -1 ? '' : token.slice(space + 1));
-      const parent = stack.at(-1) ?? null;
-      const node = new XmlNode(name, attrs, parent);
-      if (parent) parent.children.push(node);
-      else root = node;
-      if (!selfClosing) stack.push(node);
-    }
-    return new SimpleXmlDoc(root);
-  }
-};
+const { DOMParser } = await import('./xml-dom.mjs');
+globalThis.DOMParser = DOMParser;
 
 const { setState } = await import('../src/core/StateManager.js');
 const Writer = await import('../src/core/print/ThreeMFWriter.js');
@@ -203,14 +139,18 @@ await test('writer→loader: textured unit (two texture2dgroups) reconstructs ea
   const a = makeMesh('Body_a', { uvs: [0.25, 0.5, 0.75, 0.5, 0.25, 1], textureName: 'paintA' });
   const b = makeMesh('Body_b', { uvs: [0.125, 0.0625, 0.875, 0.0625, 0.5, 0.9375], textureName: 'paintB', offsetX: 5 });
   const unit = unitOf('body', [a, b]);
-  const model = modelOf(await Writer.buildMaterialsExtEntries([unit], { state: flatState(['body']) }));
+  const entries = await Writer.buildMaterialsExtEntries([unit], { state: flatState(['body']) });
+  const model = modelOf(entries);
 
   assert.equal((model.match(/<m:texture2dgroup /g) ?? []).length, 2, 'one texture2dgroup per sibling mesh');
   assert.equal((model.match(/<object /g) ?? []).length, 1);
   // Second sibling's p-indices are LOCAL to its own group (0..2), vertices offset by 3.
   assert.match(model, /<triangle v1="3" v2="4" v3="5" pid="\d+" p1="0" p2="1" p3="2"\/>/);
 
-  const container = await Loader.__test.buildContainer(scene, null, model);
+  const container = await Loader.__test.buildContainer(scene, { file: path => {
+    const entry = entries.find(e => e.path === path);
+    return entry ? { async: async () => entry.data } : null;
+  } }, model);
   assert.equal(container.meshes.length, 2);
   assert.equal(container.transformNodes.length, 1);
   const [m0, m1] = container.meshes;

@@ -8,7 +8,7 @@ import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
 import { sha256Hex } from '../hash.js';
-import { assertImportFileSize } from '../import/ImportLimits.js';
+import { assertImportFileSize, assertTriangleCapacity } from '../import/ImportLimits.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
@@ -234,6 +234,15 @@ function _applyResinDefault(container) {
  * @param {BABYLON.Scene} scene
  * @param {BABYLON.AssetContainer} container
  */
+function _assertContainerCapacity(scene, container) {
+  try {
+    assertTriangleCapacity(countSceneTriangles(scene) + countContainerTriangles(container), caps.triangleBudget, 'Scene after import');
+  } catch (err) {
+    try { container.dispose?.(); } catch { /* retain the capacity error */ }
+    throw err;
+  }
+}
+
 function _warnIfOverBudget(scene, container) {
   const budget = caps.triangleBudget;
   if (!(budget > 0)) return;
@@ -289,11 +298,12 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     if (ext === '.obj') {
       siblings = await collectObjSiblings(opts);
       if (siblings.size) rememberObjSiblings(assetId, siblings);
-      noteMissingMtl(blob, filename, siblings);   // fire-and-forget, console only
+      await noteMissingMtl(blob, filename, siblings);
     }
 
     restoreUrls = installSiblingUrls(siblings);
     const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
+    _assertContainerCapacity(scene, container);
     ProgressOverlay.update(0.8, `Materials for ${filename}…`);
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
@@ -415,6 +425,7 @@ export async function instantiateAsset(assetId, position) {
       blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings
     );
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
+    _assertContainerCapacity(scene, container);
     splitMultiMaterialMeshesInContainer(container);
     registerContainer(assetId, container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {

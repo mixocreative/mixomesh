@@ -5,13 +5,13 @@
 // duration of the load. The map is kept per assetId so re-instantiation
 // rebinds materials too.
 
+import { assertImportFileSize } from '../import/ImportLimits.js';
 import { extOf, isTextureExt } from './AssetTypes.js';
 import { getDirectoryHandle } from './DirMounts.js';
 
 const BABYLON = window.BABYLON;
 
 const _objSiblings = new Map();   // assetId → Map<lowercase filename, objectURL>
-const MAX_SIBLING_FILES = 64;
 
 /**
  * Build the sibling filename → object-URL map for an OBJ import/restore.
@@ -25,13 +25,16 @@ export async function collectObjSiblings(opts) {
   if (opts.siblings instanceof Map && !Array.isArray(opts.siblingFiles)) return new Map(opts.siblings);
   const map = new Map();
   const add = async (name, fileOrHandle) => {
-    if (map.size >= MAX_SIBLING_FILES) return;
     const ext = extOf(name);
     if (ext !== '.mtl' && !isTextureExt(ext)) return;
     try {
       const file = typeof fileOrHandle.getFile === 'function' ? await fileOrHandle.getFile() : fileOrHandle;
+      assertImportFileSize(file.size, name);
       map.set(name.toLowerCase(), URL.createObjectURL(file));
-    } catch { /* unreadable sibling — material falls back */ }
+    } catch (err) {
+      for (const url of map.values()) URL.revokeObjectURL(url);
+      throw new Error(`OBJ material/texture file ${name} could not be read: ${err.message}`, { cause: err });
+    }
   };
 
   if (Array.isArray(opts.siblingFiles)) {
@@ -49,7 +52,10 @@ export async function collectObjSiblings(opts) {
         for await (const [name, handle] of dir.entries()) {
           if (handle.kind === 'file') await add(name, handle);
         }
-      } catch { /* directory walk failed — material falls back */ }
+      } catch (err) {
+        for (const url of map.values()) URL.revokeObjectURL(url);
+        throw new Error(`OBJ material folder could not be read: ${err.message}`, { cause: err });
+      }
     }
   }
   return map;
@@ -92,24 +98,16 @@ export function installSiblingUrls(map) {
   return () => { BABYLON.Tools.PreprocessUrl = prev; };
 }
 
-/**
- * Note when the OBJ references a .mtl no sibling satisfies. A missing MTL is
- * a VALID import (mesh gets the fallback material) — console note only, no
- * toast nagging (field request).
- */
+/** Refuse an authored material reference that no provided sibling can resolve. */
 export async function noteMissingMtl(blob, filename, map) {
-  try {
-    const head = await blob.slice(0, 65536).text();
-    const refs = [...head.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)]
-      .map(m => m[1].trim().split(/[\\/]/).pop()?.toLowerCase())
-      .filter(Boolean);
-    const hasAnyMtl = [...(map?.keys() ?? [])].some(n => n.endsWith('.mtl'));
-    const missing = refs.filter(r => !map?.has(r));
-    if (missing.length && !hasAnyMtl) {
-      console.warn(`${filename}: references ${missing[0]} but no .mtl was provided — using default material. ` +
-        'Drop the .mtl/textures together with the .obj, or import from a mounted folder, to bind materials.');
-    }
-  } catch { /* note only */ }
+  const head = await blob.slice(0, 65536).text();
+  const refs = [...head.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)]
+    .map(m => m[1].trim().split(/[\\/]/).pop()?.toLowerCase()).filter(Boolean);
+  const hasSoloMtl = [...(map?.keys() ?? [])].filter(n => n.endsWith('.mtl')).length === 1;
+  const missing = refs.filter(r => !map?.has(r));
+  if (missing.length && !hasSoloMtl) {
+    throw new Error(`${filename}: required MTL file ${missing[0]} was not provided. Include its MTL and texture images with the OBJ.`);
+  }
 }
 
 /** Revoke one asset's sibling object URLs. */

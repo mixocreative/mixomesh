@@ -41,10 +41,12 @@
     "@babylonjs/materials": "9.6.2",
     "@babylonjs/serializers": "9.6.2",
     "jszip": "^3.10.1",
-    "mp4-muxer": "^5.2.2"
+    "mp4-muxer": "^5.2.2",
+    "saxes": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@xmldom/xmldom": "0.8.15",
     "electron": "^43.2.0",
     "electron-builder": "26.15.3",
     "eslint": "^9.30.0",

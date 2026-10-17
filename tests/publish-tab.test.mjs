@@ -141,21 +141,21 @@ test('errorKey maps all error codes, returns null for unknown', () => {
   assert.equal(M.errorKey('unknown-code'), null);
 });
 
-test('pending error translations file has all codes in all three locales', async () => {
+test('published error translations have all codes in all three locales', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-  const pendingFile = path.join(root, '.tmp', 'locale-pending', 'publish-errors.json');
-  const content = await fs.readFile(pendingFile, 'utf8');
-  const pending = JSON.parse(content);
   const locales = ['en', 'ja', 'zh-Hant'];
+  const translations = Object.fromEntries(await Promise.all(locales.map(async locale => [
+    locale, JSON.parse(await fs.readFile(path.join(root, 'src', 'i18n', 'locales', `${locale}.json`), 'utf8')),
+  ])));
   const codes = ['no-credentials', 'no-file-host', 'cloudflared-missing', 'tunnel-start-timeout', 'platform-http', 'platform-rejected', 'not-confirmed', 'cleanup-left', 'cancelled'];
   for (const code of codes) {
     const key = M.errorKey(code);
     assert.ok(key, `errorKey(${code}) must return a key`);
     for (const locale of locales) {
-      assert.ok(pending[locale]?.[key], `pending translations must have ${key} for locale ${locale}`);
+      assert.ok(translations[locale]?.[key], `published translations must have ${key} for locale ${locale}`);
     }
   }
 });

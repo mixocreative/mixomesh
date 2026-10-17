@@ -6,80 +6,15 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 
-const BABYLON = await import('@babylonjs/core');
+const BABYLON = { ...await import('@babylonjs/core') };
 globalThis.window.BABYLON = BABYLON;
 globalThis.window.removeEventListener = () => {};
 globalThis.document.addEventListener = () => {};
 globalThis.document.removeEventListener = () => {};
 console.error = () => {};
 
-class XmlNode {
-  constructor(tagName, attrs = {}, parent = null) {
-    this.tagName = tagName;
-    this.nodeName = tagName;
-    this.localName = tagName.includes(':') ? tagName.split(':').at(-1) : tagName;
-    this.attributes = attrs;
-    this.parentNode = parent;
-    this.children = [];
-  }
-  getAttribute(name) { return Object.hasOwn(this.attributes, name) ? this.attributes[name] : null; }
-  getElementsByTagName(name) { return collect(this, n => n.localName === name || n.tagName === name); }
-  getElementsByTagNameNS(_ns, name) { return collect(this, n => n.localName === name); }
-}
-
-class SimpleXmlDoc extends XmlNode {
-  constructor(root) {
-    super('#document');
-    if (root) {
-      this.children.push(root);
-      root.parentNode = this;
-    }
-  }
-}
-
-function collect(root, pred) {
-  const out = [];
-  const stack = [...(root.children ?? [])];
-  while (stack.length) {
-    const n = stack.shift();
-    if (pred(n)) out.push(n);
-    stack.unshift(...(n.children ?? []));
-  }
-  return out;
-}
-
-function parseAttrs(raw) {
-  const attrs = {};
-  const re = /([\w:-]+)="([^"]*)"/g;
-  for (const m of raw.matchAll(re)) attrs[m[1]] = m[2];
-  return attrs;
-}
-
-globalThis.DOMParser = class {
-  parseFromString(xml) {
-    const stack = [];
-    let root = null;
-    const re = /<([^!?][^>]*?)>/g;
-    for (const m of xml.matchAll(re)) {
-      let token = m[1].trim();
-      if (!token || token.startsWith('/')) {
-        if (token.startsWith('/')) stack.pop();
-        continue;
-      }
-      const selfClosing = token.endsWith('/');
-      if (selfClosing) token = token.slice(0, -1).trim();
-      const space = token.search(/\s/);
-      const name = space === -1 ? token : token.slice(0, space);
-      const attrs = parseAttrs(space === -1 ? '' : token.slice(space + 1));
-      const parent = stack.at(-1) ?? null;
-      const node = new XmlNode(name, attrs, parent);
-      if (parent) parent.children.push(node);
-      else root = node;
-      if (!selfClosing) stack.push(node);
-    }
-    return new SimpleXmlDoc(root);
-  }
-};
+const { DOMParser } = await import('./xml-dom.mjs');
+globalThis.DOMParser = DOMParser;
 
 const { setState } = await import('../src/core/StateManager.js');
 const Writer = await import('../src/core/print/ThreeMFWriter.js');
@@ -303,8 +238,19 @@ await test('splitByMaterial ON (textured package): textured + solid parts each b
   assert.match(model, /<object id="5" type="model" name="Body_solid" pid="3" pindex="0"><mesh>/);
   assert.match(model, /<object id="6" type="model" name="Body"><components><component objectid="4" [^>]*\/><component objectid="5" [^>]*\/><\/components>/);
   assert.match(model, /<build><item objectid="6" /);
-  const container = await Loader.__test.buildContainer(scene, null, model);
-  assert.equal(container.meshes.length, 2, 'both parts re-import');
+  const originalTexture = BABYLON.Texture;
+  BABYLON.Texture = class { constructor(url) { this.url = url; } };
+  try {
+    const zip = { file: path => {
+      const entry = entries.find(e => e.path === path);
+      return entry ? { async: async () => entry.data } : null;
+    } };
+    const container = await Loader.__test.buildContainer(scene, zip, model);
+    assert.equal(container.meshes.length, 2, 'both parts re-import');
+    assert.ok(container.materials.some(m => m.diffuseTexture), 'embedded texture is retained');
+    for (const texture of container.textures) URL.revokeObjectURL(texture.url);
+    await assert.rejects(Loader.__test.buildContainer(scene, null, model), /referenced texture .* missing or unreadable/);
+  } finally { BABYLON.Texture = originalTexture; }
 });
 
 // ── Task 1.5: metadata, thumbnail, alpha ─────────────────
@@ -532,6 +478,56 @@ await test('3MF zip caps: entry count / uncompressed size / path traversal / fil
   }
 
   await assert.rejects(Loader.__test.openZip(JSZip, ok, { ...limits(), maxFileBytes: 10 }), /too large to import/);
+});
+
+
+await test('MixoTile base materials: all colours, alpha and triangle overrides survive', async () => {
+  const xml = `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>
+    <basematerials id="2"><base name="pink" displaycolor="#F49DB680"/><base name="blue" displaycolor="#0B437FFF"/></basematerials>
+    <object id="1" pid="2" pindex="0"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="0" v2="2" v3="1" p1="1"/></triangles></mesh></object>
+    </resources><build><item objectid="1"/></build></model>`;
+  const c = await Loader.__test.buildContainer(scene, null, xml);
+  assert.equal(c.meshes.length, 2);
+  assert.equal(c.materials[0].diffuseColor.toHexString(), '#F49DB6');
+  assert.equal(c.materials[0].alpha, 128 / 255);
+  assert.equal(c.materials[1].diffuseColor.toHexString(), '#0B437F');
+});
+
+await test('300 material assignments import without a material-count cap', async () => {
+  const bases = Array.from({ length: 300 }, (_, i) => `<base name="${i}" displaycolor="#${i.toString(16).padStart(6, '0')}FF"/>`).join('');
+  const tris = Array.from({ length: 300 }, (_, i) => `<triangle v1="0" v2="1" v3="2" p1="${i}"/>`).join('');
+  const xml = `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><basematerials id="2">${bases}</basematerials><object id="1" pid="2"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices><triangles>${tris}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
+  const c = await Loader.__test.buildContainer(scene, null, xml);
+  assert.equal(c.meshes.length, 300);
+  assert.equal(c.materials.length, 300);
+  for (let i = 0; i < 300; i++) assert.equal(c.materials[i].diffuseColor.toHexString(), `#${i.toString(16).padStart(6, '0')}`.toUpperCase());
+});
+
+await test('single texture material retains UV seams and JPEG content type', async () => {
+  const original = BABYLON.Texture;
+  const createUrl = URL.createObjectURL;
+  const blobs = [];
+  BABYLON.Texture = class { constructor(url) { this.url = url; } };
+  URL.createObjectURL = blob => { blobs.push(blob); return createUrl(blob); };
+  try {
+    const xml = `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"><resources>
+    <m:texture2d id="3" path="/3D/Textures/t.jpg" contenttype="image/jpeg"/>
+    <m:texture2dgroup id="4" texid="3"><m:tex2coord u="0" v="0"/><m:tex2coord u="1" v="0"/><m:tex2coord u="0" v="1"/><m:tex2coord u="0.5" v="0.5"/></m:texture2dgroup>
+    <object id="1" pid="4"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" p1="0" p2="1" p3="2"/><triangle v1="0" v2="2" v3="1" p1="3" p2="2" p3="1"/></triangles></mesh></object>
+    </resources><build><item objectid="1"/></build></model>`;
+    const c = await Loader.__test.buildContainer(scene, { file: () => ({ async: async () => new Uint8Array([1, 2]) }) }, xml);
+    assert.equal(c.meshes.length, 1);
+    assert.equal(c.meshes[0].getTotalVertices(), 4, 'shared geometric vertex must split at the UV seam');
+    assert.deepEqual([...c.meshes[0].getVerticesData(BABYLON.VertexBuffer.UVKind)], [0, 0, 1, 0, 0, 1, 0.5, 0.5]);
+    assert.equal(blobs[0].type, 'image/jpeg');
+    assert.ok(c.materials[0].diffuseTexture);
+    URL.revokeObjectURL(c.materials[0].diffuseTexture.url);
+  } finally {
+    BABYLON.Texture = original;
+    URL.createObjectURL = createUrl;
+  }
 });
 
 console.log('\n' + out.join('\n'));

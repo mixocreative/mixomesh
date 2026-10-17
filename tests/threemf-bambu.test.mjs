@@ -6,67 +6,16 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 
-const BABYLON = await import('@babylonjs/core');
+const BABYLON = { ...await import('@babylonjs/core') };
+BABYLON.Texture = class { constructor(url) { this.url = url; } };
 globalThis.window.BABYLON = BABYLON;
 globalThis.window.removeEventListener = () => {};
 globalThis.document.addEventListener = () => {};
 globalThis.document.removeEventListener = () => {};
 console.error = () => {};
 
-// Minimal namespace-blind DOMParser (same stub as threemf-components.test.mjs).
-class XmlNode {
-  constructor(tagName, attrs = {}, parent = null) {
-    this.tagName = tagName;
-    this.nodeName = tagName;
-    this.localName = tagName.includes(':') ? tagName.split(':').at(-1) : tagName;
-    this.attributes = attrs;
-    this.parentNode = parent;
-    this.children = [];
-  }
-  getAttribute(name) { return Object.hasOwn(this.attributes, name) ? this.attributes[name] : null; }
-  getElementsByTagName(name) { return collect(this, n => n.localName === name || n.tagName === name); }
-  getElementsByTagNameNS(_ns, name) { return collect(this, n => n.localName === name); }
-}
-class SimpleXmlDoc extends XmlNode {
-  constructor(root) {
-    super('#document');
-    if (root) { this.children.push(root); root.parentNode = this; }
-  }
-}
-function collect(root, pred) {
-  const out = [];
-  const stack = [...(root.children ?? [])];
-  while (stack.length) {
-    const n = stack.shift();
-    if (pred(n)) out.push(n);
-    stack.unshift(...(n.children ?? []));
-  }
-  return out;
-}
-function parseAttrs(raw) {
-  const attrs = {};
-  for (const m of raw.matchAll(/([\w:-]+)="([^"]*)"/g)) attrs[m[1]] = m[2];
-  return attrs;
-}
-globalThis.DOMParser = class {
-  parseFromString(xml) {
-    const stack = [];
-    let root = null;
-    for (const m of xml.matchAll(/<([^!?][^>]*?)>/g)) {
-      let token = m[1].trim();
-      if (!token || token.startsWith('/')) { if (token.startsWith('/')) stack.pop(); continue; }
-      const selfClosing = token.endsWith('/');
-      if (selfClosing) token = token.slice(0, -1).trim();
-      const space = token.search(/\s/);
-      const name = space === -1 ? token : token.slice(0, space);
-      const node = new XmlNode(name, parseAttrs(space === -1 ? '' : token.slice(space + 1)), stack.at(-1) ?? null);
-      if (node.parentNode) node.parentNode.children.push(node);
-      else root = node;
-      if (!selfClosing) stack.push(node);
-    }
-    return new SimpleXmlDoc(root);
-  }
-};
+const { DOMParser } = await import('./xml-dom.mjs');
+globalThis.DOMParser = DOMParser;
 
 const { setState } = await import('../src/core/StateManager.js');
 const Writer = await import('../src/core/print/ThreeMFWriter.js');
@@ -264,7 +213,7 @@ await test('textured content keeps the Materials Extension under the Bambu flavo
   const cfg = files[Bambu.BAMBU_MODEL_SETTINGS_PATH];
   assert.match(cfg, /value="Body_tex"\/>\n {3}<metadata key="extruder" value="1"/);
   assert.match(cfg, /value="Body_blue"\/>\n {3}<metadata key="extruder" value="2"/);
-  const container = await Loader.__test.buildContainer(scene, null, model);
+  const container = await Loader.__test.buildContainer(scene, { file: path => files[path] ? { async: async () => files[path] } : null }, model);
   assert.equal(container.meshes.length, 2);
 });
 

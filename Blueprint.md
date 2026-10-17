@@ -2221,6 +2221,7 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    default CounterClockWise front). Verified 2026-09-17 against a
    PrusaSlicer-authored file (`tests/fixtures/prusa-tetra.3mf`, embedded in
    `tests/threemf-components.test.mjs`). The loader maps
+   `basematerials`/`base displaycolor` (Core, including MixoTile) and
    `m:colorgroup`+`pid/pindex` to
    `StandardMaterial.diffuseColor`, or `m:texture2dgroup` to
    `StandardMaterial.diffuseTexture`. Repeated component references instantiate
@@ -2230,6 +2231,29 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    import-scale model exactly like STL (so scale is NOT bit-identical across a
    working≠target ratio — same inherent behaviour as re-importing an exported
    OBJ/STL).
+   **Large 3MF imports (2026-10-17):** Web and Electron use the same
+   `import/ThreeMFXml.js` streaming SAX parser. Coordinates and seven-field
+   triangle records (v1/v2/v3/pid/p1/p2/p3; absent properties = -1) are stored
+   in growable Float64 buffers; only material resources, object shells and
+   hierarchy enter DOMParser. Parsing yields after 128 KiB chunks so progress
+   UI can update. Geometry transforms/normals use Float32 buffers, indices
+   Uint32. This avoids millions of DOM nodes for high-poly reliefs without
+   simplifying geometry. Material alpha is retained. Single-texture meshes
+   compact by (vertex, UV index), preserving UV seams instead of overwriting
+   per-vertex UVs; PNG and JPEG texture content types are retained.
+   OBJ sibling collection also has no file-count cap (previously 64); unreadable
+   sibling resources and unresolved authored MTL references now surface an import
+   error instead of silently falling back to untextured geometry. The existing
+   single-MTL rename fallback remains available.
+   There is no default material/texture/ZIP-entry-count cap (the former 256
+   ZIP-entry guard rejected legitimate textured packages); existing 1 GiB
+   compressed, 2 GiB expanded and unsafe-path guards remain. Explicit caller
+   entry budgets still work. Regression tests use a real XML DOM with
+   namespaces/entities, cover Core base colours/alpha, 300 material groups,
+   UV seams, many ZIP entries and malformed XML. Run
+   `node scripts/probe-3mf-import.mjs /path/to/model.3mf` for a real-package
+   headless import with geometry/material/timing/memory statistics. This is
+   a CPU/parser check, not a GPU-render or Windows-installer certification.
 4. Read import metadata via `src/core/import/ImportMetadata.js`. It scans
    Babylon's `node.metadata.gltf.extras` on meshes and transform nodes with
    normalized key matching.
@@ -3282,11 +3306,25 @@ saved scene reopens or exports. Export/readiness still blocks on ghosts and
 missing assigned textures.
 
 **Import caps (task 6.4, Decision 19, `import/ImportLimits.js`).** Max file
-size 1 GB (checked before hashing/reading); zip packages (3MF): ≤ 256
-entries, ≤ 2 GB total DECLARED uncompressed size (checked from the central
+size 1 GiB (checked before hashing/reading); zip packages (3MF): no default
+entry-count limit, ≤ 2 GiB total DECLARED uncompressed size (checked from the central
 directory before any entry is inflated), and any entry with a `..` segment,
 an absolute or drive path, or a NUL is rejected. Violations throw a
-user-readable Error → import-error modal. The mesh-validation worker has a
+user-readable Error → import-error modal. File/material count alone never
+rejects an archive. Triangle capacity is four times the runtime warning budget
+(6 million web / 24 million Electron); 3MF checks this while parsing and while
+expanding component instances, before creating Babylon geometry. All new mesh
+imports/re-instantiations check projected scene triangles before addAllToScene;
+the existing softer budget warning remains. These are conservative application
+budgets, not a promise that every device can allocate that much memory.
+`import/ImportFailure.js` maps failures to localized plain-language reasons and
+specific recovery actions (size, polygons, allocation, storage, geometry, XML,
+package references, missing embedded textures/OBJ sidecars, units and access).
+`ui/ImportError.js` keeps the filename and recovery action visible and original
+message/stack under Technical details in EN/繁中/日本語. Referenced 3MF textures
+that cannot be resolved reject import instead of silently producing grey parts.
+A browser/OS process kill cannot run an error handler; byte/triangle preflight
+and compact parsing reduce that risk. The mesh-validation worker has a
 120 s per-request timeout (`setValidateWorkerTimeout`); on expiry it is
 terminated, warned, and validation falls back to the inline path.
 

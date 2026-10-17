@@ -6,7 +6,8 @@
 
 export const IMPORT_LIMITS = Object.freeze({
   maxFileBytes: 1024 ** 3,               // 1 GB
-  maxZipEntries: 256,
+  // Texture/material counts are not an import limit; the byte budget below is.
+  maxZipEntries: Number.POSITIVE_INFINITY,
   maxZipUncompressedBytes: 2 * 1024 ** 3, // 2 GB
 });
 
@@ -44,5 +45,13 @@ export function assertZipSafe(zip, label = 'archive', limits = IMPORT_LIMITS) {
     if (total > limits.maxZipUncompressedBytes) {
       throw new Error(`${label} expands to more than ${mb(limits.maxZipUncompressedBytes)} MB uncompressed and was rejected.`);
     }
+  }
+}
+
+/** Reject a model before mesh creation when it exceeds the runtime's hard budget. */
+export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model') {
+  const limit = triangleBudget * 4;
+  if (limit > 0 && triangles > limit) {
+    throw new Error(`${label} has ${triangles.toLocaleString('en-US')} triangles; the polygon handling limit for this runtime is ${limit.toLocaleString('en-US')}. Simplify or split the model before importing.`);
   }
 }
