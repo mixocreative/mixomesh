@@ -1,87 +1,212 @@
-# Mixo GLB Provenance and Print Refinement Implementation Plan
+# Manual Mixo GLB Print Refinement Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Mark every Blender-add-on GLB as Mixo-authored, preserve the Blender render-evaluated mesh as the import baseline, and offer optional, crease-aware further subdivision for print in Mixomesh.
+**Goal:** Preserve every Mixo GLB’s render-evaluated mesh as the normal view, while making an explicitly requested, progress-visible, crease-aware further refinement available for print.
 
-**Architecture:** Blender continues to export the evaluated modifier result; its marker is provenance and a record of the authored viewport/render Subsurf settings, never an instruction to replay Blender modifiers. Mixomesh reads the marker into per-logical-object state, presents a restrained print-refinement control, and uses one worker-produced derived mesh for both refined viewport display and export.
+**Architecture:** Blender emits optional v2 refinement metadata keyed to its final GLB primitives. Mixomesh accepts it only with its existing valid Mixo provenance. A module worker computes a temporary Loop-subdivided result; an undoable state setting chooses original/refined preview and the shared export context resolves the same representation.
 
-**Tech Stack:** Blender 5.2 Python/glTF exporter; Vite JavaScript; Babylon.js; Web Workers; Node and Blender test suites.
+**Tech Stack:** Blender Python/glTF; Vite ES modules; Babylon.js; module Web Workers; Node and Blender tests.
 
 ---
 
-### Task 1: Versioned Blender GLB marker
+### Task 1: Export valid final-topology refinement metadata
 
 **Files:**
-
+- Modify: `S:\ai\mixo3dtool\mixo3d\helpers\glb_provenance.py`
 - Modify: `S:\ai\mixo3dtool\mixo3d\helpers\marksharp.py`
 - Modify: `S:\ai\mixo3dtool\mixo3d\io\glb.py`
 - Modify: `S:\ai\mixo3dtool\mixo3d\io\mixomesh_glb.py`
-- Modify: `S:\ai\mixo3dtool\tests\blender\run.py`
+- Modify: `S:\ai\mixo3dtool\mixo3d\helpers\mixomesh_contract.py`
 - Modify: `S:\ai\mixo3dtool\docs\MIXOMESH_CONTRACT.md`
+- Test: `S:\ai\mixo3dtool\tests\blender\run.py`
 
-- [ ] Write a Blender regression case that exports an AR GLB and Mixomesh GLB containing a Subsurf modifier with `levels=1` and `render_levels=2`, then asserts node extras include `mixo_origin="mixo3d"`, marker version `1`, viewport level `1`, and render level `2` while the output geometry remains render-evaluated.
-- [ ] Run the focused Blender case and confirm it fails because no marker exists.
-- [ ] Add a safe-copy-only marker writer in `marksharp.py`; it writes marker fields for every mesh object, uses zero levels when no Subsurf modifier exists, and does not alter modifier evaluation or texture handling.
-- [ ] Route both GLB writers through that writer and preserve the existing `export_apply`, embedded material, and full-resolution texture behavior.
-- [ ] Run the focused Blender case and the add-on unit suite; update the external contract, architecture/session notes, and contract version.
-- [ ] Commit the add-on contract/exporter change.
+- [ ] **Step 1: Write a failing Blender fixture/export assertion.** Build a UV-seamed triangulated mesh containing a hard sharp edge and a fractional crease. Export through both GLB routes; decode the GLB JSON/accessors and assert render-evaluated geometry remains intact, v1 provenance remains intact, and each exported primitive has an optional `extras.mixo_print_refinement` payload whose local indices are within its POSITION accessor.
 
-### Task 2: Mixomesh marker ingestion and persistence
+- [ ] **Step 2: Run the focused failure.**
+
+Run: `set ONLY=mixo_glb_refinement_metadata && python tests/blender/run.py`
+
+Expected: FAIL because no final-primitive payload is exported.
+
+- [ ] **Step 3: Implement safe-copy evaluation and payload construction.** Evaluate only safe-copy objects through Blender’s depsgraph, triangulate the evaluation result, and build `{ version: 1, creaseByVertex, sharpEdges }`. `creaseByVertex` is the maximum incident crease clamped to `[0,1]`; each `sharpEdges` row is `[v0, v1, weight]`. Never reuse pre-modifier edge indices.
+
+```python
+def refinement_payload(final_mesh):
+    return {"version": 1, "creaseByVertex": creases, "sharpEdges": edge_rows}
+```
+
+- [ ] **Step 4: Add a narrow GLB JSON post-export pass.** Map safe evaluated topology to each exporter-built primitive POSITION accessor, attach the payload to that primitive’s extras, and rewrite only the aligned GLB JSON chunk. Mapping failure omits only the payload, records a warning, and retains ordinary v1 Mixo export; it must never produce false sharp-edge indices.
+
+- [ ] **Step 5: Update the contract.** Keep provenance marker version `1`; document independent optional payload version `1`, missing-payload behavior, primitive-local indexing, and full-res/render-evaluated invariants. Bump helper and document contract versions together.
+
+- [ ] **Step 6: Verify and commit.**
+
+Run: `set ONLY=mixo_glb_refinement_metadata && python tests/blender/run.py`
+
+Expected: PASS, including UV splits and no source `.blend` mutation.
+
+Run: `python -m pytest tests/unit -q`
+
+Expected: PASS.
+
+```powershell
+git -C S:\ai\mixo3dtool add mixo3d/helpers/glb_provenance.py mixo3d/helpers/marksharp.py mixo3d/io/glb.py mixo3d/io/mixomesh_glb.py mixo3d/helpers/mixomesh_contract.py docs/MIXOMESH_CONTRACT.md tests/blender/run.py
+git -C S:\ai\mixo3dtool commit -m "feat(export): add print refinement metadata"
+```
+
+### Task 2: Read and preserve refinement metadata through import
 
 **Files:**
-
 - Modify: `src/core/import/ImportMetadata.js`
-- Modify: `src/core/assets/AssetImport.js`
 - Modify: `src/core/assets/AssetRegistration.js`
+- Modify: `src/core/assets/MeshSplit.js`
 - Modify: `src/core/persist/ProjectSerializer.js`
 - Modify: `src/core/persist/ProjectLoader.js`
-- Modify: `tests/import-metadata.test.mjs`
-- Modify: `tests/persistence.test.mjs`
+- Test: `tests/import-metadata.test.mjs`
+- Test: `tests/split-on-import.test.mjs`
+- Test: `tests/persistence.test.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write failing metadata tests for a valid marker, a missing marker, and an unsupported marker version; assert marker data attaches to the logical-object lead rather than to imported internal material siblings.
-- [ ] Run the focused test and confirm it fails because no marker parser exists.
-- [ ] Add a strict marker parser that reads glTF node extras, normalizes integer subdivision levels, rejects unsupported versions, and never treats arbitrary GLBs as Mixo-authored.
-- [ ] Carry the normalized provenance through import registration and project save/load without changing the source render mesh.
-- [ ] Run focused metadata/persistence tests and update BLUEPRINT’s import schema and rationale.
-- [ ] Commit the Mixomesh marker-read/persistence change.
+- [ ] **Step 1: Add failing acceptance tests.** Cover valid payload, out-of-range index/NaN/unknown version, Mixo v1 without payload, and an unmarked file with a spoofed payload. Assert metadata belongs only to logical-object leads and remains correctly associated after a multi-material primitive split.
 
-### Task 3: Optional derived print-refinement pipeline
+- [ ] **Step 2: Run the focused failures.**
+
+Run: `node --test tests/import-metadata.test.mjs tests/split-on-import.test.mjs tests/persistence.test.mjs`
+
+Expected: FAIL for new refinement cases.
+
+- [ ] **Step 3: Add strict extraction.** Add `normalizeMixoRefinement(value, vertexCount)` and `extractMixoRefinement(mesh)` beside `extractMixoProvenance`. Return only `{ version: 1, creaseByVertex: Float32Array, sharpEdges: Uint32Array }` or `null`; copy inputs, clamp valid crease values, reject malformed rows wholesale, and never infer edge metadata from an arbitrary mesh angle.
+
+- [ ] **Step 4: Register and persist safely.** Store source descriptors lead-only with primitive identifiers; split children retain remapped local data. Serializer converts typed arrays to JSON-safe arrays; loader revalidates and drops invalid descriptors. No derived output is persisted.
+
+- [ ] **Step 5: Update Blueprint, rerun tests, commit.**
+
+Run: `node --test tests/import-metadata.test.mjs tests/split-on-import.test.mjs tests/persistence.test.mjs`
+
+Expected: PASS.
+
+```powershell
+git add src/core/import/ImportMetadata.js src/core/assets/AssetRegistration.js src/core/assets/MeshSplit.js src/core/persist/ProjectSerializer.js src/core/persist/ProjectLoader.js BLUEPRINT.md tests/import-metadata.test.mjs tests/split-on-import.test.mjs tests/persistence.test.mjs
+git commit -m "feat(import): retain Mixo refinement metadata"
+```
+
+### Task 3: Implement a cancellable crease-aware worker
 
 **Files:**
-
-- Create: `src/core/workers/Subdivide.worker.js`
-- Create: `src/core/SubdivisionWorker.js`
-- Create: `src/core/commands/SubdivisionCommands.js`
+- Create: `src/core/workers/MixoRefine.worker.js`
+- Create: `src/core/MixoRefinementWorker.js`
+- Create: `src/core/refinement/Topology.js`
+- Create: `src/core/refinement/DerivedMeshes.js`
 - Modify: `src/core/events.js`
+- Test: `tests/mixo-refinement-topology.test.mjs`
+- Test: `tests/mixo-refinement-worker.test.mjs`
+- Modify: `BLUEPRINT.md`
+
+- [ ] **Step 1: Write pure topology failures.** Test Level 0 identity, one Loop step on a triangle, UV-seam position welding, explicit sharp-edge retention, fractional crease weighting, and clear rejection of empty/non-manifold/oversized input.
+
+- [ ] **Step 2: Run the failure.**
+
+Run: `node --test tests/mixo-refinement-topology.test.mjs`
+
+Expected: FAIL because the worker/topology modules are absent.
+
+- [ ] **Step 3: Implement pure data refinement.** `Topology.js` deterministically welds identical finite positions for topology only, propagates maximum crease and maps sharp pairs. The worker performs Loop subdivision level-by-level, posts `{ type:'progress', phase, completed, total }`, transfers only new buffers, and contains no Babylon/DOM calls.
+
+- [ ] **Step 4: Implement lifecycle/cancellation.** Follow `ValidateWorker.js`: monotonic job ID, pending map, timeout/restart, `AbortSignal`, full message validation, and late-result discard. `DerivedMeshes.js` creates temporary non-pickable Babylon siblings only after result validation; source meshes are never overwritten.
+
+- [ ] **Step 5: Add protocol tests, update Blueprint, commit.** Use the `FakeWorker` style from `tests/worker-import.test.mjs` to prove progress forwarding, cancellation, error/restart, and stale result discard.
+
+Run: `node --test tests/mixo-refinement-topology.test.mjs tests/mixo-refinement-worker.test.mjs`
+
+Expected: PASS.
+
+```powershell
+git add src/core/workers/MixoRefine.worker.js src/core/MixoRefinementWorker.js src/core/refinement src/core/events.js BLUEPRINT.md tests/mixo-refinement-topology.test.mjs tests/mixo-refinement-worker.test.mjs
+git commit -m "feat(print): add Mixo refinement worker"
+```
+
+### Task 4: Add manual state, preview controls, and failure recovery
+
+**Files:**
+- Create: `src/core/commands/RefinementCommands.js`
+- Create: `src/core/refinement/RefinementController.js`
 - Modify: `src/core/HistoryManager.js`
-- Modify: `src/core/assets/MeshSplit.js`
-- Modify: `src/core/print/PrintPipeline.js`
+- Modify: `src/core/StateManager.js`
+- Modify: `src/core/events.js`
 - Modify: `src/ui/PropertiesPanel.js`
 - Modify: `src/ui/Outliner.js`
-- Modify: `tests/subdivision-worker.test.mjs`
-- Modify: `tests/export.test.mjs`
+- Modify: `src/styles/components.css`
+- Test: `tests/refinement-commands.test.mjs`
+- Test: `tests/properties-panel.test.mjs`
 - Modify: `BLUEPRINT.md`
 
-- [ ] Write worker tests for level zero identity, one Loop subdivision of a triangle, crease-edge preservation, cancellation/stale-result discard, and worker failure retaining the original render mesh.
-- [ ] Run the focused tests and confirm they fail because the worker/API is absent.
-- [ ] Implement a pure-data Loop worker and main-thread cache keyed by logical object, source geometry revision, and requested extra level; preserve a single material per output mesh and do not mutate source meshes.
-- [ ] Preserve imported custom attribute data before material splitting and construct crease topology before any split/reorder can lose it; use explicit sharp-edge records as authoritative, not vertex crease values alone.
-- [ ] Add an undoable per-logical-object `printRefinement` state (`enabled`, `level`, `status`) and typed events. The imported Blender render mesh is always level zero; refinement is additional.
-- [ ] Add a compact Mixo badge in the Outliner and a Properties section showing Blender viewport/render source levels, a `Refine for print` switch, level 1/2 controls, and Original/Refined viewport selection. Default is original and refinement disabled.
-- [ ] Teach export clones to use the same derived mesh currently selected for that object; if a requested refinement is unavailable, retain original geometry and require an explicit user choice rather than silently claiming a refined export.
-- [ ] Run focused worker/export/UI tests and update BLUEPRINT’s state, worker, export, error, and UI contracts.
-- [ ] Commit the Mixomesh refinement feature.
+- [ ] **Step 1: Write state/undo tests.** Cover default Off/original/idle, undo/redo, no automatic job on import/load, stale request after reopen, source invalidation, and cancellation/failure retaining original preview.
 
-### Task 4: Final cross-repository verification and delivery
+- [ ] **Step 2: Implement command/controller ownership.** `SetPrintRefinementCommand` changes only selected level/preview intent. `RefinementController` owns worker/derived meshes and emits typed changed/progress/ready/failed/cancelled/stale events; UI mutates neither Babylon nor state directly.
+
+- [ ] **Step 3: Implement the Properties journey.** Valid Mixo items show a labelled source badge, authored levels, Off/Level 1/Level 2 choices, and **Build preview**. Active work shows phase, measurable progress, current batch object, and **Cancel**. Failure is inline `role="alert"` text plus **Retry**/**Use original**. Ready state exposes explicit Original/Refined preview choices. Existing v1 Mixo items show “Re-export from Mixo3D Tools” and no build control.
+
+- [ ] **Step 4: Implement Outliner and keyboard support.** Add a compact Mixo/refinement status decoration only to a lead row. It uses an existing SVG icon with `aria-hidden="true"`; its accessible row text includes source/status. Assert visible focus, labels, status, alerts, and ordinary-GLB absence.
+
+- [ ] **Step 5: Update Blueprint, test, commit.**
+
+Run: `node --test tests/refinement-commands.test.mjs tests/properties-panel.test.mjs`
+
+Expected: PASS.
+
+```powershell
+git add src/core/commands/RefinementCommands.js src/core/refinement/RefinementController.js src/core/HistoryManager.js src/core/StateManager.js src/core/events.js src/ui/PropertiesPanel.js src/ui/Outliner.js src/styles/components.css BLUEPRINT.md tests/refinement-commands.test.mjs tests/properties-panel.test.mjs
+git commit -m "feat(ui): add manual print refinement controls"
+```
+
+### Task 5: Export exactly the selected representation
 
 **Files:**
+- Modify: `src/core/print/ExportContext.js`
+- Modify: `src/core/print/PrintPipeline.js`
+- Modify: `src/core/print/PrintReadiness.js`
+- Modify: `src/ui/print/ExportTab.js`
+- Test: `tests/export-context.test.mjs`
+- Test: `tests/export.test.mjs`
+- Test: `tests/browser-export-smoke.mjs`
+- Modify: `BLUEPRINT.md`
 
+- [ ] **Step 1: Add export failures.** Cover original default, selected ready refined output, one stale/failed refined item in a batch, user-selected original fallback, multi-material logical objects, and source mesh immutability across STL/3MF/high-res GLB.
+
+- [ ] **Step 2: Extend the shared immutable context.** Add frozen per-unit `representation: 'original'|'refined'` plus its resolved mesh list. Both `previewExportContext()` and real export use the resolver. A queued/stale/failed requested refinement returns a structured blocking issue, never an unannounced fallback.
+
+- [ ] **Step 3: Wire ExportTab.** List each object’s chosen representation. Blocking UI offers Build, Retry, Use original, or Cancel; the primary action never says “refined” when an original fallback is selected.
+
+- [ ] **Step 4: Route resolved clones through existing validation/serialization.** Preserve current scale, pivot, texture-source, repair/weld, and disposal behavior; do not add a parallel exporter.
+
+- [ ] **Step 5: Update Blueprint, verify, commit.**
+
+Run: `node --test tests/export-context.test.mjs tests/export.test.mjs tests/browser-export-smoke.mjs`
+
+Expected: PASS.
+
+```powershell
+git add src/core/print/ExportContext.js src/core/print/PrintPipeline.js src/core/print/PrintReadiness.js src/ui/print/ExportTab.js BLUEPRINT.md tests/export-context.test.mjs tests/export.test.mjs tests/browser-export-smoke.mjs
+git commit -m "feat(export): honor selected print refinement"
+```
+
+### Task 6: Cross-repository verification and delivery
+
+**Files:**
 - Modify: `S:\ai\mixo3dtool\docs\SESSION_STATE.md`
-- Modify: `HANDOFF.md` only if a resumable run remains.
+- Modify: `HANDOFF.md` only if a detached verification run remains unfinished.
 
-- [ ] Run `python -m pytest tests/unit -q` and the full Blender headless suite in `S:\ai\mixo3dtool`.
-- [ ] Run `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:browser`, and `npm run test:export` in `S:\ai\mixomesh`.
-- [ ] Inspect both diffs and verify all requested behavior, source-preserving invariants, BLUEPRINT/contract updates, and no unrelated changes.
-- [ ] Commit session documentation, push both `master` branches to their configured `origin`, and report the commit hashes and fresh verification evidence.
+- [ ] **Step 1: Run add-on verification.**
+
+Run: `python -m pytest tests/unit -q; python tests/blender/run.py`
+
+Expected: PASS; report external Blender timeouts as incomplete, never as passes.
+
+- [ ] **Step 2: Run the Mixomesh baseline.**
+
+Run: `npm run lint; npm run typecheck; npm run build; npm run test; npm run test:browser; npm run test:export`
+
+Expected: every command exits 0.
+
+- [ ] **Step 3: Inspect scope and push under existing owner authority.** Preserve unrelated `package-lock.json` work, commit session notes separately, push both repositories only after clean scoped review, and report hashes plus fresh evidence.
