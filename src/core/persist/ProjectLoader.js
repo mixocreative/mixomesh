@@ -33,6 +33,13 @@ import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
 import { normalizeExportTargets } from '../scale/ScaleMath.js';
 import { applyPersistedRatioBake as _applyPersistedRatioBake } from '../assets/AssetRestore.js';
+import { normalizeMixoProvenance } from '../import/ImportMetadata.js';
+
+/** Restore only lead-owned, supported Mixo Blender provenance from .mixo JSON. */
+function normalizeLoadedMixoProvenance(sceneObject) {
+  if (sceneObject?.isInternalPart) return null;
+  return normalizeMixoProvenance(sceneObject?.mixoProvenance);
+}
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
 const BABYLON = window.BABYLON;
@@ -472,6 +479,7 @@ async function _loadProjectInner(doc, previousId) {
     // Per-object ratio (pre-redesign `print.workingRatio` was folded in by
     // migrate()).
     const objRatio = (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1;
+    const mixoProvenance = normalizeLoadedMixoProvenance(o);
     if (mesh) {
       if (_claimed.has(mesh)) {
         // Duplicate sharing a container mesh — give this object its own copy.
@@ -531,6 +539,7 @@ async function _loadProjectInner(doc, previousId) {
       sourceGroupId: o.sourceGroupId ?? null,
       logicalObjectId: o.logicalObjectId ?? null,
       isInternalPart: !!o.isInternalPart,
+      ...(mixoProvenance ? { mixoProvenance } : {}),
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
       // 1.13: migrate() seeds ratioSource for pre-3.4 docs; a 3.4 doc saved
@@ -680,4 +689,4 @@ export async function refreshAsset(assetId) {
 }
 
 /** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
-export const __test = { _printWithoutLegacyScale, _restoreGroups };
+export const __test = { _printWithoutLegacyScale, _restoreGroups, normalizeLoadedMixoProvenance };

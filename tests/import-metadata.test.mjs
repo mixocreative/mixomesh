@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 const {
   extractModelRatio,
+  extractMixoProvenance,
   isLibraryImport,
   findLibraryItemRoots,
 } = await import('../src/core/import/ImportMetadata.js');
@@ -34,6 +35,75 @@ await test('extractModelRatio reads Blender glTF extras with existing ratio keys
     transformNodes: [],
   };
   assert.equal(extractModelRatio(container), 72);
+});
+
+await test('extractMixoProvenance reads the nearest Blender Mixo marker and normalizes its levels', () => {
+  const root = extras({
+    mixo_origin: 'mixo3d',
+    mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1,
+    mixo_render_subdiv_level: 2,
+  });
+  const mesh = geomMesh('part', root);
+
+  assert.deepEqual(extractMixoProvenance(mesh), {
+    origin: 'mixo3d',
+    markerVersion: 1,
+    viewportSubdivLevel: 1,
+    renderSubdivLevel: 2,
+  });
+});
+
+await test('extractMixoProvenance does not treat an unmarked GLB as Mixo-authored', () => {
+  assert.equal(extractMixoProvenance(geomMesh('part')), null);
+});
+
+await test('extractMixoProvenance rejects an unsupported or malformed nearest marker', () => {
+  const unsupported = geomMesh('part', null, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 2,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  }));
+  const malformed = geomMesh('part', null, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1.5, mixo_render_subdiv_level: 2,
+  }));
+  assert.equal(extractMixoProvenance(unsupported), null);
+  assert.equal(extractMixoProvenance(malformed), null);
+});
+
+await test('extractMixoProvenance rejects a malformed child marker instead of trusting a marked ancestor', () => {
+  const parent = extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  });
+  const child = geomMesh('part', parent, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 2,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  }));
+  assert.equal(extractMixoProvenance(child), null);
+});
+
+await test('extractMixoProvenance requires all four marker fields to be own properties', () => {
+  const inherited = {
+    mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1,
+    mixo_render_subdiv_level: 2,
+  };
+  const extrasWithInheritedLevels = Object.assign(Object.create(inherited), {
+    mixo_origin: 'mixo3d',
+  });
+  const markedParent = extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  });
+  const partial = geomMesh('part', markedParent, extras(extrasWithInheritedLevels));
+  const onlyInherited = geomMesh('part', null, extras(Object.create({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  })));
+
+  assert.equal(extractMixoProvenance(partial), null);
+  assert.equal(extractMixoProvenance(onlyInherited), null);
 });
 
 await test('isLibraryImport reads the Blender library=1 custom property', () => {

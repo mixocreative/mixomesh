@@ -12,6 +12,7 @@ import { reportError } from '../../ui/Status.js';
 import { reportRepairResult } from '../../ui/RepairFeedback.js';
 import { t } from '../../i18n/index.js';
 import { newId, registerMesh, getBabylonMesh } from './MeshRegistry.js';
+import { extractMixoProvenance } from '../import/ImportMetadata.js';
 
 /**
  * Pick a name that no existing SceneObject already owns. If `baseName` is
@@ -175,6 +176,10 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
       // ScaleCommands.seedRatioSource (inlined: no commands import here).
       ratioSource: (Number.isFinite(modelRatio) && modelRatio > 0 && modelRatio !== 1) ? 'file' : 'default',
     };
+    // The Blender marker belongs to the printable logical-object lead, never
+    // to opaque material/primitive siblings that merely implement it.
+    const mixoProvenance = !isInternalPart ? extractMixoProvenance(mesh) : null;
+    if (mixoProvenance) sceneObject.mixoProvenance = mixoProvenance;
     objectsToAdd[meshId] = sceneObject;
     if (parentId && groupsToAdd[parentId]) groupsToAdd[parentId].childIds.push(meshId);
 

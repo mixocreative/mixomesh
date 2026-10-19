@@ -27,6 +27,8 @@ const {
   _arrToMap, _migrate,
 } = __test;
 const { encodeBase64Async } = await import('../src/core/Base64Worker.js');
+const { normalizeLoadedMixoProvenance } = (await import('../src/core/persist/ProjectLoader.js')).__test;
+const { serialiseMixoProvenance } = (await import('../src/core/persist/ProjectSerializer.js')).__test;
 
 // ── Fake File System Access handles ──────────────────────
 
@@ -283,6 +285,26 @@ await test('_migrate: newer minor (3.6) loads best-effort; unknown top-level key
   assert.deepEqual(preservedTopLevelKeys(doc), { futureThing: { a: 1 } }, 'only unknown keys preserved');
   assert.deepEqual(preservedTopLevelKeys({ version: '3.5', junk: 1 }), {}, 'same minor: nothing preserved');
   assert.deepEqual(preservedTopLevelKeys({ version: '3.3', junk: 1 }), {}, 'older minor: legacy noise dropped');
+});
+
+await test('Mixo provenance survives the JSON persistence boundary only on the logical-object lead', () => {
+  const persisted = JSON.parse(JSON.stringify({
+    sceneObjects: [
+      { id: 'lead', isInternalPart: false, mixoProvenance: serialiseMixoProvenance({ isInternalPart: false, mixoProvenance: {
+        origin: 'mixo3d', markerVersion: 1, viewportSubdivLevel: 1, renderSubdivLevel: 2,
+      } }) },
+      { id: 'part', isInternalPart: true, mixoProvenance: serialiseMixoProvenance({ isInternalPart: true, mixoProvenance: {
+        origin: 'mixo3d', markerVersion: 1, viewportSubdivLevel: 1, renderSubdivLevel: 2,
+      } }) },
+    ],
+  }));
+  assert.deepEqual(normalizeLoadedMixoProvenance(persisted.sceneObjects[0]), {
+    origin: 'mixo3d', markerVersion: 1, viewportSubdivLevel: 1, renderSubdivLevel: 2,
+  });
+  assert.equal(normalizeLoadedMixoProvenance(persisted.sceneObjects[1]), null);
+  assert.equal(normalizeLoadedMixoProvenance({ isInternalPart: false, mixoProvenance: {
+    origin: 'mixo3d', markerVersion: 2, viewportSubdivLevel: 1, renderSubdivLevel: 2,
+  } }), null, 'unsupported marker cannot regain Mixo provenance from a project file');
 });
 
 // ── _fileHandleAtPath ────────────────────────────────────

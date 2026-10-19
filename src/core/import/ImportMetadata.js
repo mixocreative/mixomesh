@@ -21,6 +21,70 @@ function _extraValue(extras, wantedKey) {
   return undefined;
 }
 
+const MIXO_ORIGIN = 'mixo3d';
+const MIXO_MARKER_VERSION = 1;
+const MIXO_MARKER_KEYS = Object.freeze([
+  'mixo_origin',
+  'mixo_marker_version',
+  'mixo_viewport_subdiv_level',
+  'mixo_render_subdiv_level',
+]);
+
+function _mixoMarkerOwnFieldCount(extras) {
+  return MIXO_MARKER_KEYS.filter(key => Object.hasOwn(extras, key)).length;
+}
+
+function _validSubdivLevel(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function _parseMixoMarker(extras) {
+  const ownFieldCount = _mixoMarkerOwnFieldCount(extras);
+  if (ownFieldCount === 0) return undefined;
+  // A nearest node that declares any marker field owns the decision. It must
+  // declare the complete marker itself; prototype-inherited values never fill
+  // a partial marker or permit a marked ancestor to authenticate it.
+  if (ownFieldCount !== MIXO_MARKER_KEYS.length) return null;
+  return normalizeMixoProvenance({
+    origin: extras.mixo_origin,
+    markerVersion: extras.mixo_marker_version,
+    viewportSubdivLevel: extras.mixo_viewport_subdiv_level,
+    renderSubdivLevel: extras.mixo_render_subdiv_level,
+  });
+}
+
+/** Normalize only the versioned provenance persisted on a logical-object lead. */
+export function normalizeMixoProvenance(value) {
+  if (!value || typeof value !== 'object'
+    || value.origin !== MIXO_ORIGIN
+    || value.markerVersion !== MIXO_MARKER_VERSION
+    || !_validSubdivLevel(value.viewportSubdivLevel)
+    || !_validSubdivLevel(value.renderSubdivLevel)) return null;
+  return {
+    origin: MIXO_ORIGIN,
+    markerVersion: MIXO_MARKER_VERSION,
+    viewportSubdivLevel: value.viewportSubdivLevel,
+    renderSubdivLevel: value.renderSubdivLevel,
+  };
+}
+
+/**
+ * Read the closest glTF node marker for a Babylon mesh. A declared but invalid
+ * marker deliberately blocks ancestor fallback, so arbitrary or newer files
+ * can never be mistaken for a compatible Mixo-authored import.
+ * @param {object|null|undefined} node Babylon mesh or transform node
+ * @returns {{origin:'mixo3d', markerVersion:1, viewportSubdivLevel:number, renderSubdivLevel:number}|null}
+ */
+export function extractMixoProvenance(node) {
+  let current = node;
+  while (current) {
+    const parsed = _parseMixoMarker(_extras(current) ?? {});
+    if (parsed !== undefined) return parsed;
+    current = current.parent;
+  }
+  return null;
+}
+
 function _isLibraryMarkerNode(node) {
   const extras = _extras(node);
   if (!extras) return false;

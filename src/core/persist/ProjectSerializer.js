@@ -17,6 +17,7 @@ import { normalizeListings } from '../publish/Listings.js';
 import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
+import { normalizeMixoProvenance } from '../import/ImportMetadata.js';
 import {
   collectRequiredAssetRefs,
   createPortableProjectError,
@@ -265,6 +266,12 @@ function _serialisablePrint(print = {}) {
   return { ...rest };
 }
 
+/** Persist only validated provenance owned by a logical-object lead. */
+function serialiseMixoProvenance(sceneObject) {
+  if (sceneObject?.isInternalPart) return undefined;
+  return normalizeMixoProvenance(sceneObject?.mixoProvenance) ?? undefined;
+}
+
 function _serialiseSceneObjects() {
   const { objects, assetLibrary } = getState().scene;
   return Object.values(objects).map(o => {
@@ -285,6 +292,9 @@ function _serialiseSceneObjects() {
       sourceGroupId: o.sourceGroupId ?? null,
       logicalObjectId: o.logicalObjectId ?? null,
       isInternalPart: !!o.isInternalPart,
+      // Provenance is logical-object state: material / primitive siblings
+      // intentionally do not carry their own duplicate marker.
+      mixoProvenance: serialiseMixoProvenance(o),
       containerMeshIndex,
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
@@ -372,4 +382,4 @@ export async function buildDocument(opts = {}) {
 }
 
 /** Test seam: group serialisation. */
-export const __test = { _serialiseGroups };
+export const __test = { _serialiseGroups, serialiseMixoProvenance };
