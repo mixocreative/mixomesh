@@ -12,7 +12,7 @@ import { reportError } from '../../ui/Status.js';
 import { reportRepairResult } from '../../ui/RepairFeedback.js';
 import { t } from '../../i18n/index.js';
 import { newId, registerMesh, getBabylonMesh } from './MeshRegistry.js';
-import { extractMixoProvenance } from '../import/ImportMetadata.js';
+import { extractMixoProvenance, extractMixoRefinement, mixoPrimitiveId } from '../import/ImportMetadata.js';
 
 /**
  * Pick a name that no existing SceneObject already owns. If `baseName` is
@@ -180,6 +180,19 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
     // to opaque material/primitive siblings that merely implement it.
     const mixoProvenance = !isInternalPart ? extractMixoProvenance(mesh) : null;
     if (mixoProvenance) sceneObject.mixoProvenance = mixoProvenance;
+    const mixoRefinement = extractMixoRefinement(mesh);
+    if (mixoRefinement && !isInternalPart && mixoProvenance) {
+      sceneObject.mixoRefinement = [{ primitiveId: mixoPrimitiveId(mesh), ...mixoRefinement }];
+    } else if (mixoRefinement && logicalObjectId) {
+      const lead = objectsToAdd[logicalObjectId];
+      if (lead?.mixoProvenance) {
+        const primitiveId = mixoPrimitiveId(mesh);
+        lead.mixoRefinement ??= [];
+        if (!lead.mixoRefinement.some(descriptor => descriptor.primitiveId === primitiveId)) {
+          lead.mixoRefinement.push({ primitiveId, ...mixoRefinement });
+        }
+      }
+    }
     objectsToAdd[meshId] = sceneObject;
     if (parentId && groupsToAdd[parentId]) groupsToAdd[parentId].childIds.push(meshId);
 

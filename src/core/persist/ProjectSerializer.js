@@ -17,7 +17,7 @@ import { normalizeListings } from '../publish/Listings.js';
 import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
-import { normalizeMixoProvenance } from '../import/ImportMetadata.js';
+import { normalizeMixoProvenance, normalizeMixoRefinement, mixoSharpEdgeWeight } from '../import/ImportMetadata.js';
 import {
   collectRequiredAssetRefs,
   createPortableProjectError,
@@ -272,6 +272,34 @@ function serialiseMixoProvenance(sceneObject) {
   return normalizeMixoProvenance(sceneObject?.mixoProvenance) ?? undefined;
 }
 
+/** Persist validated primitive-local refinement descriptors on their lead only. */
+function serialiseMixoRefinement(sceneObject) {
+  if (sceneObject?.isInternalPart || !normalizeMixoProvenance(sceneObject?.mixoProvenance)
+    || !Array.isArray(sceneObject?.mixoRefinement)) return undefined;
+  const descriptors = [];
+  for (const descriptor of sceneObject.mixoRefinement) {
+    if (!descriptor?.sharpEdges || descriptor.sharpEdges.length % 3 !== 0) continue;
+    const vertexCount = descriptor?.creaseByVertex?.length;
+    const normalized = normalizeMixoRefinement({
+      version: descriptor?.version,
+      creaseByVertex: Array.from(descriptor?.creaseByVertex ?? []),
+      sharpEdges: Array.from({ length: (descriptor?.sharpEdges?.length ?? 0) / 3 }, (_, i) => [
+        descriptor.sharpEdges[i * 3], descriptor.sharpEdges[i * 3 + 1], mixoSharpEdgeWeight(descriptor.sharpEdges[i * 3 + 2]),
+      ]),
+    }, vertexCount);
+    if (!normalized || typeof descriptor?.primitiveId !== 'string' || !descriptor.primitiveId) continue;
+    descriptors.push({
+      primitiveId: descriptor.primitiveId,
+      version: normalized.version,
+      creaseByVertex: Array.from(normalized.creaseByVertex),
+      sharpEdges: Array.from({ length: normalized.sharpEdges.length / 3 }, (_, i) => [
+        normalized.sharpEdges[i * 3], normalized.sharpEdges[i * 3 + 1], mixoSharpEdgeWeight(normalized.sharpEdges[i * 3 + 2]),
+      ]),
+    });
+  }
+  return descriptors.length ? descriptors : undefined;
+}
+
 function _serialiseSceneObjects() {
   const { objects, assetLibrary } = getState().scene;
   return Object.values(objects).map(o => {
@@ -295,6 +323,7 @@ function _serialiseSceneObjects() {
       // Provenance is logical-object state: material / primitive siblings
       // intentionally do not carry their own duplicate marker.
       mixoProvenance: serialiseMixoProvenance(o),
+      mixoRefinement: serialiseMixoRefinement(o),
       containerMeshIndex,
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
@@ -382,4 +411,4 @@ export async function buildDocument(opts = {}) {
 }
 
 /** Test seam: group serialisation. */
-export const __test = { _serialiseGroups, serialiseMixoProvenance };
+export const __test = { _serialiseGroups, serialiseMixoProvenance, serialiseMixoRefinement };

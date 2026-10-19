@@ -44,6 +44,7 @@ import { countSceneTriangles, countContainerTriangles, formatTriCount } from '..
 // Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
 // paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
 import '../ThreeMFLoader.js';
+import '../import/MixoPrimitiveExtras.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');

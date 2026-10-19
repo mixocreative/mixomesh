@@ -248,6 +248,7 @@ src/
     AssetLoader.js         ← mesh-asset façade + release/remove/reset lifecycle (impl in assets/)
     import/
       ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
+      MixoPrimitiveExtras.js ← Babylon glTF primitive-extras capture hook
       ImportHierarchy.js   ← group node extraction from glTF empty parents + multi-primitive stems
       ImportLimits.js      ← per-file size/triangle budget gates (auto-skip validation on huge meshes)
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
@@ -638,6 +639,21 @@ Import path:
    provenance only: the imported render-evaluated GLB geometry, PBR materials,
    and textures remain untouched. A missing, malformed, or unsupported marker
    is ordinary GLB input, never Mixo-authored input.
+   `MixoPrimitiveExtras` is a registered Babylon glTF loader hook because
+   Babylon's `ExtrasAsMetadata` copies node extras but omits primitive extras.
+   The hook stamps each loaded primitive mesh with its raw
+   `mixo_print_refinement` payload and stable `gltf:<mesh index>:primitive:<index>`
+   identity; it does not change geometry or materials. Only a mesh under a
+   valid four-field Mixo marker may use that payload. `ImportMetadata`
+   validates payload version 1 against that primitive's final POSITION vertex
+   count, copies `creaseByVertex` into a clamped `Float32Array`, and copies
+   `[local vertex 0, local vertex 1, weight]` rows into `Uint32Array` triples
+   (the third cell contains the IEEE-754 Float32 weight bits). Invalid or
+   unsupported payloads are unavailable without rejecting the render GLB.
+   Either weight array may be omitted; omitted vertex weights become zero and
+   omitted edge rows become empty, while supplied malformed arrays are rejected.
+   A vertex crease does not identify a sharp edge; the importer never infers
+   edge pairs from surface angles or per-vertex maxima.
 3. If a GLB/glTF has `library = 1` in glTF node `extras`, the loader registers
    each direct child of the marked object that contains geometry as a separate
    Asset Panel entry and returns without adding anything to the scene. If
@@ -704,6 +720,12 @@ Import path:
    transformed, hidden/locked, duplicated/deleted, grouped, validated, and
    exported through the lead. Mixo provenance is likewise stored only on that
    logical-object lead; opaque material/primitive siblings never duplicate it.
+   Primitive refinement descriptors likewise live only on the lead as an
+   array keyed by primitive identity. A sibling's valid descriptor is added
+   even when the lead primitive has no payload. MultiMaterial split children
+   copy the full primitive vertex arrays and slice only indices, so their
+   primitive-local refinement indices and identity remain valid; repeated
+   split children contribute one descriptor for that primitive.
 7. `assets/AssetThumbnail` generates an idle thumbnail and
    `assets/AssetRegistration.queueValidation` queues non-blocking validation.
 
@@ -720,12 +742,19 @@ Save/load path:
    transforms, embeds asset bytes when available, writes `.mixo`, records a
    recent-project entry, and clears autosave. Supported Mixo provenance is
    written as JSON-safe lead-only `mixoProvenance`; unsupported data is omitted.
+   Valid lead-owned `mixoRefinement` descriptors are also written as JSON-safe
+   arrays of primitive id, version, vertex weights, and edge triples. No
+   derived high-poly result is stored.
 2. `PersistenceManager.open/openRecent/recoverAutosave` clears history and
    live resources, restores state first, restores shaders, resolves each asset
    by the five-tier priority table in §11, binds meshes back to saved ids, then
    restores groups, camera, overlays, selection, linked-shader index, and dirty
    state. Load revalidates the provenance schema and never restores it onto an
    internal material part.
+   Refinement descriptors are revalidated against the restored mesh for each
+   primitive in the saved logical object, using that primitive's own vertex
+   count. An unknown id, malformed row, or mismatched count drops the
+   descriptor set; no sibling receives lead-owned refinement state.
 
 Export path:
 1. `PrintPanel` exposes explicit OBJ / 3MF / STL export buttons and invokes

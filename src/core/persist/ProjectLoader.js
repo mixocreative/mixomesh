@@ -33,12 +33,27 @@ import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
 import { normalizeExportTargets } from '../scale/ScaleMath.js';
 import { applyPersistedRatioBake as _applyPersistedRatioBake } from '../assets/AssetRestore.js';
-import { normalizeMixoProvenance } from '../import/ImportMetadata.js';
+import { normalizeMixoProvenance, normalizeMixoRefinement, mixoPrimitiveId } from '../import/ImportMetadata.js';
 
 /** Restore only lead-owned, supported Mixo Blender provenance from .mixo JSON. */
 function normalizeLoadedMixoProvenance(sceneObject) {
   if (sceneObject?.isInternalPart) return null;
   return normalizeMixoProvenance(sceneObject?.mixoProvenance);
+}
+
+function normalizeLoadedMixoRefinement(sceneObject, primitiveVertexCounts) {
+  if (!normalizeLoadedMixoProvenance(sceneObject) || !Array.isArray(sceneObject?.mixoRefinement)) return null;
+  const descriptors = [];
+  const seen = new Set();
+  for (const descriptor of sceneObject.mixoRefinement) {
+    if (typeof descriptor?.primitiveId !== 'string' || !descriptor.primitiveId || seen.has(descriptor.primitiveId)) return null;
+    seen.add(descriptor.primitiveId);
+    const vertexCount = primitiveVertexCounts?.get?.(descriptor.primitiveId);
+    const normalized = normalizeMixoRefinement(descriptor, vertexCount);
+    if (!normalized) return null;
+    descriptors.push({ primitiveId: descriptor.primitiveId, ...normalized });
+  }
+  return descriptors.length ? descriptors : null;
 }
 import { getTextureImage, storeTextureImage } from '../assets/TextureImageStore.js';
 
@@ -480,6 +495,15 @@ async function _loadProjectInner(doc, previousId) {
     // migrate()).
     const objRatio = (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1;
     const mixoProvenance = normalizeLoadedMixoProvenance(o);
+    let mixoRefinement = null;
+    if (mixoProvenance && Array.isArray(o.mixoRefinement)) {
+      const groupMeshes = (data.sceneObjects || [])
+        .filter(part => part.assetId === o.assetId && (part.id === o.id || part.logicalObjectId === o.id))
+        .map(part => res?.geom?.[Number.isInteger(part.containerMeshIndex) ? part.containerMeshIndex : 0])
+        .filter(Boolean);
+      const primitiveVertexCounts = new Map(groupMeshes.map(part => [mixoPrimitiveId(part), part.getTotalVertices?.()]));
+      mixoRefinement = normalizeLoadedMixoRefinement(o, primitiveVertexCounts);
+    }
     if (mesh) {
       if (_claimed.has(mesh)) {
         // Duplicate sharing a container mesh — give this object its own copy.
@@ -540,6 +564,7 @@ async function _loadProjectInner(doc, previousId) {
       logicalObjectId: o.logicalObjectId ?? null,
       isInternalPart: !!o.isInternalPart,
       ...(mixoProvenance ? { mixoProvenance } : {}),
+      ...(mixoRefinement ? { mixoRefinement } : {}),
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
       // 1.13: migrate() seeds ratioSource for pre-3.4 docs; a 3.4 doc saved
@@ -689,4 +714,4 @@ export async function refreshAsset(assetId) {
 }
 
 /** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
-export const __test = { _printWithoutLegacyScale, _restoreGroups, normalizeLoadedMixoProvenance };
+export const __test = { _printWithoutLegacyScale, _restoreGroups, normalizeLoadedMixoProvenance, normalizeLoadedMixoRefinement };

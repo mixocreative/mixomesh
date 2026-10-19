@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 const {
   extractModelRatio,
   extractMixoProvenance,
+  extractMixoRefinement,
+  normalizeMixoRefinement,
   isLibraryImport,
   findLibraryItemRoots,
 } = await import('../src/core/import/ImportMetadata.js');
@@ -104,6 +106,59 @@ await test('extractMixoProvenance requires all four marker fields to be own prop
 
   assert.equal(extractMixoProvenance(partial), null);
   assert.equal(extractMixoProvenance(onlyInherited), null);
+});
+
+await test('extractMixoRefinement accepts a primitive-local payload only beside valid Mixo provenance', () => {
+  const mesh = geomMesh('part', null, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+  }));
+  mesh.metadata.mixoPrimitiveRefinement = {
+    version: 1,
+    creaseByVertex: [-0.2, 0.5, 2],
+    sharpEdges: [[0, 1, 0.75], [1, 2, 1]],
+  };
+  const refinement = extractMixoRefinement(mesh);
+  assert.equal(refinement?.version, 1);
+  assert.deepEqual([...refinement.creaseByVertex], [0, 0.5, 1]);
+  assert.ok(refinement.sharpEdges instanceof Uint32Array);
+  assert.equal(refinement.sharpEdges.length, 6);
+  assert.notEqual(refinement.sharpEdges, mesh.metadata.mixoPrimitiveRefinement.sharpEdges);
+});
+
+await test('extractMixoRefinement ignores node extras pretending to be primitive-local data', () => {
+  const mesh = geomMesh('part', null, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 1, mixo_render_subdiv_level: 2,
+    mixo_print_refinement: { version: 1, creaseByVertex: [0, 0, 0], sharpEdges: [] },
+  }));
+  assert.equal(extractMixoRefinement(mesh), null);
+});
+
+await test('normalizeMixoRefinement rejects malformed primitive rows, bad vertices, NaN, and unknown versions', () => {
+  const valid = { version: 1, creaseByVertex: [0, 1, 0.2], sharpEdges: [[0, 1, 1]] };
+  assert.equal(normalizeMixoRefinement({ ...valid, version: 2 }, 3), null);
+  assert.equal(normalizeMixoRefinement({ ...valid, creaseByVertex: [0, NaN, 1] }, 3), null);
+  assert.equal(normalizeMixoRefinement({ ...valid, sharpEdges: [[0, 3, 1]] }, 3), null);
+  assert.equal(normalizeMixoRefinement({ ...valid, sharpEdges: [[0, 1]] }, 3), null);
+});
+
+await test('normalizeMixoRefinement defaults omitted optional crease and sharp arrays', () => {
+  const edgesOnly = normalizeMixoRefinement({ version: 1, sharpEdges: [[0, 1, 0.5]] }, 3);
+  assert.deepEqual([...edgesOnly.creaseByVertex], [0, 0, 0]);
+  const creasesOnly = normalizeMixoRefinement({ version: 1, creaseByVertex: [0, 0.25, 1] }, 3);
+  assert.deepEqual([...creasesOnly.sharpEdges], []);
+});
+
+await test('extractMixoRefinement treats missing v1 data and unmarked spoofed data as absent', () => {
+  const payload = { version: 1, creaseByVertex: [0, 0, 0], sharpEdges: [] };
+  const markedWithoutPayload = geomMesh('part', null, extras({
+    mixo_origin: 'mixo3d', mixo_marker_version: 1,
+    mixo_viewport_subdiv_level: 0, mixo_render_subdiv_level: 0,
+  }));
+  const spoofed = geomMesh('part', null, extras({ mixo_print_refinement: payload }));
+  assert.equal(extractMixoRefinement(markedWithoutPayload), null);
+  assert.equal(extractMixoRefinement(spoofed), null);
 });
 
 await test('isLibraryImport reads the Blender library=1 custom property', () => {

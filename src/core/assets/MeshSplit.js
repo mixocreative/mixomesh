@@ -120,6 +120,9 @@ function _makeBabylonChildMesh(spec) {
   }
   child.metadata = {
     ...(sourceMesh.metadata ?? {}),
+    // Captured glTF primitive refinement stays attached to every material
+    // child. VertexData retains the source primitive's local numbering, so
+    // no edge remap is required at this split boundary.
     sourceGroupId: groupId,
     sourceMeshName: sourceMesh.name || 'mesh',
     splitPartIndex: spec.partIndex,

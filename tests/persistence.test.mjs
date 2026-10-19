@@ -28,7 +28,8 @@ const {
 } = __test;
 const { encodeBase64Async } = await import('../src/core/Base64Worker.js');
 const { normalizeLoadedMixoProvenance } = (await import('../src/core/persist/ProjectLoader.js')).__test;
-const { serialiseMixoProvenance } = (await import('../src/core/persist/ProjectSerializer.js')).__test;
+const { serialiseMixoProvenance, serialiseMixoRefinement } = (await import('../src/core/persist/ProjectSerializer.js')).__test;
+const { normalizeLoadedMixoRefinement } = (await import('../src/core/persist/ProjectLoader.js')).__test;
 
 // ── Fake File System Access handles ──────────────────────
 
@@ -305,6 +306,28 @@ await test('Mixo provenance survives the JSON persistence boundary only on the l
   assert.equal(normalizeLoadedMixoProvenance({ isInternalPart: false, mixoProvenance: {
     origin: 'mixo3d', markerVersion: 2, viewportSubdivLevel: 1, renderSubdivLevel: 2,
   } }), null, 'unsupported marker cannot regain Mixo provenance from a project file');
+});
+
+await test('Mixo primitive refinement survives JSON only on a valid-provenance lead and revalidates on load', () => {
+  const provenance = { origin: 'mixo3d', markerVersion: 1, viewportSubdivLevel: 1, renderSubdivLevel: 2 };
+  const refinement = [{ primitiveId: 'p0', version: 1, creaseByVertex: new Float32Array([0, 0.5, 1]), sharpEdges: new Uint32Array([0, 1, 0x3f800000]) }];
+  const persisted = JSON.parse(JSON.stringify({
+    lead: serialiseMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: refinement }),
+    part: serialiseMixoRefinement({ isInternalPart: true, mixoProvenance: provenance, mixoRefinement: refinement }),
+  }));
+  assert.deepEqual(persisted.lead[0].creaseByVertex, [0, 0.5, 1]);
+  assert.deepEqual(persisted.lead[0].sharpEdges, [[0, 1, 1]]);
+  assert.equal(persisted.part, undefined);
+  const restored = normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: persisted.lead }, new Map([['p0', 3]]));
+  assert.ok(restored?.[0]?.creaseByVertex instanceof Float32Array);
+  assert.deepEqual([...restored[0].sharpEdges], [0, 1, 0x3f800000]);
+  const second = { primitiveId: 'p1', version: 1, creaseByVertex: [0, 0, 0, 1], sharpEdges: [[2, 3, 0.5]] };
+  const multi = normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [...persisted.lead, second] }, new Map([['p0', 3], ['p1', 4]]));
+  assert.equal(multi?.length, 2, 'each primitive uses its own vertex count');
+  assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [persisted.lead[0], persisted.lead[0]] }, new Map([['p0', 3]])), null, 'duplicate primitive identity is malformed');
+  assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [...persisted.lead, second] }, new Map([['p0', 3], ['p1', 3]])), null);
+  assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [{ ...persisted.lead[0], sharpEdges: [[0, 9, 1]] }] }, new Map([['p0', 3]])), null);
+  assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoRefinement: persisted.lead }, new Map([['p0', 3]])), null);
 });
 
 // ── _fileHandleAtPath ────────────────────────────────────
