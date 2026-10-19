@@ -630,7 +630,14 @@ Import path:
    File System Access handle.
 2. `AssetLoader.loadFromBlob/loadFromHandle` validates the extension via
    `src/core/assets/AssetTypes.js`, loads an `AssetContainer`, and reads glTF
-   custom properties through `src/core/import/ImportMetadata.js`.
+   custom properties through `src/core/import/ImportMetadata.js`. A Blender
+   Mixo marker is recognised only when the nearest mesh or ancestor node has
+   all four flat `extras` fields: `mixo_origin: "mixo3d"`,
+   `mixo_marker_version: 1`, and non-negative integer
+   `mixo_viewport_subdiv_level` / `mixo_render_subdiv_level`. The marker is
+   provenance only: the imported render-evaluated GLB geometry, PBR materials,
+   and textures remain untouched. A missing, malformed, or unsupported marker
+   is ordinary GLB input, never Mixo-authored input.
 3. If a GLB/glTF has `library = 1` in glTF node `extras`, the loader registers
    each direct child of the marked object that contains geometry as a separate
    Asset Panel entry and returns without adding anything to the scene. If
@@ -695,7 +702,8 @@ Import path:
    `SceneObject`. Split siblings remain in state, but only the lead sibling is
    rendered as the user-facing object; internal siblings are selected,
    transformed, hidden/locked, duplicated/deleted, grouped, validated, and
-   exported through the lead.
+   exported through the lead. Mixo provenance is likewise stored only on that
+   logical-object lead; opaque material/primitive siblings never duplicate it.
 7. `assets/AssetThumbnail` generates an idle thumbnail and
    `assets/AssetRegistration.queueValidation` queues non-blocking validation.
 
@@ -710,12 +718,14 @@ Edit path:
 Save/load path:
 1. `PersistenceManager.save/saveAs` serialises JSON state, dehydrates Babylon
    transforms, embeds asset bytes when available, writes `.mixo`, records a
-   recent-project entry, and clears autosave.
+   recent-project entry, and clears autosave. Supported Mixo provenance is
+   written as JSON-safe lead-only `mixoProvenance`; unsupported data is omitted.
 2. `PersistenceManager.open/openRecent/recoverAutosave` clears history and
    live resources, restores state first, restores shaders, resolves each asset
    by the five-tier priority table in §11, binds meshes back to saved ids, then
    restores groups, camera, overlays, selection, linked-shader index, and dirty
-   state.
+   state. Load revalidates the provenance schema and never restores it onto an
+   internal material part.
 
 Export path:
 1. `PrintPanel` exposes explicit OBJ / 3MF / STL export buttons and invokes
@@ -2114,6 +2124,11 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                //   primitive). They remain in state for shader
                                //   binding/export, but Outliner/selection store
                                //   the lead id.
+  mixoProvenance,              // lead only, or absent: {origin:'mixo3d',
+                               // markerVersion:1, viewportSubdivLevel:int>=0,
+                               // renderSubdivLevel:int>=0}. Read from the nearest
+                               // marked glTF node; records Blender's authored
+                               // modifier settings without replaying them.
 }
 ```
 
