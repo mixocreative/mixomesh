@@ -403,6 +403,13 @@ export async function validateGroup(logicalObjectId) {
   return (await _validateUnion(siblings, `group ${logicalObjectId}`)).results.map(r => ({ ...r, logicalObjectId }));
 }
 
+/** Validate temporary derived parts as one welded logical object, without caching against source meshes. */
+export async function validateDerivedGroup(meshes, label = 'refined object') {
+  if (!Array.isArray(meshes) || meshes.length === 0) throw new Error('No derived meshes to validate');
+  if (meshes.length === 1) return validateMesh(meshes[0]);
+  return (await _validateUnion(meshes.map((babylonMesh, index) => ({ meshId: `derived:${index}`, babylonMesh })), label)).results;
+}
+
 // ── Validation result cache (arch A6) ────────────────────
 // state.scene.validation: Record<meshId, { results, validatedAt, stale }>.
 // Stale entries keep their last results so the UI can grey them out instead
@@ -607,7 +614,7 @@ export function shouldAutoValidate(mesh) {
 
 export const MeshValidator = {
   init, invalidateAll,
-  validateMesh, validateGroup, autoFix, applyGeometryFix, replayGeometryFixes, repairObject, repairObjects,
+  validateMesh, validateGroup, validateDerivedGroup, autoFix, applyGeometryFix, replayGeometryFixes, repairObject, repairObjects,
   hasErrors, hasWarnings,
   validateAllPrintParts, shouldAutoValidate,
 };

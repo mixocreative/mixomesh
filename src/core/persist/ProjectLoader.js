@@ -41,6 +41,17 @@ function normalizeLoadedMixoProvenance(sceneObject) {
   return normalizeMixoProvenance(sceneObject?.mixoProvenance);
 }
 
+function normalizeLoadedPrintRefinement(sceneObject, provenance, refinement) {
+  const requestedLevel = refinement && [1, 2].includes(sceneObject?.printRefinement?.requestedLevel)
+    ? sceneObject.printRefinement.requestedLevel : 0;
+  return {
+    requestedLevel: provenance ? requestedLevel : 0,
+    preview: provenance && requestedLevel && sceneObject?.printRefinement?.preview === 'refined' ? 'refined' : 'original',
+    status: provenance && requestedLevel ? 'stale' : 'idle',
+    error: null,
+  };
+}
+
 function normalizeLoadedMixoRefinement(sceneObject, primitiveVertexCounts) {
   if (!normalizeLoadedMixoProvenance(sceneObject) || !Array.isArray(sceneObject?.mixoRefinement)) return null;
   const descriptors = [];
@@ -565,6 +576,8 @@ async function _loadProjectInner(doc, previousId) {
       isInternalPart: !!o.isInternalPart,
       ...(mixoProvenance ? { mixoProvenance } : {}),
       ...(mixoRefinement ? { mixoRefinement } : {}),
+      ...(mixoProvenance && !o.isInternalPart
+        ? { printRefinement: normalizeLoadedPrintRefinement(o, mixoProvenance, mixoRefinement) } : {}),
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
       // 1.13: migrate() seeds ratioSource for pre-3.4 docs; a 3.4 doc saved
@@ -714,4 +727,4 @@ export async function refreshAsset(assetId) {
 }
 
 /** Test seam: the pure `print`-slice sanitiser the load merge applies (I8). */
-export const __test = { _printWithoutLegacyScale, _restoreGroups, normalizeLoadedMixoProvenance, normalizeLoadedMixoRefinement };
+export const __test = { _printWithoutLegacyScale, _restoreGroups, normalizeLoadedMixoProvenance, normalizeLoadedMixoRefinement, normalizeLoadedPrintRefinement };

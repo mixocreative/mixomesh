@@ -17,6 +17,7 @@ export * from './commands/BooleanCommands.js';
 export * from './commands/SliceConnectorCommands.js';
 export * from './commands/AssetCommands.js';
 export * from './commands/PrinterCommands.js';
+export * from './commands/RefinementCommands.js';
 
 const STACK_LIMIT = 200;
 

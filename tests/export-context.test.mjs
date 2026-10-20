@@ -119,6 +119,86 @@ await test('buildExportContext: returned object is frozen', () => {
     /Cannot assign to read only property|Cannot add property/);
 });
 
+await test('refinement resolution keeps original by default and selects ready derived parts per logical unit', () => {
+  const original = unit('a', 72);
+  original.parts[0].mesh.id = 'source-a';
+  const derived = { getTotalVertices: () => 6, metadata: { level: 1, sourceMeshId: 'source-a' } };
+  const originalResult = ExportContext.resolveExportUnits([original], () => [derived]);
+  assert.equal(originalResult.issues.length, 0);
+  assert.equal(originalResult.units[0].representation, 'original');
+  assert.equal(originalResult.units[0].parts[0].mesh, original.parts[0].mesh);
+  assert.ok(Object.isFrozen(originalResult.units[0]));
+  const refined = {
+    ...original, obj: { ...original.obj, printRefinement: { requestedLevel: 1, preview: 'refined', status: 'ready' } },
+  };
+  const result = ExportContext.resolveExportUnits([refined], () => [derived]);
+  assert.equal(result.issues.length, 0);
+  assert.equal(result.units[0].representation, 'refined');
+  assert.equal(result.units[0].parts[0].mesh, derived);
+  assert.notEqual(result.units[0].parts[0], original.parts[0]);
+  assert.ok(Object.isFrozen(result.units[0].parts));
+});
+
+await test('refinement resolution blocks requested preview with stale or absent derived parts', () => {
+  const source = unit('a', 72);
+  source.parts[0].mesh.id = 'source-a';
+  const refined = {
+    ...source, obj: { ...source.obj, printRefinement: { requestedLevel: 2, preview: 'refined', status: 'stale' } },
+  };
+  const stale = ExportContext.resolveExportUnits([refined], () => [source.parts[0].mesh]);
+  assert.equal(stale.issues[0].code, 'refinement-unavailable');
+  assert.deepEqual(stale.issues[0].objectIds, ['a']);
+  assert.equal(stale.units[0].parts.length, 0, 'blocked representation must not expose original mesh');
+  refined.obj.printRefinement.status = 'ready';
+  const missing = ExportContext.resolveExportUnits([refined], () => null);
+  assert.equal(missing.issues[0].code, 'refinement-unavailable');
+  const wrongLevel = ExportContext.resolveExportUnits([refined], () => [{
+    getTotalVertices: () => 6, metadata: { level: 1, sourceMeshId: 'source-a' },
+  }]);
+  assert.equal(wrongLevel.issues[0].code, 'refinement-unavailable', 'cache for another requested level must block');
+  refined.obj.printRefinement.preview = 'original';
+  const fallback = ExportContext.resolveExportUnits([refined], () => null);
+  assert.equal(fallback.issues.length, 0, 'explicit original choice may export despite stale build');
+  assert.equal(fallback.units[0].representation, 'original');
+});
+
+await test('preview and export context measure the selected refined mesh', () => {
+  const source = unit('a', 72);
+  source.parts[0].mesh.id = 'source-a';
+  source.obj.printRefinement = { requestedLevel: 1, preview: 'refined', status: 'ready' };
+  const derived = {
+    getTotalVertices: () => 6,
+    metadata: { level: 1, sourceMeshId: 'source-a' },
+    computeWorldMatrix() {},
+    getWorldMatrix() { return window.BABYLON.Matrix.Translation(0, 0, 0); },
+    getBoundingInfo() { return { boundingBox: {
+      minimumWorld: { x: 0, y: 0, z: 0 },
+      maximumWorld: { subtract: o => ({ x: 2 - o.x, y: 3 - o.y, z: 4 - o.z }) },
+    } }; },
+  };
+  const ctx = ExportContext.buildExportContext({
+    state: FAKE_STATE, units: [source], target: null, derivedMeshesFor: () => [derived],
+  });
+  assert.equal(ctx.units[0].parts[0].mesh, derived);
+  assert.equal(ExportContext.getExportedDimensions('a', ctx).x, 2 * ctx.factor);
+});
+
+await test('multi-material logical unit resolves every derived sibling in source-part order', () => {
+  const source = unit('lead', 72);
+  source.parts[0].mesh.id = 'source-a';
+  source.parts.push({ meshId: 'material-b', obj: { id: 'material-b' }, mesh: { id: 'source-b', getTotalVertices: () => 3 } });
+  source.obj.printRefinement = { requestedLevel: 1, preview: 'refined', status: 'ready' };
+  const a = { getTotalVertices: () => 6, metadata: { level: 1, sourceMeshId: 'source-a' } };
+  const b = { getTotalVertices: () => 9, metadata: { level: 1, sourceMeshId: 'source-b' } };
+  const result = ExportContext.resolveExportUnits([source], () => [a, b]);
+  assert.equal(result.issues.length, 0);
+  assert.deepEqual(result.units[0].parts.map(part => part.meshId), ['lead', 'material-b']);
+  assert.deepEqual(result.units[0].parts.map(part => part.mesh), [a, b]);
+  const incomplete = ExportContext.resolveExportUnits([source], () => [a]);
+  assert.equal(incomplete.issues[0].code, 'refinement-unavailable');
+  assert.equal(incomplete.units[0].parts.length, 0);
+});
+
 await test('buildExportContext: csgSkipped + meshes + cloneGroups arrays stay mutable inside frozen ctx', () => {
   const ctx = ExportContext.buildExportContext({
     state: FAKE_STATE,
@@ -469,30 +549,19 @@ await test('1.3: an invalid stored value falls back to the profile default (neve
 await test('getExportedDimensions: ctx.state is read when ctx is supplied (snapshot consistency)', () => {
   // Stash the live state, then build a ctx whose state has a known object
   // we can verify is read from the ctx, not from live getState().
+  const u = unit('a', 72);
+  u.parts[0].mesh.getBoundingInfo = () => ({ boundingBox: {
+    minimumWorld: { x: 0, y: 0, z: 0 },
+    maximumWorld: { subtract: (o) => ({ x: 1 - o.x, y: 2 - o.y, z: 3 - o.z }) },
+  } });
   const ctx = ExportContext.buildExportContext({
     state: FAKE_STATE,
-    units: [unit('a', 72)],
+    units: [u],
     target: null,
   });
-  // If the function looked up the mesh via getState() instead of ctx.state,
-  // it would miss the object that lives in FAKE_STATE. Stub the AssetLoader
-  // to return a mesh so the bbox path runs.
-  const stash = AssetLoader.getBabylonMesh;
-  AssetLoader.getBabylonMesh = () => ({
-    getBoundingInfo: () => ({
-      boundingBox: {
-        minimumWorld: { x: 0, y: 0, z: 0, subtract: () => ({ x: 1, y: 2, z: 3 }) },
-        maximumWorld: { subtract: (o) => ({ x: 1 - o.x, y: 2 - o.y, z: 3 - o.z }) },
-      },
-    }),
-  });
-  try {
-    const dims = ExportContext.getExportedDimensions('a', ctx);
-    assert.ok(dims, 'dims should resolve when ctx.state contains the obj');
-    assert.equal(dims.x, 1 * ctx.factor);
-  } finally {
-    AssetLoader.getBabylonMesh = stash;
-  }
+  const dims = ExportContext.getExportedDimensions('a', ctx);
+  assert.ok(dims, 'dims should resolve when ctx.state contains the obj');
+  assert.equal(dims.x, 1 * ctx.factor);
 });
 
 await test('2.6: collectPrintUnits yields ONE unit per logical object even with several parts selected', () => {

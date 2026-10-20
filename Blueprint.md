@@ -755,6 +755,45 @@ Save/load path:
    primitive in the saved logical object, using that primitive's own vertex
    count. An unknown id, malformed row, or mismatched count drops the
    descriptor set; no sibling receives lead-owned refinement state.
+   The lead's `printRefinement` persists only `requestedLevel` (`0|1|2`) and
+   `preview` (`original|refined`). Temporary refined geometry is never saved.
+   Reopening a nonzero request sets status `stale`; it never starts a worker or
+   silently falls back to original when refined was explicitly selected.
+
+Mixo print-refinement path:
+1. A valid four-field Mixo node marker displays source provenance on the
+   logical-object lead. Level selection is manual and undoable; import never
+   runs subdivision. Every final primitive of the logical object must have a
+   compatible `mixo_print_refinement` descriptor before Build is offered.
+   Missing or invalid payload leaves the render-evaluated GLB untouched and
+   shows re-export guidance. Ordinary GLBs have no refinement controls.
+2. `RefinementController` owns an ephemeral cache keyed by logical lead and
+   selected level. It copies source vertex arrays; `MixoRefinementWorker`
+   transfers only those copies into a module Worker. The worker runs weighted
+   Loop subdivision on triangles, welding identical positions for topology
+   while retaining UV/normal splits for rendering. Material siblings share
+   one welded topology, then split back into one mesh per material in source
+   order. Non-manifold geometry and output above 250,000 triangles fail
+   explicitly; the latter advises a lower level. Worker jobs report phase and
+   bounded progress, support Cancel, have a timeout, and discard stale
+   job/revision messages. Source meshes and textures are never modified.
+3. After a worker result, the main thread validates typed-array dimensions,
+   finite values, and index bounds before creating temporary Babylon meshes.
+   The existing mesh validator checks those derived parts as one logical
+   group; errors prevent `ready`. The controller restores source visibility
+   on cancellation/failure and invalidates its cache on level changes,
+   source-object edits, transforms (including `meshIds` batches), asset
+   relinks, removal, and visibility changes. `printRefinement.status` and
+   errors are transient; only requested level and preview intent are undoable.
+4. Properties shows Off/Level 1/Level 2, an explicit Build action, inline
+   progress bar/status, Cancel, Retry/Use original, and a separate
+   Original/Refined preview choice after Ready. A Mixo badge has text, never
+   icon-only meaning. The Export tab summarizes each printable logical unit's
+   selected representation. `ExportContext` resolves the same original or
+   ready refined mesh handles for dimensions, readiness, and all existing
+   OBJ/3MF/STL/PLY/WRL writers. A requested refined result that is queued,
+   failed, cancelled, stale, wrong-level, or missing blocks export with
+   Build/Retry/Use original actions; it never quietly exports the source.
 
 Export path:
 1. `PrintPanel` exposes explicit OBJ / 3MF / STL export buttons and invokes
@@ -2158,6 +2197,14 @@ AssetLoader.splitMultiMaterialMeshesInContainer(container) → void
                                // renderSubdivLevel:int>=0}. Read from the nearest
                                // marked glTF node; records Blender's authored
                                // modifier settings without replaying them.
+  mixoRefinement,              // lead-only final-primitive descriptor array,
+                               // keyed by stable glTF primitive identity;
+                               // typed crease weights + sharp edge triples.
+  printRefinement,             // Mixo lead only: {requestedLevel:0|1|2,
+                               // preview:'original'|'refined', transient
+                               // status:'idle'|'queued'|'building'|'ready'|
+                               // 'failed'|'cancelled'|'stale', error:null|{code,message}}.
+                               // Only requestedLevel/preview persist.
 }
 ```
 

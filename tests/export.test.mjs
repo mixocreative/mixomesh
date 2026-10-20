@@ -36,6 +36,7 @@ AssetLoader.getBabylonMesh = (id) => _registry[id] ?? null;
 function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [0, 0, 0], side = 1 } = {}) {
   return {
     name,
+    id: name,
     sideOrientation: side,   // 1 = CounterClockWise (Babylon default), 0 = ClockWise (glTF imports)
     material: color ? { id: 'mat-' + name, diffuseColor: color } : { id: 'mat-' + name },
     _verts: verts, _size: size, _color: color, _origin: origin,
@@ -142,6 +143,57 @@ async function test(name, fn) {
 const rejects = (p, re) => assert.rejects(p, re);
 
 // ── Collection gating (pre-auto-fix) ─────────────────────
+
+await test('requested refined preview blocks a batch when one logical unit is stale', async () => {
+  setScene({
+    objects: {
+      m1: obj('m1'),
+      m2: obj('m2', { printRefinement: { requestedLevel: 1, preview: 'refined', status: 'stale' } }),
+    },
+    registry: { m1: mesh('m1'), m2: mesh('m2') },
+  });
+  MeshValidator.validateMesh = valOK;
+  const readiness = PrintManager.getPrintReadiness();
+  assert.equal(readiness.canExport, false);
+  assert.ok(readiness.issues.some(issue => issue.code === 'refinement-unavailable'
+    && issue.objectIds.includes('m2')));
+  await assert.rejects(PrintManager.exportSTL(), err =>
+    err.readinessIssues?.some(issue => issue.code === 'refinement-unavailable'));
+  assert.equal(_clones.length, 0, 'preflight must block before creating export clones');
+});
+
+await test('explicit original preview exports despite failed refinement request', async () => {
+  const original = mesh('m1');
+  setScene({
+    objects: { m1: obj('m1', { printRefinement: { requestedLevel: 1, preview: 'original', status: 'failed' } }) },
+    registry: { m1: original },
+  });
+  MeshValidator.validateMesh = valOK;
+  assert.equal(PrintManager.getPrintReadiness().canExport, true);
+  await PrintManager.exportOBJ();
+  assert.ok(_clones.length > 0);
+  assert.equal(_clones[0].name, 'm1__export');
+  assert.equal(original.__worldBaked, undefined, 'source mesh must not be prepared in place');
+});
+
+await test('ready refined preview sends derived clones through OBJ, STL and 3MF without changing sources', async () => {
+  const original = mesh('original');
+  const derived = mesh('refined', { size: [20, 30, 40] });
+  derived.metadata = { level: 1, sourceMeshId: 'original' };
+  setScene({
+    objects: { m1: obj('m1', { printRefinement: { requestedLevel: 1, preview: 'refined', status: 'ready' } }) },
+    registry: { m1: original },
+  });
+  MeshValidator.validateMesh = valOK;
+  for (const writer of [PrintManager.exportOBJ, PrintManager.exportSTL, PrintManager.exportThreeMF]) {
+    _clones.length = 0;
+    await writer({ derivedMeshesFor: () => [derived], repair: false, acknowledgeWarnings: true });
+    assert.ok(_clones.some(clone => clone.name === 'refined__export'), 'writer must clone the selected derived mesh');
+    assert.ok(!_clones.some(clone => clone.name === 'original__export'), 'writer must not clone original mesh');
+    assert.equal(original.__worldBaked, undefined);
+    assert.equal(derived.__worldBaked, undefined);
+  }
+});
 
 await test('OBJ: empty scene → throws "No printable meshes"', async () => {
   setScene({});

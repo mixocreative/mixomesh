@@ -28,12 +28,40 @@ import { logicalObjectLeadIds, logicalObjectPartIds, canonicalObjectId } from '.
 import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
 import { effectivePrintSettings } from './PrintProfileSettings.js';
+import { getDerivedMeshes } from '../refinement/RefinementController.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 /** Babylon scene units (metres) → millimetres. Defined once. */
 export const BU_TO_MM = 1000;
+
+/** Resolve the selected print mesh for every logical unit without mutating source units. */
+export function resolveExportUnits(units, derivedMeshesFor = getDerivedMeshes) {
+  const issues = [];
+  const resolved = units.map(unit => {
+    const refinement = unit.obj?.printRefinement;
+    const representation = refinement?.preview === 'refined' ? 'refined' : 'original';
+    if (representation === 'original') {
+      return Object.freeze({ ...unit, representation, parts: Object.freeze([...unit.parts]) });
+    }
+    const derived = refinement.status === 'ready' ? derivedMeshesFor(unit.logicalId) : null;
+    if (!Array.isArray(derived) || derived.length !== unit.parts.length
+      || ![1, 2].includes(refinement.requestedLevel)
+      || derived.some((mesh, index) => !mesh || mesh.isDisposed?.() || !(mesh.getTotalVertices?.() > 0)
+        || mesh.metadata?.level !== refinement.requestedLevel
+        || mesh.metadata?.sourceMeshId !== unit.parts[index].mesh.id)) {
+      issues.push(Object.freeze({
+        code: 'refinement-unavailable', severity: 'error', objectIds: Object.freeze([unit.logicalId]),
+        data: Object.freeze({ status: refinement.status ?? 'idle', name: unit.name }),
+      }));
+      return Object.freeze({ ...unit, representation, parts: Object.freeze([]) });
+    }
+    const parts = unit.parts.map((part, index) => Object.freeze({ ...part, mesh: derived[index] }));
+    return Object.freeze({ ...unit, representation, parts: Object.freeze(parts) });
+  });
+  return Object.freeze({ units: Object.freeze(resolved), issues: Object.freeze(issues) });
+}
 
 /**
  * Capture persisted print preferences from state into a frozen `prefs` object
@@ -134,11 +162,20 @@ function _capturePrefs(state) {
  * @param {boolean} [args.csgReady]    True once CSG2 init resolved.
  * @param {boolean} [args.repairReady] True once the repair engine init resolved (and the
  *                                     caller did not opt out via options.repair === false).
+ * @param {(id:string)=>Array|null} [args.derivedMeshesFor] Derived mesh lookup; production uses
+ *                                     the refinement controller's live cache.
  * @returns {ExportContext}
  */
-export function buildExportContext({ state, units, target = null, options = {}, csgReady = false, repairReady = false }) {
+export function buildExportContext({ state, units, target = null, options = {}, csgReady = false, repairReady = false, derivedMeshesFor = getDerivedMeshes }) {
   if (!state) throw new Error('buildExportContext: state required');
   if (!Array.isArray(units) || !units.length) throw new Error('buildExportContext: units required');
+  const resolved = resolveExportUnits(units, derivedMeshesFor);
+  if (resolved.issues.length) {
+    throw Object.assign(new Error('Selected print refinement is unavailable.'), {
+      code: 'EXPORT_REFINEMENT_UNAVAILABLE', readinessIssues: resolved.issues,
+    });
+  }
+  units = resolved.units;
   const referenceUnit = _selectReferenceUnit(units, state);
   const referenceRatio = effectiveRatio(referenceUnit?.obj ?? null, _leadMesh(referenceUnit));
   if (!(referenceRatio > 0)) throw new Error('buildExportContext: referenceRatio must be positive');
@@ -259,7 +296,7 @@ export function previewExportContext(options = {}) {
     }
     return buildExportContext({ state, units, target, options });
   } catch (err) {
-    console.error('previewExportContext: ctx build failed:', err);
+    if (err?.code !== 'EXPORT_REFINEMENT_UNAVAILABLE') console.error('previewExportContext: ctx build failed:', err);
     return null;
   }
 }
@@ -315,7 +352,7 @@ export function getExportedDimensions(meshId, ctx = null) {
   const state = useCtx.state;
   const obj = state.scene.objects[meshId];
   if (!obj) return null;
-  const mesh = AssetLoader.getBabylonMesh(meshId);
+  const mesh = useCtx.units.flatMap(unit => unit.parts).find(part => part.meshId === meshId)?.mesh ?? null;
   if (!mesh) return null;
   const bb = mesh.getBoundingInfo().boundingBox;
   const size = bb.maximumWorld.subtract(bb.minimumWorld);

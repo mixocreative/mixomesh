@@ -7,6 +7,7 @@ import { BootBanner } from '../ui/BootBanner.js';
 import { ViewportDrop } from '../ui/ViewportDrop.js';
 import { Outliner } from '../ui/Outliner.js';
 import { PropertiesPanel } from '../ui/PropertiesPanel.js';
+import { RefinementController } from '../core/refinement/RefinementController.js';
 import { ShaderPanel } from '../ui/ShaderPanel.js';
 import { ScenePanel } from '../ui/ScenePanel.js';
 import { PrintPanel } from '../ui/PrintPanel.js';
@@ -100,6 +101,7 @@ async function bootstrap() {
   Modal.init();
   ImportError.init();     // registers the import-failure detail modal
   MeshValidator.init();   // validation-cache invalidation hooks (A6)
+  RefinementController.init();
   Outliner.init();
   PropertiesPanel.init();
   ShaderPanel.init();

@@ -30,9 +30,49 @@ import { wirePrinterDefault } from './PrinterTab.js';
 import { caps } from '../../core/storage/capabilities.js';
 import { saveListingPackageFromView } from './PublishTab.js';
 import { formatLabel, formatDetail, objAxisLabel, flavourLabel, modifiedDot } from './printLabels.js';
+import { logicalObjectLeadIds } from '../../core/LogicalObjects.js';
+import { SetPrintRefinementCommand } from '../../core/commands/RefinementCommands.js';
+import { RefinementController } from '../../core/refinement/RefinementController.js';
+import { safeAsync } from '../Status.js';
 
 // Disclosure state survives the panel's full re-render.
 let _advancedOpen = false;
+
+/** Short representation summary for the primary export action. */
+export function exportRepresentationSummary(state) {
+  const objects = state.scene?.objects ?? {};
+  const leads = logicalObjectLeadIds(objects).map(id => objects[id]).filter(obj => obj?.isPrintPart && !obj.isGhost);
+  if (!leads.length) return '';
+  const refined = leads.filter(obj => obj.printRefinement?.preview === 'refined');
+  if (!refined.length) return t('print.representation.original');
+  if (leads.length === 1) return `${t('print.representation.refined')} · ${t('print.refine.level', { level: refined[0].printRefinement.requestedLevel })}`;
+  return `${refined.length} ${t('print.representation.refined')} · ${leads.length - refined.length} ${t('print.representation.original')}`;
+}
+
+/** Per-object representation choices shown next to the export gate. */
+export function exportRepresentationsHtml(state) {
+  const objects = state.scene?.objects ?? {};
+  const leads = logicalObjectLeadIds(objects).map(id => objects[id]).filter(obj => obj?.isPrintPart);
+  if (!leads.length) return '';
+  let html = `<div class="pp-field-group pp-export-representations"><span class="pp-group-label">${escapeHtml(t('print.representation.heading'))}</span>`;
+  for (const object of leads) {
+    const r = object.printRefinement;
+    const refined = r?.preview === 'refined';
+    const selected = refined ? `${t('print.representation.refined')} · ${t('print.refine.level', { level: r.requestedLevel })}` : t('print.representation.original');
+    const active = r?.status === 'queued' || r?.status === 'building';
+    html += `<div class="pp-row pp-representation-row"><span>${escapeHtml(object.name ?? object.id)}</span>`
+      + `<span>${escapeHtml(selected)}</span>`;
+    if (refined && r?.status !== 'ready') {
+      html += `<span role="alert">${escapeHtml(t('print.representation.unavailable'))}</span>`;
+      html += `<button type="button" data-refinement-action="${r?.status === 'failed' ? 'retry' : active ? 'cancel' : 'build'}" data-object-id="${escapeAttr(object.id)}">${escapeHtml(t(r?.status === 'failed' ? 'print.representation.retry' : active ? 'print.representation.cancel' : 'print.representation.build'))}</button>`;
+      html += `<button type="button" data-refinement-action="original" data-object-id="${escapeAttr(object.id)}">${escapeHtml(t('print.representation.useOriginal'))}</button>`;
+    } else if (refined) {
+      html += `<button type="button" data-refinement-action="original" data-object-id="${escapeAttr(object.id)}">${escapeHtml(t('print.representation.useOriginal'))}</button>`;
+    }
+    html += '</div>';
+  }
+  return `${html}</div>`;
+}
 
 function _checkbox(id, checked, label, extra = '') {
   return `<div class="pp-checkbox"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}>`
@@ -106,11 +146,13 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
   let html = '<div class="pp-tab-content pp-export-tab">';
   html += printSizesHtml({ preview, readiness });
   html += _formatHtml(eff, mods, profile);
+  html += exportRepresentationsHtml(state);
   if (readiness.issues.length) html += renderIssueList(readiness);
   html += '<div id="pp-cost-block"></div>';
   html += _advancedHtml(print, eff, mods);
 
-  const label = t('print.exportFor', { printer: profile.displayName, format: formatLabel(eff.exportFormat) });
+  const representation = exportRepresentationSummary(state);
+  const label = `${t('print.exportFor', { printer: profile.displayName, format: formatLabel(eff.exportFormat) })}${representation ? ` · ${representation}` : ''}`;
   const disabled = readiness.canExport ? '' : ` disabled aria-disabled="true" title="${escapeAttr(t('print.exportDisabledTitle'))}"`;
   html += '<div class="pp-export-footer">';
   html += `<button type="button" class="pp-primary-btn" data-act="export-primary" data-export-format="${escapeAttr(eff.exportFormat)}"${disabled}>`
@@ -132,6 +174,16 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
 
   wirePrintSizes(el, rerender);
   wirePrinterDefault(el);
+
+  el.querySelectorAll('[data-refinement-action]').forEach(btn => btn.addEventListener('click', () => {
+    const objectId = /** @type {HTMLElement} */ (btn).dataset.objectId;
+    const action = /** @type {HTMLElement} */ (btn).dataset.refinementAction;
+    if (!objectId) return;
+    if (action === 'original') push(new SetPrintRefinementCommand(objectId, { preview: 'original' }));
+    else if (action === 'cancel') RefinementController.cancel(objectId);
+    else safeAsync(() => RefinementController.build(objectId));
+    rerender();
+  }));
 
   const setProject = (patch, lbl) => push(new SetPrintSettingsCommand(patch, lbl));
 

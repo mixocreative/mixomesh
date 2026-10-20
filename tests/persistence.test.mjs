@@ -28,8 +28,8 @@ const {
 } = __test;
 const { encodeBase64Async } = await import('../src/core/Base64Worker.js');
 const { normalizeLoadedMixoProvenance } = (await import('../src/core/persist/ProjectLoader.js')).__test;
-const { serialiseMixoProvenance, serialiseMixoRefinement } = (await import('../src/core/persist/ProjectSerializer.js')).__test;
-const { normalizeLoadedMixoRefinement } = (await import('../src/core/persist/ProjectLoader.js')).__test;
+const { serialiseMixoProvenance, serialiseMixoRefinement, serialisePrintRefinement } = (await import('../src/core/persist/ProjectSerializer.js')).__test;
+const { normalizeLoadedMixoRefinement, normalizeLoadedPrintRefinement } = (await import('../src/core/persist/ProjectLoader.js')).__test;
 
 // ── Fake File System Access handles ──────────────────────
 
@@ -328,6 +328,19 @@ await test('Mixo primitive refinement survives JSON only on a valid-provenance l
   assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [...persisted.lead, second] }, new Map([['p0', 3], ['p1', 3]])), null);
   assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoProvenance: provenance, mixoRefinement: [{ ...persisted.lead[0], sharpEdges: [[0, 9, 1]] }] }, new Map([['p0', 3]])), null);
   assert.equal(normalizeLoadedMixoRefinement({ isInternalPart: false, mixoRefinement: persisted.lead }, new Map([['p0', 3]])), null);
+});
+
+await test('print-refinement persistence keeps only intent and reopens refined requests as stale', () => {
+  const provenance = { origin: 'mixo3d', markerVersion: 1, viewportSubdivLevel: 1, renderSubdivLevel: 2 };
+  const object = { isInternalPart: false, mixoProvenance: provenance,
+    printRefinement: { requestedLevel: 2, preview: 'refined', status: 'ready', error: null } };
+  const persisted = JSON.parse(JSON.stringify(serialisePrintRefinement(object)));
+  assert.deepEqual(persisted, { requestedLevel: 2, preview: 'refined' });
+  const restored = normalizeLoadedPrintRefinement({ ...object, printRefinement: persisted }, provenance, [{}]);
+  assert.deepEqual(restored, { requestedLevel: 2, preview: 'refined', status: 'stale', error: null });
+  assert.equal(serialisePrintRefinement({ ...object, isInternalPart: true }), undefined);
+  assert.deepEqual(normalizeLoadedPrintRefinement({ ...object, printRefinement: persisted }, provenance, null),
+    { requestedLevel: 0, preview: 'original', status: 'idle', error: null });
 });
 
 // ── _fileHandleAtPath ────────────────────────────────────

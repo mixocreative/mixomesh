@@ -33,6 +33,8 @@ import { logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { escapeHtml as _escape, escapeAttr } from './renderSafe.js';
 import { escEnter, wireNumbers, wireToggles, reflectToggle } from './lib/fields.js';
 import { createCollapseController } from './lib/sections.js';
+import { renderRefinementSection, wireRefinementSection } from './refinement/RefinementSection.js';
+import { RefinementController } from '../core/refinement/RefinementController.js';
 
 const BABYLON = window.BABYLON;
 
@@ -93,6 +95,12 @@ export function init() {
     EVENTS.COLOR_APPLIED,
     EVENTS.UV_OVERRIDE_CHANGED,
     EVENTS.OBJECT_UPDATED,
+    EVENTS.REFINEMENT_CHANGED,
+    EVENTS.REFINEMENT_PROGRESS,
+    EVENTS.REFINEMENT_READY,
+    EVENTS.REFINEMENT_FAILED,
+    EVENTS.REFINEMENT_CANCELLED,
+    EVENTS.REFINEMENT_STALE,
     EVENTS.WORKSPACE_CHANGED,    // empty-state hint is workspace-specific
     EVENTS.ASSET_RELINKED,       // Source row status
     EVENTS.GROUP_CREATED,
@@ -152,6 +160,7 @@ function _render() {
 
   _bodyEl.innerHTML = `
     ${_renderObjectSection(obj, multi, sel.length, asset)}
+    ${renderRefinementSection(obj, RefinementController.getProgress(activeId), sel.filter(id => RefinementController.availability(id).available).length, RefinementController.availability(activeId))}
     ${_renderTransformSection(mesh, multi, resolved)}
     ${asset ? _renderSourceUnitSection(asset) : ''}
     ${_renderShaderSection(obj)}
@@ -159,6 +168,7 @@ function _render() {
   `;
 
   _wireObjectSection(obj, asset);
+  wireRefinementSection(_bodyEl, activeId, sel);
   _wireTransformSection(activeId);
   if (asset) _wireSourceUnitSection(asset);
   _wireShaderSection();

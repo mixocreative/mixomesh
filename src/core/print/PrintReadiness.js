@@ -35,9 +35,9 @@ function partIds(parts, predicate) {
  */
 export function buildReadiness({
   parts = [], targets = [], bedDimensions, reference = null,
-  profile = null, strictExport = false,
+  profile = null, strictExport = false, representationIssues = [],
 } = {}) {
-  const issues = [];
+  const issues = [...representationIssues];
   if (!parts.length) {
     issues.push(issue('no-print-parts', 'error', []));
   } else {

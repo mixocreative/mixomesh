@@ -61,6 +61,12 @@ export function init() {
     EVENTS.HISTORY_UNDONE,
     EVENTS.HISTORY_REDONE,
     EVENTS.MATERIALS_LOADED,      // presets file (re)loaded — Cost block select
+    EVENTS.REFINEMENT_CHANGED,
+    EVENTS.REFINEMENT_PROGRESS,
+    EVENTS.REFINEMENT_READY,
+    EVENTS.REFINEMENT_FAILED,
+    EVENTS.REFINEMENT_STALE,
+    EVENTS.REFINEMENT_CANCELLED,
   ];
   for (const ev of events) subscribe(ev, _render);
   // The Validation tab's last outcome line describes the scene it ran on —
@@ -506,6 +512,8 @@ export function exportSelected(format) {
 function _routeReadinessIssue(code, objectId = '') {
   if (code === 'bed-overflow' || code === 'below-bed') {
     _activeTab = 'printer';
+  } else if (code === 'refinement-unavailable') {
+    _activeTab = 'export';
   } else if (code === 'no-print-parts' || code === 'missing-source' || code === 'missing-texture'
     || code === 'unit-unconfirmed') {   // File units live in Properties ▸ Object
     Workspace.setWorkspace('layout');

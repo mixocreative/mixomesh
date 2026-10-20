@@ -47,6 +47,12 @@ const _SUBSCRIBE = [
   EVENTS.PROJECT_LOADED,
   EVENTS.VALIDATION_COMPLETE,   // status pills read the A6 cache
   EVENTS.TRANSFORM_COMMITTED,   // stale-marking after moves
+  EVENTS.REFINEMENT_CHANGED,
+  EVENTS.REFINEMENT_PROGRESS,
+  EVENTS.REFINEMENT_READY,
+  EVENTS.REFINEMENT_FAILED,
+  EVENTS.REFINEMENT_CANCELLED,
+  EVENTS.REFINEMENT_STALE,
 ];
 
 // ── Init ─────────────────────────────────────────────────
@@ -224,7 +230,7 @@ function _renderObjectRow(obj, depth, collections = {}) {
     hasChildren: partCount > 0,
     isCollapsed: !open,
     partCount,
-    pill: _statusPill(obj.id),
+    pill: _statusPill(obj.id) + _mixoPill(obj),
     iconName: obj.isGhost ? 'CircleAlert' : (obj.isUnlinked ? 'Link' : 'Box'),
     typeTitle: fileName ? t('outliner.fromFile', { file: fileName }) : t('outliner.typeObject'),
     isGhost: obj.isGhost,
@@ -244,6 +250,14 @@ function _renderObjectRow(obj, depth, collections = {}) {
     }
   }
   return html;
+}
+
+function _mixoPill(obj) {
+  if (!obj?.mixoProvenance || obj.isInternalPart) return '';
+  const status = obj.printRefinement?.status;
+  const suffix = status && status !== 'idle' ? ` · ${status === 'ready' && obj.printRefinement.preview === 'refined' ? `Refined L${obj.printRefinement.requestedLevel}` : status}` : '';
+  const label = `Mixo 3D${suffix}`;
+  return `<span class="ol-pill ol-mixo" title="${escapeAttr(label)}">${icon('Box', { width: 10, height: 10, 'aria-hidden': 'true' })}<span>${_escape(label)}</span></span>`;
 }
 
 // Validation status pill from the A6 cache (Blueprint §13 Outliner row

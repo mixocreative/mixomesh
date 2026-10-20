@@ -371,7 +371,7 @@ body[data-workspace="shade"]  .pp-section[data-section="source-unit"] { display:
    section (name, Source, Print, visible/lock) as a compact strip above the
    workspace's specialist panel; with nothing selected it hides entirely. */
 body[data-workspace="scene"] #rp-properties .pp-section:not([data-section="object"]),
-body[data-workspace="print"] #rp-properties .pp-section:not([data-section="object"]),
+body[data-workspace="print"] #rp-properties .pp-section:not([data-section="object"]):not([data-section="print-refinement"]),
 body[data-workspace="scene"] #rp-properties .pp-group-material,
 body[data-workspace="print"] #rp-properties .pp-group-material,
 body[data-workspace="scene"] #rp-properties:has(.pp-empty),

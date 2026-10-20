@@ -200,6 +200,8 @@
   cursor: default;
 }
 button.ol-pill { cursor: pointer; }
+.ol-mixo { color: var(--accent); border-color: var(--accent); gap: 3px; white-space: nowrap; }
+.ol-mixo svg { flex: 0 0 auto; }
 .ol-parts-pill:hover { background: var(--bg-4); color: var(--text-0); }
 .ol-validation-warning,
 .ol-validation-error {

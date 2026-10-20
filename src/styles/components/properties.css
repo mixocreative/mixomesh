@@ -65,6 +65,20 @@
 .pp-multi { color: var(--accent); text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); }
 .pp-warn  { color: var(--warning); display: inline-flex; align-items: center; }
 
+.mixo-source-badge, .mixo-refine-preview-indicator {
+  display: inline-flex; align-items: center; border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 2px var(--sp-2);
+  color: var(--accent); font-size: var(--fs-xs); text-transform: none; letter-spacing: 0;
+}
+.mixo-refine-section .pp-section-body { display: grid; gap: var(--sp-3); }
+.mixo-refine-note, .mixo-refine-status, .mixo-refine-error { margin: 0; color: var(--text-1); font-size: var(--fs-xs); line-height: 1.5; }
+.mixo-refine-error { color: var(--danger, var(--warning)); }
+.mixo-refine-choice { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.mixo-refine-section progress { display: block; width: 100%; height: 0.65rem; accent-color: var(--accent); }
+.mixo-refine-section button { min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-1); cursor: pointer; }
+.mixo-refine-section button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--bg-1); }
+.mixo-refine-section button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .pp-row {
   display: grid;
   grid-template-columns: 70px 1fr;

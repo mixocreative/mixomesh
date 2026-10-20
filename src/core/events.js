@@ -16,6 +16,14 @@ export const EVENTS = {
   VALIDATION_COMPLETE:     'validation:complete',
   VALIDATION_FOCUS_REQUESTED: 'validation:focusRequested', // toast click-through → Print Panel Validation tab (B5)
 
+  // Manual Mixo print refinement (lead-owned intent, transient worker lifecycle)
+  REFINEMENT_CHANGED:      'refinement:changed',
+  REFINEMENT_PROGRESS:     'refinement:progress',
+  REFINEMENT_READY:        'refinement:ready',
+  REFINEMENT_FAILED:       'refinement:failed',
+  REFINEMENT_CANCELLED:    'refinement:cancelled',
+  REFINEMENT_STALE:        'refinement:stale',
+
   // Selection
   SELECTION_CHANGED:       'selection:changed',
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',

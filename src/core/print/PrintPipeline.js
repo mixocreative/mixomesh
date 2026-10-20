@@ -22,7 +22,7 @@ import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
 import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportTargetsFromState, objectRatio } from '../scale/ScaleMath.js';
-import { buildExportContext, collectPrintUnits, getExportReference } from './ExportContext.js';
+import { buildExportContext, collectPrintUnits, getExportReference, resolveExportUnits } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
@@ -322,7 +322,8 @@ async function _runExport(formatKey, options = {}) {
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   const readiness = getPrintReadiness(options);
   if (!readiness.canExport) {
-    const noParts = readiness.targets.length === 0;
+    const noParts = readiness.targets.length === 0
+      && !readiness.issues.some(issue => issue.code === 'refinement-unavailable');
     throw Object.assign(
       new Error(noParts ? 'No printable meshes to export.' : 'Print readiness errors must be resolved before export.'),
       { readinessIssues: readiness.issues },
@@ -387,6 +388,7 @@ export function getPrintReadiness(options = {}) {
   const selected = new Set(state.selection?.selectedIds ?? []);
   const objects = state.scene?.objects ?? {};
   const units = collectPrintUnits(state, !!options.selectedOnly);
+  const representationIssues = resolveExportUnits(units, options.derivedMeshesFor).issues;
   const unitsById = new Map(units.map(unit => [unit.logicalId, unit]));
   const leads = Object.values(objects).filter(obj => obj?.isPrintPart
     && shouldDisplayObject(obj)
@@ -429,11 +431,11 @@ export function getPrintReadiness(options = {}) {
   });
   const explicit = exportTargetsFromState(state);
   const requested = explicit.length ? explicit : [null];
-  const targets = units.length ? requested.map(target => {
+  const targets = units.length && !representationIssues.length ? requested.map(target => {
     let ctx;
     // A height target on a flat (zero-Z) reference has no factor — it throws
     // at export with a clear message; readiness just has no line for it.
-    try { ctx = buildExportContext({ state, units, target, options }); } catch (err) {
+    try { ctx = buildExportContext({ state, units, target, options, derivedMeshesFor: options.derivedMeshesFor }); } catch (err) {
       if (target?.kind === 'height') return { bounds: null };
       throw err;
     }
@@ -451,7 +453,7 @@ export function getPrintReadiness(options = {}) {
   const profile = getPrinterProfile(state.print?.targetPrinterId);
   return buildReadiness({
     parts, targets, bedDimensions: state.print.bedDimensions, reference,
-    profile, strictExport: !!state.print?.strictExport,
+    profile, strictExport: !!state.print?.strictExport, representationIssues,
   });
 }
 
@@ -500,13 +502,13 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
   settleImportBounce();   // flattenWorld bakes world matrices — never a mid-pop scale
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
-  const printMeshes = _flattenPrintUnits(units);
 
   // ctx.options carries the caller's per-call request; ctx.prefs carries the
   // snapshotted state.print.* values (set inside buildExportContext). The
   // two stay separate so callers can't accidentally override a pref by
   // spreading their own options bag.
-  const ctx = buildExportContext({ state, units, target, csgReady, repairReady, options });
+  const ctx = buildExportContext({ state, units, target, csgReady, repairReady, options, derivedMeshesFor: options.derivedMeshesFor });
+  const printMeshes = _flattenPrintUnits(ctx.units);
 
   const clones = [];
   const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };
@@ -828,7 +830,9 @@ async function _serialize3MFMaterialsExt(ctx) {
 export async function collectExportFiles(formatKeys, options = {}) {
   const readiness = getPrintReadiness(options);
   if (!readiness.canExport) {
-    return { blocked: true, code: readiness.targets.length === 0 ? 'EXPORT_NOTHING' : 'EXPORT_BLOCKED', readinessIssues: readiness.issues };
+    const noParts = readiness.targets.length === 0
+      && !readiness.issues.some(issue => issue.code === 'refinement-unavailable');
+    return { blocked: true, code: noParts ? 'EXPORT_NOTHING' : 'EXPORT_BLOCKED', readinessIssues: readiness.issues };
   }
   if (readiness.requiresAcknowledgement && options.acknowledgeWarnings !== true) {
     return { blocked: true, code: 'EXPORT_NEEDS_ACKNOWLEDGEMENT', readinessIssues: readiness.issues };

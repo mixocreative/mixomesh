@@ -272,6 +272,15 @@ function serialiseMixoProvenance(sceneObject) {
   return normalizeMixoProvenance(sceneObject?.mixoProvenance) ?? undefined;
 }
 
+function serialisePrintRefinement(sceneObject) {
+  if (!serialiseMixoProvenance(sceneObject)) return undefined;
+  return {
+    requestedLevel: [0, 1, 2].includes(sceneObject.printRefinement?.requestedLevel)
+      ? sceneObject.printRefinement.requestedLevel : 0,
+    preview: sceneObject.printRefinement?.preview === 'refined' ? 'refined' : 'original',
+  };
+}
+
 /** Persist validated primitive-local refinement descriptors on their lead only. */
 function serialiseMixoRefinement(sceneObject) {
   if (sceneObject?.isInternalPart || !normalizeMixoProvenance(sceneObject?.mixoProvenance)
@@ -324,6 +333,7 @@ function _serialiseSceneObjects() {
       // intentionally do not carry their own duplicate marker.
       mixoProvenance: serialiseMixoProvenance(o),
       mixoRefinement: serialiseMixoRefinement(o),
+      printRefinement: serialisePrintRefinement(o),
       containerMeshIndex,
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
@@ -411,4 +421,4 @@ export async function buildDocument(opts = {}) {
 }
 
 /** Test seam: group serialisation. */
-export const __test = { _serialiseGroups, serialiseMixoProvenance, serialiseMixoRefinement };
+export const __test = { _serialiseGroups, serialiseMixoProvenance, serialiseMixoRefinement, serialisePrintRefinement };

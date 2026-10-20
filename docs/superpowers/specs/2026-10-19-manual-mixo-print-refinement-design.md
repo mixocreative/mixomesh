@@ -24,13 +24,13 @@ mixo_render_subdiv_level = non-negative integer
 ```
 
 It identifies the source and reports authored Blender levels; it never selects
-or runs a refinement level. A future marker revision adds an optional
-`mixo_print_refinement` payload per exported primitive. It must be indexed to
+or runs a refinement level. An optional additive `mixo_print_refinement`
+payload is attached per exported primitive. It must be indexed to
 the final exported primitive, not the pre-modifier Blender cage:
 
-- `crease`: an optional float weight per final vertex, in `[0, 1]`;
-- `sharpEdges`: optional final-primitive local vertex-index pairs;
-- `topologyVersion`: the version of this refinement payload.
+- `creaseByVertex`: a float weight per final primitive vertex, in `[0, 1]`;
+- `sharpEdges`: final-primitive local `[vertexA, vertexB, weight]` rows;
+- `version`: the version of this refinement payload (currently `1`).
 
 `sharpEdges` is authoritative. A vertex crease alone can only contribute a
 weighted crease when both endpoints carry a positive value. Missing,
@@ -113,9 +113,10 @@ weights propagate to welded IDs and sharp pairs map through that weld.
 The first implementation uses Loop subdivision for triangulated primitives.
 It preserves explicit sharp edges and supports weighted crease blending. It
 must reject unsupported/non-manifold input with a clear failure rather than
-guessing at watertight print output. Multi-primitive logical objects are
-processed independently and reassembled under the same logical object so the
-one-mesh-one-shader invariant remains true.
+guessing at watertight print output. Multi-primitive logical objects share a
+single welded topology during subdivision so material boundaries cannot tear;
+the result is split back into its original material parts, preserving the
+one-mesh-one-shader invariant.
 
 Jobs are cancellable between subdivision phases. Worker messages contain a
 monotonic job id and source revision; the main thread ignores obsolete results.
@@ -128,7 +129,7 @@ The derived output goes through the existing mesh/print validation path before
 it can become `ready`. It must retain material assignment and UV continuity;
 it may not silently downscale texture sources or alter print scale. Export uses
 the same `ExportContext` selection used by preview, so there is no separate
-hidden export mode. STL/3MF/high-resolution GLB consume refined geometry only
+hidden export mode. The supported STL/3MF/OBJ/PLY/WRL exporters consume refined geometry only
 when the ready refined representation is explicitly selected; otherwise all
 formats use original geometry.
 
