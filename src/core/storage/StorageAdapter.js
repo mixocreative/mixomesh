@@ -56,7 +56,7 @@ import {
  * @property {()=>Promise<void>} ready   rejects with `storageUnavailable(...)` when unusable
  * @property {()=>Promise<{ref:any,name:string,file:File|Blob}|null>} pickOpenProject   null = cancelled
  * @property {(suggestedName:string)=>Promise<{ref:any,name:string}|null>} pickSaveProject   null = cancelled
- * @property {(ref:any, data:string|Blob|ArrayBuffer|Uint8Array)=>Promise<void>} writeFile   atomic; project refs only on desktop
+ * @property {(ref:any, data:string|Blob|ArrayBuffer|Uint8Array)=>Promise<void>} writeFile   never leaves a half file: atomic swap, or write-temp-then-swap on OPFS without createWritable; project refs only on desktop
  * @property {(opts?:{multiple?:boolean})=>Promise<Array<{ref:any,name:string}>>} pickImportAssets   [] = cancelled
  * @property {(blob:Blob, suggestedName:string, hint?:ExportHint)=>Promise<boolean>} saveExport   false = cancelled
  * @property {(item:DataTransferItem)=>Promise<any|null>} refForDrop   call SYNCHRONOUSLY inside the drop event

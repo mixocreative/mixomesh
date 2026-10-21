@@ -64,9 +64,27 @@ async function _save() {
   if (!target) return _saveAs(null);
   const attempt = beginSave();   // same tick as buildDocument's state snapshot
   const text = JSON.stringify(await buildDocument());
-  await storage.writeFile(target, text);   // the adapter never commits a half file (see OpfsWrite.worker.js for the sync-handle tier)
+  await _write(target, text);
   await _afterWrite(attempt, target);
   return true;
+}
+
+// No adapter commits a half file: createWritable swaps atomically, desktop
+// writes temp+rename in main, and the OPFS sync-handle tier stages a temp
+// first (OpfsWrite.worker.js). That tier reports which copy survived a
+// failure; say so to the user instead of a bare reason (cia B-05).
+async function _write(target, data) {
+  try {
+    await storage.writeFile(target, data);
+  } catch (err) {
+    if (typeof err?.previousKept !== 'boolean') throw err;
+    const name = getState().project.name || 'Untitled';
+    const reason = err.cause?.message ?? err.message;
+    const message = err.previousKept
+      ? t('storage.saveFailedPreviousKept', { name, reason })
+      : t('storage.saveFailedNewKept', { name, copy: err.recoveryName, reason });
+    throw new Error(message, { cause: err });
+  }
 }
 
 // Ask the browser to exempt origin storage (IndexedDB recents / autosave) from
@@ -129,7 +147,7 @@ async function _saveAs(presetTarget) {
   const attempt = beginSave();
   const doc = await buildDocument();
   doc.project = { ...doc.project, name, id };   // the file carries its own name + id
-  await storage.writeFile(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
+  await _write(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
   _fileRef = picked.ref;
   setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
   await _afterWrite(attempt, picked.ref, previousId);

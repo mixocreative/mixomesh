@@ -26,7 +26,8 @@
 //   re-walks the path from the OPFS root (null when gone / unreadable).
 // - `writeFile`: `createWritable()` (atomic swap file) when the engine has it;
 //   older WebKit (no createWritable on the main thread) writes through a worker
-//   with `createSyncAccessHandle` — truncate + write + flush, NOT atomic.
+//   with `createSyncAccessHandle`: temp file first, then move()/copy over the
+//   target, so a failed write keeps the previous save (OpfsWrite.worker.js).
 //
 // Everything browser-global is touched at CALL time only (headless-safe import).
 
@@ -137,8 +138,9 @@ export function setOpfsWriteTimeout(ms) {
 }
 
 /** Timeout for one write: the base plus 1 s per MB, so a big but healthy
- *  truncate-then-write is never cut off half-way (that would leave the
- *  previous file truncated). Only a worker that stopped answering trips it. */
+ *  write is never cut off half-way (the swap phase, on engines without
+ *  move(), overwrites the previous file). Only a worker that stopped
+ *  answering trips it. */
 export function opfsWriteTimeoutFor(byteLength, base = _opfsWriteTimeoutMs) {
   return base + Math.ceil(byteLength / (1024 * 1024)) * 1000;
 }
@@ -152,10 +154,37 @@ const _opfsWriteTask = new WorkerTask({
   create: () => new Worker(new URL('../workers/OpfsWrite.worker.js', import.meta.url), { type: 'module' }),
 });
 
+/** Sibling the worker stages the new bytes in before the swap. It is a
+ *  listed project only if a swap failed half-way, so the user can open it
+ *  and Save As (B-05). */
+export function recoveryNameFor(name) {
+  const stem = name.toLowerCase().endsWith(PROJECT_EXT) ? name.slice(0, -PROJECT_EXT.length) : name;
+  return `${stem} (recovered)${PROJECT_EXT}`;
+}
+
+// The error says which copy survived (cia B-05): a failure in the 'temp'
+// phase leaves the previous file intact (`previousKept: true`); one in the
+// 'swap' phase leaves the complete new document under `recoveryName`. The
+// persistence façade turns these into the user's message.
 async function _writeViaWorker(path, data) {
   const bytes = await _bytesOf(data);
   const copy = bytes.slice();   // own buffer → transferable without detaching the caller's
-  await _opfsWriteTask.run({ path, bytes: copy }, { transfer: [copy.buffer], timeoutMs: opfsWriteTimeoutFor(copy.byteLength) });
+  const name = path[path.length - 1];
+  let stage = 'temp';
+  try {
+    await _opfsWriteTask.run({ path, tempName: recoveryNameFor(name), bytes: copy }, {
+      transfer: [copy.buffer],
+      timeoutMs: opfsWriteTimeoutFor(copy.byteLength),
+      onProgress: (e) => { if (e?.stage) stage = e.stage; },
+    });
+  } catch (err) {
+    const previousKept = stage !== 'swap';
+    const reason = err?.message ?? String(err);
+    const message = previousKept
+      ? `Could not write ${name} (previous copy intact): ${reason}`
+      : `Could not replace ${name} (new document kept as ${recoveryNameFor(name)}): ${reason}`;
+    throw Object.assign(new Error(message, { cause: err }), { previousKept, recoveryName: recoveryNameFor(name), stage });
+  }
 }
 
 /**
