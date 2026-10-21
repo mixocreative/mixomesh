@@ -14,11 +14,18 @@ import {
 let _dirty         = false;
 let _savedPosition = 0;
 let _sticky        = false;
+let _stickyGen     = 0;       // bumps on every sticky (non-undoable) change
+let _announcing    = false;   // our own PROJECT_SAVED dispatch must not re-baseline
 
 function _baseline() {
   _savedPosition = historyPosition();
   _sticky = false;
   _dirty = false;
+}
+
+function _announceSaved() {
+  _announcing = true;
+  try { dispatch(EVENTS.PROJECT_SAVED, {}); } finally { _announcing = false; }
 }
 
 function _recomputeDirty() {
@@ -27,12 +34,40 @@ function _recomputeDirty() {
   _dirty = next;
   // Announce the transition so StatusBar/ProjectMenu track undo-driven
   // changes too (undo/redo suppress PROJECT_DIRTY via withoutDirty).
-  dispatch(next ? EVENTS.PROJECT_DIRTY : EVENTS.PROJECT_SAVED, {});
+  if (next) dispatch(EVENTS.PROJECT_DIRTY, {}); else _announceSaved();
 }
 
 /** @returns {boolean} current dirty state (position-based + sticky). */
 export function isDirty() {
   return _dirty;
+}
+
+// ── Save attempt ────────────────────────────────────────
+// The written document is built from the state at the START of a save, so the
+// baseline must be that state, not the state when the bytes landed: an edit
+// made while the file was writing is not in the file and keeps the project
+// dirty (cia A-01).
+
+/**
+ * Capture the baseline for a save, synchronously, right before the document
+ * is built from live state.
+ * @returns {{position:number, stickyGen:number}}
+ */
+export function beginSave() {
+  return { position: historyPosition(), stickyGen: _stickyGen };
+}
+
+/**
+ * The bytes for `attempt` are on disk: baseline to the captured state and
+ * announce PROJECT_SAVED. Listeners that read isDirty() in that event get
+ * the post-save answer whatever their subscription order.
+ * @param {{position:number, stickyGen:number}} attempt
+ */
+export function commitSave(attempt) {
+  _savedPosition = attempt.position;
+  _sticky = _stickyGen !== attempt.stickyGen;
+  _dirty = _sticky || historyPosition() !== _savedPosition;
+  _announceSaved();
 }
 
 /**
@@ -89,10 +124,10 @@ export function whenSaveIdle() {
 /** Wire dirty tracking. Call once at boot. */
 export function init() {
   subscribe(EVENTS.PROJECT_DIRTY, () => {
-    if (!historyIsApplying()) _sticky = true;
+    if (!historyIsApplying()) { _sticky = true; _stickyGen++; }
     _dirty = true;
   });
-  subscribe(EVENTS.PROJECT_SAVED,  _baseline);
+  subscribe(EVENTS.PROJECT_SAVED,  () => { if (!_announcing) _baseline(); });
   subscribe(EVENTS.PROJECT_LOADED, _baseline);
   subscribe(EVENTS.PROJECT_NEW,    _baseline);
   subscribe(EVENTS.HISTORY_PUSHED, _recomputeDirty);

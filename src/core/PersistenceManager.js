@@ -31,7 +31,7 @@ import { storage } from './storage/StorageAdapter.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
 import { startAutosave, stopAutosave, recoverAutosave } from './persist/Autosave.js';
 import {
-  isDirty, clearDirty, confirmDirty, init, runExclusiveSave, isSaving, whenSaveIdle,
+  isDirty, clearDirty, confirmDirty, init, runExclusiveSave, isSaving, whenSaveIdle, beginSave, commitSave,
 } from './persist/DirtyTracker.js';
 
 // ── Re-exported surface (unchanged for callers/tests) ────────────────────
@@ -62,9 +62,10 @@ async function _save() {
   // started, whatever gets bound meanwhile (cia A-08).
   const target = _fileRef;
   if (!target) return _saveAs(null);
+  const attempt = beginSave();   // same tick as buildDocument's state snapshot
   const text = JSON.stringify(await buildDocument());
   await storage.writeFile(target, text);   // the adapter never commits a half file (see OpfsWrite.worker.js for the sync-handle tier)
-  await _afterWrite(target);
+  await _afterWrite(attempt, target);
   return true;
 }
 
@@ -82,12 +83,12 @@ function _requestPersistentStorage() {
 }
 
 // Post-write bookkeeping shared by save / saveAs: runs only once bytes are on
-// disk. `staleId` = the project id before a saveAs (which mints a new id —
-// the new file is a new document), whose autosave is now stale too.
-async function _afterWrite(target, staleId = null) {
+// disk. `attempt` = the dirty baseline captured when the document was built;
+// `staleId` = the project id before a saveAs (which mints a new id — the new
+// file is a new document), whose autosave is now stale too.
+async function _afterWrite(attempt, target, staleId = null) {
   setState(s => ({ ...s, project: { ...s.project, lastSavedAt: new Date().toISOString() } }), SILENT);
-  clearDirty();
-  dispatch(EVENTS.PROJECT_SAVED, {});
+  commitSave(attempt);   // announces PROJECT_SAVED; stays dirty if the user edited during the write
   const name = getState().project.name;
   _requestPersistentStorage();
   Toast.show(t('toast.projectSaved'), 'success', 2000);
@@ -125,12 +126,13 @@ async function _saveAs(presetTarget) {
   const name = picked.name.replace(/\.mixo$/i, '');
   const previousId = getState().project.id ?? null;
   const id = mintProjectId();   // a Save As copy is a new document (own autosave identity)
+  const attempt = beginSave();
   const doc = await buildDocument();
   doc.project = { ...doc.project, name, id };   // the file carries its own name + id
   await storage.writeFile(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
   _fileRef = picked.ref;
   setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
-  await _afterWrite(picked.ref, previousId);
+  await _afterWrite(attempt, picked.ref, previousId);
   return true;
 }
 

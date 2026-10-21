@@ -1,6 +1,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe } from '../core/StateManager.js';
 import { getUndoLabel, getRedoLabel, undo, redo } from '../core/HistoryManager.js';
+import { isDirty } from '../core/persist/DirtyTracker.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -54,10 +55,12 @@ function _onDirty() {
   _updateRight();
 }
 
+// PROJECT_SAVED means bytes reached disk, not that nothing changed since:
+// an edit made while the file was writing keeps the project dirty (A-01).
 function _onSaved() {
-  _isDirty = false;
+  _isDirty = isDirty();
   const dirtyEl = document.getElementById('dirty-indicator');
-  if (dirtyEl) dirtyEl.classList.remove('dirty');
+  if (dirtyEl) dirtyEl.classList.toggle('dirty', _isDirty);
   _updateRight();
 }
 
