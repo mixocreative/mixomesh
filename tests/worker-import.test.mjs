@@ -76,7 +76,8 @@ await test('(a) job that never replies rejects with /timed out/ and terminates t
   await tick();
   assert.equal(workers.length, 1, 'one worker spawned');
   assert.equal(workers[0].posted.length, 1, 'job posted');
-  await assert.rejects(p, /timed out after 0 s — falling back to main-thread parse/);
+  // The timeout code survives so AssetImport never retries a big file on the main thread.
+  await assert.rejects(p, (err) => /OBJ import timed out after 0 s/.test(err.message) && err.code === 'timeout');
   assert.equal(workers[0].terminated, 1, 'terminate() called on the stalled worker');
 });
 

@@ -609,6 +609,26 @@ async function _openZip(JSZip, data, limits = IMPORT_LIMITS) {
   return zip;
 }
 
+/**
+ * Build the AssetContainer from the import worker's pre-parsed package
+ * (meshImportCore.importThreeMFBuffer): model parts arrive with geometry in
+ * typed arrays, every other part (textures) as bytes behind a tiny zip
+ * stand-in, so the shared container build runs unchanged.
+ * @param {BABYLON.Scene} scene
+ * @param {{ rootPath: string, models: { path: string, xml: string, geometry: [string, object][] }[], parts: [string, Uint8Array][] }} parsed
+ */
+export function buildThreeMFContainerFromParsed(scene, parsed) {
+  const preparsed = new Map(parsed.models.map(m => [_cleanPackagePath(m.path), { xml: m.xml, geometry: new Map(m.geometry) }]));
+  const parts = new Map(parsed.parts.map(([path, bytes]) => [_cleanPackagePath(path), bytes]));
+  const zip = {
+    file(path) {
+      const bytes = parts.get(_cleanPackagePath(path));
+      return bytes ? { async: async (type) => (type === 'text' ? new TextDecoder().decode(bytes) : bytes) } : null;
+    },
+  };
+  return _buildContainer(scene, zip, null, { modelPath: parsed.rootPath, preparsed });
+}
+
 /** Register the `.3mf` SceneLoader plugin exactly once. Idempotent. */
 export function registerThreeMFLoader() {
   if (_registered || !BABYLON?.SceneLoader?.RegisterPlugin) return;

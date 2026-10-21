@@ -31,6 +31,7 @@ import {
   installSiblingUrls, noteMissingMtl, revokeObjSiblings,
 } from './ObjSiblings.js';
 import { isWorkerImportSupported, loadObjContainerViaWorker } from '../WorkerImport.js';
+import { isMeshWorkerImport, loadMeshContainerViaWorker } from '../MeshImportWorker.js';
 import { splitMultiMaterialMeshesInContainer } from './MeshSplit.js';
 import {
   uniqueHierarchyName, registerAssetEntry, registerInstantiatedMeshes,
@@ -51,20 +52,39 @@ const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 // ── Import progress overlay (field request) ─────────────────────────────
-// Imports block the UI thread during parse; the overlay stops false clicks
-// and shows real byte progress where Babylon reports it. Ref-counted so a
-// multi-file drop keeps one overlay up until the LAST import finishes.
+// An import changes the scene the user is editing, so it keeps the blocking
+// overlay (heavy-mesh spec §5.4) — with Cancel: parsing runs in a worker, the
+// UI stays live, and Cancel aborts every running import (nothing half-added).
+// Ref-counted so a multi-file drop keeps one overlay up until the LAST import
+// finishes.
 
 let _importDepth = 0;
+const _importAborts = new Set();
 
-function _importBegin(label) {
-  if (++_importDepth === 1) ProgressOverlay.show('Importing…');
+/** Import stages reported by the worker → overlay text. */
+const STAGE_LABEL = {
+  read: (f) => `Reading ${f}…`,
+  parse: (f) => `Parsing ${f}…`,
+  weld: (f) => `Welding vertices of ${f}…`,
+  normals: (f) => `Computing normals for ${f}…`,
+};
+
+function _importBegin(label, abort = null) {
+  if (abort) _importAborts.add(abort);
+  if (++_importDepth === 1) {
+    ProgressOverlay.show('Importing…', {
+      onCancel: () => { for (const a of [..._importAborts]) a.abort(); },
+    });
+  }
   ProgressOverlay.update(0.02, label);
 }
 
 function _importProgress(filename) {
   return (evt) => {
-    if (evt?.lengthComputable && evt.total > 0) {
+    if (evt && typeof evt.fraction === 'number') {
+      const label = STAGE_LABEL[evt.stage]?.(filename) ?? `Reading ${filename}…`;
+      ProgressOverlay.update(0.02 + 0.73 * Math.min(1, evt.fraction), label);
+    } else if (evt?.lengthComputable && evt.total > 0) {
       ProgressOverlay.update(0.02 + 0.73 * (evt.loaded / evt.total), `Reading ${filename}…`);
     } else {
       ProgressOverlay.update(0.4, `Reading ${filename}…`);
@@ -72,9 +92,16 @@ function _importProgress(filename) {
   };
 }
 
-function _importEnd() {
+function _importEnd(abort = null) {
+  if (abort) _importAborts.delete(abort);
   _importDepth = Math.max(0, _importDepth - 1);
   if (_importDepth === 0) ProgressOverlay.hide();
+}
+
+function _throwIfAborted(signal, container) {
+  if (!signal?.aborted) return;
+  try { container?.dispose?.(); } catch { /* not scene-owned */ }
+  throw new DOMException('Import cancelled', 'AbortError');
 }
 
 /** True while any loadFromBlob / instantiateAsset is in flight (F20 / M2). */
@@ -92,21 +119,50 @@ function _assertNoProjectLoad() {
   if (isProjectLoading()) throw new Error(PROJECT_LOADING_MESSAGE);
 }
 
+/** Above this size a failed worker parse is NOT retried on the main thread:
+ *  the files that time out or crash a worker are exactly the ones that would
+ *  freeze or kill the tab there (audit area 2c). */
+export const MAIN_THREAD_FALLBACK_MAX_BYTES = 32 * 1024 * 1024;
+
+/** Worker failure → may the main-thread SceneLoader retry it? */
+export function mayFallBackToMainThread(err, size) {
+  if (err?.name === 'AbortError') return false;
+  if (err?.code === 'timeout') return false;
+  if (/triangles|handles up to|polygon handling limit/.test(String(err?.message))) return false;
+  return !(size > MAIN_THREAD_FALLBACK_MAX_BYTES);
+}
+
 /**
- * Load an AssetContainer from a blob URL. OBJ parses in a worker when
- * available (Babylon's OBJ loader is a synchronous text parse — big files
- * freeze the UI for seconds on the main thread); any worker failure falls
- * back to the main-thread SceneLoader path, which the installed
- * PreprocessUrl sibling swap still covers.
+ * Load an AssetContainer from a blob URL. STL and 3MF parse + weld in
+ * workers/MeshImport.worker.js and OBJ in workers/ObjParse.worker.js when
+ * Worker exists; a worker failure on a small file falls back to the
+ * main-thread SceneLoader path (which the installed PreprocessUrl sibling
+ * swap still covers); a big file, a timeout or Cancel never does.
+ * @param {string} blobUrl
+ * @param {string} ext
+ * @param {BABYLON.Scene} scene
+ * @param {Function|null} onProgress
+ * @param {Map<string,string>|null} siblings
+ * @param {{ signal?: AbortSignal, size?: number }} [opts]
  */
-export async function loadContainer(blobUrl, ext, scene, onProgress, siblings) {
-  if (ext === '.obj' && isWorkerImportSupported()) {
+export async function loadContainer(blobUrl, ext, scene, onProgress, siblings, opts = {}) {
+  const { signal, size } = opts;
+  if (isMeshWorkerImport(ext)) {
     try {
-      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined);
+      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal });
     } catch (err) {
+      if (!mayFallBackToMainThread(err, size)) throw err;
+      console.warn(`${ext} worker parse failed — main-thread fallback:`, err);
+    }
+  } else if (ext === '.obj' && isWorkerImportSupported()) {
+    try {
+      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal });
+    } catch (err) {
+      if (!mayFallBackToMainThread(err, size)) throw err;
       console.warn('OBJ worker parse failed — main-thread fallback:', err);
     }
   }
+  if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
   return BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, onProgress, ext);
 }
 
@@ -307,7 +363,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.
-  _importBegin(`Reading ${filename}…`);
+  const abort = new AbortController();
+  _importBegin(`Reading ${filename}…`, abort);
   let restoreUrls = () => {};
   const scene = SceneManager.getScene();
   const assetId = newId('asset');
@@ -335,7 +392,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     }
 
     restoreUrls = installSiblingUrls(siblings);
-    const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings);
+    const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings,
+      { signal: abort.signal, size: blob.size });
+    _throwIfAborted(abort.signal, container);
     _assertContainerCapacity(scene, container);
     ProgressOverlay.update(0.8, `Materials for ${filename}…`);
 
@@ -428,7 +487,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     throw err;
   } finally {
     restoreUrls();
-    _importEnd();
+    _importEnd(abort);
   }
 }
 
@@ -449,14 +508,16 @@ export async function instantiateAsset(assetId, position) {
   if (!blobUrl) throw new Error(`No cached data for ${asset.filename} — cannot re-instantiate`);
 
   const scene = SceneManager.getScene();
-  _importBegin(`Reading ${asset.filename}…`);
+  const abort = new AbortController();
+  _importBegin(`Reading ${asset.filename}…`, abort);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
   const siblings = getObjSiblings(assetId);
   const restoreUrls = installSiblingUrls(siblings);
   try {
     const container = await loadContainer(
-      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings
+      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings, { signal: abort.signal }
     );
+    _throwIfAborted(abort.signal, container);
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
     _assertContainerCapacity(scene, container);
     splitMultiMaterialMeshesInContainer(container);
@@ -483,7 +544,7 @@ export async function instantiateAsset(assetId, position) {
     return meshIds;
   } finally {
     restoreUrls();
-    _importEnd();
+    _importEnd(abort);
   }
 }
 

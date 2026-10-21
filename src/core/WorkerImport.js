@@ -33,16 +33,18 @@ export function isWorkerImportSupported() {
   return typeof Worker === 'function';
 }
 
-async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs) {
+async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs, signal) {
   try {
     return await _task.run(
       { blobUrl, ext, siblings: [...(siblings ?? new Map()).entries()] },
-      { timeoutMs, onProgress },
+      { timeoutMs, onProgress, signal, label: 'Loading OBJ', cancellable: true },
     );
   } catch (err) {
     const secs = Math.round(timeoutMs / 1000);
-    if (err?.code === 'timeout') throw new Error(`OBJ worker timed out after ${secs} s — falling back to main-thread parse`);
-    if (err?.code === 'restarted') throw new Error(`OBJ worker restarted after another job failed (${err.message})`);
+    // Keep the code: AssetImport never retries a timed-out (big) file on the main thread.
+    const coded = (message) => Object.assign(new Error(message), { code: err.code });
+    if (err?.code === 'timeout') throw coded(`OBJ import timed out after ${secs} s`);
+    if (err?.code === 'restarted') throw coded(`OBJ worker restarted after another job failed (${err.message})`);
     throw err;
   }
 }
@@ -128,12 +130,12 @@ function _buildContainer(scene, parsed, siblings) {
  * @param {string} blobUrl
  * @param {Map<string,string>|null} siblings  lowercase filename → object URL
  * @param {(evt:{lengthComputable:boolean,loaded:number,total:number})=>void} [onProgress]
- * @param {{ timeoutMs?: number }} [opts]  per-job timeout (default WORKER_JOB_TIMEOUT_MS)
+ * @param {{ timeoutMs?: number, signal?: AbortSignal }} [opts]  per-job timeout (default WORKER_JOB_TIMEOUT_MS), Cancel
  * @returns {Promise<BABYLON.AssetContainer>}
  */
 export async function loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? WORKER_JOB_TIMEOUT_MS;
-  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs);
+  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs, opts.signal);
   if (!parsed.meshes?.length) throw new Error('worker returned no geometry');
   _assertParsedShape(parsed);
   return _buildContainer(scene, parsed, siblings);
