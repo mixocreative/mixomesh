@@ -72,8 +72,11 @@ export async function promptImport(position = BABYLON.Vector3.Zero()) {
  * Import already-picked assets ([{ref,name}], mesh + sibling MTL/textures).
  * Shared by the picker and launch-time file arguments.
  * @param {Array<{ref:any, name?:string}>} picked
+ * @param {BABYLON.Vector3} [position]
+ * @param {{ signal?: AbortSignal }} [opts]  the caller's cancel stops the
+ *   running file and the rest of the pick (API request, cia F-08)
  */
-export async function importPicked(picked, position = BABYLON.Vector3.Zero()) {
+export async function importPicked(picked, position = BABYLON.Vector3.Zero(), { signal } = {}) {
   if (!picked?.length) return;
   const files = await Promise.all(picked.map(p => storage.readFile(p.ref)));
   const siblingFiles = files.filter(file => {
@@ -90,12 +93,13 @@ export async function importPicked(picked, position = BABYLON.Vector3.Zero()) {
   const cancelGen = importCancelGeneration();
   for (const { file, ref } of meshes) {
     // Cancel ends the whole pick, not just the file that was running (review I5).
-    if (importCancelGeneration() !== cancelGen) break;
+    if (importCancelGeneration() !== cancelGen || signal?.aborted) break;
     const ids = await safeImport(async () => {
       const fileHandleKey = await _persistedKey(ref);
       return importWithDedupe(file, file.name, at, {
         ...(fileHandleKey ? { fileHandleKey } : {}),
         ...(siblingFiles.length ? { siblingFiles } : {}),
+        ...(signal ? { signal } : {}),
       });
     }, file.name);
     at = _nextStaggerPosition(at, ids);

@@ -331,9 +331,10 @@ export function createDispatcher(deps) {
       const g = groups()[id];
       return { id, name: g?.name ?? id, kind: 'group', childIds: plain(g?.childIds ?? g?.children ?? []) };
     },
-    'scene.import': async p => {
+    'scene.import': async (p, signal) => {
       const before = new Set(Object.keys(objects()));
-      await deps.importPicked(p.files.map(f => ({ ref: f.ref, name: f.name })));
+      await deps.importPicked(p.files.map(f => ({ ref: f.ref, name: f.name })), { signal });
+      throwIfCancelled(signal);
       const added = displayedLeads().filter(o => !before.has(o.id));
       if (!added.length) {
         throw apiError('E_INTERNAL', 'import produced no objects (unsupported or unreadable file)');
@@ -510,7 +511,7 @@ export function createDispatcher(deps) {
     }
     const p = validateWithRefs(spec, params);
     if (IMMEDIATE.has(method)) return H[method](p);
-    return enqueue(() => H[method](p), signal);
+    return enqueue(() => H[method](p, signal), signal);
   }
 
   /**

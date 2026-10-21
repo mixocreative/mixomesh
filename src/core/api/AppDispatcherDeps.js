@@ -164,7 +164,7 @@ export async function createAppDispatcher(extra = {}) {
       saveAs: picked => PersistenceManager.saveAs(picked),
     },
     readFile: ref => storage.readFile(ref),
-    importPicked: picked => Drop.ViewportDrop.importPicked(picked),
+    importPicked: (picked, { signal } = {}) => Drop.ViewportDrop.importPicked(picked, undefined, { signal }),
     mountLibrary: async picked => {
       const m = await AssetLoader.registerMount(picked);
       await Panel.AssetPanel.mountFromRef(picked);

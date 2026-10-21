@@ -463,3 +463,17 @@ test('scrubPaths', () => {
   assert.equal(scrubPaths('bad \\\\srv\\share\\f.stl'), 'bad f.stl');
   assert.equal(scrubPaths('and/or fine'), 'and/or fine');
 });
+
+test('scene.import: a cancelled request aborts the import it already started (F-08)', async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  let signal = null;
+  const { d } = setup({ deps: { importPicked: async (_picked, opts) => { signal = opts?.signal ?? null; await gate; } } });
+  const caller = new AbortController();
+  const req = d.dispatch('scene.import', { files: [ref('a.stl')] }, { signal: caller.signal }).catch(e => e);
+  for (let i = 0; i < 5 && !signal; i++) await new Promise(r => setImmediate(r));
+  caller.abort();
+  assert.equal(signal?.aborted, true, 'the running import sees the cancel');
+  release();
+  await req;
+});

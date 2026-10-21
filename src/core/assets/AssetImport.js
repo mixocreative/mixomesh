@@ -390,11 +390,13 @@ function _warnIfOverBudget(scene, container) {
  * @param {BABYLON.Vector3} [position]
  * @param {{ originalPath?: string, directoryHandleKey?: string,
  *           fileHandleKey?: string, contentHash?: string|null,
- *           preParse?: 'ok'|'warn'|'unknown' }} [opts]
+ *           preParse?: 'ok'|'warn'|'unknown', signal?: AbortSignal }} [opts]
  *   `fileHandleKey` = an already-persisted storage-adapter key for a loose
  *   file (ViewportDrop persists the ref before calling); `contentHash` = the
  *   sha256 `importWithDedupe` already computed (skips a second hash);
- *   `preParse` = its pre-parse verdict (skips a second estimate).
+ *   `preParse` = its pre-parse verdict (skips a second estimate); `signal` =
+ *   the caller's cancel (an API request that timed out or lost its client)
+ *   aborts this import only, like the overlay's Cancel (cia F-08).
  * @returns {Promise<string[]>} created meshIds
  */
 export async function loadFromBlob(blob, filename, position, opts = {}) {
@@ -408,6 +410,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.
   const abort = new AbortController();
+  const callerAbort = () => abort.abort();
+  opts.signal?.addEventListener('abort', callerAbort, { once: true });
+  if (opts.signal?.aborted) abort.abort();
   _importBegin(_stageText(filename, 'read'), abort);
   let restoreUrls = () => {};
   const scene = SceneManager.getScene();
@@ -535,6 +540,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     removeContainer(assetId);
     throw err;
   } finally {
+    opts.signal?.removeEventListener('abort', callerAbort);
     restoreUrls();
     _importEnd(abort);
   }
