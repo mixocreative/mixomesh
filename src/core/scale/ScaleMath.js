@@ -50,6 +50,15 @@ export function objectRatio(obj) {
   return _positiveOrOne(obj?.ratio ?? obj?.modelRatio);
 }
 
+// The ratio an object's vertices are baked at, relative to its asset's raw
+// bytes (vertices = raw × unit × modelRatio / bakedRatio). It equals `ratio`
+// until a Set scale relabel moves the label without resizing; the relabel
+// stores the old anchor as `bakedRatio` so a reload rebuilds the same size.
+export function bakedRatioOf(obj) {
+  const n = Number(obj?.bakedRatio);
+  return Number.isFinite(n) && n > 0 ? n : objectRatio(obj);
+}
+
 // World-space node scale of a mesh: per-axis magnitude, so parent scaling
 // (a group at x2) counts and a negative (mirror) scale is just its size.
 // Reads the world matrix (row-major: rows 0-2 hold the scaled basis vectors),

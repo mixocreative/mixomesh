@@ -4165,8 +4165,11 @@ MIGRATE : exportTargets wins; else exportRatios:[n] → [{kind:'ratio',value:n}]
 RESTORE : restoreContainer reloads RAW bytes, then re-runs the SAME
           bakeImportTransform as a fresh import (unit + glTF flip + winding, at
           ratio=modelRatio seed); _loadProject bakes the per-object DELTA
-          (modelRatio/ratio) via _applyPersistedRatioBake → size + ratio + flip
-          all survive reload (byte-identical to a fresh import + saved placement)
+          (modelRatio / bakedRatioOf(obj), = modelRatio/ratio unless a Set
+          scale relabel moved the label) via _applyPersistedRatioBake; the
+          relink/replace re-bind (AssetCommands) uses the same delta → size +
+          ratio + flip all survive reload (byte-identical to a fresh import +
+          saved placement)
 ```
 
 `PrintPipeline._runExport` resolves targets from `exportTargetsFromState` and
@@ -5690,6 +5693,14 @@ Owner/integrator: merge into Blueprint.md at the anchors named below.
                                //   minted outside import (Boolean / Slice)
                                //   carry none and derive the seed from their
                                //   asset (ScaleCommands.ratioSourceOf).
+  bakedRatio,                  // optional (cia W-01). The ratio the object's
+                               //   vertices are baked at relative to the raw
+                               //   asset bytes (vertices = raw × unit ×
+                               //   modelRatio / bakedRatio). Absent = `ratio`.
+                               //   Written only by Set scale (relabel keeps
+                               //   the old anchor) and carried through Convert
+                               //   (anchor × new/old). Persisted in .mixo when
+                               //   present. Read via ScaleMath.bakedRatioOf.
 ```
 
 ## §11 Persistence — migrate ladder (3.3 → 3.4 step `_migrateTo34`)
@@ -5707,8 +5718,9 @@ the serializer always writes the resolved value.
   Convert…`. Picking a preset or typing a ratio only *stages* it; nothing is
   applied until a verb is clicked (or Enter applies the default verb).
 - **Set scale** = `SetScaleLabelCommand(ids, ratio)`: relabels `ratio`, sets
-  `ratioSource:'user'`, touches no geometry/transform. Undo restores each
-  prior `ratio` + `ratioSource`. Emits no `OBJECT_UPDATED` (geometry is
+  `ratioSource:'user'`, touches no geometry/transform, and keeps the vertex
+  anchor in `bakedRatio` (dropped when it equals the new label). Undo restores
+  each prior `ratio` + `ratioSource` + `bakedRatio`. Emits no `OBJECT_UPDATED` (geometry is
   unchanged, so validation must not go stale); panels re-render on
   `HISTORY_PUSHED/UNDONE/REDONE`.
 - **Convert…** = `RescaleObjectCommand(ids, ratio)` (math unchanged: bake

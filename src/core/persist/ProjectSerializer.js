@@ -346,6 +346,9 @@ function _serialiseSceneObjects(scene) {
       // Per-object scale ratio (2026-06-16). Persisted so each object keeps its
       // ratio across save/reload, never lost.
       ratio: (Number.isFinite(o.ratio) && o.ratio > 0) ? o.ratio : 1,
+      // Set scale relabel (cia W-01): the ratio the vertices are baked at,
+      // present only while it differs from `ratio` (ScaleMath.bakedRatioOf).
+      bakedRatio: Number.isFinite(o.bakedRatio) && o.bakedRatio > 0 ? o.bakedRatio : undefined,
       // Declare vs convert (1.13): where `ratio` came from — 'file' | 'user' |
       // 'default'. Objects minted outside import (Boolean/Slice) carry none
       // and are written with the seed derived from their asset.

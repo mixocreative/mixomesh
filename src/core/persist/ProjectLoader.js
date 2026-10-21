@@ -31,7 +31,7 @@ import {
 import { isLoading, setLoading } from './LoadGate.js';
 import { normalizeGroupOrigin } from '../hierarchy/HierarchyIntegrity.js';
 import { canonicalObjectId, seedLogicalObjectIds } from '../LogicalObjects.js';
-import { normalizeExportTargets } from '../scale/ScaleMath.js';
+import { normalizeExportTargets, bakedRatioOf } from '../scale/ScaleMath.js';
 import { applyPersistedRatioBake as _applyPersistedRatioBake } from '../assets/AssetRestore.js';
 import { normalizeMixoProvenance, normalizeMixoRefinement, mixoPrimitiveId } from '../import/ImportMetadata.js';
 
@@ -535,13 +535,14 @@ async function _loadProjectInner(doc, previousId) {
       }
       _claimed.add(mesh);
       // restoreContainer already re-ran the import seed (unit + glTF flip +
-      // winding) at ratio = modelRatio. Apply the per-object ratio DELTA here
-      // (modelRatio / ratio) so size AND the per-object ratio survive reload —
+      // winding) at ratio = modelRatio. Apply the per-object DELTA here
+      // (modelRatio / bakedRatio; bakedRatio is the ratio unless a Set scale
+      // relabel moved the label) so size AND the per-object ratio survive reload —
       // fresh + migrated saves alike. (Guarded by the browser-smoke ratio
       // round-trip.) The saved node transform (position/rot/scale) is applied
       // after; the flip lives in the vertices so it is unaffected.
       const asset = assetById[o.assetId];
-      _applyPersistedRatioBake(mesh, asset, objRatio, _reBaked);
+      _applyPersistedRatioBake(mesh, asset, bakedRatioOf({ ratio: objRatio, bakedRatio: o.bakedRatio }), _reBaked);
       // Replay persisted auto-fix edits at the displayed scale (after the ratio
       // bake) so the weld's absolute MERGE_DISTANCE behaves as it did when the
       // fix was first applied (M1). Each SceneObject owns a distinct mesh here
@@ -591,6 +592,7 @@ async function _loadProjectInner(doc, previousId) {
         ? { printRefinement: normalizeLoadedPrintRefinement(o, mixoProvenance, mixoRefinement) } : {}),
       containerMeshIndex: Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0,
       ratio: objRatio,
+      ...(Number.isFinite(o.bakedRatio) && o.bakedRatio > 0 ? { bakedRatio: o.bakedRatio } : {}),
       // 1.13: migrate() seeds ratioSource for pre-3.4 docs; a 3.4 doc saved
       // before the field existed derives the same seed here.
       ratioSource: ratioSourceOf(o, assetById[o.assetId]),

@@ -15,6 +15,7 @@ import {
 } from '../assets/AssetRestore.js';
 import { decompose, applyWorld } from '../persist/ProjectSerializer.js';
 import { SILENT } from './support.js';
+import { bakedRatioOf } from '../scale/ScaleMath.js';
 
 /**
  * Replace the bytes behind an asset: Relink (ghost / missing asset -> a file the
@@ -111,7 +112,7 @@ export class RelinkAssetCommand {
       };
       this._bound[o.id] = rec;
       if (!src) continue;
-      applyPersistedRatioBake(src, asset, o.ratio, reBaked);
+      applyPersistedRatioBake(src, asset, bakedRatioOf(o), reBaked);
       let mesh = src;
       if (used.has(src)) {
         // Two objects of one asset on the same container mesh: each owns its

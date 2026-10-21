@@ -10,7 +10,7 @@ import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import {
   SOURCE_UNIT_FACTORS, exportTargetsFromState, normalizeExportTarget, exportTargetsEqual,
-  formatScaleRatio,
+  formatScaleRatio, bakedRatioOf,
 } from '../scale/ScaleMath.js';
 import { canonicalObjectId } from '../LogicalObjects.js';
 import { SILENT, withDetachedPivot } from './support.js';
@@ -186,12 +186,21 @@ export class SetScaleLabelCommand {
     this._prev = {};
     for (const id of this._ids) {
       if (!objects[id]) continue;
-      this._prev[id] = { ratio: _positiveRatio(objects[id].ratio), ratioSource: objects[id].ratioSource };
+      this._prev[id] = {
+        ratio: _positiveRatio(objects[id].ratio),
+        ratioSource: objects[id].ratioSource,
+        bakedRatio: objects[id].bakedRatio,
+      };
     }
     this.label = t('history.setScaleLabel', { ratio: _fmtRatioLabel(this._next) });
   }
   execute() {
-    _writeRatioFields(Object.fromEntries(Object.keys(this._prev).map(id => [id, { ratio: this._next, ratioSource: RATIO_SOURCE.USER }])));
+    const objects = getState().scene.objects;
+    _writeRatioFields(Object.fromEntries(Object.keys(this._prev).map(id => [id, {
+      ratio: this._next,
+      ratioSource: RATIO_SOURCE.USER,
+      bakedRatio: _anchorUnlessLabel(bakedRatioOf(objects[id]), this._next),
+    }])));
     markDirty();
   }
   undo() { _writeRatioFields(this._prev); }
@@ -204,12 +213,19 @@ function _writeRatioFields(byId) {
       if (!objects[id]) continue;
       const next = { ...objects[id], ratio: f.ratio };
       if (f.ratioSource === undefined) delete next.ratioSource; else next.ratioSource = f.ratioSource;
+      if (f.bakedRatio === undefined) delete next.bakedRatio; else next.bakedRatio = f.bakedRatio;
       objects[id] = next;
     }
     return { ...s, scene: { ...s.scene, objects } };
   }, SILENT);
   // No OBJECT_UPDATED: geometry is untouched, so validation must not go
   // stale. Panels showing the label re-render on HISTORY_* (push/undo/redo).
+}
+
+// `bakedRatio` is stored only while it differs from the label (see
+// ScaleMath.bakedRatioOf); equal means the object never was relabelled.
+function _anchorUnlessLabel(bakedRatio, ratio) {
+  return Math.abs(bakedRatio - ratio) <= 1e-9 * ratio ? undefined : bakedRatio;
 }
 
 function _positiveRatio(v) {
@@ -236,11 +252,17 @@ function _rescaleObject(id, fromRatio, toRatio, ratioSource) {
   setState(s => {
     const obj = s.scene.objects[id];
     if (!obj) return s;
+    // The vertices scaled by from/to, so a relabelled anchor moves by to/from.
+    const { bakedRatio: _old, ...rest } = obj;
+    const anchor = obj.bakedRatio === undefined
+      ? undefined
+      : _anchorUnlessLabel(bakedRatioOf(obj) * to / _positiveRatio(fromRatio), to);
+    const next = anchor === undefined ? { ...rest, ratio: to } : { ...rest, ratio: to, bakedRatio: anchor };
     return {
       ...s,
       scene: {
         ...s.scene,
-        objects: { ...s.scene.objects, [id]: _withRatioSource({ ...obj, ratio: to }, ratioSource) },
+        objects: { ...s.scene.objects, [id]: _withRatioSource(next, ratioSource) },
       },
     };
   }, SILENT);
