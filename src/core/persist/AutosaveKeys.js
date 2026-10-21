@@ -6,7 +6,35 @@
 // boot scan for `autosave_*` never mistakes an image for a snapshot.
 
 import { storage } from '../storage/StorageAdapter.js';
+import { EVENTS } from '../events.js';
 import { AUTOSAVE_PREFIX, AUTOSAVE_IMG_PREFIX } from './constants.js';
+
+// ── Autosave liveness (cia B-02) ───────────────────────────
+// Lives here, not in Autosave.js, so the status bar can read it without
+// importing the loader graph (which reaches the status bar itself).
+
+/** Dispatched with `{ state, failures, lastError, reason }` whenever a tick fails or is paused. */
+export const AUTOSAVE_FAILED_EVENT = EVENTS.AUTOSAVE_FAILED ?? 'project:autosaveFailed';
+
+/** Ticks skipped in a row (busy world, slow snapshot) before the status reads paused. */
+export const AUTOSAVE_PAUSED_AFTER_SKIPS = 3;
+
+/**
+ * @typedef {{ state: 'idle'|'written'|'failing'|'paused', lastWrittenAt: string|null,
+ *   failures: number, lastError: string|null, skips: number, reason: 'busy'|'slow'|null }} AutosaveStatus
+ */
+/** @type {AutosaveStatus} */
+const _status = { state: 'idle', lastWrittenAt: null, failures: 0, lastError: null, skips: 0, reason: null };
+
+/** @returns {AutosaveStatus} a copy of the current autosave status. */
+export function autosaveStatus() {
+  return { ..._status };
+}
+
+/** @param {Partial<AutosaveStatus>} patch */
+export function setAutosaveStatus(patch) {
+  Object.assign(_status, patch);
+}
 
 export const autosaveKey = (projectId) => `${AUTOSAVE_PREFIX}${projectId}`;
 export const autosaveImagePrefix = (projectId) => `${AUTOSAVE_IMG_PREFIX}${projectId}_`;

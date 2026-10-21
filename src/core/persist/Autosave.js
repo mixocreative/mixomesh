@@ -16,11 +16,26 @@ import { mintProjectId } from './ProjectId.js';
 import {
   autosaveKey, autosaveImageKey, autosaveImagePrefix, projectIdFromAutosaveKey, deleteAutosave,
   isImageStored, markImageStored,
+  AUTOSAVE_FAILED_EVENT, AUTOSAVE_PAUSED_AFTER_SKIPS, autosaveStatus, setAutosaveStatus,
 } from './AutosaveKeys.js';
 
+export { autosaveStatus };
+
 let _autosaveTimer  = null;
-let _autosaveWarned = false;   // warn once per session, not every 60 s tick
+let _autosaveWarned = false;   // toast once per session; the status bar keeps showing it (B-02)
 let _ticking        = false;   // one snapshot at a time (a slow build must not overlap the next tick)
+
+// A tick that could not run. Three in a row while the project is dirty means
+// no snapshot is being written for minutes: say so on the status bar (B-02).
+function _skipped(reason) {
+  const skips = autosaveStatus().skips + 1;
+  setAutosaveStatus({ skips, reason });
+  if (skips >= AUTOSAVE_PAUSED_AFTER_SKIPS) {
+    setAutosaveStatus({ state: 'paused' });
+    dispatch(AUTOSAVE_FAILED_EVENT, autosaveStatus());
+  }
+  return false;
+}
 
 /** The live project's id, minting one first if the project has none yet. */
 export function ensureProjectId() {
@@ -45,13 +60,18 @@ async function _storeTextureImages(projectId) {
 
 /** One autosave snapshot. Exported for tests; the interval calls it. */
 export async function autosaveTick() {
-  if (_ticking || !isDirty()) return false;
+  if (!isDirty()) {   // nothing to protect: a clean project is not a stalled autosave
+    if (autosaveStatus().state !== 'written') setAutosaveStatus({ state: 'idle' });
+    setAutosaveStatus({ skips: 0, reason: null });
+    return false;
+  }
+  if (_ticking) return _skipped('slow');
   // M2: never snapshot a half-built world. Mid-load the state is a mix of
   // old and new project; mid-import the container is registered but its
   // objects are not minted yet — either would write a torn autosave that
   // the next boot offers to "recover". A Save in flight will leave the file
   // newer than anything this tick could write.
-  if (_worldBusy() || isSaving()) return false;
+  if (_worldBusy() || isSaving()) return _skipped('busy');
   _ticking = true;
   try {
     const projectId = ensureProjectId();
@@ -68,10 +88,13 @@ export async function autosaveTick() {
     // A Save that completed during the write already deleted this key once;
     // the snapshot predates the file, so take it back out (A-07).
     if (stale()) { await deleteAutosave(projectId); return false; }
-    dispatch(EVENTS.AUTOSAVE_WRITTEN, {});
+    setAutosaveStatus({ state: 'written', lastWrittenAt: new Date().toISOString(), failures: 0, lastError: null, skips: 0, reason: null });
+    dispatch(EVENTS.AUTOSAVE_WRITTEN, autosaveStatus());
     _autosaveWarned = false;
     return true;
   } catch (err) {
+    setAutosaveStatus({ state: 'failing', failures: autosaveStatus().failures + 1, lastError: err?.message ?? String(err) });
+    dispatch(AUTOSAVE_FAILED_EVENT, autosaveStatus());
     if (_autosaveWarned) {
       console.error('Autosave failed:', err);
     } else {

@@ -2,6 +2,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe } from '../core/StateManager.js';
 import { getUndoLabel, getRedoLabel, undo, redo } from '../core/HistoryManager.js';
 import { isDirty } from '../core/persist/DirtyTracker.js';
+import { autosaveStatus, AUTOSAVE_FAILED_EVENT } from '../core/persist/AutosaveKeys.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -11,6 +12,26 @@ let _elCenter = null;
 let _elRight  = null;
 let _isDirty  = false;
 let _leftDefault = true;
+
+// Autosave liveness (B-02): the last snapshot time, or a persistent warning
+// while snapshots fail or keep being skipped. One toast is easy to dismiss;
+// this stays until the next snapshot succeeds.
+function _autosavePart() {
+  const s = autosaveStatus();
+  if (s.state === 'written') {
+    const when = new Date(s.lastWrittenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<span class="sb-label sb-autosave">${escapeHtml(t('status.autosaved', { when }))}</span>`;
+  }
+  if (s.state === 'failing') {
+    const text = t('status.autosaveFailed', { n: s.failures, reason: s.lastError ?? '' });
+    return `<span class="sb-label sb-autosave hud-warn" title="${escapeAttr(text)}">${escapeHtml(text)}</span>`;
+  }
+  if (s.state === 'paused') {
+    const text = t(s.reason === 'slow' ? 'status.autosavePausedSlow' : 'status.autosavePausedBusy');
+    return `<span class="sb-label sb-autosave hud-warn" title="${escapeAttr(text)}">${escapeHtml(text)}</span>`;
+  }
+  return '';
+}
 
 function _updateRight() {
   const undoLabel = getUndoLabel();
@@ -29,6 +50,7 @@ function _updateRight() {
   const saveClass = _isDirty ? 'dirty' : 'saved';
   const saveIconName = _isDirty ? 'Circle' : 'Check';
   const savePart = `<span class="sb-save-icon ${escapeAttr(saveClass)}">${icon(saveIconName, { width: 12, height: 12 })}</span>`;
+  const autosavePart = _autosavePart();
 
   const undoTitle = canUndo ? `${t('status.undo')}: ${undoLabel} (Ctrl+Z)` : t('status.nothingToUndo');
   const redoTitle = canRedo ? `${t('status.redo')}: ${redoLabel} (Ctrl+Shift+Z)` : t('status.nothingToRedo');
@@ -37,7 +59,7 @@ function _updateRight() {
     <button id="status-undo" class="sb-btn" ${canUndo ? '' : 'disabled'} title="${escapeAttr(undoTitle)}">${icon('RotateCcw', { width: 14, height: 14 })}</button>
     <button id="status-redo" class="sb-btn" ${canRedo ? '' : 'disabled'} title="${escapeAttr(redoTitle)}">${icon('RotateCw', { width: 14, height: 14 })}</button>
     <span class="sb-sep">·</span>
-    ${undoPart}${redoPart ? `<span class="sb-sep">·</span>${redoPart}` : ''}<span class="sb-sep">·</span>${savePart}
+    ${undoPart}${redoPart ? `<span class="sb-sep">·</span>${redoPart}` : ''}<span class="sb-sep">·</span>${savePart}${autosavePart ? `<span class="sb-sep">·</span>${autosavePart}` : ''}
   `;
 
   _elRight.querySelector('#status-undo')?.addEventListener('click', e => { e.stopPropagation(); undo(); });
@@ -83,6 +105,8 @@ export function init() {
   subscribe(EVENTS.HISTORY_REDONE, _onHistoryChange);
   subscribe(EVENTS.PROJECT_DIRTY,  _onDirty);
   subscribe(EVENTS.PROJECT_SAVED,  _onSaved);
+  subscribe(EVENTS.AUTOSAVE_WRITTEN, _updateRight);
+  subscribe(AUTOSAVE_FAILED_EVENT,   _updateRight);
   subscribe(EVENTS.LOCALE_CHANGED, () => {
     if (_leftDefault) _elLeft.textContent = t('status.defaultHint');
     _updateRight();
