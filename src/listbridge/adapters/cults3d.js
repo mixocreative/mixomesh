@@ -179,6 +179,7 @@ export const cults3dAdapter = {
       drafts: true, // SECRET = "only people with the link" (not a true draft)
       requires: ['categoryHint', 'license'],
       updateFiles: false, // updateCreation has no file / image arguments
+      printableExtensions: [...PRINTABLE_EXT], // U3: a zip is an extra download, not a model (U6)
       fields: ['title', 'description', 'tags', 'price', 'license', 'categoryHint', 'subCategoryIds', 'visibility', 'madeWithAi', 'locale'],
       credentials: ['nickname', 'apiKey'],
     };
@@ -199,7 +200,13 @@ export const cults3dAdapter = {
       }
     }
     if (files.length && !printable) {
-      issues.push({ field: 'files', code: 'no-printable-file', message: 'Add at least one printable model file (STL, OBJ, 3MF, STEP).' });
+      const zips = files.filter((f) => extOf(f.name) === 'zip').map((f) => `"${f.name}"`);
+      issues.push({
+        field: 'files', code: 'no-printable-file',
+        message: zips.length
+          ? `${zips.join(', ')} is a zip: Cults3D offers it only as an extra download, not as the model. Add a model file that is not zipped (STL, 3MF or STEP; an OBJ export always arrives zipped).`
+          : 'Add at least one printable model file (STL, OBJ, 3MF, STEP).',
+      });
     }
     for (const i of pkg.images || []) {
       if (!IMAGE_MIMES.includes(i.mime)) {

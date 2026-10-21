@@ -283,6 +283,7 @@ function registerListbridgeIpc(handle, deps = {}) {
           transfers: d.transfers ? [...d.transfers] : undefined,
           visibility: d.visibility ? [...d.visibility] : undefined, drafts: d.drafts === true,
           requires: d.requires ? [...d.requires] : undefined, updateFiles: d.updateFiles === true,
+          printableExtensions: d.printableExtensions ? [...d.printableExtensions] : undefined,
           listOptions: typeof a.buildListOptions === 'function',
           currencies: d.currencies ? [...d.currencies] : undefined, fields: [...(d.fields || [])],
           credentials: [...(d.credentials || [])], testConnection: typeof a.testConnection === 'function',

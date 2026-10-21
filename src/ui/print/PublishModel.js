@@ -357,6 +357,27 @@ export function collectCredentials(values, required, optional = []) {
   return { secret: out, missing };
 }
 
+/**
+ * Extension of the one file an export format produces: OBJ always ships OBJ + MTL + textures as a zip,
+ * STL / PLY / WRL zip when each object is its own file (ObjWriter / StlWriter / PlyWriter / WrlWriter).
+ * @param {string} format @param {{ individually?: boolean }} [opts]
+ */
+export function exportExtension(format, { individually = false } = {}) {
+  if (format === 'obj') return 'zip';
+  if (individually && (format === 'stl' || format === 'ply' || format === 'wrl')) return 'zip';
+  return format;
+}
+
+/**
+ * True when at least one chosen format reaches the platform as a file it counts as a model
+ * (describe().printableExtensions). No list = the platform is not second-guessed.
+ * @param {string[]} formats @param {{ individually?: boolean }} opts @param {string[]} [printable]
+ */
+export function shipsPrintable(formats, opts, printable) {
+  if (!Array.isArray(printable) || !printable.length) return true;
+  return formats.some(f => printable.includes(exportExtension(f, opts)));
+}
+
 /** "Files over N are zipped": N from describe().maxFiles, or null when unknown. */
 export const zipLimit = desc => (Number.isFinite(desc?.maxFiles) ? desc.maxFiles : null);
 

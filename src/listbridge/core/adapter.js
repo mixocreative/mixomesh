@@ -18,6 +18,8 @@
  * @property {boolean} [drafts] true when the platform can hold a listing short of public. Note: Cults3D
  *   "secret" is "only people with the link", not a true draft; the UI words it that way.
  * @property {string[]} [requires] Listing fields validate() insists on (e.g. ['categoryHint','license']).
+ * @property {string[]} [printableExtensions] File extensions the platform counts as a model (a listing
+ *   needs one); other accepted files are extras. Lets a host warn before it builds the files.
  * @property {boolean} [updateFiles] true when buildUpdate can replace files and images. Absent / false:
  *   an update is metadata only (the runner validates it without files or images, and hosts nothing).
  * @property {number} maxFiles

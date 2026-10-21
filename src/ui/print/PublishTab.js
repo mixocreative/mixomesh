@@ -715,7 +715,7 @@ function _filesHtml(readiness, building) {
   let h = `<div class="pub-sub">${escapeHtml(t('publish.files.title'))} <span class="pub-sub-aside">· ${escapeHtml(t('publish.files.fromExport'))}</span></div>`;
   h += `<fieldset class="pub-files"${building ? ' disabled' : ''}><legend class="pub-sr">${escapeHtml(t('publish.files.title'))}</legend>`;
   for (const key of FORMAT_KEYS) {
-    const exts = EXT_GROUP[key] ?? [key];
+    const exts = [...(EXT_GROUP[key] ?? [key]), ...(M.exportExtension(key, { individually: !!getState().print?.individually }) === 'zip' ? ['zip'] : [])];
     const mine = S.built.filter(f => exts.includes(f.name.split('.').pop().toLowerCase()));
     const size = mine.length ? M.formatBytes(mine.reduce((n, f) => n + f.size, 0)) : '—';
     h += `<label class="pub-file"><input type="checkbox" data-fmt-pick="${escapeAttr(key)}"${formats.has(key) ? ' checked' : ''}>`
@@ -847,6 +847,9 @@ function _blocker(desc, readiness) {
   if (scope.files && readiness && !readiness.canExport) return t('print.readiness.blockedHint');
   const formats = scope.files ? _currentFormats() : [];
   if (scope.files && !formats.length) return t('publish.blocker.noFormat');
+  if (scope.files && !M.shipsPrintable(formats, { individually: !!getState().print?.individually }, desc.printableExtensions)) {
+    return t('publish.blocker.zipOnly', { label: desc.label });
+  }
   const sizes = Math.max(1, readiness?.targets?.length ?? 1);
   const issues = M.validateForm({
     form: S.form, hasHero: !!S.hero, galleryCount: S.gallery.length, fileCount: formats.length * sizes,
