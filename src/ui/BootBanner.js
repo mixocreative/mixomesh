@@ -39,7 +39,12 @@ function _html() {
   if (remount) {
     parts.push(`<span class="bb-item" data-bb="remount">${_escape(t('boot.remountBefore'))} <strong class="bb-name">${_escape(remount.name)}</strong></span>`);
   }
-  if (recover) {
+  if (recover?.unreadable) {
+    // B-03: the store could not be read. Say so and let the user retry; the
+    // snapshot (if any) is still there for the next launch.
+    const reason = recover.unreadable.message ?? String(recover.unreadable);
+    parts.push(`<span class="bb-item bb-unreadable" data-bb="unreadable">${_escape(t('boot.recoverUnreadable', { reason }))}</span>`);
+  } else if (recover) {
     const when = formatSavedAt(recover.savedAt);
     const title = t('boot.recoverTitle', { when: new Date(recover.savedAt).toLocaleString() });
     parts.push(`<span class="bb-item" data-bb="recover" title="${escapeAttr(title)}">${_escape(t('boot.recoverBefore'))} <time class="bb-time" datetime="${escapeAttr(recover.savedAt)}">${_escape(when)}</time>${recover.name ? ` <span class="bb-project">${_escape(t('boot.recoverIn', { name: recover.name }))}</span>` : ''}</span>`);
@@ -52,7 +57,8 @@ function _html() {
     <span class="bb-items">${parts.join(sep)}</span>
     <span class="bb-actions">
       ${remount ? `<button class="btn btn-sm bb-btn" type="button" data-act="remount">${icon('FolderOpen', { width: 13, height: 13 })}<span>${_escape(t('boot.remount'))}</span></button>` : ''}
-      ${recover ? `<button class="btn btn-sm btn-primary bb-btn" type="button" data-act="recover">${icon('RotateCcw', { width: 13, height: 13 })}<span>${_escape(t('boot.recover'))}</span></button>` : ''}
+      ${recover?.unreadable ? `<button class="btn btn-sm bb-btn" type="button" data-act="retry">${icon('RotateCcw', { width: 13, height: 13 })}<span>${_escape(t('boot.retry'))}</span></button>` : ''}
+      ${recover && !recover.unreadable ? `<button class="btn btn-sm btn-primary bb-btn" type="button" data-act="recover">${icon('RotateCcw', { width: 13, height: 13 })}<span>${_escape(t('boot.recover'))}</span></button>` : ''}
       <button class="bb-dismiss" type="button" data-act="dismiss" aria-label="${escapeAttr(t('boot.dismiss'))}" title="${escapeAttr(t('boot.dismissTitle'))}">×</button>
     </span>`;
 }
@@ -84,6 +90,7 @@ function _onClick(e) {
     try {
       if (act === 'remount') await _doRemount();
       else if (act === 'recover') await _doRecover();
+      else if (act === 'retry') _offers.recover = await _lookupRecover();
     } finally {
       _busy = false;
       _render();
@@ -99,9 +106,14 @@ async function _doRemount() {
   return ok;
 }
 
+// A lookup that throws is the same fault as one that reports unreadable.
+function _lookupRecover() {
+  return findRecoverableAutosave().catch(err => ({ unreadable: err instanceof Error ? err : new Error(String(err)) }));
+}
+
 async function _doRecover() {
   const offer = _offers.recover;
-  if (!offer) return;
+  if (!offer || offer.unreadable) return;
   // Recovery resolves handle-backed assets through the mounted folder (the
   // autosave skips their bytes, A9) — so re-mount first, inside this same
   // click gesture, when that offer is still open.
@@ -121,7 +133,7 @@ async function _doRecover() {
  * Show the banner for the given offers (either may be null; both null = no
  * banner). Returns the banner element, or null when nothing is offered.
  * @param {{ remount?: {key:string,name:string}|null,
- *           recover?: {key:string,projectId:string,savedAt:string,name?:string}|null }} offers
+ *           recover?: {key:string,projectId:string,savedAt:string,name?:string}|{unreadable:Error}|null }} offers
  * @returns {HTMLElement|null}
  */
 export function show({ remount = null, recover = null } = {}) {
@@ -149,7 +161,7 @@ export function hide() {
 export async function runBootChecks() {
   const [remount, recover] = await Promise.all([
     AssetPanel.findRemountOffer().catch(() => null),
-    findRecoverableAutosave().catch(() => null),
+    _lookupRecover(),
   ]);
   return show({ remount, recover });
 }

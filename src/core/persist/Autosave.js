@@ -134,18 +134,23 @@ async function _withStoredImages(projectId, doc, keys) {
  * its project's last real save, or null. Stale snapshots (not newer than the
  * file) are deleted silently. Never opens UI and never touches the world —
  * the boot banner renders the offer; `recoverAutosave(offer)` applies it.
- * @returns {Promise<{key:string, projectId:string, savedAt:string, name:string}|null>}
+ * A store that cannot be read is `{ unreadable }`, never null: "blind" must
+ * not look like "clean" (cia B-03), or a crash plus a blocked IndexedDB shows
+ * the same screen as no unsaved work and the snapshot is never offered again.
+ * @returns {Promise<{key:string, projectId:string, savedAt:string, name:string}|{unreadable:Error}|null>}
  */
 export async function findRecoverableAutosave() {
-  let keys;
-  try { keys = await storage.kvKeys(); } catch { return null; }
-  const auto = (keys || []).filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_PREFIX));
-  if (!auto.length) return null;
-
   let newest = null;
-  for (const k of auto) {
-    const v = await storage.kvGet(k);
-    if (v?.savedAt && (!newest || v.savedAt > newest.savedAt)) newest = { key: k, ...v };
+  try {
+    const keys = await storage.kvKeys();
+    const auto = (keys || []).filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_PREFIX));
+    if (!auto.length) return null;
+    for (const k of auto) {
+      const v = await storage.kvGet(k);
+      if (v?.savedAt && (!newest || v.savedAt > newest.savedAt)) newest = { key: k, ...v };
+    }
+  } catch (err) {
+    return { unreadable: err instanceof Error ? err : new Error(String(err)) };
   }
   if (!newest) return null;
 
@@ -174,6 +179,7 @@ export async function recoverAutosave(offer = null) {
   assertNoImportInFlight();   // F20: recovery resets the world like any load
   const target = offer ?? await findRecoverableAutosave();
   if (!target) return false;
+  if (target.unreadable) throw target.unreadable;   // a fault, not "nothing to recover"
   const { projectId } = target;
   try {
     const snap = await storage.kvGet(target.key);
