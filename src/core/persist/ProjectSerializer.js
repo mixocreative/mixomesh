@@ -17,6 +17,7 @@ import { normalizeListings } from '../publish/Listings.js';
 import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
 import { getTextureImage, listTextureImages } from '../assets/TextureImageStore.js';
+import { captureUnstoredTextureImages } from '../assets/TextureAssets.js';
 import { normalizeMixoProvenance, normalizeMixoRefinement, mixoSharpEdgeWeight } from '../import/ImportMetadata.js';
 import {
   collectRequiredAssetRefs,
@@ -381,6 +382,10 @@ function _serialiseGroups({ groups } = getState().scene) {
  *   them into every 60 s snapshot; `textureImages` is then [].
  */
 export async function buildDocument(opts = {}) {
+  // An imported texture's bytes are captured on idle after import; a save
+  // that runs first waits for them, before the snapshot below, instead of
+  // writing none (cia A-09).
+  await captureUnstoredTextureImages();
   // Snap any in-flight import/duplicate bounce to its resting scale FIRST: the
   // pop multiplies live node scaling, and _serialiseSceneObjects decomposes the
   // world matrix — a save mid-bounce would otherwise bake the transient factor
