@@ -39,12 +39,13 @@ export async function serializeOBJ(ctx) {
     blobByFilename: textureBlobs,
     filenameByMesh: textureFilenameByMesh,
   } = await collectTextureExportData(ctx.meshes, ctx.state);
-  // Key by the SAME token the MTL `newmtl` / OBJ `usemtl` lines use
-  // (`_objMaterialName`), so `map_Kd` always resolves — a raw `Base Color`
-  // key used to miss the `Base_Color` lookup and silently drop the map.
+  const materialNames = _objMaterialNames(ctx.meshes);
+  // Key by the SAME token the MTL `newmtl` / OBJ `usemtl` lines use, so
+  // `map_Kd` always resolves — a raw `Base Color` key used to miss the
+  // `Base_Color` lookup and silently drop the map.
   const textureFilenameByMaterialName = new Map();
   for (const [mesh, filename] of textureFilenameByMesh) {
-    textureFilenameByMaterialName.set(_objMaterialName(mesh), filename);
+    textureFilenameByMaterialName.set(materialNames.get(mesh.material ?? mesh), filename);
   }
 
   // OBJ-only fallback: every solid-colour material gets a tiny 4×4 RGBA PNG
@@ -55,7 +56,7 @@ export async function serializeOBJ(ctx) {
   // and actual export cannot disagree if the user toggles mid-flight.
   const bakeSolids = !!ctx.prefs?.objBakeSolidTextures;
   const synth = bakeSolids
-    ? await _synthesizeSolidShaderTextures(ctx.meshes)
+    ? await _synthesizeSolidShaderTextures(ctx.meshes, materialNames)
     : { blobByName: new Map(), filenameByMaterialName: new Map() };
   const filenameByMaterialName = new Map([
     ...textureFilenameByMaterialName,
@@ -67,13 +68,13 @@ export async function serializeOBJ(ctx) {
   if (ctx.individually) {
     for (const unit of ctx.cloneGroups) {
       const base = perMeshBaseName(ctx, unit.name);
-      entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base }) });
-      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, filenameByMaterialName) });
+      entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base, materialNames }) });
+      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, materialNames, filenameByMaterialName) });
     }
   } else {
     const base = exportBaseName(ctx);
-    entries.push({ path: `${base}.obj`, data: encodeOBJ(ctx.meshes, { axis, mtllib: base }) });
-    entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(ctx.meshes, filenameByMaterialName) });
+    entries.push({ path: `${base}.obj`, data: encodeOBJ(ctx.meshes, { axis, mtllib: base, materialNames }) });
+    entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(ctx.meshes, materialNames, filenameByMaterialName) });
   }
 
   for (const [filename, blob] of textureBlobs) entries.push({ path: `textures/${filename}`, data: blob });
@@ -100,10 +101,11 @@ export function resolveObjAxis(ctx) {
  * Encode meshes as ONE Wavefront OBJ text (positions in mm, flattened world).
  * One `o` block per mesh; `v`/`vt`/`vn` share each mesh's vertex indexing.
  * @param {Array<{mesh:object}>} meshEntries
- * @param {{axis?:'y-up'|'z-up', mtllib?:string}} [opts]
+ * @param {{axis?:'y-up'|'z-up', mtllib?:string, materialNames?:Map<object,string>}} [opts]
+ *   `materialNames`: the whole export's material-token table (default: built from `meshEntries`).
  * @returns {string}
  */
-export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null } = {}) {
+export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null, materialNames = _objMaterialNames(meshEntries) } = {}) {
   const yUp = axis !== 'z-up';
   const lines = [];
   if (mtllib != null) lines.push(`mtllib ${objToken(mtllib)}.mtl`);
@@ -130,7 +132,7 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null 
     const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
 
     lines.push(`o ${objToken(mesh.name || `mesh${j}`)}`);
-    if (mesh.material) lines.push(`usemtl ${_objMaterialName(mesh)}`);
+    if (mesh.material) lines.push(`usemtl ${materialNames.get(mesh.material)}`);
     for (let i = 0; i < pos.length; i += 3) lines.push(`v ${pos[i]} ${pos[i + 1]} ${pos[i + 2]}`);
     if (uv) for (let i = 0; i < uv.length; i += 2) lines.push(`vt ${uv[i]} ${uv[i + 1]}`);
     if (nrm) for (let i = 0; i < nrm.length; i += 3) lines.push(`vn ${nrm[i]} ${nrm[i + 1]} ${nrm[i + 2]}`);
@@ -160,7 +162,7 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null 
  *
  * Dedup key is `${HEX_RRGGBBAA}` — one blob per unique (rgb, α) tuple.
  */
-async function _synthesizeSolidShaderTextures(meshList) {
+async function _synthesizeSolidShaderTextures(meshList, materialNames) {
   const blobByName = new Map();
   const filenameByMaterialName = new Map();
   const seenMaterials = new Set();
@@ -175,8 +177,7 @@ async function _synthesizeSolidShaderTextures(meshList) {
     const a = clamp255(_safeAlpha01(mat.alpha));
     const hex = `${hex2(r)}${hex2(g)}${hex2(b)}${hex2(a)}`;
     const filename = `solid_${hex}.png`;
-    const matName = _objMaterialName(mesh);
-    if (matName) filenameByMaterialName.set(matName, filename);
+    filenameByMaterialName.set(materialNames.get(mat), filename);
     if (!blobByName.has(filename)) {
       try { blobByName.set(filename, await _solidColorBlob(r, g, b, a)); }
       catch (err) { console.error(`Solid PNG synthesis failed for ${hex}:`, err); }
@@ -218,11 +219,25 @@ function _safeAlpha01(v) {
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
 }
 
-// Use ?? not || so a legitimate-but-falsy mat.id (0, '') is not silently
-// replaced by mat.name / mesh.name and misaligned with the OBJ usemtl key.
-function _objMaterialName(mesh) {
-  const mat = mesh?.material;
-  return objToken(String(mat?.id ?? mat?.name ?? mesh?.name ?? 'material'));
+// One `newmtl` / `usemtl` token per distinct shader, keyed by the material
+// object (or the mesh when it has none; ShaderLibrary holds one material per
+// shader). The id is only the token's text: Babylon keeps the source file's
+// material name there, so two imported "Paint" shaders share an id and used
+// to merge into one MTL colour (cia C-03). Case-insensitive repeats get `_2`.
+function _objMaterialNames(meshEntries) {
+  const names = new Map();
+  const taken = new Set();
+  for (const { mesh } of meshEntries ?? []) {
+    const key = mesh?.material ?? mesh;
+    if (!key || names.has(key)) continue;
+    const mat = mesh.material;
+    const base = objToken(String(mat?.id ?? mat?.name ?? mesh.name ?? 'material'));
+    let name = base;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base}_${n}`;
+    taken.add(name.toLowerCase());
+    names.set(key, name);
+  }
+  return names;
 }
 
 /**
@@ -247,12 +262,12 @@ function _mtlLineColor(prefix, color) {
   return `${prefix} ${c01(color?.r)} ${c01(color?.g)} ${c01(color?.b)}`;
 }
 
-function _buildOBJMtl(meshEntries, filenameByMaterialName) {
+function _buildOBJMtl(meshEntries, materialNames, filenameByMaterialName) {
   const blocks = [];
   const seen = new Set();
   for (const { mesh } of meshEntries) {
     const mat = mesh.material || {};
-    const matName = _objMaterialName(mesh);
+    const matName = materialNames.get(mesh.material ?? mesh);
     if (seen.has(matName)) continue;
     seen.add(matName);
     const color = _mtlColor(mat);

@@ -1536,12 +1536,12 @@ await test('Decision 17: textures are named `<object>_<slot>.png`; MTL + 3MF ref
 await test('Decision 17: a texture shared by several objects is named after its material', async () => {
   const { mkTex, mkTexMesh } = _texFixture();
   const shared = mkTex('tS');
+  const left = mkTexMesh('m1', shared, 'mat-wood', 'Wood');
+  const right = mkTexMesh('m2', shared, 'mat-wood', 'Wood');
+  right.material = left.material;   // one shader = one Babylon material (ShaderLibrary)
   setScene({
     objects: { m1: obj('m1', { name: 'Left' }), m2: obj('m2', { name: 'Right' }) },
-    registry: {
-      m1: mkTexMesh('m1', shared, 'mat-wood', 'Wood'),
-      m2: mkTexMesh('m2', shared, 'mat-wood', 'Wood'),
-    },
+    registry: { m1: left, m2: right },
   });
   _setTexLibrary(['tS']);
   MeshValidator.validateMesh = valOK;
