@@ -46,9 +46,11 @@ picture, change the constant **and** the table in §6 in the same commit.
 | 3MF | uncompressed size of the model part from the zip central directory ÷ bytes per triangle measured on the head of the decompressed part | ± sampling error |
 | GLB / glTF | sum of `indices` accessor counts / 3 (or position count / 3 when unindexed) for TRIANGLES primitives, from the JSON chunk | exact (per mesh, before instancing) |
 
-Rules: refuse only on **exact** counts or on estimates that are `> 4× budget × 1.25` (sampling
-margin); warn on estimates above budget. Unknown → no pre-parse decision; the post-parse check
-decides.
+Rules: refuse only on **exact** counts (binary STL; glTF counted per referencing node, no GPU
+instancing) or on sampled estimates far above the limit (`> 4× budget × 2`: ASCII STL, OBJ). 3MF
+and GPU-instanced glTF estimates are **warn-only** (bytes per triangle vary with per-triangle
+attributes; instancing multiplies at load). Warn on any estimate above budget. Unknown → no
+pre-parse decision; the parse-time check decides.
 
 ## 4. Memory model
 

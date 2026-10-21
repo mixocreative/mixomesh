@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   estimateStl, estimateObj, threeMFModelBytes, countGltfJsonTriangles, glbJsonChunkLength,
-  estimateFileTriangles, THREEMF_BYTES_PER_TRIANGLE,
+  estimateFileTriangles, THREEMF_BYTES_PER_TRIANGLE, gltfEstimate,
 } from '../src/core/import/TriangleEstimate.js';
 import { assertPreParseCapacity } from '../src/core/import/ImportLimits.js';
 import { binaryStlChunks, asciiStlChunks, threeMFModelChunks } from '../scripts/heavy-mesh/generate.mjs';
@@ -46,7 +46,11 @@ test('glTF JSON: indices / positions of TRIANGLES primitives only', () => {
       { primitives: [{ attributes: { POSITION: 1 } }, { mode: 1, indices: 2, attributes: { POSITION: 1 } }] },
     ],
   };
-  assert.equal(countGltfJsonTriangles(json), 130);
+  assert.equal(countGltfJsonTriangles(json), 130, 'no nodes: every mesh once');
+  // Nodes: instancing counts per referencing node; unreferenced meshes count nothing (review M9).
+  assert.equal(countGltfJsonTriangles({ ...json, nodes: [{ mesh: 0 }, { mesh: 0 }, { children: [0] }] }), 200);
+  assert.equal(gltfEstimate({ ...json, nodes: [{ mesh: 1 }] }).triangles, 30);
+  assert.deepEqual(gltfEstimate({ ...json, extensionsUsed: ['EXT_mesh_gpu_instancing'] }).warnOnly, true);
 });
 
 test('GLB: JSON chunk length from the header', () => {
@@ -71,14 +75,16 @@ test('3MF: model part size from the central directory → estimate near the trut
   assert.ok(est > truth * 0.6 && est < truth * 1.4, `${est} vs ${truth}`);
   const r = await estimateFileTriangles(new Blob([buf]), '.3mf');
   assert.equal(r.exact, false);
+  assert.equal(r.warnOnly, true, '3MF estimates never refuse');
 });
 
-test('pre-parse capacity: exact refuses above 4×, estimates get 25 % margin, warn above 1×', () => {
+test('pre-parse capacity: exact refuses above 4×, estimates only far above it, 3MF never; warn above 1×', () => {
   const ctx = { budget: 1_000_000, filename: 'big.stl' };
   assert.throws(() => assertPreParseCapacity({ triangles: 4_000_001, exact: true }, ctx),
     /"big\.stl" has 4,000,001 triangles; this web build handles up to 4,000,000\. Simplify or split the model, or use the desktop app\./);
-  assert.equal(assertPreParseCapacity({ triangles: 4_500_000, exact: false }, ctx), 'warn');
-  assert.throws(() => assertPreParseCapacity({ triangles: 5_000_001, exact: false }, ctx), /has about 5,000,001/);
+  assert.equal(assertPreParseCapacity({ triangles: 7_900_000, exact: false }, ctx), 'warn');
+  assert.throws(() => assertPreParseCapacity({ triangles: 8_000_001, exact: false }, ctx), /has about 8,000,001/);
+  assert.equal(assertPreParseCapacity({ triangles: 50_000_000, exact: false, warnOnly: true }, ctx), 'warn');
   assert.equal(assertPreParseCapacity({ triangles: 900_000, exact: true }, ctx), 'ok');
   assert.equal(assertPreParseCapacity({ triangles: 900_000, exact: true }, { ...ctx, sceneTriangles: 200_000 }), 'warn');
   assert.equal(assertPreParseCapacity(null, ctx), 'unknown');

@@ -110,18 +110,36 @@ export async function threeMFModelBytes(tail, size, readAt) {
   return total || null;
 }
 
-/** Triangle count per glTF JSON (TRIANGLES primitives; indices, else positions). */
-export function countGltfJsonTriangles(json) {
+function _meshTriangles(json, mesh) {
   const accessors = json?.accessors ?? [];
   let tris = 0;
-  for (const mesh of json?.meshes ?? []) {
-    for (const prim of mesh?.primitives ?? []) {
-      if ((prim?.mode ?? GL_TRIANGLES) !== GL_TRIANGLES) continue;
-      const acc = prim.indices != null ? accessors[prim.indices] : accessors[prim?.attributes?.POSITION];
-      if (acc?.count > 0) tris += Math.floor(acc.count / 3);
-    }
+  for (const prim of mesh?.primitives ?? []) {
+    if ((prim?.mode ?? GL_TRIANGLES) !== GL_TRIANGLES) continue;
+    const acc = prim.indices != null ? accessors[prim.indices] : accessors[prim?.attributes?.POSITION];
+    if (acc?.count > 0) tris += Math.floor(acc.count / 3);
   }
   return tris;
+}
+
+/**
+ * Triangles the scene will hold: every node that references a mesh counts it
+ * (instancing), unreferenced meshes count nothing (review M9). Without nodes,
+ * every mesh once.
+ */
+export function countGltfJsonTriangles(json) {
+  const meshes = json?.meshes ?? [];
+  const nodes = Array.isArray(json?.nodes) ? json.nodes : [];
+  const referenced = nodes.filter(n => Number.isInteger(n?.mesh) && meshes[n.mesh]);
+  if (!referenced.length) return meshes.reduce((n, m) => n + _meshTriangles(json, m), 0);
+  return referenced.reduce((n, node) => n + _meshTriangles(json, meshes[node.mesh]), 0);
+}
+
+/** Exact unless GPU instancing multiplies nodes at load (then a lower bound, warn-only). */
+export function gltfEstimate(json) {
+  const instanced = (json?.extensionsUsed ?? []).includes('EXT_mesh_gpu_instancing');
+  return instanced
+    ? { triangles: countGltfJsonTriangles(json), exact: false, warnOnly: true }
+    : { triangles: countGltfJsonTriangles(json), exact: true };
 }
 
 /** GLB header → byte length of its JSON chunk (or null when not a GLB). */
@@ -155,17 +173,18 @@ export async function estimateFileTriangles(blob, ext) {
       const tailLen = Math.min(size, 66 * 1024);
       const tail = await _slice(blob, size - tailLen, size);
       const modelBytes = await threeMFModelBytes(tail, size, (off, len) => _slice(blob, off, off + len));
-      return modelBytes ? { triangles: Math.round(modelBytes / THREEMF_BYTES_PER_TRIANGLE), exact: false } : null;
+      // Warn-only: paint / segmentation attributes make bytes per triangle vary widely.
+      return modelBytes ? { triangles: Math.round(modelBytes / THREEMF_BYTES_PER_TRIANGLE), exact: false, warnOnly: true } : null;
     }
     if (ext === '.glb') {
       const len = glbJsonChunkLength(await _slice(blob, 0, 20));
       if (!len || len > MAX_GLTF_JSON_BYTES) return null;
       const json = JSON.parse(new TextDecoder().decode(await _slice(blob, 20, 20 + len)));
-      return { triangles: countGltfJsonTriangles(json), exact: true };
+      return gltfEstimate(json);
     }
     if (ext === '.gltf') {
       if (size > MAX_GLTF_JSON_BYTES) return null;
-      return { triangles: countGltfJsonTriangles(JSON.parse(await blob.text())), exact: true };
+      return gltfEstimate(JSON.parse(await blob.text()));
     }
   } catch {
     return null;   // unreadable header: no pre-parse decision, the post-parse check decides

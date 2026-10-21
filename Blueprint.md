@@ -2578,7 +2578,7 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   `import/TriangleEstimate.estimateFileTriangles(blob, ext)` reads only small slices — exact for
   binary STL (`(size−84)/50`) and GLB/glTF accessors, sampled for ASCII STL (head + tail), OBJ (face
   lines) and 3MF (model size from the zip central directory ÷ 66 B/triangle) — and
-  `ImportLimits.assertPreParseCapacity` throws above 4× (estimates get a 25 % margin). It runs in
+  `ImportLimits.assertPreParseCapacity` throws above 4× on exact counts (glTF counted per referencing node), above 8× on sampled ASCII STL / OBJ estimates, never on 3MF or GPU-instanced glTF estimates (warn-only). It runs in
   `importWithDedupe` before hashing and in `loadFromBlob`; the over-budget toast shows once, up front.
   The post-parse `_assertContainerCapacity` stays as the backstop.
 - **Import off the UI thread:** `loadContainer` routes `.stl` / `.3mf` to

@@ -57,12 +57,14 @@ export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model
 }
 
 /** Margin on sampled (non-exact) estimates before they may refuse an import. */
-export const ESTIMATE_REFUSE_MARGIN = 1.25;
+/** Sampled estimates refuse only far above the limit (review M9): a wrong
+ *  refusal blocks a file the user may well be able to load. */
+export const ESTIMATE_REFUSE_MARGIN = 2;
 
 /**
  * Pre-parse budget decision (heavy-mesh spec §1/§3). Throws the refusal
  * message when the scene would exceed 4× the budget — on an exact count, or on
- * an estimate above 4× × ESTIMATE_REFUSE_MARGIN. Returns 'warn' above 1×,
+ * a sampled estimate above 4× × ESTIMATE_REFUSE_MARGIN (never for `warnOnly`). Returns 'warn' above 1×,
  * 'ok' otherwise, or 'unknown' when there is no estimate.
  * @param {{ triangles: number, exact: boolean } | null} estimate
  * @param {{ sceneTriangles?: number, budget: number, filename: string, desktop?: boolean }} ctx
@@ -72,7 +74,9 @@ export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, f
   if (!estimate || !(budget > 0)) return 'unknown';
   const projected = sceneTriangles + estimate.triangles;
   const limit = budget * 4;
-  const refuseAt = estimate.exact ? limit : limit * ESTIMATE_REFUSE_MARGIN;
+  // `warnOnly` estimates (3MF: bytes per triangle vary with per-triangle
+  // attributes) never refuse; the parse-time check is their backstop.
+  const refuseAt = estimate.exact ? limit : estimate.warnOnly ? Infinity : limit * ESTIMATE_REFUSE_MARGIN;
   if (projected > refuseAt) {
     const about = estimate.exact ? '' : 'about ';
     const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';
