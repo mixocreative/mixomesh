@@ -69,8 +69,15 @@ export async function serializeOBJ(ctx) {
   // (incl. U+3000) kept in the entry path but `_` in `mtllib` left slicers
   // with no MTL and a grey model (cia C-02).
   if (ctx.individually) {
+    // Unique (case-insensitively) BEFORE encoding: the zip packager's later
+    // rename of `P_cube.obj` to `P_cube_2.obj` cannot reach the `mtllib` line
+    // already written inside it, so `Cube` and `cube` swapped MTLs (cia C-08).
+    const taken = new Set();
     for (const unit of ctx.cloneGroups) {
-      const base = objToken(perMeshBaseName(ctx, unit.name));
+      const stem = objToken(perMeshBaseName(ctx, unit.name));
+      let base = stem;
+      for (let n = 2; taken.has(base.toLowerCase()); n++) base = `${stem}_${n}`;
+      taken.add(base.toLowerCase());
       entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base, materialNames }) });
       entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, materialNames, filenameByMaterialName) });
     }
