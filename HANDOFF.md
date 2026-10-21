@@ -8,6 +8,11 @@
 > Booleans in a Manifold worker (`booleanCore.js`, caps 250k web / 1M desktop);
 > lean STL + STL worker; chunked desktop export save (`export:beginSave` etc.).
 > New heavy work (supports, slicer) follows the rules in `docs/adr/0006-workers-and-memory.md`.
+> Clean builds: `npm run build` / `dist` first delete `dist/`, `release/` and
+> `node_modules/.vite` (`scripts/clean.mjs`; the Vite cache is kept while a dev
+> server listens on 5173). `release/` is therefore gone after a plain build —
+> run `npm run dist` again before `npm run smoke:packaged`. The installer build
+> keeps only the newest setup in `installers/`.
 
 > **2026-10-21 — UI style switch (New / Original) landed.** Spec
 > `docs/superpowers/specs/2026-10-21-ui-style-switch-design.md`, plan

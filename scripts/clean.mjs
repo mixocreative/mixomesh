@@ -9,13 +9,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import net from 'node:net';
 
 export const CLEAN_DIRS = ['dist', 'release', 'node_modules/.vite'];
 
-/** Remove the generated directories under `root`. Returns the ones that existed. */
-export function cleanBuildOutputs(root) {
+/** The `npm run dev` port (package.json "dev": vite --port 5173). */
+export const DEV_PORT = 5173;
+
+/** Remove the generated directories under `root`. Returns the ones that existed.
+ *  `keepViteCache`: leave node_modules/.vite (a running dev server owns it). */
+export function cleanBuildOutputs(root, { keepViteCache = false } = {}) {
   const removed = [];
   for (const rel of CLEAN_DIRS) {
+    if (keepViteCache && rel === 'node_modules/.vite') continue;
     const abs = path.join(root, rel);
     if (!fs.existsSync(abs)) continue;
     fs.rmSync(abs, { recursive: true, force: true });
@@ -40,8 +46,22 @@ export function pruneOldInstallers(dir, keepName) {
   return removed;
 }
 
+/** Is something accepting connections on 127.0.0.1:port? */
+export function isPortListening(port, timeoutMs = 300) {
+  return new Promise(resolve => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    const done = result => { socket.destroy(); resolve(result); };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const removed = cleanBuildOutputs(root);
+  // Deleting Vite's dep cache under a running dev server breaks that server.
+  const keepViteCache = await isPortListening(DEV_PORT);
+  const removed = cleanBuildOutputs(root, { keepViteCache });
   console.log(removed.length ? `clean: removed ${removed.join(', ')}` : 'clean: nothing to remove');
+  if (keepViteCache) console.log(`clean: kept node_modules/.vite (dev server running on ${DEV_PORT})`);
 }

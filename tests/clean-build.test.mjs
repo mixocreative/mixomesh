@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanBuildOutputs, pruneOldInstallers, CLEAN_DIRS } from '../scripts/clean.mjs';
+import { cleanBuildOutputs, pruneOldInstallers, CLEAN_DIRS, isPortListening } from '../scripts/clean.mjs';
+import { createServer } from 'node:net';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'mx-clean-'));
@@ -32,4 +33,20 @@ test('prunes older installer versions, keeping only the one just built (+ its ch
   assert.deepEqual(removed.sort(), ['MIXOMESH-Setup-0.0.9.exe', 'MIXOMESH-Setup-0.0.9.exe.sha256']);
   assert.deepEqual(readdirSync(dir).sort(), ['MIXOMESH-Setup-0.1.0.exe', 'MIXOMESH-Setup-0.1.0.exe.sha256', 'notes.txt']);
   assert.deepEqual(pruneOldInstallers(join(dir, 'missing'), 'x.exe'), [], 'missing folder is fine');
+});
+
+test('keepViteCache leaves the dev cache for a running dev server', () => {
+  const root = fixture();
+  const removed = cleanBuildOutputs(root, { keepViteCache: true });
+  assert.deepEqual(removed.sort(), ['dist', 'release']);
+  assert.equal(existsSync(join(root, 'node_modules/.vite')), true);
+});
+
+test('isPortListening detects a live dev-server port', async () => {
+  const server = createServer().listen(0, '127.0.0.1');
+  await new Promise(r => server.once('listening', r));
+  const { port } = server.address();
+  assert.equal(await isPortListening(port), true);
+  await new Promise(r => server.close(r));
+  assert.equal(await isPortListening(port), false);
 });
