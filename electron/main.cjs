@@ -14,7 +14,10 @@ const {
 const { createKvStore } = require('./KvStore.cjs');
 const { parseLaunchArgv, validateLaunchPath } = require('./LaunchArgs.cjs');
 const { buildLaunchBatch, createLaunchQueue } = require('./LaunchQueue.cjs');
-const { createApiServer, apiError: makeApiError, METHOD_NAMES: API_METHOD_NAMES, readSessionFile: readApiSession } = require('./ApiServer.cjs');
+const {
+  createApiServer, apiError: makeApiError, METHOD_NAMES: API_METHOD_NAMES, readSessionFile: readApiSession,
+  readApiEnabled, API_KV_KEY,
+} = require('./ApiServer.cjs');
 const { createJobRunner, LIMITS: JOB_LIMITS } = require('./JobRunner.cjs');
 const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/index.cjs');
 const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
@@ -654,11 +657,12 @@ app.on('second-instance', (_event, argv, workingDirectory) => {
 // it to the renderer ('api:request') and resolves it when the renderer answers 'api:response'.
 // The renderer never sees a path (ApiServer rewrites them to opaque tokens first). Enabled by
 // default; the Preferences toggle persists KV key 'api_enabled' (absent = enabled, false = off).
-const API_KV_KEY = 'api_enabled';
+// An unreadable KV file keeps it off (readApiEnabled) and the renderer shows `_apiNotice`.
 const API_MAX_NOTIFY_BYTES = 64 * 1024;
 const API_PENDING_MAX_MS = 10 * 60 * 1000 + 30000;   // ApiServer times out at 10 min; this only reaps
 let _apiServer = null;
 let _apiEnabled = true;
+let _apiNotice = null;
 let _apiChain = Promise.resolve();                    // serialises start/stop
 let _apiSeq = 0;
 const _apiPending = new Map();                        // id -> {resolve, reject, sender, timer}
@@ -718,7 +722,7 @@ function _createApiServer() {
 }
 
 function _apiStatus() {
-  return { enabled: _apiEnabled, running: !!_apiServer };
+  return { enabled: _apiEnabled, running: !!_apiServer, notice: _apiNotice };
 }
 
 function _apiApply(enabled) {
@@ -767,6 +771,7 @@ handle('api:notify', (_e, evt) => {
 handle('api:setEnabled', async (_e, enabled) => {
   if (typeof enabled !== 'boolean') throw new Error('api:setEnabled expects a boolean');
   _apiEnabled = enabled;
+  _apiNotice = null;
   await _kv.set(API_KV_KEY, enabled);
   try { await _apiApply(enabled); } catch (err) {
     console.error('api server toggle failed:', err?.message ?? err);
@@ -869,9 +874,9 @@ if (_gotLock) app.whenReady().then(async () => {
     userDataDir: app.getPath('userData'), safeStorage, adapters: await _loadListbridgeAdapters(),
   });
   createWindow();
-  // API server: after the window exists. Absent flag = enabled; only the explicit boolean false
-  // disables. Other smoke modes keep their exact behaviour (no pipe); MIXO_SMOKE=api requires it.
-  _apiEnabled = (await _kv.get(API_KV_KEY).catch(() => null)) !== false;
+  // API server: after the window exists. Other smoke modes keep their exact behaviour (no pipe);
+  // MIXO_SMOKE=api requires it.
+  ({ enabled: _apiEnabled, notice: _apiNotice } = await readApiEnabled(_kv));
   if (_apiEnabled && (!process.env.MIXO_SMOKE || SMOKE_API)) {
     try {
       await _apiApply(true);

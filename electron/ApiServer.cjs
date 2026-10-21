@@ -134,6 +134,24 @@ async function readSessionFile(fs, userDataDir) {
   return doc;
 }
 
+const API_KV_KEY = 'api_enabled';
+
+/**
+ * Startup read of the Preferences API switch: absent = on, false = off, but only from a file
+ * that read cleanly. An unreadable or quarantined file fails closed (the user may have turned
+ * the API off), and a quarantined one gets an explicit false so the next start stays off too.
+ */
+async function readApiEnabled(kv) {
+  const off = { enabled: false, notice: 'settings-unreadable' };
+  let value;
+  try { value = await kv.get(API_KV_KEY); } catch { return off; }
+  if (kv.damaged()) {
+    await kv.set(API_KV_KEY, false).catch(() => {});
+    return off;
+  }
+  return { enabled: value !== false, notice: null };
+}
+
 /**
  * @param {object} deps
  *  net {createServer}, fs {mkdir,writeFile,rename,unlink,realpath,stat,access},
@@ -606,6 +624,6 @@ function createApiServer(deps) {
 }
 
 module.exports = {
-  createApiServer, pipeNameFor, readSessionFile, containsAbsolutePath, apiError, LIMITS,
+  createApiServer, pipeNameFor, readSessionFile, readApiEnabled, API_KV_KEY, containsAbsolutePath, apiError, LIMITS,
   API_VERSION, ERROR_CODES, METHOD_NAMES, EVENT_TYPES, PATH_METHODS, OUTPUT_EXTENSIONS,
 };

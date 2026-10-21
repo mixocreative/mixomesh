@@ -40,7 +40,7 @@ function countFor(kind, method, result) {
 
 /**
  * @param {{
- *   bridge: {onApiRequest?:Function, respondApi?:Function, notifyApi?:Function},
+ *   bridge: {onApiRequest?:Function, respondApi?:Function, notifyApi?:Function, getApiStatus?:Function},
  *   createDispatcher: (extra:{notify:(evt:any)=>void})=>Promise<{dispatch:(m:string,p:any)=>Promise<any>}>|{dispatch:Function},
  *   toast?: (message:string, type:string, duration:number)=>any,
  *   t?: (key:string, fallback:string, params?:object)=>string,
@@ -114,8 +114,19 @@ export function createApiBridge(deps) {
     try { await bridge.respondApi(res); } catch (err) { console.warn('[api] respond failed:', scrub(err?.message)); }
   }
 
+  // Main turned the API off because its settings file could not be read (B-01): say so once.
+  async function _showStartupNotice() {
+    let status = null;
+    try { status = await bridge.getApiStatus?.(); } catch { return; }
+    if (status?.notice !== 'settings-unreadable') return;
+    try {
+      toast(t('api.notice.settingsUnreadable', 'Automation API turned off: its settings could not be read. Turn it on again in Preferences.'), 'warning', 8000);
+    } catch { /* toast failure is non-fatal */ }
+  }
+
   /** Subscribe to requests. No bridge -> no-op. Returns unsubscribe. */
   function init() {
+    _showStartupNotice();
     if (typeof bridge.onApiRequest !== 'function' || typeof bridge.respondApi !== 'function') return () => {};
     const off = bridge.onApiRequest(req => { handle(req); });
     return typeof off === 'function' ? off : () => {};

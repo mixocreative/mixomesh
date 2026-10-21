@@ -28,6 +28,7 @@ function createKvStore(filePath, deps = {}) {
   };
   let chain = Promise.resolve();
   let tmpSeq = 0;
+  let damage = null;   // sticky: what this process found unreadable, so callers can fail closed
 
   const enqueue = task => {
     const run = chain.then(task, task);   // keep the chain alive after a rejection
@@ -40,6 +41,7 @@ function createKvStore(filePath, deps = {}) {
   async function quarantine(reason) {
     const stamp = new Date(io.now()).toISOString().replace(/[:.]/g, '-');
     const corruptPath = `${filePath}.corrupt-${stamp}`;
+    damage ??= { reason, corruptPath };
     try {
       await io.rename(filePath, corruptPath);
       io.log(`[KvStore] ${filePath} is unreadable (${reason}); moved to ${corruptPath} and starting empty`);
@@ -87,6 +89,8 @@ function createKvStore(filePath, deps = {}) {
     get: key => enqueue(async () => { const o = await read(); return key in o ? o[key] : null; }),
     delete: key => enqueue(async () => { const o = await read(); delete o[key]; await write(o); }),
     keys: () => enqueue(async () => Object.keys(await read())),
+    /** The first quarantine this process made ({reason, corruptPath}), or null if the file always read cleanly. */
+    damaged: () => damage,
     /** Resolves once every op queued so far has settled (test/shutdown helper). */
     flush: () => chain,
   };
