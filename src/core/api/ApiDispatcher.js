@@ -248,12 +248,21 @@ export function createDispatcher(deps) {
       throw apiError('E_CONFIRM_REQUIRED', `${method} ${why}; pass confirm:true to proceed`, { method });
     }
   }
-  async function guardDirty(method, p) {
-    if (!deps.persistence.isDirty()) return;
-    if (p.confirm !== true) {
+  function guardDirty(method, p) {
+    if (deps.persistence.isDirty() && p.confirm !== true) {
       throw apiError('E_DIRTY', `${method}: the open project has unsaved changes; pass confirm:true to discard them`, { method });
     }
-    deps.persistence.discardChanges();   // no dialog in a hidden window
+  }
+  // Discard unsaved work only for a replacement that succeeds: the hidden window cannot answer
+  // the dirty dialog, so clear it up front, and mark the work unsaved again if `replace` fails.
+  async function replacingProject(replace) {
+    const restore = deps.persistence.isDirty() ? deps.persistence.discardChanges() : null;
+    try {
+      await replace();
+    } catch (e) {
+      restore?.();
+      throw e;
+    }
   }
 
   // ---------- handlers ----------
@@ -276,16 +285,16 @@ export function createDispatcher(deps) {
     'app.ping': async () => ({ pong: true, time: now() }),
 
     'project.new': async p => {
-      await guardDirty('project.new', p);
-      await deps.persistence.newProject();
+      guardDirty('project.new', p);
+      await replacingProject(() => deps.persistence.newProject());
       return projectInfo();
     },
     'project.open': async p => {
-      await guardDirty('project.open', p);
+      guardDirty('project.open', p);
       let file;
       try { file = await deps.readFile(p.file.ref); } catch { file = null; }
       if (!file) throw apiError('E_NOT_FOUND', `cannot read project "${p.file.name}"`);
-      await deps.persistence.openPicked({ ref: p.file.ref, file });
+      await replacingProject(() => deps.persistence.openPicked({ ref: p.file.ref, file }));
       return projectInfo();
     },
     'project.save': async () => {

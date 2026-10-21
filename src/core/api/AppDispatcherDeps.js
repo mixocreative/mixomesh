@@ -149,7 +149,11 @@ export async function createAppDispatcher(extra = {}) {
     },
     persistence: {
       isDirty: () => PersistenceManager.isDirty(),
-      discardChanges: () => Dirty.clearDirty(),
+      // Returns the undo: PROJECT_DIRTY marks the work unsaved again (sticky) if the replacement fails.
+      discardChanges: () => {
+        Dirty.clearDirty();
+        return () => SM.dispatch(EVENTS.PROJECT_DIRTY, {});
+      },
       hasSaveTarget: () => Persistence.hasSaveTarget(),
       newProject: () => PersistenceManager.newProject(),
       openPicked: picked => PersistenceManager.openPicked(picked),
