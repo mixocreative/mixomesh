@@ -204,6 +204,7 @@
   "print.representation.cancel": "Cancel build",
   "print.representation.useOriginal": "Use original",
   "print.refine.title": "Print refinement",
+  "print.refine.sourceBadge": "Mixo 3D",
   "print.refine.authored": "Blender subdivision: Viewport {viewport} · Render {render}. The imported GLB is the original view.",
   "print.refine.levelGroup": "Print refinement level",
   "print.refine.off": "Off — original GLB",

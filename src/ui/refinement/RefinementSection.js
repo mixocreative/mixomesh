@@ -39,7 +39,7 @@ export function renderRefinementSection(object, progress = null, batchCount = 1,
   if (!valid) state = setting.preview === 'refined' ? `<button type="button" data-action="refine-original">${escape(t('print.refine.useOriginal'))}</button>` : '';
   const unavailable = !valid ? `<p class="mixo-refine-note">${escape(availability?.reason ?? t('print.refine.unavailable'))}</p>` : '';
   return `<section class="pp-section mixo-refine-section" data-section="print-refinement" data-object-id="${escapeAttr(object.id)}">
-    <header class="pp-section-header">${escape(t('print.refine.title'))} <span class="mixo-source-badge">Mixo 3D</span></header>
+    <header class="pp-section-header">${escape(t('print.refine.title'))} <span class="mixo-source-badge">${escape(t('print.refine.sourceBadge'))}</span></header>
     <div class="pp-section-body">
       <p class="mixo-refine-note">${escape(t('print.refine.authored', { viewport: provenance.viewportSubdivLevel, render: provenance.renderSubdivLevel }))}</p>
       ${unavailable}${levelButtons}${state}

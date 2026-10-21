@@ -204,6 +204,7 @@
   "print.representation.cancel": "作成を中止",
   "print.representation.useOriginal": "元の形状を使用",
   "print.refine.title": "印刷用細分化",
+  "print.refine.sourceBadge": "Mixo 3D",
   "print.refine.authored": "Blender の細分化設定: ビューポート {viewport} · レンダー {render}。読み込んだ GLB が元の表示です。",
   "print.refine.levelGroup": "印刷用細分化レベル",
   "print.refine.off": "オフ — 元の GLB",
