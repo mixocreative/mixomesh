@@ -2586,7 +2586,13 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   fetches the blob URL itself. STL welds exact-equal corners (open-addressing hash on float bits,
   no strings) and splits vertices only at creases > 40° (flat CAD edges, smooth scans at ~T/2
   vertices); names, axis swap (file x,y,z → x,z,y) and corner order match Babylon's STL loader, so
-  triangle counts and placement are unchanged. 3MF model parts are inflated and decoded in chunks
+  triangle counts and placement are unchanged. **The faceted look is kept**: `scene/FlatShading.js`
+  registers a Standard/PBR material plugin (`MXFLAT` define per mesh, injected at
+  `CUSTOM_FRAGMENT_BEFORE_LIGHTS`, GLSL + WGSL) that shades meshes with `metadata.flatShading`
+  (set by `buildStlContainer`) with the screen-space face normal; the **Smooth shading** viewport
+  toggle (`scene.overlays.smoothShading`, per-user setting, default off) turns it off. Place Face on
+  Bed uses `getNormal(true, false)` (geometric face normal); OBJ export omits `vn` for faceted
+  meshes. 3MF model parts are inflated and decoded in chunks
   into the push SAX parser (`createThreeMFXmlParser`; no string over V8's limit), triangles packed
   Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` (textures via a
   zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did

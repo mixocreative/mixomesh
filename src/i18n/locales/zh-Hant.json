@@ -877,6 +877,8 @@
   "viewport.toggle.axes": "座標軸",
   "viewport.toggle.bed": "列印範圍",
   "viewport.toggle.section": "剖面",
+  "viewport.toggle.smooth": "平滑",
+  "viewport.smoothShadingTitle": "平滑著色（僅顯示）：將匯入的 STL 網格面平滑顯示。關閉時顯示列印時實際的面。",
   "scope.root": "場景",
   "scope.escHint": "按 Esc 離開群組",
   "scope.aria": "群組路徑",

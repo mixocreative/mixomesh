@@ -877,6 +877,8 @@
   "viewport.toggle.axes": "軸",
   "viewport.toggle.bed": "造形領域",
   "viewport.toggle.section": "断面",
+  "viewport.toggle.smooth": "スムーズ",
+  "viewport.smoothShadingTitle": "スムーズシェーディング（表示のみ）：読み込んだ STL の面をなめらかに表示します。オフでは印刷される面がそのまま見えます。",
   "scope.root": "シーン",
   "scope.escHint": "Esc でグループを出る",
   "scope.aria": "グループの階層",

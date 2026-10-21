@@ -16,6 +16,7 @@ import { t } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { ScenePanel } from './ScenePanel.js';
 import { ScopeBreadcrumb } from './ScopeBreadcrumb.js';
+import { SettingsStore } from '../core/SettingsStore.js';
 
 let _root = null;
 
@@ -26,6 +27,8 @@ const FEATURE_TOGGLES = [
   { id: 'axes',    kind: 'overlay', iconName: 'Move3D',  key: 'viewport.toggle.axes',    fallback: 'Axes' },
   { id: 'bedPreview', kind: 'overlay', iconName: 'Box',  key: 'viewport.toggle.bed',     fallback: 'Build volume' },
   { id: 'section', kind: 'section', iconName: 'Scissors', key: 'viewport.toggle.section', fallback: 'Cross-section' },
+  // View-only, per-user (persisted): welded STL renders faceted unless this is on (review I1).
+  { id: 'smoothShading', kind: 'overlay', iconName: 'Disc3', key: 'viewport.toggle.smooth', fallback: 'Smooth shading', titleKey: 'viewport.smoothShadingTitle', persist: true },
 ];
 const SECTION_DEFAULTS = { enabled: false, axis: 'z', offsetMM: 0, flip: false };
 
@@ -55,8 +58,9 @@ function _render() {
   const featureBtns = FEATURE_TOGGLES.map(f => {
     const on = f.kind === 'section' ? sectionOn : !!overlays[f.id];
     const label = tr(f.key, f.fallback);
+    const title = f.titleKey ? t(f.titleKey) : label;
     return `<button class="vt-btn vt-feature ${on ? 'vt-on' : ''}" data-feature="${escapeAttr(f.id)}"
-            title="${escapeAttr(label)}" aria-pressed="${on ? 'true' : 'false'}">
+            title="${escapeAttr(title)}" aria-pressed="${on ? 'true' : 'false'}">
       ${icon(f.iconName, { width: 14, height: 14 })}<span class="vt-label">${escapeHtml(label)}</span>
     </button>`;
   }).join('');
@@ -144,6 +148,7 @@ function _toggleFeature(id) {
       scene: { ...s.scene, overlays: { ...s.scene.overlays, [id]: enabled } },
     }), { silent: true });
     SceneManager.setOverlay(id, enabled);
+    if (f.persist) SettingsStore.scheduleSave();
   }
   _render();
   ScenePanel.refresh();   // keep the Scene panel's own toggles in step

@@ -35,7 +35,7 @@
     "turntable": { "durationS": 8, "fps": 30, "direction": "left", "ease": true }
   },
   "grid": { "cellMM": 10, "subdivisions": 10 },
-  "overlays": { "grid": true, "axes": true, "printPreview": true },
+  "overlays": { "grid": true, "axes": true, "printPreview": true, "smoothShading": false },
   "print": {
     "exportTargets": [],
     "referenceObjectId": null,

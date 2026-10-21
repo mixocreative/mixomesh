@@ -877,6 +877,8 @@
   "viewport.toggle.axes": "Axes",
   "viewport.toggle.bed": "Build volume",
   "viewport.toggle.section": "Cross-section",
+  "viewport.toggle.smooth": "Smooth",
+  "viewport.smoothShadingTitle": "Smooth shading (view only): blend the facets of imported STL meshes. Off shows the facets the print will have.",
   "scope.root": "Scene",
   "scope.escHint": "Esc to exit group",
   "scope.aria": "Group path",

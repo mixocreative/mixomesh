@@ -29,6 +29,7 @@ import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
 import { initSelectionOutline, suspendOutline, isOutlineEnabled, setActive, setSelected, setOutlineColors, setOutlineLightMode } from './scene/SelectionOutline.js';
 import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState, setCursorColor } from './scene/Cursor3D.js';
 import { HeavyPick } from './scene/HeavyPick.js';
+import { FlatShading } from './scene/FlatShading.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
   setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
@@ -96,7 +97,11 @@ export async function init(canvas) {
   // dynamic), NOT the raw adaptToDeviceRatio — full DPR on a 2×/4K display is
   // 4× the fragments and tanks heavy 4096²/high-poly print scenes.
 
+  // Before the scene: every Standard/PBR material created from here on gets the
+  // flat-shading plugin (welded STL renders faceted, review I1).
+  FlatShading.install();
   _scene = new BABYLON.Scene(_engine);
+  FlatShading.attachScene(_scene);
   // Heavy-mesh spec §7.5: nothing reads pointerInfo.pickInfo, so Babylon's own
   // implicit picks on every pointer down / up / move (orbit included) are pure
   // cost — up to three full mesh picks per click. The app picks explicitly,
@@ -389,7 +394,7 @@ function _setupAxes() {
 
 /**
  * Toggle a named scene overlay.
- * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'uvCheckerView'|'invertedFaces'|'bedPreview'} name
+ * @param {'grid'|'axes'|'wireframe'|'wireframeEdges'|'printPreview'|'baseColorView'|'uvCheckerView'|'invertedFaces'|'bedPreview'|'smoothShading'} name
  * @param {boolean} on
  */
 export function setOverlay(name, on) {
@@ -421,6 +426,9 @@ export function setOverlay(name, on) {
       break;
     case 'wireframeEdges':
       setWireframeEdgesMode(on);
+      break;
+    case 'smoothShading':
+      FlatShading.setSmooth(on);
       break;
     case 'bedPreview':
       if (on) _bedUpdatePreview(getState().print.bedDimensions);

@@ -50,7 +50,7 @@ test('pickSettings keeps only the persisted slices, drops content + pose', () =>
   assert.equal('pose' in picked.renderOut, false);
   assert.equal(picked.pivotMode, 'active');
   // overlays narrowed to display prefs only
-  assert.deepEqual(Object.keys(picked.overlays).sort(), ['axes', 'grid', 'printPreview']);
+  assert.deepEqual(Object.keys(picked.overlays).sort(), ['axes', 'grid', 'printPreview', 'smoothShading']);
   // gizmo narrowed to space + snap (mode excluded)
   assert.deepEqual(Object.keys(picked.gizmo).sort(), ['snap', 'space']);
 });

@@ -9,6 +9,7 @@
 import { WorkerTask } from './workers/WorkerTask.js';
 import { buildThreeMFContainerFromParsed } from './ThreeMFLoader.js';
 import { caps } from './storage/capabilities.js';
+import { markFlat } from './scene/FlatShading.js';
 
 const BABYLON = window.BABYLON;
 
@@ -41,6 +42,8 @@ export function buildStlContainer(scene, meshes) {
       vd.normals = m.normals;
       vd.indices = m.indices;
       vd.applyToMesh(mesh);
+      // Welded geometry, faceted look: STL always rendered flat (review I1).
+      markFlat(mesh);
       mesh.computeWorldMatrix(true);
       container.meshes.push(mesh);
     }

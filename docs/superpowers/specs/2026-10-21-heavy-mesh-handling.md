@@ -57,8 +57,14 @@ decides.
   job and keep nothing after the job.
 - **Welded, indexed geometry**, `Uint32Array` indices. STL welds by exact float bits with a
   typed-array open-addressing hash — no strings, no per-vertex objects. Vertices are split again
-  only at creases (> 40° between face normals) so hard CAD edges keep flat shading; a smooth scan
-  stays at ~T/2 vertices (~18–24 B/triangle on the CPU instead of 84).
+  only at creases (> 40° between face normals; degenerate faces never seed a split group); a smooth
+  scan stays at ~T/2 vertices (~18–24 B/triangle on the CPU instead of 84).
+- **Look is unchanged (decision, review I1):** welded STL still renders **faceted** by default — a
+  material plugin replaces the fragment normal with the screen-space face normal
+  (`cross(dFdx(p), dFdy(p))`, oriented like the interpolated normal) for meshes flagged
+  `flatShading`. A per-user **Smooth shading** view toggle (off by default, persisted, translated)
+  shows the stored smooth/crease normals instead. Picking, Place Face on Bed (geometric face
+  normal) and exports are independent of the toggle; OBJ export writes no `vn` for faceted meshes.
 - **Parsing never runs on the UI thread** for STL / 3MF: the worker reads the `Blob` itself (a Blob
   crosses `postMessage` by reference, no copy) and transfers typed arrays back.
 - **3MF model XML is streamed** (inflate → `TextDecoder` stream → SAX) so a 10M-triangle model
