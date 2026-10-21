@@ -6,6 +6,7 @@
 
 import { EVENTS } from './events.js';
 import { dispatch, withoutDirty } from './StateManager.js';
+import { caps } from './storage/capabilities.js';
 
 export * from './commands/TransformCommands.js';
 export * from './commands/HierarchyCommands.js';
@@ -20,6 +21,17 @@ export * from './commands/PrinterCommands.js';
 export * from './commands/RefinementCommands.js';
 
 const STACK_LIMIT = 200;
+
+// Heavy-mesh spec §4 — history never pins a big mesh forever. Commands that
+// keep meshes alive for undo/redo expose
+//   retainedTriangles(side) → triangles held only for that side
+//   release(side)           → free them, the entry is gone for good
+// where side 'undo' = the entry sits on the undo stack (it was executed) and
+// 'redo' = on the redo stack (it was undone). An entry leaving the 200-step
+// window or a dropped redo branch is released; the undo side's retained total
+// is also capped at the tier's triangle budget (oldest entries go first, the
+// newest always stays undoable).
+let _retainCap = null;   // null = caps.triangleBudget
 
 let _undoStack = [];
 let _redoStack = [];
@@ -36,7 +48,38 @@ class BatchCommand {
   }
   execute() { this._commands.forEach(c => c.execute()); }
   undo()    { [...this._commands].reverse().forEach(c => c.undo()); }
+  retainedTriangles(side) { return this._commands.reduce((n, c) => n + _retained(c, side), 0); }
+  release(side) { for (const c of this._commands) _release(c, side); }
 }
+
+function _retained(cmd, side) {
+  try { return cmd?.retainedTriangles?.(side) ?? 0; } catch { return 0; }
+}
+
+function _release(cmd, side) {
+  try { cmd?.release?.(side); } catch (err) { console.error('History release failed:', err); }
+}
+
+function _dropRedo() {
+  for (const cmd of _redoStack) _release(cmd, 'redo');
+  _redoStack = [];
+}
+
+function _trimUndo() {
+  while (_undoStack.length > STACK_LIMIT) _release(_undoStack.shift(), 'undo');
+  const cap = _retainCap ?? caps.triangleBudget;
+  if (!(cap > 0)) return;
+  let total = 0;
+  for (const cmd of _undoStack) total += _retained(cmd, 'undo');
+  while (total > cap && _undoStack.length > 1) {
+    const cmd = _undoStack.shift();
+    total -= _retained(cmd, 'undo');
+    _release(cmd, 'undo');
+  }
+}
+
+/** Test seam: override the retained-triangle cap (null = tier budget). */
+export function setRetainCap(cap) { _retainCap = cap; }
 
 // ── Public API ───────────────────────────────────────────
 
@@ -55,8 +98,8 @@ export function push(command) {
     }
     command._serial = ++_serial;
     _undoStack.push(command);
-    if (_undoStack.length > STACK_LIMIT) _undoStack.shift();
-    _redoStack = [];
+    _dropRedo();
+    _trimUndo();
     dispatch(EVENTS.HISTORY_PUSHED, { label: command.label });
   } finally {
     _applying = false;
@@ -85,6 +128,7 @@ export function redo() {
     const cmd = _redoStack.pop();
     withoutDirty(() => cmd.execute());
     _undoStack.push(cmd);
+    _trimUndo();
     dispatch(EVENTS.HISTORY_REDONE, { label: cmd.label });
   } finally {
     _applying = false;
@@ -140,12 +184,12 @@ export function endBatch() {
   const batch = new BatchCommand(label, cmds);
   batch._serial = ++_serial;
   _undoStack.push(batch);
-  if (_undoStack.length > STACK_LIMIT) _undoStack.shift();
-  _redoStack = [];
+  _dropRedo();
+  _trimUndo();
   dispatch(EVENTS.HISTORY_PUSHED, { label: batch.label });
 }
 
 export const HistoryManager = {
   push, undo, redo, clear, getUndoLabel, getRedoLabel, beginBatch, endBatch,
-  getPosition, isApplying,
+  getPosition, isApplying, setRetainCap,
 };

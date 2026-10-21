@@ -47,9 +47,15 @@ export function bump(meshOrId) {
   return revision;
 }
 
+/** Drop one mesh's revision (its mesh was released for good). */
+export function forgetRevision(meshOrId) {
+  const id = _id(meshOrId);
+  if (id) _revisions.delete(id);
+}
+
 /** Drop every revision: the project was reset and its meshes disposed
- *  (MeshRegistry.resetRegistry). Deleted objects stay alive for undo, so
- *  this is the only point where revisions can be released. */
+ *  (MeshRegistry.resetRegistry). Deleted objects stay alive for undo until
+ *  their history entry is dropped (MeshRegistry.releaseMesh → forgetRevision). */
 export function clearRevisions() {
   _revisions.clear();
 }
@@ -73,11 +79,17 @@ function _toWorld(positions, m) {
  */
 export function extract(mesh, { space = 'local', uvs = false } = {}) {
   const src = mesh?.getVerticesData?.(POSITION);
-  const positions = src ? Float32Array.from(src) : new Float32Array(0);
+  // slice() on a same-type typed array is a straight memory copy; from()
+  // iterates element by element (heavy-mesh task g: 10M triangles).
+  const positions = src ? (src instanceof Float32Array ? src.slice() : Float32Array.from(src)) : new Float32Array(0);
   const rawIndices = mesh?.getIndices?.();
-  const indices = rawIndices
-    ? Uint32Array.from(rawIndices)
-    : Uint32Array.from({ length: positions.length / 3 }, (_, i) => i);
+  let indices;
+  if (rawIndices) {
+    indices = rawIndices instanceof Uint32Array ? rawIndices.slice() : Uint32Array.from(rawIndices);
+  } else {
+    indices = new Uint32Array(positions.length / 3);
+    for (let i = 0; i < indices.length; i++) indices[i] = i;   // no per-element callback
+  }
   if (space === 'world' && positions.length) {
     const m = mesh.computeWorldMatrix(true)?.m;
     if (m) _toWorld(positions, m);
@@ -85,7 +97,7 @@ export function extract(mesh, { space = 'local', uvs = false } = {}) {
   const out = { positions, indices, revision: revisionOf(mesh) };
   if (uvs) {
     const srcUv = mesh?.getVerticesData?.(UV);
-    out.uvs = srcUv ? Float32Array.from(srcUv) : new Float32Array(0);
+    out.uvs = srcUv ? (srcUv instanceof Float32Array ? srcUv.slice() : Float32Array.from(srcUv)) : new Float32Array(0);
   }
   return out;
 }

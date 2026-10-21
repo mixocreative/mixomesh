@@ -213,9 +213,13 @@ function _setCollectionName(collectionId, name) {
   dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name });
 }
 
+const _tris = (mesh) => (mesh && !mesh.isDisposed?.() ? (mesh.getTotalIndices?.() ?? 0) / 3 : 0);
+
 /**
  * Soft-delete: meshes are kept in memory (setEnabled(false)) so undo can
  * restore them without re-loading the asset. State entries are removed.
+ * When the entry leaves the undo window (HistoryManager release, heavy-mesh
+ * spec §4) the meshes are disposed for good.
  */
 export class DeleteCommand {
   constructor(meshIds) {
@@ -287,6 +291,16 @@ export class DeleteCommand {
         restoreSceneObject(s.id, s.obj);
       }
     });
+  }
+  /** Executed (undo side): the deleted meshes are held only for this entry. */
+  retainedTriangles(side) {
+    return side === 'undo' ? this._snapshots.reduce((n, s) => n + _tris(s.mesh), 0) : 0;
+  }
+  release(side) {
+    if (side !== 'undo') return;   // undone: the meshes are live scene content again
+    for (const s of this._snapshots) {
+      if (s.mesh?.isEnabled?.() === false) AssetLoader.releaseMesh(s.id, s.mesh);
+    }
   }
 }
 

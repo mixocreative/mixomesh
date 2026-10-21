@@ -5,11 +5,15 @@
 // explicitly to avoid leaks. Never persisted in state.
 
 import { DEFAULT_SOURCE_UNIT } from '../ImportNormalizer.js';
-import { clearRevisions } from '../geometry/GeometryStore.js';
+import { clearRevisions, forgetRevision } from '../geometry/GeometryStore.js';
 
 const _containers   = new Map();    // assetId → BABYLON.AssetContainer
 const _meshRegistry = new Map();    // meshId  → BABYLON.AbstractMesh
 const _orphanMeshes = new Set();
+// Meshes freed while their container lives on (history release, heavy-mesh
+// spec §4). They keep their slot in getContainerGeomMeshes so the saved
+// `containerMeshIndex` of the container's other meshes never shifts.
+const _released = new WeakSet();
 
 let _idCounter = 0;
 
@@ -66,7 +70,26 @@ export function trackOrphan(mesh) {
 export function getContainerGeomMeshes(assetId) {
   const container = _containers.get(assetId);
   if (!container) return [];
-  return container.meshes.filter(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0);
+  return container.meshes.filter(m => _released.has(m) || (m.geometry && (m.getTotalVertices?.() ?? 0) > 0));
+}
+
+/**
+ * Free a mesh that only a dropped undo/redo entry still held (heavy-mesh spec
+ * §4: history never pins a big mesh forever). Disposes it (GPU + CPU data;
+ * shared materials untouched), unregisters its id if it still maps to it and
+ * forgets its geometry revision. Its container slot stays (see _released).
+ * @param {string|null} meshId
+ * @param {any} mesh
+ * @returns {boolean} true when something was freed
+ */
+export function releaseMesh(meshId, mesh) {
+  if (!mesh || mesh.isDisposed?.()) return false;
+  _released.add(mesh);
+  if (meshId && _meshRegistry.get(meshId) === mesh) _meshRegistry.delete(meshId);
+  _orphanMeshes.delete(mesh);
+  if (meshId) forgetRevision(meshId);
+  try { mesh.dispose(false, false); } catch { /* already gone */ }
+  return true;
 }
 
 /**

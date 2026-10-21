@@ -13,7 +13,7 @@ import { isMeshExt, isTextureExt } from './assets/AssetTypes.js';
 import { revokeBlobUrl, revokeAllBlobUrls } from './assets/BlobUrls.js';
 import {
   getContainer, removeContainer, getBabylonMesh,
-  getContainerGeomMeshes, bindRestoredMesh, resetRegistry,
+  getContainerGeomMeshes, bindRestoredMesh, resetRegistry, releaseMesh,
 } from './assets/MeshRegistry.js';
 import { mountDirectory, registerMount, getDirectoryHandle, SESSION_KEY } from './assets/DirMounts.js';
 import { revokeObjSiblings, revokeAllObjSiblings } from './assets/ObjSiblings.js';
@@ -36,7 +36,7 @@ import {
 
 export { mountDirectory, registerMount, getDirectoryHandle, SESSION_KEY };
 export { loadFromBlob, loadFromHandle, instantiateAsset, isImporting };
-export { getContainer, getBabylonMesh, getContainerGeomMeshes, bindRestoredMesh };
+export { getContainer, getBabylonMesh, getContainerGeomMeshes, bindRestoredMesh, releaseMesh };
 export {
   getAssetBytes, restoreContainer, cacheAssetBlob,
   cloneRestoredMesh, cloneMeshAsNewObject, restoreCloneToScene,
@@ -115,7 +115,7 @@ export const AssetLoader = {
   isMeshExt, isTextureExt,
   releaseAsset, removeAsset, instantiateAsset, getContainer, getBabylonMesh, getDirectoryHandle,
   cloneMeshAsNewObject, restoreCloneToScene,
-  getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh, cloneRestoredMesh,
+  getContainerGeomMeshes, getAssetBytes, restoreContainer, bindRestoredMesh, cloneRestoredMesh, releaseMesh,
   bindRestoredTexture,
   restoreTexture, registerAssetEntry, cacheAssetBlob, registerBakedResult, resetAll,
   bakeImportTransform, importScaleFactor,

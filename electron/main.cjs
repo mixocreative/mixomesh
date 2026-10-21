@@ -22,6 +22,11 @@ const {
   SECURE_WEB_PREFERENCES, appEntryUrl, guardWebContents, denyAllPermissions, isTrustedSender,
 } = require('./WindowSecurity.cjs');
 
+const { applyHeapFlags } = require('./HeapFlags.cjs');
+
+// Before app ready: room for heavy (2M-10M+ triangle) print meshes in the renderer.
+applyHeapFlags(app);
+
 const DEV_URL = process.env.MIXO_DEV_URL || '';
 const INDEX_PATH = path.join(__dirname, '..', 'dist', 'index.html');
 // The ONE document the renderer may show (task 6.1): navigation, window.open

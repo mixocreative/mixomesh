@@ -197,4 +197,18 @@ export class BooleanCommand {
       if (ids.length) Selection.set(ids, ids[0]);
     });
   }
+
+  /** Executed (undo side): the operands are held only so undo can bring them back. */
+  retainedTriangles(side) {
+    if (side !== 'undo') return 0;
+    return this._snapshots.reduce((n, s) => n + (s.mesh && !s.mesh.isDisposed?.() ? (s.mesh.getTotalIndices?.() ?? 0) / 3 : 0), 0);
+  }
+
+  /** Entry dropped from the undo window: free the hidden operands (heavy-mesh spec §4). */
+  release(side) {
+    if (side !== 'undo') return;
+    for (const s of this._snapshots) {
+      if (s.mesh?.isEnabled?.() === false) AssetLoader.releaseMesh(s.id, s.mesh);
+    }
+  }
 }
