@@ -2,6 +2,13 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-10-21 — Workers & memory foundation landed (ADR 0006).** One worker
+> runner (`src/core/workers/WorkerTask.js` + `serveTask.js`) for every worker;
+> geometry revisions + single-copy extraction (`src/core/geometry/GeometryStore.js`);
+> Booleans in a Manifold worker (`booleanCore.js`, caps 250k web / 1M desktop);
+> lean STL + STL worker; chunked desktop export save (`export:beginSave` etc.).
+> New heavy work (supports, slicer) follows the rules in `docs/adr/0006-workers-and-memory.md`.
+
 > **2026-10-21 — UI style switch (New / Original) landed.** Spec
 > `docs/superpowers/specs/2026-10-21-ui-style-switch-design.md`, plan
 > `docs/superpowers/plans/2026-10-21-ui-style-switch.md`. New = mixo-app-style
