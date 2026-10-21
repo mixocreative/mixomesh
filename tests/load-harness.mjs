@@ -87,6 +87,11 @@ export function makeContainer() {
   };
 }
 B.MeshBuilder = { CreateBox: (name) => makeMesh(name) };
+B.TransformNode = function (name, scene) {
+  const n = makeMesh(name);
+  scene?.transformNodes?.push?.(n);
+  return n;
+};
 B.SceneLoader = { LoadAssetContainerAsync: async () => makeContainer() };
 
 const GLB = new TextEncoder().encode('glb-bytes');

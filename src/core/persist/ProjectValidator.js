@@ -3,6 +3,7 @@
 // the current project intact. Throws; never mutates state.
 
 import { SCHEMA_VERSION } from './constants.js';
+import { validateHierarchy } from '../hierarchy/HierarchyIntegrity.js';
 
 // Every field loadProject iterates with `for..of` / `.map` — a string or
 // number there would iterate characters or throw mid-load (after the reset).
@@ -31,6 +32,20 @@ function _isFiniteTuple(v, n) {
 function _isTransform(t) {
   return t === undefined || t === null
     || (_isPlainObject(t) && _isFiniteTuple(t.p, 3) && _isFiniteTuple(t.q, 4) && _isFiniteTuple(t.s, 3));
+}
+
+// The loader tolerates a dangling group parent (the group restores at root),
+// so only a cycle, which the roots-first walk cannot order, is refused.
+function _assertAcyclicGroups(groupList) {
+  const ids = new Set(groupList.map(g => g.id));
+  const groups = Object.fromEntries(groupList.map(g => [
+    g.id, { id: g.id, parentId: ids.has(g.parentId) ? g.parentId : null },
+  ]));
+  try {
+    validateHierarchy({ scene: { objects: {}, groups } });
+  } catch (err) {
+    throw new Error(`.mixo is malformed: ${err.message}`);
+  }
 }
 
 function _major(version) {
@@ -144,6 +159,7 @@ export function validateDocument(doc) {
       }
     }
   }
+  _assertAcyclicGroups(doc.groups ?? []);
   for (const [i, image] of (doc.textureImages ?? []).entries()) {
     if (!_isPlainObject(image)) throw new Error(`.mixo is malformed: textureImages[${i}] must be an object`);
   }
