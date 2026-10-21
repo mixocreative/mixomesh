@@ -91,7 +91,13 @@ export class WorkerTask {
         opts.timeoutMs ?? this._timeoutMs,
       );
       if (opts.signal) {
-        job.abort = () => this._settle(job, abortError(this._name));
+        job.abort = () => {
+          this._settle(job, abortError(this._name));
+          // The worker keeps grinding on the aborted job; if nothing else is
+          // using a persistent worker, drop it so the next job starts fresh
+          // instead of queueing behind the leftover work.
+          if (this._mode !== 'per-job' && this._worker === worker && this._jobs.size === 0) this._restart(null, null);
+        };
         opts.signal.addEventListener('abort', job.abort, { once: true });
       }
       if (this._mode === 'per-job') {
@@ -150,6 +156,7 @@ export class WorkerTask {
     const worker = this._worker;
     this._worker = null;
     if (worker) { worker.onmessage = null; worker.onerror = null; worker.terminate(); }
+    if (!error) return;   // idle restart (abort): no jobs left to fail
     for (const other of [...this._jobs.values()]) {
       const reason = !job || other === job ? error : coded(`${this._name} restarted: ${error.message}`, 'restarted');
       this._settle(other, reason);

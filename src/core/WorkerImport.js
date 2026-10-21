@@ -19,9 +19,9 @@ const BABYLON = window.BABYLON;
 export const WORKER_JOB_TIMEOUT_MS = 120_000;
 
 // One persistent worker, jobs strictly one at a time (the worker swaps the
-// engine-global Tools.PreprocessUrl). A timeout or crash terminates it and
-// fails the other queued jobs too (WorkerTask 'restarted'); the next import
-// starts a fresh worker.
+// engine-global Tools.PreprocessUrl). A timeout or crash fails the running job
+// and terminates the worker; imports still queued behind it then run on a
+// fresh worker (WorkerTask serial queue).
 const _task = new WorkerTask({
   name: 'OBJ worker',
   concurrency: 'serial',

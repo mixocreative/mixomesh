@@ -165,3 +165,30 @@ test('messages for unknown ids are ignored', async () => {
   w.reply({ id: w.last.id, type: 'done', result: 'mine' });
   assert.equal(await p, 'mine');
 });
+
+test('aborting the only job on a persistent worker restarts it, so leftover work cannot delay the next job', async () => {
+  const task = new WorkerTask({ create: fresh() });
+  const ac = new AbortController();
+  const p = task.run({}, { signal: ac.signal });
+  ac.abort();
+  await assert.rejects(p, e => e.name === 'AbortError');
+  assert.equal(FakeWorker.all[0].terminated, true, 'busy worker dropped');
+  const next = task.run({});
+  assert.equal(FakeWorker.all.length, 2, 'next job on a fresh worker');
+  const w = FakeWorker.all[1];
+  w.reply({ id: w.last.id, type: 'done', result: 'ok' });
+  assert.equal(await next, 'ok');
+});
+
+test('aborting one of several jobs keeps the shared worker for the others', async () => {
+  const task = new WorkerTask({ create: fresh() });
+  const ac = new AbortController();
+  const a = task.run({}, { signal: ac.signal });
+  const b = task.run({});
+  ac.abort();
+  await assert.rejects(a, e => e.name === 'AbortError');
+  const w = FakeWorker.all[0];
+  assert.equal(w.terminated, false);
+  w.reply({ id: w.posts[1].data.id, type: 'done', result: 'b' });
+  assert.equal(await b, 'b');
+});
