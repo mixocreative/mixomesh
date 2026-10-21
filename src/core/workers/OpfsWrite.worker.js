@@ -4,8 +4,9 @@
 // file's OPFS path + a COPY of the bytes; this replaces the file contents.
 // Not atomic (truncate + write) — the createWritable path is preferred whenever present.
 
-self.onmessage = async (e) => {
-  const { path, bytes } = e.data ?? {};
+import { serveTask } from './serveTask.js';
+
+serveTask(async ({ path, bytes } = {}) => {
   let access = null;
   try {
     if (!Array.isArray(path) || !path.length) throw new Error('No OPFS path');
@@ -21,10 +22,8 @@ self.onmessage = async (e) => {
       at += n;
     }
     access.flush();
-    self.postMessage({ ok: true });
-  } catch (err) {
-    self.postMessage({ ok: false, error: err?.message ?? 'OPFS write failed' });
+    return true;
   } finally {
     try { access?.close(); } catch { /* already closed */ }
   }
-};
+});

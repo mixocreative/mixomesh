@@ -12,21 +12,24 @@ export function transferable(result, transfer) {
   return { [TRANSFER]: true, result, transfer };
 }
 
-export function serveTask(handler, scope = self) {
-  scope.onmessage = async (event) => {
+export function serveTask(handler, scope) {
+  // Resolve `self` per message (not once) so a re-stubbed global in tests
+  // still receives the replies; real workers have one fixed `self`.
+  const target = () => scope ?? self;
+  target().onmessage = async (event) => {
     const msg = event.data;
     if (!msg || msg.type !== 'run') return;
     const { id, payload, revision } = msg;
-    const progress = (fields) => scope.postMessage({ ...fields, id, type: 'progress' });
+    const progress = (fields) => target().postMessage({ ...fields, id, type: 'progress' });
     try {
       const out = await handler(payload, { progress, revision });
       const wrapped = out && out[TRANSFER];
-      scope.postMessage(
+      target().postMessage(
         { id, type: 'done', result: wrapped ? out.result : out, ...(revision != null ? { revision } : {}) },
         wrapped ? out.transfer : [],
       );
     } catch (err) {
-      scope.postMessage({ id, type: 'error', message: err?.message ?? String(err) });
+      target().postMessage({ id, type: 'error', message: err?.message ?? String(err) });
     }
   };
 }

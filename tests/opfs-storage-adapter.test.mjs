@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { __reset as resetIdb } from './idb-stub.mjs';
 import { createOpfsRoot, installOpfsEnv, makeMemFs } from './opfs-stub.mjs';
 import {
-  OpfsStorageAdapter as A, OPFS_PROJECTS_DIR, sanitizeProjectName, isTouchApple,
+  OpfsStorageAdapter as A, OPFS_PROJECTS_DIR, sanitizeProjectName, isTouchApple, setOpfsWriteTimeout,
 } from '../src/core/storage/OpfsStorageAdapter.js';
 import {
   detectStorageTier, detectCapabilities, storageTier, WEB_TRIANGLE_BUDGET,
@@ -310,9 +310,9 @@ await test('writeFile without createWritable → OPFS write worker gets the file
     globalThis.Worker = class {
       constructor(url, opts) { this.url = String(url); this.opts = opts; }
       postMessage(msg, transfer) {
-        posted.push({ url: this.url, opts: this.opts, msg, transfer });
-        fs.write(`opfs/${msg.path.join('/')}`, [...msg.bytes]);
-        queueMicrotask(() => this.onmessage({ data: { ok: true } }));
+        posted.push({ url: this.url, opts: this.opts, msg: msg.payload, transfer });
+        fs.write(`opfs/${msg.payload.path.join('/')}`, [...msg.payload.bytes]);
+        queueMicrotask(() => this.onmessage({ data: { id: msg.id, type: 'done', result: true } }));
       }
       terminate() { this.terminated = true; }
     };
@@ -327,8 +327,16 @@ await test('writeFile without createWritable → OPFS write worker gets the file
       assert.notEqual(posted[0].msg.bytes.buffer, src.buffer, 'caller buffer is not transferred away');
       assert.equal(src.byteLength, 7);
       assert.equal(await text(await A.readFile(ref)), '{"v":1}');
-      globalThis.Worker = class { postMessage() { queueMicrotask(() => this.onmessage({ data: { ok: false, error: 'quota' } })); } terminate() {} };
+      globalThis.Worker = class { postMessage(msg) { queueMicrotask(() => this.onmessage({ data: { id: msg.id, type: 'error', message: 'quota' } })); } terminate() {} };
       await assert.rejects(A.writeFile(ref, 'x'), /quota/);
+      // A worker that never answers no longer hangs the save (it used to).
+      const prevTimeout = setOpfsWriteTimeout(20);
+      let killed = false;
+      globalThis.Worker = class { postMessage() {} terminate() { killed = true; } };
+      try {
+        await assert.rejects(A.writeFile(ref, 'x'), /timed out/);
+        assert.equal(killed, true, 'hung write worker terminated');
+      } finally { setOpfsWriteTimeout(prevTimeout); }
     } finally { globalThis.Worker = prevWorker; }
   });
 });

@@ -157,7 +157,7 @@ await test('ValidateWorker request carries the clockwise flag', async () => {
     postMessage(msg) {
       posted.push(msg);
       // Echo a 'done' so the promise settles.
-      queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, type: 'done', badEdgeCount: 0, inverted: false } }));
+      queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, type: 'done', result: { badEdgeCount: 0, inverted: false } } }));
     }
     terminate() {}
   }
@@ -170,12 +170,15 @@ await test('ValidateWorker request carries the clockwise flag', async () => {
     globalThis.Worker = prev;
   }
   assert.equal(posted.length, 2);
-  assert.equal(posted[0].clockwise, true, 'explicit true is forwarded');
-  assert.equal(posted[1].clockwise, false, 'defaults to false (CounterClockWise)');
-  assert.ok(posted[0].positions instanceof Float32Array && posted[0].indices instanceof Uint32Array);
+  assert.equal(posted[0].type, 'run', 'WorkerTask protocol');
+  assert.equal(posted[0].payload.clockwise, true, 'explicit true is forwarded');
+  assert.equal(posted[1].payload.clockwise, false, 'defaults to false (CounterClockWise)');
+  assert.ok(posted[0].payload.positions instanceof Float32Array && posted[0].payload.indices instanceof Uint32Array);
 });
 
 let _workerOnMessage = null;
+// serveTask handlers are async: call and let the reply land.
+async function runIn(scope, data) { scope.onmessage({ data }); await new Promise(r => setImmediate(r)); }
 await test('worker weld key is exact: a closed 10 mm cube has 0 non-manifold edges (was 1 from 63-bit key overflow)', async () => {
   // Regression 2026-09-18: the packed weld key used 3 × 21 bits (63 bits),
   // past JS's 53-bit exact integers, so vertices differing only in z by
@@ -192,19 +195,19 @@ await test('worker weld key is exact: a closed 10 mm cube has 0 non-manifold edg
     const s = 0.01;   // 10 mm in BU
     const positions = Float32Array.from([0,0,0, s,0,0, s,s,0, 0,s,0, 0,0,s, s,0,s, s,s,s, 0,s,s]);
     const indices = Uint32Array.from([0,2,1,0,3,2, 4,5,6,4,6,7, 0,5,4,0,1,5, 1,6,5,1,2,6, 2,7,6,2,3,7, 3,4,7,3,0,4]);
-    globalThis.self.onmessage({ data: { id: 1, positions, indices, clockwise: false } });
+    await runIn(globalThis.self, { id: 1, type: 'run', payload: { positions, indices, clockwise: false } });
     assert.equal(sent[0].type, 'done');
-    assert.equal(sent[0].badEdgeCount, 0, 'closed cube must have 0 bad edges');
+    assert.equal(sent[0].result.badEdgeCount, 0, 'closed cube must have 0 bad edges');
     // Two vertices that differ ONLY in z by 10 mm must stay distinct: an
     // open quad on top of a closed cube's face would otherwise weld into it.
     const p2 = Float32Array.from([0,0,0, s,0,0, 0,s,0, 0,0,s, s,0,s, 0,s,s]);
     const i2 = Uint32Array.from([0,1,2, 3,4,5]);
-    globalThis.self.onmessage({ data: { id: 2, positions: p2, indices: i2, clockwise: false } });
-    assert.equal(sent[1].badEdgeCount, 6, 'two separate open triangles = 6 boundary edges, none welded away');
+    await runIn(globalThis.self, { id: 2, type: 'run', payload: { positions: p2, indices: i2, clockwise: false } });
+    assert.equal(sent[1].result.badEdgeCount, 6, 'two separate open triangles = 6 boundary edges, none welded away');
     // Far-away coordinates (outside ±6.5 m) still work via the string-key fallback.
     const p3 = Float32Array.from(positions.map(v => v + 20));
-    globalThis.self.onmessage({ data: { id: 3, positions: p3, indices, clockwise: false } });
-    assert.equal(sent[2].badEdgeCount, 0, 'out-of-range coordinates: closed cube still 0 bad edges');
+    await runIn(globalThis.self, { id: 3, type: 'run', payload: { positions: p3, indices, clockwise: false } });
+    assert.equal(sent[2].result.badEdgeCount, 0, 'out-of-range coordinates: closed cube still 0 bad edges');
   } finally {
     globalThis.self = prevSelf;
   }
@@ -225,9 +228,9 @@ await test('worker pure function applies the same orientation rule', async () =>
     assert.equal(checkInvertedNormals(f.getVerticesData(), f.getIndices(), false), true,  'CCW + V>0 → inverted');
     assert.equal(checkInvertedNormals(f.getVerticesData(), f.getIndices(), true),  false, 'CW + V>0 → outward');
     // Message path: the flag is read off the request.
-    globalThis.self.onmessage({ data: { id: 7, positions: pos, indices: Uint32Array.from(idx), clockwise: true } });
-    globalThis.self.onmessage({ data: { id: 8, positions: pos, indices: Uint32Array.from(idx) } });
-    assert.deepEqual(sent.map(x => [x.id, x.type, x.inverted]), [[7, 'done', true], [8, 'done', false]]);
+    await runIn(globalThis.self, { id: 7, type: 'run', payload: { positions: pos, indices: Uint32Array.from(idx), clockwise: true } });
+    await runIn(globalThis.self, { id: 8, type: 'run', payload: { positions: pos, indices: Uint32Array.from(idx) } });
+    assert.deepEqual(sent.map(x => [x.id, x.type, x.result.inverted]), [[7, 'done', true], [8, 'done', false]]);
   } finally {
     globalThis.self = prevSelf;
   }

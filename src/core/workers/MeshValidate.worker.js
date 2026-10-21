@@ -15,6 +15,8 @@
 //    flagged one (glTF) when it is POSITIVE — so inverted = clockwise ? V<0
 //    : V>0. Robust for closed meshes; a cheap heuristic for open ones.
 
+import { serveTask } from './serveTask.js';
+
 const MERGE_DISTANCE = 1e-4;   // 0.1 mm (1 BU = 1 m) — matches MeshValidator
 
 // Weld vertices by quantized position. Returns Int32Array remap[vertexIndex]
@@ -90,13 +92,7 @@ export function checkInvertedNormals(positions, indices, clockwise) {
   return clockwise ? v6 < 0 : v6 > 0;
 }
 
-self.onmessage = (e) => {
-  const { id, positions, indices, clockwise = false } = e.data;
-  try {
-    const badEdgeCount = checkNonManifold(positions, indices);
-    const inverted = checkInvertedNormals(positions, indices, !!clockwise);
-    self.postMessage({ id, type: 'done', badEdgeCount, inverted });
-  } catch (err) {
-    self.postMessage({ id, type: 'error', message: err?.message ?? String(err) });
-  }
-};
+serveTask(({ positions, indices, clockwise = false }) => ({
+  badEdgeCount: checkNonManifold(positions, indices),
+  inverted: checkInvertedNormals(positions, indices, !!clockwise),
+}));

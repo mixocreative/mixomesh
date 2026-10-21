@@ -10,37 +10,20 @@
 // real Chrome); headless tests always take the sync fallback (no Worker).
 
 import { encodeBase64 } from './workers/base64Codec.js';
+import { WorkerTask } from './workers/WorkerTask.js';
 
-let _worker = null;
-let _seq = 0;
-const _pending = new Map();   // id → { resolve, reject }
+// Persistent worker; no Worker (headless tests) or a failed spawn runs the
+// same sync codec on the main thread (WorkerTask fallback).
+const _task = new WorkerTask({
+  name: 'base64 worker',
+  create: typeof Worker === 'function'
+    ? () => new Worker(new URL('./workers/Base64.worker.js', import.meta.url), { type: 'module' })
+    : null,
+  fallback: ({ buffer }) => encodeBase64(buffer),
+});
 
 export function isBase64WorkerSupported() {
   return typeof Worker === 'function';
-}
-
-function _ensureWorker() {
-  if (_worker) return _worker;
-  _worker = new Worker(new URL('./workers/Base64.worker.js', import.meta.url), { type: 'module' });
-  _worker.onmessage = (e) => {
-    const { id, b64, error } = e.data ?? {};
-    const p = _pending.get(id);
-    if (!p) return;
-    _pending.delete(id);
-    if (error) p.reject(new Error(error));
-    else p.resolve(b64);
-  };
-  _worker.onerror = (err) => {
-    // Wholesale failure (bundle failed to load/execute). Reject all in-flight
-    // requests and drop the worker — each caller then falls back to sync, and
-    // the next encode retries a fresh spawn.
-    const reason = new Error(err?.message ?? 'base64 worker error');
-    for (const p of _pending.values()) p.reject(reason);
-    _pending.clear();
-    try { _worker.terminate(); } catch { /* already dead */ }
-    _worker = null;
-  };
-  return _worker;
 }
 
 /**
@@ -57,11 +40,7 @@ export async function encodeBase64Async(buf) {
     // Own, transferable copy — never detach the source bytes.
     const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     const copy = u8.slice().buffer;
-    return await new Promise((resolve, reject) => {
-      const id = ++_seq;
-      _pending.set(id, { resolve, reject });
-      _ensureWorker().postMessage({ id, buffer: copy }, [copy]);
-    });
+    return await _task.run({ buffer: copy }, { transfer: [copy] });
   } catch {
     return encodeBase64(buf);   // worker spawn/post/exec failure → safe sync path
   }

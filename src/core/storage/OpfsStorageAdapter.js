@@ -30,6 +30,7 @@
 //
 // Everything browser-global is touched at CALL time only (headless-safe import).
 
+import { WorkerTask } from '../workers/WorkerTask.js';
 import { caps, setCapabilities, storageUnavailable } from './capabilities.js';
 import { ASSET_STATUS, stableKeyFor } from './AssetSource.js';
 
@@ -125,17 +126,28 @@ async function _bytesOf(data) {
 }
 
 /** Older WebKit: no main-thread createWritable → sync access handle in a worker. */
+export const DEFAULT_OPFS_WRITE_TIMEOUT_MS = 60_000;
+let _opfsWriteTimeoutMs = DEFAULT_OPFS_WRITE_TIMEOUT_MS;
+
+/** Test seam: override the write-worker timeout (ms). Returns the previous value. */
+export function setOpfsWriteTimeout(ms) {
+  const prev = _opfsWriteTimeoutMs;
+  _opfsWriteTimeoutMs = Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_OPFS_WRITE_TIMEOUT_MS;
+  return prev;
+}
+
+// One fresh worker per write (sync access handles are per worker); a worker
+// that never answers is terminated by the timeout instead of hanging the save.
+const _opfsWriteTask = new WorkerTask({
+  name: 'OPFS write',
+  mode: 'per-job',
+  create: () => new Worker(new URL('../workers/OpfsWrite.worker.js', import.meta.url), { type: 'module' }),
+});
+
 async function _writeViaWorker(path, data) {
   const bytes = await _bytesOf(data);
   const copy = bytes.slice();   // own buffer → transferable without detaching the caller's
-  const worker = new Worker(new URL('../workers/OpfsWrite.worker.js', import.meta.url), { type: 'module' });
-  try {
-    await new Promise((resolve, reject) => {
-      worker.onmessage = e => (e.data?.ok ? resolve(undefined) : reject(new Error(e.data?.error || 'OPFS write failed')));
-      worker.onerror = e => reject(new Error(e?.message || 'OPFS write worker failed'));
-      worker.postMessage({ path, bytes: copy }, [copy.buffer]);
-    });
-  } finally { worker.terminate(); }
+  await _opfsWriteTask.run({ path, bytes: copy }, { transfer: [copy.buffer], timeoutMs: _opfsWriteTimeoutMs });
 }
 
 /**
