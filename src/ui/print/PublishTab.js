@@ -30,6 +30,7 @@ import { saveListingPackage } from '../../core/publish/ListingPackageExport.js';
 import { captureListingShot } from '../../core/RenderOutput.js';
 import { reportError } from '../Status.js';
 import { Toast } from '../Toast.js';
+import { Modal } from '../Modal.js';
 import { ProgressOverlay } from '../ProgressOverlay.js';
 import { formatLabel } from './printLabels.js';
 import * as M from './PublishModel.js';
@@ -378,6 +379,25 @@ async function _retry(desc, refresh) {
   }
 }
 
+// Only after the seller checked the platform: a listing made by the lost request would be duplicated.
+function _confirmPublishNew(desc, refresh) {
+  Modal.register('publishNewListing', ({ data, close }) => {
+    const el = document.createElement('div');
+    el.className = 'pm-modal';
+    el.innerHTML = `<p class="pm-modal-body">${escapeHtml(t('publish.unknown.confirmNew', data))}</p>
+      <div class="pm-modal-actions">
+        <button class="btn" data-r="cancel">${escapeHtml(t('publish.cancel'))}</button>
+        <button class="btn btn-primary" data-r="new">${escapeHtml(t('publish.unknown.publishNew', data))}</button>
+      </div>`;
+    el.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => close(b.dataset.r)));
+    return el;
+  });
+  Modal.open('publishNewListing', {
+    label: desc.label, title: S.lastPkg?.title ?? S.form?.title ?? '',
+    onClose: r => { if (r === 'new') _publish(desc, refresh); },
+  });
+}
+
 async function _cancel(refresh) {
   S.cancelRequested = true;
   if (!S.jobId) { refresh(); return; }
@@ -597,15 +617,18 @@ function _runHtml(desc) {
     const failed = S.steps.find(s => s.status === 'failed');
     h += _stepsHtml(desc);
     h += '<div class="pub-fail pub-job-fail" role="alert">';
+    const view = M.failureView(o);
+    const title = S.lastPkg?.title ?? S.form?.title ?? '';
     const errKey = M.errorKey(o.code);
-    const errMsg = errKey ? t(errKey) : (o.error ?? t('publish.failed.unknown'));
+    const errMsg = errKey ? t(errKey, { label: desc.label, title }) : (o.error ?? t('publish.failed.unknown'));
     const platformMsg = (o.code === 'platform-rejected' || o.code === 'platform-http') && o.error ? ` ${escapeHtml(o.error)}` : '';
     h += `<p><b>${escapeHtml(failed ? t('publish.failed.step', { step: t(M.stepLabelKey(failed.id, { direct: desc.transfer === 'direct' }) ?? 'publish.step.build', { label: desc.label }) }) : t('publish.failed.generic'))}</b> — ${escapeHtml(errMsg)}${platformMsg}</p>`;
     if (o.leftover?.length) h += `<p class="pub-hint">${escapeHtml(t('publish.note.cancelledLeftover', { n: o.leftover.length }))}</p>`;
-    h += `<p class="pub-hint">${escapeHtml(t('publish.failed.reuse'))}</p>`;
+    h += `<p class="pub-hint">${escapeHtml(t(view.hintKey, { label: desc.label, title }))}</p>`;
     const openLeft = failed?.id === 'confirm' ? M.linksOpenLeft(S.linksOpen, Date.now()) : 0;
     if (openLeft > 0) h += `<p class="pub-hint pub-links-open">${escapeHtml(t('publish.hold.linksOpen', { min: M.minutesLeft(openLeft) }))}</p>`;
-    h += `<div class="pub-btns"><button type="button" class="pp-primary-btn pub-inline" data-act="retry">${escapeHtml(t('publish.retry'))}</button>`
+    h += `<div class="pub-btns"><button type="button" class="pp-primary-btn pub-inline" data-act="retry">${escapeHtml(t(view.retryKey, { label: desc.label }))}</button>`
+      + (view.publishNew ? `<button type="button" class="pub-btn" data-act="publish-new">${escapeHtml(t('publish.unknown.publishNew', { label: desc.label }))}</button>` : '')
       + (openLeft > 0 ? `<button type="button" class="pub-btn" data-act="keep-waiting"${S.extending ? ' disabled' : ''}>${escapeHtml(t('publish.hold.keepWaiting'))}</button>` : '')
       + `<button type="button" class="pub-btn" data-act="cancel-clean">${escapeHtml(t('publish.cancelClean'))}</button></div></div>`;
   }
@@ -837,6 +860,7 @@ function _wire(el, desc, readiness, refresh) {
   // run states
   on('cancel-run', () => _cancel(refresh));
   on('retry', () => _retry(desc, refresh));
+  on('publish-new', () => _confirmPublishNew(desc, refresh));
   on('keep-waiting', () => _keepWaiting(refresh));
   on('cancel-clean', () => _cancel(refresh).then(() => { S.phase = 'form'; refresh(); }));
   on('back', () => { S.phase = 'form'; S.steps = []; S.outcome = null; S.jobId = null; S.hold = null; S.linksOpen = null; refresh('#pub-title'); });

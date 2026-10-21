@@ -682,7 +682,7 @@ test('hold: expiry → failed + resumable with the host kept; Retry inside the w
 
 test('hold: retry-window expiry after a failure closes the host; Retry then re-hosts on a fresh host', async () => {
   let fail = true;
-  const ctx = setupHold({ retryWindowMs: 60, responder: req => (req.body.op === 'create' && fail ? { status: 500, ok: false } : created()) });
+  const ctx = setupHold({ retryWindowMs: 60, responder: req => (req.body.op === 'create' && fail ? { json: { errors: [{ message: 'Price is invalid' }] } } : created()) });
   const first = await ctx.start();
   assert.equal(first.failedStep, 'create');
   assert.equal(ctx.events.find(e => e.status === 'failed').linksOpenMs, 60, 'failure before the hold → retry window');

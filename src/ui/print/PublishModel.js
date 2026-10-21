@@ -200,10 +200,22 @@ const ERROR_KEYS = Object.freeze({
   'not-confirmed': 'publish.err.notConfirmed',
   'cleanup-left': 'publish.err.cleanupLeft',
   'cancelled': 'publish.err.cancelled',
+  'create-unknown': 'publish.err.createUnknown',
 });
 
 /** i18n key for a job error code, or null (then the UI shows the raw error message). */
 export const errorKey = code => ERROR_KEYS[code] ?? null;
+
+/**
+ * What the failed panel offers. A create whose answer was lost (`create-unknown`) may exist on the
+ * platform: its button only checks again, and publishing anew is a separate, confirmed choice.
+ * @returns {{ retryKey: string, hintKey: string, publishNew: boolean }}
+ */
+export function failureView(outcome) {
+  return outcome?.code === 'create-unknown'
+    ? { retryKey: 'publish.unknown.check', hintKey: 'publish.unknown.howTo', publishNew: true }
+    : { retryKey: 'publish.retry', hintKey: 'publish.failed.reuse', publishNew: false };
+}
 
 /**
  * Validate the form the way the main process will, without building files:

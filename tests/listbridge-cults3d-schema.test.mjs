@@ -144,6 +144,7 @@ test('upload slot mutations, list options, confirm and connection queries match 
   for (const locale of ['en', 'ja', 'zh-Hant']) for (const spec of a.buildListOptions({ locale })) check(spec, `listOptions ${locale}`);
   check(a.buildConfirm({ remoteId: '1', slug: 's', url: '', status: 'secret' }), 'creation(slug)');
   check(a.testConnection(), 'me');
+  for (const locale of ['en', 'ja']) check(a.buildOwnListings({ locale }), `myself.creationsBatch ${locale}`);
 });
 
 test('the checker itself catches drift (guards against a vacuous pass)', () => {

@@ -68,7 +68,9 @@
  *   Build the create request (no secrets: the runner adds authHeaders()).
  * @property {(remoteId: string, pkg: ListingPackage, ctx: BuildContext) => RequestSpec} buildUpdate
  * @property {(response: TransportResponse) => PublishResult} parseResult
- *   Parse a transport response into a PublishResult; throw on platform errors.
+ *   Parse a transport response into a PublishResult; throw on platform errors. Throw with
+ *   `code: 'platform-unclear'` when the answer proves neither success nor rejection (unreadable
+ *   body, no listing and no error): the runner then treats the create as possibly made.
  * @property {(credentialRecord: Record<string, any>) => Record<string,string>} [authHeaders]
  *   Turn the decrypted account record into request headers (e.g. Basic auth). Called by
  *   the host-side runner only; the result is never logged or returned.
@@ -86,6 +88,12 @@
  * @property {(opts?: { locale?: string }) => RequestSpec[]} [buildListOptions]
  *   Optional: request(s) that load the platform's category and license lists. Required with parseListOptions.
  * @property {(responses: TransportResponse[]) => ListOptions} [parseListOptions]
+ * @property {(opts?: { locale?: string }) => RequestSpec} [buildOwnListings]
+ *   Optional: request the account's own listings, newest included. The runner snapshots them
+ *   before a create and, after a create whose answer was lost, looks for the one listing that
+ *   is new and carries the title it sent. Required with parseOwnListings.
+ * @property {(response: TransportResponse) => Array<PublishResult & { name: string }>} [parseOwnListings]
+ *   Throws when the platform did not return a list.
  * @property {(ctx?: any) => RequestSpec} [listCategories] optional request builder
  * @property {(ctx?: any) => RequestSpec} [testConnection] optional request builder
  */
@@ -94,6 +102,7 @@ export const REQUIRED_ADAPTER_MEMBERS = ['describe', 'validate', 'buildCreate', 
 export const OPTIONAL_ADAPTER_MEMBERS = [
   'authHeaders', 'buildConfirm', 'parseConfirm', 'listCategories', 'testConnection',
   'buildUploadSlot', 'parseUploadSlot', 'buildListOptions', 'parseListOptions',
+  'buildOwnListings', 'parseOwnListings',
 ];
 
 /**
@@ -111,6 +120,7 @@ export function assertAdapter(obj) {
   if (typeof obj.buildConfirm === 'function' && typeof obj.parseConfirm !== 'function') missing.push('parseConfirm');
   if (typeof obj.buildUploadSlot === 'function' && typeof obj.parseUploadSlot !== 'function') missing.push('parseUploadSlot');
   if (typeof obj.buildListOptions === 'function' && typeof obj.parseListOptions !== 'function') missing.push('parseListOptions');
+  if (typeof obj.buildOwnListings === 'function' && typeof obj.parseOwnListings !== 'function') missing.push('parseOwnListings');
   if (missing.length) throw new Error(`Listbridge adapter is missing or invalid: ${missing.join(', ')}`);
   return obj;
 }

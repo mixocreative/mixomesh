@@ -16,7 +16,8 @@
  *  - visibility PUBLIC | SECRET | DEACTIVATED (SECRET = only people with the link); LocaleEnum
  *    (EN ES DE FR IT PT JA TR RU ZH); CurrencyEnum (26 codes, below); madeWithAi is a real Boolean.
  *  - Read-back: creation(slug) { blueprints, illustrations, visibility, url }; licenses and
- *    categories queries; me { nick } for the connection test.
+ *    categories queries; me { nick } for the connection test; myself { creationsBatch } ("List my
+ *    designs") for finding a creation whose create answer was lost.
  *
  * STILL UNCONFIRMED (introspection cannot show these; check on the first live publish, PB.11):
  *  U1  fileKeys / imageKeys take the presign `key` field value verbatim (with ${filename} replaced
@@ -29,6 +30,8 @@
  *      zip / pdf may not, so confirm requires blueprints >= model-file count (not zip contents).
  *  U7  Price is a major-unit decimal (4.5), and any minimum price.
  *  U8  Whether `me` is null (not an error) for a bad key; the connection test relies on HTTP 401.
+ *  U9  Whether myself.creationsBatch lists SECRET creations and in which order. A creation it does
+ *      not show is never assumed absent: the runner then refuses to create again (fails closed).
  */
 
 export const CULTS3D_ENDPOINT = 'https://cults3d.com/graphql';
@@ -275,7 +278,11 @@ export const cults3dAdapter = {
     if (!issues.length && (!creation || !creation.id)) {
       issues.push({ field: 'platform', code: 'no-creation', message: 'Cults3D accepted the request but returned no creation.' });
     }
-    if (issues.length) throw typedError(`Cults3D: ${issues.map((i) => i.message).join('; ')}`, 'platform-rejected', issues);
+    if (issues.length) {
+      // No error list and no creation proves nothing: the creation may exist (the runner then looks it up).
+      const unclear = issues.every((i) => i.code === 'bad-response' || i.code === 'no-creation');
+      throw typedError(`Cults3D: ${issues.map((i) => i.message).join('; ')}`, unclear ? 'platform-unclear' : 'platform-rejected', issues);
+    }
     return {
       remoteId: String(creation.id), url: String(creation.url || ''), status: statusOf(creation.visibility),
       ...(creation.slug ? { slug: String(creation.slug) } : {}),
@@ -303,6 +310,29 @@ export const cults3dAdapter = {
     // An update re-sends no files (updateCreation takes none): the creation existing is enough.
     if (!ctx?.update && (blueprints < expectBlueprints || (needImages && illustrations < 1))) return { confirmed: false };
     return { confirmed: true, status: statusOf(c.visibility), ...(c.url ? { url: String(c.url) } : {}) };
+  },
+
+  buildOwnListings(opts) {
+    const l = localeEnum(opts?.locale ?? 'en');
+    return post(`query OwnCreations {
+  myself {
+    creationsBatch(limit: 100) {
+      results { id slug name(locale: ${l}) url(locale: ${l}) visibility }
+    }
+  }
+}`);
+  },
+
+  parseOwnListings(res) {
+    const errs = gqlErrors(res.json);
+    const list = res.json?.data?.myself?.creationsBatch?.results;
+    if (errs.length || !Array.isArray(list)) {
+      throw typedError(`Cults3D: could not list your creations${errs.length ? ` (${errs.join('; ')})` : ''}.`, 'platform-rejected', []);
+    }
+    return list.filter((/** @type {any} */ c) => c && c.id != null).map((/** @type {any} */ c) => ({
+      remoteId: String(c.id), name: String(c.name ?? ''), url: String(c.url || ''), status: statusOf(c.visibility),
+      ...(c.slug ? { slug: String(c.slug) } : {}),
+    }));
   },
 
   buildListOptions(opts) {

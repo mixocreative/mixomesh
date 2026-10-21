@@ -473,7 +473,7 @@ test('runner: retry-window expiry closes the tunnel; Retry then re-hosts and UPD
   let fail = true;
   const ctx = setupRunner({
     adapter: fakeAdapter(), holdMs: 20_000, retryWindowMs: 150,
-    responder: body => (body.op === 'create' && fail ? { status: 500, ok: false } : undefined),
+    responder: body => (body.op === 'create' && fail ? { status: 400, ok: false } : undefined),
   });
   const first = await ctx.runner.start({ platform: 'fake', accountId: 'me', fileHostId: 'tunnel', pkg: makePkg() });
   assert.equal(first.failedStep, 'create');

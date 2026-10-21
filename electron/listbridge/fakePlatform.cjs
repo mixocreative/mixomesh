@@ -25,6 +25,7 @@ function createFakeCultsAdapter(real, endpoint) {
     testConnection: (...a) => redirect(real.testConnection(...a)),
     buildUploadSlot: (...a) => redirect(real.buildUploadSlot(...a)),
     buildConfirm: (...a) => redirect(real.buildConfirm(...a)),
+    buildOwnListings: (...a) => redirect(real.buildOwnListings(...a)),
     buildListOptions: (...a) => real.buildListOptions(...a).map(redirect),
     // The real parser insists on an https slot; the fake's slot is a loopback http POST target.
     parseUploadSlot: (res, item) => {

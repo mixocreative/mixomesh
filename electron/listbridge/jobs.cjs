@@ -18,6 +18,13 @@
 //               `upload-failed`. Progress: { step:'host', status:'running', phase:'upload', done, total }.
 //   * create:   adapter.buildCreate(pkg, ctx) + authHeaders → transport → parseResult
 //               (update: buildUpdate(remoteId, …) when the job has a remoteId).
+//               A create is never sent twice blindly. When its answer proves nothing (network
+//               error, timeout, HTTP 5xx, or the adapter's `platform-unclear`), the job fails with
+//               code `create-unknown`: the platform may hold the listing already. Retry then only
+//               LOOKS (adapter.buildOwnListings: the one listing that is new since a snapshot taken
+//               before the create and carries the sent title) and adopts it; anything less fails
+//               again with `create-unknown`. Cancel never aborts a create in flight: it waits for
+//               the answer, so a listing the platform made is reported (result.remoteId).
 //   * confirm:  adapter.buildConfirm/parseConfirm polling when the adapter has them.
 //   * cleanup:  remove hosted objects. Runs only after confirm (or on cancel); if it fails the
 //               objects are kept, the job reports it, and retry() resumes at cleanup.
@@ -55,6 +62,7 @@ const RETRY_WINDOW_MS = 15 * 60 * 1000;
 const MAX_EXTEND_MS = 60 * 60 * 1000;
 
 const errMessage = err => String(err?.message || err || 'unknown error');
+const CREATE_UNKNOWN = 'create-unknown';
 
 const FILE_PART_TYPE = 'application/octet-stream';
 const quoteHeader = v => String(v).replace(/[\r\n"]/g, '_');
@@ -247,21 +255,10 @@ function createPublishRunner({
     },
 
     async publish(job) {
-      const ctx = buildContext(job);
-      const spec = job.remoteId
-        ? job.adapter.buildUpdate(job.remoteId, job.pkg, ctx)
-        : job.adapter.buildCreate(job.pkg, ctx);
-      const res = await send(job, spec);
-      try {
-        job.result = job.adapter.parseResult(res);
-      } catch (err) {
-        // parseResult failed: the platform rejected/reported an error
-        const e = new Error(errMessage(err));
-        /** @type {any} */ (e).code = 'platform-rejected';
-        throw e;
-      }
-      if (!job.result || !job.result.remoteId) throw Object.assign(new Error('The platform response did not include a listing id.'), { code: 'platform-rejected' });
-      return `${job.remoteId ? 'Updated' : 'Created'} listing ${job.result.remoteId}.`;
+      if (!job.remoteId) return createOnce(job);
+      const res = await send(job, job.adapter.buildUpdate(job.remoteId, job.pkg, buildContext(job)));
+      job.result = parseCreated(job, res);
+      return `Updated listing ${job.result.remoteId}.`;
     },
 
     async confirm(job) {
@@ -303,6 +300,89 @@ function createPublishRunner({
       return 'Hosted copies removed.';
     },
   };
+
+  function parseCreated(job, res) {
+    let result;
+    try {
+      result = job.adapter.parseResult(res);
+    } catch (err) {
+      throw Object.assign(new Error(errMessage(err)), { code: err?.code === 'platform-unclear' ? 'platform-unclear' : 'platform-rejected' });
+    }
+    if (!result || !result.remoteId) throw Object.assign(new Error('The platform response did not include a listing id.'), { code: 'platform-unclear' });
+    return result;
+  }
+
+  function createUnknownError(job, cause) {
+    const label = job.desc.label || job.platform;
+    return Object.assign(new Error(`${label} may have created this listing, but its answer was lost${cause ? ` (${errMessage(cause)})` : ''}. `
+      + `It is not sent again: check your listings on ${label} for "${job.pkg.title}".`), { code: CREATE_UNKNOWN });
+  }
+
+  // Create at most once. Only an answer that proves rejection (an HTTP 4xx, or the platform's own
+  // error list) lets a later Retry send the create again.
+  async function createOnce(job) {
+    if (job.createUnknown) {
+      const found = await findCreated(job, { title: job.pkg.title, locale: job.pkg.locale, knownIds: job.knownListings });
+      if (!found) throw createUnknownError(job);
+      job.createUnknown = false;
+      job.result = found;
+      return `Found listing ${found.remoteId} on ${job.desc.label || job.platform}.`;
+    }
+    const spec = job.adapter.buildCreate(job.pkg, buildContext(job));
+    job.knownListings = await ownListingIds(job);
+    job.createInFlight = true;
+    let res;
+    try {
+      res = await send(job, spec, 'rate-limit');
+    } catch (err) {
+      // Never sent (no credentials) or refused with a 4xx: nothing was created.
+      if (err?.code === 'no-credentials' || (err?.code === 'platform-http' && Number(err.status) < 500)) throw err;
+      job.createUnknown = true;
+      throw createUnknownError(job, err);
+    } finally {
+      job.createInFlight = false;
+    }
+    try {
+      job.result = parseCreated(job, res);
+    } catch (err) {
+      if (err.code !== 'platform-unclear') throw err;
+      job.createUnknown = true;
+      throw createUnknownError(job, err);
+    }
+    return `Created listing ${job.result.remoteId}.`;
+  }
+
+  async function ownListings(ref, locale) {
+    const res = await send(ref, ref.adapter.buildOwnListings({ locale }), 'all');
+    return ref.adapter.parseOwnListings(res);
+  }
+
+  // Ids that exist before the create (null = no lookup possible, so nothing can ever be adopted).
+  async function ownListingIds(job) {
+    if (typeof job.adapter.buildOwnListings !== 'function') return null;
+    try {
+      return (await ownListings(job, job.pkg.locale)).map(l => l.remoteId);
+    } catch (err) {
+      if (err?.cancelled) throw err;
+      return null;
+    }
+  }
+
+  // The one listing that is new since the snapshot and carries the title sent, else null.
+  async function findCreated(ref, { title, locale, knownIds }) {
+    if (!Array.isArray(knownIds) || typeof ref.adapter.buildOwnListings !== 'function') return null;
+    let list;
+    try {
+      list = await ownListings(ref, locale);
+    } catch (err) {
+      if (err?.cancelled) throw err;
+      return null;
+    }
+    const known = new Set(knownIds);
+    const want = String(title ?? '').trim();
+    const hits = list.filter(l => !known.has(l.remoteId) && String(l.name).trim() === want);
+    return hits.length === 1 ? { ...hits[0] } : null;
+  }
 
   // Native upload (transfer 'direct' + buildUploadSlot): slot request, then multipart POST, per item.
   async function uploadItems(job) {
@@ -476,6 +556,7 @@ function createPublishRunner({
         // 422 / GraphQL errors are the adapter's to explain; other HTTP failures are generic.
         const e = new Error(`The platform answered HTTP ${res.status}${res.status === 401 || res.status === 403 ? ' (check the account credentials)' : ''}.`);
         /** @type {any} */ (e).code = 'platform-http';
+        /** @type {any} */ (e).status = res.status;
         throw e;
       }
       return res;
@@ -534,7 +615,7 @@ function createPublishRunner({
             ? { remoteId: job.result.remoteId, ...(job.result.url ? { url: job.result.url } : {}) } : {};
           report(job, step, 'done', msg, { ...(r?.skipped ? { skipped: true } : {}), ...created });
         } catch (err) {
-          if (err?.cancelled || job.cancelRequested) throw cancelledError();
+          if (err?.cancelled || (job.cancelRequested && err?.code !== CREATE_UNKNOWN)) throw cancelledError();
           job.failedStep = step;
           job.error = errMessage(err);
           job.code = err?.code ?? null;
@@ -599,6 +680,7 @@ function createPublishRunner({
       id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null,
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
       stepIndex: 0, status: 'pending', hosted: new Map(), uploaded: new Map(), deliverFiles: null, result: null,
+      createUnknown: false, createInFlight: false, knownListings: null,
       fileHost: null, cancelRequested: false, abort: null, running: null, closeTimer: null, closeAt: null,
       holdDeadline: null, linksLost: false, error: null, code: null, issues: null, failedStep: null, leftover: null,
     });
@@ -641,7 +723,8 @@ function createPublishRunner({
       if (job.status === 'done' || job.status === 'cancelled') return outcome(job);
       job.cancelRequested = true;
       if (job.running) {
-        job.abort?.abort();
+        // A create in flight finishes first: aborting it would hide a listing the platform made.
+        if (!job.createInFlight) job.abort?.abort();
         return job.running;
       }
       return finishCancel(job);
@@ -668,6 +751,12 @@ function createPublishRunner({
       }
       return { ok: false, message: 'This publish is not waiting for the platform.' };
     },
+    /**
+     * Look for a listing whose create answer was lost (e.g. after an app restart): the one listing
+     * of the account that is not in `knownIds` and carries `title`. Resolves the result or null.
+     */
+    findCreated: ({ platform, accountId, title, locale, knownIds }) => findCreated(
+      { adapter: adapterFor(platform), platform, accountId, abort: null }, { title, locale, knownIds }),
     get(jobId) {
       const job = jobs.get(jobId);
       return job ? outcome(job) : null;
@@ -680,4 +769,4 @@ function createPublishRunner({
   });
 }
 
-module.exports = { createPublishRunner, STEPS, MAX_EXTEND_MS };
+module.exports = { createPublishRunner, STEPS, MAX_EXTEND_MS, CREATE_UNKNOWN };
