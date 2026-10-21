@@ -9,6 +9,8 @@
   "scripts": {
     "install:deps": "node scripts/install-deps.mjs",
     "dev": "vite --host 127.0.0.1 --port 5173",
+    "clean": "node scripts/clean.mjs",
+    "prebuild": "node scripts/clean.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "typecheck": "tsc --noEmit",
@@ -30,6 +32,7 @@
     "test:rehearsal": "node tests/listbridge-rehearsal.mjs",
     "electron": "electron electron/main.cjs",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
+    "predist": "npm run build",
     "dist": "electron-builder --win",
     "build:installer": "node scripts/build-installer.mjs",
     "smoke:packaged": "node scripts/packaged-smoke.mjs",

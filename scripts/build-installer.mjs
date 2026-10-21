@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pruneOldInstallers } from './clean.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
@@ -73,6 +74,8 @@ const hash = createHash('sha256');
 hash.update(fs.readFileSync(dest));
 const sha = hash.digest('hex');
 fs.writeFileSync(`${dest}.sha256`, `${sha} *${name}\n`);
+const pruned = pruneOldInstallers(outDir, name);
+if (pruned.length) console.log(`removed older installers: ${pruned.join(', ')}`);
 const mb = (fs.statSync(dest).size / 1048576).toFixed(1);
 
 if (keepBuild) { begin('cleanup'); console.log('kept release/ and dist/ (--keep-build)'); }
