@@ -6,6 +6,21 @@ Source of truth for values is the code: `src/styles/tokens.css` (tokens) and
 disagree, the CSS wins and this file is corrected. Stitch output is a reference
 picture only — never paste generated HTML/CSS into `src/`.
 
+## 0. Two interface styles (2026-10-21)
+
+MIXOMESH ships two styles, switched in the header next to the language picker
+(`src/ui/UiStyleSwitcher.js`, stored as `mx-ui-style-v1`):
+
+- **New** (default): the shared Mixo app style, Dense. Values come from the
+  `mixo-app-style` skill (github.com/mixocreative/mixo-app-style) and live in
+  `src/styles/style-new.css`, every rule scoped to
+  `:root:not([data-ui-style="original"])` (`tests/style-new-scope.test.mjs`).
+  Dense panel widths: `workspaceDefaults()` in `src/ui/Workspace.js`.
+- **Original**: the washi workbench described in the rest of this file,
+  unchanged.
+
+Change New's values in the skill first, then mirror them here.
+
 ## 1. Visual Theme & Atmosphere
 
 **Direction (owner, 2026-10-14): minimal, clean, modern.** A calm, light

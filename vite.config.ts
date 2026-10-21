@@ -39,6 +39,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2024',
+    // Fonts always ship as files: CSP has no font-src, so default-src 'self'
+    // blocks data: fonts (small @fontsource subsets would otherwise inline).
+    assetsInlineLimit: (filePath) => (/\.(woff2?|ttf|otf)$/.test(filePath) ? false : undefined),
     sourcemap: true,
     // Temporary while src/app/boot.ts bundles the Babylon namespace bridge
     // plus the migrated JS modules into one Vite entry. Lower this after

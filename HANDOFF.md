@@ -2,6 +2,16 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-10-21 — UI style switch (New / Original) landed.** Spec
+> `docs/superpowers/specs/2026-10-21-ui-style-switch-design.md`, plan
+> `docs/superpowers/plans/2026-10-21-ui-style-switch.md`. New = mixo-app-style
+> Dense (default), Original = washi. Files: `src/core/uiStyleStore.js`,
+> `src/core/UiStyle.js`, `src/app/ui-style-boot.js`, `src/ui/UiStyleSwitcher.js`,
+> `src/styles/style-new.css`, `src/ui/Workspace.js` (per-style widths). Tests:
+> `tests/ui-style*.test.mjs`, `tests/style-new-scope.test.mjs`,
+> `npm run test:ui-style`. Screenshots: `UI_STYLE=new|original LOCALE=ja
+> SIZES=1366x768 node scripts/ui-screenshot.mjs <dir>`.
+
 **Purpose of this file:** durable resume point. If a session is cut off mid-operation,
 THIS is the first file to read. It tracks the goal, decisions, plan, and exactly
 what is done vs next. Update it at every safe boundary (before each commit).
