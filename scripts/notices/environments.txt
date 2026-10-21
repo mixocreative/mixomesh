@@ -1,0 +1,22 @@
+HDRI environment lighting presets (public/env/*.env, shipped as env/*.env)
+
+The three prefiltered environment textures are unmodified copies of assets from the
+Babylon.js Assets repository (https://github.com/BabylonJS/Assets), which is licensed
+under the Creative Commons Attribution 4.0 International License (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/) unless an asset folder says otherwise;
+neither source folder does. Provenance verified 2026-10-21 by SHA-256 against the files
+served from assets.babylonjs.com.
+
+  env/studio.env   = BabylonJS/Assets environments/studio.env
+                     https://assets.babylonjs.com/environments/studio.env
+                     SHA-256 88639560e8e444eea5ebb15f0f97896f549f469f90afd6839f6ac9f67a40c9e1
+  env/neutral.env  = BabylonJS/Assets core/environments/environmentSpecular.env
+                     https://assets.babylonjs.com/core/environments/environmentSpecular.env
+                     SHA-256 ca3e30921265d084d46c62c5220217d99296c0c3eacaeb40ca15f7534dfdd8bc
+  env/outdoor.env  = BabylonJS/Assets environments/sanGiuseppeBridge.env
+                     https://assets.babylonjs.com/environments/sanGiuseppeBridge.env
+                     SHA-256 2f0415a106e19c3dbc70f5a5a037d2c0fa1f712a8f0140102adf7925ea49006f
+
+Attribution: "studio.env", "environmentSpecular.env" and "sanGiuseppeBridge.env" by the
+Babylon.js team and contributors, from https://github.com/BabylonJS/Assets, licensed under
+CC BY 4.0. Renamed (neutral.env, outdoor.env); content not modified.
