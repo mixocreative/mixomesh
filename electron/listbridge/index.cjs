@@ -282,7 +282,7 @@ function registerListbridgeIpc(handle, deps = {}) {
           id: d.id, label: d.label, transfer: d.transfer, maxFiles: d.maxFiles, maxImages: d.maxImages,
           transfers: d.transfers ? [...d.transfers] : undefined,
           visibility: d.visibility ? [...d.visibility] : undefined, drafts: d.drafts === true,
-          requires: d.requires ? [...d.requires] : undefined,
+          requires: d.requires ? [...d.requires] : undefined, updateFiles: d.updateFiles === true,
           listOptions: typeof a.buildListOptions === 'function',
           currencies: d.currencies ? [...d.currencies] : undefined, fields: [...(d.fields || [])],
           credentials: [...(d.credentials || [])], testConnection: typeof a.testConnection === 'function',
@@ -391,7 +391,8 @@ function registerListbridgeIpc(handle, deps = {}) {
     if (projectKey && !ID_PART.test(projectKey)) throw new Error('projectKey has invalid characters');
     const pkg = buildPackage(core, payload);
     const d = adapter.describe();
-    const issues = [...core.validateListing(pkg, { maxImages: d.maxImages, currencies: d.currencies }), ...(adapter.validate(pkg) || [])];
+    const metadataOnly = !!remoteId && d.updateFiles !== true;
+    const issues = [...core.validateListing(pkg, { maxImages: d.maxImages, currencies: d.currencies, metadataOnly }), ...(adapter.validate(pkg) || [])];
     if (issues.length) return { ok: false, status: 'invalid', issues };
     if (projectKey && !remoteId) {
       const pending = await pendingFor(runner, projectKey);

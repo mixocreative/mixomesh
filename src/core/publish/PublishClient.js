@@ -75,8 +75,10 @@ export async function buildListingPackage(input, deps) {
   return { blocked: false, pkg: createListing({ ...listing, images, files }) };
 }
 
-function recordFor(pkg, req, outcome, status, now) {
+function recordFor(pkg, req, outcome, status, now, existing = null) {
   const r = outcome.result ?? {};
+  // A metadata-only update sends no files: the listing still carries the files it was published with.
+  const fileNames = pkg.files.length || !existing ? pkg.files.map(f => f.name) : [...(existing.fileNames ?? [])];
   return {
     platform: req.platform,
     accountId: req.accountId,
@@ -94,7 +96,7 @@ function recordFor(pkg, req, outcome, status, now) {
     url: r.url ?? null,
     publishedAt: status === 'published' ? now : null,
     updatedAt: now,
-    fileNames: pkg.files.map(f => f.name),
+    fileNames,
     status,
   };
 }
@@ -123,7 +125,8 @@ function recordOutcome(pkg, req, outcome, d) {
   if (outcome.ok) {
     // 'published' = public; anything else ('secret' = link only, or a platform draft) stays a draft record.
     const published = outcome.result?.status === 'published';
-    rec = recordFor(pkg, req, outcome, published ? 'published' : 'draft', now);
+    const existing = req.remoteId ? findListing(d.getState().project?.listings, req.platform, req.accountId) : null;
+    rec = recordFor(pkg, req, outcome, published ? 'published' : 'draft', now, existing?.remoteId === req.remoteId ? existing : null);
   } else if (outcome.status === 'invalid') {
     return;   // never reached the platform; nothing to record
   } else if (outcome.result?.remoteId || req.remoteId) {

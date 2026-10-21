@@ -218,14 +218,27 @@ export function failureView(outcome) {
 }
 
 /**
+ * What a publish sends besides the listing text. An update of a platform whose update call takes no
+ * files (describe().updateFiles not true, e.g. Cults3D updateCreation) sends neither files nor
+ * images: the tab does not offer them and builds no export.
+ * @param {{ updateFiles?: boolean }|null} desc @param {string|null} remoteId
+ * @returns {{ files: boolean, images: boolean }}
+ */
+export function listingScope(desc, remoteId) {
+  const sends = !remoteId || desc?.updateFiles === true;
+  return { files: sends, images: sends };
+}
+
+/**
  * Validate the form the way the main process will, without building files:
  * placeholder images / files stand in for the real bytes.
  * @param {{ form: PublishForm, hasHero: boolean, galleryCount: number, fileCount: number,
  *   limits?: { maxImages?: number, currencies?: string[] }, locale?: string,
- *   requires?: string[] }} a  `requires` = describe().requires (listing fields the platform insists on)
+ *   requires?: string[], scope?: { files: boolean, images: boolean } }} a
+ *   `requires` = describe().requires (listing fields the platform insists on); `scope` = listingScope()
  * @returns {Array<{field:string, code:string, message:string}>}
  */
-export function validateForm({ form, hasHero, galleryCount, fileCount, limits = {}, locale = 'en', requires = [] }) {
+export function validateForm({ form, hasHero, galleryCount, fileCount, limits = {}, locale = 'en', requires = [], scope = { files: true, images: true } }) {
   const amount = parsePriceInput(form.price);
   const stub = { name: 'x', mime: 'application/octet-stream', bytes: new Uint8Array(0) };
   const images = [
@@ -236,7 +249,7 @@ export function validateForm({ form, hasHero, galleryCount, fileCount, limits = 
   const listing = formToListing(form, { locale });
   if (Number.isNaN(amount)) listing.price = { amount: NaN, currency: listing.price?.currency ?? form.currency };
   const pkg = createListing({ ...listing, images, files });
-  const issues = validateListing(pkg, { maxImages: limits.maxImages, currencies: limits.currencies });
+  const issues = validateListing(pkg, { maxImages: limits.maxImages, currencies: limits.currencies, metadataOnly: !scope.files && !scope.images });
   if (requires.includes('categoryHint') && !pkg.categoryHint) issues.push({ field: 'category', code: 'category-required', message: 'Choose a category.' });
   if (requires.includes('license') && !pkg.license) issues.push({ field: 'license', code: 'license-required', message: 'Choose a license.' });
   return issues;
@@ -261,11 +274,16 @@ const STEP_LABEL_KEYS = Object.freeze({
  */
 export const stepLabelKey = (id, { direct = false } = {}) => (direct && id === 'host' ? 'publish.step.hostDirect' : (STEP_LABEL_KEYS[id] ?? null));
 
-/** Ordered step ids; 'publish' in jobs.cjs reports as create (new) or update (remoteId). */
-export const stepPlan = isUpdate => ['build', 'validate', 'bundle', 'host', isUpdate ? 'update' : 'create', 'confirm', 'cleanup'];
+/**
+ * Ordered step ids; 'publish' in jobs.cjs reports as create (new) or update (remoteId).
+ * Without files (listingScope) nothing is built, bundled or hosted.
+ */
+export const stepPlan = (isUpdate, scope = { files: true }) => [
+  ...(scope.files ? ['build', 'validate', 'bundle', 'host'] : ['validate']), isUpdate ? 'update' : 'create', 'confirm', 'cleanup',
+];
 
 /** @returns {Array<{id:string, status:'todo'|'run'|'done'|'failed'|'skipped', message?:string}>} */
-export const initialSteps = isUpdate => stepPlan(isUpdate).map(id => ({ id, status: 'todo' }));
+export const initialSteps = (isUpdate, scope) => stepPlan(isUpdate, scope).map(id => ({ id, status: 'todo' }));
 
 /**
  * Fold one progress event ({step,status,message,skipped}) into the step list.

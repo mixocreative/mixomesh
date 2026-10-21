@@ -178,6 +178,7 @@ export const cults3dAdapter = {
       visibility: ['secret', 'public'],
       drafts: true, // SECRET = "only people with the link" (not a true draft)
       requires: ['categoryHint', 'license'],
+      updateFiles: false, // updateCreation has no file / image arguments
       fields: ['title', 'description', 'tags', 'price', 'license', 'categoryHint', 'subCategoryIds', 'visibility', 'madeWithAi', 'locale'],
       credentials: ['nickname', 'apiKey'],
     };

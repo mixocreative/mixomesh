@@ -177,7 +177,7 @@ function createPublishRunner({
     async validate(job) {
       const d = job.desc;
       const issues = [
-        ...core.validateListing(job.pkg, { maxImages: d.maxImages, currencies: d.currencies }),
+        ...core.validateListing(job.pkg, { maxImages: d.maxImages, currencies: d.currencies, metadataOnly: !!job.remoteId && d.updateFiles !== true }),
         ...(job.adapter.validate(job.pkg) || []),
       ];
       if (issues.length) {

@@ -293,6 +293,8 @@ function _remoteId(desc) {
   return findListing(getState().project?.listings, desc.id, M.ACCOUNT_ID)?.remoteId ?? null;
 }
 
+const _scope = desc => M.listingScope(desc, _remoteId(desc));
+
 function _request(desc) {
   const remoteId = _remoteId(desc);
   return {
@@ -370,7 +372,8 @@ function _settle(outcome, refresh) {
 async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
   const form = S.form;
   const isUpdate = !!_remoteId(desc);
-  S.phase = 'publishing'; S.steps = M.initialSteps(isUpdate); S.jobId = null; S.outcome = null;
+  const scope = _scope(desc);
+  S.phase = 'publishing'; S.steps = M.initialSteps(isUpdate, scope); S.jobId = null; S.outcome = null;
   S.blocked = null; S.note = null; S.cancelRequested = false; S.hold = null; S.linksOpen = null;
   _guardUnload(true);
   S.steps = M.applyProgress(S.steps, { step: 'build', status: 'running' });
@@ -379,9 +382,9 @@ async function _publish(desc, refresh, { acknowledgeWarnings = false } = {}) {
     const print = getState().print ?? {};
     const res = await Publish.buildListingPackage({
       listing: M.formToListing(form, { locale: getLocale() }),
-      exportSelection: { formats: _currentFormats(), options: { individually: !!print.individually, acknowledgeWarnings } },
-      heroBlob: S.hero?.blob,
-      galleryBlobs: S.gallery.map(g => g.blob),
+      exportSelection: { formats: scope.files ? _currentFormats() : [], options: { individually: !!print.individually, acknowledgeWarnings } },
+      heroBlob: scope.images ? S.hero?.blob : undefined,
+      galleryBlobs: scope.images ? S.gallery.map(g => g.blob) : [],
     });
     if (res.blocked) {
       S.phase = 'form'; S.blocked = res;
@@ -744,6 +747,21 @@ function _optionsOrText(id, list, value) {
   return `<input id="${id}" class="pp-preset-select" type="text" value="${escapeAttr(value)}" autocomplete="off">`;
 }
 
+function _heroHtml(max) {
+  let h = '<div class="pub-hero-wrap">';
+  if (S.hero) {
+    h += `<div class="pub-hero${S.hero.transparent ? ' transparent' : ''}"><img src="${escapeAttr(S.hero.url)}" alt="${escapeAttr(t('publish.hero.alt'))}">`
+      + `<span class="pub-cap pp-num">${HERO_SIZE} × ${HERO_SIZE} · ${escapeHtml(S.hero.transparent ? t('publish.hero.transparent') : t('publish.hero.studio'))}</span></div>`;
+  } else {
+    h += `<div class="pub-hero pub-hero-empty" role="status">${escapeHtml(S.capturing ? t('publish.hero.capturing') : t('publish.hero.none'))}</div>`;
+  }
+  h += '</div>';
+  h += '<div class="pub-btns">'
+    + `<button type="button" class="pub-btn" data-act="retake"${S.capturing ? ' disabled' : ''}>${icon('Camera', { width: 12, height: 12 })} ${escapeHtml(t('publish.hero.retake'))}</button>`
+    + `<button type="button" class="pp-toggle${S.transparent ? ' pp-toggle-on' : ''}" data-act="transparent" aria-pressed="${S.transparent}"><span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(t('publish.hero.transparent'))}</button></div>`;
+  return h + _galleryHtml(max);
+}
+
 function _formHtml(desc, readiness) {
   const f = _ensureForm(desc);
   const rec = findListing(getState().project?.listings, desc.id, M.ACCOUNT_ID);
@@ -761,19 +779,10 @@ function _formHtml(desc, readiness) {
     if (S.blocked.code === 'EXPORT_NEEDS_ACKNOWLEDGEMENT') h += `<div class="pub-btns"><button type="button" class="pub-btn" data-act="publish-anyway">${escapeHtml(t('publish.blocked.anyway'))}</button></div>`;
     h += '</div>';
   }
-  // hero
-  h += '<div class="pub-hero-wrap">';
-  if (S.hero) {
-    h += `<div class="pub-hero${S.hero.transparent ? ' transparent' : ''}"><img src="${escapeAttr(S.hero.url)}" alt="${escapeAttr(t('publish.hero.alt'))}">`
-      + `<span class="pub-cap pp-num">${HERO_SIZE} × ${HERO_SIZE} · ${escapeHtml(S.hero.transparent ? t('publish.hero.transparent') : t('publish.hero.studio'))}</span></div>`;
-  } else {
-    h += `<div class="pub-hero pub-hero-empty" role="status">${escapeHtml(S.capturing ? t('publish.hero.capturing') : t('publish.hero.none'))}</div>`;
-  }
-  h += '</div>';
-  h += '<div class="pub-btns">'
-    + `<button type="button" class="pub-btn" data-act="retake"${S.capturing ? ' disabled' : ''}>${icon('Camera', { width: 12, height: 12 })} ${escapeHtml(t('publish.hero.retake'))}</button>`
-    + `<button type="button" class="pp-toggle${S.transparent ? ' pp-toggle-on' : ''}" data-act="transparent" aria-pressed="${S.transparent}"><span class="pp-toggle-dot" aria-hidden="true"></span>${escapeHtml(t('publish.hero.transparent'))}</button></div>`;
-  h += _galleryHtml(max);
+  // hero + gallery: not sent by an update the platform takes as metadata only (listingScope)
+  const scope = M.listingScope(desc, rec?.remoteId ?? null);
+  if (!scope.images) h += `<p class="pp-help pub-help" role="note">${escapeHtml(t('publish.update.filesFixed', { label: desc.label }))}</p>`;
+  else h += _heroHtml(max);
   // fields
   h += _row('pub-title', t('publish.field.title'), `<input id="pub-title" class="pp-preset-select" type="text" value="${escapeAttr(f.title)}" autocomplete="off">`);
   h += _row('pub-desc', t('publish.field.description'), `<textarea id="pub-desc" class="pp-preset-select pub-area" rows="4">${escapeHtml(f.description)}</textarea>`);
@@ -813,9 +822,11 @@ function _formHtml(desc, readiness) {
     if (opt?.status === 'failed') h += `<button type="button" class="pub-btn" data-act="reload-options">${escapeHtml(t('publish.options.reload'))}</button>`;
   }
   h += `<div class="pp-checkbox"><input type="checkbox" id="pub-ai"${f.madeWithAi ? ' checked' : ''}><label for="pub-ai">${escapeHtml(t('publish.field.madeWithAi'))}</label></div>`;
-  h += _filesHtml(readiness, false);
-  const limit = M.zipLimit(desc);
-  if (limit != null) h += `<p class="pp-help">${escapeHtml(t('publish.files.zipHint', { n: limit }))}</p>`;
+  if (scope.files) {
+    h += _filesHtml(readiness, false);
+    const limit = M.zipLimit(desc);
+    if (limit != null) h += `<p class="pp-help">${escapeHtml(t('publish.files.zipHint', { n: limit }))}</p>`;
+  }
   h += `<p class="pub-blocker" id="pub-blocker" role="status"></p>`;
   h += '<button type="button" class="pp-primary-btn" id="pub-primary" data-act="publish" aria-describedby="pub-blocker"><span class="pp-primary-label"></span></button>';
   h += `<button type="button" class="pub-btn pub-wide" data-act="save-package">${escapeHtml(t('publish.savePackage'))}</button>`;
@@ -830,15 +841,16 @@ function _formHtml(desc, readiness) {
 /** First reason the primary button is disabled, or '' when it can fire. */
 function _blocker(desc, readiness) {
   if (S.pending.length && !_remoteId(desc)) return t('publish.pending.blocked', { label: desc.label });
-  if (S.capturing && !S.hero) return t('publish.hero.capturing');
-  if (_needsHost(desc) && S.hostMode === 's3' && !S.s3Connected) return t('publish.blocker.host');
-  if (readiness && !readiness.canExport) return t('print.readiness.blockedHint');
-  const formats = _currentFormats();
-  if (!formats.length) return t('publish.blocker.noFormat');
+  const scope = _scope(desc);
+  if (scope.images && S.capturing && !S.hero) return t('publish.hero.capturing');
+  if (scope.files && _needsHost(desc) && S.hostMode === 's3' && !S.s3Connected) return t('publish.blocker.host');
+  if (scope.files && readiness && !readiness.canExport) return t('print.readiness.blockedHint');
+  const formats = scope.files ? _currentFormats() : [];
+  if (scope.files && !formats.length) return t('publish.blocker.noFormat');
   const sizes = Math.max(1, readiness?.targets?.length ?? 1);
   const issues = M.validateForm({
     form: S.form, hasHero: !!S.hero, galleryCount: S.gallery.length, fileCount: formats.length * sizes,
-    limits: { maxImages: desc.maxImages, currencies: desc.currencies }, locale: getLocale(), requires: desc.requires ?? [],
+    limits: { maxImages: desc.maxImages, currencies: desc.currencies }, locale: getLocale(), requires: desc.requires ?? [], scope,
   });
   if (!issues.length) return '';
   const key = M.issueKey(issues[0].code);
@@ -1000,7 +1012,7 @@ function _wire(el, desc, readiness, refresh) {
     if (g) URL.revokeObjectURL(g.url);
     refresh('[data-act="add-shot"]');
   });
-  if (!S.hero && !S.capturing && !S.heroTried) setTimeout(() => _captureHero(refresh), 0);
+  if (_scope(desc).images && !S.hero && !S.capturing && !S.heroTried) setTimeout(() => _captureHero(refresh), 0);
 
   // files
   el.querySelectorAll('[data-fmt-pick]').forEach(cb => cb.addEventListener('change', () => {

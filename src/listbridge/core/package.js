@@ -28,7 +28,8 @@ export const VISIBILITIES = Object.freeze(['public', 'secret']);
  * @property {ListingFile[]} files
  * @typedef {{ field: string, code: string, message: string }} Issue
  * @typedef {{ maxTitle?: number, maxTags?: number, maxTagLength?: number, maxImages?: number,
- *   maxFiles?: number, currencies?: string[], requireHero?: boolean }} Limits
+ *   maxFiles?: number, currencies?: string[], requireHero?: boolean, metadataOnly?: boolean }} Limits
+ *   metadataOnly: an update of a platform that cannot replace files / images (no files or images needed)
  */
 
 /** @param {any} v @returns {string} */
@@ -100,7 +101,7 @@ function safeName(name) {
  */
 export function validateListing(pkg, limits = {}) {
   const {
-    maxTitle = 120, maxTags = 20, maxTagLength = 40, maxImages = 10, currencies, requireHero = true,
+    maxTitle = 120, maxTags = 20, maxTagLength = 40, maxImages = 10, currencies, requireHero = true, metadataOnly = false,
   } = limits;
   /** @type {Issue[]} */
   const issues = [];
@@ -135,7 +136,7 @@ export function validateListing(pkg, limits = {}) {
   }
 
   const images = pkg.images || [];
-  if (images.length < 1) add('images', 'images-none', 'At least one image is required.');
+  if (images.length < 1 && !metadataOnly) add('images', 'images-none', 'At least one image is required.');
   if (images.length > maxImages) add('images', 'images-too-many', `At most ${maxImages} images allowed.`);
   if (requireHero && images.length >= 1) {
     const heroes = images.filter((i) => i.role === 'hero').length;
@@ -146,7 +147,7 @@ export function validateListing(pkg, limits = {}) {
   }
 
   const files = pkg.files || [];
-  if (files.length < 1) add('files', 'files-none', 'At least one file is required.');
+  if (files.length < 1 && !metadataOnly) add('files', 'files-none', 'At least one file is required.');
   const seen = new Set();
   for (const f of files) {
     if (!safeName(f.name)) { add('files', 'file-name-unsafe', `Unsafe file name "${f.name}".`); continue; }
