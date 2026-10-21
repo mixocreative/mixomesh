@@ -59,13 +59,22 @@ PLY / WRL) and is never hidden or blocked.
   siblings by `logicalObjectId`. `sourceGroupId` is still stamped at split time
   (save-file compat) but is migrate-only at runtime (Decision 33).
 - **A multi-shader object is ONE logical object** regardless of how it arrives.
-  Two cases get the same `logicalObjectId` (`_registerInstantiatedMeshes`):
+  Three cases get the same `logicalObjectId` (`_registerInstantiatedMeshes`):
   (1) a `BABYLON.MultiMaterial` split (shared split-time `sourceGroupId` stamp, used only as the import grouping key); (2) a glTF
   **multi-primitive** mesh — Babylon names primitives `<stem>_primitive<N>` and
   parents them under one node, so they share a stem + `parentId`. Most
   multi-shader models export as case 2. **Separate objects are distinct nodes
   with no `_primitive` name → never merged** (regression-tested with a 2-object
   glTF). The lead part is the visible object; the rest are material parts.
+  (3) an **OBJ object with several `usemtl`**: Babylon's OBJ loader emits one
+  mesh per material; the first keeps the `o`/`g` name, the rest are named
+  `mesh_mm<N>` (N = 1, 2, … restarting at each `o`/`g`).
+  `MeshSplit.groupObjMaterialRuns` (run inside
+  `splitMultiMaterialMeshesInContainer`, so the worker and main-thread OBJ
+  paths and re-instantiation all pass through it) stamps each run of two or
+  more non-empty meshes with one `sourceGroupId` and the object's name as
+  `sourceMeshName`, so it reuses case (1)'s key. Separate `o`/`g` blocks are
+  separate runs and never merge (cia A-10).
 - **Validation runs at import time, non-blocking.** Re-runs blocking before
   export. Topology is **logical-object-aware**: a mesh whose
   `logicalObjectPartIds` has >1 part is validated as the **welded union** of
@@ -1302,7 +1311,8 @@ Module-local `_suppressDirty` flag drives `withoutDirty` and gates both `setStat
 ### State Shape (full schema — see Part 10 for persisted form)
 ```js
 const initialState = {
-  project: { name: 'Untitled', isDirty: false, lastSavedAt: null, version: '3.1' },
+  project: { id: null, name: 'Untitled', lastSavedAt: null, version: '3.4', listings: [] },
+  // dirty is NOT state: persist/DirtyTracker.js (PersistenceManager.isDirty) is the one truth
   scene: {
     objects: {},        // Record<meshId, SceneObject> — each has collectionId tag
     groups: {},         // Record<groupId, GroupNode>
@@ -1584,13 +1594,18 @@ selects the new root group(s); undo removes the copy, redo restores it.
 - **Dirty is position-based** (review A5). `HistoryManager.getPosition()`
   returns the serial of the current undo-stack top (0 when empty); push
   assigns a monotonic serial per command. PersistenceManager records the
-  position at save/load/new; the project is dirty iff
-  `position !== savedPosition` OR a non-history mutation fired
-  `PROJECT_DIRTY` since the last save (sticky flag —
-  `HistoryManager.isApplying()` distinguishes command-driven dirty events,
-  which the position diff already covers). Undoing back to the saved
-  position therefore reads clean; editing after save then undoing past the
-  save reads dirty.
+  position at load/new, and for a save the position captured when the
+  document was BUILT (`DirtyTracker.beginSave()` in the same tick as
+  `buildDocument`'s state snapshot, `commitSave(attempt)` after the bytes
+  landed, cia A-01). The project is dirty iff `position !== savedPosition`
+  OR a non-history mutation fired `PROJECT_DIRTY` since the captured
+  baseline (sticky generation; `HistoryManager.isApplying()` distinguishes
+  command-driven dirty events, which the position diff already covers). An
+  edit made while the file was writing therefore keeps the project dirty.
+  Undoing back to the saved position reads clean; editing after save then
+  undoing past the save reads dirty. `state.project.isDirty` does not exist;
+  the tracker is the only dirty flag (cia W-14), and `PROJECT_SAVED`
+  listeners that need the answer read `isDirty()` rather than assuming clean.
 - **Silent-vs-dirty rule for state writes** (Stage 7, 2026-07-17):
   a slice covered by a `SettingsStore` schema entry (per-user boot defaults —
   `render`, `grid`, `overlays.grid/axes/printPreview`, `print` prefs, `gizmo`,
@@ -1861,17 +1876,17 @@ Viewer sizes are measured at RESTING scale (`ImportBounce.withRestTransform`): a
 
 **Layer 1: Listing package (platform-neutral).** `ListingPackage` model in `src/listbridge/core/package.js` holds title, description (Markdown), tags, price `{amount, currency}`, license, AI flag, category, images `[{name, mime, bytes, role}]`, files `[{name, mime, bytes}]`. Built once from the project: files come from the export pipeline (byte-identical to Export; >10 are zipped), hero image from `FrameCapture.captureListingShot` (1600² PNG, furniture hidden). "Save listing package…" writes it as one `<title>.listbridge.zip` (`listing.json` + `images/` + `files/`) through `storage.saveExport` (`ListingPackageExport.js`), on every storage tier — usable for manual upload anywhere. `fromManifest` rebuilds entry paths from validated names, so an untrusted `listing.json` cannot read outside the package. Format version `"listbridge": 1` in `listing.json` so packages written by other projects are readable.
 
-**Layer 2: Platform adapter (pure).** One file per platform in `src/listbridge/adapters/`, registered in the `ADAPTERS` list of `src/listbridge/index.js` (a new platform = one file + one entry). Adapters only build requests and parse responses; the runner does all transport. Required members: `describe()` → `{id, label, transfer: 'url'|'direct', transfers?, maxFiles, maxImages, currencies?, visibility?, drafts?, requires?, fields, credentials}`, `validate(pkg)` → issues, `buildCreate(pkg, ctx)`, `buildUpdate(remoteId, pkg, ctx)`, `parseResult(response)` → `{remoteId, url, status}` or typed issues. Optional: `authHeaders(record)`, `buildConfirm(result, ctx)`/`parseConfirm(response, ctx)` (ingestion read-back), `buildUploadSlot(kind, item)`/`parseUploadSlot(response, item)` (native upload: an S3-style presigned POST `{url, fields, key}`; failure = error with `code: 'upload-slot-failed'`), `buildListOptions({locale})`/`parseListOptions(responses)` (→ `{categories:[{id,name,children}], licenses:[{code,name,free,priced,commercial}]}`), `listCategories`, `testConnection`. `transfer: 'direct'` with `buildUploadSlot` means "upload slots": the runner uploads each file / image itself and hands the keys to `buildCreate` in `ctx.files[].key` / `ctx.images[].key`; `buildCreate` also still accepts `ctx.*[].url` (URL delivery, the `transfers: ['direct','url']` fallback). `cults3d.js` is reconciled with the LIVE schema (`docs/reference/cults3d-schema.json`, enforced by `tests/listbridge-cults3d-schema.test.mjs`): GraphQL `createCreation` (`fileKeys`/`imageKeys`) / `updateCreation` (metadata only, no files), Basic auth (nickname + API key), `visibility` SECRET (default, "only people with the link", not a true draft) or PUBLIC, `madeWithAi`, `usages: ['3dp']`, required `categoryId` + `licenseCode`, 26-code `CurrencyEnum`, locale en/ja/zh-Hant → EN/JA/ZH, confirm via `creation(slug){blueprints illustrations}`. What introspection cannot prove (key format, tag limits, file extensions, blueprint semantics) is listed as U1–U8 in the file header. The listing package gained `visibility: 'public'|'secret'` (default `secret`) and `subCategoryIds`.
+**Layer 2: Platform adapter (pure).** One file per platform in `src/listbridge/adapters/`, registered in the `ADAPTERS` list of `src/listbridge/index.js` (a new platform = one file + one entry). Adapters only build requests and parse responses; the runner does all transport. Required members: `describe()` → `{id, label, transfer: 'url'|'direct', transfers?, maxFiles, maxImages, currencies?, visibility?, drafts?, requires?, updateFiles?, printableExtensions?, fields, credentials}` (`updateFiles: true` only when `buildUpdate` can replace files and images; absent/false (Cults3D: `updateCreation` has no file or image arguments) makes every update metadata only, cia D-02. `printableExtensions`: the file extensions the platform counts as a model; Cults3D: stl obj 3mf step stp ply amf. A .zip is only an extra download there (U3/U6 unconfirmed), and its `no-printable-file` issue names the zip, cia D-03), `validate(pkg)` → issues, `buildCreate(pkg, ctx)`, `buildUpdate(remoteId, pkg, ctx)`, `parseResult(response)` → `{remoteId, url, status}` or typed issues; `parseResult` throws `code: 'platform-unclear'` when the answer proves neither success nor rejection (unreadable body, or no creation and no error list). Optional: `authHeaders(record)`, `buildConfirm(result, ctx)`/`parseConfirm(response, ctx)` (ingestion read-back), `buildUploadSlot(kind, item)`/`parseUploadSlot(response, item)` (native upload: an S3-style presigned POST `{url, fields, key}`; failure = error with `code: 'upload-slot-failed'`), `buildListOptions({locale})`/`parseListOptions(responses)` (→ `{categories:[{id,name,children}], licenses:[{code,name,free,priced,commercial}]}`), `buildOwnListings({locale})`/`parseOwnListings(response)` (→ `[{remoteId, name, url, status, slug?}]`, the account's own listings; Cults3D: `myself { creationsBatch(limit: 100) { results { id slug name url visibility } } }`, cia F-01), `listCategories`, `testConnection`. `transfer: 'direct'` with `buildUploadSlot` means "upload slots": the runner uploads each file / image itself and hands the keys to `buildCreate` in `ctx.files[].key` / `ctx.images[].key`; `buildCreate` also still accepts `ctx.*[].url` (URL delivery, the `transfers: ['direct','url']` fallback). `cults3d.js` is reconciled with the LIVE schema (`docs/reference/cults3d-schema.json`, enforced by `tests/listbridge-cults3d-schema.test.mjs`): GraphQL `createCreation` (`fileKeys`/`imageKeys`) / `updateCreation` (metadata only, no files), Basic auth (nickname + API key), `visibility` SECRET (default, "only people with the link", not a true draft) or PUBLIC, `madeWithAi`, `usages: ['3dp']`, required `categoryId` + `licenseCode`, 26-code `CurrencyEnum`, locale en/ja/zh-Hant → EN/JA/ZH, confirm via `creation(slug){blueprints illustrations}`. What introspection cannot prove (key format, tag limits, file extensions, blueprint semantics) is listed as U1–U9 in the file header. The listing package gained `visibility: 'public'|'secret'` (default `secret`) and `subCategoryIds`.
 
 **Layer 3: File host (only for URL-delivery platforms; Cults3D now uploads natively and does not use it).** Owner rule (2026-10-14): **zero user setup beyond the platform's API key**. Default host is **automatic temporary link from this PC**: a `node:http` server on `127.0.0.1` serves files at `/<random token>/<name>`, exposed via Cloudflare quick tunnel (`cloudflared --url`, no account) as `https://<words>.trycloudflare.com` only while the job runs. `cloudflared` is bundled with the installer (pinned version, SHA-256 verified by `scripts/fetch-cloudflared.mjs` before `npm run dist`; shipped via `extraResources` with its Apache-2.0 licence); host code in `electron/listbridge/filehosts/tunnel.cjs`. Links work only while MIXOMESH runs; the job holds open until ingestion is confirmed (via host `served` bytes + adapter query if present), then closes. S3-compatible presigned URLs (R2, AWS) remain an **advanced** option (`electron/listbridge/filehosts/s3.cjs`): random prefix, short-lived GET, deleted after confirmation. Either way, paid files are never left at permanent public URLs.
 
-**Job pipeline and credentials.** The renderer builds the package (export files + listing shot), then the runner's resumable job runs `validate → bundle (zip when over maxFiles) → host (URL platforms: temporary links; upload-slot platforms: per file / image slot request → multipart POST to the slot with no platform credentials → key recorded, so Retry never re-uploads a finished item; an update re-sends no files; errors `upload-slot-failed` / `upload-failed`) → create | update → confirm → cleanup`, emitting `publish:progress` events. Create/update are never blindly re-sent after a 5xx or timeout (no duplicate listings); Retry resumes the failed step and reuses already-hosted URLs. Credentials are encrypted with `safeStorage` (DPAPI) in `<userData>/listbridge-credentials.bin`; the store refuses to save if OS encryption is unavailable, and secrets are never returned to the renderer, written to `.mixo`/localStorage or logged. The renderer sends the manifest plus byte arrays (never file paths); `publish:start` enforces size/count limits and re-validates.
+**Job pipeline and credentials.** The renderer builds the package (export files + listing shot), then the runner's resumable job runs `validate → bundle (zip when over maxFiles) → host (URL platforms: temporary links; upload-slot platforms: per file / image slot request → multipart POST to the slot with no platform credentials → key recorded, so Retry never re-uploads a finished item; an update re-sends no files; errors `upload-slot-failed` / `upload-failed`) → create | update → confirm → cleanup`, emitting `publish:progress` events. A create is sent at most once per job. When its answer proves nothing (network error, timeout, HTTP 5xx, `platform-unclear`) the job fails with code `create-unknown`; Retry then only looks the listing up (`buildOwnListings` snapshot taken before the create; adopts the single new listing with the sent title) and otherwise fails again with `create-unknown`, never re-creating. The Publish tab replaces Retry with "Check <platform> again" plus a confirmed "Not there: publish as new", and tells the seller what to look for on the platform. Cancel never aborts a create in flight: it waits for the answer so a listing the platform made is still reported (`result.remoteId`). Only a 4xx or the platform's own error list counts as "not created". Updates stay retryable (same metadata). Retry resumes the failed step and reuses already-hosted URLs (cia F-01). Credentials are encrypted with `safeStorage` (DPAPI) in `<userData>/listbridge-credentials.bin`; the store refuses to save if OS encryption is unavailable, a file this OS account can no longer decrypt (password reset, profile moved, restored backup) is renamed to `<file>.corrupt-<stamp>` and the store starts empty, so Connect works again; `publish:describe` carries `credentialsReset: true` once and the Publish tab says the saved accounts were reset (cia F-03), and secrets are never returned to the renderer, written to `.mixo`/localStorage or logged. The renderer sends the manifest plus byte arrays (never file paths); `publish:start` enforces size/count limits and re-validates. A metadata-only update (remoteId and `updateFiles` not true) is validated with `validateListing(pkg, {metadataOnly: true})` (no files or images required) in `publish:start` and in the runner, and hosts / uploads nothing (cia D-02). Every create is journaled by the main process in `<userData>/listbridge-journal.json` (`electron/listbridge/journal.cjs`; no secrets, no bytes): `creating` before the request leaves (with the project key, title, locale, the pre-create listing snapshot and the listing metadata), then `created` with the remote id, `unknown` when the answer was lost; a refused create is dropped. The renderer acknowledges an entry once the listing record is in `project.listings`. A reload, a renderer crash or an app restart therefore never loses a created listing id (cia B-04).
 
-**IPC channels** (all through main's trusted-sender `handle()`; preload exposes `window.electronAPI.listbridge`): `publish:describe` (platforms, file hosts, default host), `publish:hasCredentials`, `publish:setCredentials`, `publish:clearCredentials`, `publish:testConnection`, `publish:listOptions` (platform, locale → `{ok, categories, licenses}` or `{ok:false, message}`; cached in memory 10 min per platform + locale), `publish:start`, `publish:retry`, `publish:cancel`, `publish:extendHold`; event `publish:progress`. Retry/cancel/extendHold only from the window that started the job. Outcomes are saved as `project.listings[]` (schema 3.5).
+**IPC channels** (all through main's trusted-sender `handle()`; preload exposes `window.electronAPI.listbridge`): `publish:describe` (platforms, file hosts, default host), `publish:hasCredentials`, `publish:setCredentials` (tests the candidate record first when the platform or file host has a connection test and saves it only when the test passes, else `{ok:false, message}` and the saved record is untouched, so a typo or being offline never replaces a working account, cia F-09), `publish:clearCredentials`, `publish:testConnection`, `publish:listOptions` (platform, locale → `{ok, categories, licenses}` or `{ok:false, message}`; cached in memory 10 min per platform + locale), `publish:start`, `publish:retry`, `publish:cancel`, `publish:extendHold`, `publish:pending` (project key → the project's unsettled creates `{jobId, state: 'running'|'creating'|'created'|'unknown', title, listing, remoteId?, url?, status?}`; a `creating` entry whose job is gone reads `unknown`), `publish:resolvePending` (job id, `'ack'` after the record is saved | `'check'` looks the listing up via `buildOwnListings` | `'discard'` after the seller checked the platform); event `publish:progress`. `publish:start` takes `projectKey` (the project's `project.id`, minted silently when missing); while that project has an unsettled create or a running publish and the request has no `remoteId`, it creates nothing and answers `{ok:false, status:'pending', pending}` (cia B-04). Retry/cancel/extendHold only from the window that started the job. Outcomes are saved as `project.listings[]` (schema 3.5).
 
 **Schema 3.5 — marketplace listings.** `project.listings[]: { platform, accountId, title, description, tags[], price, currency, license, madeWithAi, categoryId, subCategoryIds[], visibility: 'public'|'secret'|null, remoteId, url, publishedAt, updatedAt, fileNames[], status: 'draft'|'published'|'failed' }` (a SECRET listing is stored as `draft`). No credentials or bytes stored. `src/core/publish/Listings.js`: `normalizeListing` whitelists fields so secrets can't reach a `.mixo`; `upsertListing` matches by platform + accountId + remoteId and updates in place (publishing an existing `remoteId` is an update, never a duplicate); `findListing` looks up by platform + account. Migration 3.4 → 3.5 adds `listings: []`; older files load with empty list.
 
-**Publish tab (desktop only).** Print panel's 4th tab (`PublishTab.js`, `PublishModel.js` for pure helpers). Web gets **Save listing package…** at Export tab bottom instead (account-free `.listbridge.zip` download, `caps.publish=false` hides the tab). States: (1) **Not connected:** platform select, credential form fields (secrets are password inputs, read at click, never re-rendered), optional file-delivery choice (Automatic temporary link [default, no fields], Advanced S3/R2 [optional]), Connect + Test connection. (2) **Ready:** account row (Change / Disconnect / Test), hero 1600² with Retake + transparency toggle, gallery thumbnails (+ captures current view, each removable), Title, Description, Tags (chip input), Category + optional Sub-category and License (selects loaded through `publish:listOptions` after connect, licenses filtered free vs priced; free text with a note if the call fails or the platform has no lists), Visibility (when `describe().visibility` offers a choice: "Secret — only people with the link" is the default on first publish), Price + Currency (empty = free), Made with AI (default off), file checklist (export formats × print sizes), blocking reason if any, primary button naming consequence ("Publish secretly on X · €4.00", "Publish live on X · €4.00", "Update listing on X", or "Save as draft on X" for platforms with `drafts` but no visibility choice). (3) **Publishing / done / failed:** progress bar + step list, Cancel while running, failed step shows platform message + Retry + Cancel and clean up. Success shows URL as selectable text + Copy button + note that re-publishing updates the listing.
+**Publish tab (desktop only).** Print panel's 4th tab (`PublishTab.js`, `PublishModel.js` for pure helpers). Web gets **Save listing package…** at Export tab bottom instead (account-free `.listbridge.zip` download, `caps.publish=false` hides the tab). States: (1) **Not connected:** platform select, credential form fields (secrets are password inputs, read at click, never re-rendered), optional file-delivery choice (Automatic temporary link [default, no fields], Advanced S3/R2 [optional]), Connect + Test connection. (2) **Ready:** account row (Change / Disconnect / Test), hero 1600² with Retake + transparency toggle, gallery thumbnails (+ captures current view, each removable), Title, Description, Tags (chip input), Category + optional Sub-category and License (selects loaded through `publish:listOptions` after connect, licenses filtered free vs priced; free text with a note if the call fails or the platform has no lists), Visibility (when `describe().visibility` offers a choice: "Secret — only people with the link" is the default on first publish), Price + Currency (empty = free), Made with AI (default off), file checklist (export formats × print sizes), blocking reason if any (including: every ticked format reaches the platform zipped, so none counts as a model: `PublishModel.exportExtension` knows OBJ always zips and STL/PLY/WRL zip one-file-per-object; the tab asks to also tick 3MF or STL before anything is built, cia D-03), primary button naming consequence ("Publish secretly on X · €4.00", "Publish live on X · €4.00", "Update listing on X", or "Save as draft on X" for platforms with `drafts` but no visibility choice). When the project already has a listing on a platform whose update is metadata only (`PublishModel.listingScope`), the hero, gallery and file checklist are not shown; one line says the platform keeps the files and pictures of the first publish and that they are changed on the platform's website. Such an update builds no export (no readiness gate), its step list is validate → update → confirm → cleanup, and the listing record keeps the `fileNames` of the first publish (cia D-02). (3) **Publishing / done / failed:** progress bar + step list, Cancel while running, failed step shows platform message + Retry + Cancel and clean up. Success shows URL as selectable text + Copy button + note that re-publishing updates the listing. On load (and after each publish) the tab reads `publish:pending` for the open project: created listings are written to `project.listings` with a note to save; an unknown create shows what to look for on the platform with "Check <platform> again" and a confirmed "Not there: publish as new"; a publish still running from before a reload shows a Refresh button. Publish is blocked until those are settled (cia B-04).
 
 **Capability gate.** `caps.publish` is true only in the desktop shell with the Listbridge bridge present; false on web, OPFS (iPad/iPhone) and phone viewer. The Electron security smoke asserts the bridge, the Cults3D adapter and the default tunnel host are registered.
 
@@ -1907,13 +1922,15 @@ the platform, and Retry only re-runs the wait (the tunnel is restarted only if i
 
 **argv grammar** (`--open file [--open file...] [--library folder]` for single-instance handoff, LI.1–LI.6): relative paths resolve against cwd; absolute paths allowed (validated by `validateLaunchPath`, fail-closed); extensions allowlist (mixo, glb, gltf, 3mf, obj, stl); ≤32 opens; reserved device names + UNC + device prefixes rejected. Second instance forwards to the first.
 
-**Single instance + forwarding** (`electron/main.cjs` LI.2, LI.6): `app.requestSingleInstanceLock()` before boot; loser exits 0. `second-instance` event parses argv, validates paths, enqueues via `_launchQueue` per window. Renderer pulls batch via `handle('launch:pull')` after bootstrap finishes; later batches fan out via `send('launch:requests')`. `did-start-loading` resets the queue so a reloading renderer never loses a batch.
+**Single instance + forwarding** (`electron/main.cjs` LI.2, LI.6): `app.requestSingleInstanceLock()` before boot; loser exits 0. `second-instance` event parses argv, validates paths, enqueues via `_launchQueue` per window. Renderer pulls batch via `handle('launch:pull')` after bootstrap finishes; later batches fan out via `send('launch:requests')`. `did-start-loading` resets the queue so a reloading renderer never loses a batch. The per-window queue holds at most 16 batches until the renderer pulls; a batch arriving beyond that is not opened, and the next pulled batch carries one error entry ("N more launch request(s) were not opened: too many were waiting") that the launch toast lists (cia F-13).
+
+In the renderer, launch batches (`LaunchRequests`) and automation requests (`ApiDispatcher`) run on ONE serial lane (`src/core/api/ExternalLane.js`): a batch waiting in its unsaved-changes dialog holds the lane, so an API request queued meanwhile runs only after the open finished (or was cancelled). `app.info`, `app.capabilities`, `app.ping` and `events.subscribe` stay immediate (cia F-06).
 
 **Busy gate** (cia A-04, A-08, F-06): before a launch batch or an API request starts, it polls `isBusy` (`AssetLoader.isImporting() || LoadGate.isLoading() || BusyRegistry.isBusy()`) and waits (launch: toast `launch.busy` after the timeout; API: `E_BUSY`). `src/core/BusyRegistry.js` (`beginBusy(kind)` → idempotent end, `whileBusy(kind, fn)`, `isBusy()`) is the one record of the user's own work in flight: `save` (DirtyTracker.runExclusiveSave, from request to settle), `dialog` (DirtyTracker.confirmDirty until answered), `open` (PersistenceManager open / openPicked / newProject / openRecent, dialog + picker + load), `export` (PrintPipeline `_runExport`, picker included), `repair` (RepairSession.repairObjects), `boolean` (BooleanService.computeBooleanAsync). A new long-running user action that replaces or reads the whole world reports here. No self-deadlock: the gate is polled only before an external task starts.
 
 **Job batch transport** (`--job job.json --result result.json [--hidden] [--quit]`, API.7): JSON file containing `{apiVersion:1, steps:[{method,params}], stopOnError?:boolean}`. Validation gate: each step's method and params are validated by the live API method; ≤64 steps, 20 min total timeout. Result written to `--result` as `{apiVersion, ok, steps:[{method, ok, result|error, ms}]}`. When an instance is running, the job is forwarded over the named pipe (the second process acts as a client); otherwise it runs locally. Exit codes: 0 (ok), 2 (step error), 3 (job malformed), 4 (timeout), 5 (API unavailable).
 
-**Live API via named pipe** (`\\.\pipe\mixomesh-<16-char-hash>`, JSON-RPC 2.0 NDJSON, API.4): per-user per-session. First frame must be `hello {token, apiVersion}` with a 32-byte token from `<userData>/api/session.json` (created on start, deleted on quit, ACL = user profile). Token verified using constant-time comparison. ≤4 clients, 1 MiB frame cap, 10 min request timeout. Methods dispatch through `ApiDispatcher` (injection-based) to existing seams: `PersistenceManager`, `ViewportDrop.importPicked`, `AssetPanel.mountFromRef`, `MeshValidator`, `PrintReadiness`, `PrintCost`, `PrintPipeline.collectExportFiles`, `RenderOutput`. Results are same bytes as the Export / Render buttons. **Background throttling (2026-10-21):** while a window has pending API requests, `electron/ApiThrottle.cjs` turns its `backgroundThrottling` off (restored when the last request settles; job mode never throttles), so render-backed requests (thumbnail, save, export) complete even when the window is occluded or the display is asleep — Chromium stops producing frames for occluded windows otherwise.
+**Live API via named pipe** (`\\.\pipe\mixomesh-<16-char-hash>`, JSON-RPC 2.0 NDJSON, API.4): per-user per-session. First frame must be `hello {token, apiVersion}` with a 32-byte token from `<userData>/api/session.json` (created on start, deleted on quit, ACL = user profile). Token verified using constant-time comparison. ≤4 clients, 1 MiB frame cap, 10 min request timeout. Methods dispatch through `ApiDispatcher` (injection-based) to existing seams: `PersistenceManager`, `ViewportDrop.importPicked`, `AssetPanel.mountFromRef`, `MeshValidator`, `PrintReadiness`, `PrintCost`, `PrintPipeline.collectExportFiles`, `RenderOutput`. Results are same bytes as the Export / Render buttons. **Background throttling (2026-10-21):** while a window has pending API requests, `electron/ApiThrottle.cjs` turns its `backgroundThrottling` off (restored when the last request settles; job mode never throttles), so render-backed requests (thumbnail, save, export) complete even when the window is occluded or the display is asleep — Chromium stops producing frames for occluded windows otherwise. `events.subscribe` is per client: main records each client's types and sends the renderer the UNION of all live clients' types (the renderer keeps one set), answers each client with its own list, and `notify` delivers an event only to clients that asked for its type. One client's subscribe never narrows another's stream (cia F-05).
 
 **Cancellation (cia F-08).** A request whose pipe client disconnects, or that hits the 10 min timeout, is aborted: main sends the renderer `{cancel: id}` on `api:request`, the dispatcher drops it with `E_CANCELLED` if it has not started (still queued on the external lane or waiting for idle), and ApiServer writes no output file for it afterwards. Handlers receive the request's `signal`; `scene.import` passes it to `ViewportDrop.importPicked(picked, position, {signal})` → `importWithDedupe` → `AssetImport.loadFromBlob(opts.signal)`, where it aborts that import's own AbortController (nothing half-added, like the overlay's Cancel, but without bumping the user's drop generation) and stops the rest of the pick, so re-running a timed-out job does not import its files twice. Other started work (save, export, render) still completes; mutating methods carry no idempotency key.
 
@@ -1923,11 +1940,11 @@ the platform, and Retry only re-runs the wait (the tunnel is restarted only if i
 
 **Error model** (stable contract): JSON-RPC errors with `data.code` from `{E_INVALID_PARAMS, E_METHOD_NOT_FOUND, E_NOT_FOUND, E_PATH_REJECTED, E_BUSY, E_CONFIRM_REQUIRED, E_DIRTY, E_CANCELLED, E_UNSUPPORTED, E_EXPORT_GATE, E_LIMIT, E_TIMEOUT, E_INTERNAL}`. Mapping to JSON-RPC numeric codes is fixed (−32602, −32601, −32000, −32001, …).
 
-**Consent gates** (fail-closed): destructive methods (`project.new` on dirty, `scene.remove`, `repair.run`) and outward methods (publishing in v2) return `E_CONFIRM_REQUIRED` unless the request carries `confirm:true`. A hidden instance never pops a dialog; consent is delegated to the caller.
+**Consent gates** (fail-closed): destructive methods (`project.new` on dirty, `scene.remove`, `repair.run`) and outward methods (publishing in v2) return `E_CONFIRM_REQUIRED` unless the request carries `confirm:true`. A hidden instance never pops a dialog; consent is delegated to the caller. `project.new` / `project.open` with `confirm:true` discard unsaved work only for a replacement that succeeds: an unreadable or corrupt file, or a failed load, leaves the current work marked unsaved (`ApiDispatcher.replacingProject`; the dirty flag is re-raised via PROJECT_DIRTY), so closing the window still warns (cia F-04).
 
-**Limits**: 4 clients, 1 MiB/frame, 32 imports/request, 1 GiB/file, 10 min/request, 64 steps + 20 min/job, 50 events/sec.
+**Limits**: 4 clients, 1 MiB/frame, 32 imports/request, 1 GiB/file, 10 min/request, 64 steps + 20 min/job, 50 events/sec per client (ApiServer.notify; the renderer also caps each event type at 50/sec, cia F-05).
 
-**Settings toggle** (`Preferences`, `settings.api.enabled`, default true): same-user pipe + session token is the trust boundary, not the toggle (toggle is UX, convenience for disabling during dev / debugging).
+**Settings toggle** (`Preferences`, KV key `api_enabled`, absent = on, `false` = off): same-user pipe + session token is the trust boundary, not the toggle. The switch fails closed: when `mixo-kv.json` cannot be read at startup (locked, or corrupt and quarantined by `KvStore`), `readApiEnabled` (`electron/ApiServer.cjs`) keeps the API off, writes `false` after a quarantine so the next start stays off, and `api:status` carries `notice: 'settings-unreadable'`, which the renderer's ApiBridge shows once as a warning toast. Turning the toggle on again clears the notice (cia B-01).
 
 **Smoke modes** (test harness): `MIXO_SMOKE=launch` (unpackaged, LI.6) runs `--open` / `--library` through the queue and asserts objects populate the Outliner. `MIXO_SMOKE=api` (unpackaged, API.8) boots a hidden window, starts the API server, and allows the external smoke (`tests/electron-api-smoke.mjs`) to drive it over the pipe; end-to-end import → validate → export → render → job forwarding test.
 
@@ -3348,6 +3365,7 @@ PersistenceManager.startAutosave(ms=60000) → void
 PersistenceManager.stopAutosave()          → void
 PersistenceManager.recoverAutosave()       → Promise<boolean>
 PersistenceManager.requestClose()          → Promise<{action:'save'|'discard'|'cancel',saved?:boolean}>
+PersistenceManager.isSaving()              → boolean       // a save is building or writing
 // Test surface — pure helpers exported for headless tests; do NOT import from app code.
 PersistenceManager.__test = {
   _b64FromBuf, _bufFromB64, _sha256Hex, _extOf,
@@ -3356,6 +3374,15 @@ PersistenceManager.__test = {
   _buildDocument, _loadProject,
 }
 ```
+Saves run one at a time (`DirtyTracker.runExclusiveSave`); `open / openPicked / openRecent /
+newProject / recoverAutosave` wait for the save in flight before replacing the world, and the
+save writes only to the target bound when it started (cia A-08). `buildDocument` first awaits
+`TextureAssets.captureUnstoredTextureImages()`, so a save that runs before the idle full-res
+capture still writes an imported texture's bytes (cia A-09); then it takes every live read
+(state slices, object and group world transforms, camera, texture image list) in one tick
+before its next await; only the byte encoding is async (cia A-02). The built document is handed
+to the adapter by `serialiseDocument`: one string for a small document, a Blob of parts around
+each large base64 `fileData` for a heavy one (cia W-00 part 1).
 Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.4'` (3.4 adds
 the AssetEntry `source` descriptor + `displayName` and formalises `project.id`;
 3.3 added top-level content-addressed `textureImages` plus `imageContentHash` /
@@ -3657,8 +3684,14 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 
 ### Load Sequence (order critical)
 ```
-1. Parse JSON, check version compatibility (validateDocument), then
-   migrate(doc) — the §11 Schema Migration Ladder.
+1. Parse JSON, validate (validateDocument: version compatibility, top-level
+   types, every assetLibrary/sceneObjects/shaders/collections/groups entry a
+   plain object with a string id, sceneObjects/groups transforms either null
+   or {p[3], q[4], s[3]} finite, textureImages entries objects, and group
+   parent links acyclic via HierarchyIntegrity.validateHierarchy; a dangling
+   group parent is tolerated and restores at root), then migrate(doc), the
+   §11 Schema Migration Ladder. Nothing is reset before this passes (cia C-07,
+   D-04).
 2. HistoryManager.clear()
 3. Dispose all current Babylon meshes/materials/containers, revoke blob URLs.
 4. Restore print, sceneSettings, ui, gizmo, uvOverrides, userSwatches,
@@ -3669,6 +3702,11 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
    - Mesh assets: restoreContainer, then REBIND imported textures owned by
      this container (§10b reload rebind rule: match persisted
      babylonTextureName, register under the persisted texture assetId).
+   - Imported texture entries the restored container did NOT supply (an OBJ
+     whose MTL/PNG siblings are not in a mounted folder) restore from the
+     stored image under `imageContentHash` via restoreTexture, under the
+     persisted id, BEFORE shaders restore (cia A-09). These textures are owned
+     by TextureAssets (disposed on reset), not by a container.
    - User-loaded texture assets: resolve `imageContentHash` from the image
      store first (legacy `fileData`/live tiers remain fallback), then create its
      independent texture view under the persisted id.
@@ -3682,13 +3720,19 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
    - If asset loaded → instantiate at transform, assign shader, apply UV override if exists.
    - If ghost → create wireframe bounding box at transform.
    - Preserve `collectionId` on the restored object so Outliner re-routes correctly.
+9b. A multi-part `groupRepair` replay that throws shows the same
+    toast.geometryFixReplayFailed warning as the per-mesh replay and drops
+    `groupRepair` from every part of that logical object (cia B-12).
 10. Restore groups (TransformNodes), re-parent children in order.
 11. SceneManager.restoreCameraState() from saved camera.
 12. Apply overlay states (including `wireframeEdges` + `wireframeEdgeColor`).
 12b. Apply `SceneManager.setScaleLock(state.ui.scaleLocked)` so the viewport scale gizmo matches the saved lock preference on first activation.
 13. ShaderLibrary.rebuildLinkedIndex().
-14. Queue validation for all non-ghost meshes (async, non-blocking).
-15. Dispatch PROJECT_LOADED. Set isDirty=false.
+14. After PROJECT_LOADED and clearDirty: validate every print part's logical
+    object once (canonical lead, MeshValidator.validateMesh), behind the same
+    shouldAutoValidate budget gate as import; silent (no import toasts, no
+    opt-in auto-repair) and never dirties the project (cia W-06).
+15. Dispatch PROJECT_LOADED; DirtyTracker.clearDirty().
 ```
 
 ### Autosave
@@ -3706,6 +3750,18 @@ Liveness rule: tier 1–3 ⇒ live (badge: **Linked**); tier 4 ⇒ frozen (badge
 - One tick at a time; the loading/importing check runs before AND after the
   async build (and the project id must be unchanged), so a load/import/New
   that starts mid-build drops the snapshot instead of writing a torn one.
+- The tick records `DirtyTracker.saveGeneration()` before its build and drops
+  (or deletes its own freshly written key) when a save committed meanwhile, so
+  no autosave is ever newer than the save it predates (cia A-07). Discard in
+  the unsaved-changes dialog (New, window close) deletes the discarded
+  project's autosave; Open/Recent already do through the loader (cia W-04).
+- Liveness (cia B-02): `AutosaveKeys.autosaveStatus()` is written / failing
+  (count and reason) / paused after three skipped ticks, announced on
+  `AUTOSAVE_WRITTEN` and `AUTOSAVE_FAILED`; the status bar shows "Autosaved
+  hh:mm" or the warning until the next snapshot succeeds.
+  `findRecoverableAutosave()` returns `{ unreadable }` when the store cannot
+  be read; the boot banner shows the failed check with Retry instead of a
+  clean screen (cia B-03).
 - Boot: after the folder-remount prompt, `recoverAutosave()` offers the
   newest snapshot only if its `savedAt` is newer than the snapshot doc's
   `project.lastSavedAt` (otherwise it is deleted silently). A recovered
@@ -3774,7 +3830,11 @@ Caps (opfs): `mountDirectory/relinkByPath/watchFiles:false`, `writeFiles:true`
   `hasRef` = record stored.
 - `writeFile`: `createWritable()` (atomic) when present; older WebKit without
   main-thread createWritable → `workers/OpfsWrite.worker.js`
-  (`createSyncAccessHandle`, truncate+write+flush — NOT atomic).
+  (`createSyncAccessHandle`): the worker writes a sibling temp file first,
+  then `move()`s it over the target where the engine has it, or copies the
+  complete temp over and removes it. A failure in the temp phase leaves the
+  previous save untouched; the error carries `previousKept` and
+  `recoveryName` and the façade tells the user which copy survived (cia B-05).
 - `ready()`: no OPFS → "Browser not supported"; OPFS/Projects open fails →
   "Storage unavailable" (Private Browsing); then `navigator.storage.persist()`
   best-effort (OPFS is the only copy; WebKit evicts idle origins) and the
@@ -3873,6 +3933,10 @@ individually:
 For OBJ, the OBJ payload's `mtllib` reference points at the **matching**
 `.mtl` filename (per-mesh in individually mode, combined otherwise) — never
 a project-scoped name, so a per-mesh OBJ is independently usable.
+OBJ inner entries (`.obj`, `.mtl`) use `objToken(base)` (whitespace, including
+U+3000, becomes `_`), the same token the `mtllib` line writes, so `My Model`
+exports `My_Model_r1to1.obj` + `My_Model_r1to1.mtl` and the link always
+resolves. The outer `.zip` keeps the plain base name (cia C-02).
 
 `projectName` comes from `state.project.name`, set by `PersistenceManager.saveAs`
 (File System Access save picker) and by `_loadProject` on opening a `.mixo`.
@@ -3932,9 +3996,13 @@ PrintManager 2026-06-18 so the orchestrator no longer hosts format-specific code
 - `_synthesizeSolidShaderTextures(meshList)` — returns
   `{ blobByName, filenameByMaterialName }`. Skips materials with a real
   diffuse/albedo/base texture (the `collectTextureExportData` path owns those).
-- `_solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas.
-- `_buildOBJMtl(meshEntries, filenameByMaterialName)` generates MTL blocks
-  using Mixomesh material ids/names, diffuse/albedo/base colour, alpha, and
+- `_solidColorBlob(r,g,b,a)` — 4×4 RGBA PNG via canvas. Fails closed: when it
+  rejects (canvas `toBlob` yields no blob), the export aborts with an error
+  naming the part and the `#RRGGBBAA` colour, as
+  `ExportTextures._readTextureOrThrow` does for textures. It never ships an
+  MTL whose `map_Kd` names a PNG that is not in the zip (cia B-06).
+- `_buildOBJMtl(meshEntries, materialNames, filenameByMaterialName)` generates
+  MTL blocks using the per-export material token table, diffuse/albedo/base colour, alpha, and
   optional `map_Kd` lines. Mixomesh does not call `BABYLON.OBJExport.MTL`
   because Babylon's MTL helper accepts one mesh, emits `newmtl mat1`, and
   can mismatch OBJ `usemtl <material.id>`.
@@ -4497,7 +4565,12 @@ det +1, so winding/chirality preserved). Normals use the same maps; UVs raw
 (−x, y, z) — identical to the former OBJExport output (verified against the
 real serializer + trimesh +1000 mm³ for both axes). The file carries a
 `# mixomesh export: millimetres, right-handed, <axis>` comment; `usemtl` uses
-the same `objToken` name as the MTL `newmtl`; empty meshes are skipped.
+the same token as the MTL `newmtl`. Tokens come from one table per
+export (`ObjWriter._objMaterialNames`), keyed by the material OBJECT (one per
+shader), never by `mat.id`: the id is only the token text
+(`objToken(id ?? name)`), and case-insensitive repeats get `_2`, `_3`, so two
+shaders whose source files both called them "Paint" stay two MTL materials
+(cia C-03). Empty meshes are skipped.
 
 Current implementation (orchestrator: `print/PrintPipeline.js`; serializer:
 `print/ObjWriter.js`):
