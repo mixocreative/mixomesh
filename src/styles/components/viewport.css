@@ -563,3 +563,53 @@ body.touch-input .vt-btn { min-width: 44px; height: 44px; }
    width:100%, which in this flex row shrank them to a stub ("Fre", blank
    pivot). Words, not numbers → UI sans, not mono (DESIGN.md §3). */
 .viewport-toolbar .pp-preset-select { width: auto; flex: none; font-family: var(--font-sans); }
+
+/* -- Statistics HUD (bottom-left, owner request 2026-10-21) ----------------
+   Glass like the other viewport HUD chrome; read-only (pointer-events none)
+   except its hide button. Tabular numerals so counts do not jitter. Sits in
+   the bottom-left corner ABOVE the centred viewport toolbar (bottom 16 px,
+   ~36 px tall), so the two never overlap at any viewport width. */
+.stats-hud {
+  position: absolute;
+  left: 16px;
+  bottom: 60px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  padding: 3px 4px 3px 10px;
+  background: var(--hud-bg);
+  backdrop-filter: var(--hud-blur);
+  -webkit-backdrop-filter: var(--hud-blur);
+  border: 1px solid var(--hud-border);
+  border-radius: var(--r-sm, 4px);
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  color: var(--hud-text);
+  text-shadow: var(--hud-text-shadow);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.stats-hud[hidden] { display: none; }
+.stats-hud .sh-sep { color: var(--hud-text-dim); }
+.stats-hud .sh-changed { font-weight: 700; }
+.stats-hud .sh-hide {
+  pointer-events: auto;
+  margin-left: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  border: 0;
+  border-radius: var(--r-sm, 4px);
+  background: transparent;
+  color: var(--hud-text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.stats-hud .sh-hide:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
+.stats-hud .sh-hide:focus-visible { outline: 2px solid var(--ring-focus); }

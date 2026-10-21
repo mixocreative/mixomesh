@@ -80,10 +80,10 @@ export function stripFileData(a) {
 // ── Asset provenance (schema 3.4, overhaul §4.4 / task 4.1) ──
 
 /** `dir_<name>_<ts>` (pre-4.2 mount key) → `<name>`; else the path's first folder. */
-/** Overlays saved in a .mixo: the per-user Smooth shading view preference is
- *  not project content, so it is never written (re-review minor 3). */
+/** Overlays saved in a .mixo: per-user view preferences (Smooth shading, the
+ *  Statistics HUD) are not project content, so they are never written. */
 export function _projectOverlays(overlays = {}) {
-  const { smoothShading: _view, ...rest } = overlays;
+  const { smoothShading: _view, stats: _stats, ...rest } = overlays;
   return { ...rest };
 }
 

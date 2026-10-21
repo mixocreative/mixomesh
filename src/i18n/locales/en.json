@@ -1312,5 +1312,13 @@
   "activity.next.hashFile": "The file still imports, without duplicate detection.",
   "activity.remaining": "about {time} left",
   "activity.elapsed": "{time} so far",
-  "activity.dismiss": "Dismiss"
+  "activity.dismiss": "Dismiss",
+  "stats.region": "Viewport statistics",
+  "stats.selected": "Selected {n} / {total}",
+  "stats.scene": "Scene · Objects {total}",
+  "stats.triangles": "Triangles",
+  "stats.vertices": "Vertices",
+  "stats.hide": "Hide statistics",
+  "viewport.toggle.stats": "Statistics",
+  "viewport.statsTitle": "Statistics: object, triangle and vertex counts of the selection or the scene"
 }

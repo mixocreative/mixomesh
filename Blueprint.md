@@ -2631,6 +2631,17 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   keeps the container slot so `containerMeshIndex` never shifts. `GeometryStore.extract` copies with
   `slice()`.
 - **Desktop:** `electron/HeapFlags.cjs` sets `js-flags=--max-old-space-size=4096` before ready.
+- **Statistics HUD (owner request 2026-10-21):** `ui/StatsHud.js` + pure `core/scene/SceneStats.js`.
+  Bottom-left of the viewport, above the centred toolbar: "Selected n / total · Triangles · Vertices"
+  (or "Scene · Objects total" when nothing is selected), locale number formatting, translated
+  labels. Counts come from buffer lengths (`getTotalIndices`/`getTotalVertices`, unindexed =
+  vertices/3), cached per mesh against its GeometryStore revision; refined (subdivided) meshes are
+  counted when they are what the viewport shows. Event-driven and coalesced (selection, geometry,
+  history, import/delete, refinement, project events) — no per-frame polling. A geometry change
+  within the same scope shows "before → after" for 3 s (`nextHighlight`; chained operations keep the
+  original before; Delete never highlights). Read-only glass (pointer-events none) except a hide
+  button; aria label, not a live region. Toggle "Statistics" in the viewport display strip;
+  `scene.overlays.stats`, per-user (SettingsStore), default on, never stored in or read from a `.mixo`.
 - **Perf harness:** `npm run fixtures:heavy` (2M/5M/10M STL, 0.5M ASCII, 10M 3MF into
   `.tmp/heavy-mesh`, never committed), `npm run perf:heavy` (headless Chrome on the real GPU).
 

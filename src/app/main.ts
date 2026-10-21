@@ -17,6 +17,7 @@ import { Modal } from '../ui/Modal.js';
 import { ImportError } from '../ui/ImportError.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
 import { ViewportToggles } from '../ui/ViewportToggles.js';
+import { StatsHud } from '../ui/StatsHud.js';
 import { MeshStats } from '../ui/MeshStats.js';
 import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
@@ -117,6 +118,7 @@ async function bootstrap() {
   AssetPanel.init();
   ViewportToolbar.init();
   ViewportToggles.init();
+  StatsHud.init();   // viewport statistics, bottom-left
   MeshStats.init();       // live mesh stats in the status-bar centre segment
   NavCube.init();
   PersistenceManager.init();

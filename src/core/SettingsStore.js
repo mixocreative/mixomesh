@@ -56,7 +56,7 @@ const SCHEMA = [
   { key: 'render',    path: ['scene', 'render'],    fields: null },
   { key: 'renderOut', path: ['scene', 'renderOut'], fields: ['width', 'height', 'transparent', 'turntable'] },
   { key: 'grid',      path: ['scene', 'grid'],      fields: null },
-  { key: 'overlays',  path: ['scene', 'overlays'],  fields: ['grid', 'axes', 'printPreview', 'smoothShading'] },
+  { key: 'overlays',  path: ['scene', 'overlays'],  fields: ['grid', 'axes', 'printPreview', 'smoothShading', 'stats'] },
   // `exportTargets` (typed print sizes, task 1.17 — and its one-minor
   // `exportRatios` mirror in saved docs) and `referenceObjectId` are
   // per-PROJECT content (persisted in the .mixo, restored on load) — NOT

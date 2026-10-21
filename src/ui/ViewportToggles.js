@@ -17,6 +17,7 @@ import { tr } from './lib/tr.js';
 import { ScenePanel } from './ScenePanel.js';
 import { ScopeBreadcrumb } from './ScopeBreadcrumb.js';
 import { SettingsStore } from '../core/SettingsStore.js';
+import { StatsHud } from './StatsHud.js';
 
 let _root = null;
 
@@ -29,6 +30,8 @@ const FEATURE_TOGGLES = [
   { id: 'section', kind: 'section', iconName: 'Scissors', key: 'viewport.toggle.section', fallback: 'Cross-section' },
   // View-only, per-user (persisted): welded STL renders faceted unless this is on (review I1).
   { id: 'smoothShading', kind: 'overlay', iconName: 'Disc3', key: 'viewport.toggle.smooth', fallback: 'Smooth shading', titleKey: 'viewport.smoothShadingTitle', persist: true },
+  // Statistics HUD (bottom-left): per-user, default on, never in a project.
+  { id: 'stats', kind: 'hud', iconName: 'Gauge', key: 'viewport.toggle.stats', fallback: 'Statistics', titleKey: 'viewport.statsTitle' },
 ];
 const SECTION_DEFAULTS = { enabled: false, axis: 'z', offsetMM: 0, flip: false };
 
@@ -37,6 +40,7 @@ export function init() {
   if (!_root) return;
   _render();
   ScopeBreadcrumb.init();   // viewport top-left chrome, same lifecycle as the toggle strip
+  StatsHud.onVisibilityChange(_render);   // the HUD's own hide button keeps this strip in sync
   // Overlays arrive restored on load (spec load step 12) and reset on new.
   subscribe(EVENTS.PROJECT_LOADED, _render);
   subscribe(EVENTS.PROJECT_NEW, _render);
@@ -56,7 +60,7 @@ function _render() {
     : 'shaded';
 
   const featureBtns = FEATURE_TOGGLES.map(f => {
-    const on = f.kind === 'section' ? sectionOn : !!overlays[f.id];
+    const on = f.kind === 'section' ? sectionOn : f.kind === 'hud' ? overlays[f.id] !== false : !!overlays[f.id];
     const label = tr(f.key, f.fallback);
     const title = f.titleKey ? t(f.titleKey) : label;
     return `<button class="vt-btn vt-feature ${on ? 'vt-on' : ''}" data-feature="${escapeAttr(f.id)}"
@@ -136,7 +140,9 @@ function _wire() {
 function _toggleFeature(id) {
   const f = FEATURE_TOGGLES.find(x => x.id === id);
   if (!f) return;
-  if (f.kind === 'section') {
+  if (f.kind === 'hud') {
+    StatsHud.setStatsVisible(getState().scene.overlays?.[id] === false, { persist: true });
+  } else if (f.kind === 'section') {
     const cur = { ...SECTION_DEFAULTS, ...(getState().scene.section ?? {}) };
     const next = { ...cur, enabled: !cur.enabled };
     setState(s => ({ ...s, scene: { ...s.scene, section: next } }), { silent: true });

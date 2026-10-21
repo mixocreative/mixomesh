@@ -1312,5 +1312,13 @@
   "activity.next.hashFile": "檔案仍會匯入，但不檢查是否重複。",
   "activity.remaining": "約剩 {time}",
   "activity.elapsed": "已經過 {time}",
-  "activity.dismiss": "關閉"
+  "activity.dismiss": "關閉",
+  "stats.region": "視窗統計",
+  "stats.selected": "已選 {n} / {total}",
+  "stats.scene": "場景 · 物件 {total}",
+  "stats.triangles": "三角面",
+  "stats.vertices": "頂點",
+  "stats.hide": "隱藏統計",
+  "viewport.toggle.stats": "統計",
+  "viewport.statsTitle": "統計：所選物件或整個場景的物件、三角面與頂點數"
 }

@@ -1312,5 +1312,13 @@
   "activity.next.hashFile": "ファイルは重複の確認なしで読み込まれます。",
   "activity.remaining": "残り約 {time}",
   "activity.elapsed": "{time} 経過",
-  "activity.dismiss": "閉じる"
+  "activity.dismiss": "閉じる",
+  "stats.region": "ビューポートの統計",
+  "stats.selected": "選択 {n} / {total}",
+  "stats.scene": "シーン · オブジェクト {total}",
+  "stats.triangles": "三角形",
+  "stats.vertices": "頂点",
+  "stats.hide": "統計を隠す",
+  "viewport.toggle.stats": "統計",
+  "viewport.statsTitle": "統計：選択またはシーンのオブジェクト・三角形・頂点の数"
 }

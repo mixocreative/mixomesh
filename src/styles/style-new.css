@@ -154,6 +154,9 @@
 :root:not([data-ui-style="original"]) .po-bar { background: var(--red); }
 :root:not([data-ui-style="original"]) .po-track,
 :root:not([data-ui-style="original"]) .po-bar { border-radius: 0; }
+/* Statistics HUD: viewport glass kept; Mixo font, density and ink. */
+:root:not([data-ui-style="original"]) .stats-hud { font-size: 11.5px; color: var(--text-0); border-radius: 2px; text-shadow: none; }
+:root:not([data-ui-style="original"]) .stats-hud .sh-changed { color: var(--text-0); }
 /* Job activity panel: hairline, 2px radius, the fill is the only red. */
 :root:not([data-ui-style="original"]) .job-activity { border-color: var(--border); border-radius: 2px; }
 :root:not([data-ui-style="original"]) .ja-fill { background: var(--red); }
