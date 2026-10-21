@@ -86,6 +86,39 @@ export function splitMultiMaterialMeshes(meshes, makeChild, genGroupId) {
   return { meshes: out, disposed, orphanMultiMaterials };
 }
 
+/**
+ * Babylon's OBJ loader already splits an object per `usemtl`: the first
+ * material keeps the `o`/`g` name, each later one becomes `mesh_mm<N>`
+ * (N = 1, 2, … restarting at every `o`/`g`). Stamp each such run of two or
+ * more non-empty meshes with one shared `sourceGroupId` (and the object's
+ * name as `sourceMeshName`) so it registers as ONE logical object, like a
+ * MultiMaterial split (AGENTS rule 7). Separate `o`/`g` blocks never merge.
+ *
+ * @param {Array} meshes  container meshes, in loader order
+ * @param {()=>string} genGroupId
+ */
+export function groupObjMaterialRuns(meshes, genGroupId) {
+  const runs = [];
+  let run = null;
+  for (const mesh of meshes) {
+    const mm = /^mesh_mm(\d+)$/.exec(mesh.name ?? '');
+    if (mm && run && Number(mm[1]) === run.next) {
+      run.meshes.push(mesh);
+      run.next++;
+      continue;
+    }
+    run = { meshes: [mesh], next: mm ? Number(mm[1]) + 1 : 1 };
+    runs.push(run);
+  }
+  for (const { meshes: parts } of runs) {
+    const solid = parts.filter(m => (m.getTotalVertices?.() ?? 0) > 0);
+    if (solid.length < 2 || solid.some(m => m.metadata?.sourceGroupId)) continue;
+    const sourceGroupId = genGroupId();
+    const sourceMeshName = parts[0].name || 'mesh';
+    for (const m of solid) m.metadata = { ...(m.metadata ?? {}), sourceGroupId, sourceMeshName };
+  }
+}
+
 /** Real-Babylon child factory used by the in-container split. */
 function _makeBabylonChildMesh(spec) {
   const { name, scene, sourceMesh, subMaterial,
@@ -131,8 +164,9 @@ function _makeBabylonChildMesh(spec) {
 }
 
 /**
- * Wrapper: split every MultiMaterial mesh in `container.meshes`, prune the
- * MultiMaterial wrappers from `container.materials`, dispose source meshes.
+ * Wrapper: split every MultiMaterial mesh in `container.meshes`, group OBJ
+ * per-material runs, prune the MultiMaterial wrappers from
+ * `container.materials`, dispose source meshes.
  * Called from every import / restore entry point so the rest of the pipeline
  * only ever sees single-material meshes.
  */
@@ -143,6 +177,7 @@ export function splitMultiMaterialMeshesInContainer(container) {
     _newGroupId
   );
   container.meshes = result.meshes;
+  groupObjMaterialRuns(container.meshes, _newGroupId);
   for (const m of result.disposed) {
     try { m.dispose?.(); } catch { /* fall through */ }
   }
