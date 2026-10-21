@@ -303,7 +303,8 @@ async function main() {
 // and — when Python trimesh is installed — checks each file reports volume
 // ≈ +1000 mm³ (positive = outward, not inside-out). trimesh has no VRML
 // loader, so the WRL is read back by a minimal Coordinate/coordIndex parser
-// and handed to trimesh.Trimesh. Skips (exit 0) when trimesh is missing.
+// and handed to trimesh.Trimesh. When trimesh is missing it prints UNVERIFIED and exits 0 so dev machines stay usable;
+// REQUIRE_TRIMESH=1 turns that into a non-zero exit (use it in any gate that relies on this probe).
 async function writersProbe() {
   const { writeFileSync } = await import('node:fs');
   const { deflateSync } = await import('node:zlib');
@@ -412,7 +413,13 @@ async function writersProbe() {
 
     const py = resolveCommand('python') ?? resolveCommand('python3');
     const has = py && spawnSync(py, ['-c', 'import trimesh'], { stdio: 'ignore' }).status === 0;
-    if (!has) { console.log('WRITERS PROBE SKIPPED — python trimesh not installed'); return; }
+    if (!has) {
+      if (process.env.REQUIRE_TRIMESH === '1') {
+        throw new Error('WRITERS PROBE FAILED: python trimesh not installed and REQUIRE_TRIMESH=1 (orientation is UNVERIFIED without an independent consumer)');
+      }
+      console.log('WRITERS PROBE UNVERIFIED — python trimesh not installed; orientation was NOT checked by an independent consumer (set REQUIRE_TRIMESH=1 to fail instead)');
+      return;
+    }
     const objScript = [
       'import json, sys, trimesh',
       'out = []',
