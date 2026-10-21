@@ -602,6 +602,13 @@ await test('[desktop] saveExport streams big files in chunks; cancel, failure an
     assert.deepEqual(calls.at(-1), ['abort', 'save_1'], 'a failed chunk aborts the session');
 
     calls.length = 0;
+    setExportStreaming({ thresholdBytes: 4, chunkBytes: 3, maxBytes: 8 });
+    window.electronAPI = api();
+    await assert.rejects(DesktopStorageAdapter.saveExport(big, 'huge.stl'), /too large/);
+    assert.deepEqual(calls, [], 'refused before the dialog, nothing streamed');
+    setExportStreaming({ maxBytes: 1024 ** 3 });
+
+    calls.length = 0;
     const old = api(); delete old.beginExportSave;
     window.electronAPI = old;
     assert.equal(await DesktopStorageAdapter.saveExport(big, 'big.stl'), true);

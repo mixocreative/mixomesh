@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { createOpaqueFileRegistry } = require('../electron/OpaqueFileRegistry.cjs');
+const { createOpaqueFileRegistry, publicSaveError } = require('../electron/OpaqueFileRegistry.cjs');
 
 const dirent = (name, kind) => ({
   name,
@@ -435,4 +435,14 @@ await check('chunked export save: commit waits for in-flight writes; parallel wr
   assert.equal(temps.size, 0, 'oversize session cleaned up');
 });
 
-assert.equal(cases, 16);
+await check('save errors sent to the renderer carry no file path', async () => {
+  const fsErr = Object.assign(new Error(String.raw`EPERM: operation not permitted, rename 'C:\Users\me\x.stl.1.tmp' -> 'C:\Users\me\x.stl'`), { code: 'EPERM' });
+  const out = publicSaveError(fsErr);
+  assert.equal(out.message.includes('C:'), false);
+  assert.equal(out.message.includes('Users'), false);
+  assert.match(out.message, /EPERM/);
+  assert.equal(publicSaveError(new Error('File is too large to write')).message, 'File is too large to write', 'own messages pass through');
+  assert.match(publicSaveError(new Error("ENOENT: no such file, open '/home/me/a.stl'")).message, /^Could not save the file/);
+});
+
+assert.equal(cases, 17);

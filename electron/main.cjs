@@ -9,7 +9,7 @@
 const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
 const path = require('node:path');
 const {
-  createOpaqueFileRegistry, sanitizeSuggestedName, exportDialogOptions, withExtension,
+  createOpaqueFileRegistry, sanitizeSuggestedName, exportDialogOptions, withExtension, publicSaveError,
 } = require('./OpaqueFileRegistry.cjs');
 const { createKvStore } = require('./KvStore.cjs');
 const { parseLaunchArgv, validateLaunchPath } = require('./LaunchArgs.cjs');
@@ -551,27 +551,33 @@ handle('fs:registerDropped', async (_e, filePath) => {
   } catch { return null; }
   return _fileRefs.registerFile(filePath, path.basename(filePath));
 });
-handle('export:save', async (event, opts, data) => {
+
+// Save handlers: fs errors carry absolute paths; send the renderer a path-free one.
+const pathless = fn => async (...args) => {
+  try { return await fn(...args); } catch (err) { throw publicSaveError(err); }
+};
+
+handle('export:save', pathless(async (event, opts, data) => {
   const { ext, defaultName, filters } = exportDialogOptions(opts); // throws on a non-whitelisted type
   const result = await dialog.showSaveDialog(_winOf(event), { defaultPath: defaultName, filters });
   if (result.canceled || !result.filePath) return false;
   await _fileRefs.writeDialogTarget(withExtension(result.filePath, ext), data);
   return true;
-});
+}));
 
 // Streamed export save for big files: the renderer sends ≤16 MiB chunks instead
 // of one whole-file buffer (no 2-3x peak from Blob → ArrayBuffer → IPC clone).
 // Same whitelisted dialog as export:save; the session id is opaque and bound to
 // the sender, the temp file is renamed into place only on commit.
-handle('export:beginSave', async (event, opts) => {
+handle('export:beginSave', pathless(async (event, opts) => {
   const { ext, defaultName, filters } = exportDialogOptions(opts); // throws on a non-whitelisted type
   const result = await dialog.showSaveDialog(_winOf(event), { defaultPath: defaultName, filters });
   if (result.canceled || !result.filePath) return null;
   return _fileRefs.beginDialogWrite(withExtension(result.filePath, ext), event.sender.id);
-});
-handle('export:writeChunk', (event, id, data) => _fileRefs.appendWrite(id, data, event.sender.id));
-handle('export:commitSave', (event, id) => _fileRefs.commitWrite(id, event.sender.id));
-handle('export:abortSave', (event, id) => _fileRefs.abortWrite(id, event.sender.id));
+}));
+handle('export:writeChunk', pathless((event, id, data) => _fileRefs.appendWrite(id, data, event.sender.id)));
+handle('export:commitSave', pathless((event, id) => _fileRefs.commitWrite(id, event.sender.id)));
+handle('export:abortSave', pathless((event, id) => _fileRefs.abortWrite(id, event.sender.id)));
 
 // ── Listbridge marketplace publishing (ADR 0004, plan PB.4) ──
 // `publish:*` channels, registered through `handle` (trusted sender) once the app is

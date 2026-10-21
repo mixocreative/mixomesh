@@ -167,6 +167,8 @@ export const DesktopStorageAdapter = {
     if (hint.forceDownload) throw new Error('The export could not be saved');
     const ext = String(hint.ext || (suggestedName.split('.').pop() || '')).replace(/^\./, '').toLowerCase();
     const opts = { suggestedName, ext, description: hint.description || `${ext.toUpperCase()} file` };
+    // Refuse before the dialog: main would only reject after the whole file was sent.
+    if (blob?.size > _streaming.maxBytes) throw new Error('The export is too large to save (over 1 GB).');
     const api = _api();
     if (blob?.size >= _streaming.thresholdBytes && typeof api?.beginExportSave === 'function') {
       return _streamExport(api, blob, opts);
@@ -248,7 +250,9 @@ export const DesktopStorageAdapter = {
 // in memory at a time) instead of one whole-file ArrayBuffer + IPC clone.
 export const EXPORT_STREAM_THRESHOLD_BYTES = 64 * 1024 * 1024;
 export const EXPORT_STREAM_CHUNK_BYTES = 16 * 1024 * 1024;   // = main's MAX_CHUNK_BYTES
-let _streaming = { thresholdBytes: EXPORT_STREAM_THRESHOLD_BYTES, chunkBytes: EXPORT_STREAM_CHUNK_BYTES };
+/** Main refuses writes above this (OpaqueFileRegistry MAX_WRITE_BYTES). */
+export const EXPORT_MAX_BYTES = 1024 * 1024 * 1024;
+let _streaming = { thresholdBytes: EXPORT_STREAM_THRESHOLD_BYTES, chunkBytes: EXPORT_STREAM_CHUNK_BYTES, maxBytes: EXPORT_MAX_BYTES };
 
 /** Test seam: override the streaming threshold / chunk size. Returns the previous values. */
 export function setExportStreaming(next) {

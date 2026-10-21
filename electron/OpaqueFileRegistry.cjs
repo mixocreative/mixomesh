@@ -447,7 +447,23 @@ function createOpaqueFileRegistry(deps = {}) {
   };
 }
 
+/**
+ * The error a save handler sends back to the renderer: Node fs errors carry
+ * absolute paths in their message ("rename 'C:\Users\...'"), which must not
+ * cross IPC. They become "Could not save the file (CODE)."; the registry's own
+ * messages (no fs code) pass through unchanged.
+ */
+function publicSaveError(err) {
+  const code = typeof err?.code === 'string' && /^[A-Z0-9_]+$/.test(err.code) ? err.code : null;
+  const message = String(err?.message ?? err ?? 'Save failed');
+  const fsLike = code || /^[A-Z]+: /.test(message);
+  if (!fsLike) return err instanceof Error ? err : new Error(message);
+  const shown = code ?? message.split(':')[0];
+  return new Error(`Could not save the file (${shown}).`);
+}
+
 module.exports = {
+  publicSaveError,
   createOpaqueFileRegistry,
   createMemoryStore,
   MAX_WRITE_BYTES,
