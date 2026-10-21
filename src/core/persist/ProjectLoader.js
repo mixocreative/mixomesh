@@ -609,6 +609,17 @@ async function _loadProjectInner(doc, previousId) {
       await MeshValidator.repairObject(lead, { record: false });
     } catch (err) {
       console.error(`Multi-part geometry-fix replay failed for "${obj.name}":`, err);
+      Toast.show(t('toast.geometryFixReplayFailed', { name: obj.name }), 'warning', 5000);
+      setState(s => {
+        const objects = { ...s.scene.objects };
+        for (const [id, part] of Object.entries(objects)) {
+          if (canonicalObjectId(id, objects) !== lead || !part.geometryFixes) continue;
+          const kept = part.geometryFixes.filter(f => f !== 'groupRepair');
+          const { geometryFixes: _dropped, ...rest } = part;
+          objects[id] = kept.length ? { ...rest, geometryFixes: kept } : rest;
+        }
+        return { ...s, scene: { ...s.scene, objects } };
+      }, SILENT);
     }
   }
 
