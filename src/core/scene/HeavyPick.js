@@ -165,6 +165,8 @@ function _intersects(ray, fastCheck, trianglePredicate, onlyBoundingInfo = false
 export function track(mesh) {
   if (!mesh || _state.has(mesh) || mesh.isDisposed?.() || _isTiny(mesh)) return false;
   if (mesh.getClassName?.() !== 'Mesh') return false;   // instances / lines keep Babylon's pick
+  // Only pickable scene content: never edge-overlay clones, previews or helpers.
+  if (mesh.isPickable === false || !mesh.metadata?.meshId) return false;
   _state.set(mesh, { bvh: null, revision: -1, posRef: null, idxRef: null, indexCount: -1, timer: null, building: false });
   _tracked.add(mesh);
   mesh.intersects = _intersects;
@@ -194,9 +196,13 @@ export function buildNow(mesh) {
 export function init(scene) {
   for (const m of scene.meshes) track(m);
   scene.onNewMeshAddedObservable.add((m) => {
-    // Geometry is bound after the add (VertexData.applyToMesh / addAllToScene): check next tick.
+    // Geometry and the registry meshId are bound right after the add
+    // (applyToMesh / registerInstantiatedMeshes): check next tick.
     setTimeout(() => track(m), 0);
   });
+  // Restores and re-instantiations stamp meshIds later: sweep (track is idempotent).
+  const sweep = () => { for (const m of scene.meshes) track(m); };
+  for (const ev of [EVENTS.ASSET_INSTANTIATED, EVENTS.OBJECT_RESTORED, EVENTS.PROJECT_LOADED]) subscribe(ev, () => setTimeout(sweep, 0));
   subscribe(EVENTS.GEOMETRY_CHANGED, ({ meshId } = {}) => {
     for (const m of _tracked) if (m.metadata?.meshId === meshId) _schedule(m);
   });

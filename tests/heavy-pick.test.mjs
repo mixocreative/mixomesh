@@ -52,10 +52,12 @@ ref.computeWorldMatrix(true);
 
 HP.setBvhBuilder(async (p, i) => buildTriangleBvh(p, i));
 
-test('only meshes at or above the threshold are tracked', () => {
+test('only pickable content meshes at or above the threshold are tracked', () => {
   const small = BABYLON.MeshBuilder.CreateBox('small', {}, scene);
+  small.metadata = { meshId: 'small_1' };
   assert.equal(HP.track(small), false);
   small.dispose();
+  assert.equal(HP.track(ref), false, 'no registry meshId (helper / overlay) → never tracked');
   assert.equal(HP.track(mesh), true);
   assert.equal(HP.hasFreshIndex(mesh), false, 'no index until it is built');
 });
