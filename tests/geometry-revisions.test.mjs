@@ -116,6 +116,26 @@ await test('source-unit and rescale commands bump the revision of every baked me
   assert.ok(revisionOf(m) > beforeRescale, 'rescale bake bumped');
 });
 
+await test('one engine repair is one revision, even when it also re-orients the winding', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  // Engine "fixes" the mesh and hands back inward-facing triangles, so
+  // repairMesh rewrites the arrays AND conformWinding flips them.
+  const outward = [[0,2,1],[0,1,3],[1,2,3],[0,3,2]];
+  const inward = outward.map(([a, b, c]) => [a, c, b]);
+  try {
+    for (const [name, T] of [['rev_repair_out', outward], ['rev_repair_in', inward]]) {
+      R.__test.setEngine({
+        diagnose: () => ({ boundary: 0, nonManifold: 0, components: 1, isWatertight: true }),
+        repairObject: async () => ({ V: [[0,0,0],[1,0,0],[0,1,0],[0,0,1]], T, report: { holesFilled: 1 } }),
+      });
+      const m = tetra(name);
+      const r = await R.repairMesh(m);
+      assert.equal(r.changed, true);
+      assert.equal(revisionOf(m), 1, `${name}: one repair, one revision`);
+    }
+  } finally { R.__test.setEngine(null); }
+});
+
 await test('meshes marked as detached export clones never bump the original', () => {
   const m = tetra('rev_clone');
   m.__geometryDetached = true;

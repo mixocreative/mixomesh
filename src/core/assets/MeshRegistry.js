@@ -5,6 +5,7 @@
 // explicitly to avoid leaks. Never persisted in state.
 
 import { DEFAULT_SOURCE_UNIT } from '../ImportNormalizer.js';
+import { clearRevisions } from '../geometry/GeometryStore.js';
 
 const _containers   = new Map();    // assetId → BABYLON.AssetContainer
 const _meshRegistry = new Map();    // meshId  → BABYLON.AbstractMesh
@@ -87,4 +88,5 @@ export function resetRegistry() {
   _orphanMeshes.clear();
   _containers.clear();
   _meshRegistry.clear();
+  clearRevisions();
 }

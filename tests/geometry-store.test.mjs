@@ -81,3 +81,11 @@ test('GeometryStore namespace exposes the same functions', () => {
   assert.equal(GeometryStore.extract, extract);
   assert.equal(GeometryStore.bump, bump);
 });
+
+test('a project reset clears every revision (meshes are disposed there)', async () => {
+  const { resetRegistry } = await import('../src/core/assets/MeshRegistry.js');
+  bump('mesh_reset_a'); bump('mesh_reset_b');
+  resetRegistry();
+  assert.equal(revisionOf('mesh_reset_a'), 0);
+  assert.equal(revisionOf('mesh_reset_b'), 0);
+});

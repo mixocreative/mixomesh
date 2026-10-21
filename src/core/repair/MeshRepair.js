@@ -387,7 +387,7 @@ function _withTimeout(run, timeoutMs, name) {
  * disagrees with it. A zero signed volume (sheet, degenerate) is no evidence
  * either way, so nothing is touched.
  */
-export function conformWinding(mesh) {
+export function conformWinding(mesh, { bumpRevision = true } = {}) {
   const positions = mesh.getVerticesData?.('position');
   const indices = mesh.getIndices?.();
   if (!positions?.length || !indices?.length) return false;
@@ -399,7 +399,7 @@ export function conformWinding(mesh) {
   for (let i = 0; i < indices.length; i += 3) { rev[i] = indices[i]; rev[i + 1] = indices[i + 2]; rev[i + 2] = indices[i + 1]; }
   mesh.setIndices(rev, null, true);
   mesh.createNormals?.(true);
-  bump(mesh);
+  if (bumpRevision) bump(mesh);
   return true;
 }
 
@@ -423,8 +423,8 @@ export async function repairMesh(mesh, opts = {}) {
   const originalUvs = mesh.getVerticesData('uv') ? Float32Array.from(mesh.getVerticesData('uv')) : null;
   const out = await repairArraysByComponent(V, T, { ...opts, name: mesh.name ?? 'mesh' });
   if (out.changed) {
-    arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);
-    conformWinding(mesh);
+    arraysToMesh(mesh, out.V, out.T, originalPositions, originalUvs, T);   // bumps the revision once
+    conformWinding(mesh, { bumpRevision: false });
   }
   const r = out.report;
   return { holesFilled: r.holesFilled | 0, nmFixed: r.nmFixed | 0, normalsFlipped: r.normalsFlipped | 0, merged: r.merged | 0, isWatertight: !!out.after.isWatertight, changed: out.changed };

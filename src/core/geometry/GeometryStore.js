@@ -47,10 +47,11 @@ export function bump(meshOrId) {
   return revision;
 }
 
-/** Forget a mesh's revision (mesh disposed). */
-export function forget(meshOrId) {
-  const id = _id(meshOrId);
-  if (id) _revisions.delete(id);
+/** Drop every revision: the project was reset and its meshes disposed
+ *  (MeshRegistry.resetRegistry). Deleted objects stay alive for undo, so
+ *  this is the only point where revisions can be released. */
+export function clearRevisions() {
+  _revisions.clear();
 }
 
 /** Apply a Babylon world matrix (row-vector layout, translation in m[12..14]) in place. */
@@ -89,4 +90,4 @@ export function extract(mesh, { space = 'local', uvs = false } = {}) {
   return out;
 }
 
-export const GeometryStore = { meshIdOf, revisionOf, bump, forget, extract };
+export const GeometryStore = { meshIdOf, revisionOf, bump, clearRevisions, extract };
