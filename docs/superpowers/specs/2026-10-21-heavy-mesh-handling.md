@@ -64,9 +64,10 @@ pre-parse decision; the parse-time check decides.
 - **Look is unchanged (decision, review I1):** welded STL still renders **faceted** by default — a
   material plugin replaces the fragment normal with the screen-space face normal
   (`cross(dFdx(p), dFdy(p))`, oriented like the interpolated normal) for meshes flagged
-  `flatShading`. A per-user **Smooth shading** view toggle (off by default, persisted, translated)
-  shows the stored smooth/crease normals instead. Picking, Place Face on Bed (geometric face
-  normal) and exports are independent of the toggle; OBJ export writes no `vn` for faceted meshes.
+  `flatShading` (STL imports and Boolean results). A per-user **Smooth shading** view toggle (off by
+  default, persisted per user, translated; not stored in projects and not overridden by them) shows
+  the stored smooth/crease normals instead. Picking, Place Face on Bed (geometric face normal) and
+  exports are independent of the toggle; OBJ export writes no `vn` for faceted meshes (mesh flag).
 - **Parsing never runs on the UI thread** for STL / 3MF: the worker reads the `Blob` itself (a Blob
   crosses `postMessage` by reference, no copy) and transfers typed arrays back.
 - **3MF model XML is streamed** (inflate → `TextDecoder` stream → SAX) so a 10M-triangle model

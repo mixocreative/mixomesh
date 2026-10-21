@@ -17,6 +17,7 @@ import { revisionOf } from '../geometry/GeometryStore.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 import { retainedTrianglesOf } from './HierarchyCommands.js';
+import { markFlat } from '../scene/FlatShading.js';
 
 export function _isMaterialTextured(mat) {   // exported for tests
   if (!mat) return false;
@@ -120,6 +121,8 @@ export async function performBoolean(meshIds, op, opts = {}) {
     try { result?.dispose?.(); } catch { /* already gone */ }
     return { blocked: true, reason: 'changed-during-boolean' };
   }
+  // A Boolean result is new welded geometry: faceted by default like an STL import.
+  markFlat(result);
   const { assetId, meshId } = await AssetLoader.registerBakedResult(result, `${op}_result`);
 
   const lead = objects[operandIds[0]];

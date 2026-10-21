@@ -31,12 +31,13 @@ export async function sha256Hex(buf) {
  * would copy the very bytes the worker could not hold (review M4); callers
  * treat null as "no dedupe".
  * @param {Blob} blob
- * @param {{ signal?: AbortSignal, cancellable?: boolean }} [opts]  Cancel → AbortError
+ * @param {{ signal?: AbortSignal, cancellable?: boolean, hidden?: boolean }} [opts]  Cancel → AbortError;
+ *   `hidden` when the caller shows its own progress (import overlay)
  * @returns {Promise<string|null>}
  */
-export async function sha256HexOfBlob(blob, { signal, cancellable = false } = {}) {
+export async function sha256HexOfBlob(blob, { signal, cancellable = false, hidden = false } = {}) {
   if (blob?.size >= WORKER_HASH_MIN_BYTES && typeof Worker === 'function') {
-    try { return await _task.run({ blob }, { signal, cancellable }); }
+    try { return await _task.run({ blob }, { signal, cancellable, hidden }); }
     catch (err) {
       if (err?.name === 'AbortError') throw err;
       return null;

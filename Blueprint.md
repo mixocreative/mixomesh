@@ -2590,9 +2590,11 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   registers a Standard/PBR material plugin (`MXFLAT` define per mesh, injected at
   `CUSTOM_FRAGMENT_BEFORE_LIGHTS`, GLSL + WGSL) that shades meshes with `metadata.flatShading`
   (set by `buildStlContainer`) with the screen-space face normal; the **Smooth shading** viewport
-  toggle (`scene.overlays.smoothShading`, per-user setting, default off) turns it off. Place Face on
-  Bed uses `getNormal(true, false)` (geometric face normal); OBJ export omits `vn` for faceted
-  meshes. 3MF model parts are inflated and decoded in chunks
+  toggle (`scene.overlays.smoothShading`, per-user setting, default off; never written to or read from
+  a `.mixo` — `_projectOverlays` / ProjectLoader keep the user's value) turns it off. Boolean results
+  (new and restored `.mxvd`) are flagged too. Place Face on Bed uses `getNormal(true, false)`
+  (geometric face normal); OBJ export omits `vn` for faceted meshes, decided by the mesh flag only
+  (`isFaceted`), never by the view toggle. 3MF model parts are inflated and decoded in chunks
   into the push SAX parser (`createThreeMFXmlParser`; no string over V8's limit), triangles packed
   Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` (textures via a
   zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did

@@ -427,7 +427,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
     let sourceFileHash = opts.contentHash ?? null;
     if (!sourceFileHash) {
-      try { sourceFileHash = await sha256HexOfBlob(blob, { signal: abort.signal }); }
+      try { sourceFileHash = await sha256HexOfBlob(blob, { signal: abort.signal, hidden: true }); }
       catch (err) { if (err?.name === 'AbortError') throw err; /* hash is an identity optimisation — import proceeds without it */ }
     }
 

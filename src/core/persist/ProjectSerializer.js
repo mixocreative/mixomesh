@@ -80,6 +80,13 @@ export function stripFileData(a) {
 // ── Asset provenance (schema 3.4, overhaul §4.4 / task 4.1) ──
 
 /** `dir_<name>_<ts>` (pre-4.2 mount key) → `<name>`; else the path's first folder. */
+/** Overlays saved in a .mixo: the per-user Smooth shading view preference is
+ *  not project content, so it is never written (re-review minor 3). */
+export function _projectOverlays(overlays = {}) {
+  const { smoothShading: _view, ...rest } = overlays;
+  return { ...rest };
+}
+
 function _folderLabel(refKey, path) {
   const m = /^dir_(.+)_\d+$/.exec(String(refKey ?? ''));
   if (m) return m[1];
@@ -393,7 +400,7 @@ export async function buildDocument(opts = {}) {
     project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null, listings: normalizeListings(s.project.listings) },
     sceneSettings: {
       camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
-      overlays: { ...s.scene.overlays },
+      overlays: _projectOverlays(s.scene.overlays),
       render: { ...s.scene.render },
       renderOut: { ...s.scene.renderOut },
       grid: { ...s.scene.grid },

@@ -43,7 +43,13 @@ export function markFlat(mesh) {
   mesh.metadata = { ...(mesh.metadata ?? {}), flatShading: true };
 }
 
-/** Should this mesh render faceted right now? (pure; unit-tested) */
+/** Is this mesh faceted by nature (welded STL, Boolean result)? A property of
+ *  the mesh, never of the view — exports use this (re-review minor 1). */
+export function isFaceted(mesh) {
+  return mesh?.metadata?.flatShading === true;
+}
+
+/** Should this mesh RENDER faceted right now? (view; pure; unit-tested) */
 export function wantsFlat(mesh, smooth = _smooth) {
   return !smooth && mesh?.metadata?.flatShading === true;
 }
@@ -96,4 +102,4 @@ export function setSmooth(on) {
   }
 }
 
-export const FlatShading = { install, attachScene, markFlat, wantsFlat, setSmooth, isSmooth };
+export const FlatShading = { install, attachScene, markFlat, isFaceted, wantsFlat, setSmooth, isSmooth };

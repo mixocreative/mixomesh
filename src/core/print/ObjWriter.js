@@ -20,7 +20,7 @@ import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, bufferZUpToYUp } from './PrintSpace.js';
 import { getPrinterProfile, PRINTER_OBJ_AXES } from './PrinterProfiles.js';
-import { wantsFlat } from '../scene/FlatShading.js';
+import { isFaceted } from '../scene/FlatShading.js';
 
 const DEFAULT_OBJ_AXIS = 'y-up';
 
@@ -119,10 +119,11 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null 
     }
     const zPos = positionsToPrintSpace(raw);
     const pos = yUp ? bufferZUpToYUp(zPos) : zPos;
-    // A faceted-by-default (welded STL) mesh writes no `vn`: its stored normals
-    // are smooth, and OBJ consumers then use face normals — the look the
-    // viewport and the print show (review I1 / M10). Smooth shading on → vn.
-    const nRaw = wantsFlat(mesh) ? null : mesh.getVerticesData?.('normal');
+    // A faceted mesh (welded STL, Boolean result) writes no `vn`: its stored
+    // normals are smooth, and OBJ consumers then use face normals — the look
+    // the print has (review I1 / M10). Decided by the MESH only; the Smooth
+    // shading view toggle never changes exported files (re-review minor 1).
+    const nRaw = isFaceted(mesh) ? null : mesh.getVerticesData?.('normal');
     const zNrm = nRaw && nRaw.length === count * 3 ? positionsToPrintSpace(nRaw) : null;
     const nrm = zNrm && yUp ? bufferZUpToYUp(zNrm) : zNrm;
     const uvRaw = mesh.getVerticesData?.('uv');

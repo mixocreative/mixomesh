@@ -369,7 +369,9 @@ async function _loadProjectInner(doc, previousId) {
     scene: {
       ...s.scene,
       camera:   { ...s.scene.camera, ...(data.sceneSettings?.camera || {}) },
-      overlays: { ...s.scene.overlays, ...(data.sceneSettings?.overlays || {}) },
+      // smoothShading is a per-user VIEW preference (SettingsStore): a project's
+      // saved value never overrides it (re-review minor 3).
+      overlays: { ...s.scene.overlays, ...(data.sceneSettings?.overlays || {}), smoothShading: !!s.scene.overlays?.smoothShading },
       render:   { ...s.scene.render, ...(data.sceneSettings?.render || {}) },
       renderOut: {
         ...s.scene.renderOut, ...(data.sceneSettings?.renderOut || {}),

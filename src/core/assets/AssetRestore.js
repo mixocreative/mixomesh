@@ -10,6 +10,7 @@ import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
 import { setBlobUrl, getBlobUrl, getBlob, revokeBlobUrl } from './BlobUrls.js';
+import { markFlat } from '../scene/FlatShading.js';
 import {
   newId, registerContainer, removeContainer, getContainer, registerMesh, hasMesh, trackOrphan,
   getBabylonMesh, bindRestoredMesh,
@@ -194,6 +195,7 @@ async function _restoreMxvd(assetId, blob) {
   vd.indices = indices;
   if (normals) vd.normals = normals;
   vd.applyToMesh(mesh);
+  markFlat(mesh);   // restored Boolean result: same faceted default as when it was made
   mesh.material = scene.defaultMaterial;
   const container = new B.AssetContainer(scene);
   container.meshes.push(mesh);

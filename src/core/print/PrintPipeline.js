@@ -686,7 +686,8 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     }
     return true;
   } catch (err) {
-    if (!err.validationErrors) console.error(`${fmt.label} export failed:`, err);
+    // A user Cancel is not a failure (re-review minor 4).
+    if (!err.validationErrors && err?.name !== 'AbortError') console.error(`${fmt.label} export failed:`, err);
     throw err;
   } finally {
     dispose();
