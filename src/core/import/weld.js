@@ -70,7 +70,7 @@ export function weldPositions(soup, { onProgress } = {}) {
  * Per-vertex normals that stay smooth across gentle curvature but split the
  * vertex where incident faces differ by more than `creaseDeg`, so CAD edges
  * keep flat shading while a smooth scan keeps ~T/2 vertices. Area-weighted.
- * Degenerate (zero-area) faces join the vertex's first group.
+ * Degenerate (zero-area) faces join the vertex's first group and never seed one.
  * @param {Float32Array} positions
  * @param {Uint32Array} indices
  * @param {{ creaseDeg?: number, onProgress?: (fraction: number) => void }} [opts]
@@ -113,21 +113,25 @@ export function creaseNormals(positions, indices, { creaseDeg = 40, onProgress }
       const f = (corner / 3) | 0;
       const nx = fn[f * 3], ny = fn[f * 3 + 1], nz = fn[f * 3 + 2];
       const len = Math.hypot(nx, ny, nz);
+      // Degenerate (zero-area) corners never seed a group — they would make
+      // every later face "match" and switch the crease split off at this
+      // vertex; they ride along with group 0 instead.
       let g = 0;
-      if (len > 0 && seeds.length) {
-        g = -1;
-        for (let s = 0; s < seeds.length; s++) {
-          const sf = seeds[s];
-          const sx = fn[sf * 3], sy = fn[sf * 3 + 1], sz = fn[sf * 3 + 2];
-          const slen = Math.hypot(sx, sy, sz);
-          if (slen === 0 || (nx * sx + ny * sy + nz * sz) >= cos * len * slen) { g = s; break; }
+      if (len > 0) {
+        if (!seeds.length) {
+          seeds.push(f);
+        } else {
+          g = -1;
+          for (let s = 0; s < seeds.length; s++) {
+            const sf = seeds[s];
+            const sx = fn[sf * 3], sy = fn[sf * 3 + 1], sz = fn[sf * 3 + 2];
+            if ((nx * sx + ny * sy + nz * sz) >= cos * len * Math.hypot(sx, sy, sz)) { g = s; break; }
+          }
+          if (g === -1) {
+            if (seeds.length >= 255) g = seeds.length - 1;
+            else { g = seeds.length; seeds.push(f); extra++; }
+          }
         }
-        if (g === -1) {
-          if (seeds.length >= 255) g = seeds.length - 1;
-          else { g = seeds.length; seeds.push(f); extra++; }
-        }
-      } else if (!seeds.length) {
-        seeds.push(f);
       }
       group[corner] = g;
     }

@@ -111,3 +111,12 @@ test('parseStl reports staged progress up to 1', () => {
   assert.equal(stages.at(-1).fraction, 1);
   assert.ok(stages.every((s, i) => i === 0 || s.fraction >= stages[i - 1].fraction));
 });
+
+test('crease split: a zero-area face first at a vertex does not switch the split off', () => {
+  // Vertex 0 shared by a degenerate face, an XY face and an XZ face (90° apart).
+  const P = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const first = creaseNormals(P, new Uint32Array([0, 1, 1, 0, 1, 2, 0, 3, 1]));
+  const last = creaseNormals(P, new Uint32Array([0, 1, 2, 0, 3, 1, 0, 1, 1]));
+  assert.equal(first.positions.length / 3, last.positions.length / 3, 'order of faces must not matter');
+  assert.equal(last.positions.length / 3, 6, 'vertices 0 and 1 split across the 90° edge');
+});
