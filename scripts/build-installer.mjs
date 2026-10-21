@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // One-click clean Windows installer build.
-//   node scripts/build-installer.mjs [--skip-tests] [--keep-build]
+//   node scripts/build-installer.mjs [--skip-tests] [--skip-smoke] [--keep-build]
 //   (or double-click build-installer.cmd at the repo root)
 //
-// 1 wipe release/ + dist/   2 warn on uncommitted changes   3 npm test   4 npm run build +
-// electron-builder --win   5 copy ONLY the installer to installers/MIXOMESH-Setup-<v>.exe
-// (+ .sha256)   6 wipe release/ + dist/ again (unless --keep-build, needed for smoke:packaged).
+// 1 wipe release/ + dist/   2 warn on uncommitted changes   3 npm test   4 npm run build,
+// test:electron (needs dist/), electron-builder --win, smoke:packaged (needs release/win-unpacked)
+// 5 copy ONLY the installer to installers/MIXOMESH-Setup-<v>.exe (+ .sha256)
+// 6 wipe release/ + dist/ again (unless --keep-build). The smokes open a window, so they need a
+// desktop session; --skip-smoke bypasses them (the installer is then NOT release-verified).
 // Exit 0 = ok; non-zero names the failing step.
 
 import { spawnSync } from 'node:child_process';
@@ -18,6 +20,7 @@ import { pruneOldInstallers } from './clean.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
 const skipTests = args.has('--skip-tests');
+const skipSmoke = args.has('--skip-smoke');
 const keepBuild = args.has('--keep-build');
 let step = 'startup';
 
@@ -60,7 +63,11 @@ begin('git status');
 if (skipTests) { begin('npm test'); console.log('skipped (--skip-tests)'); } else { begin('npm test'); run('npm', ['test']); }
 
 begin('npm run build'); run('npm', ['run', 'build']);
+if (skipSmoke) { begin('npm run test:electron'); console.log('skipped (--skip-smoke)'); }
+else { begin('npm run test:electron'); run('npm', ['run', 'test:electron']); }
 begin('electron-builder --win'); run('npx', ['electron-builder', '--win']);
+if (skipSmoke) { begin('npm run smoke:packaged'); console.log('skipped (--skip-smoke)'); }
+else { begin('npm run smoke:packaged'); run('npm', ['run', 'smoke:packaged']); }
 
 begin('collect installer');
 const name = `MIXOMESH-Setup-${pkg.version}.exe`;
