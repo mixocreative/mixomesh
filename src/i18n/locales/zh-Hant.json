@@ -658,6 +658,8 @@
   "import.duplicateSeparate": "匯入為獨立素材",
   "toast.smartReplaceMultiPart": "「以作用中物件取代」尚不支援多材質物件（會遺失其他部件）。",
   "toast.booleanBlocked": "無法合併這些物件（{reason}）。",
+  "toast.booleanBusy": "已有合併正在進行。",
+  "toast.booleanChanged": "合併期間物件已變更，因此沒有套用。請再試一次。",
   "toast.booleanTextured": "合併會遺失貼圖（Mimaki 色彩）。請先將有貼圖的物件轉為單色。",
   "boolean.bakeTitle": "合併有貼圖的物件？",
   "boolean.bakeBody": "合併會遺失貼圖（CSG2 無 UV）。結果將使用單色。貼圖無法復原——取消以保留各部件並維持貼圖。",

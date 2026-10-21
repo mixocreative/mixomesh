@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { __reset as resetIdb } from './idb-stub.mjs';
 import { createOpfsRoot, installOpfsEnv, makeMemFs } from './opfs-stub.mjs';
 import {
-  OpfsStorageAdapter as A, OPFS_PROJECTS_DIR, sanitizeProjectName, isTouchApple, setOpfsWriteTimeout,
+  OpfsStorageAdapter as A, OPFS_PROJECTS_DIR, sanitizeProjectName, isTouchApple, setOpfsWriteTimeout, opfsWriteTimeoutFor,
 } from '../src/core/storage/OpfsStorageAdapter.js';
 import {
   detectStorageTier, detectCapabilities, storageTier, WEB_TRIANGLE_BUDGET, WEB_BOOLEAN_TRIANGLE_CAP,
@@ -299,6 +299,11 @@ await test('saveExport: share sheet dismissed → false (cancel); share refused 
     assert.equal(await A.saveExport(new Blob(['x']), 'a.stl'), true);
     assert.deepEqual(env.rec.downloads.map(d => d.name), ['a.stl']);
   });
+});
+
+await test('OPFS write timeout grows with the file (truncate-then-write must not be cut off)', () => {
+  assert.equal(opfsWriteTimeoutFor(0), 60_000);
+  assert.equal(opfsWriteTimeoutFor(500 * 1024 * 1024), 60_000 + 500_000, '+1 s per MB');
 });
 
 // ── Older WebKit: no main-thread createWritable ──

@@ -470,6 +470,8 @@ export function invalidateAll() {
 export function init() {
   subscribe(EVENTS.TRANSFORM_COMMITTED, (p) => { const ids = p?.meshIds ?? []; _bumpSeq(ids); _markStale(ids); });
   subscribe(EVENTS.OBJECT_UPDATED, (p) => { const ids = p?.meshId ? [p.meshId] : []; _bumpSeq(ids); _markStale(ids); });
+  // In-place geometry edits (repair, weld, bakes) that send no OBJECT_UPDATED.
+  subscribe(EVENTS.GEOMETRY_CHANGED, (p) => { const ids = p?.meshId ? [p.meshId] : []; _bumpSeq(ids); _markStale(ids); });
   subscribe(EVENTS.OBJECT_REMOVED, (p) => { if (p?.id) _dropEntry(p.id); });
   subscribe(EVENTS.PROJECT_NEW, _clearCache);
   subscribe(EVENTS.PROJECT_LOADED, _clearCache);

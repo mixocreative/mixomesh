@@ -83,7 +83,7 @@ test('worker crash rejects every in-flight job and recreates on next run', async
   const task = new WorkerTask({ create: fresh() });
   const a = task.run({}); const b = task.run({});
   FakeWorker.all[0].crash('kaput');
-  await assert.rejects(a, /kaput/);
+  await assert.rejects(a, e => /kaput/.test(e.message) && e.code === 'crashed');
   await assert.rejects(b, /kaput/);
   const next = task.run({});
   assert.equal(FakeWorker.all.length, 2);

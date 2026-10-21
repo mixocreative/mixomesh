@@ -251,6 +251,10 @@ await check('chunked export save: sender-checked channels, owner-bound sessions,
     "commitExportSave: (id) => ipcRenderer.invoke('export:commitSave', id)",
     "abortExportSave: (id) => ipcRenderer.invoke('export:abortSave', id)",
   ]) assert.ok(preloadSource.includes(line), `preload exposes ${line}`);
+  // A crashed or closed window never leaves a temp file / open handle behind.
+  assert.ok(mainSource.includes('const abortSaves = () => { _fileRefs?.abortAllFor(owner)'), 'abortSaves aborts the owner\'s saves');
+  assert.ok(mainSource.includes("contents.on('render-process-gone', abortSaves)"), 'renderer crash aborts its saves');
+  assert.ok(mainSource.includes("contents.once('destroyed', abortSaves)"), 'window close aborts its saves');
 });
 
 await check('automation API: sender-checked channels, five optional preload methods, session file only under userData', () => {

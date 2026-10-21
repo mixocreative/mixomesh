@@ -14,7 +14,9 @@ function manifold(url) {
       wasm.setup();
       return wasm;
     })
-    .catch(err => { _wasm = null; throw err; });
+    // Tagged so the client treats it as "worker cannot do Booleans" and falls
+    // back inline, instead of reporting a load error for a valid Boolean.
+    .catch(err => { _wasm = null; throw new Error(`manifold-unavailable: ${err?.message ?? err}`); });
   return _wasm;
 }
 

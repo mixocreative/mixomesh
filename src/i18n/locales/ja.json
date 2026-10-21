@@ -658,6 +658,8 @@
   "import.duplicateSeparate": "別のアセットとして読み込む",
   "toast.smartReplaceMultiPart": "「アクティブで置換」は複数マテリアルのオブジェクトにまだ対応していません（他のパーツが失われます）。",
   "toast.booleanBlocked": "これらのオブジェクトは結合できません（{reason}）。",
+  "toast.booleanBusy": "結合はすでに実行中です。",
+  "toast.booleanChanged": "結合中にオブジェクトが変更されたため、適用しませんでした。もう一度お試しください。",
   "toast.booleanTextured": "結合するとテクスチャが失われます（Mimakiカラー）。先にテクスチャ付きオブジェクトを単色に変換してください。",
   "boolean.bakeTitle": "テクスチャ付きオブジェクトを結合しますか？",
   "boolean.bakeBody": "結合するとテクスチャが失われます（CSG2 は UV を保持しません）。結果は単色になります。テクスチャは復元できません。パーツを別々・テクスチャ付きのままにするにはキャンセルしてください。",

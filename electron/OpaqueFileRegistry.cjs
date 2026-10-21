@@ -195,6 +195,17 @@ function createOpaqueFileRegistry(deps = {}) {
     return true;
   }
 
+  /** Run `fn` after the session's previous call; a session that already
+   *  ended (commit/abort/oversize) rejects every later call. */
+  function enqueue(id, save, fn) {
+    const run = save.queue.then(() => {
+      if (saves.get(id) !== save) throw new Error('Unknown save session');
+      return fn();
+    });
+    save.queue = run.catch(() => {});
+    return run;
+  }
+
   function requireSave(id, owner) {
     const save = saves.get(id);
     if (!save || save.owner !== owner) throw new Error('Unknown save session');
@@ -270,40 +281,55 @@ function createOpaqueFileRegistry(deps = {}) {
       const tmp = `${absolutePath}.${makeId()}.tmp`;
       const handle = await openFs(tmp, 'w');
       const id = `save_${makeId()}`;
-      saves.set(id, { owner, target: absolutePath, tmp, handle, bytes: 0 });
+      saves.set(id, { owner, target: absolutePath, tmp, handle, bytes: 0, queue: Promise.resolve() });
       return id;
     },
 
-    async appendWrite(id, data, owner) {
-      const save = requireSave(id, owner);
+    /** Append one chunk. Calls on a session run strictly in order (a commit
+     *  sent while a write is in flight waits for it; the size cap counts
+     *  every queued write). */
+    appendWrite(id, data, owner) {
+      let save;
+      try { save = requireSave(id, owner); } catch (err) { return Promise.reject(err); }
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data)
         : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null;
-      if (!bytes) throw new TypeError('appendWrite expects bytes');
-      if (bytes.byteLength > maxChunkBytes) throw new Error('Save chunk is too large');
-      if (save.bytes + bytes.byteLength > maxWriteBytes) {
-        await endSave(id, save, false);
-        throw new Error('File is too large to write');
-      }
-      try {
-        await save.handle.write(bytes);
-      } catch (err) {
-        await endSave(id, save, false);
-        throw err;
-      }
-      save.bytes += bytes.byteLength;
-      return true;
+      if (!bytes) return Promise.reject(new TypeError('appendWrite expects bytes'));
+      if (bytes.byteLength > maxChunkBytes) return Promise.reject(new Error('Save chunk is too large'));
+      return enqueue(id, save, async () => {
+        if (save.bytes + bytes.byteLength > maxWriteBytes) {
+          await endSave(id, save, false);
+          throw new Error('File is too large to write');
+        }
+        try {
+          await save.handle.write(bytes);
+        } catch (err) {
+          await endSave(id, save, false);
+          throw err;
+        }
+        save.bytes += bytes.byteLength;
+        return true;
+      });
     },
 
-    async commitWrite(id, owner) {
-      const save = requireSave(id, owner);
-      return endSave(id, save, true);
+    commitWrite(id, owner) {
+      let save;
+      try { save = requireSave(id, owner); } catch (err) { return Promise.reject(err); }
+      return enqueue(id, save, () => endSave(id, save, true));
     },
 
     async abortWrite(id, owner) {
       const save = saves.get(id);
       if (!save || save.owner !== owner) return false;
-      await endSave(id, save, false);
+      await enqueue(id, save, () => endSave(id, save, false)).catch(() => {});
       return true;
+    },
+
+    /** A window closed or its renderer died: abort every save it left open.
+     *  Returns how many were aborted. */
+    async abortAllFor(owner) {
+      const ids = [...saves].filter(([, save]) => save.owner === owner).map(([id]) => id);
+      await Promise.all(ids.map(id => this.abortWrite(id, owner)));
+      return ids.length;
     },
 
     async listDirectory(ref, parentPath = '') {

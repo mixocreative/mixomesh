@@ -10,6 +10,7 @@ import { logicalObjectPartIds, shouldDisplayObject, canonicalObjectId } from '..
 import { cascadeObjectIds, cascadeLockIds, groupDescendantObjectIds } from '../core/hierarchy/GroupCascade.js';
 import { safeAsync, Toast } from './Toast.js';
 import { repairWithOverlay } from './RepairFeedback.js';
+import { ProgressOverlay } from './ProgressOverlay.js';
 import { Modal } from './Modal.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
@@ -537,27 +538,51 @@ function _mate() {
 // Interactive Boolean (ADR 0002). performBoolean is async (CSG2 + serialise); it
 // applies the change + returns an already-applied command to push, or a blocked
 // reason to surface.
+const BOOLEAN_TITLES = { union: 'context.booleanUnion', subtract: 'context.booleanSubtract', intersect: 'context.booleanIntersect' };
+
+/** Run a Boolean under the blocking overlay (it runs in a worker, so the UI
+ *  would otherwise stay editable mid-run); Cancel aborts it. */
+async function _runBoolean(ids, op, opts = {}) {
+  const controller = new AbortController();
+  ProgressOverlay.show(t(BOOLEAN_TITLES[op] ?? 'progress.working'), { controller });
+  try {
+    return await performBoolean(ids, op, { ...opts, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') return null;
+    throw err;
+  } finally {
+    ProgressOverlay.hide();
+  }
+}
+
+function _booleanToastKey(reason) {
+  return reason === 'multi-part' ? 'toast.booleanMultiPart'
+    : reason === 'too-large' ? 'toast.booleanTooLarge'
+    : reason === 'busy' ? 'toast.booleanBusy'
+    : reason === 'changed-during-boolean' ? 'toast.booleanChanged'
+    : 'toast.booleanBlocked';
+}
+
 async function _boolean(op) {
   const ids = Selection.getSelectedIds();
   if (ids.length < 2) return;
-  const res = await performBoolean(ids, op);
+  const res = await _runBoolean(ids, op);
+  if (!res) return;   // cancelled
   if (res && res.blocked) {
     if (res.reason === 'needs-texture-bake') {
       // Offer to downgrade to solid colour + combine (CSG2 can't keep UVs).
       Modal.open('booleanTextureBake', { onClose: (r) => {
         if (r !== 'bake') return;
         safeAsync(async () => {
-          const baked = await performBoolean(ids, op, { bakeTexturedToSolid: true });
-          if (baked && baked.blocked) Toast.show(t('toast.booleanBlocked', { reason: baked.reason }), 'warning', 4000);
+          const baked = await _runBoolean(ids, op, { bakeTexturedToSolid: true });
+          if (!baked) return;
+          if (baked.blocked) Toast.show(t(_booleanToastKey(baked.reason), { reason: baked.reason }), 'warning', 4000);
           else push(baked);
         });
       } });
       return;
     }
-    const key = res.reason === 'multi-part' ? 'toast.booleanMultiPart'
-      : res.reason === 'too-large' ? 'toast.booleanTooLarge'
-      : 'toast.booleanBlocked';
-    Toast.show(t(key, { reason: res.reason }), 'warning', 4000);
+    Toast.show(t(_booleanToastKey(res.reason), { reason: res.reason }), 'warning', 4000);
     return;
   }
   push(res);

@@ -88,6 +88,18 @@ export function booleanTriangleCap({ workerAvailable, caps }) {
   return workerAvailable && caps?.booleanTriangleCap > 0 ? caps.booleanTriangleCap : DEFAULT_BOOLEAN_TRIANGLE_CAP;
 }
 
+/**
+ * Did the Boolean WORKER fail (could not start, crashed, restarted, or could
+ * not load Manifold) rather than the Boolean itself? Only those may fall back
+ * to the inline CSG2 path; a Manifold error (open operand), a timeout or an
+ * abort is reported as is. Pure.
+ */
+export function isBooleanInfraFailure(err) {
+  if (!err) return false;
+  if (['unavailable', 'restarted', 'crashed'].includes(err.code)) return true;
+  return /^manifold-unavailable:/.test(err.message ?? '');
+}
+
 // ── CSG2 compute (main-thread; browser-only — exercised by the Slice-2 smoke) ──
 //
 // CSG2/Manifold init is one-time per session, cached (mirrors PrintPipeline._ensureCSG2).
@@ -209,6 +221,7 @@ export async function computeBooleanAsync(op, meshes, opts = {}) {
   if (!['union', 'subtract', 'intersect'].includes(op)) throw new Error(`computeBoolean: bad op ${op}`);
   // Loaded on use: this module must stay importable headless (gating tests).
   const { isBooleanWorkerSupported, runBooleanInWorker } = await import('./BooleanWorker.js');
+  if (opts.signal?.aborted) throw new DOMException('Boolean aborted', 'AbortError');
   if (!isBooleanWorkerSupported()) return computeBoolean(op, meshes, opts);
   const { extract } = await import('./geometry/GeometryStore.js');
   const B = window.BABYLON;
@@ -226,8 +239,7 @@ export async function computeBooleanAsync(op, meshes, opts = {}) {
   try {
     out = await runBooleanInWorker(op, operands, { signal: opts.signal });
   } catch (err) {
-    const infra = err?.code === 'unavailable' || err?.code === 'restarted' || /crashed|requires a Web Worker/.test(err?.message ?? '');
-    if (infra && triangles <= DEFAULT_BOOLEAN_TRIANGLE_CAP) return computeBoolean(op, meshes, opts);
+    if (isBooleanInfraFailure(err) && triangles <= DEFAULT_BOOLEAN_TRIANGLE_CAP) return computeBoolean(op, meshes, opts);
     throw err;
   }
   const scene = meshes[0].getScene();

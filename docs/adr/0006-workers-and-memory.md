@@ -44,8 +44,9 @@ file into one IPC buffer.
 ## Rules for new heavy work (support generator, slicer)
 
 - Run it through `WorkerTask`; pass geometry from `GeometryStore.extract`
-  (transfer it, never the live Babylon arrays); send `revision` and drop stale
-  results.
+  (transfer it, never the live Babylon arrays). Record `revisionOf(mesh)` before
+  the job and compare it after the await; drop the result if it changed (the
+  runner's `revision` option is only a request/reply echo check).
 - Keep the worker's pure core in a module with no `window`/Babylon imports so
   it runs in a worker and under Node tests.
 - Stream large outputs (layer by layer) instead of building whole files.

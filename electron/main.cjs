@@ -795,6 +795,12 @@ app.on('web-contents-created', (_event, contents) => {
   guardWebContents(contents, ENTRY_URL, {
     onBlocked: (kind, url) => console.error(`blocked ${kind}${url ? `: ${url}` : ''}`),
   });
+  // A streamed export save left open by a crashed renderer or a closed window
+  // would keep its temp file (and an open handle) beside the user's file.
+  const owner = contents.id;
+  const abortSaves = () => { _fileRefs?.abortAllFor(owner).catch(() => {}); };
+  contents.on('render-process-gone', abortSaves);
+  contents.once('destroyed', abortSaves);
 });
 
 if (_gotLock) app.whenReady().then(async () => {

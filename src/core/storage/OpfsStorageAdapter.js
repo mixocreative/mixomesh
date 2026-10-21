@@ -136,6 +136,13 @@ export function setOpfsWriteTimeout(ms) {
   return prev;
 }
 
+/** Timeout for one write: the base plus 1 s per MB, so a big but healthy
+ *  truncate-then-write is never cut off half-way (that would leave the
+ *  previous file truncated). Only a worker that stopped answering trips it. */
+export function opfsWriteTimeoutFor(byteLength, base = _opfsWriteTimeoutMs) {
+  return base + Math.ceil(byteLength / (1024 * 1024)) * 1000;
+}
+
 // One fresh worker per write (sync access handles are per worker); a worker
 // that never answers is terminated by the timeout instead of hanging the save.
 const _opfsWriteTask = new WorkerTask({
@@ -147,7 +154,7 @@ const _opfsWriteTask = new WorkerTask({
 async function _writeViaWorker(path, data) {
   const bytes = await _bytesOf(data);
   const copy = bytes.slice();   // own buffer → transferable without detaching the caller's
-  await _opfsWriteTask.run({ path, bytes: copy }, { transfer: [copy.buffer], timeoutMs: _opfsWriteTimeoutMs });
+  await _opfsWriteTask.run({ path, bytes: copy }, { transfer: [copy.buffer], timeoutMs: opfsWriteTimeoutFor(copy.byteLength) });
 }
 
 /**

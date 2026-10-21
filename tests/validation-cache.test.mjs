@@ -139,6 +139,16 @@ await test('TRANSFORM_COMMITTED marks entries stale (results kept)', async () =>
   assert.ok(e.results.length > 0, 'old results retained for display');
 });
 
+await test('GEOMETRY_CHANGED (repair, bake, weld) marks entries stale too', async () => {
+  const { bump } = await import('../src/core/geometry/GeometryStore.js');
+  const m = buildMesh('S3', LO_TRIS, 'mesh_v3');
+  seedState([{ id: 'mesh_v3', mesh: m }]);
+  await MeshValidator.validateMesh(m);
+  assert.equal(cache('mesh_v3').stale, false);
+  bump('mesh_v3');
+  assert.equal(cache('mesh_v3').stale, true, 'stale after an in-place geometry change');
+});
+
 await test('OBJECT_REMOVED drops the entry; PROJECT_NEW clears everything', async () => {
   const m = buildMesh('S3', LO_TRIS, 'mesh_v3');
   seedState([{ id: 'mesh_v3', mesh: m }]);

@@ -661,6 +661,8 @@
   "import.duplicateSeparate": "Import as separate asset",
   "toast.smartReplaceMultiPart": "Replace with active can't yet handle multi-material objects — they'd lose their other parts.",
   "toast.booleanBlocked": "Can't combine these objects ({reason}).",
+  "toast.booleanBusy": "A combine is already running.",
+  "toast.booleanChanged": "The objects changed while combining, so nothing was applied. Try again.",
   "toast.booleanTextured": "Combine drops textures (Mimaki colour). Convert the textured object to a solid colour first.",
   "boolean.bakeTitle": "Combine textured objects?",
   "boolean.bakeBody": "Combine drops textures (CSG2 has no UVs). The result will use a solid colour. Textures can't be recovered — cancel to keep the parts separate and textured.",

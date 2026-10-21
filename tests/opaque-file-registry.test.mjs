@@ -404,4 +404,35 @@ await check('chunked export save: size cap, chunk cap, owner and bad input are r
   await assert.rejects(() => reg.commitWrite('save_forged', 'o'), /Unknown save/);
 });
 
-assert.equal(cases, 14);
+await check('chunked export save: a closed/crashed window aborts its open sessions only', async () => {
+  const { temps, deps } = writeFs();
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore() });
+  const mine = await reg.beginDialogWrite('C:\\p\\m.stl', 7);
+  const other = await reg.beginDialogWrite('C:\\p\\o.stl', 8);
+  await reg.appendWrite(mine, new Uint8Array([1]), 7);
+  assert.equal(await reg.abortAllFor(7), 1);
+  assert.equal(temps.size, 1, "window 7's temp removed, window 8's kept");
+  await assert.rejects(() => reg.appendWrite(mine, new Uint8Array([1]), 7), /Unknown save/);
+  assert.equal(await reg.commitWrite(other, 8), true);
+});
+
+await check('chunked export save: commit waits for in-flight writes; parallel writes cannot pass the cap', async () => {
+  const { disk, temps, deps } = writeFs();
+  const slowOpen = async (p) => {
+    const h = await deps.open(p);
+    return { ...h, write: async (b) => { await new Promise(r => setTimeout(r, 15)); return h.write(b); } };
+  };
+  const reg = createOpaqueFileRegistry({ ...deps, open: slowOpen, store: createMemoryStore(), maxWriteBytes: 4 });
+  const id = await reg.beginDialogWrite('C:\\p\\s.stl', 1);
+  const w1 = reg.appendWrite(id, new Uint8Array([1, 2]), 1);
+  const done = reg.commitWrite(id, 1);       // sent before the write finished
+  await w1;
+  assert.equal(await done, true);
+  assert.deepEqual([...disk.get('C:\\p\\s.stl')], [1, 2], 'commit saw the whole write');
+  const id2 = await reg.beginDialogWrite('C:\\p\\t.stl', 1);
+  const results = await Promise.allSettled([1, 2, 3].map(() => reg.appendWrite(id2, new Uint8Array(2), 1)));
+  assert.equal(results.filter(r => r.status === 'rejected').length >= 1, true, 'the third 2-byte write breaks the 4-byte cap');
+  assert.equal(temps.size, 0, 'oversize session cleaned up');
+});
+
+assert.equal(cases, 16);

@@ -8,6 +8,11 @@
 // `new Worker(new URL('./X.worker.js', import.meta.url), { type: 'module' })`
 // at the call site to bundle the worker) or null when Worker is unavailable.
 //
+// `revision` is an echo check only: it pairs a reply with the request that
+// carried the same revision. It cannot see geometry edited WHILE the job ran —
+// callers must compare GeometryStore.revisionOf(mesh) after the await (see
+// RefinementController) before using a result.
+//
 // Failure isolation: a timeout or crash on a persistent worker terminates it;
 // the failing job rejects with its own reason, the other in-flight jobs reject
 // with code 'restarted' (crash: everyone gets the crash message), and the next
@@ -91,7 +96,7 @@ export class WorkerTask {
       }
       if (this._mode === 'per-job') {
         worker.onmessage = e => this._onMessage(e.data, job);
-        worker.onerror = e => this._settle(job, new Error(e?.message || `${this._name} crashed`));
+        worker.onerror = e => this._settle(job, coded(e?.message || `${this._name} crashed`, 'crashed'));
       } else {
         this._jobs.set(id, job);
       }
@@ -110,7 +115,7 @@ export class WorkerTask {
       const job = this._jobs.get(msg.id);
       if (job) this._onMessage(msg, job);
     };
-    worker.onerror = e => this._restart(null, new Error(e?.message || `${this._name} crashed`));
+    worker.onerror = e => this._restart(null, coded(e?.message || `${this._name} crashed`, 'crashed'));
     return worker;
   }
 

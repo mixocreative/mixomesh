@@ -13,6 +13,7 @@ import { ShaderLibrary } from '../ShaderLibrary.js';
 import { evaluateBooleanEligibility, computeBooleanAsync, booleanTriangleCap } from '../BooleanService.js';
 import { isBooleanWorkerSupported } from '../BooleanWorker.js';
 import { caps } from '../storage/capabilities.js';
+import { revisionOf } from '../geometry/GeometryStore.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 
@@ -64,6 +65,17 @@ function _operandDescriptor(id, objects) {
   };
 }
 
+let _booleanRunning = false;
+
+/** Fingerprint of the operands' identity, geometry revision and world matrix. */
+function _operandSnapshot(ids) {
+  return JSON.stringify(ids.map(id => {
+    const m = AssetLoader.getBabylonMesh(id);
+    if (!m || !getState().scene.objects[id]) return null;
+    return [id, revisionOf(m), Array.from(m.computeWorldMatrix?.(true)?.m ?? [])];
+  }));
+}
+
 /**
  * Run an interactive Boolean and apply it to the scene. Async (CSG2 + serialise).
  * Returns an already-applied `BooleanCommand` for the caller to push, or a
@@ -90,7 +102,23 @@ export async function performBoolean(meshIds, op, opts = {}) {
   const meshes = operandIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
   if (meshes.length < 2) return { blocked: true, reason: 'needs-two' };
 
-  const result = await computeBooleanAsync(op, meshes, { name: op });
+  // The Boolean runs in a worker while the UI stays live (ContextMenu shows a
+  // blocking overlay, but a project load / API call could still interleave):
+  // one at a time, and discard the result if any operand changed meanwhile.
+  if (_booleanRunning) return { blocked: true, reason: 'busy' };
+  const before = _operandSnapshot(operandIds);
+  const compute = opts.compute ?? computeBooleanAsync;
+  let result;
+  _booleanRunning = true;
+  try {
+    result = await compute(op, meshes, { name: op, signal: opts.signal });
+  } finally {
+    _booleanRunning = false;
+  }
+  if (_operandSnapshot(operandIds) !== before) {
+    try { result?.dispose?.(); } catch { /* already gone */ }
+    return { blocked: true, reason: 'changed-during-boolean' };
+  }
   const { assetId, meshId } = await AssetLoader.registerBakedResult(result, `${op}_result`);
 
   const lead = objects[operandIds[0]];
