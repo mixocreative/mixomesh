@@ -213,6 +213,14 @@ async function main() {
     assert(snapshot.splitBefore !== snapshot.splitAfter,
       'right splitter keyboard resize did not change aria-valuenow');
 
+    // The first-run tour auto-opens ~800 ms after boot and takes focus. Wait
+    // for it so the modal focus checks below never race its timer (it stays
+    // open: the onboarding block near the end asserts the fresh tour).
+    await waitFor(() => evaluate(cdp, `(() => {
+      const root = document.getElementById('onboard-root');
+      return !!root && !root.classList.contains('hidden') && !!root.querySelector('.ob-bubble');
+    })()`), 10000, 'first-run tour opened');
+
     const modalA11y = await evaluate(cdp, `(async () => {
       const { Modal } = await import('/src/ui/Modal.js');
       const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

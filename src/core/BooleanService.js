@@ -78,6 +78,16 @@ export function evaluateBooleanEligibility(operands, opts = {}) {
   return { ok: true, reason: 'ready', totalTriangles };
 }
 
+/**
+ * Triangle ceiling for a Boolean: the capability cap when the Manifold worker
+ * runs it (the UI stays responsive), the conservative main-thread cap when it
+ * must run inline. Pure.
+ * @param {{ workerAvailable: boolean, caps: { booleanTriangleCap?: number } }} env
+ */
+export function booleanTriangleCap({ workerAvailable, caps }) {
+  return workerAvailable && caps?.booleanTriangleCap > 0 ? caps.booleanTriangleCap : DEFAULT_BOOLEAN_TRIANGLE_CAP;
+}
+
 // ── CSG2 compute (main-thread; browser-only — exercised by the Slice-2 smoke) ──
 //
 // CSG2/Manifold init is one-time per session, cached (mirrors PrintPipeline._ensureCSG2).
@@ -158,22 +168,91 @@ export async function computeBoolean(op, meshes, opts = {}) {
     }
     const name = opts.name || `${op}_result`;
     const result = acc.toMesh(name, scene);   // NOT in `made` — this is the kept output
-
-    const srcMat = meshes[0].material;
-    // sRGB read: a PBR source keeps `albedoColor` LINEAR (Blueprint §10 colour
-    // contract); copying it raw into a StandardMaterial (gamma) made Boolean
-    // results of PBR parts render darker than their source.
-    const srcColor = srcMat ? materialSrgbColor(srcMat) : null;
-    if (srcColor) {
-      const mat = new B.StandardMaterial(`${name}_mat`, scene);
-      mat.diffuseColor = new B.Color3(srcColor.r, srcColor.g, srcColor.b);
-      result.material = mat;
-    } else {
-      result.material = scene.defaultMaterial;
-    }
+    _applyResultMaterial(result, meshes[0], name, scene);
     return result;
   } finally {
     for (const csg of made) { try { csg.dispose?.(); } catch { /* already gone */ } }
     for (const mesh of operands) { try { mesh.dispose?.(); } catch { /* already gone */ } }
   }
+}
+
+/** Solid colour from the first operand (sRGB read: a PBR source keeps
+ *  `albedoColor` LINEAR — Blueprint §10 — so copying it raw into a gamma
+ *  StandardMaterial rendered Boolean results darker), else the scene default. */
+function _applyResultMaterial(result, firstOperand, name, scene) {
+  const B = window.BABYLON;
+  const srcMat = firstOperand.material;
+  const srcColor = srcMat ? materialSrgbColor(srcMat) : null;
+  if (srcColor) {
+    const mat = new B.StandardMaterial(`${name}_mat`, scene);
+    mat.diffuseColor = new B.Color3(srcColor.r, srcColor.g, srcColor.b);
+    result.material = mat;
+  } else {
+    result.material = scene.defaultMaterial;
+  }
+}
+
+/**
+ * Boolean off the main thread when a Worker is available (raw manifold-3d in
+ * workers/Boolean.worker.js), else the inline CSG2 path. The result matches
+ * computeBoolean: world-space geometry re-centred on the origin (CSG2's
+ * toMesh `centerMesh` default) with the first operand's solid colour. A worker
+ * that cannot start or crashes falls back inline only when the job is small
+ * enough for the main thread; a Manifold error (open operand) is reported.
+ *
+ * @param {'union'|'subtract'|'intersect'} op
+ * @param {import('@babylonjs/core').Mesh[]} meshes  >=2, application order
+ * @param {{ name?: string, signal?: AbortSignal }} [opts]
+ */
+export async function computeBooleanAsync(op, meshes, opts = {}) {
+  if (!Array.isArray(meshes) || meshes.length < 2) throw new Error('computeBoolean: need ≥2 meshes');
+  if (!['union', 'subtract', 'intersect'].includes(op)) throw new Error(`computeBoolean: bad op ${op}`);
+  // Loaded on use: this module must stay importable headless (gating tests).
+  const { isBooleanWorkerSupported, runBooleanInWorker } = await import('./BooleanWorker.js');
+  if (!isBooleanWorkerSupported()) return computeBoolean(op, meshes, opts);
+  const { extract } = await import('./geometry/GeometryStore.js');
+  const B = window.BABYLON;
+  const operands = meshes.map(mesh => {
+    const { positions, indices } = extract(mesh);
+    const normals = mesh.getVerticesData?.(B.VertexBuffer.NormalKind);
+    return {
+      positions, indices,
+      normals: normals?.length === positions.length ? Float32Array.from(normals) : null,
+      matrix: Array.from(mesh.computeWorldMatrix(true).m),
+    };
+  });
+  const triangles = operands.reduce((n, o) => n + o.indices.length / 3, 0);
+  let out;
+  try {
+    out = await runBooleanInWorker(op, operands, { signal: opts.signal });
+  } catch (err) {
+    const infra = err?.code === 'unavailable' || err?.code === 'restarted' || /crashed|requires a Web Worker/.test(err?.message ?? '');
+    if (infra && triangles <= DEFAULT_BOOLEAN_TRIANGLE_CAP) return computeBoolean(op, meshes, opts);
+    throw err;
+  }
+  const scene = meshes[0].getScene();
+  const name = opts.name || `${op}_result`;
+  // CSG2 toMesh centerMesh: shift so the bounding-box centre sits at the origin.
+  const { positions } = out;
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      const v = positions[i + c];
+      if (v < min[c]) min[c] = v;
+      if (v > max[c]) max[c] = v;
+    }
+  }
+  const centre = [0, 1, 2].map(c => (min[c] + max[c]) / 2);
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] -= centre[0]; positions[i + 1] -= centre[1]; positions[i + 2] -= centre[2];
+  }
+  const result = new B.Mesh(name, scene);
+  const vd = new B.VertexData();
+  vd.positions = positions;
+  vd.indices = out.indices;
+  if (out.normals) vd.normals = out.normals;
+  else { const n = []; B.VertexData.ComputeNormals(positions, out.indices, n); vd.normals = n; }
+  vd.applyToMesh(result);
+  _applyResultMaterial(result, meshes[0], name, scene);
+  return result;
 }

@@ -34,6 +34,10 @@
 // trusted verbatim from `desktopCaps` (Electron never injects it).
 export const WEB_TRIANGLE_BUDGET = 1_500_000;
 export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
+/** Boolean ceiling when Booleans run in the Manifold worker (BooleanService
+ *  keeps DEFAULT_BOOLEAN_TRIANGLE_CAP for the inline main-thread fallback). */
+export const WEB_BOOLEAN_TRIANGLE_CAP = 250_000;
+export const DESKTOP_BOOLEAN_TRIANGLE_CAP = 1_000_000;
 
 /**
  * @typedef {'chromium'|'webkit'|'gecko'|'other'} Engine
@@ -118,6 +122,7 @@ export function detectCapabilities(env = {}) {
   const { hasFSA, hasIDB, desktop, desktopCaps } = env;
   const publish = !!desktop && !!env.hasListbridge;
   const triangleBudget = desktop ? DESKTOP_TRIANGLE_BUDGET : WEB_TRIANGLE_BUDGET;
+  const booleanTriangleCap = desktop ? DESKTOP_BOOLEAN_TRIANGLE_CAP : WEB_BOOLEAN_TRIANGLE_CAP;
   if (desktop && desktopCaps) {
     // Trust the desktop shell's declared capabilities (Node fs backed).
     return {
@@ -128,6 +133,7 @@ export function detectCapabilities(env = {}) {
       writeFiles: !!desktopCaps.writeFiles,
       publish,
       triangleBudget,
+      booleanTriangleCap,
     };
   }
   if (detectStorageTier(env) === 'opfs') {
@@ -141,6 +147,7 @@ export function detectCapabilities(env = {}) {
       writeFiles: true,
       publish,
       triangleBudget,
+      booleanTriangleCap,
     };
   }
   // Web build — feature-detect. FSA gates the pickers/mount/relink/write; IDB gates
@@ -153,6 +160,7 @@ export function detectCapabilities(env = {}) {
     watchFiles: false,
     publish,
     triangleBudget,
+    booleanTriangleCap,
   };
 }
 

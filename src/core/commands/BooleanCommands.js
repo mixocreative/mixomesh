@@ -10,7 +10,9 @@ import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
-import { evaluateBooleanEligibility, computeBoolean } from '../BooleanService.js';
+import { evaluateBooleanEligibility, computeBooleanAsync, booleanTriangleCap } from '../BooleanService.js';
+import { isBooleanWorkerSupported } from '../BooleanWorker.js';
+import { caps } from '../storage/capabilities.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 
@@ -74,7 +76,8 @@ function _operandDescriptor(id, objects) {
 export async function performBoolean(meshIds, op, opts = {}) {
   const objects = getState().scene.objects;
   const operandIds = [...new Set((meshIds ?? []).map(id => canonicalObjectId(id, objects)).filter(Boolean))];
-  const gate = evaluateBooleanEligibility(operandIds.map(id => _operandDescriptor(id, objects)));
+  const triangleCap = booleanTriangleCap({ workerAvailable: isBooleanWorkerSupported(), caps });
+  const gate = evaluateBooleanEligibility(operandIds.map(id => _operandDescriptor(id, objects)), { triangleCap });
   if (!gate.ok) return { blocked: true, reason: gate.reason };
   // `needs-texture-bake` is a SOFT gate (ok:true): CSG2 drops UVs, so proceeding
   // silently loses the texture (ADR 0002 moat). Block UNLESS the caller explicitly
@@ -87,7 +90,7 @@ export async function performBoolean(meshIds, op, opts = {}) {
   const meshes = operandIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean);
   if (meshes.length < 2) return { blocked: true, reason: 'needs-two' };
 
-  const result = await computeBoolean(op, meshes, { name: op });
+  const result = await computeBooleanAsync(op, meshes, { name: op });
   const { assetId, meshId } = await AssetLoader.registerBakedResult(result, `${op}_result`);
 
   const lead = objects[operandIds[0]];
