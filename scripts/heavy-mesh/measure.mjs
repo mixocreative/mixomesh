@@ -115,8 +115,12 @@ const INTERACT_IN_PAGE = `(async () => {
   let t = performance.now();
   const coldId = sm.SceneManager.pickMeshIdAt(cx, cy);
   const pickColdMs = performance.now() - t;
-  // Let a background BVH build (if any) finish before the warm pick.
-  for (let i = 0; i < 100 && window.__heavyPickPending?.(); i++) await new Promise(r => setTimeout(r, 100));
+  // Let a background pick-index build (if any) finish before the warm pick.
+  const hp = await import('/src/core/scene/HeavyPick.js').catch(() => null);
+  const waitStart = performance.now();
+  await new Promise(r => setTimeout(r, 800));
+  for (let i = 0; i < 300 && hp?.pendingCount?.() > 0; i++) await new Promise(r => setTimeout(r, 100));
+  const pickIndexWaitMs = Math.round(performance.now() - waitStart);
   t = performance.now();
   const warmId = sm.SceneManager.pickMeshIdAt(cx, cy);
   const pickWarmMs = performance.now() - t;
@@ -136,7 +140,7 @@ const INTERACT_IN_PAGE = `(async () => {
   frames.shift();
   return {
     picked: !!coldId && coldId === warmId,
-    pickColdMs: Math.round(pickColdMs), pickWarmMs: Math.round(pickWarmMs),
+    pickColdMs: Math.round(pickColdMs), pickWarmMs: Math.round(pickWarmMs), pickIndexWaitMs,
     orbitFrameMs: Math.round(frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length)),
   };
 })()`;

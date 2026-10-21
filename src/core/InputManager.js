@@ -575,8 +575,8 @@ function _onContextMenuRMB(info) {
 // (clientX, clientY) viewport px for the menu position.
 function _openContextMenuAt(x, y, clientX, clientY) {
   if (_readOnly) return;
-  const pick = _scene.pick?.(x, y, mesh => !!mesh && mesh.isPickable !== false);
-  const meshId = SceneManager.pickMeshIdAt(x, y);
+  const { meshId, pick } = SceneManager.pickAt?.(x, y)
+    ?? { meshId: SceneManager.pickMeshIdAt(x, y), pick: null };   // one pick, not two
   const id = meshId ? Selection.resolveClick(meshId) : null;   // same click-depth as LMB
   if (id && !Selection.contains(id)) {
     Selection.set([id], id);

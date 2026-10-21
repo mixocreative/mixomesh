@@ -28,6 +28,7 @@ import {
 import { initAdaptiveResolution } from './scene/AdaptiveResolution.js';
 import { initSelectionOutline, suspendOutline, isOutlineEnabled, setActive, setSelected, setOutlineColors, setOutlineLightMode } from './scene/SelectionOutline.js';
 import { initCursor3D, getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState, setCursorColor } from './scene/Cursor3D.js';
+import { HeavyPick } from './scene/HeavyPick.js';
 import {
   initBedGrid, rebuildGround as _rebuildGround, setGrid as _bedSetGrid,
   setGroundVisible, updateBedPreview as _bedUpdatePreview, disposeBedPreview,
@@ -96,6 +97,14 @@ export async function init(canvas) {
   // 4× the fragments and tanks heavy 4096²/high-poly print scenes.
 
   _scene = new BABYLON.Scene(_engine);
+  // Heavy-mesh spec §7.5: nothing reads pointerInfo.pickInfo, so Babylon's own
+  // implicit picks on every pointer down / up / move (orbit included) are pure
+  // cost — up to three full mesh picks per click. The app picks explicitly,
+  // once, where it needs to (SceneManager.pickAt, Hover's per-frame throttle).
+  _scene.skipPointerMovePicking = true;
+  _scene.skipPointerDownPicking = true;
+  _scene.skipPointerUpPicking = true;
+  HeavyPick.init(_scene);
   // Fallback solid = gradient base, so any frame before the backdrop layer
   // draws (and screenshot edges) matches instead of flashing black.
   _scene.clearColor   = BABYLON.Color4.FromHexString(BG_GRADIENT_BOTTOM + 'ff');
@@ -645,29 +654,35 @@ export function getScene() { return _scene; }
 /** @returns {BABYLON.Engine} */
 export function getEngine() { return _engine; }
 
-/** @returns {string|null} meshId picked at canvas (x, y), or null. */
-export function pickMeshIdAt(x, y) {
-  if (!_scene) return null;
-  // Predicate accepts ONLY meshes whose ancestor chain carries a registered
-  // meshId — helper meshes (grid, labels, previews, edge overlays, anything
-  // future) can never eat the pick by sitting in front of real content.
-  const result = _scene.pick(x, y, m => {
-    if (!m?.isPickable) return false;
-    let node = m;
-    while (node) {
-      if (node.metadata?.meshId) return true;
-      node = node.parent;
-    }
-    return false;
-  });
-  if (!result?.hit || !result.pickedMesh) return null;
+// Predicate accepts ONLY meshes whose ancestor chain carries a registered
+// meshId — helper meshes (grid, labels, previews, edge overlays, anything
+// future) can never eat the pick by sitting in front of real content.
+function _isPickableContent(m) {
+  return !!m?.isPickable && _isContentMesh(m);
+}
+
+/**
+ * ONE content pick at canvas (x, y): the meshId (or null) plus Babylon's
+ * PickingInfo, so callers that need both (context menu: id + face normal)
+ * never pick twice (heavy-mesh spec §7.5).
+ * @returns {{ meshId: string|null, pick: any }}
+ */
+export function pickAt(x, y) {
+  if (!_scene) return { meshId: null, pick: null };
+  const result = _scene.pick(x, y, _isPickableContent);
+  if (!result?.hit || !result.pickedMesh) return { meshId: null, pick: result ?? null };
   let node = result.pickedMesh;
   while (node) {
     const id = node.metadata?.meshId;
-    if (id) return id;
+    if (id) return { meshId: id, pick: result };
     node = node.parent;
   }
-  return null;
+  return { meshId: null, pick: result };
+}
+
+/** @returns {string|null} meshId picked at canvas (x, y), or null. */
+export function pickMeshIdAt(x, y) {
+  return pickAt(x, y).meshId;
 }
 
 export const SceneManager = {
@@ -681,6 +696,6 @@ export const SceneManager = {
   setBackgroundEnabled, setFloorShadowOnly, setSectionPlane, invalidateShadows,
   setSectionVizVisible, isSectionVizVisible, getSectionExtentMM,
   getCursor, setCursor, setCursorVisible, isCursorVisible, setCursorFromState,
-  pickMeshIdAt,
+  pickMeshIdAt, pickAt,
   getBodyDragPlaneY, beginBodyDrag, setBodyDragOffset, endBodyDrag, cancelBodyDrag,
 };

@@ -180,6 +180,8 @@ let bodyDragOk = true;
 // 'loose', anything else is empty. Ray: straight down from (x/100, 10, 0).
 function pickAt(x) { return x < 100 ? 'a' : x < 200 ? 'loose' : null; }
 SceneManager.pickMeshIdAt = (x) => pickAt(x);
+// The context menu picks ONCE through pickAt (id + PickingInfo), heavy-mesh task e.
+SceneManager.pickAt = (x) => ({ meshId: pickAt(x), pick: null });
 const fakeScene = {
   pointerX: 0, pointerY: 0, meshes: [],
   activeCamera: {},
