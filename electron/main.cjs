@@ -23,6 +23,7 @@ const {
 } = require('./WindowSecurity.cjs');
 
 const { applyHeapFlags } = require('./HeapFlags.cjs');
+const { createApiThrottleGuard } = require('./ApiThrottle.cjs');
 
 // Before app ready: room for heavy (2M-10M+ triangle) print meshes in the renderer.
 applyHeapFlags(app);
@@ -661,6 +662,9 @@ let _apiEnabled = true;
 let _apiChain = Promise.resolve();                    // serialises start/stop
 let _apiSeq = 0;
 const _apiPending = new Map();                        // id -> {resolve, reject, sender, timer}
+// Automation must render even when the window is occluded / the display sleeps (job mode
+// already never throttles): throttling is off for a window while it has pending API requests.
+const _apiThrottle = createApiThrottleGuard({ keepOff: _jobMode });
 
 function _failApiRequests(message) {
   for (const [id, p] of _apiPending) {
@@ -677,7 +681,9 @@ function _apiDispatch(method, params) {
   // The renderer's ApiBridge subscribes during bootstrap, right after LaunchRequests pulls
   // its queue (launch:pull) — until then a request would sit unanswered: say "starting".
   if (!_launchQueues.get(win.webContents)?.isReady()) return Promise.reject(makeApiError('E_BUSY', 'the app is still starting'));
-  return new Promise((resolve, reject) => {
+  const wc = win.webContents;
+  _apiThrottle.begin(wc);
+  const job = new Promise((resolve, reject) => {
     const id = 'r' + (++_apiSeq);
     const timer = setTimeout(() => {
       if (_apiPending.delete(id)) reject(makeApiError('E_TIMEOUT', method + ': timed out'));
@@ -690,6 +696,8 @@ function _apiDispatch(method, params) {
       reject(makeApiError('E_INTERNAL', 'could not reach the app'));
     }
   });
+  job.then(() => _apiThrottle.end(wc), () => _apiThrottle.end(wc));
+  return job;
 }
 
 function _createApiServer() {
