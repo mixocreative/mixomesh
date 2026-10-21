@@ -5,7 +5,9 @@ import { SCHEMA_VERSION } from './persist/constants.js';
 const DEV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 const INITIAL_STATE = {
-  project: { id: null, name: 'Untitled', isDirty: false, lastSavedAt: null, version: SCHEMA_VERSION, listings: [] },   // id minted on new/load/autosave (persist/ProjectId.js)
+  // id minted on new/load/autosave (persist/ProjectId.js). Dirty is NOT state:
+  // persist/DirtyTracker.js (PersistenceManager.isDirty) is the one truth (W-14).
+  project: { id: null, name: 'Untitled', lastSavedAt: null, version: SCHEMA_VERSION, listings: [] },
   scene: {
     objects: {},
     groups: {},
