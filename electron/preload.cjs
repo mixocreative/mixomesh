@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     retry: (jobId) => ipcRenderer.invoke('publish:retry', jobId),
     cancel: (jobId) => ipcRenderer.invoke('publish:cancel', jobId),
     extendHold: (jobId, ms) => ipcRenderer.invoke('publish:extendHold', jobId, ms),
+    pending: (projectKey) => ipcRenderer.invoke('publish:pending', projectKey),
+    resolvePending: (jobId, action) => ipcRenderer.invoke('publish:resolvePending', jobId, action),
     onProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);
       ipcRenderer.on('publish:progress', listener);

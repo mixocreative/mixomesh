@@ -145,7 +145,7 @@ function createWindow() {
       title: publishing ? 'Reload during a publish?' : 'Leave without saving?',
       message: publishing ? 'A publish is still running.' : 'Leave without saving?',
       detail: publishing
-        ? 'Reloading hides its progress. The publish keeps running, but you cannot cancel or retry it from the reloaded window.'
+        ? 'Reloading hides its progress. The publish keeps running; the Publish tab picks up its result after the reload, but cannot cancel or retry it.'
         : 'This project has unsaved changes that will be lost.',
     });
     if (choice === 0) event.preventDefault(); // preventDefault here = proceed with unload
