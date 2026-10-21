@@ -25,16 +25,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Vite 8 (rolldown) ships its native binary as a per-platform
-      # optionalDependency. The Windows-generated package-lock.json records only
-      # the win32 binary, and npm's optional-deps bug (npm/cli#4828) means even a
-      # plain `npm install` keeps the locked tree and never fetches the linux one
-      # — the build then dies with "Cannot find native binding". Deleting the
-      # lockfile first forces a fresh resolve that picks up the linux-x64 binary.
-      # (node_modules doesn't exist on a clean runner, so only the lockfile needs
-      # removing.) The official npm-bug workaround, applied in CI.
-      - run: rm -f package-lock.json
-      - run: npm install --no-audit --no-fund
+      # The committed package-lock.json records every rolldown platform binding
+      # (including linux-x64-gnu), so `npm ci` installs exactly what was tested
+      # locally. Do not delete the lockfile here: that shipped untested
+      # dependency versions to Pages. ELECTRON_SKIP_BINARY_DOWNLOAD avoids a
+      # ~100 MB Electron download the web build does not use.
+      - run: npm ci --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run i18n:check
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
