@@ -1,0 +1,10 @@
+/* New interface style — mixo-app-style (github.com/mixocreative/mixo-app-style),
+   Dense density. Loaded LAST. Every rule is scoped to
+   :root:not([data-ui-style="original"]) so New is the default and Original
+   (data-ui-style="original") renders exactly the earlier sheets.
+   Values come from the skill's tokens.css; change them there first. */
+
+/* Zen Kaku Gothic New, bundled (SIL OFL 1.1). Declaring @font-face is inert
+   in Original: nothing there names this family. */
+@import '@fontsource/zen-kaku-gothic-new/400.css';
+@import '@fontsource/zen-kaku-gothic-new/500.css';

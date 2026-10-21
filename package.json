@@ -40,6 +40,7 @@
     "@babylonjs/loaders": "9.6.2",
     "@babylonjs/materials": "9.6.2",
     "@babylonjs/serializers": "9.6.2",
+    "@fontsource/zen-kaku-gothic-new": "^5.3.1",
     "jszip": "^3.10.1",
     "mp4-muxer": "^5.2.2",
     "saxes": "6.0.0"
