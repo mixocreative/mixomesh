@@ -2,6 +2,18 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-10-22 — Release 0.3.0 shipped (master 4e7a81e, tag v0.3.0, Pages live,
+> installer `installers/MIXOMESH-Setup-0.3.0.exe`).** Heavy-mesh handling per
+> `docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md` (plan in
+> `docs/superpowers/plans/`): STL/3MF import in a worker with weld + crease split,
+> pre-parse refusal, measured budgets (web 2.5M warn / 10M refuse, desktop 6M / 24M),
+> one progress surface for every worker job (NN/g timing, Cancel), BVH picking,
+> faceted shading by default (shader) + per-user Smooth shading toggle, undo memory
+> trim, statistics HUD (Selected n/total · Faces · Vertices, before → after),
+> generated `THIRD_PARTY_NOTICES.txt` in web + desktop builds (Babylon Apache,
+> Lucide ISC, env files = BabylonJS/Assets CC BY 4.0), automation sessions not
+> throttled. Nothing in progress.
+
 > **2026-10-21 — Workers & memory foundation landed (ADR 0006).** One worker
 > runner (`src/core/workers/WorkerTask.js` + `serveTask.js`) for every worker;
 > geometry revisions + single-copy extraction (`src/core/geometry/GeometryStore.js`);
