@@ -314,7 +314,10 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     if (key.tg) {
       const tex = ctx.textures.get(key.tg.texId);
       if (tex?.url) {
-        const bt = new BABYLON.Texture(tex.url, scene, false, false);
+        // Materials 1.2.1 ch.3: tex2coord (0,0) is the image's LOWER-left
+        // corner, so upload with invertY=true (the OBJ/MTL convention), not
+        // the glTF top-left one (cia C-01).
+        const bt = new BABYLON.Texture(tex.url, scene, false, true);
         bt.name = `${name}__tex`;
         mat.diffuseTexture = bt;
         container.textures?.push?.(bt);
