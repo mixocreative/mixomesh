@@ -65,14 +65,17 @@ export async function serializeOBJ(ctx) {
 
   const axis = resolveObjAxis(ctx);
   const entries = [];
+  // One token names the .obj/.mtl entries AND the `mtllib` line: a space
+  // (incl. U+3000) kept in the entry path but `_` in `mtllib` left slicers
+  // with no MTL and a grey model (cia C-02).
   if (ctx.individually) {
     for (const unit of ctx.cloneGroups) {
-      const base = perMeshBaseName(ctx, unit.name);
+      const base = objToken(perMeshBaseName(ctx, unit.name));
       entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base, materialNames }) });
       entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, materialNames, filenameByMaterialName) });
     }
   } else {
-    const base = exportBaseName(ctx);
+    const base = objToken(exportBaseName(ctx));
     entries.push({ path: `${base}.obj`, data: encodeOBJ(ctx.meshes, { axis, mtllib: base, materialNames }) });
     entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(ctx.meshes, materialNames, filenameByMaterialName) });
   }
