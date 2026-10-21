@@ -42,3 +42,17 @@ test('the scope check catches a leaking rule', () => {
   const css = `${SCOPE} .a { color: red; }\n@media (min-width: 1px) { .leak, ${SCOPE} .b { color: red; } }`;
   assert.deepEqual(unscopedSelectors(css), ['.leak']);
 });
+
+test('New keeps 44px touch targets on coarse pointers', () => {
+  const css = readFileSync(new URL('../src/styles/style-new.css', import.meta.url), 'utf8');
+  const coarse = css.slice(css.lastIndexOf('@media (pointer: coarse)'));
+  assert.ok(css.includes('@media (pointer: coarse)'), 'coarse-pointer block present');
+  assert.match(coarse, /--ctl-h:\s*44px/);
+  assert.match(coarse, /\.rp-section-header\s*\{[^}]*padding-block/);
+  assert.match(coarse, /\.ws-btn\s*\{[^}]*padding-inline/);
+});
+
+test('the font licence ships with the app', () => {
+  const ofl = readFileSync(new URL('../public/fonts/OFL-zen-kaku-gothic-new.txt', import.meta.url), 'utf8');
+  assert.match(ofl, /SIL OPEN FONT LICENSE/i);
+});

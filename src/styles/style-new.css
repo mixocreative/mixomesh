@@ -183,3 +183,10 @@
 /* ── 8. Narrow panels: one-line footers ────────────────────────────── */
 :root:not([data-ui-style="original"]) .ol-footer { padding: 3px 8px; gap: 6px; }
 :root:not([data-ui-style="original"]) .ol-footer > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* ── 9. Touch: Dense never shrinks tap targets (mirrors responsive.css) ── */
+@media (pointer: coarse) {
+  :root:not([data-ui-style="original"]) { --ctl-h: 44px; }
+  :root:not([data-ui-style="original"]) .rp-section-header { padding-block: var(--sp-4); }
+  :root:not([data-ui-style="original"]) .ws-btn { padding-inline: var(--sp-6); }
+}
