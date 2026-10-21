@@ -189,9 +189,12 @@ export async function runApiSmoke({ bin, label = 'api' } = {}) {
     // A graceful taskkill posts WM_CLOSE; Windows occasionally drops it (the
     // run then "did not exit" with nothing wrong in the app). Re-send every
     // 3 s, still never /F, so will-quit runs and removes the session file.
+    const closeAttempts = [];
     const askToClose = () => {
-      if (isWin) spawnSync('taskkill', ['/PID', String(session.pid ?? child.pid)], { stdio: 'ignore' });
-      else child.kill('SIGTERM');
+      if (isWin) {
+        const r = spawnSync('taskkill', ['/PID', String(session.pid ?? child.pid)], { encoding: 'utf8' });
+        closeAttempts.push(`${r.status}:${(r.stdout + r.stderr).trim().replace(/\s+/g, ' ').slice(0, 120)}`);
+      } else { child.kill('SIGTERM'); closeAttempts.push('SIGTERM'); }
     };
     askToClose();
     const sd = Date.now() + 15000;
@@ -200,7 +203,8 @@ export async function runApiSmoke({ bin, label = 'api' } = {}) {
       await sleep(200);
       if (exited === null && Date.now() >= nextAsk) { askToClose(); nextAsk = Date.now() + 3000; }
     }
-    step('app exits cleanly', exited !== null, 'did not exit');
+    step(`app exits cleanly (close attempts: ${closeAttempts.length})`, exited !== null, `did not exit; taskkill: ${closeAttempts.join(' | ')}`);
+    if (closeAttempts.length > 1) console.log(`MIXO_SMOKE: graceful close needed ${closeAttempts.length} attempts: ${closeAttempts.join(' | ')}`);
     step('session.json removed', !existsSync(sessionFile));
   } catch (e) {
     if (e.message !== 'abort') fails.push(`exception: ${e.message}`);
