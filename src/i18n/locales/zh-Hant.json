@@ -100,6 +100,8 @@
   "import.fix.size": "請在技術詳細資料中查看實際大小，降低貼圖解析度、拆分模型或匯出較小的檔案後重試。",
   "import.reason.polygons": "模型將超出此版本的多邊形處理上限。",
   "import.fix.polygons": "技術詳細資料會顯示三角面數及上限。請減面或拆成較小的部件；桌面版的上限較高。",
+  "import.reason.timeout": "匯入耗時過久，已停止。",
+  "import.fix.timeout": "請再試一次。若仍發生，請簡化模型或拆成較小的部件；桌面版可處理更大的模型。",
   "import.reason.unsafePath": "封裝檔內含不安全的檔案路徑。",
   "import.fix.unsafePath": "請用原本的軟體重新匯出，使用正常的相對路徑；不要略過此檢查。",
   "import.reason.format": "目前不支援匯入此檔案格式。",

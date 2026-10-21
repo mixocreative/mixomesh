@@ -100,6 +100,8 @@
   "import.fix.size": "Check the actual size in Technical details. Reduce texture resolution, split the model or export a smaller file, then retry.",
   "import.reason.polygons": "The model would exceed this version’s polygon handling limit.",
   "import.fix.polygons": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts; the desktop app has a higher limit.",
+  "import.reason.timeout": "The import took too long and was stopped.",
+  "import.fix.timeout": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models.",
   "import.reason.unsafePath": "The package contains an unsafe internal file path.",
   "import.fix.unsafePath": "Open it in the original app and export a new package using normal relative paths. Do not bypass this check.",
   "import.reason.format": "This file format is not supported for import.",

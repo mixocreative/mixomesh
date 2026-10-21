@@ -49,6 +49,8 @@ export async function guard(fn, { title, modal = false, filename, loadingToastId
     return await fn();
   } catch (err) {
     if (loadingToastId) dismiss(loadingToastId);
+    // The user pressed Cancel: that is not a failure (heavy-mesh spec §5.5).
+    if (err?.name === 'AbortError') return undefined;
     reportError(err, { title: resolvedTitle, modal, filename });
     return undefined;
   }

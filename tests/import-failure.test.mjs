@@ -14,6 +14,8 @@ test('capacity and corrupt-file failures select a relevant reason and recovery a
     ['3MF: unsafe file path', 'unsafePath'], ['unsupported file type: .fbx', 'format'],
     ['3MF: unsupported unit furlong', 'unit'], ['3MF: no importable mesh objects', 'empty'],
     ['Unclosed root tag', 'damaged'], ['permission denied', 'permission'],
+    ['"a.stl" has 30,000,000 triangles; this web build handles up to 6,000,000.', 'polygons'],
+    ['Loading model timed out after 300000 ms', 'timeout'],
   ];
   for (const [message, expected] of cases) assert.equal(classifyImportFailure(message).category, expected, message);
   assert.equal(classifyImportFailure('texture missing', 'tile.3mf').category, 'embeddedTexture');
@@ -24,7 +26,7 @@ test('capacity and corrupt-file failures select a relevant reason and recovery a
 test('every recovery message is translated in English, Traditional Chinese and Japanese', async () => {
   for (const locale of ['en', 'zh-Hant', 'ja']) {
     const data = JSON.parse(await fs.readFile(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url)));
-    for (const category of ['unknown', 'storage', 'memory', 'size', 'polygons', 'unsafePath', 'format', 'unit', 'package', 'geometry', 'embeddedTexture', 'sidecars', 'empty', 'permission', 'damaged']) {
+    for (const category of ['unknown', 'storage', 'memory', 'size', 'polygons', 'unsafePath', 'format', 'unit', 'package', 'geometry', 'embeddedTexture', 'sidecars', 'empty', 'permission', 'damaged', 'timeout']) {
       assert.ok(data[`import.reason.${category}`], `${locale}: ${category} reason`);
       assert.ok(data[`import.fix.${category}`], `${locale}: ${category} fix`);
     }
