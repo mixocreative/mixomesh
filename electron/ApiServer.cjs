@@ -85,6 +85,7 @@ const LIMITS = Object.freeze({
   requestTimeoutMs: 10 * 60 * 1000,
   helloTimeoutMs: 10 * 1000,
   maxPendingPerClient: 64,
+  eventsPerSecond: 50,
   closeGraceMs: 2000,
 });
 
@@ -166,6 +167,7 @@ function createApiServer(deps) {
   } = deps;
   const setT = deps.setTimeout ?? setTimeout;
   const clearT = deps.clearTimeout ?? clearTimeout;
+  const now = deps.now ?? Date.now;
   const pid = deps.pid ?? process.pid;
   const limits = { ...LIMITS, ...(deps.limits || {}) };
   const sessionDir = nodePath.join(userDataDir, 'api');
@@ -426,6 +428,20 @@ function createApiServer(deps) {
       throw apiError('E_METHOD_NOT_FOUND', `unknown method "${String(method).slice(0, 64)}"`);
     }
     const job = await prepare(method, rawParams);
+    // The renderer keeps ONE subscription set for every client: give it the union of all
+    // live clients' types (notify() filters per client), and answer with this client's own.
+    // Recorded before the dispatch so a concurrent subscribe from another client already
+    // includes it; restored if the renderer rejects the list.
+    let ownSubs = null;
+    const prevSubs = client?.subs ?? null;
+    if (method === 'events.subscribe') {
+      const asked = Array.isArray(job.forward.events) ? job.forward.events : [];
+      ownSubs = asked.length ? [...new Set(asked)] : [...EVENT_TYPES];
+      if (client) client.subs = new Set(ownSubs);
+      const union = new Set(ownSubs);
+      for (const c of clients) if (c.authed && !c.closed && c.subs) for (const t of c.subs) union.add(t);
+      job.forward = { ...job.forward, events: [...union] };
+    }
     let timer = null;
     const timeout = new Promise((_, reject) => {
       timer = setT(() => reject(apiError('E_TIMEOUT', `${method}: timed out`)), limits.requestTimeoutMs);
@@ -433,15 +449,14 @@ function createApiServer(deps) {
     let result;
     try {
       result = await Promise.race([Promise.resolve().then(() => dispatch(method, job.forward)), timeout]);
+    } catch (err) {
+      if (ownSubs && client) client.subs = prevSubs;
+      throw err;
     } finally {
       if (timer) clearT(timer);
     }
     const out = mergeMainInfo(method, await job.finish(result));
-    if (method === 'events.subscribe' && client) {
-      const ev = Array.isArray(job.forward.events) ? job.forward.events.filter(e => EVENT_TYPES.includes(e)) : [];
-      client.subs = new Set(ev.length ? ev : EVENT_TYPES);
-    }
-    return out;
+    return ownSubs ? { ...out, subscribed: ownSubs } : out;
   }
 
   /** app.info / app.capabilities: add the fields only main knows (typed whitelist, no paths). */
@@ -530,6 +545,7 @@ function createApiServer(deps) {
     }
     const client = {
       socket, buf: Buffer.alloc(0), authed: false, closed: false, pending: 0, subs: null, helloTimer: null,
+      events: { windowStart: 0, sent: 0, dropped: 0 },
     };
     clients.add(client);
     client.helloTimer = setT(() => {
@@ -594,13 +610,23 @@ function createApiServer(deps) {
     await removeSessionFile();
   }
 
-  /** Fan an app event out to subscribed, authenticated clients only. */
+  /**
+   * Fan an app event out to subscribed, authenticated clients only, each capped at
+   * LIMITS.eventsPerSecond; a client's next delivered event carries what it missed as `dropped`.
+   */
   function notify(evt) {
     if (!isPlainObject(evt) || !EVENT_TYPES.includes(evt.type)) return 0;
+    const t = now();
     let n = 0;
     for (const c of clients) {
       if (!c.authed || c.closed || !c.subs || !c.subs.has(evt.type)) continue;
-      send(c, { jsonrpc: '2.0', method: 'event', params: evt });
+      const w = c.events;
+      if (t - w.windowStart >= 1000) { w.windowStart = t; w.sent = 0; }
+      if (w.sent >= limits.eventsPerSecond) { w.dropped++; continue; }
+      w.sent++;
+      const params = w.dropped ? { ...evt, dropped: (evt.dropped || 0) + w.dropped } : evt;
+      w.dropped = 0;
+      send(c, { jsonrpc: '2.0', method: 'event', params });
       n++;
     }
     return n;

@@ -129,18 +129,20 @@ export function createDispatcher(deps) {
   // ---------- events ----------
   let subs = [];            // unsubscribe fns
   let subscribedTypes = new Set();
-  let winStart = 0;
-  let winCount = 0;
-  let dropped = 0;
+  // Rate window per event type: the subscription set is shared by every pipe client (main
+  // filters and caps per client), so one chatty type must not starve the others.
+  const windows = new Map();   // type -> { start, count, dropped }
 
   function emit(type, data) {
     if (!subscribedTypes.has(type) || typeof deps.notify !== 'function') return;
     const t = now();
-    if (t - winStart >= 1000) { winStart = t; winCount = 0; }
-    if (winCount >= maxEventsPerSec) { dropped++; return; }
-    winCount++;
+    let w = windows.get(type);
+    if (!w) windows.set(type, w = { start: t, count: 0, dropped: 0 });
+    if (t - w.start >= 1000) { w.start = t; w.count = 0; }
+    if (w.count >= maxEventsPerSec) { w.dropped++; return; }
+    w.count++;
     const payload = { type, data: plain(data) ?? {} };
-    if (dropped > 0) { payload.dropped = dropped; dropped = 0; }
+    if (w.dropped > 0) { payload.dropped = w.dropped; w.dropped = 0; }
     try { deps.notify(payload); } catch { /* a broken sink must not break a command */ }
   }
 
