@@ -14,6 +14,7 @@ import {
 } from '../scale/ScaleMath.js';
 import { canonicalObjectId } from '../LogicalObjects.js';
 import { SILENT, withDetachedPivot } from './support.js';
+import { bump } from '../geometry/GeometryStore.js';
 
 const BABYLON = window.BABYLON;
 
@@ -59,6 +60,7 @@ function _applySourceUnit(assetId, fromUnit, toUnit, confirmed) {
       if (Math.abs(delta - 1) > 1e-12) {
         if (m.geometry && typeof m.bakeTransformIntoVertices === 'function') {
           m.bakeTransformIntoVertices(scaleMat);
+          bump(m);
         }
         if (m.parent) m.position.scaleInPlace(delta);
       }
@@ -224,6 +226,7 @@ function _rescaleObject(id, fromRatio, toRatio, ratioSource) {
     if (mesh) {
       if (mesh.geometry && typeof mesh.bakeTransformIntoVertices === 'function') {
         mesh.bakeTransformIntoVertices(BABYLON.Matrix.Scaling(factor, factor, factor));
+        bump(mesh);
       }
       _rescalePosition(id, mesh, factor);
       mesh.refreshBoundingInfo?.();

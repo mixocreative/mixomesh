@@ -22,6 +22,7 @@
 import { signedVolume, frontFaceIsClockwise } from '../print/PrintSpace.js';
 import { capBoundaryLoops } from './CapLoops.js';
 import { vendorUrl } from '../vendorUrl.js';
+import { bump } from '../geometry/GeometryStore.js';
 
 export const REPAIR_TRIANGLE_CAP = 300_000;
 /** Wall-clock budget for ONE repairMesh call (CIA F4). Override per call with `opts.timeoutMs`. */
@@ -198,6 +199,7 @@ export function arraysToMesh(mesh, V, T, originalPositions, originalUvs, origina
     if (mesh.isVerticesDataPresent?.(kind)) mesh.removeVerticesData?.(kind);
   }
   mesh.createNormals?.(true); mesh.refreshBoundingInfo?.();
+  bump(mesh);
 }
 
 /**
@@ -397,6 +399,7 @@ export function conformWinding(mesh) {
   for (let i = 0; i < indices.length; i += 3) { rev[i] = indices[i]; rev[i + 1] = indices[i + 2]; rev[i + 2] = indices[i + 1]; }
   mesh.setIndices(rev, null, true);
   mesh.createNormals?.(true);
+  bump(mesh);
   return true;
 }
 

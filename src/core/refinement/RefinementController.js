@@ -7,6 +7,7 @@ import { refinePartsInWorker } from '../MixoRefinementWorker.js';
 import { createDerivedMeshes } from './DerivedMeshes.js';
 import { MeshValidator } from '../MeshValidator.js';
 import { refinementSetting } from '../commands/RefinementCommands.js';
+import { revisionOf } from '../geometry/GeometryStore.js';
 
 const PHASES = { reading: 'Reading topology', refining: 'Refining', validating: 'Validating' };
 let initialized = false;
@@ -56,10 +57,16 @@ function inputOf(mesh, descriptor) {
   const normals = mesh.getVerticesData('normal');
   const uvs = mesh.getVerticesData('uv');
   const values = value => Array.isArray(value) || ArrayBuffer.isView(value) ? value : Object.values(value ?? {});
+  // Typed arrays pass through as-is: the worker client copies once before
+  // transferring (MixoRefinementWorker.copiedGeometry), so copying here too
+  // doubled the peak for big sources. A geometry change mid-job is caught by
+  // the GeometryStore revision check in build().
+  const f32 = a => (a instanceof Float32Array ? a : Float32Array.from(a));
+  const u32 = a => (a instanceof Uint32Array ? a : Uint32Array.from(a));
   return {
-    positions: Float32Array.from(positions), indices: Uint32Array.from(indices),
-    ...(normals?.length ? { normals: Float32Array.from(normals) } : {}),
-    ...(uvs?.length ? { uvs: Float32Array.from(uvs) } : {}),
+    positions: f32(positions), indices: u32(indices),
+    ...(normals?.length ? { normals: f32(normals) } : {}),
+    ...(uvs?.length ? { uvs: f32(uvs) } : {}),
     creaseByVertex: Float32Array.from(values(descriptor.creaseByVertex)),
     sharpEdges: Uint32Array.from(values(descriptor.sharpEdges)),
   };
@@ -109,6 +116,7 @@ export function create({ sourceMeshes = id => logicalObjectPartIds(id, getState(
           if (!descriptor) throw new Error('Refinement metadata is missing for a source part');
           return inputOf(source, descriptor);
         });
+        const geometryRevisions = sources.map(revisionOf);
         entry.progress = { phase: PHASES.reading, completed: 0, total: 1, objectName: object.name };
         setTransient(id, { status: 'building' }, EVENTS.REFINEMENT_PROGRESS);
         const result = await refine(inputs, setting.requestedLevel, { signal: abort.signal, sourceRevision: revision, onProgress(progress) {
@@ -117,6 +125,11 @@ export function create({ sourceMeshes = id => logicalObjectPartIds(id, getState(
           dispatch(EVENTS.REFINEMENT_PROGRESS, { objectId: id, ...entry.progress });
         } });
         if (abort.signal.aborted || own.get(id) !== entry || refinementSetting(getState().scene.objects[id]).requestedLevel !== setting.requestedLevel) return false;
+        // Source geometry edited while the worker ran (repair, rescale, mirror): the result is stale.
+        if (sources.some((source, i) => revisionOf(source) !== geometryRevisions[i])) {
+          setTransient(id, { status: 'failed', error: { code: 'SOURCE_CHANGED', message: 'The source geometry changed while refining. Build again.' } }, EVENTS.REFINEMENT_FAILED);
+          return false;
+        }
         entry.progress = { phase: PHASES.validating, completed: 0, total: 1, objectName: object.name };
         dispatch(EVENTS.REFINEMENT_PROGRESS, { objectId: id, ...entry.progress });
         entry.meshes = derive(sources, result.geometries ?? result, inputs, setting.requestedLevel);

@@ -22,6 +22,7 @@ import { repairMesh } from './MeshRepair.js';
 import { repairGroup, toLeadMatrix } from './GroupRepair.js';
 import { withRestTransform } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from './Weld.js';
+import { bump } from '../geometry/GeometryStore.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -92,6 +93,7 @@ export async function applyGeometryFix(mesh, type, report = null, opts = {}) {
     BABYLON.VertexData.ComputeNormals(positions, flipped, normals);
     mesh.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
     mesh.refreshBoundingInfo?.();
+    bump(mesh);
     return true;
   }
   if (type === 'holes' || type === 'nonManifold') {
@@ -125,6 +127,7 @@ export async function applyGeometryFix(mesh, type, report = null, opts = {}) {
       flipped[i + 2] = indices[i + 1];
     }
     mesh.setIndices(flipped);
+    bump(mesh);
     return true;
   }
   return false;

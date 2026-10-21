@@ -149,3 +149,46 @@ test('visibility event hides a previously visible refined preview', async () => 
     assert.equal(derived.isVisible, false);
   } finally { unsubscribe(); controller.dispose(); }
 });
+
+test('a geometry change during the worker job discards the result as stale', async () => {
+  reset();
+  const { bump } = await import('../src/core/geometry/GeometryStore.js');
+  History.push(new History.SetPrintRefinementCommand('lead', { requestedLevel: 1 }));
+  let finish;
+  const source = { ...sourceMesh(), metadata: { mixoPrimitiveId: 'p', meshId: 'lead_part_geo' } };
+  const controller = RefinementController.create({
+    sourceMeshes: () => [source],
+    refine: () => new Promise(resolve => { finish = resolve; }),
+    derive: () => { derived = true; return [{ isVisible: true, dispose() {} }]; },
+    validate: async () => [],
+  });
+  let derived = false;
+  const pending = controller.build('lead');
+  await new Promise(r => setImmediate(r));
+  bump(source);                       // e.g. a repair ran while the worker was busy
+  finish({ geometries: [{}] });
+  assert.equal(await pending, false);
+  assert.equal(derived, false, 'stale geometry never reaches derive');
+  const after = History.refinementSetting(State.getState().scene.objects.lead);
+  assert.equal(after.status, 'failed', 'user sees why, not a stuck "building"');
+  assert.equal(after.error.code, 'SOURCE_CHANGED');
+  controller.dispose();
+});
+
+test('typed source arrays reach the worker client uncopied (the client makes the one copy)', async () => {
+  reset();
+  History.push(new History.SetPrintRefinementCommand('lead', { requestedLevel: 1 }));
+  const positions = new Float32Array([0,0,0, 1,0,0, 0,1,0]);
+  const indices = new Uint32Array([0,1,2]);
+  const source = { ...sourceMesh(), getVerticesData: kind => kind === 'position' ? positions : null, getIndices: () => indices };
+  let seen;
+  const controller = RefinementController.create({
+    sourceMeshes: () => [source],
+    refine: async inputs => { seen = inputs[0]; throw new Error('stop'); },
+    validate: async () => [],
+  });
+  await controller.build('lead');
+  assert.equal(seen.positions, positions);
+  assert.equal(seen.indices, indices);
+  controller.dispose();
+});

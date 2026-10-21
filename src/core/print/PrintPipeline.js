@@ -554,6 +554,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
       // CRITICAL: Babylon's clone shares geometry by reference. Without a
       // unique copy here, prep would corrupt the live scene mesh.
       clone.makeGeometryUnique?.();
+      clone.__geometryDetached = true;   // prep edits must not bump the live mesh's revision
       // The side-orientation flag decides export winding (PrintSpace.printIndices).
       // glTF imports carry ClockWise on the MESH (material.sideOrientation is
       // null), so copy it explicitly rather than trusting clone() to.

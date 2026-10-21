@@ -36,6 +36,9 @@ export function revisionOf(meshOrId) {
 
 /** Record an in-place geometry change. Returns the new revision (0 when the mesh has no id). */
 export function bump(meshOrId) {
+  // Export clones share the original's metadata (meshId) but own their
+  // geometry; their prep mutations must not mark the live mesh changed.
+  if (meshOrId?.__geometryDetached) return 0;
   const id = _id(meshOrId);
   if (!id) return 0;
   const revision = (_revisions.get(id) ?? 0) + 1;

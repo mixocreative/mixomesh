@@ -4,6 +4,7 @@
 // isolated from loading, scene wiring and export. The export-side twin is
 // PrintManager's `flattenWorld` PREP step.
 
+import { bump } from './geometry/GeometryStore.js';
 import {
   DEFAULT_SOURCE_UNIT,
   SOURCE_UNIT_FACTORS,
@@ -201,6 +202,7 @@ export function bakeImportTransform(container, factor, position) {
     const linear = W.clone();
     linear.setTranslation(BABYLON.Vector3.Zero());   // rot + scale + RH→LH flip
     m.bakeTransformIntoVertices(linear);
+    bump(m);
 
     m.setParent(null);
     m.position.copyFrom(W.getTranslation());

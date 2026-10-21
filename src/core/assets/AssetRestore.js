@@ -23,6 +23,7 @@ import { nextDupName, registerAssetEntry } from './AssetRegistration.js';
 import { loadContainer, filterContainerToLibraryItem } from './AssetImport.js';
 import { encodeGeometry, decodeGeometry } from '../GeometryCodec.js';
 import { sha256Hex } from '../hash.js';
+import { bump } from '../geometry/GeometryStore.js';
 
 /**
  * Raw bytes of a loaded asset, read back from its cached blob URL. Used by
@@ -115,6 +116,7 @@ export function applyPersistedRatioBake(mesh, asset, ratio, rebaked = null) {
   if (Number.isFinite(delta) && delta > 0 && Math.abs(delta - 1) > 1e-9) {
     mesh.bakeTransformIntoVertices(B.Matrix.Scaling(delta, delta, delta));
     mesh.refreshBoundingInfo?.();
+    bump(mesh);
   }
   rebaked?.add(mesh);
 }

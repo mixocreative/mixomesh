@@ -27,6 +27,8 @@
  * at a stale length.
  */
 
+import { bump } from '../geometry/GeometryStore.js';
+
 /** 0.1 mm at 1 BU = 1 m. Matches MeshValidator.MERGE_DISTANCE. */
 export const WELD_DISTANCE = 1e-4;
 
@@ -109,6 +111,7 @@ export function weldMesh(mesh, distance = WELD_DISTANCE) {
   }
   mesh.setIndices(outIndices, null, true);
   mesh.refreshBoundingInfo?.();
+  bump(mesh);
   return true;
 }
 
