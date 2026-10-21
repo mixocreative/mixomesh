@@ -30,13 +30,15 @@ import { isDesktop } from './storage/capabilities.js';
 import { storage } from './storage/StorageAdapter.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
 import { startAutosave, stopAutosave, recoverAutosave } from './persist/Autosave.js';
-import { isDirty, clearDirty, confirmDirty, init } from './persist/DirtyTracker.js';
+import {
+  isDirty, clearDirty, confirmDirty, init, runExclusiveSave, isSaving, whenSaveIdle,
+} from './persist/DirtyTracker.js';
 
 // ── Re-exported surface (unchanged for callers/tests) ────────────────────
 
 export { relinkAsset, getRecentProjects, isLoading };
 export { startAutosave, stopAutosave, recoverAutosave };
-export { isDirty, init };
+export { isDirty, init, isSaving };
 
 // Module-local — not persisted.
 let _fileRef = null;        // adapter-owned opaque ref of the open .mixo
@@ -44,17 +46,25 @@ let _fileRef = null;        // adapter-owned opaque ref of the open .mixo
 // ── Public API ───────────────────────────────────────────
 
 /**
- * Write to the currently-open file, or prompt if none.
+ * Write to the currently-open file, or prompt if none. Saves run one at a
+ * time; a second Save queues behind the first.
  * @returns {Promise<boolean>} true when bytes hit disk; false when the user
  *   cancelled the save picker. Callers in "save then continue" flows MUST
  *   abort on false — proceeding discards the project the user asked to keep
  *   (review H9).
  */
-export async function save() {
-  if (!_fileRef) return saveAs();
+export function save() {
+  return runExclusiveSave(_save);
+}
+
+async function _save() {
+  // The target is read ONCE: the write goes to the file bound when this save
+  // started, whatever gets bound meanwhile (cia A-08).
+  const target = _fileRef;
+  if (!target) return _saveAs(null);
   const text = JSON.stringify(await buildDocument());
-  await storage.writeFile(_fileRef, text);   // atomic: a failed write never commits a half file
-  await _afterWrite();
+  await storage.writeFile(target, text);   // the adapter never commits a half file (see OpfsWrite.worker.js for the sync-handle tier)
+  await _afterWrite(target);
   return true;
 }
 
@@ -74,7 +84,7 @@ function _requestPersistentStorage() {
 // Post-write bookkeeping shared by save / saveAs: runs only once bytes are on
 // disk. `staleId` = the project id before a saveAs (which mints a new id —
 // the new file is a new document), whose autosave is now stale too.
-async function _afterWrite(staleId = null) {
+async function _afterWrite(target, staleId = null) {
   setState(s => ({ ...s, project: { ...s.project, lastSavedAt: new Date().toISOString() } }), SILENT);
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});
@@ -84,7 +94,7 @@ async function _afterWrite(staleId = null) {
   // The bytes are on disk: bookkeeping failures (recents list, autosave key
   // cleanup) are reported but must never reject save().
   try {
-    await pushRecent(name, _fileRef);
+    await pushRecent(name, target);
     const id = getState().project.id;
     await deleteAutosave(id);
     if (staleId && staleId !== id) await deleteAutosave(staleId);
@@ -101,7 +111,11 @@ async function _afterWrite(staleId = null) {
  * leaves the previous handle/name untouched instead of adopting a 0-byte file.
  * @returns {Promise<boolean>} true on save, false on picker cancel.
  */
-export async function saveAs(presetTarget = null) {
+export function saveAs(presetTarget = null) {
+  return runExclusiveSave(() => _saveAs(presetTarget));
+}
+
+async function _saveAs(presetTarget) {
   const previousName = getState().project.name || 'Untitled';
   const suggested = `${previousName}${FILE_EXT}`;
   // presetTarget = an already-validated `{ref, name}` (automation API: the host
@@ -116,7 +130,7 @@ export async function saveAs(presetTarget = null) {
   await storage.writeFile(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
   _fileRef = picked.ref;
   setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
-  await _afterWrite(previousId);
+  await _afterWrite(picked.ref, previousId);
   return true;
 }
 
@@ -135,8 +149,9 @@ function _parseDoc(text) {
   }
 }
 
-/** Prompt for a .mixo file and load it. */
+/** Prompt for a .mixo file and load it (after any save in flight). */
 export async function open() {
+  await whenSaveIdle();
   assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm, not after the user answered it
   if (isDirty()) {
     const choice = await confirmDirty();
@@ -156,6 +171,7 @@ export async function open() {
  * @param {{ref:any, file:File|Blob}} picked
  */
 export async function openPicked(picked) {
+  await whenSaveIdle();
   assertNoImportInFlight();
   if (isDirty()) {
     const choice = await confirmDirty();
@@ -169,7 +185,10 @@ export async function openPicked(picked) {
 // BEFORE loadProject meant a torn load (world already reset, then a throw)
 // left Ctrl+S pointing at the user's good file with an empty scene — one
 // keystroke from overwriting their only copy (audit 2026-09-17, C1).
+// The dirty confirm above may have been answered while a Save (queued by the
+// "save" answer, or Ctrl+S) was still writing: wait for it again here.
 async function _loadAndBind(doc, ref) {
+  await whenSaveIdle();
   _fileRef = null;
   await loadProject(doc);
   _fileRef = ref;
@@ -177,12 +196,14 @@ async function _loadAndBind(doc, ref) {
 
 /** Reset to a blank project (confirm if dirty). */
 export async function newProject() {
+  await whenSaveIdle();
   assertNoImportInFlight();   // F20: an import mid-flight would mint objects into the blank project
   if (isDirty()) {
     const choice = await confirmDirty();
     if (choice === 'cancel') return;
     if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
+  await whenSaveIdle();
   historyClear();
   resetWorld();
   _fileRef = null;
@@ -202,6 +223,7 @@ export async function newProject() {
 
 /** Open a recent project by its stored entry. */
 export async function openRecent(rec) {
+  await whenSaveIdle();
   assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm
   if (isDirty()) {
     const choice = await confirmDirty();
@@ -239,7 +261,7 @@ export async function requestClose() {
 // NOT frozen — monkey-patching this object is the established headless-test
 // seam (same rationale as AssetLoader, bundle-1 plan 2026-06-11).
 export const PersistenceManager = {
-  init, isDirty, isLoading,
+  init, isDirty, isLoading, isSaving,
   save, saveAs, open, openPicked, newProject, requestClose, hasSaveTarget,
   getRecentProjects, openRecent, relinkAsset,
   startAutosave, stopAutosave, recoverAutosave,

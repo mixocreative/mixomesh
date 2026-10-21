@@ -10,7 +10,7 @@ import { AssetLoader } from '../AssetLoader.js';
 import { buildDocument, referencedTextureImages, serialiseTextureImage } from './ProjectSerializer.js';
 import { loadProject, assertNoImportInFlight } from './ProjectLoader.js';
 import { isLoading } from './LoadGate.js';
-import { isDirty } from './DirtyTracker.js';
+import { isDirty, whenSaveIdle } from './DirtyTracker.js';
 import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
 import {
@@ -141,6 +141,7 @@ export async function findRecoverableAutosave() {
  * @returns {Promise<boolean>} true if a project was recovered
  */
 export async function recoverAutosave(offer = null) {
+  await whenSaveIdle();       // a save still writing must finish before the world is replaced (A-08)
   assertNoImportInFlight();   // F20: recovery resets the world like any load
   const target = offer ?? await findRecoverableAutosave();
   if (!target) return false;

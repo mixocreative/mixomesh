@@ -56,6 +56,36 @@ export function confirmDirty() {
   });
 }
 
+// ── Save in flight ──────────────────────────────────────
+// One save writes at a time, and nothing replaces the world (open / new /
+// recent / recover) while it writes: a load that finished mid-save used to
+// rebind the save target, so the old project was written into the file the
+// user had just opened (cia A-08).
+
+let _saveInFlight = null;
+
+/**
+ * Run `fn` as the one save in flight: it starts after any earlier save settled,
+ * and `whenSaveIdle()` waits for it. Rejections reach the caller untouched.
+ * @template T @param {() => Promise<T>} fn @returns {Promise<T>}
+ */
+export function runExclusiveSave(fn) {
+  const run = whenSaveIdle().then(fn);
+  const settled = run.then(() => {}, () => {}).then(() => { if (_saveInFlight === settled) _saveInFlight = null; });
+  _saveInFlight = settled;
+  return run;
+}
+
+/** @returns {boolean} true while a save is building or writing. */
+export function isSaving() {
+  return _saveInFlight !== null;
+}
+
+/** Resolves once no save is in flight (immediately when none is). */
+export function whenSaveIdle() {
+  return _saveInFlight ?? Promise.resolve();
+}
+
 /** Wire dirty tracking. Call once at boot. */
 export function init() {
   subscribe(EVENTS.PROJECT_DIRTY, () => {
