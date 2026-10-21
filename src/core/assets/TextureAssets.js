@@ -20,6 +20,13 @@ const BABYLON = window.BABYLON;
 const TEX_THUMB_SIZE = 128;
 
 const _textures = new Map();    // assetId → BABYLON.BaseTexture
+// Imported textures rebuilt from stored bytes on reload: owned here, not by a
+// container, so they are disposed like user textures.
+const _ownedImported = new WeakSet();
+
+function _ownsTexture(texture, entry) {
+  return !entry?.isImported || _ownedImported.has(texture);
+}
 
 let _idCounter = 0;
 const _newId = () => `tex_${Date.now().toString(36)}_${++_idCounter}`;
@@ -260,6 +267,27 @@ function _awaitTextureReady(texture) {
 }
 
 /**
+ * Capture the full-res image of every live texture whose bytes are not stored
+ * yet. The capture normally runs on idle after import; a save that runs first
+ * awaits it here, or the document would carry no bytes for that texture and
+ * reopen untextured (cia A-09). A texture that never becomes ready is left to
+ * the idle path.
+ * @returns {Promise<void>}
+ */
+export async function captureUnstoredTextureImages() {
+  for (const [id, texture] of [..._textures]) {
+    const entry = getState().scene.assetLibrary[id];
+    if (entry?.kind !== 'texture' || entry.imageContentHash) continue;
+    try {
+      await _awaitTextureReady(texture);
+    } catch {
+      continue;
+    }
+    await captureAndCap(id, texture);
+  }
+}
+
+/**
  * Bind a restored container-owned texture instance under its persisted
  * assetId (§10b reload rebind). PersistenceManager matches the instance by
  * `babylonTextureName` inside the freshly restored container; this just
@@ -274,9 +302,10 @@ export function bindRestoredTexture(assetId, texture) {
 }
 
 /**
- * Recreate a user-loaded texture asset from embedded bytes, keeping its
- * persisted assetId so shader.diffuseTextureAssetId stays valid.
- * @param {object} entry  persisted AssetEntry (kind 'texture', !isImported)
+ * Recreate a texture asset from stored bytes, keeping its persisted assetId so
+ * shader.diffuseTextureAssetId stays valid. Also rebuilds an imported texture
+ * whose container did not supply it on reload.
+ * @param {object} entry  persisted AssetEntry (kind 'texture')
  * @param {Blob}   blob
  * @returns {Promise<string>} assetId
  */
@@ -298,6 +327,7 @@ export async function restoreTexture(entry, blob) {
   texture.wrapV = view.wrapV;
   _tagTextureAsset(texture, entry.id);
   _textures.set(entry.id, texture);
+  if (entry.isImported) _ownedImported.add(texture);
   setState(s => ({
     ...s,
     scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: { ...entry, thumbnailDataUrl: blobUrl } } },
@@ -316,7 +346,7 @@ export function releaseTextureAsset(assetId, entry) {
   const refd = Object.values(shaders).some(s => s.diffuseTextureAssetId === assetId);
   if (refd) return false;
   const tex = _textures.get(assetId);
-  if (tex && !entry.isImported) tex.dispose();
+  if (tex && _ownsTexture(tex, entry)) tex.dispose();
   _textures.delete(assetId);
   revokeBlobUrl(assetId);
   clearCapUrl(assetId);
@@ -328,7 +358,7 @@ export function releaseTextureAsset(assetId, entry) {
 export function resetTextures() {
   for (const [id, t] of _textures.entries()) {
     const e = getState().scene.assetLibrary[id];
-    if (t && !e?.isImported) { try { t.dispose(); } catch { /* */ } }
+    if (t && _ownsTexture(t, e)) { try { t.dispose(); } catch { /* */ } }
   }
   _textures.clear();
   clearCapUrls();

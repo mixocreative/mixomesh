@@ -485,6 +485,15 @@ async function _loadProjectInner(doc, previousId) {
     }
   }
 
+  // An imported texture its container did not supply (an OBJ whose MTL/PNG
+  // siblings are not in a mounted folder) restores from the image bytes the
+  // save captured, under its persisted id, so the shader slot rebinds.
+  for (const a of data.assetLibrary || []) {
+    if (a.kind !== 'texture' || !a.isImported || AssetLoader.getBabylonTexture(a.id)) continue;
+    const stored = a.imageContentHash ? getTextureImage(a.imageContentHash) : null;
+    if (stored) await AssetLoader.restoreTexture(stripFileData(a), stored.blob);
+  }
+
   for (const sh of data.shaders || []) ShaderLibrary.restoreShader(sh);
 
   const objMap = {};
