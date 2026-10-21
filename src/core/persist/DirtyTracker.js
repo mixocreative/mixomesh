@@ -15,6 +15,7 @@ let _dirty         = false;
 let _savedPosition = 0;
 let _sticky        = false;
 let _stickyGen     = 0;       // bumps on every sticky (non-undoable) change
+let _saveGen       = 0;       // bumps on every committed file write
 let _announcing    = false;   // our own PROJECT_SAVED dispatch must not re-baseline
 
 function _baseline() {
@@ -67,7 +68,17 @@ export function commitSave(attempt) {
   _savedPosition = attempt.position;
   _sticky = _stickyGen !== attempt.stickyGen;
   _dirty = _sticky || historyPosition() !== _savedPosition;
+  _saveGen++;
   _announceSaved();
+}
+
+/**
+ * Serial of the last committed file write. A snapshot built under one
+ * generation is stale once it moves (the file is newer), so the autosave
+ * tick drops it instead of offering pre-save content as "recoverable" (A-07).
+ */
+export function saveGeneration() {
+  return _saveGen;
 }
 
 /**

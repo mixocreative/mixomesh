@@ -10,7 +10,7 @@ import { AssetLoader } from '../AssetLoader.js';
 import { buildDocument, referencedTextureImages, serialiseTextureImage } from './ProjectSerializer.js';
 import { loadProject, assertNoImportInFlight } from './ProjectLoader.js';
 import { isLoading } from './LoadGate.js';
-import { isDirty, whenSaveIdle } from './DirtyTracker.js';
+import { isDirty, whenSaveIdle, isSaving, saveGeneration } from './DirtyTracker.js';
 import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
 import {
@@ -49,19 +49,25 @@ export async function autosaveTick() {
   // M2: never snapshot a half-built world. Mid-load the state is a mix of
   // old and new project; mid-import the container is registered but its
   // objects are not minted yet — either would write a torn autosave that
-  // the next boot offers to "recover".
-  if (_worldBusy()) return false;
+  // the next boot offers to "recover". A Save in flight will leave the file
+  // newer than anything this tick could write.
+  if (_worldBusy() || isSaving()) return false;
   _ticking = true;
   try {
     const projectId = ensureProjectId();
+    const generation = saveGeneration();
     const doc = await buildDocument({ skipEmbed: true, skipTextureImages: true });   // A9 + 0.11
     // The build is async: a load/import/New that started meanwhile makes the
     // snapshot torn or stale — drop it (the check wraps the whole build).
-    if (_worldBusy() || getState().project.id !== projectId) return false;
+    const stale = () => _worldBusy() || getState().project.id !== projectId || saveGeneration() !== generation;
+    if (stale()) return false;
     await _storeTextureImages(projectId);
     await storage.kvSet(autosaveKey(projectId), {
       savedAt: new Date().toISOString(), name: getState().project.name, doc,
     });
+    // A Save that completed during the write already deleted this key once;
+    // the snapshot predates the file, so take it back out (A-07).
+    if (stale()) { await deleteAutosave(projectId); return false; }
     dispatch(EVENTS.AUTOSAVE_WRITTEN, {});
     _autosaveWarned = false;
     return true;
