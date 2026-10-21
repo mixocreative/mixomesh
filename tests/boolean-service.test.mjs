@@ -1,11 +1,9 @@
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { installEnv } from './env.mjs';
 import { evaluateBooleanEligibility, DEFAULT_BOOLEAN_TRIANGLE_CAP } from '../src/core/BooleanService.js';
 
-let passed = 0, failed = 0;
-function test(name, fn) {
-  try { fn(); console.log(`# PASS  ${name}`); passed++; }
-  catch (err) { console.log(`# FAIL  ${name}\n      ${err.stack || err.message}`); failed++; }
-}
+installEnv();
 
 const solid = (id, triangles = 100) => ({ id, triangles, solidColor: true, partCount: 1 });
 
@@ -78,6 +76,3 @@ test('6.3: every UV texture slot counts as textured; the environment reflection 
   assert.equal(_isMaterialTextured({ clearCoat: { texture: tex } }), true, 'config-held texture counts');
   assert.equal(_isMaterialTextured(null), false);
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
