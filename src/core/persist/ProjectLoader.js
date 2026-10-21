@@ -669,6 +669,7 @@ async function _loadProjectInner(doc, previousId) {
 
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});                        // project is clean post-load
+  _queueLoadValidation();
   // Only AFTER a successful load: the just-opened project's own autosave is
   // stale, and so is the one for the project we just left (its dirty state
   // was either saved or explicitly discarded via the dirty-confirm). A failed
@@ -692,6 +693,22 @@ async function _loadProjectInner(doc, previousId) {
     return;
   }
   Toast.show(t('toast.loaded', { name: loadedName }), 'success', 3000);
+}
+
+// Validation results are not persisted, so an opened project validates every
+// print part like an import does (one pass per logical object, same budget
+// gate), silently: the import toasts and opt-in auto-repair stay import-only.
+function _queueLoadValidation() {
+  const objects = getState().scene.objects;
+  const leads = new Set();
+  for (const [id, obj] of Object.entries(objects)) {
+    if (obj.isPrintPart && !obj.isGhost) leads.add(canonicalObjectId(id, objects));
+  }
+  for (const id of leads) {
+    const mesh = AssetLoader.getBabylonMesh(id);
+    if (!mesh || !MeshValidator.shouldAutoValidate(mesh)) continue;
+    MeshValidator.validateMesh(mesh).catch(err => console.error(`Validation after open failed for "${objects[id]?.name}":`, err));
+  }
 }
 
 // ── Relink ───────────────────────────────────────────────
