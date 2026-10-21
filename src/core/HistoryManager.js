@@ -7,6 +7,7 @@
 import { EVENTS } from './events.js';
 import { dispatch, withoutDirty } from './StateManager.js';
 import { caps } from './storage/capabilities.js';
+import { t } from '../i18n/index.js';
 
 export * from './commands/TransformCommands.js';
 export * from './commands/HierarchyCommands.js';
@@ -71,11 +72,16 @@ function _trimUndo() {
   if (!(cap > 0)) return;
   let total = 0;
   for (const cmd of _undoStack) total += _retained(cmd, 'undo');
+  let freed = false;
   while (total > cap && _undoStack.length > 1) {
     const cmd = _undoStack.shift();
-    total -= _retained(cmd, 'undo');
+    const held = _retained(cmd, 'undo');
+    total -= held;
+    if (held > 0) freed = true;
     _release(cmd, 'undo');
   }
+  // Never drop an undo step silently (review M5).
+  if (freed) dispatch(EVENTS.TOAST, { message: t('toast.undoTrimmed'), type: 'info', duration: 6000 });
 }
 
 /** Test seam: override the retained-triangle cap (null = tier budget). */

@@ -213,7 +213,16 @@ function _setCollectionName(collectionId, name) {
   dispatch(EVENTS.COLLECTION_RENAMED, { collectionId, name });
 }
 
-const _tris = (mesh) => (mesh && !mesh.isDisposed?.() ? (mesh.getTotalIndices?.() ?? 0) / 3 : 0);
+// Triangles only this hidden mesh keeps alive: 0 when its geometry is shared
+// with another live mesh (a duplicate), since releasing it would free nothing
+// (review M5).
+const _tris = (mesh) => {
+  if (!mesh || mesh.isDisposed?.()) return 0;
+  const sharers = mesh.geometry?.meshes ?? [];
+  if (sharers.some(m => m !== mesh && !m.isDisposed?.() && m.isEnabled?.())) return 0;
+  return (mesh.getTotalIndices?.() ?? 0) / 3;
+};
+export { _tris as retainedTrianglesOf };
 
 /**
  * Soft-delete: meshes are kept in memory (setEnabled(false)) so undo can

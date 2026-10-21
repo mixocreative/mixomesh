@@ -766,6 +766,7 @@
   "toast.partsNotWatertight": "{n, plural, one{1 part not watertight — re-bake skipped; slicer will auto-repair} other{# parts not watertight — re-bake skipped; slicer will auto-repair}}",
   "toast.repairUnavailable": "Mesh repair engine unavailable — watertight repair skipped",
   "toast.triangleBudget": "Scene has {current} triangles — over the {budget} safe budget for this build. Import continuing, but expect slower response.",
+  "toast.undoTrimmed": "Older undo steps were cleared to free memory for large models.",
   "toast.exportedWithWarnings": "Exported with warnings — could not confirm watertight: {names}",
   "toast.loaded": "Loaded {name}",
   "toast.loadedWithGhosts": "Loaded {name} - {n, plural, one{1 asset} other{# assets}} could not be found (red placeholders)",

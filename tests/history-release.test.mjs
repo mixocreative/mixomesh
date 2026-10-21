@@ -111,3 +111,24 @@ test('extract copies typed arrays and builds the 0..n index without a callback',
   assert.notEqual(out2.indices, src);
   assert.deepEqual([...out2.indices], [2, 1, 0]);
 });
+
+test('cap trimming tells the user once; shared geometry counts as nothing retained (review M5)', async () => {
+  const { EVENTS } = await import('../src/core/events.js');
+  const { subscribe } = await import('../src/core/StateManager.js');
+  const toasts = [];
+  const off = subscribe(EVENTS.TOAST, (e) => toasts.push(e));
+  HM.clear(); HM.setRetainCap(100);
+  HM.push(cmd('a', 80)); HM.push(cmd('b', 80));
+  assert.equal(toasts.length, 1);
+  assert.match(toasts[0].message, /undo/i);
+  HM.push(cmd('c', 0));
+  assert.equal(toasts.length, 1, 'no toast when nothing held was dropped');
+  off?.(); HM.setRetainCap(null); HM.clear();
+  const { retainedTrianglesOf } = await import('../src/core/commands/HierarchyCommands.js');
+  const src = BABYLON.MeshBuilder.CreateBox('src', {}, scene);
+  const dup = src.clone('dup');
+  src.setEnabled(false);
+  assert.equal(retainedTrianglesOf(src), 0, 'a live duplicate shares the geometry');
+  dup.dispose();
+  assert.equal(retainedTrianglesOf(src), 12);
+});

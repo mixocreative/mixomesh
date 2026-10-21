@@ -16,6 +16,7 @@ import { caps } from '../storage/capabilities.js';
 import { revisionOf } from '../geometry/GeometryStore.js';
 import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
+import { retainedTrianglesOf } from './HierarchyCommands.js';
 
 export function _isMaterialTextured(mat) {   // exported for tests
   if (!mat) return false;
@@ -201,7 +202,7 @@ export class BooleanCommand {
   /** Executed (undo side): the operands are held only so undo can bring them back. */
   retainedTriangles(side) {
     if (side !== 'undo') return 0;
-    return this._snapshots.reduce((n, s) => n + (s.mesh && !s.mesh.isDisposed?.() ? (s.mesh.getTotalIndices?.() ?? 0) / 3 : 0), 0);
+    return this._snapshots.reduce((n, s) => n + retainedTrianglesOf(s.mesh), 0);
   }
 
   /** Entry dropped from the undo window: free the hidden operands (heavy-mesh spec §4). */
