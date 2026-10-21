@@ -224,10 +224,15 @@ export async function newProject() {
     if (choice === 'save' && !(await save())) return;   // picker cancelled — abort (H9)
   }
   await whenSaveIdle();
+  // Discarded means discarded: the project New replaces must not come back
+  // as "Recover unsaved work" next launch (cia W-04). After a Save the key
+  // is already gone; the API's confirm:true path lands here too.
+  const previousId = getState().project.id;
   historyClear();
   resetWorld();
   _fileRef = null;
   setState(s => ({ ...s, project: { ...s.project, id: mintProjectId(), lastSavedAt: null, listings: [] } }), SILENT);
+  await deleteAutosave(previousId);
   // New starts from the user's last-used settings, not raw factory (File-wins
   // applies to OPENING a .mixo, not to New). seedBootState merges the persisted
   // per-user settings onto the fresh factory state; applyToScene pushes the
@@ -273,6 +278,7 @@ export async function requestClose() {
   if (!isDirty()) return { action: 'discard' };
   const choice = await confirmDirty();
   const action = choice === 'save' || choice === 'discard' ? choice : 'cancel';
+  if (action === 'discard') await deleteAutosave(getState().project.id);   // W-04
   if (action !== 'save') return { action };
   const saved = await save();
   return { action: 'save', saved };
