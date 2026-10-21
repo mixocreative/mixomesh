@@ -433,5 +433,43 @@ export async function buildDocument(opts = {}) {
   };
 }
 
+// ── Document → bytes ─────────────────────────────────────
+
+/** An embedded `fileData` string at least this long becomes its own Blob part. */
+export const STREAM_PART_MIN = 1 << 20;
+
+/**
+ * Turn a built document into what the adapter writes. A document with no
+ * large embedded asset is one JSON string. One with large embedded assets is
+ * a Blob whose parts are the JSON text around each base64 string and the
+ * strings themselves, so no single giant string is ever concatenated on the
+ * main thread (cia W-00: a 5M-triangle model is 333 MB of base64, and
+ * JSON.stringify + the UTF-8 encode of that text froze the tab). The bytes
+ * read back as the exact same JSON.
+ * @param {object} doc  from buildDocument
+ * @returns {string|Blob}
+ */
+export function serialiseDocument(doc) {
+  const parts = [];
+  const nonce = `\u0000mixo-part-${Math.random().toString(36).slice(2)}-`;
+  const json = JSON.stringify(doc, (key, value) => (
+    key === 'fileData' && typeof value === 'string' && value.length >= STREAM_PART_MIN
+      ? (parts.push(value), `${nonce}${parts.length - 1}\u0000`)
+      : value));
+  if (!parts.length) return json;
+  // JSON spells the NUL as the six characters \u0000, so the marker cannot
+  // collide with any user string (those get the same escaping).
+  const spelled = JSON.stringify(nonce).slice(1, -1).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+  const marker = new RegExp(`"${spelled}(\\d+)\\\\u0000"`, 'g');
+  const blobParts = [];
+  let last = 0;
+  for (const m of json.matchAll(marker)) {
+    blobParts.push(json.slice(last, m.index), '"', parts[Number(m[1])], '"');
+    last = m.index + m[0].length;
+  }
+  blobParts.push(json.slice(last));
+  return new Blob(blobParts, { type: 'application/json' });
+}
+
 /** Test seam: group serialisation. */
 export const __test = { _serialiseGroups, serialiseMixoProvenance, serialiseMixoRefinement, serialisePrintRefinement };

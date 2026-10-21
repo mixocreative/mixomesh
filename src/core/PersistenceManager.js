@@ -20,7 +20,7 @@ import { sha256Hex } from './hash.js';
 import { FILE_EXT, SILENT } from './persist/constants.js';
 import { mintProjectId } from './persist/ProjectId.js';
 import { deleteAutosave } from './persist/AutosaveKeys.js';
-import { b64FromBuf, bufFromB64, extOf, buildDocument } from './persist/ProjectSerializer.js';
+import { b64FromBuf, bufFromB64, extOf, buildDocument, serialiseDocument } from './persist/ProjectSerializer.js';
 import { resolveAssetBlob, scanDirForHash, fileHandleAtPath } from './persist/AssetResolver.js';
 import {
   loadProject, resetWorld, relinkAsset, isLoading, assertNoImportInFlight,
@@ -63,8 +63,7 @@ async function _save() {
   const target = _fileRef;
   if (!target) return _saveAs(null);
   const attempt = beginSave();   // same tick as buildDocument's state snapshot
-  const text = JSON.stringify(await buildDocument());
-  await _write(target, text);
+  await _write(target, serialiseDocument(await buildDocument()));
   await _afterWrite(attempt, target);
   return true;
 }
@@ -147,7 +146,7 @@ async function _saveAs(presetTarget) {
   const attempt = beginSave();
   const doc = await buildDocument();
   doc.project = { ...doc.project, name, id };   // the file carries its own name + id
-  await _write(picked.ref, JSON.stringify(doc));   // throws → nothing below runs
+  await _write(picked.ref, serialiseDocument(doc));   // throws → nothing below runs
   _fileRef = picked.ref;
   setState(s => ({ ...s, project: { ...s.project, name, id } }), SILENT);
   await _afterWrite(attempt, picked.ref, previousId);
