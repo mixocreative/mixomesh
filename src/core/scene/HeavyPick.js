@@ -26,6 +26,17 @@ const _state = new WeakMap();   // mesh → { bvh, revision, posRef, idxRef, ind
 const _tracked = new Set();
 let _pending = 0;
 let _builder = null;            // test seam: (positions, indices) → Promise<bvh>
+let _noScan = 0;                // > 0 inside withoutScan(): heavy meshes without a fresh index are skipped
+
+/**
+ * Run a cheap, optional pick (hover) without the flat scan: heavy meshes whose
+ * index is not ready yet are skipped instead of scanned (~40 ms each at 4M
+ * triangles, every frame) — review M8. Clicks keep the scan (always correct).
+ */
+export function withoutScan(fn) {
+  _noScan++;
+  try { return fn(); } finally { _noScan--; }
+}
 
 const _task = new WorkerTask({
   name: 'pick index',
@@ -125,12 +136,15 @@ function _intersects(ray, fastCheck, trianglePredicate, onlyBoundingInfo = false
   const st = _state.get(this);
   const proto = Object.getPrototypeOf(this).intersects;
   const stale = _isStale(this, st);
+  // A stale index must not pin the old arrays (~380 MB at 10M): drop them now (review M7).
+  if (stale && st?.bvh) { st.bvh = null; st.posRef = null; st.idxRef = null; }
   const pos = stale ? _livePositions(this) : st.posRef;
   const idx = stale ? this.getIndices?.() : st.idxRef;
   if (trianglePredicate || onlyBoundingInfo || !this.subMeshes || !pos || !idx) {
     return proto.call(this, ray, fastCheck, trianglePredicate, onlyBoundingInfo, worldToUse, skipBoundingInfo);
   }
   if (stale && st && !st.building && !st.timer) _schedule(this);
+  if (stale && _noScan > 0) return new BABYLON.PickingInfo();
   const info = new BABYLON.PickingInfo();
   const boundingInfo = this.getBoundingInfo();
   if (!skipBoundingInfo && (!ray.intersectsSphere(boundingInfo.boundingSphere, 0) || !ray.intersectsBox(boundingInfo.boundingBox, 0))) {
@@ -208,4 +222,4 @@ export function init(scene) {
   });
 }
 
-export const HeavyPick = { init, track, untrack, buildNow, hasFreshIndex, pendingCount, setBvhBuilder, HEAVY_PICK_TRIANGLES };
+export const HeavyPick = { init, track, untrack, buildNow, hasFreshIndex, pendingCount, setBvhBuilder, withoutScan, HEAVY_PICK_TRIANGLES };

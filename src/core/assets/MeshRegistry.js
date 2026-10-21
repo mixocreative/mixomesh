@@ -88,6 +88,12 @@ export function releaseMesh(meshId, mesh) {
   if (meshId && _meshRegistry.get(meshId) === mesh) _meshRegistry.delete(meshId);
   _orphanMeshes.delete(mesh);
   if (meshId) forgetRevision(meshId);
+  // Live scene content parented under it keeps living (state still references
+  // it): detach it first. Helper children (edge overlay clones, previews) go
+  // with the mesh (review M6).
+  for (const child of mesh.getChildMeshes?.(true) ?? []) {
+    if (child.metadata?.meshId && _meshRegistry.get(child.metadata.meshId) === child) child.setParent(null);
+  }
   try { mesh.dispose(false, false); } catch { /* already gone */ }
   return true;
 }

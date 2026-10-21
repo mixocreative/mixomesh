@@ -93,8 +93,12 @@ test('a stale index (revision bump) answers through the flat scan, identically, 
   assert.equal(hit.pickedMesh, mesh, 'fallback still picks');
   assert.equal(hit.faceId, before.faceId);
   assert.ok(!mesh._positions, "Babylon's per-vertex Vector3 array is never built");
+  assert.equal(HP.hasFreshIndex(mesh), false, 'the stale index and its arrays were dropped (review M7)');
+  assert.equal(HP.withoutScan(() => scene.pick(100, 100, m => m === mesh)).hit, false,
+    'hover-style picks skip a heavy mesh while its index rebuilds (review M8)');
   await HP.buildNow(mesh);
   assert.equal(HP.hasFreshIndex(mesh), true);
+  assert.equal(HP.withoutScan(() => scene.pick(100, 100, m => m === mesh)).pickedMesh, mesh, 'with a fresh index hover picks normally');
 });
 
 test('untrack restores Babylon intersects; dispose untracks', () => {

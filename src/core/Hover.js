@@ -21,6 +21,7 @@ import { SceneManager } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { selectableAtDepth } from './LogicalObjects.js';
 import { setHover as setHoverOutline } from './scene/SelectionOutline.js';
+import { withoutScan } from './scene/HeavyPick.js';
 
 // ── Pure helpers (unit-tested in tests/box-select.test.mjs) ──────────────
 
@@ -151,7 +152,8 @@ function _tick() {
   if (!_pending) return;
   const { x, y } = _pending;
   _pending = null;
-  const meshId = SceneManager.pickMeshIdAt(x, y);
+  // Hover is optional: skip heavy meshes whose pick index is still building (review M8).
+  const meshId = withoutScan(() => SceneManager.pickMeshIdAt(x, y));
   const st = getState();
   _apply(hoverTarget(meshId, st.scene, Selection.getScope()));
 }

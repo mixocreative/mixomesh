@@ -132,3 +132,16 @@ test('cap trimming tells the user once; shared geometry counts as nothing retain
   dup.dispose();
   assert.equal(retainedTrianglesOf(src), 12);
 });
+
+test('releaseMesh keeps live content children, disposes helper children (review M6)', () => {
+  const parent = BABYLON.MeshBuilder.CreateBox('p', {}, scene);
+  const content = BABYLON.MeshBuilder.CreateBox('c', {}, scene);
+  const helper = BABYLON.MeshBuilder.CreateBox('h', {}, scene);
+  content.metadata = { meshId: 'mesh_c' }; Registry.registerMesh('mesh_c', content);
+  content.parent = parent; helper.parent = parent;
+  Registry.releaseMesh('mesh_p', parent);
+  assert.equal(parent.isDisposed(), true);
+  assert.equal(content.isDisposed(), false);
+  assert.equal(content.parent, null);
+  assert.equal(helper.isDisposed(), true);
+});
