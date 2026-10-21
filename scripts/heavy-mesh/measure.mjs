@@ -205,7 +205,7 @@ async function main() {
       const procs = info.processInfo ?? [];
       const gpuPid = procs.find(p => p.type === 'GPU')?.id;
       const rendererPids = procs.filter(p => p.type === 'renderer').map(p => p.id);
-      sampler?.child.kill();
+      if (sampler) await stopProcess(sampler.child);   // taskkill /T: a bare kill() can leave PowerShell running
       sampler = startSampler([...rendererPids, gpuPid].filter(Boolean));
       await sleep(600);
       sampler.resetPeak();
@@ -235,7 +235,7 @@ async function main() {
     }
     await browserCdp.close();
   } finally {
-    sampler?.child.kill();
+    if (sampler) await stopProcess(sampler.child);
     await stopProcess(browser);
     await stopProcess(vite);
     removeTempDir(userDataDir);
