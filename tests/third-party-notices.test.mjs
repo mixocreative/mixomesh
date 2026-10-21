@@ -38,4 +38,6 @@ test('the notices are built with the app and shipped in the web dist and the des
   assert.match(builder, /extraResources:\s*\n\s*- from: dist\/THIRD_PARTY_NOTICES\.txt/);
   const icons = readFileSync(new URL('../src/core/Icons.js', import.meta.url), 'utf8');
   assert.match(icons, /^\/\*! Icon path data from Lucide[\s\S]*ISC License[\s\S]*Feather[\s\S]*MIT License/);
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
+  assert.match(vite, /comments: \{ legal: true \}/, 'the minified bundle keeps /*! */ credits');
 });

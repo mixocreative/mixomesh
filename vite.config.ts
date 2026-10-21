@@ -51,6 +51,9 @@ export default defineConfig({
       input: {
         app: resolve(PROJECT_ROOT, 'index.html'),
       },
+      // Keep /*! */ legal comments (licence credits, e.g. Lucide in Icons.js)
+      // in the minified bundle — licence scan M1.
+      output: { comments: { legal: true } },
     },
     // NOTE (perf audit 2026-06-13): forcing a @babylonjs manualChunks vendor
     // chunk under rolldown DEFEATS tree-shaking — the vendor chunk came out
