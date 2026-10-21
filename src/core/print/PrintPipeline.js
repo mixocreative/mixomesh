@@ -507,7 +507,7 @@ function _throwIfCancelled(signal) {
 }
 
 async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {
-  progress(0.02, 'Collecting meshes…');
+  progress(0.02, t('progress.collecting'));
   settleImportBounce();   // flattenWorld bakes world matrices — never a mid-pop scale
   const units = collectPrintUnits(state, !!options.selectedOnly);
   if (!units.length) throw new Error('No printable meshes to export.');
@@ -578,7 +578,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
         logicalName: logicalName || mesh.name || `mesh_${meshId}`,
       });
       await runSteps(clone, preSteps);
-      progress(0.05 + 0.25 * ((i + 1) / N), `Preparing ${i + 1}/${N}…`);
+      progress(0.05 + 0.25 * ((i + 1) / N), t('progress.preparing', { i: i + 1, n: N }));
     }
     const multiPart = new Set();   // clone meshes that belong to a >1-part unit
     if (repairAt >= 0) {
@@ -591,7 +591,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
         } else {
           await PREP_STEPS.repair(unit.meshes[0].mesh, ctx);
         }
-        progress(0.30 + 0.10 * ((u + 1) / byUnit.length), `Repairing ${u + 1}/${byUnit.length}…`);
+        progress(0.30 + 0.10 * ((u + 1) / byUnit.length), t('progress.repairing', { i: u + 1, n: byUnit.length }));
       }
     }
     // A part of a multi-part unit is an OPEN patch by design (its seams are
@@ -611,7 +611,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
       if (!(triCount > 0)) {
         throw new Error(`Part "${logicalName || mesh.name || meshId}" has no triangles after preparation — export aborted`);
       }
-      progress(0.40 + 0.10 * ((i + 1) / N), `Finishing ${i + 1}/${N}…`);
+      progress(0.40 + 0.10 * ((i + 1) / N), t('progress.finishing', { i: i + 1, n: N }));
     }
     ctx.meshes.push(...clones);
     ctx.cloneGroups.push(..._groupCloneEntries(clones));
@@ -641,10 +641,10 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     }
 
     const remaining = await _validateExportMeshes(
-      clones, (d, tot) => progress(0.5 + 0.3 * (d / tot), `Validating ${d}/${tot}…`));
+      clones, (d, tot) => progress(0.5 + 0.3 * (d / tot), t('progress.validating', { i: d, n: tot })));
     if (remaining.length) throw _exportError('Validation errors remain after auto-fix.', remaining);
 
-    progress(0.82, `Writing ${fmt.label}…`);
+    progress(0.82, t('progress.writing', { format: fmt.label }));
     _throwIfCancelled(options.signal);
     const out = await fmt.serialize(ctx);
     // Cancel (export overlay) wins over a finished encode: nothing is saved.
@@ -658,7 +658,7 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
         name: out.filename, mime: out.mime || blob.type || 'application/octet-stream',
         bytes: new Uint8Array(await blob.arrayBuffer()),
       });
-      progress(1, 'Done');
+      progress(1, t('progress.done'));
       if (ctx.repairSkipped.length) {
         Toast.show(t('toast.exportedWithWarnings', { names: ctx.repairSkipped.join(', ') }), 'warning', 5000);
       }
@@ -667,11 +667,11 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     const written = await packageAndDownload(out, fmt.label, progress);
     if (!written) {
       // User cancelled the save picker: say so, never "✓ Exported" (H6).
-      progress(1, 'Cancelled');
+      progress(1, t('progress.cancelled'));
       Toast.show(t('toast.exportCancelled', { filename: out.filename ?? fmt.label }), 'info', 3000);
       return false;
     }
-    progress(1, 'Done');
+    progress(1, t('progress.done'));
     Toast.show(t('toast.exportedOk', { filename: out.filename ?? fmt.label }), 'success', 3000);
     if (ctx.csgSkipped.length) {
       Toast.show(t('toast.partsNotWatertight', { n: ctx.csgSkipped.length }), 'info', 5000);

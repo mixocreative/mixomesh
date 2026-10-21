@@ -1,4 +1,5 @@
 import { triggerDownload } from './Download.js';
+import { t } from '../../i18n/index.js';
 
 /**
  * Serializer output -> one Blob (zip for multi-entry formats). Shared by the
@@ -7,7 +8,7 @@ import { triggerDownload } from './Download.js';
  */
 export async function buildExportBlob(out, progress = () => {}) {
   if (out.kind === 'zip') {
-    progress(0.9, 'Packaging…');
+    progress(0.9, t('progress.packaging'));
     const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
     for (const e of uniqueEntryPaths(out.entries)) zip.file(e.path, e.data);
@@ -25,7 +26,7 @@ export async function buildExportBlob(out, progress = () => {}) {
  */
 export async function packageAndDownload(out, fmtLabel, progress) {
   const blob = await buildExportBlob(out, progress);
-  progress(0.98, 'Downloading…');
+  progress(0.98, t('progress.downloading'));
   const ext = (out.filename.split('.').pop() || '').toLowerCase();
   return triggerDownload(blob, out.filename, { mime: out.mime, ext, description: `${fmtLabel} file` });
 }

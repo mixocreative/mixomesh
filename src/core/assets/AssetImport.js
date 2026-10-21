@@ -450,7 +450,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       { signal: abort.signal, size: blob.size, hidden: true });
     _throwIfAborted(abort.signal, container);
     _assertContainerCapacity(scene, container);
-    _overlayUpdate(0.8, `Materials for ${filename}…`);
+    _overlayUpdate(0.8, t('import.progress.materials', { filename }));
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
     const modelRatio = extractModelRatio(container) ?? 1;
@@ -463,7 +463,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceUnit,
       modelRatio,
     })) {
-      _overlayUpdate(0.98, `${filename} added to assets`);
+      _overlayUpdate(0.98, t('import.progress.addedToAssets', { filename }));
       try { container.dispose?.(); } catch { /* not scene-owned */ }
       return [];
     }
@@ -480,7 +480,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceAssetId: assetId, sourceFileHash,
     });
 
-    _overlayUpdate(0.9, `Adding ${filename} to scene…`);
+    _overlayUpdate(0.9, t('import.progress.addingToScene', { filename }));
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
@@ -520,7 +520,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const collectionId = createCollectionFromFilename(filename, assetId);
     const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, modelRatio);
 
-    _overlayUpdate(0.98, `${filename} ready`);
+    _overlayUpdate(0.98, t('import.progress.ready', { filename }));
 
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
