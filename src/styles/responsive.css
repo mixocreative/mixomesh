@@ -190,7 +190,7 @@
   .pm-btn { min-width: 44px; }
   .pm-btn-help { width: 44px; height: 44px; min-height: 44px; }
   .ws-btn { padding-inline: var(--sp-6); }
-  #locale-switcher { min-height: 44px; }
+  #locale-switcher, #ui-style-switcher { min-height: 44px; }
   .ol-row { min-height: 44px; }
   .ol-icon-btn { min-width: 44px; justify-content: center; }
   .rp-section-header { padding-block: var(--sp-4); }

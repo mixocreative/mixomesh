@@ -48,8 +48,8 @@
 .ol-row.ol-unlinked .ol-icon { color: var(--accent); }
 
 /* Locale switcher — sits in the header, styled as a --ctl pill. */
-#locale-switcher-host { display: inline-flex; align-items: center; margin-left: var(--sp-3); }
-#locale-switcher {
+#locale-switcher-host, #ui-style-switcher-host { display: inline-flex; align-items: center; margin-left: var(--sp-3); }
+#locale-switcher, #ui-style-switcher {
   background: var(--ctl-bg);
   border: 1px solid var(--ctl-border);
   border-radius: var(--r-sm);
@@ -59,7 +59,7 @@
   font-size: var(--fs-sm);
   cursor: pointer;
 }
-#locale-switcher:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
+#locale-switcher:hover, #ui-style-switcher:hover { background: var(--ctl-bg-hover); color: var(--text-0); }
 
 /* Workspace tab sub-label — hidden in PR1; PR3 enables the furigana view. */
 .ws-tab-sub { display: none; }
