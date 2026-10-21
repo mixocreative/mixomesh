@@ -582,7 +582,10 @@ function _openContextMenuAt(x, y, clientX, clientY) {
     Selection.set([id], id);
   }
   if (_onContextMenu) {
-    const normal = pick?.hit ? pick.getNormal?.(true) : null;
+    // Geometric FACE normal (useVerticesNormals = false): welded imports carry
+    // smoothed vertex normals, and Place Face on Bed must land the clicked
+    // facet flat, not a blend of its neighbours (review I2).
+    const normal = pick?.hit ? pick.getNormal?.(true, false) : null;
     _onContextMenu({
       x: clientX, y: clientY, source: 'viewport',
       hit: !!id,   // false = empty space under the cursor (scene menu)
