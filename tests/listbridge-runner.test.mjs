@@ -167,7 +167,7 @@ test('credentials: refuse to store when OS encryption is unavailable (no plainte
   assert.equal(await store.has('cults3d:mixo'), false);
 });
 
-test('credentials: ids and record shapes are validated; damaged file gives a clear error', async () => {
+test('credentials: ids and record shapes are validated; a damaged file is moved aside and reads empty', async () => {
   const dir = tmpDir();
   const filePath = path.join(dir, 'c.bin');
   const store = createCredentialStore({ filePath, safeStorage: fakeSafeStorage() });
@@ -176,7 +176,9 @@ test('credentials: ids and record shapes are validated; damaged file gives a cle
   await assert.rejects(store.set('cults3d:me', { nested: { a: 1 } }), /must be a string/);
   await assert.rejects(store.set('cults3d:me', {}), /no fields/);
   fs.writeFileSync(filePath, 'garbage');
-  await assert.rejects(store.get('cults3d:me'), /cannot be decrypted/);
+  assert.equal(await store.get('cults3d:me'), null);
+  assert.equal(await store.takeResetNotice(), true);
+  assert.ok(!fs.existsSync(filePath));
 });
 
 // ── transport ────────────────────────────────────────────────────────────

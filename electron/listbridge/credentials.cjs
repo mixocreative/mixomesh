@@ -8,6 +8,10 @@
 //
 // `get()` is for the main process only: index.cjs never returns a record to the renderer
 // (only has / listIds / ok flags). Pure Node: safeStorage is injected, so tests pass a fake.
+//
+// A file this OS account cannot decrypt (password reset by an admin, profile copied to another PC,
+// restored backup) is renamed to `<file>.corrupt-<stamp>` and the store starts empty, so Connect
+// works again; takeResetNotice() reports that once so the UI can say why the accounts are gone.
 
 const fs = require('node:fs/promises');
 
@@ -57,6 +61,7 @@ function createCredentialStore({ filePath, safeStorage, io: ioOverrides = {} } =
   const io = { readFile: fs.readFile, writeFile: fs.writeFile, rename: fs.rename, unlink: fs.unlink, ...ioOverrides };
   let chain = Promise.resolve();
   let tmpSeq = 0;
+  let resetNotice = false;
 
   const enqueue = task => {
     const run = chain.then(task, task);
@@ -86,10 +91,21 @@ function createCredentialStore({ filePath, safeStorage, io: ioOverrides = {} } =
       parsed = JSON.parse(safeStorage.decryptString(Buffer.from(blob)));
     } catch {
       // Never include the decrypted text (it may be partially valid secret JSON).
-      throw new Error('Listbridge credentials: the credential file cannot be decrypted or is damaged. '
-        + 'Clear the saved accounts and connect again.');
+      await quarantine();
+      return {};
     }
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  }
+
+  async function quarantine() {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    try {
+      await io.rename(filePath, `${filePath}.corrupt-${stamp}`);
+    } catch {
+      throw new Error('Listbridge credentials: the credential file cannot be decrypted on this computer and could not be moved aside. '
+        + `Delete "${filePath}" and connect again.`);
+    }
+    resetNotice = true;
   }
 
   async function save(records) {
@@ -129,6 +145,13 @@ function createCredentialStore({ filePath, safeStorage, io: ioOverrides = {} } =
       return true;
     }),
     listIds: () => enqueue(async () => Object.keys(await load()).sort()),
+    /** True once after an undecryptable file was moved aside (the saved accounts are gone). */
+    takeResetNotice: () => enqueue(async () => {
+      await load();
+      const was = resetNotice;
+      resetNotice = false;
+      return was;
+    }),
   });
 }
 

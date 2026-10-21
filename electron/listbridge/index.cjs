@@ -275,7 +275,9 @@ function registerListbridgeIpc(handle, deps = {}) {
 
   handle('publish:describe', async () => {
     const { byId } = await ready();
+    const credentialsReset = await store.takeResetNotice?.().catch(() => false);
     return {
+      ...(credentialsReset ? { credentialsReset: true } : {}),
       platforms: [...byId.values()].map(a => {
         const d = a.describe();
         return {

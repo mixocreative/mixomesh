@@ -117,6 +117,7 @@ async function _hydrate(refresh) {
   try {
     const desc = await api.describe();
     S.desc = desc;
+    if (desc.credentialsReset) S.connMsg = { ok: false, text: t('publish.connect.reset') };
     S.platformId = desc.platforms?.[0]?.id ?? null;
     for (const p of desc.platforms ?? []) {
       S.connected[p.id] = (p.credentials?.length ?? 0) === 0 ? true : await api.hasCredentials(M.platformCredentialId(p.id));
