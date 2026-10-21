@@ -48,7 +48,11 @@ const DANGER_RATIO = 0.9;
 // VALIDATION_COMPLETE is included because repairObject's fix-then-revalidate
 // flow re-validates through here after a hole-fill actually changes the
 // mesh's triangle count — there is no dedicated "repaired" event.
+// PROJECT_LOADED / PROJECT_NEW replace the whole scene, and a load restores
+// the saved selection without a SELECTION_CHANGED when it matches the state.
 const GEOMETRY_EVENTS = [
+  EVENTS.PROJECT_LOADED,
+  EVENTS.PROJECT_NEW,
   EVENTS.ASSET_INSTANTIATED,
   EVENTS.OBJECT_REMOVED,
   EVENTS.OBJECT_RESTORED,
