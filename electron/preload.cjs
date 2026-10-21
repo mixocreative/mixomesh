@@ -86,7 +86,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('launch:requests', listener);
   },
   // Automation API (API.5, ADR 0005): main forwards a validated request ({id, method, params};
-  // params carry opaque tokens, never paths); the renderer answers with respondApi({id,
+  // params carry opaque tokens, never paths; `{cancel: id}` withdraws a request whose caller
+  // timed out or disconnected); the renderer answers with respondApi({id,
   // result|error}) and pushes events with notifyApi. setApiEnabled/getApiStatus back the
   // Preferences toggle ({enabled, running}). All OPTIONAL: not part of REQUIRED_BRIDGE.
   onApiRequest: (callback) => {

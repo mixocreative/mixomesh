@@ -182,9 +182,14 @@ export function createDispatcher(deps) {
   const lane = deps.lane ?? createExternalLane();
   let pending = 0;
 
-  async function waitIdle() {
+  const throwIfCancelled = signal => {
+    if (signal?.aborted) throw apiError('E_CANCELLED', 'the request was cancelled before it started');
+  };
+
+  async function waitIdle(signal) {
     const start = now();
     while (deps.isBusy?.()) {
+      throwIfCancelled(signal);
       if (now() - start >= busyTimeoutMs) {
         throw apiError('E_BUSY', 'MIXOMESH is busy (import or project load in progress); try again later');
       }
@@ -192,11 +197,13 @@ export function createDispatcher(deps) {
     }
   }
 
-  function enqueue(task) {
+  function enqueue(task, signal) {
     const run = async () => {
+      throwIfCancelled(signal);
       if (pending++ === 0) emit('busy', { busy: true });
       try {
-        await waitIdle();
+        await waitIdle(signal);
+        throwIfCancelled(signal);
         return await task();
       } finally {
         if (--pending === 0) emit('busy', { busy: false });
@@ -495,7 +502,7 @@ export function createDispatcher(deps) {
   // Every v1 method must have a handler (guards drift between ApiSchema and here).
   for (const n of methodNames()) if (!H[n]) throw new Error(`ApiDispatcher: no handler for ${n}`);
 
-  async function execute(method, params) {
+  async function execute(method, params, signal) {
     const spec = getMethod(method);
     if (!spec) throw apiError('E_METHOD_NOT_FOUND', `unknown method "${String(method).slice(0, 64)}"`);
     if (spec.needsPath && !supportsRefs) {
@@ -503,13 +510,16 @@ export function createDispatcher(deps) {
     }
     const p = validateWithRefs(spec, params);
     if (IMMEDIATE.has(method)) return H[method](p);
-    return enqueue(() => H[method](p));
+    return enqueue(() => H[method](p), signal);
   }
 
-  /** Run one method. Resolves to the result; rejects with an apiError object. */
-  async function dispatch(method, params) {
+  /**
+   * Run one method. Resolves to the result; rejects with an apiError object. An aborted
+   * `signal` drops a request that has not started yet (E_CANCELLED).
+   */
+  async function dispatch(method, params, { signal } = {}) {
     try {
-      return await execute(method, params);
+      return await execute(method, params, signal);
     } catch (e) {
       if (isApiError(e)) throw e;
       throw apiError('E_INTERNAL', scrubPaths(e?.message ?? e));

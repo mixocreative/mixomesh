@@ -191,6 +191,7 @@ function createApiServer(deps) {
   function closeClient(client, finalFrame) {
     if (client.closed) return;
     client.closed = true;
+    for (const c of client.inflight) c.abort();
     if (client.helloTimer) { clearT(client.helloTimer); client.helloTimer = null; }
     clients.delete(client);
     try {
@@ -442,18 +443,27 @@ function createApiServer(deps) {
       for (const c of clients) if (c.authed && !c.closed && c.subs) for (const t of c.subs) union.add(t);
       job.forward = { ...job.forward, events: [...union] };
     }
+    // Aborted when the caller times out or its connection closes: the app drops the request
+    // if it has not started, and nothing is written for a caller that is gone (F-08).
+    const cancel = new AbortController();
+    client?.inflight.add(cancel);
     let timer = null;
     const timeout = new Promise((_, reject) => {
-      timer = setT(() => reject(apiError('E_TIMEOUT', `${method}: timed out`)), limits.requestTimeoutMs);
+      timer = setT(() => {
+        cancel.abort();
+        reject(apiError('E_TIMEOUT', `${method}: timed out`));
+      }, limits.requestTimeoutMs);
     });
     let result;
     try {
-      result = await Promise.race([Promise.resolve().then(() => dispatch(method, job.forward)), timeout]);
+      result = await Promise.race([Promise.resolve().then(() => dispatch(method, job.forward, { signal: cancel.signal })), timeout]);
+      if (cancel.signal.aborted) throw apiError('E_CANCELLED', `${method}: the caller disconnected`);
     } catch (err) {
       if (ownSubs && client) client.subs = prevSubs;
       throw err;
     } finally {
       if (timer) clearT(timer);
+      client?.inflight.delete(cancel);
     }
     const out = mergeMainInfo(method, await job.finish(result));
     return ownSubs ? { ...out, subscribed: ownSubs } : out;
@@ -545,7 +555,7 @@ function createApiServer(deps) {
     }
     const client = {
       socket, buf: Buffer.alloc(0), authed: false, closed: false, pending: 0, subs: null, helloTimer: null,
-      events: { windowStart: 0, sent: 0, dropped: 0 },
+      events: { windowStart: 0, sent: 0, dropped: 0 }, inflight: new Set(),
     };
     clients.add(client);
     client.helloTimer = setT(() => {
@@ -556,6 +566,7 @@ function createApiServer(deps) {
     socket.on('error', () => closeClient(client));
     socket.on('close', () => {
       client.closed = true;
+      for (const c of client.inflight) c.abort();
       if (client.helloTimer) { clearT(client.helloTimer); client.helloTimer = null; }
       clients.delete(client);
     });
@@ -599,6 +610,7 @@ function createApiServer(deps) {
     started = false;
     for (const c of [...clients]) {
       c.closed = true;
+      for (const r of c.inflight) r.abort();
       if (c.helloTimer) { clearT(c.helloTimer); c.helloTimer = null; }
       try { c.socket.destroy(); } catch { /* ok */ }
     }

@@ -93,15 +93,27 @@ export function createApiBridge(deps) {
     else if (!timerSet) { timerSet = true; setTimer(_flush, wait); }
   }
 
-  /** Answer one request; resolves after respondApi was called. Never rejects. */
+  const inflight = new Map();   // request id -> AbortController
+
+  /**
+   * Answer one request; resolves after respondApi was called. Never rejects. Main sends
+   * `{cancel: id}` on the same channel when the caller timed out or disconnected: that
+   * request is dropped if it has not started, and the cancel itself gets no answer.
+   */
   async function handle(req) {
+    if (req && Object.hasOwn(req, 'cancel')) {
+      inflight.get(req.cancel)?.abort();
+      return;
+    }
     const id = req?.id;
+    const cancel = new AbortController();
+    inflight.set(id, cancel);
     let res;
     try {
       const method = String(req?.method ?? '');
       const d = await _dispatcher();
       try {
-        const result = await d.dispatch(method, req?.params ?? {});
+        const result = await d.dispatch(method, req?.params ?? {}, { signal: cancel.signal });
         res = { id, result: result === undefined ? null : result };
         const kind = TOAST_KIND[method];
         if (kind) _noteMutation(kind, countFor(kind, method, result));
@@ -111,6 +123,7 @@ export function createApiBridge(deps) {
     } catch (e) {
       res = { id, error: apiError('E_INTERNAL', scrub(e?.message ?? e)) };
     }
+    inflight.delete(id);
     try { await bridge.respondApi(res); } catch (err) { console.warn('[api] respond failed:', scrub(err?.message)); }
   }
 

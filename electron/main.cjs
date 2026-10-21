@@ -678,7 +678,7 @@ function _failApiRequests(message) {
   }
 }
 
-function _apiDispatch(method, params) {
+function _apiDispatch(method, params, { signal } = {}) {
   const win = _launchPrimaryWindow();
   if (!win || win.webContents.isDestroyed()) return Promise.reject(makeApiError('E_BUSY', 'no window is open'));
   if (win.webContents.isLoading()) return Promise.reject(makeApiError('E_BUSY', 'the app is still loading'));
@@ -698,7 +698,16 @@ function _apiDispatch(method, params) {
       clearTimeout(timer);
       _apiPending.delete(id);
       reject(makeApiError('E_INTERNAL', 'could not reach the app'));
+      return;
     }
+    // The caller timed out or disconnected: the renderer drops the request if it has not
+    // started (ApiBridge), and its late answer is ignored.
+    signal?.addEventListener('abort', () => {
+      if (!_apiPending.delete(id)) return;
+      clearTimeout(timer);
+      try { if (!wc.isDestroyed()) wc.send('api:request', { cancel: id }); } catch { /* window gone */ }
+      reject(makeApiError('E_CANCELLED', method + ': cancelled'));
+    }, { once: true });
   });
   job.then(() => _apiThrottle.end(wc), () => _apiThrottle.end(wc));
   return job;
