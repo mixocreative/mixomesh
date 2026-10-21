@@ -221,7 +221,9 @@ function _askQuitDuringPublish(win, running) {
 // module worker and a blob: worker.
 function _runSecuritySmoke(win) {
   const assets = path.join(__dirname, '..', 'dist', 'assets');
-  const workerFile = require('node:fs').readdirSync(assets).find(f => /^MeshValidate\.worker-.*\.js$/.test(f)) ?? '';
+  const assetFiles = require('node:fs').readdirSync(assets);
+  const workerFile = assetFiles.find(f => /^MeshValidate\.worker-.*\.js$/.test(f)) ?? '';
+  const booleanFile = assetFiles.find(f => /^Boolean\.worker-.*\.js$/.test(f)) ?? '';
   const probe = `(async () => {
     const until = async (fn, ms) => { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) return false; await new Promise(r => setTimeout(r, 100)); } return true; };
     const workerOk = w => new Promise(resolve => {
@@ -247,15 +249,46 @@ function _runSecuritySmoke(win) {
       r.listbridge = Array.isArray(d?.platforms) && Array.isArray(d?.fileHosts) && d.platforms.some(p => p.id === 'cults3d') && d.fileHosts.some(h => h.type === 'tunnel' && h.default);
     } catch (err) { r.listbridge = String(err?.message ?? err); }
     r.blobWorker = await workerOk(new Worker(URL.createObjectURL(new Blob(['postMessage(1)'], { type: 'text/javascript' }))));
+    // A real Boolean through the bundled worker: module worker + dynamic import
+    // of the vendored manifold.js from file:// + WASM, end to end.
+    r.booleanWorker = await (async () => {
+      const file = ${JSON.stringify(booleanFile)};
+      if (!file) return 'no Boolean worker bundle';
+      const cube = dx => {
+        const P = [0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1].map((v, i) => (i % 3 === 0 ? v + dx : v));
+        const T = [0,3,2, 0,2,1, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7];   // CCW outward
+        const I = [];
+        for (let i = 0; i < T.length; i += 3) I.push(T[i + 2], T[i + 1], T[i]);   // Babylon winding
+        return { positions: new Float32Array(P), indices: new Uint32Array(I), normals: null, matrix: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1] };
+      };
+      return new Promise(resolve => {
+        const w = new Worker(new URL('assets/' + file, document.baseURI), { type: 'module' });
+        const timer = setTimeout(() => { w.terminate(); resolve('timeout'); }, 15000);
+        w.onerror = e => { clearTimeout(timer); w.terminate(); resolve('error: ' + (e.message || '')); };
+        w.onmessage = e => {
+          const m = e.data;
+          if (m?.type === 'progress') return;
+          clearTimeout(timer); w.terminate();
+          resolve(m?.type === 'done' && m.result?.indices?.length > 0 ? true : 'bad reply: ' + JSON.stringify(m).slice(0, 200));
+        };
+        w.postMessage({ id: 1, type: 'run', payload: { op: 'union', operands: [cube(0), cube(0.5)],
+          manifoldUrl: new URL('vendor/manifold-3d/manifold.js', document.baseURI).href } });
+      });
+    })();
     return r;
   })()`;
   win.webContents.executeJavaScript(probe).then(async r => {
+    // The window can be gone already (another smoke path exited the app):
+    // touching a destroyed webContents throws in main and pops an error dialog.
+    if (win.isDestroyed()) return;
     const before = win.webContents.getURL();
     await win.webContents.executeJavaScript(`location.href = 'https://example.com/'; true`).catch(() => {});
     await new Promise(res => setTimeout(res, 800));
+    if (win.isDestroyed()) return;
     r.navigationDenied = win.webContents.getURL() === before;
     const ok = r.booted && r.noNode && r.bridge && r.csp && r.popupDenied && r.manifold === true
-      && r.moduleWorker && r.blobWorker && r.navigationDenied && r.listbridge === true;
+      && r.moduleWorker && r.blobWorker && r.navigationDenied && r.listbridge === true
+      && r.booleanWorker === true;
     console.log(`MIXO_SMOKE: security ${ok ? 'ok' : 'FAIL'}`, JSON.stringify(r));
     setTimeout(() => app.exit(ok ? 0 : 6), 200);
   }, err => { console.error('MIXO_SMOKE: security probe threw', err?.message ?? err); app.exit(6); });

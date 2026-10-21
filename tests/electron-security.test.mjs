@@ -294,4 +294,12 @@ await check('automation API: sender-checked channels, five optional preload meth
   }
 });
 
-assert.equal(cases, 13);
+await check('security smoke: runs a real Boolean in the bundled worker under file://, and survives a closed window', () => {
+  const smoke = mainSource.slice(mainSource.indexOf('function _runSecuritySmoke('));
+  assert.ok(smoke.includes('Boolean\\.worker-'), 'probe locates the bundled Boolean worker');
+  assert.ok(smoke.includes("op: 'union'"), 'probe runs a union');
+  assert.ok(smoke.includes('r.booleanWorker === true'), 'smoke fails unless the Boolean worker answered');
+  assert.ok(smoke.includes('win.isDestroyed()'), 'probe callbacks bail out on a destroyed window');
+});
+
+assert.equal(cases, 14);
