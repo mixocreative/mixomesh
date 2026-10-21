@@ -497,6 +497,10 @@ function _watertightVerdict(ids, state) {
   return known ? true : null;
 }
 
+function _throwIfCancelled(signal) {
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+}
+
 async function _runExportForTarget(fmt, target, options, csgReady, repairReady, progress, state = getState()) {
   progress(0.02, 'Collecting meshes…');
   settleImportBounce();   // flattenWorld bakes world matrices — never a mid-pop scale
@@ -636,7 +640,10 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     if (remaining.length) throw _exportError('Validation errors remain after auto-fix.', remaining);
 
     progress(0.82, `Writing ${fmt.label}…`);
+    _throwIfCancelled(options.signal);
     const out = await fmt.serialize(ctx);
+    // Cancel (export overlay) wins over a finished encode: nothing is saved.
+    _throwIfCancelled(options.signal);
 
     // Collect mode (publish): same writers + ctx, but the bytes go to the
     // caller's sink instead of the save picker — no second writer.

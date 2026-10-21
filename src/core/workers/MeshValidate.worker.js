@@ -93,10 +93,10 @@ export function checkInvertedNormals(positions, indices, clockwise) {
 }
 
 serveTask(({ positions, indices, clockwise = false }, { progress }) => {
-  progress({ stage: 'edges', fraction: 0 });
+  // Stages only (no measured fraction) — review I6.
+  progress({ stage: 'edges' });
   const badEdgeCount = checkNonManifold(positions, indices);
-  progress({ stage: 'winding', fraction: 0.9 });
+  progress({ stage: 'winding' });
   const inverted = checkInvertedNormals(positions, indices, !!clockwise);
-  progress({ stage: 'winding', fraction: 1 });
   return { badEdgeCount, inverted };
 });

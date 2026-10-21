@@ -189,3 +189,25 @@ test('blob hashing: same digest inline and the big-file path falls back without 
   const big = new Blob([new Uint8Array(WORKER_HASH_MIN_BYTES + 1)]);
   assert.equal(await sha256HexOfBlob(big), await sha256Hex(await big.arrayBuffer()));
 });
+
+test('stage-only progress keeps a row indeterminate (no fake percentages, review I6)', () => {
+  JA.resetJobs(); now = 0;
+  const job = JA.beginJob({ label: 'job.boolean' });
+  now = 500; job.progress({ stage: 'load' });
+  now = 600; job.progress({ stage: 'boolean' });
+  const [row] = JA.viewModel(now);
+  assert.equal(row.state, 'indeterminate');
+  assert.equal(row.percent, null);
+  assert.equal(row.stage, 'boolean');
+  for (const name of ['Boolean', 'Hash', 'MeshValidate']) {
+    const src = readFileSync(join(ROOT, 'src/core/workers', `${name}.worker.js`), 'utf8');
+    assert.doesNotMatch(src, /fraction\s*:/, `${name}.worker.js reports an unmeasured fraction`);
+  }
+});
+
+test('STL export encode honours Cancel and is never re-run inline after it (review I6)', async () => {
+  const { encodeBinarySTLAsync } = await import('../src/core/print/StlWriter.js');
+  const ctrl = new AbortController();
+  ctrl.abort();
+  await assert.rejects(encodeBinarySTLAsync([], 'x', { signal: ctrl.signal }), { name: 'AbortError' });
+});

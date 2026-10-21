@@ -6,10 +6,10 @@ import { serveTask } from './serveTask.js';
 import { hexOfDigest } from '../hashHex.js';
 
 serveTask(async ({ blob }, { progress }) => {
-  progress({ stage: 'read', fraction: 0 });
+  // Stages only (neither step reports real progress) — review I6.
+  progress({ stage: 'read' });
   const buf = await blob.arrayBuffer();
-  progress({ stage: 'hash', fraction: 0.5 });
+  progress({ stage: 'hash' });
   const digest = await crypto.subtle.digest('SHA-256', buf);
-  progress({ stage: 'hash', fraction: 1 });
   return hexOfDigest(digest);
 });

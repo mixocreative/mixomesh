@@ -21,11 +21,12 @@ function manifold(url) {
 }
 
 serveTask(async ({ op, operands, manifoldUrl }, { progress }) => {
-  progress({ stage: 'load', fraction: 0 });
+  // Stages only: neither step is measurable, so the activity row stays
+  // indeterminate instead of showing a frozen percentage (review I6).
+  progress({ stage: 'load' });
   const wasm = await manifold(manifoldUrl);
-  progress({ stage: 'boolean', fraction: 0.2 });
+  progress({ stage: 'boolean' });
   const out = booleanArrays(wasm, op, operands);
-  progress({ stage: 'boolean', fraction: 1 });
   const transfer = [out.positions.buffer, out.indices.buffer, ...(out.normals ? [out.normals.buffer] : [])];
   return transferable(out, transfer);
 });

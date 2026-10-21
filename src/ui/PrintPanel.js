@@ -402,7 +402,7 @@ function _renderValidationTab() {
  * Cancel); then the pipeline under the progress overlay. Shared by the
  * Export tab buttons and the context menu's export-selected action.
  */
-async function _runExport(fn, opts, _regated = false) {
+async function _runExport(fn, opts, _regated = false, label = null) {
   {
     const currentReadiness = PrintManager.getPrintReadiness(opts);
     if (!currentReadiness.canExport) {
@@ -454,15 +454,20 @@ async function _runExport(fn, opts, _regated = false) {
         return;   // 'cancel', ESC, or backdrop dismissal
       }
     }
-    ProgressOverlay.show(t('progress.exporting'));
+    // Cancel on the export overlay aborts the run (STL encode in its worker,
+    // and no file is saved for any format) — review I6.
+    const abort = new AbortController();
+    ProgressOverlay.show(t('progress.exporting'), { controller: abort });
     try {
-      await fn({ ...exportOpts, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
+      await fn({ ...exportOpts, signal: abort.signal, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
     } catch (err) {
-      if (err?.needsAcknowledgement && !_regated) {
+      if (err?.name === 'AbortError') {
+        Toast.show(t('toast.exportCancelled', { filename: label ?? t('progress.exporting') }), 'info', 3000);
+      } else if (err?.needsAcknowledgement && !_regated) {
         // The pipeline enforces the gate itself; readiness changed between
         // the panel's check and the run. Re-open the three-way prompt once.
         ProgressOverlay.hide();
-        return _runExport(fn, opts, true);
+        return _runExport(fn, opts, true, label);
       } else if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
       } else if (err?.readinessIssues?.length) {
@@ -486,7 +491,7 @@ const EXPORTERS = {
 function _exportFormat(format, opts) {
   const fn = EXPORTERS[format]?.();
   if (!fn) return Promise.resolve();
-  return _runExport(fn, opts);
+  return _runExport(fn, opts, false, String(format).toUpperCase());
 }
 
 /**
@@ -502,7 +507,7 @@ export function exportSelected(format) {
     Toast.show(t('toast.exportSelectedNone'), 'info', 2500);
     return Promise.resolve();
   }
-  return _runExport(fn, { selectedOnly: true });
+  return _runExport(fn, { selectedOnly: true }, false, String(format).toUpperCase());
 }
 
 /**

@@ -64,8 +64,11 @@ const _stlTask = new WorkerTask({
     : null,
 });
 
-/** Encode, in the STL worker when the job is large (bytes identical to encodeBinarySTL). */
-export async function encodeBinarySTLAsync(meshEntries, solidName = 'mixomesh') {
+/** Encode, in the STL worker when the job is large (bytes identical to encodeBinarySTL).
+ *  `signal` (the export overlay's Cancel) aborts the worker job; a cancelled job
+ *  is never re-run inline. */
+export async function encodeBinarySTLAsync(meshEntries, solidName = 'mixomesh', { signal } = {}) {
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   const parts = _partsOf(meshEntries);   // fresh print-space copies (typed), safe to transfer
   const triangles = parts.reduce((n, p) => n + Math.floor(p.indices.length / 3), 0);
   if (!shouldEncodeStlInWorker(triangles, typeof Worker === 'function')) return encodeBinarySTLFromArrays(parts, solidName);
@@ -73,9 +76,10 @@ export async function encodeBinarySTLAsync(meshEntries, solidName = 'mixomesh') 
     return await _stlTask.run({ parts, solidName }, {
       transfer: parts.flatMap(p => [p.positions.buffer, p.indices.buffer]),
       timeoutMs: stlWorkerTimeoutFor(triangles),
+      signal,
     });
   } catch (err) {
-    if (/index out of range/.test(err?.message ?? '')) throw err;
+    if (err?.name === 'AbortError' || /index out of range/.test(err?.message ?? '')) throw err;
     return encodeBinarySTL(meshEntries, solidName);   // worker unavailable/crashed: same bytes inline
   }
 }
@@ -89,10 +93,10 @@ export async function serializeSTL(ctx) {
     const entries = [];
     for (const unit of ctx.cloneGroups) {
       const base = perMeshBaseName(ctx, unit.name);
-      entries.push({ path: `${base}.stl`, data: await encodeBinarySTLAsync(unit.meshes, base) });
+      entries.push({ path: `${base}.stl`, data: await encodeBinarySTLAsync(unit.meshes, base, { signal: ctx.options?.signal }) });
     }
     return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
   }
   const base = exportBaseName(ctx);
-  return { kind: 'blob', mime: 'model/stl', filename: `${base}.stl`, data: await encodeBinarySTLAsync(ctx.meshes, base) };
+  return { kind: 'blob', mime: 'model/stl', filename: `${base}.stl`, data: await encodeBinarySTLAsync(ctx.meshes, base, { signal: ctx.options?.signal }) };
 }
