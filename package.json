@@ -25,6 +25,8 @@
     "test:group": "node tests/browser-group-repair-smoke.mjs",
     "test:ui-style": "node tests/browser-ui-style-smoke.mjs",
     "probe:scans": "node tests/scan-probe.mjs",
+    "fixtures:heavy": "node scripts/heavy-mesh/generate.mjs",
+    "perf:heavy": "node scripts/heavy-mesh/measure.mjs",
     "test:video": "node tests/browser-video-check.mjs",
     "test:webgpu": "node tests/browser-webgpu-check.mjs",
     "test:electron": "node tests/electron-smoke.mjs",
