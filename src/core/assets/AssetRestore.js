@@ -73,7 +73,7 @@ export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const restoreUrls = installSiblingUrls(siblings);
   let container;
   try {
-    container = await loadContainer(blobUrl, extension, scene, null, siblings);
+    container = await loadContainer(blobUrl, extension, scene, null, siblings, { size: blob?.size });
   } catch (err) {
     // Mirror the live-import cleanup (audit LOW): a failed restore must not
     // leak the source blob URL or the OBJ sibling URLs — the caller turns this
