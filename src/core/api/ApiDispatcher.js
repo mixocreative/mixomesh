@@ -18,6 +18,7 @@
 
 import { API_VERSION, apiError, isApiError } from './ApiErrors.js';
 import { METHODS, EVENT_TYPES, LIMITS, getMethod, methodNames, validateParams } from './ApiSchema.js';
+import { createExternalLane } from './ExternalLane.js';
 
 export const BUSY_TIMEOUT_MS = 30000;
 export const BUSY_POLL_MS = 250;
@@ -176,7 +177,7 @@ export function createDispatcher(deps) {
   }
 
   // ---------- queue ----------
-  let chain = Promise.resolve();
+  const lane = deps.lane ?? createExternalLane();
   let pending = 0;
 
   async function waitIdle() {
@@ -199,9 +200,7 @@ export function createDispatcher(deps) {
         if (--pending === 0) emit('busy', { busy: false });
       }
     };
-    const p = chain.then(run, run);
-    chain = p.catch(() => {});
-    return p;
+    return lane.run(run);
   }
 
   // ---------- param pre-pass: ref tokens ----------

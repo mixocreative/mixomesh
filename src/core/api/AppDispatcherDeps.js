@@ -11,6 +11,7 @@
 // PrinterProfiles. Nothing here writes a second exporter.
 
 import { createDispatcher } from './ApiDispatcher.js';
+import { externalLane } from './ExternalLane.js';
 
 const MM = 1000;   // BU -> mm (ExportContext.BU_TO_MM)
 
@@ -138,6 +139,7 @@ export async function createAppDispatcher(extra = {}) {
     runtime: storage.kind,
     supportsRefs: storage.kind === 'desktop',
     isBusy: () => AssetLoader.isImporting() || Gate.isLoading(),
+    lane: externalLane,
     state: { getState: SM.getState, subscribe: SM.subscribe },
     EVENTS,
     selection: { set: (ids, active) => Selection.set(ids, active), getSelectedIds: () => Selection.getSelectedIds() },

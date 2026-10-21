@@ -10,9 +10,11 @@
 // only the open; (2) the library folder, exactly like the Mount button; (3) imports,
 // exactly like a drop. Every problem (main's errors[], skipped files, step failures)
 // ends up in ONE toast listing basenames + reasons. A batch that arrives while an
-// import / project load is in flight waits (poll, <= 30 s).
+// import / project load is in flight waits (poll, <= 30 s). Batches share one serial
+// lane with automation requests (api/ExternalLane.js).
 
 import { storage as defaultStorage } from './storage/StorageAdapter.js';
+import { createExternalLane, externalLane } from './api/ExternalLane.js';
 
 export const WAIT_TIMEOUT_MS = 30000;
 export const WAIT_POLL_MS = 250;
@@ -30,6 +32,7 @@ const _msg = err => (err instanceof Error ? err.message : String(err));
  *   toast: (message:string, type:string, duration:number)=>any,
  *   t: (key:string, params?:object)=>string,
  *   isBusy: ()=>boolean,
+ *   lane?: {run:(task:()=>Promise<any>)=>Promise<any>},
  *   sleep?: (ms:number)=>Promise<void>,
  *   now?: ()=>number,
  *   waitTimeoutMs?: number, pollMs?: number,
@@ -41,7 +44,7 @@ export function createLaunchRunner(deps) {
   const timeoutMs = deps.waitTimeoutMs ?? WAIT_TIMEOUT_MS;
   const pollMs = deps.pollMs ?? WAIT_POLL_MS;
   const seen = new Set();
-  let chain = Promise.resolve();
+  const lane = deps.lane ?? createExternalLane();
 
   /** @returns {Promise<boolean>} false when still busy after the timeout */
   async function _waitIdle() {
@@ -103,10 +106,9 @@ export function createLaunchRunner(deps) {
       if (seen.has(batch.id)) return Promise.resolve();
       seen.add(batch.id);
     }
-    chain = chain.then(() => _run(batch)).catch(err => {
+    return lane.run(() => _run(batch)).catch(err => {
       deps.toast(deps.t('launch.errors', { count: 1, list: _msg(err) }), 'warning', ERROR_TOAST_MS);
     });
-    return chain;
   }
 
   /** Subscribe to pushed batches, then pull the queued one. No bridge → no-op. */
@@ -145,6 +147,7 @@ async function init() {
     toast: (m, type, ms) => Toast.show(m, type, ms),
     t,
     isBusy: () => AssetLoader.isImporting() || isLoading(),
+    lane: externalLane,
   });
   await _runner.init();
 }
