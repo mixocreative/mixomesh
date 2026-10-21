@@ -4,6 +4,7 @@
   "description": "Full-colour 3D print preparation (MIXOMESH)",
   "author": "mixocreative",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -12,6 +13,8 @@
     "clean": "node scripts/clean.mjs",
     "prebuild": "node scripts/clean.mjs",
     "build": "vite build",
+    "postbuild": "node scripts/build-notices.mjs",
+    "notices": "node scripts/build-notices.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

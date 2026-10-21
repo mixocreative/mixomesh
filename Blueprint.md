@@ -114,8 +114,22 @@ Runtime contract:
   chunk), and Babylon npm packages. Tests use Node's built-in test runner
   unless a future feature explicitly needs Vitest.
 - `public/env/` holds the three prefiltered HDRI presets (`studio.env`,
-  `neutral.env`, `outdoor.env` — copies of Babylon CDN environment assets,
-  served at `/env/*` by Vite and copied into `dist/`).
+  `neutral.env`, `outdoor.env` — unmodified copies of BabylonJS/Assets
+  `environments/studio.env`, `core/environments/environmentSpecular.env` and
+  `environments/sanGiuseppeBridge.env`, CC BY 4.0, verified by SHA-256; credit
+  in `scripts/notices/environments.txt`), served at `/env/*` by Vite and copied
+  into `dist/`.
+- **Third-party notices (licence scan 2026-10-21):** `npm run build` runs
+  `scripts/build-notices.mjs` (postbuild) → `dist/THIRD_PARTY_NOTICES.txt`: every
+  production npm package in the installed tree (name, version, licence, its own
+  LICENSE/NOTICE text verbatim; jszip under MIT; `@types/*` skipped) plus Lucide/
+  Feather icon paths, the Zen Kaku Gothic New OFL text, `public/vendor/NOTICE.md`
+  with the MeshFixLib/Manifold licences, and the HDRI credit. Shipped in the web
+  dist and in the desktop app (`dist/**` and an `extraResources` copy next to the
+  executable). `src/core/Icons.js` carries a `/*! */` Lucide/Feather credit the
+  minifier keeps. Adding a production dependency needs no manual notice edit;
+  adding non-npm material means a file in `scripts/notices/` and a section in the
+  script. `tests/third-party-notices.test.mjs` pins the contents.
 - Dependency install is npm-first via `node scripts/install-deps.mjs`, which
   forces repo-local `.tmp/` and `.npm-cache/` paths and bypasses broken
   user-level npm shims on Windows by invoking the system npm CLI through Node.

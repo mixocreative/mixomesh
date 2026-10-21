@@ -1,3 +1,8 @@
+/*! Icon path data from Lucide (https://lucide.dev), ISC License,
+ * Copyright (c) Lucide Contributors 2022; portions Copyright (c) Cole Bemis
+ * 2013-2022 as part of Feather (https://feathericons.com), MIT License.
+ * Full licence texts: THIRD_PARTY_NOTICES.txt (scripts/notices/lucide-feather.txt). */
+
 const DEFAULT_ATTRS = { width: 16, height: 16, 'stroke-width': 1.75 };
 
 const ICON_PATHS = {

@@ -15,6 +15,11 @@ files:
   # Listbridge portable core (ESM), loaded by electron/listbridge/index.cjs via import().
   - src/listbridge/**/*
   - package.json
+# Third-party notices (licence scan M2): also inside the app via dist/**; this copy sits next to
+# the executable in resources/ where users and auditors look for it.
+extraResources:
+  - from: dist/THIRD_PARTY_NOTICES.txt
+    to: THIRD_PARTY_NOTICES.txt
 # cloudflared is NOT bundled (Cults3D uploads natively). A URL-only platform downloads the pinned,
 # SHA-256-verified copy once into <userData>/listbridge/ on first use (electron/listbridge/cloudflaredPin.cjs).
 win:
