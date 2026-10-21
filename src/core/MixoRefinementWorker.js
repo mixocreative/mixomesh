@@ -1,6 +1,7 @@
+import { WorkerTask } from './workers/WorkerTask.js';
+
 const DEFAULT_TIMEOUT_MS = 120_000;
 let nextJobId = 0;
-const pending = new Map();
 
 function copiedGeometry(input) {
   return {
@@ -26,61 +27,46 @@ export function validateRefinedGeometry(geometry, input, level) {
   return geometry;
 }
 
+// A fresh worker per job, terminated when it settles (WorkerTask 'per-job'):
+// refinement jobs are large and rare, so nothing is kept warm. The geometry
+// revision rides along as the stale guard.
+const _task = new WorkerTask({
+  name: 'refinement worker',
+  mode: 'per-job',
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  create: typeof Worker === 'function'
+    ? () => new Worker(new URL('./workers/MixoRefine.worker.js', import.meta.url), { type: 'module' })
+    : null,
+});
+
 /** Start one isolated worker job; never transfer or mutate source mesh arrays. */
-function runWorker(input, level, { signal, sourceRevision = 0, onProgress, timeoutMs = DEFAULT_TIMEOUT_MS } = {}, multiple = false) {
-  if (typeof Worker !== 'function') return Promise.reject(new Error('Mixo refinement requires a Web Worker'));
-  if (signal?.aborted) return Promise.reject(new DOMException('Refinement aborted', 'AbortError'));
-  if (![0,1,2].includes(level) || !Number.isSafeInteger(sourceRevision) || sourceRevision < 0) return Promise.reject(new Error('invalid refinement request'));
+async function runWorker(input, level, { signal, sourceRevision = 0, onProgress, timeoutMs = DEFAULT_TIMEOUT_MS } = {}, multiple = false) {
+  if (typeof Worker !== 'function') throw new Error('Mixo refinement requires a Web Worker');
+  if (signal?.aborted) throw new DOMException('Refinement aborted', 'AbortError');
+  if (![0,1,2].includes(level) || !Number.isSafeInteger(sourceRevision) || sourceRevision < 0) throw new Error('invalid refinement request');
   const jobId = ++nextJobId;
-  return new Promise((resolve, reject) => {
-    let worker;
-    try { worker = new Worker(new URL('./workers/MixoRefine.worker.js', import.meta.url), { type: 'module' }); }
-    catch (error) { reject(error); return; }
-    const cleanup = () => {
-      const job = pending.get(jobId);
-      if (!job) return false;
-      pending.delete(jobId);
-      clearTimeout(job.timer);
-      signal?.removeEventListener('abort', abort);
-      worker.onmessage = null; worker.onerror = null;
-      worker.terminate();
-      return true;
-    };
-    const fail = error => { if (cleanup()) reject(error); };
-    const abort = () => fail(new DOMException('Refinement aborted', 'AbortError'));
-    const timer = setTimeout(() => fail(new Error(`refinement worker timed out after ${timeoutMs} ms`)), timeoutMs);
-    pending.set(jobId, { timer });
-    signal?.addEventListener('abort', abort, { once: true });
-    worker.onerror = event => fail(new Error(event?.message ?? 'refinement worker error'));
-    worker.onmessage = event => {
-      const message = event.data;
-      if (!pending.has(jobId) || !message || message.jobId !== jobId) return;
-      if (message.sourceRevision !== sourceRevision) { fail(new Error('stale refinement worker result')); return; }
-      if (message.type === 'progress') {
-        if (typeof message.phase !== 'string' || !Number.isSafeInteger(message.completed) || !Number.isSafeInteger(message.total)
-          || message.completed < 0 || message.total < 1 || message.completed > message.total) { fail(new Error('invalid refinement progress')); return; }
-        try { onProgress?.({ phase: message.phase, completed: message.completed, total: message.total, jobId, sourceRevision }); }
-        catch (error) { fail(error); }
-      } else if (message.type === 'done') {
-        try {
-          if (multiple) {
-            if (!Array.isArray(message.geometries) || message.geometries.length !== input.length) throw new Error('invalid refinement material result count');
-            const geometries = message.geometries.map((geometry, i) => validateRefinedGeometry(geometry, input[i], level));
-            if (cleanup()) resolve({ jobId, sourceRevision, geometries });
-          } else {
-            const geometry = validateRefinedGeometry(message.geometry, input, level);
-            if (cleanup()) resolve({ jobId, sourceRevision, geometry });
-          }
-        } catch (error) { fail(error); }
-      } else if (message.type === 'error') fail(new Error(message.message || 'refinement worker failed'));
-      else fail(new Error('invalid refinement worker message'));
-    };
-    try {
-      const geometry = multiple ? input.map(copiedGeometry) : copiedGeometry(input);
-      const buffers = (multiple ? geometry : [geometry]).flatMap(part => Object.values(part).map(value => value.buffer));
-      worker.postMessage({ type: multiple ? 'refine-parts' : 'refine', jobId, sourceRevision, level, geometry }, buffers);
-    } catch (error) { fail(error); }
-  });
+  const geometry = multiple ? input.map(copiedGeometry) : copiedGeometry(input);
+  const buffers = (multiple ? geometry : [geometry]).flatMap(part => Object.values(part).map(value => value.buffer));
+  let result;
+  try {
+    result = await _task.run({ kind: multiple ? 'refine-parts' : 'refine', level, geometry }, {
+      transfer: buffers, signal, timeoutMs, revision: sourceRevision,
+      onProgress: ({ phase, completed, total }) => {
+        if (typeof phase !== 'string' || !Number.isSafeInteger(completed) || !Number.isSafeInteger(total)
+          || completed < 0 || total < 1 || completed > total) throw new Error('invalid refinement progress');
+        onProgress?.({ phase, completed, total, jobId, sourceRevision });
+      },
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new DOMException('Refinement aborted', 'AbortError');
+    if (error?.code === 'stale') throw new Error('stale refinement worker result');
+    throw error;
+  }
+  if (multiple) {
+    if (!Array.isArray(result?.geometries) || result.geometries.length !== input.length) throw new Error('invalid refinement material result count');
+    return { jobId, sourceRevision, geometries: result.geometries.map((g, i) => validateRefinedGeometry(g, input[i], level)) };
+  }
+  return { jobId, sourceRevision, geometry: validateRefinedGeometry(result?.geometry, input, level) };
 }
 
 export function refineInWorker(input, level, options = {}) { return runWorker(input, level, options); }

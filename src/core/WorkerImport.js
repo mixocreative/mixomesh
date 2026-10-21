@@ -9,6 +9,8 @@
 // the main-thread SceneLoader path. Headless tests have no Worker, so they
 // always exercise the fallback — the worker path is covered by browser smoke.
 
+import { WorkerTask } from './workers/WorkerTask.js';
+
 const BABYLON = window.BABYLON;
 
 /** Per-job wall clock. A job that never posts back (stalled blob fetch,
@@ -16,91 +18,33 @@ const BABYLON = window.BABYLON;
  *  later import behind it (audit F17). */
 export const WORKER_JOB_TIMEOUT_MS = 120_000;
 
-let _worker = null;
-let _seq = 0;
-const _pending = new Map();      // id → { resolve, reject, onProgress, timer }
-let _chain = Promise.resolve();  // serialize: worker swaps engine-global PreprocessUrl
+// One persistent worker, jobs strictly one at a time (the worker swaps the
+// engine-global Tools.PreprocessUrl). A timeout or crash terminates it and
+// fails the other queued jobs too (WorkerTask 'restarted'); the next import
+// starts a fresh worker.
+const _task = new WorkerTask({
+  name: 'OBJ worker',
+  concurrency: 'serial',
+  timeoutMs: WORKER_JOB_TIMEOUT_MS,
+  create: () => new Worker(new URL('./workers/ObjParse.worker.js', import.meta.url), { type: 'module' }),
+});
 
 export function isWorkerImportSupported() {
   return typeof Worker === 'function';
 }
 
-function _ensureWorker() {
-  if (_worker) return _worker;
-  _worker = new Worker(new URL('./workers/ObjParse.worker.js', import.meta.url), { type: 'module' });
-  _worker.onmessage = (e) => {
-    const msg = e.data;
-    const p = _pending.get(msg.id);
-    if (!p) return;
-    if (msg.type === 'progress') { p.onProgress?.(msg); return; }
-    _settle(msg.id);
-    if (msg.type === 'done') p.resolve(msg);
-    else p.reject(new Error(msg.message ?? 'worker parse failed'));
-  };
-  _worker.onerror = (err) => {
-    // Wholesale failure (worker bundle failed to load/execute). Reject all
-    // in-flight requests and drop the worker — callers fall back, and the
-    // next import retries a fresh spawn.
-    _resetWorker(new Error(err?.message ?? 'import worker error'));
-  };
-  return _worker;
-}
-
-/** Remove a job from `_pending` and cancel its timer. Returns the entry. */
-function _settle(id) {
-  const p = _pending.get(id);
-  if (!p) return null;
-  clearTimeout(p.timer);
-  _pending.delete(id);
-  return p;
-}
-
-/**
- * Kill the worker and fail every in-flight job with `reason`. `_chain` is
- * reset too, so the next job starts on a fresh worker with no stale queue
- * ahead of it (the queued closures still run, but each resolves/rejects on
- * its own and no longer gates anything).
- */
-function _resetWorker(reason) {
-  const jobs = [..._pending.values()];
-  _pending.clear();
-  for (const p of jobs) { clearTimeout(p.timer); p.reject(reason); }
-  const w = _worker;
-  _worker = null;
-  _chain = Promise.resolve();
-  if (w) { try { w.terminate(); } catch { /* already dead */ } }
-}
-
-function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs) {
-  const run = () => new Promise((resolve, reject) => {
-    const id = ++_seq;
-    const timer = setTimeout(() => {
-      if (!_pending.has(id)) return;
-      const secs = Math.round(timeoutMs / 1000);
-      const reason = new Error(`OBJ worker timed out after ${secs} s — falling back to main-thread parse`);
-      // Fail THIS job with the timeout message; anything else in flight on
-      // the same (now dead) worker gets a distinct reason so its caller's
-      // fallback log says why.
-      const me = _settle(id);
-      _resetWorker(new Error(`OBJ worker restarted after another job timed out (${secs} s)`));
-      me.reject(reason);
-    }, timeoutMs);
-    _pending.set(id, { resolve, reject, onProgress, timer });
-    try {
-      _ensureWorker().postMessage({
-        id, blobUrl, ext,
-        siblings: [...(siblings ?? new Map()).entries()],
-      });
-    } catch (err) {
-      _settle(id);
-      reject(err);
-    }
-  });
-  const result = _chain.then(run, run);
-  // Intentionally silent: only detaches the rejection from the queue chain —
-  // the caller still receives it via `result` (Status policy, local recovery).
-  _chain = result.catch(() => {});
-  return result;
+async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs) {
+  try {
+    return await _task.run(
+      { blobUrl, ext, siblings: [...(siblings ?? new Map()).entries()] },
+      { timeoutMs, onProgress },
+    );
+  } catch (err) {
+    const secs = Math.round(timeoutMs / 1000);
+    if (err?.code === 'timeout') throw new Error(`OBJ worker timed out after ${secs} s — falling back to main-thread parse`);
+    if (err?.code === 'restarted') throw new Error(`OBJ worker restarted after another job failed (${err.message})`);
+    throw err;
+  }
 }
 
 const TEXTURE_SLOTS = {

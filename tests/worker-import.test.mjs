@@ -23,7 +23,11 @@ class FakeWorker {
   postMessage(msg) { this.posted.push(msg); }
   terminate() { this.terminated++; }
   // Test helper: reply to the last posted job as the worker would.
-  reply(msg) { this.onmessage?.({ data: { id: this.posted.at(-1).id, ...msg } }); }
+  reply(msg) {
+    const id = this.posted.at(-1).id;
+    const { type, ...rest } = msg;
+    this.onmessage?.({ data: type === 'done' ? { id, type, result: rest } : { id, ...msg } });
+  }
 }
 globalThis.Worker = FakeWorker;
 
@@ -95,7 +99,8 @@ await test('(c) a normal job still resolves and does not leave a timer/pending b
   const p = loadObjContainerViaWorker(scene, 'blob:ok', new Map([['a.mtl', 'blob:mtl']]), undefined, { timeoutMs: 20 });
   await tick();
   assert.equal(workers.at(-1), w, 'reuses the live worker');
-  assert.deepEqual(w.posted.at(-1).siblings, [['a.mtl', 'blob:mtl']]);
+  assert.equal(w.posted.at(-1).type, 'run', 'WorkerTask protocol');
+  assert.deepEqual(w.posted.at(-1).payload.siblings, [['a.mtl', 'blob:mtl']]);
   w.reply(DONE);
   const container = await p;
   assert.equal(container.meshes.length, 1);

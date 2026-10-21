@@ -15,6 +15,7 @@ import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader.js';
 import { Tools } from '@babylonjs/core/Misc/tools.js';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer.js';
 import '@babylonjs/loaders/OBJ/index.js';
+import { serveTask, transferable } from './serveTask.js';
 
 const engine = new NullEngine();
 
@@ -46,7 +47,7 @@ function _ownedF32(data) {
           data.buffer.byteLength === data.byteLength) ? data : new Float32Array(data);
 }
 
-async function _parse({ id, blobUrl, ext, siblings }) {
+async function _parse({ blobUrl, ext, siblings }, progress) {
   const scene = new Scene(engine);
   const sibMap = new Map(siblings ?? []);
   // Same sibling redirect the main thread installs for its fallback path —
@@ -62,8 +63,7 @@ async function _parse({ id, blobUrl, ext, siblings }) {
   try {
     const container = await SceneLoader.LoadAssetContainerAsync(
       blobUrl, '', scene,
-      (evt) => self.postMessage({
-        id, type: 'progress',
+      (evt) => progress({
         lengthComputable: !!evt?.lengthComputable,
         loaded: evt?.loaded ?? 0,
         total: evt?.total ?? 0,
@@ -130,9 +130,7 @@ async function _parse({ id, blobUrl, ext, siblings }) {
       });
     }
 
-    self.postMessage({ id, type: 'done', meshes, materials }, transfers);
-  } catch (err) {
-    self.postMessage({ id, type: 'error', message: err?.message ?? String(err) });
+    return transferable({ meshes, materials }, transfers);
   } finally {
     Tools.PreprocessUrl = prevPre;
     scene.dispose();
@@ -140,10 +138,12 @@ async function _parse({ id, blobUrl, ext, siblings }) {
 }
 
 // Requests run strictly one at a time (the PreprocessUrl swap above is
-// engine-global); WorkerImport.js also serializes on its side — this chain is
-// the in-worker belt to that suspender.
+// engine-global); WorkerImport.js serializes on its side — this chain is the
+// in-worker belt to that suspender.
 let _queue = Promise.resolve();
-self.onmessage = (e) => {
-  const job = () => _parse(e.data);
-  _queue = _queue.then(job, job);
-};
+serveTask((payload, { progress }) => {
+  const job = () => _parse(payload, progress);
+  const run = _queue.then(job, job);
+  _queue = run.catch(() => {});
+  return run;
+});
