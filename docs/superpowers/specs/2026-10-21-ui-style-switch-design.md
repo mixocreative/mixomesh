@@ -16,6 +16,10 @@ a switch to choose between it and the current look, **Original**.
 Density was chosen from a side-by-side mockup (`.superpowers/brainstorm/…/density.html`): the owner
 picked **C — Dense (Blender-like)**: 22 px rows, 11.5 px base text, ~232 px side panels.
 
+**Style source:** the `mixo-app-style` skill (github.com/mixocreative/mixo-app-style —
+`tokens.css`, `base.css`, `SKILL.md`). Take values from there; if this document and the skill
+disagree on a value, the skill wins and this document is corrected.
+
 ## Goals
 
 1. A **New** style for MIXOMESH that adopts the mixosupports visual language:
