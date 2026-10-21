@@ -51,6 +51,19 @@ file into one IPC buffer.
   it runs in a worker and under Node tests.
 - Stream large outputs (layer by layer) instead of building whole files.
 
+## Heavy-mesh follow-up (2026-10-21)
+
+Spec: `docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md`. Additions to the rules above:
+
+- Every `WorkerTask` passes a translated `label` (`job.*`) and every worker reports `progress`;
+  `WorkerTask` feeds the shared `JobActivity` registry, rendered by one non-blocking panel. Jobs
+  run with a `signal` or `cancellable: true` get a Cancel (AbortError, worker restarted).
+- STL / 3MF parse and weld in `MeshImport.worker.js`; big source blobs are hashed in
+  `Hash.worker.js`; heavy meshes get a pick BVH from `TriangleBvh.worker.js`. A failed worker job is
+  never retried on the main thread for files over 32 MiB, on timeout, on Cancel or on a refusal.
+- History entries release the meshes only they hold (`retainedTriangles` / `release`), capped at
+  the tier budget — deleted objects no longer stay alive until New/Open.
+
 ## Not now
 
 - Babylon ownership flip (the store becoming the source of truth for restore,

@@ -231,8 +231,14 @@ src/
     InputManager.js
     SceneManager.js        ← engine/lighting/overlays orchestrator (camera/pivot split into scene/)
     WorkerImport.js        ← main side of worker OBJ parse: rebuild meshes from transferables
+    MeshImportWorker.js    ← main side of worker STL/3MF import: welded arrays → AssetContainer (heavy meshes)
     ValidateWorker.js      ← main side of worker topology validation (transfer pos/idx, get counts)
     workers/
+      WorkerTask.js        ← the ONE job runner (ADR 0006); every job → JobActivity (label, progress, Cancel)
+      JobActivity.js       ← registry of running jobs + NN/g timing rules (pure; ui/JobActivity.js renders it)
+      MeshImport.worker.js ← STL parse+weld / 3MF streamed SAX, reads the blob URL itself (heavy meshes)
+      TriangleBvh.worker.js ← pick-index (BVH) builder for heavy meshes
+      Hash.worker.js       ← sha256 of big import blobs (the UI thread never copies the bytes)
       ObjParse.worker.js   ← Babylon OBJ/MTL loader in a NullEngine worker (no UI freeze)
       MeshValidate.worker.js ← pure-math topology check (weld + non-manifold + signed-volume), off-thread
       Base64.worker.js     ← base64 codec worker for large asset round-trip (load/save)
@@ -250,7 +256,12 @@ src/
       ImportMetadata.js    ← glTF extras reader: ratio + Mixomesh import mode
       MixoPrimitiveExtras.js ← Babylon glTF primitive-extras capture hook
       ImportHierarchy.js   ← group node extraction from glTF empty parents + multi-primitive stems
-      ImportLimits.js      ← per-file size/triangle budget gates (auto-skip validation on huge meshes)
+      ImportLimits.js      ← per-file size/triangle budget gates (auto-skip validation on huge meshes) + assertPreParseCapacity
+      TriangleEstimate.js  ← pre-parse triangle count/estimate from small slices (STL/OBJ/3MF/GLB/glTF)
+      stlParse.js          ← STL → welded indexed geometry, Babylon STL conventions (pure)
+      weld.js              ← typed-array exact weld + crease-aware normals (pure)
+      meshImportCore.js    ← worker-side STL/3MF import cores (pure)
+      zipText.js           ← zip entry → decoded text chunks (no giant strings)
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     vendorUrl.js           ← the ONE public/vendor/ URL resolver (document.baseURI-relative)
@@ -2560,6 +2571,61 @@ no regression.
 - Track blob URLs in `Map<assetId, blobUrl>` for explicit revocation.
 - On `PROJECT_NEW` / `PROJECT_LOADED`: revoke all blob URLs, dispose all containers, clear map.
 
+### Heavy meshes (2026-10-21 — `docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md`)
+Contract for 2M–10M+ triangle print meshes; the spec carries the measured numbers.
+- **Budgets:** `caps.triangleBudget` per runtime tier (`storage/capabilities.js`, measured, not
+  guessed): warn above 1×, refuse above 4×. **Refusal happens before parsing**:
+  `import/TriangleEstimate.estimateFileTriangles(blob, ext)` reads only small slices — exact for
+  binary STL (`(size−84)/50`) and GLB/glTF accessors, sampled for ASCII STL (head + tail), OBJ (face
+  lines) and 3MF (model size from the zip central directory ÷ 66 B/triangle) — and
+  `ImportLimits.assertPreParseCapacity` throws above 4× (estimates get a 25 % margin). It runs in
+  `importWithDedupe` before hashing and in `loadFromBlob`; the over-budget toast shows once, up front.
+  The post-parse `_assertContainerCapacity` stays as the backstop.
+- **Import off the UI thread:** `loadContainer` routes `.stl` / `.3mf` to
+  `workers/MeshImport.worker.js` (via `MeshImportWorker.js`), `.obj` to ObjParse. The worker
+  fetches the blob URL itself. STL welds exact-equal corners (open-addressing hash on float bits,
+  no strings) and splits vertices only at creases > 40° (flat CAD edges, smooth scans at ~T/2
+  vertices); names, axis swap (file x,y,z → x,z,y) and corner order match Babylon's STL loader, so
+  triangle counts and placement are unchanged. 3MF model parts are inflated and decoded in chunks
+  into the push SAX parser (`createThreeMFXmlParser`; no string over V8's limit), triangles packed
+  Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` (textures via a
+  zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did
+  not time out, were not cancelled and were not refused (`mayFallBackToMainThread`). glTF/GLB stays
+  on Babylon's loader (scene-bound materials/extensions) with the exact pre-parse count.
+- **Cancel:** the import overlay (blocking, because an import changes the scene being edited) has
+  Cancel; it aborts every running import and nothing is half-added (`_throwIfAborted`). `guard()`
+  treats AbortError as the user's choice, never an error modal.
+- **Hashing:** `hash.sha256HexOfBlob` hashes blobs ≥ 8 MiB in `workers/Hash.worker.js`.
+- **Every worker job shows progress:** `WorkerTask` reports each job to
+  `workers/JobActivity.js` under a translated `label` (`job.*`), forwards `progress({ fraction |
+  loaded/total | completed/total, stage | phase })`, and gives jobs run with a `signal` or
+  `cancellable: true` a Cancel. `ui/JobActivity.js` renders one non-blocking panel above the status
+  bar: hidden < 400 ms, kept ≥ 500 ms once shown, indeterminate + plain label, determinate % +
+  stage (+ time left once ≥ 3 s / ≥ 10 % of progress), elapsed after 10 s, failures in plain words
+  with the next step (lingering 8 s, never silent), `aria-live` announcements, `role=progressbar`,
+  reduced-motion aware; Mixo style = red fill only. `tests/job-activity.test.mjs` fails on any
+  `new WorkerTask` without a `job.*` label or any worker that never calls `progress`.
+- **Picking:** `scene/HeavyPick.js` gives each pickable content mesh with ≥ 200k triangles a BVH
+  (`geometry/triangleBvh.js`, built in `workers/TriangleBvh.worker.js`) and an instance
+  `intersects` override returning Babylon's own `PickingInfo`; while the index builds or is stale
+  (geometry revision / buffer identity) an allocation-free scan answers, so Babylon's per-vertex
+  `Vector3` array is never built. `scene.skipPointer{Move,Down,Up}Picking = true` (nothing reads
+  `pointerInfo.pickInfo`); callers needing id + PickingInfo use `SceneManager.pickAt` (one pick).
+- **Rendering:** measured CPU render time for a 10M-triangle scene is ~0.5 ms/frame with or without
+  `freezeWorldMatrix`/`doNotSyncBoundingInfo`/`material.freeze`, and shadows already render once
+  per change — so no freezing (it would add a stale-transform risk for zero gain). No decimated
+  display proxy yet (see spec).
+- **History never pins a big mesh forever:** commands that keep meshes alive expose
+  `retainedTriangles(side)` / `release(side)` (side `'undo'` = on the undo stack, `'redo'` = on the
+  redo stack). `HistoryManager` releases entries leaving the 200-step window or a dropped redo
+  branch and trims the oldest undo entries once the retained total passes the tier budget (the
+  newest always stays). Delete/Boolean free hidden meshes with `MeshRegistry.releaseMesh`, which
+  keeps the container slot so `containerMeshIndex` never shifts. `GeometryStore.extract` copies with
+  `slice()`.
+- **Desktop:** `electron/HeapFlags.cjs` sets `js-flags=--max-old-space-size=4096` before ready.
+- **Perf harness:** `npm run fixtures:heavy` (2M/5M/10M STL, 0.5M ASCII, 10M 3MF into
+  `.tmp/heavy-mesh`, never committed), `npm run perf:heavy` (headless Chrome on the real GPU).
+
 ---
 
 ## PART 9 — MESH VALIDATOR
@@ -3023,7 +3089,7 @@ repair-engine limit, so it has its own `costTriangleCap()` tracking
 - **PrusaSlicer 2.9.3** (`prusa-slicer-console.exe --info`) on the same
   exported file, independently: `manifold = yes`, `number_of_facets = 4`,
   `volume = 1000.000000`.
-- HUD (§13 MeshStats) reads `tris 4 / 1.5M` — the budget denominator is the
+- HUD (§13 MeshStats) reads `tris 4 / 2.5M` (1.5M before 2026-10-21) — the budget denominator is the
   web tier's `caps.triangleBudget`.
 - Cost block (§12 Cost quote) `#pp-cost-total` read
   `1.00 cm³ · 1.1 g · 0.55 + support 0.09 = 0.64 USD` — a live, non-null
@@ -5453,8 +5519,8 @@ Single bar at bottom. Segments:
 - **Center:** `src/ui/MeshStats.js` → `StatusBar.setCenter` (2026-09-18 —
   watertight-repair-and-cost task 7 + fix round 1). Two independent halves:
   - **Triangle budget — scene-wide, ALWAYS ON**, even with nothing selected:
-    `tris <scene> / <budget>` against `caps.triangleBudget` (web 1.5M /
-    desktop 6M). Gains `hud-warn` (≥70% of budget) / `hud-danger` (≥90%)
+    `tris <scene> / <budget>` against `caps.triangleBudget` (web 2.5M /
+    desktop 6M — measured, heavy-mesh spec 2026-10-21). Gains `hud-warn` (≥70% of budget) / `hud-danger` (≥90%)
     classes; tooltip `t('hud.triangleBudget')`. The scene-wide count is a full
     `scene.meshes` walk, so it is CACHED and only recomputed on events that
     change scene geometry (asset add/remove, undo/redo, repair-completion
@@ -5485,7 +5551,7 @@ Single bar at bottom. Segments:
     hard geometry block in the app is `print.strictExport` (§9 *Pre-Export
     Gate*); the validator's own results never block anything.
     `mesh-stats.test.mjs` pins all three verdicts.
-  - Full example: `tris 342k / 1.5M · sel 82k · 120×80×45 mm · ✓ watertight`.
+  - Full example: `tris 342k / 2.5M · sel 82k · 120×80×45 mm · ✓ watertight`.
   - `AssetImport.js` reuses the same scene/container triangle counters for a
     non-blocking `toast.triangleBudget` warning before both
     `container.addAllToScene()` call sites (`loadFromBlob`,

@@ -26,8 +26,8 @@ measurement). Section 7 is mixomesh's own implementation.
 
 | Tier | Budget (warn) | Refuse above | Basis |
 |---|---|---|---|
-| Web (Chrome/Edge tab, Safari OPFS tier) | 1.5M | 6M | §6 measurements: 10M imports fit, but the tab's renderer peaks are high; a tab shares memory with everything else the user has open. |
-| Desktop (Electron, V8 heap raised) | 6M | 24M | §6 measurements: 10M imports in ~X s with ~Y GB peak; Electron's renderer gets `--max-old-space-size=4096`. |
+| Web (Chrome/Edge tab, Safari OPFS tier) | **2.5M** (was 1.5M) | 10M | §6: at 10M (4×) a tab peaks at ~1.8 GB renderer + ~1.1 GB GPU process; at the 2.5M warning line ~0.6 GB. A tab shares memory with everything else the user has open, so 4× stays the ceiling. |
+| Desktop (Electron, V8 heap raised) | 6M (unchanged) | 24M | §6: ~160 MB renderer + ~70 MB GPU per million triangles → ~4 GB + ~2.2 GB extrapolated at 24M; the renderer gets `--max-old-space-size=4096`; the 1 GB file cap stops binary STL at ~21M anyway. Not measured inside Electron (same Chromium). |
 
 Budgets are constants in one module (mixomesh: `src/core/storage/capabilities.js`), keyed off the
 runtime tier, not reported by the shell. If a measurement on the reference machine changes the
@@ -130,11 +130,39 @@ Reading: the UI is frozen for ~75 % of the import; the first pick builds Babylon
 `Vector3` array (the heap jump: 3.3 GB at 10M) and takes 4.6 s; delete frees nothing (memory
 *grows* because the soft-deleted mesh plus the pick arrays stay alive); 10M 3MF cannot load.
 
-### After (branch `feat/heavy-mesh`)
+### After (branch `feat/heavy-mesh`, budget overridden to unlimited)
+
+Same machine and harness. "Pick cold" is the first pick while the pick index is still building
+(allocation-free scan); "warm" is after the index is ready (built in a worker: 0.8 s at 0.5M,
+1.0 s at 2M, 3.1 s at 5M, 6.7 s at 10M). "After delete" includes the asset's cached source Blob
+(kept for Add another copy; ~477 MB for the 10M STL in this harness, where the file is fetched into
+memory rather than dropped from disk).
 
 | Fixture | Import ms | Max block ms | Peak renderer MB | Peak GPU MB | Heap MB | Pick cold / warm ms | Orbit frame ms | After delete MB |
 |---|---|---|---|---|---|---|---|---|
-| _filled in at the end_ | | | | | | | | |
+| 0.5M ASCII STL (99 MiB) | 1011 | 51 | 571 | 477 | 95 | 7 / 1 | 17 | 325 |
+| 2M binary STL (95 MiB) | 1018 | 156 | 601 | 581 | 171 | 23 / 1 | 17 | 462 |
+| 5M binary STL (238 MiB) | 2470 | 359 | 1101 | 763 | 352 | 53 / 1 | 17 | 577 |
+| 10M binary STL (477 MiB) | 4316–4612 | 626–664 | 1773–1804 | 1126–1129 | 621–630 | ~100 / 1 | 17 | 949–985 |
+| 10M 3MF (109 MiB) | 18270 (loads) | 1099 | 1455 | 1152 | 1257 | 88 / 1 | 17 | 774 |
+| over 4× budget (10M STL vs the old 1.5M web budget) | refused **before** parse in 14 ms | 0 | 168 | 398 | 62 | — | — | — |
+
+Headline (10M binary STL): longest UI freeze 3019 → ~640 ms; peak renderer 3583 → ~1790 MB; peak
+GPU process 2446 → ~1130 MB; first pick 4645 → ~100 ms, later picks 186 → 1 ms; memory after
+delete 5204 → ~970 MB; 10M 3MF fails → loads. Import wall time is unchanged (~4 s: the parse moved
+to a worker, the UI stays live with progress and Cancel).
+
+Remaining main-thread work (CPU profile of the 10M STL import): GPU buffer upload (~95 ms), shader
+compile, bounding info (~30 ms), the import unit/flip bake (`bakeTransformIntoVertices`), and GC
+of the transferred arrays (~300 ms). 3MF additionally builds its container on the main thread
+(~1.1 s: vertex transform, grouping, `ComputeNormals`) and its SAX pass in the worker is slow
+(~17 s for 0.7 GB of XML).
+
+Rendering experiment (task f): CPU time from `onBeforeRender` to `onAfterRender` for the 10M scene
+is 0.5 ms median / 0.7 ms p90, and 0.5 / 0.6 ms after `freezeWorldMatrix()` +
+`doNotSyncBoundingInfo` + `material.freeze()` — no measurable gain; shadows already render once
+per change (`REFRESHRATE_RENDERONCE`). Orbit frame time is vsync-bound (16–17 ms) before and after
+on the reference GPU.
 
 ## 7. mixomesh implementation
 
@@ -156,12 +184,16 @@ Reading: the UI is frozen for ~75 % of the import; the first pick builds Babylon
    instance `intersects` override (all `scene.pick` callers benefit, Babylon's per-vertex
    `Vector3` array is never built). Babylon's implicit pointer-down/up/move picks are skipped
    (nothing reads `pointerInfo.pickInfo`); the context menu picks once.
-6. **Rendering** — static heavy meshes: `freezeWorldMatrix` + `doNotSyncBoundingInfo` while not
-   selected/transformed, unfrozen on selection, transform or geometry change. Display decimation:
-   **not in this pass** (see plan; edits/export must always use the full mesh, and a proxy needs a
-   second GPU copy plus selection/outline/shader plumbing).
-7. **Memory** — history release on trim (`release()` on Delete/Boolean/Duplicate commands, retained
-   triangle cap), `GeometryStore.extract` without the per-element callback, Electron
+6. **Rendering** — measured first (§6): freezing world matrices / bounding sync / materials gives
+   no measurable CPU gain for heavy meshes (render CPU is ~0.5 ms/frame at 10M) and would add a
+   stale-transform risk (pivot parenting, commands that move unselected objects), so **no freeze
+   is applied**. Display decimation: **not in this pass** (edits/export must always use the full
+   mesh, and a proxy needs a second GPU copy plus selection/outline/shader plumbing). Next step if
+   weaker GPUs show orbit stalls: a decimated proxy only while the camera moves.
+7. **Memory** — history release on trim (`retainedTriangles()` / `release()` on Delete and Boolean
+   commands; Duplicate clones share geometry so they hold nothing extra), retained-triangle cap =
+   tier budget, `MeshRegistry.releaseMesh` keeps container slots stable, `GeometryStore.extract`
+   with `slice()` and no per-element callback, big import blobs hashed in a worker, Electron
    `--max-old-space-size=4096`.
 
 ## Non-goals
@@ -169,4 +201,5 @@ Reading: the UI is frozen for ~75 % of the import; the first pick builds Babylon
 - Babylon ownership flip (ADR 0006 "Not now").
 - glTF parse in a worker (Babylon's loader needs the scene for materials, textures, extensions).
 - Decimated display proxy (deferred; recorded in the lane report).
+- World-matrix / material freezing (measured: no gain, see §6).
 - Streaming 3MF/zip **output**.
