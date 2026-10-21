@@ -139,8 +139,7 @@ let _preservedTopLevel = {};
 export function setPreservedTopLevelKeys(keys) { _preservedTopLevel = { ...(keys ?? {}) }; }
 export function getPreservedTopLevelKeys() { return { ..._preservedTopLevel }; }
 
-async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
-  const state = getState();
+async function _serialiseAssetLibrary(state, { skipEmbed = false } = {}) {
   const lib = state.scene.assetLibrary;
   const requiredRefs = collectRequiredAssetRefs(state);
   const portableIssues = [];
@@ -235,8 +234,8 @@ async function _serialiseAssetLibrary({ skipEmbed = false } = {}) {
 }
 
 /** Stored texture images referenced by the asset library (not yet encoded). */
-export function referencedTextureImages() {
-  const referenced = new Set(Object.values(getState().scene.assetLibrary)
+export function referencedTextureImages(state = getState()) {
+  const referenced = new Set(Object.values(state.scene.assetLibrary)
     .map(asset => asset.imageContentHash).filter(Boolean));
   return listTextureImages().filter(image => referenced.has(image.hash));
 }
@@ -252,8 +251,9 @@ export async function serialiseTextureImage(image) {
   };
 }
 
-export async function serialiseTextureImages() {
-  return Promise.all(referencedTextureImages().map(serialiseTextureImage));
+/** The image list is taken synchronously from `state`; only the encoding is async. */
+export async function serialiseTextureImages(state = getState()) {
+  return Promise.all(referencedTextureImages(state).map(serialiseTextureImage));
 }
 
 /**
@@ -261,7 +261,7 @@ export async function serialiseTextureImages() {
  * preference (SettingsStore, localStorage) and is deliberately NOT written
  * into the document — see the call site (I8).
  */
-function _serialisablePrint(print = {}) {
+function _serialisablePrint(print = {}, objects = {}) {
   // strictExport is per-USER like repairOnImport (Decision 15) — never in the .mixo.
   const { repairOnImport, strictExport, ...rest } = print;
   // 1.17: typed print sizes + a ratio-only `exportRatios` mirror kept for one
@@ -269,7 +269,7 @@ function _serialisablePrint(print = {}) {
   rest.exportTargets = exportTargetsFromState({ print });
   rest.exportRatios = exportRatiosFromState({ print });
   // 1.15: never persist a reference to an object that no longer exists.
-  if (rest.referenceObjectId && !getState().scene.objects[rest.referenceObjectId]) rest.referenceObjectId = null;
+  if (rest.referenceObjectId && !objects[rest.referenceObjectId]) rest.referenceObjectId = null;
   return { ...rest };
 }
 
@@ -316,8 +316,8 @@ function serialiseMixoRefinement(sceneObject) {
   return descriptors.length ? descriptors : undefined;
 }
 
-function _serialiseSceneObjects() {
-  const { objects, assetLibrary } = getState().scene;
+function _serialiseSceneObjects(scene) {
+  const { objects, assetLibrary } = scene;
   return Object.values(objects).map(o => {
     const mesh = AssetLoader.getBabylonMesh(o.id);
     let containerMeshIndex = Number.isInteger(o.containerMeshIndex) ? o.containerMeshIndex : 0;
@@ -359,9 +359,8 @@ function _serialiseSceneObjects() {
   });
 }
 
-function _serialiseGroups() {
+function _serialiseGroups({ groups } = getState().scene) {
   const scene = SceneManager.getScene();
-  const { groups } = getState().scene;
   return Object.values(groups).map(g => {
     const node = scene.transformNodes.find(t => t.metadata?.groupId === g.id);
     return {
@@ -388,7 +387,14 @@ export async function buildDocument(opts = {}) {
   // into the saved transform (duplicate reloaded permanently shrunk — audit
   // dup-reload bug 2026-06-16).
   settleImportBounce();
+  // One save is one snapshot (cia A-02): every read of live state or live
+  // meshes happens here, before the first await. Only the byte encoding
+  // (asset embed, texture images) runs async, over this snapshot.
   const s = getState();
+  const sceneObjects = _serialiseSceneObjects(s.scene);
+  const groups = _serialiseGroups(s.scene);
+  const camera = { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' };
+  const textureImages = opts.skipTextureImages ? [] : serialiseTextureImages(s);
   return {
     // Newer-minor unknown keys first, so every key this build owns wins.
     ..._preservedTopLevel,
@@ -399,7 +405,7 @@ export async function buildDocument(opts = {}) {
     // offer an autosave only when it is newer than the last real save.
     project: { name: s.project.name || 'Untitled', id: s.project.id ?? null, lastSavedAt: s.project.lastSavedAt ?? null, listings: normalizeListings(s.project.listings) },
     sceneSettings: {
-      camera: { ...SceneManager.saveCameraState(), followMode: s.scene.camera.followMode ?? 'free' },
+      camera,
       overlays: _projectOverlays(s.scene.overlays),
       render: { ...s.scene.render },
       renderOut: { ...s.scene.renderOut },
@@ -410,15 +416,15 @@ export async function buildDocument(opts = {}) {
     // localStorage), exactly like the `cost` slice — a teammate opening this
     // .mixo must not have their auto-repair-on-import setting flipped by the
     // saver's choice. Everything else in `print` is project data.
-    print: _serialisablePrint(s.print),
-    assetLibrary: await _serialiseAssetLibrary(opts),
-    textureImages: opts.skipTextureImages ? [] : await serialiseTextureImages(),
+    print: _serialisablePrint(s.print, s.scene.objects),
+    assetLibrary: await _serialiseAssetLibrary(s, opts),
+    textureImages: await textureImages,
     collections: Object.values(s.scene.collections ?? {}),
     shaders: Object.values(s.scene.shaders).map(({ linkedMeshIds, ...rest }) => rest),
     uvOverrides: { ...s.scene.uvOverrides },
     userSwatches: [...(s.scene.userSwatches ?? [])],
-    sceneObjects: _serialiseSceneObjects(),
-    groups: _serialiseGroups(),
+    sceneObjects,
+    groups,
     selection: { ...s.selection },
     gizmo: { ...s.gizmo },
     // Workspace layout is a per-USER preference (localStorage, PART 13b) —
