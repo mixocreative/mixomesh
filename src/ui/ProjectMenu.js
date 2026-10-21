@@ -52,9 +52,11 @@ export function init() {
     </div>
   `;
   header.appendChild(bar);
-  // The locale switcher lives in the bar, just before the ? menu.
-  const localeHost = document.getElementById('locale-switcher-host');
-  if (localeHost) bar.insertBefore(localeHost, bar.querySelector('.pm-help'));
+  // The locale and interface-style switchers live in the bar, just before the ? menu.
+  for (const id of ['locale-switcher-host', 'ui-style-switcher-host']) {
+    const host = document.getElementById(id);
+    if (host) bar.insertBefore(host, bar.querySelector('.pm-help'));
+  }
   _retranslateBar(bar);
   _recentWrap = bar.querySelector('.pm-recent-list');
   _helpMenu = bar.querySelector('.pm-help-menu');

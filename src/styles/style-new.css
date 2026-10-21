@@ -8,3 +8,178 @@
    in Original: nothing there names this family. */
 @import '@fontsource/zen-kaku-gothic-new/400.css';
 @import '@fontsource/zen-kaku-gothic-new/500.css';
+
+/* ── 1. Tokens: mixomesh names → mixo-app-style values ─────────────── */
+:root:not([data-ui-style="original"]) {
+  /* Surfaces: three visible steps (paper / surface / sunken). */
+  --bg-0: #f4f2ed;
+  --bg-1: #f4f2ed;
+  --bg-2: #f4f2ed;
+  --bg-3: #fbfaf7;
+  --bg-4: #ffffff;
+
+  --text-0: #3b3631;
+  --text-1: #3b3631;
+  --text-2: #8a847a;
+  --text-disabled: #b4aea4;
+
+  /* Accent = ink. Red is applied by name below (primary actions, progress,
+     current-item marker), never through a shared token. */
+  --accent:    #3b3631;
+  --accent-hi: #54504a;
+  --accent-fg: #f4f2ed;
+  --red:       #7f0019;
+  --red-hover: #96102b;
+
+  --active:    #3b3631;
+  --active-bg: #ebe8e1;
+
+  --border:         #dcd7cd;
+  --border-strong:  #c4bdb0;
+  --border-section: #dcd7cd;
+  --border-focus:   #3b3631;
+  --ring-focus:     rgba(59, 54, 49, 0.25);
+
+  --ctl-bg:        #fbfaf7;
+  --ctl-bg-hover:  #ffffff;
+  --ctl-bg-active: #ebe8e1;
+  --ctl-border:    #dcd7cd;
+  --ctl-h: 22px;
+
+  --danger:  #b3261e;
+  --warning: #b07a12;
+  --success: #4a6b3a;
+  --info:    #3b4a5c;
+
+  --font-sans: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  --fs-xs: 10.5px;
+  --fs-sm: 11px;
+  --fs-md: 11.5px;
+  --fs-lg: 13px;
+  --fs-xl: 15px;
+
+  --r-sm: 2px;
+  --r-md: 2px;
+  --r-lg: 2px;
+
+  --shadow-md: none;
+  --shadow-lg: none;
+  --sheet-shadow: none;
+
+  /* Panel widths: Workspace.js workspaceDefaults() (inline on #app). */
+}
+/* Traditional Chinese keeps Taiwan glyph forms. */
+:root:not([data-ui-style="original"]):lang(zh-Hant) {
+  --font-sans: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', 'Zen Kaku Gothic New', system-ui, sans-serif;
+}
+:root:not([data-ui-style="original"]) body { font-size: var(--fs-md); }
+
+/* ── 2. Frame: dense header and status bar ─────────────────────────── */
+/* Same breakpoints as responsive.css / viewer.css: four tracks on desktop. */
+@media (min-width: 1280px) {
+  :root:not([data-ui-style="original"]) #app {
+    grid-template-rows: 32px 1fr var(--asset-panel-height, 220px) 22px;
+  }
+}
+/* 768–1279px: three tracks. Phones (≤767px) keep viewer.css's own grid. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  :root:not([data-ui-style="original"]) #app { grid-template-rows: auto 1fr 22px; }
+}
+:root:not([data-ui-style="original"]) #header { padding: 0 8px; gap: 6px; }
+:root:not([data-ui-style="original"]) #status-bar { padding: 0 8px; }
+:root:not([data-ui-style="original"]) .rp-section-header { padding: 4px 8px; }
+
+/* ── 3. Flat: floating surfaces lose their shadow, keep an edge ────── */
+:root:not([data-ui-style="original"]) :is(
+  .ac-menu, .context-menu, .modal-shell, .ob-bubble, .pp-cost-pop, .po-panel,
+  .pm-recent-list, .pm-help-menu, .pp-menu, .vm-list, .vm-sheet,
+  .slice-tool-panel, .toast
+) {
+  box-shadow: none;
+  border: 1px solid var(--border-strong);
+}
+:root:not([data-ui-style="original"]) .pp-toggle-dot,
+:root:not([data-ui-style="original"]) .pp-toggle.pp-toggle-on .pp-toggle-dot { box-shadow: none; }
+
+/* ── 4. Ink states: active tab / segment / pressed ─────────────────── */
+:root:not([data-ui-style="original"]) .ws-switcher { border-radius: 2px; padding: 0; background: var(--bg-3); border: 1px solid var(--border); }
+:root:not([data-ui-style="original"]) .ws-btn { border-radius: 0; padding: 2px 10px; }
+:root:not([data-ui-style="original"]) .ws-btn.active,
+:root:not([data-ui-style="original"]) .pp-tab.active,
+:root:not([data-ui-style="original"]) .pp-seg-btn[aria-checked="true"] {
+  background: var(--text-0);
+  color: var(--bg-0);
+  box-shadow: none;
+  border-color: var(--text-0);
+}
+:root:not([data-ui-style="original"]) .pp-tab.active .sec-icon { color: var(--bg-0); }
+:root:not([data-ui-style="original"]) .pp-icon-btn[aria-expanded="true"],
+:root:not([data-ui-style="original"]) .cm-item[aria-expanded="true"] {
+  background: var(--text-0);
+  color: var(--bg-0);
+}
+
+/* ── 5. Rows: selected = sunken, no colour; current item = red edge ── */
+:root:not([data-ui-style="original"]) .ol-row.ol-selected,
+:root:not([data-ui-style="original"]) .sp-row-selected,
+:root:not([data-ui-style="original"]) .sm-row.is-focus,
+:root:not([data-ui-style="original"]) .vm-item-on {
+  background: var(--active-bg);
+  box-shadow: none;
+}
+:root:not([data-ui-style="original"]) .ol-row.ol-selected.ol-active {
+  background: var(--active-bg);
+  box-shadow: inset 2px 0 0 0 var(--red);
+}
+:root:not([data-ui-style="original"]) .tp-card-current { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+
+/* ── 6. Red: the one primary action, and progress ──────────────────── */
+:root:not([data-ui-style="original"]) :is(
+  .btn-primary, .pp-primary-btn, .pm-btn-primary, .modal-btn-primary,
+  .pp-body .pp-btn.pp-btn-primary:not(:disabled)
+) {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+:root:not([data-ui-style="original"]) :is(
+  .btn-primary, .pp-primary-btn, .pm-btn-primary, .modal-btn-primary,
+  .pp-body .pp-btn.pp-btn-primary
+):hover:not(:disabled) {
+  background: var(--red-hover);
+  border-color: var(--red-hover);
+  color: #fff;
+}
+:root:not([data-ui-style="original"]) .pp-apply-btn:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
+:root:not([data-ui-style="original"]) .po-bar { background: var(--red); }
+:root:not([data-ui-style="original"]) .po-track,
+:root:not([data-ui-style="original"]) .po-bar { border-radius: 0; }
+
+/* Destructive stays an outline; hover tints, never fills. */
+:root:not([data-ui-style="original"]) .modal-btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* ── 7. Dense properties: hairline sections, narrow label column ───── */
+:root:not([data-ui-style="original"]) .pp-body { padding: 4px 8px; }
+:root:not([data-ui-style="original"]) .pp-section {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 6px 0;
+  margin-bottom: 0;
+}
+:root:not([data-ui-style="original"]) .pp-section:first-child { border-top: 0; padding-top: 0; }
+:root:not([data-ui-style="original"]) :is(.pp-row, .pp-ratio-row, .pp-source-row, .sp-uv-cell) {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+:root:not([data-ui-style="original"]) .pp-grid3 {
+  grid-template-columns: 64px repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+:root:not([data-ui-style="original"]) :is(.pp-body, .sp-body) :is(input[type="text"], input[type="number"], select) {
+  padding: 1px 3px;
+}
+
+/* ── 8. Narrow panels: one-line footers ────────────────────────────── */
+:root:not([data-ui-style="original"]) .ol-footer { padding: 3px 8px; gap: 6px; }
+:root:not([data-ui-style="original"]) .ol-footer > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

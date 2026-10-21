@@ -13,6 +13,7 @@ import { subscribe, dispatch, getState, setState } from '../core/StateManager.js
 import { InputManager } from '../core/InputManager.js';
 import { icon } from '../core/Icons.js';
 import { t, applyTranslations } from '../i18n/index.js';
+import { getStyle } from '../core/UiStyle.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
 // v2: panelCollapsed went tri-state (absent = defer to workspace default).
@@ -37,6 +38,17 @@ export const WORKSPACE_DEFAULTS = {
   scene:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Scene',   icon: 'Boxes' },
   print:  { right: true, bottom: false, outlinerWidth: 220, rightWidth: 320, assetHeight: 220, label: 'Print',   icon: 'Printer' },
 };
+
+/**
+ * Defaults for one workspace in one interface style. New (dense) narrows the
+ * side panels: outliner at most 220px, right panel 40px narrower (properties rows need
+ * ~260px for three XYZ fields). Pure.
+ */
+export function workspaceDefaults(workspace, style) {
+  const def = WORKSPACE_DEFAULTS[workspace] ?? WORKSPACE_DEFAULTS.layout;
+  if (style !== 'new') return def;
+  return { ...def, outlinerWidth: Math.min(def.outlinerWidth, 220), rightWidth: def.rightWidth - 40 };
+}
 
 /**
  * Resolution rule (13b): a manual override always wins; otherwise the
@@ -73,13 +85,17 @@ export function parseStored(raw) {
       workspace: WORKSPACES.includes(data.workspace) ? data.workspace : 'layout',
       panelCollapsed,
       widths: (data.widths && typeof data.widths === 'object') ? data.widths : {},
+      widthsNew: (data.widthsNew && typeof data.widthsNew === 'object') ? data.widthsNew : {},
     };
   } catch {
     return null;
   }
 }
 
-let _widths = {};   // workspace → { outlinerWidth, rightWidth, assetHeight }
+// Remembered panel sizes, kept per interface style so Dense widths never
+// leak into Original: style → workspace → { outlinerWidth, rightWidth, assetHeight }.
+const _widthsByStyle = { original: {}, new: {} };
+const _widths = () => _widthsByStyle[getStyle()];
 const _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
 let _pillEl = null;
 
@@ -91,7 +107,8 @@ export function init() {
     ? parseStored(localStorage.getItem(STORAGE_KEY))
     : null;
   if (stored) {
-    _widths = stored.widths;
+    _widthsByStyle.original = stored.widths;
+    _widthsByStyle.new = stored.widthsNew;
     setState(s => ({
       ...s,
       ui: { ...s.ui, workspace: stored.workspace, panelCollapsed: stored.panelCollapsed },
@@ -102,6 +119,7 @@ export function init() {
   _applyDom();
 
   subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_pillEl));
+  subscribe(EVENTS.UI_STYLE_CHANGED, _applyDom);
 
   InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
   InputManager.register('Ctrl+Shift+@', 'global', () => setWorkspace('shade'));
@@ -169,7 +187,7 @@ export function maxViewport() {
 
 function _applyDom() {
   const { workspace, panelCollapsed } = getState().ui;
-  const def = WORKSPACE_DEFAULTS[workspace];
+  const def = workspaceDefaults(workspace, getStyle());
   const app = document.getElementById('app');
   const rpEl = document.getElementById('right-panel');
   const apEl = document.getElementById('asset-panel');
@@ -177,7 +195,7 @@ function _applyDom() {
 
   document.body.dataset.workspace = workspace;
 
-  const w = _widths[workspace] ?? {};
+  const w = _widths()[workspace] ?? {};
   const setVar = (name, val) => app.style.setProperty(name, `${val}px`);
 
   const rightVisible  = resolvePanelVisible(workspace, panelCollapsed, 'right');
@@ -227,9 +245,9 @@ function _captureWidths(workspace) {
     assetHeight:   Math.round(apEl.getBoundingClientRect().height),
   };
   // Don't memorise collapsed strips as "the width" — keep prior/default.
-  const prev = _widths[workspace] ?? {};
-  const def = WORKSPACE_DEFAULTS[workspace];
-  _widths[workspace] = {
+  const prev = _widths()[workspace] ?? {};
+  const def = workspaceDefaults(workspace, getStyle());
+  _widths()[workspace] = {
     outlinerWidth: cur.outlinerWidth > 60 ? cur.outlinerWidth : (prev.outlinerWidth ?? def.outlinerWidth),
     rightWidth:    cur.rightWidth    > 60 ? cur.rightWidth    : (prev.rightWidth    ?? def.rightWidth),
     assetHeight:   cur.assetHeight   > 60 ? cur.assetHeight   : (prev.assetHeight   ?? def.assetHeight),
@@ -241,7 +259,8 @@ function _persist() {
   const { workspace, panelCollapsed } = getState().ui;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      v: STORAGE_VERSION, workspace, panelCollapsed, widths: _widths,
+      v: STORAGE_VERSION, workspace, panelCollapsed,
+      widths: _widthsByStyle.original, widthsNew: _widthsByStyle.new,
     }));
   } catch { /* quota/privacy mode — preference loss only */ }
 }

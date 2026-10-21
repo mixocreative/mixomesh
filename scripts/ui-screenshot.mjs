@@ -54,7 +54,9 @@ async function main() {
   try {
     await waitForHttp(`http://127.0.0.1:${appPort}/index.html`, 20000, viteOutput);
     await waitForWs(debugPort);
-    const target = await openTarget(debugPort, `http://127.0.0.1:${appPort}/index.html`);
+    // LOCALE=ja|zh-Hant picks the UI language; UI_STYLE=original|new the interface style.
+    const query = process.env.LOCALE ? `?locale=${encodeURIComponent(process.env.LOCALE)}` : '';
+    const target = await openTarget(debugPort, `http://127.0.0.1:${appPort}/index.html${query}`);
     const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
@@ -71,6 +73,25 @@ async function main() {
 
     // The first-run tour overlays every shot; mark it seen and close it.
     await evaluate(cdp, `(() => { try { localStorage.setItem('mx-onboard-v1', '1'); } catch { /* */ } document.querySelector('.ob-skip')?.click(); })()`);
+    if (process.env.UI_STYLE) {
+      // Through the app's own setter so listeners (workspace widths) re-apply.
+      await evaluate(cdp, `import('/src/core/UiStyle.js').then(m => m.setStyle(${JSON.stringify(process.env.UI_STYLE)}))`);
+      await new Promise(r => setTimeout(r, 300));
+    }
+    if (process.env.PROBE) {
+      await new Promise(r => setTimeout(r, 1500));
+      console.log('PROBE', await evaluate(cdp, `JSON.stringify({
+        style: document.documentElement.dataset.uiStyle,
+        font: getComputedStyle(document.body).fontFamily,
+        zen: document.fonts.check('12px "Zen Kaku Gothic New"'),
+        olVar: getComputedStyle(document.documentElement).getPropertyValue('--outliner-width'),
+        cols: getComputedStyle(document.getElementById('app')).gridTemplateColumns,
+        bg: getComputedStyle(document.body).backgroundColor,
+        inline: document.getElementById('app').getAttribute('style'),
+        faces: [...document.fonts].filter(f => f.family.includes('Zen')).map(f => f.status).reduce((a, s) => (a[s] = (a[s] || 0) + 1, a), {}),
+        sheets: [...document.styleSheets].filter(x => (x.href || '').includes('zen') || (x.href||'').includes('style-new')).map(x => x.href),
+      })`));
+    }
 
     const setSize = async ({ w, h, touch }) => {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
