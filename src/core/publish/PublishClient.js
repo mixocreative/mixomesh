@@ -12,6 +12,7 @@ import { createListing, toManifest } from '../../listbridge/index.js';
 import { caps as liveCaps } from '../storage/capabilities.js';
 import { getState, setState } from '../StateManager.js';
 import { upsertListing, findListing } from './Listings.js';
+import { mintProjectId } from '../persist/ProjectId.js';
 
 const EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
@@ -98,6 +99,22 @@ function recordFor(pkg, req, outcome, status, now) {
   };
 }
 
+/** The project's stable id (minted silently when it has none): the main process journals creates by it. */
+function projectKey(d) {
+  let id = d.getState().project?.id;
+  if (!id) {
+    id = mintProjectId();
+    d.setState(s => ({ ...s, project: { ...s.project, id } }), { silent: true });
+  }
+  return id;
+}
+
+/** The main process keeps a created listing on disk until the project has its record; then drop it. */
+async function acknowledge(outcome, d) {
+  if (!outcome?.jobId || !outcome.result?.remoteId || typeof d.api.resolvePending !== 'function') return;
+  try { await d.api.resolvePending(outcome.jobId, 'ack'); } catch { /* kept: the next load records it again (same remoteId, no duplicate) */ }
+}
+
 /** Persist the outcome in project.listings (non-undoable; marks dirty). */
 function recordOutcome(pkg, req, outcome, d) {
   if (!outcome) return;
@@ -160,6 +177,7 @@ export async function publish(pkg, req, onProgress, deps) {
   const request = {
     platform: req.platform,
     accountId: req.accountId,
+    projectKey: projectKey(d),
     ...(req.remoteId ? { remoteId: req.remoteId } : {}),
     ...(req.fileHostId ? { fileHostId: req.fileHostId } : {}),
     manifest: toManifest(pkg),
@@ -174,6 +192,7 @@ export async function publish(pkg, req, onProgress, deps) {
     if (typeof off === 'function') off();
   }
   recordOutcome(pkg, req, outcome, d);
+  await acknowledge(outcome, d);
   return outcome;
 }
 
@@ -192,8 +211,41 @@ export async function retryPublish(jobId, pkg, req, onProgress, deps) {
     if (typeof off === 'function') off();
   }
   recordOutcome(pkg, req, outcome, d);
+  await acknowledge(outcome, d);
   return outcome;
 }
+
+/**
+ * Creates of this project that the main process holds and this window never recorded: a publish
+ * that finished while the window reloaded or crashed, or one the app quit in the middle of (cia B-04).
+ * Created listings are written to project.listings and acknowledged; the rest are returned.
+ * @returns {Promise<{ adopted: object[], unresolved: object[] }>} unresolved entries carry
+ *   `state: 'running'` (still publishing) or `'unknown'` (the create may have landed: check first)
+ */
+export async function pendingPublishes(deps) {
+  const d = requireApi(deps);
+  if (typeof d.api.pending !== 'function') return { adopted: [], unresolved: [] };
+  const entries = await d.api.pending(projectKey(d));
+  const adopted = [];
+  const unresolved = [];
+  for (const e of Array.isArray(entries) ? entries : []) {
+    if (e.state !== 'created' || !e.remoteId) { unresolved.push(e); continue; }
+    const l = e.listing ?? {};
+    const pkg = {
+      title: l.title ?? e.title ?? '', description: l.description ?? '', tags: l.tags ?? [], price: l.price ?? null,
+      license: l.license ?? null, madeWithAi: !!l.madeWithAi, categoryHint: l.categoryHint ?? null,
+      subCategoryIds: l.subCategoryIds ?? [], visibility: l.visibility ?? null, files: (l.fileNames ?? []).map(name => ({ name })),
+    };
+    const outcome = { jobId: e.jobId, ok: true, result: { remoteId: e.remoteId, url: e.url ?? null, status: e.status } };
+    recordOutcome(pkg, { platform: e.platform, accountId: e.accountId }, outcome, d);
+    await acknowledge(outcome, d);
+    adopted.push(e);
+  }
+  return { adopted, unresolved };
+}
+
+/** Look an unsettled create up on the platform again ('check'), or drop it to publish anew ('discard'). */
+export const resolvePending = async (jobId, action, deps) => requireApi(deps).api.resolvePending(jobId, action);
 
 /**
  * Category + license lists for a platform (needs a saved account). Never throws for platform

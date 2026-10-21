@@ -487,7 +487,7 @@ test('ipc: registers exactly the publish:* channels', () => {
   const { handlers } = setupIpc();
   assert.deepEqual([...handlers.keys()].sort(), [
     'publish:cancel', 'publish:clearCredentials', 'publish:describe', 'publish:extendHold', 'publish:hasCredentials', 'publish:listOptions',
-    'publish:retry', 'publish:setCredentials', 'publish:start', 'publish:testConnection',
+    'publish:pending', 'publish:resolvePending', 'publish:retry', 'publish:setCredentials', 'publish:start', 'publish:testConnection',
   ]);
 });
 

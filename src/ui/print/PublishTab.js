@@ -81,6 +81,9 @@ const S = {
   linksOpen: null,         // { ms, at } after a confirm failure while the links stay open
   extending: false,        // a Keep waiting request is in flight
   options: {},             // platform id -> { status:'loading'|'ok'|'failed', categories, licenses, message } (publish:listOptions)
+  pending: [],             // unsettled creates of this project held by the main process (publish:pending)
+  pendingFor: undefined,   // project id the pending list belongs to (undefined = not checked yet)
+  pendingBusy: false,
 };
 
 const _api = () => (typeof window !== 'undefined' ? window.electronAPI?.listbridge : undefined);
@@ -98,6 +101,7 @@ export function _resetPublishTabState() {
     hero: null, gallery: [], transparent: false, capturing: false, heroTried: false, formats: null,
     built: [], phase: 'form', steps: [], jobId: null, outcome: null, lastPkg: null, lastReq: null,
     blocked: null, note: null, cancelRequested: false, hold: null, linksOpen: null, extending: false, options: {},
+    pending: [], pendingFor: undefined, pendingBusy: false,
   });
   _guardUnload(false);
 }
@@ -124,6 +128,43 @@ async function _hydrate(refresh) {
     S.loading = false;
   }
   refresh();
+}
+
+// A publish that finished (or died) while this window was gone: record it, or show what is unsettled.
+async function _checkPending(refresh) {
+  if (S.pendingBusy) return;
+  S.pendingBusy = true;
+  S.pendingFor = getState().project?.id ?? null;
+  try {
+    const { adopted, unresolved } = await Publish.pendingPublishes();
+    S.pending = unresolved;
+    if (adopted.length) {
+      S.form = null;
+      S.note = t('publish.pending.adopted', { label: S.desc?.platforms?.find(p => p.id === adopted[0].platform)?.label ?? adopted[0].platform });
+    }
+    S.pendingFor = getState().project?.id ?? null;
+  } catch (err) {
+    S.pending = [];
+    reportError(err, { title: t('publish.pending.checkFailed') });
+  } finally {
+    S.pendingBusy = false;
+  }
+  refresh();
+}
+
+async function _resolvePending(jobId, action, desc, refresh) {
+  if (S.pendingBusy) return;
+  S.pendingBusy = true;
+  refresh();
+  try {
+    await Publish.resolvePending(jobId, action);
+  } catch (err) {
+    reportError(err, { title: t('publish.pending.checkFailed') });
+  } finally {
+    S.pendingBusy = false;
+  }
+  await _checkPending(refresh);
+  if (action === 'discard' && !S.pending.length) _publish(desc, refresh);
 }
 
 // Category + license lists, loaded once per connected platform (and again on Reload / reconnect).
@@ -304,6 +345,7 @@ async function _keepWaiting(refresh) {
 
 function _settle(outcome, refresh) {
   S.outcome = outcome;
+  S.pendingFor = undefined;   // the form re-reads what the main process still holds for this project
   S.hold = null;
   if (outcome?.ok || outcome?.status === 'cancelled' || outcome?.status === 'invalid') S.linksOpen = null;
   if (outcome?.ok) {
@@ -314,6 +356,10 @@ function _settle(outcome, refresh) {
   } else if (outcome?.status === 'invalid') {
     S.phase = 'form'; S.jobId = null;
     S.note = (outcome.issues ?? []).map(i => i.message).join(' ');
+  } else if (outcome?.status === 'pending') {
+    S.phase = 'form'; S.jobId = null; S.lastPkg = null;
+    S.pending = outcome.pending ?? [];
+    S.pendingFor = getState().project?.id ?? null;
   } else {
     S.phase = 'failed';
   }
@@ -394,7 +440,12 @@ function _confirmPublishNew(desc, refresh) {
   });
   Modal.open('publishNewListing', {
     label: desc.label, title: S.lastPkg?.title ?? S.form?.title ?? '',
-    onClose: r => { if (r === 'new') _publish(desc, refresh); },
+    onClose: r => {
+      if (r !== 'new') return;
+      const jobId = S.jobId;
+      if (jobId) void _resolvePending(jobId, 'discard', desc, refresh);
+      else _publish(desc, refresh);
+    },
   });
 }
 
@@ -635,6 +686,26 @@ function _runHtml(desc) {
   return `${h}</div>`;
 }
 
+function _pendingHtml(desc) {
+  let h = '';
+  for (const p of S.pending) {
+    const title = p.title || p.listing?.title || '';
+    const busy = S.pendingBusy ? ' disabled' : '';
+    h += '<div class="pub-fail pub-pending" role="alert">';
+    if (p.running) {
+      h += `<p>${escapeHtml(t('publish.pending.running', { label: desc.label, title }))}</p>`
+        + `<div class="pub-btns"><button type="button" class="pub-btn" data-act="pending-refresh"${busy}>${escapeHtml(t('publish.pending.refresh'))}</button></div>`;
+    } else {
+      h += `<p>${escapeHtml(t('publish.err.createUnknown', { label: desc.label, title }))}</p>`
+        + `<p class="pub-hint">${escapeHtml(t('publish.unknown.howTo', { label: desc.label, title }))}</p>`
+        + `<div class="pub-btns"><button type="button" class="pp-primary-btn pub-inline" data-act="pending-check" data-job="${escapeAttr(p.jobId)}"${busy}>${escapeHtml(t('publish.unknown.check', { label: desc.label }))}</button>`
+        + `<button type="button" class="pub-btn" data-act="pending-new" data-job="${escapeAttr(p.jobId)}"${busy}>${escapeHtml(t('publish.unknown.publishNew', { label: desc.label }))}</button></div>`;
+    }
+    h += '</div>';
+  }
+  return h;
+}
+
 function _filesHtml(readiness, building) {
   const formats = new Set(_currentFormats());
   const sizes = Math.max(1, readiness?.targets?.length ?? 1);
@@ -684,6 +755,7 @@ function _formHtml(desc, readiness) {
       + `<span class="pub-hint">${escapeHtml(t('publish.live.again'))}</span></div>`;
   }
   if (S.note) h += `<p class="pub-note" role="status">${escapeHtml(S.note)}</p>`;
+  h += _pendingHtml(desc);
   if (S.blocked) {
     h += `<div class="pub-fail pub-gate" role="alert"><p>${escapeHtml(t(S.blocked.code === 'EXPORT_NEEDS_ACKNOWLEDGEMENT' ? 'publish.blocked.warnings' : 'publish.blocked.errors'))}</p>`;
     if (S.blocked.code === 'EXPORT_NEEDS_ACKNOWLEDGEMENT') h += `<div class="pub-btns"><button type="button" class="pub-btn" data-act="publish-anyway">${escapeHtml(t('publish.blocked.anyway'))}</button></div>`;
@@ -757,6 +829,7 @@ function _formHtml(desc, readiness) {
 
 /** First reason the primary button is disabled, or '' when it can fire. */
 function _blocker(desc, readiness) {
+  if (S.pending.length && !_remoteId(desc)) return t('publish.pending.blocked', { label: desc.label });
   if (S.capturing && !S.hero) return t('publish.hero.capturing');
   if (_needsHost(desc) && S.hostMode === 's3' && !S.s3Connected) return t('publish.blocker.host');
   if (readiness && !readiness.canExport) return t('print.readiness.blockedHint');
@@ -825,6 +898,7 @@ export function renderPublishTab({ readiness, rerender }) {
     }
   } else if (S.phase === 'form') {
     if (desc.listOptions && !S.options[desc.id]) setTimeout(() => _loadOptions(desc, refresh), 0);
+    if (S.pendingFor !== (getState().project?.id ?? null) && !S.pendingBusy) setTimeout(() => _checkPending(refresh), 0);
     h += _formHtml(desc, readiness);
   } else {
     h += _runHtml(desc);
@@ -861,6 +935,9 @@ function _wire(el, desc, readiness, refresh) {
   on('cancel-run', () => _cancel(refresh));
   on('retry', () => _retry(desc, refresh));
   on('publish-new', () => _confirmPublishNew(desc, refresh));
+  on('pending-refresh', () => _checkPending(refresh));
+  on('pending-check', b => _resolvePending(b.dataset.job, 'check', desc, refresh));
+  on('pending-new', b => { S.jobId = b.dataset.job; _confirmPublishNew(desc, refresh); });
   on('keep-waiting', () => _keepWaiting(refresh));
   on('cancel-clean', () => _cancel(refresh).then(() => { S.phase = 'form'; refresh(); }));
   on('back', () => { S.phase = 'form'; S.steps = []; S.outcome = null; S.jobId = null; S.hold = null; S.linksOpen = null; refresh('#pub-title'); });

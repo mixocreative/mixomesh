@@ -52,7 +52,7 @@ function setup({ respond = () => ({ json: { data: { remoteId: 'R1', url: 'https:
     cancel: async id => ({ cancelled: id }),
     onProgress: cb => { listeners.add(cb); return () => listeners.delete(cb); },
   };
-  let state = { project: { listings: [] } };
+  let state = { project: { id: 'proj-test', listings: [] } };
   const sets = [];
   const deps = {
     caps: { publish: true }, api,

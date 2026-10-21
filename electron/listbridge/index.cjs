@@ -8,6 +8,12 @@
 // validated before a job exists. Progress goes back to the SAME webContents on
 // `publish:progress`.
 //
+// Creates are journaled on disk (journal.cjs, cia B-04/F-01): a window that reloads or crashes
+// mid-publish, or an app restart, finds the outcome with `publish:pending(projectKey)` and
+// settles it with `publish:resolvePending(jobId, 'ack' | 'check' | 'discard')`. While a project
+// has an unsettled create (or a publish still running), `publish:start` for it creates nothing
+// and answers { ok:false, status:'pending', pending }.
+//
 // No Electron import here (safeStorage / userData come in through deps) so the wiring is
 // unit-testable under plain node. The portable core (src/listbridge, ESM) is loaded with
 // dynamic import() by loadCore().
@@ -17,10 +23,12 @@ const { pathToFileURL } = require('node:url');
 const { createCredentialStore } = require('./credentials.cjs');
 const { createTransport } = require('./transport.cjs');
 const { createPublishRunner } = require('./jobs.cjs');
+const { createJournal } = require('./journal.cjs');
 const { createS3FileHost } = require('./filehosts/s3.cjs');
 const { createTunnelFileHost, resolveCloudflared } = require('./filehosts/tunnel.cjs');
 
 const CREDENTIALS_FILE = 'listbridge-credentials.bin';
+const JOURNAL_FILE = 'listbridge-journal.json';
 const MAX_ITEM_BYTES = 1024 * 1024 * 1024;          // 1 GiB per file / image
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;     // 2 GiB per listing
 const MAX_ITEMS = 64;
@@ -136,6 +144,7 @@ function registerListbridgeIpc(handle, deps = {}) {
     listIds: () => store.listIds?.(),
   };
   const transport = deps.transport || createTransport({ fetchImpl, ...(sleep ? { sleep } : {}) });
+  const journal = deps.journal || createJournal({ filePath: path.join(String(userDataDir), JOURNAL_FILE) });
   const makeS3Host = deps.makeFileHost || (record => {
     const { type: _type, ...cfg } = record;
     return createS3FileHost({ ...cfg, fetchImpl });
@@ -175,7 +184,7 @@ function registerListbridgeIpc(handle, deps = {}) {
       const core = await loadCore();
       for (const a of adapters) core.assertAdapter(a);
       const runner = createPublishRunner({
-        adapters, credentials, transport, makeFileHost, zip, core, confirm, ...(sleep ? { sleep } : {}),
+        adapters, credentials, transport, makeFileHost, zip, core, confirm, journal, ...(sleep ? { sleep } : {}),
       });
       liveRunner = runner;
       return { core, runner, byId: new Map(adapters.map(a => [a.describe().id, a])) };
@@ -378,15 +387,71 @@ function registerListbridgeIpc(handle, deps = {}) {
     // URL-only platforms default to the temporary-link host (no account needed).
     if (!fileHostId && adapter.describe().transfer === 'url') fileHostId = TUNNEL_ID;
     const remoteId = str(payload.remoteId, 'remoteId', { required: false, max: 256 });
+    const projectKey = str(payload.projectKey, 'projectKey', { required: false, max: 128 });
+    if (projectKey && !ID_PART.test(projectKey)) throw new Error('projectKey has invalid characters');
     const pkg = buildPackage(core, payload);
     const d = adapter.describe();
     const issues = [...core.validateListing(pkg, { maxImages: d.maxImages, currencies: d.currencies }), ...(adapter.validate(pkg) || [])];
     if (issues.length) return { ok: false, status: 'invalid', issues };
+    if (projectKey && !remoteId) {
+      const pending = await pendingFor(runner, projectKey);
+      if (pending.length) return { ok: false, status: 'pending', pending };
+    }
     const jobId = runner.create({
       platform, accountId, fileHostId, remoteId, pkg, onProgress: progressTo(event.sender), zipName: slugName(pkg.title),
+      projectKey,
     });
     jobOwner.set(jobId, event.sender?.id);
     return runner.run(jobId);
+  });
+
+  // Unsettled creates of a project, plus publishes of it still running (no journal entry yet).
+  async function pendingFor(runner, projectKey) {
+    const running = runner.runningJobs().filter(j => j.projectKey === projectKey);
+    const live = new Set(running.map(j => j.jobId));
+    const entries = (await journal.list()).filter(e => e.projectKey === projectKey).map(e => pendingView(e, live.has(e.jobId)));
+    for (const j of running) if (!entries.some(e => e.jobId === j.jobId)) entries.push({ jobId: j.jobId, platform: j.platform, state: 'running', running: true });
+    return entries;
+  }
+
+  // A 'creating' entry whose job is gone (crash, quit, restart) is unknown: the request may have landed.
+  const pendingView = (e, running) => ({
+    jobId: e.jobId, platform: e.platform, accountId: e.accountId, title: e.title ?? '', listing: e.listing ?? null,
+    state: e.state === 'creating' && !running ? 'unknown' : e.state, running,
+    ...(e.remoteId ? { remoteId: e.remoteId, url: e.url ?? '', status: e.status ?? null } : {}),
+  });
+
+  handle('publish:pending', async (_e, projectKey) => {
+    const { runner } = await ready();
+    if (typeof projectKey !== 'string' || !ID_PART.test(projectKey)) throw new Error('publish:pending needs a project key');
+    return pendingFor(runner, projectKey);
+  });
+
+  // 'ack' = the listing record is saved in the project; 'check' = look the listing up on the platform;
+  // 'discard' = the seller checked the platform and wants to publish anew (never while it runs).
+  handle('publish:resolvePending', async (_e, jobId, action) => {
+    const { runner } = await ready();
+    if (typeof jobId !== 'string' || !ID_PART.test(jobId)) throw new Error('publish:resolvePending needs a job id');
+    const entry = await journal.get(jobId);
+    if (!entry) return { ok: true, state: 'gone' };
+    const running = runner.runningJobs().some(j => j.jobId === jobId);
+    if (action === 'ack') {
+      if (entry.state !== 'created') throw new Error('only a created listing can be acknowledged');
+      await journal.remove(jobId);
+      return { ok: true, state: 'gone' };
+    }
+    if (running) return { ok: false, ...pendingView(entry, true) };
+    if (action === 'discard') {
+      await journal.remove(jobId);
+      return { ok: true, state: 'gone' };
+    }
+    if (action !== 'check') throw new Error(`unknown action "${action}"`);
+    if (entry.state === 'created') return { ok: true, ...pendingView(entry, false) };
+    const found = await runner.findCreated({
+      platform: entry.platform, accountId: entry.accountId, title: entry.title, locale: entry.locale, knownIds: entry.knownIds,
+    });
+    if (!found) return { ok: false, ...pendingView(entry, false) };
+    return { ok: true, ...pendingView(await journal.put(jobId, { state: 'created', ...found }), false) };
   });
 
   handle('publish:retry', async (event, jobId) => {
@@ -421,4 +486,4 @@ function registerListbridgeIpc(handle, deps = {}) {
   return { ready, credentials, closeAll, hasRunningJobs, runningJobs, cancelAll };
 }
 
-module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, FILEHOST_TYPES, TUNNEL_ID, CONFIRM_OPTIONS, defaultZip, loadListbridgeCore: defaultLoadCore };
+module.exports = { registerListbridgeIpc, CREDENTIALS_FILE, JOURNAL_FILE, FILEHOST_TYPES, TUNNEL_ID, CONFIRM_OPTIONS, defaultZip, loadListbridgeCore: defaultLoadCore };

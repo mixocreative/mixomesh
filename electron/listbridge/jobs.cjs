@@ -25,6 +25,9 @@
 //               before the create and carries the sent title) and adopts it; anything less fails
 //               again with `create-unknown`. Cancel never aborts a create in flight: it waits for
 //               the answer, so a listing the platform made is reported (result.remoteId).
+//               deps.journal (journal.cjs) records every create on disk: 'creating' before it is
+//               sent, then 'created' (with the id) or 'unknown'; a create the platform refused is
+//               dropped. The main process, not the renderer, owns that record (cia B-04).
 //   * confirm:  adapter.buildConfirm/parseConfirm polling when the adapter has them.
 //   * cleanup:  remove hosted objects. Runs only after confirm (or on cancel); if it fails the
 //               objects are kept, the job reports it, and retry() resumes at cleanup.
@@ -102,6 +105,8 @@ function s3Reason(text) {
  * @param {(event: any) => void} [deps.emit]               default progress sink
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => number} [deps.now]
+ * @param {{ put(jobId: string, fields: object): Promise<any>, remove(jobId: string): Promise<any> }} [deps.journal]
+ *   on-disk create record (journal.cjs); default keeps nothing
  * @param {{ polls?: number, intervalMs?: number, holdMs?: number, retryWindowMs?: number, publicWaitMs?: number }} [deps.confirm]
  *   polls / intervalMs: adapter confirm polling (non-uptime hosts); intervalMs is also the hold
  *   poll interval; holdMs: uptime-host hold; retryWindowMs: failed-job link lifetime.
@@ -110,6 +115,7 @@ function createPublishRunner({
   adapters = [], credentials, transport, makeFileHost, zip, core, emit = () => {},
   sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now,
   confirm: confirmOpts = {}, newId = () => `job_${crypto.randomBytes(8).toString('hex')}`,
+  journal = { put: async () => {}, remove: async () => {} },
 } = {}) {
   if (!core || typeof core.validateListing !== 'function' || typeof core.planBundle !== 'function') {
     throw new Error('Listbridge runner: core { validateListing, planBundle } is required');
@@ -326,31 +332,61 @@ function createPublishRunner({
       if (!found) throw createUnknownError(job);
       job.createUnknown = false;
       job.result = found;
+      await journalCreated(job);
       return `Found listing ${found.remoteId} on ${job.desc.label || job.platform}.`;
     }
     const spec = job.adapter.buildCreate(job.pkg, buildContext(job));
     job.knownListings = await ownListingIds(job);
+    // On disk BEFORE the request leaves: a reload, crash or quit from here on cannot forget it.
+    await journal.put(job.id, {
+      projectKey: job.projectKey, platform: job.platform, accountId: job.accountId, state: 'creating',
+      title: job.pkg.title, locale: job.pkg.locale, knownIds: job.knownListings, listing: listingOf(job.pkg),
+    });
     job.createInFlight = true;
     let res;
     try {
       res = await send(job, spec, 'rate-limit');
     } catch (err) {
       // Never sent (no credentials) or refused with a 4xx: nothing was created.
-      if (err?.code === 'no-credentials' || (err?.code === 'platform-http' && Number(err.status) < 500)) throw err;
-      job.createUnknown = true;
-      throw createUnknownError(job, err);
+      if (err?.code === 'no-credentials' || (err?.code === 'platform-http' && Number(err.status) < 500)) {
+        await journalQuietly(() => journal.remove(job.id));
+        throw err;
+      }
+      throw await markUnknown(job, err);
     } finally {
       job.createInFlight = false;
     }
     try {
       job.result = parseCreated(job, res);
     } catch (err) {
-      if (err.code !== 'platform-unclear') throw err;
-      job.createUnknown = true;
-      throw createUnknownError(job, err);
+      if (err.code !== 'platform-unclear') {
+        await journalQuietly(() => journal.remove(job.id));
+        throw err;
+      }
+      throw await markUnknown(job, err);
     }
+    await journalCreated(job);
     return `Created listing ${job.result.remoteId}.`;
   }
+
+  async function markUnknown(job, cause) {
+    job.createUnknown = true;
+    await journalQuietly(() => journal.put(job.id, { state: 'unknown' }));
+    return createUnknownError(job, cause);
+  }
+
+  const journalCreated = job => journalQuietly(() => journal.put(job.id, { state: 'created', ...job.result }));
+
+  // After the request went out, a failing journal write must not turn a made listing into a failure.
+  async function journalQuietly(write) {
+    try { await write(); } catch { /* the outcome still carries the result */ }
+  }
+
+  const listingOf = pkg => ({
+    title: pkg.title, description: pkg.description, tags: [...(pkg.tags || [])], price: pkg.price ? { ...pkg.price } : null,
+    license: pkg.license ?? null, madeWithAi: !!pkg.madeWithAi, categoryHint: pkg.categoryHint ?? null,
+    subCategoryIds: [...(pkg.subCategoryIds || [])], visibility: pkg.visibility ?? null, fileNames: (pkg.files || []).map(f => f.name),
+  });
 
   async function ownListings(ref, locale) {
     const res = await send(ref, ref.adapter.buildOwnListings({ locale }), 'all');
@@ -669,15 +705,16 @@ function createPublishRunner({
   /**
    * Register a job without running it. Returns the jobId.
    * @param {{ platform: string, accountId: string, fileHostId?: string, remoteId?: string,
-   *   pkg: any, onProgress?: (e: any) => void, zipName?: string }} opts
+   *   pkg: any, onProgress?: (e: any) => void, zipName?: string, projectKey?: string }} opts
+   *   projectKey = the caller's project identity, carried into the create journal
    */
-  function create({ platform, accountId, fileHostId, remoteId, pkg, onProgress, zipName } = {}) {
+  function create({ platform, accountId, fileHostId, remoteId, pkg, onProgress, zipName, projectKey } = {}) {
     const adapter = adapterFor(platform);
     if (typeof accountId !== 'string' || !accountId) throw new Error('Listbridge: accountId is required.');
     if (!pkg || typeof pkg !== 'object') throw new Error('Listbridge: a listing package is required.');
     const id = newId();
     jobs.set(id, {
-      id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null,
+      id, platform, accountId, fileHostId: fileHostId || null, remoteId: remoteId || null, projectKey: projectKey || null,
       adapter, desc: adapter.describe(), pkg, onProgress, zipName: zipName || 'files.zip',
       stepIndex: 0, status: 'pending', hosted: new Map(), uploaded: new Map(), deliverFiles: null, result: null,
       createUnknown: false, createInFlight: false, knownListings: null,
@@ -764,7 +801,7 @@ function createPublishRunner({
     has: jobId => jobs.has(jobId),
     /** Jobs that are executing right now (a failed job waiting for Retry is not running). */
     runningJobs: () => [...jobs.values()].filter(j => j.status === 'running')
-      .map(j => ({ jobId: j.id, platform: j.platform, label: j.desc.label || j.platform })),
+      .map(j => ({ jobId: j.id, platform: j.platform, label: j.desc.label || j.platform, projectKey: j.projectKey })),
     hasRunningJobs: () => [...jobs.values()].some(j => j.status === 'running'),
   });
 }
