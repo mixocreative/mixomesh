@@ -76,6 +76,14 @@ const MEASURE_IN_PAGE = (fileUrl, filename, budget) => `(async () => {
   const po = new PerformanceObserver(list => { for (const e of list.getEntries()) longTasks.push(e.duration); });
   po.observe({ type: 'longtask', buffered: false });
   window.__heavyMark = 'import';
+  // Which activity rows were on screen during the import (progress UX check).
+  const activity = new Set();
+  const spy = setInterval(() => {
+    const panel = document.querySelector('#job-activity');
+    if (panel && !panel.hidden) for (const row of panel.querySelectorAll('.ja-row')) {
+      activity.add(row.dataset.state + ': ' + row.querySelector('.ja-label')?.textContent);
+    }
+  }, 100);
   const t0 = performance.now();
   let meshIds = [], err = null;
   try { meshIds = await al.AssetLoader.loadFromBlob(blob, ${JSON.stringify(filename)}, new B.Vector3(0, 0, 0), {}); }
@@ -85,6 +93,7 @@ const MEASURE_IN_PAGE = (fileUrl, filename, budget) => `(async () => {
   const firstFrameMs = performance.now() - t0;
   await new Promise(r => setTimeout(r, 200));
   po.disconnect();
+  clearInterval(spy);
   window.__heavyMark = 'after';
   const tris = scene.meshes.filter(m => m.metadata?.meshId && m.isEnabled())
     .reduce((n, m) => n + (m.getTotalIndices?.() ?? 0) / 3, 0);
@@ -92,6 +101,7 @@ const MEASURE_IN_PAGE = (fileUrl, filename, budget) => `(async () => {
     err, meshIds, tris, importMs: Math.round(importMs), firstFrameMs: Math.round(firstFrameMs),
     maxBlockMs: Math.round(Math.max(0, ...longTasks)), blockedMs: Math.round(longTasks.reduce((a, b) => a + b, 0)),
     heapMB: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 2 ** 20),
+    activity: [...activity].slice(0, 6),
   };
 })()`;
 

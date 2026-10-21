@@ -6,7 +6,7 @@
 
 import { serveTask } from './serveTask.js';
 
-serveTask(async ({ path, bytes } = {}) => {
+serveTask(async ({ path, bytes } = {}, { progress } = {}) => {
   let access = null;
   try {
     if (!Array.isArray(path) || !path.length) throw new Error('No OPFS path');
@@ -20,6 +20,7 @@ serveTask(async ({ path, bytes } = {}) => {
       const n = access.write(bytes.subarray(at), { at });
       if (!(n > 0)) throw new Error('OPFS write made no progress');
       at += n;
+      progress?.({ stage: 'write', loaded: at, total: bytes.byteLength });
     }
     access.flush();
     return true;

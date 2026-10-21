@@ -20,9 +20,12 @@ function manifold(url) {
   return _wasm;
 }
 
-serveTask(async ({ op, operands, manifoldUrl }) => {
+serveTask(async ({ op, operands, manifoldUrl }, { progress }) => {
+  progress({ stage: 'load', fraction: 0 });
   const wasm = await manifold(manifoldUrl);
+  progress({ stage: 'boolean', fraction: 0.2 });
   const out = booleanArrays(wasm, op, operands);
+  progress({ stage: 'boolean', fraction: 1 });
   const transfer = [out.positions.buffer, out.indices.buffer, ...(out.normals ? [out.normals.buffer] : [])];
   return transferable(out, transfer);
 });

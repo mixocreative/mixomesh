@@ -16,6 +16,7 @@ import { WorkerTask } from './workers/WorkerTask.js';
 // same sync codec on the main thread (WorkerTask fallback).
 const _task = new WorkerTask({
   name: 'base64 worker',
+  label: 'job.encodeAssets',
   create: typeof Worker === 'function'
     ? () => new Worker(new URL('./workers/Base64.worker.js', import.meta.url), { type: 'module' })
     : null,

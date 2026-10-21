@@ -18,7 +18,7 @@ const KINDS = { '.stl': 'stl', '.3mf': '3mf' };
 
 const _task = new WorkerTask({
   name: 'Model import',
-  label: 'Loading model',
+  label: 'job.importModel',
   mode: 'per-job',
   timeoutMs: MESH_IMPORT_TIMEOUT_MS,
   create: () => new Worker(new URL('./workers/MeshImport.worker.js', import.meta.url), { type: 'module' }),
@@ -64,7 +64,7 @@ export async function loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgre
   if (!kind) throw new Error(`No worker import for ${ext}`);
   const result = await _task.run(
     { kind, blobUrl, triangleBudget: caps.triangleBudget },
-    { onProgress, signal, label: kind === 'stl' ? 'Loading STL' : 'Loading 3MF', cancellable: true },
+    { onProgress, signal, label: kind === 'stl' ? 'job.importStl' : 'job.import3mf', cancellable: true },
   );
   if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
   if (kind === 'stl') {

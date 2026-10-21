@@ -92,7 +92,11 @@ export function checkInvertedNormals(positions, indices, clockwise) {
   return clockwise ? v6 < 0 : v6 > 0;
 }
 
-serveTask(({ positions, indices, clockwise = false }) => ({
-  badEdgeCount: checkNonManifold(positions, indices),
-  inverted: checkInvertedNormals(positions, indices, !!clockwise),
-}));
+serveTask(({ positions, indices, clockwise = false }, { progress }) => {
+  progress({ stage: 'edges', fraction: 0 });
+  const badEdgeCount = checkNonManifold(positions, indices);
+  progress({ stage: 'winding', fraction: 0.9 });
+  const inverted = checkInvertedNormals(positions, indices, !!clockwise);
+  progress({ stage: 'winding', fraction: 1 });
+  return { badEdgeCount, inverted };
+});

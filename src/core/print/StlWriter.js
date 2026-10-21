@@ -58,6 +58,7 @@ export function stlWorkerTimeoutFor(triangles) {
 // print-space copies), the encoded bytes come back transferred.
 const _stlTask = new WorkerTask({
   name: 'STL encoder',
+  label: 'job.exportStl',
   create: typeof Worker === 'function'
     ? () => new Worker(new URL('../workers/StlEncode.worker.js', import.meta.url), { type: 'module' })
     : null,

@@ -9,6 +9,7 @@ export const BOOLEAN_WORKER_TIMEOUT_MS = 300_000;
 
 const _task = new WorkerTask({
   name: 'Boolean worker',
+  label: 'job.boolean',
   timeoutMs: BOOLEAN_WORKER_TIMEOUT_MS,
   create: typeof Worker === 'function'
     ? () => new Worker(new URL('./workers/Boolean.worker.js', import.meta.url), { type: 'module' })

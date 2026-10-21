@@ -3,7 +3,7 @@
 import { encodeBinarySTLFromArrays } from '../print/stlEncode.js';
 import { serveTask, transferable } from './serveTask.js';
 
-serveTask(({ parts, solidName }) => {
-  const bytes = encodeBinarySTLFromArrays(parts, solidName);
+serveTask(({ parts, solidName }, { progress }) => {
+  const bytes = encodeBinarySTLFromArrays(parts, solidName, (fraction) => progress({ stage: 'encode', fraction }));
   return transferable(bytes, [bytes.buffer]);
 });

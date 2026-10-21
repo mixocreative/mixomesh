@@ -7,4 +7,4 @@
 import { encodeBase64 } from './base64Codec.js';
 import { serveTask } from './serveTask.js';
 
-serveTask(({ buffer }) => encodeBase64(buffer));
+serveTask(({ buffer }, { progress }) => encodeBase64(buffer, (fraction) => progress({ stage: 'encode', fraction })));

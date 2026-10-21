@@ -28,6 +28,7 @@ export function isValidateWorkerSupported() {
 // request respawns it (WorkerTask). Callers fall back inline on rejection.
 const _task = new WorkerTask({
   name: 'validation worker',
+  label: 'job.checkMesh',
   create: () => new Worker(new URL('./workers/MeshValidate.worker.js', import.meta.url), { type: 'module' }),
 });
 

@@ -24,6 +24,7 @@ export const WORKER_JOB_TIMEOUT_MS = 120_000;
 // fresh worker (WorkerTask serial queue).
 const _task = new WorkerTask({
   name: 'OBJ worker',
+  label: 'job.importObj',
   concurrency: 'serial',
   timeoutMs: WORKER_JOB_TIMEOUT_MS,
   create: () => new Worker(new URL('./workers/ObjParse.worker.js', import.meta.url), { type: 'module' }),
@@ -37,7 +38,7 @@ async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs, sig
   try {
     return await _task.run(
       { blobUrl, ext, siblings: [...(siblings ?? new Map()).entries()] },
-      { timeoutMs, onProgress, signal, label: 'Loading OBJ', cancellable: true },
+      { timeoutMs, onProgress, signal, cancellable: true },
     );
   } catch (err) {
     const secs = Math.round(timeoutMs / 1000);

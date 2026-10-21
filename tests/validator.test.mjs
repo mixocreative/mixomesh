@@ -186,7 +186,8 @@ await test('worker weld key is exact: a closed 10 mm cube has 0 non-manifold edg
   // every real model's count was garbage.
   const prevSelf = globalThis.self;
   const sent = [];
-  globalThis.self = { postMessage: (m) => sent.push(m) };
+  // Progress messages (heavy-mesh task d) are not what these assertions are about.
+  globalThis.self = { postMessage: (m) => { if (m.type !== 'progress') sent.push(m); } };
   try {
     await import('../src/core/workers/MeshValidate.worker.js');
     // The module binds self.onmessage ONCE at first import — keep it for
@@ -217,7 +218,7 @@ await test('worker pure function applies the same orientation rule', async () =>
   // The worker module binds self.onmessage at import; give it a stub `self`.
   const prevSelf = globalThis.self;
   const sent = [];
-  globalThis.self = { postMessage: (m) => sent.push(m), onmessage: _workerOnMessage };
+  globalThis.self = { postMessage: (m) => { if (m.type !== 'progress') sent.push(m); }, onmessage: _workerOnMessage };
   try {
     const { checkInvertedNormals } = await import('../src/core/workers/MeshValidate.worker.js');
     const m = buildMesh(TRIS);

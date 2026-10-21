@@ -18,6 +18,14 @@
 // with code 'restarted' (crash: everyone gets the crash message), and the next
 // run() starts a fresh worker. Named WorkerTask, not JobRunner — that is the
 // Electron CLI batch runner (electron/JobRunner.cjs).
+//
+// Progress UX (heavy-mesh spec §5): every job is reported to the shared
+// JobActivity registry under its `label` (an i18n "job.*" key), with the
+// worker's progress messages forwarded. A job run with a `signal` or
+// `cancellable: true` gets a Cancel in the activity UI, which rejects it with
+// AbortError exactly like the caller's own signal would.
+
+import { beginJob } from './JobActivity.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -40,8 +48,10 @@ export class WorkerTask {
    * @param {number} [opts.timeoutMs]
    * @param {(payload: any) => any} [opts.fallback]  main-thread implementation
    * @param {string} [opts.name]  used in error messages
+   * @param {string} [opts.label]  i18n key shown in the activity UI ("job.*")
    */
-  constructor({ create, mode = 'persistent', concurrency = 'parallel', timeoutMs = DEFAULT_TIMEOUT_MS, fallback, name = 'worker task' }) {
+  constructor({ create, mode = 'persistent', concurrency = 'parallel', timeoutMs = DEFAULT_TIMEOUT_MS, fallback, name = 'worker task', label }) {
+    this.label = label ?? null;
     this._create = create;
     this._mode = mode;
     this._serial = concurrency === 'serial';
@@ -58,14 +68,36 @@ export class WorkerTask {
    * Run one job. Resolves with the worker's `result`.
    * @param {any} payload
    * @param {{ transfer?: Transferable[], signal?: AbortSignal, timeoutMs?: number,
-   *           onProgress?: (e: object) => void, revision?: number }} [opts]
+   *           onProgress?: (e: object) => void, revision?: number,
+   *           label?: string, cancellable?: boolean }} [opts]
    */
   run(payload, opts = {}) {
     if (opts.signal?.aborted) return Promise.reject(abortError(this._name));
-    if (!this._serial) return this._start(payload, opts);
-    const next = this._chain.then(() => this._start(payload, opts));
-    this._chain = next.catch(() => {});
-    return next;
+    // One controller per job: the caller's signal and the activity Cancel both feed it.
+    const ctrl = new AbortController();
+    const outer = opts.signal;
+    const onOuter = () => ctrl.abort();
+    outer?.addEventListener('abort', onOuter, { once: true });
+    const activity = beginJob({
+      label: opts.label ?? this.label ?? this._name,
+      cancel: (opts.cancellable || outer) ? () => ctrl.abort() : null,
+    });
+    const userProgress = opts.onProgress;
+    const inner = {
+      ...opts,
+      signal: ctrl.signal,
+      onProgress: (fields) => { activity.progress(fields); userProgress?.(fields); },
+    };
+    let job;
+    if (!this._serial) {
+      job = this._start(payload, inner);
+    } else {
+      job = this._chain.then(() => this._start(payload, inner));
+      this._chain = job.catch(() => {});
+    }
+    job.then(() => activity.end(), (error) => activity.end(error))
+      .finally(() => outer?.removeEventListener('abort', onOuter));
+    return job;
   }
 
   /** Terminate the persistent worker (pending jobs reject 'restarted'). */

@@ -32,6 +32,7 @@ export function validateRefinedGeometry(geometry, input, level) {
 // revision rides along as the stale guard.
 const _task = new WorkerTask({
   name: 'refinement worker',
+  label: 'job.refine',
   mode: 'per-job',
   timeoutMs: DEFAULT_TIMEOUT_MS,
   create: typeof Worker === 'function'

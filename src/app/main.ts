@@ -1,5 +1,6 @@
 import { Toast, safeAsync } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
+import { JobActivityPanel } from '../ui/JobActivity.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { AssetPanel } from '../ui/AssetPanel.js';
@@ -78,6 +79,7 @@ async function bootstrap() {
   i18n.init();    // detect locale, set _locale, apply <html lang>, fire LOCALE_CHANGED
   Toast.init();
   StatusBar.init();
+  JobActivityPanel.init();   // every worker job shows up here (heavy-mesh spec §5)
 
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('Viewport canvas missing');

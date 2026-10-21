@@ -154,6 +154,11 @@
 :root:not([data-ui-style="original"]) .po-bar { background: var(--red); }
 :root:not([data-ui-style="original"]) .po-track,
 :root:not([data-ui-style="original"]) .po-bar { border-radius: 0; }
+/* Job activity panel: hairline, 2px radius, the fill is the only red. */
+:root:not([data-ui-style="original"]) .job-activity { border-color: var(--border); border-radius: 2px; }
+:root:not([data-ui-style="original"]) .ja-fill { background: var(--red); }
+:root:not([data-ui-style="original"]) .ja-track { height: 2px; }
+:root:not([data-ui-style="original"]) :is(.ja-cancel, .ja-dismiss) { border-radius: 2px; }
 
 /* Destructive stays an outline; hover tints, never fills. */
 :root:not([data-ui-style="original"]) .modal-btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }

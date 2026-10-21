@@ -9,7 +9,7 @@
  * @param {string} [solidName]  written into the 80-byte header (ASCII, truncated)
  * @returns {Uint8Array}
  */
-export function encodeBinarySTLFromArrays(parts, solidName = 'mixomesh') {
+export function encodeBinarySTLFromArrays(parts, solidName = 'mixomesh', onProgress) {
   let count = 0;
   for (const { name, positions: pos, indices: idx } of parts) {
     for (let i = 0; i + 2 < idx.length; i += 3) {
@@ -40,6 +40,7 @@ export function encodeBinarySTLFromArrays(parts, solidName = 'mixomesh') {
       view.setFloat32(o + 4, len > 0 ? ny / len : 0, true);
       view.setFloat32(o + 8, len > 0 ? nz / len : 0, true);
       view.setFloat32(o + 12, ax, true); view.setFloat32(o + 16, ay, true); view.setFloat32(o + 20, az, true);
+      if (onProgress && ((o - 84) / 50) % 0x40000 === 0) onProgress((o - 84) / 50 / count);
       view.setFloat32(o + 24, bx, true); view.setFloat32(o + 28, by, true); view.setFloat32(o + 32, bz, true);
       view.setFloat32(o + 36, cx, true); view.setFloat32(o + 40, cy, true); view.setFloat32(o + 44, cz, true);
       view.setUint16(o + 48, 0, true);

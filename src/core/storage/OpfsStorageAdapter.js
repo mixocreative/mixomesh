@@ -147,6 +147,7 @@ export function opfsWriteTimeoutFor(byteLength, base = _opfsWriteTimeoutMs) {
 // that never answers is terminated by the timeout instead of hanging the save.
 const _opfsWriteTask = new WorkerTask({
   name: 'OPFS write',
+  label: 'job.saveBrowser',
   mode: 'per-job',
   create: () => new Worker(new URL('../workers/OpfsWrite.worker.js', import.meta.url), { type: 'module' }),
 });
