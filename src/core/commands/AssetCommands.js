@@ -7,7 +7,7 @@ import { t } from '../../i18n/index.js';
 import { Selection } from '../Selection.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
-import { sha256Hex } from '../hash.js';
+import { sha256HexOfBlob } from '../hash.js';
 import { extOf } from '../assets/AssetTypes.js';
 import {
   prepareAssetReplacement, installAssetSet, applyPersistedRatioBake,
@@ -50,7 +50,7 @@ export class RelinkAssetCommand {
     const { blob } = spec;
     const filename = spec.filename || entry.filename;
     const extension = extOf(filename);
-    const contentHash = await sha256Hex(await blob.arrayBuffer());
+    const contentHash = await sha256HexOfBlob(blob);
     const { previous, next } = await prepareAssetReplacement(assetId, blob, extension, {
       ...(spec.siblingFiles ? { siblingFiles: spec.siblingFiles } : {}),
     });

@@ -181,3 +181,11 @@ test('activity rows say what is running and, on failure, what to do next', async
   assert.deepEqual(rowText({ label: 'job.checkMesh', state: 'indeterminate', percent: null, showElapsed: true, elapsedMs: 12000 }),
     { label: 'Checking mesh…', meta: '12 s so far' });
 });
+
+test('blob hashing: same digest inline and the big-file path falls back without Worker', async () => {
+  const { sha256Hex, sha256HexOfBlob, WORKER_HASH_MIN_BYTES } = await import('../src/core/hash.js');
+  const small = new Blob(['abc']);
+  assert.equal(await sha256HexOfBlob(small), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  const big = new Blob([new Uint8Array(WORKER_HASH_MIN_BYTES + 1)]);
+  assert.equal(await sha256HexOfBlob(big), await sha256Hex(await big.arrayBuffer()));
+});

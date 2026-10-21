@@ -7,7 +7,7 @@ import { EVENTS } from '../events.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
-import { sha256Hex } from '../hash.js';
+import { sha256HexOfBlob } from '../hash.js';
 import { assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity } from '../import/ImportLimits.js';
 import { estimateFileTriangles } from '../import/TriangleEstimate.js';
 import {
@@ -248,7 +248,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   // Heavy-mesh spec §3: refuse/warn on the triangle count BEFORE hashing.
   const preParse = await preParseCheck(blob, filename);
   let contentHash = null;
-  try { contentHash = await sha256Hex(await blob.arrayBuffer()); }
+  try { contentHash = await sha256HexOfBlob(blob); }
   catch { /* no hash → no dedupe; loadFromBlob proceeds as before */ }
   const existingId = findByHash(contentHash);
   if (existingId) {
@@ -378,7 +378,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
     let sourceFileHash = opts.contentHash ?? null;
     if (!sourceFileHash) {
-      try { sourceFileHash = await sha256Hex(await blob.arrayBuffer()); }
+      try { sourceFileHash = await sha256HexOfBlob(blob); }
       catch { /* hash is an identity optimisation — import proceeds without it */ }
     }
 
