@@ -28,6 +28,7 @@ import {
 } from './persist/ProjectLoader.js';
 import { isDesktop } from './storage/capabilities.js';
 import { storage } from './storage/StorageAdapter.js';
+import { whileBusy } from './BusyRegistry.js';
 import { pushRecent, getRecentProjects } from './persist/RecentProjects.js';
 import { startAutosave, stopAutosave, recoverAutosave } from './persist/Autosave.js';
 import {
@@ -168,8 +169,12 @@ function _parseDoc(text) {
   }
 }
 
+// Open / New / Recent replace the world, and their dialog and picker wait on
+// the user: an external import must not land under them (cia F-06).
+const _replacing = fn => (...args) => whileBusy('open', () => fn(...args));
+
 /** Prompt for a .mixo file and load it (after any save in flight). */
-export async function open() {
+export const open = _replacing(async () => {
   await whenSaveIdle();
   assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm, not after the user answered it
   if (isDirty()) {
@@ -181,7 +186,7 @@ export async function open() {
   if (!picked) return;
   const doc = _parseDoc(await picked.file.text());
   await _loadAndBind(doc, picked.ref);
-}
+});
 
 /**
  * Open an already-picked project (`{ref, file}` from `storage.pickOpenProject`)
@@ -189,7 +194,7 @@ export async function open() {
  * viewer (8.6) uses it for its own file input / project list.
  * @param {{ref:any, file:File|Blob}} picked
  */
-export async function openPicked(picked) {
+export const openPicked = _replacing(async picked => {
   await whenSaveIdle();
   assertNoImportInFlight();
   if (isDirty()) {
@@ -198,7 +203,7 @@ export async function openPicked(picked) {
     if (choice === 'save' && !(await save())) return;
   }
   await _loadAndBind(_parseDoc(await picked.file.text()), picked.ref);
-}
+});
 
 // Bind the save target only once the loaded state is coherent. Binding
 // BEFORE loadProject meant a torn load (world already reset, then a throw)
@@ -214,7 +219,7 @@ async function _loadAndBind(doc, ref) {
 }
 
 /** Reset to a blank project (confirm if dirty). */
-export async function newProject() {
+export const newProject = _replacing(async () => {
   await whenSaveIdle();
   assertNoImportInFlight();   // F20: an import mid-flight would mint objects into the blank project
   if (isDirty()) {
@@ -243,10 +248,10 @@ export async function newProject() {
   clearDirty();
   dispatch(EVENTS.PROJECT_SAVED, {});
   Toast.show(t('toast.newProject'), 'info', 2000);
-}
+});
 
 /** Open a recent project by its stored entry. */
-export async function openRecent(rec) {
+export const openRecent = _replacing(async rec => {
   await whenSaveIdle();
   assertNoImportInFlight();   // F20: refuse BEFORE the dirty confirm
   if (isDirty()) {
@@ -267,7 +272,7 @@ export async function openRecent(rec) {
   }
   const file = await storage.readFile(ref);
   await _loadAndBind(_parseDoc(await file.text()), ref);
-}
+});
 
 /**
  * Resolve an app-window close through the shared save/discard/cancel vocabulary.

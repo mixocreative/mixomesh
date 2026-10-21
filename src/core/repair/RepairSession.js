@@ -23,6 +23,7 @@ import { repairGroup, toLeadMatrix } from './GroupRepair.js';
 import { withRestTransform } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from './Weld.js';
 import { bump } from '../geometry/GeometryStore.js';
+import { whileBusy } from '../BusyRegistry.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -275,7 +276,11 @@ export async function repairObject(meshId, { record = true, onProgress } = {}) {
  * @returns {Promise<{ holesFilled: number, nmFixed: number, repaired: number,
  *                     failed: Array<{ meshId: string, name: string, error: unknown }> }>}
  */
-export async function repairObjects(meshIds, { onProgress } = {}) {
+export function repairObjects(meshIds, opts = {}) {
+  return whileBusy('repair', () => _repairObjects(meshIds, opts));
+}
+
+async function _repairObjects(meshIds, { onProgress }) {
   let holesFilled = 0;
   let nmFixed = 0;
   let repaired = 0;

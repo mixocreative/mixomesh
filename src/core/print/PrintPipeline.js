@@ -37,6 +37,7 @@ import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { getTextureDimensions } from './ExportTextures.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { initCsg2 } from '../vendorUrl.js';
+import { whileBusy } from '../BusyRegistry.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -316,7 +317,11 @@ function _groupCloneEntries(entries) {
  *          acknowledgeWarnings?:boolean,
  *          onProgress?:(frac:number,msg:string)=>void}} options
  */
-async function _runExport(formatKey, options = {}) {
+function _runExport(formatKey, options = {}) {
+  return whileBusy('export', () => _exportBatch(formatKey, options));
+}
+
+async function _exportBatch(formatKey, options) {
   const fmt = FORMATS[formatKey];
   if (!fmt) throw new Error(`Unknown export format: ${formatKey}`);
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};

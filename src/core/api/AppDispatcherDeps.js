@@ -21,7 +21,7 @@ export async function createAppDispatcher(extra = {}) {
   const [
     SM, { EVENTS }, SelectionMod, History, Persistence, Dirty, Drop, Panel, Validator,
     Pipeline, Cost, ExportCtx, Capture, Profiles, Materials, Scale, Loader, { storage }, Gate, TriCount, Logical,
-    { withRestTransform },
+    { withRestTransform }, Busy,
   ] = await Promise.all([
     import('../StateManager.js'),
     import('../events.js'),
@@ -45,6 +45,7 @@ export async function createAppDispatcher(extra = {}) {
     import('../scene/TriangleCount.js'),
     import('../LogicalObjects.js'),
     import('../scene/ImportBounce.js'),
+    import('../BusyRegistry.js'),
   ]);
   const { Selection } = SelectionMod;
   const { PersistenceManager } = Persistence;
@@ -138,7 +139,7 @@ export async function createAppDispatcher(extra = {}) {
     appVersion: import.meta.env?.VITE_APP_VERSION ?? null,
     runtime: storage.kind,
     supportsRefs: storage.kind === 'desktop',
-    isBusy: () => AssetLoader.isImporting() || Gate.isLoading(),
+    isBusy: () => AssetLoader.isImporting() || Gate.isLoading() || Busy.isBusy(),
     lane: externalLane,
     state: { getState: SM.getState, subscribe: SM.subscribe },
     EVENTS,

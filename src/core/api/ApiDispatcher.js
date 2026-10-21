@@ -191,7 +191,7 @@ export function createDispatcher(deps) {
     while (deps.isBusy?.()) {
       throwIfCancelled(signal);
       if (now() - start >= busyTimeoutMs) {
-        throw apiError('E_BUSY', 'MIXOMESH is busy (import or project load in progress); try again later');
+        throw apiError('E_BUSY', 'MIXOMESH is busy (import, load, save, export, repair or an open dialog in progress); try again later');
       }
       await sleep(busyPollMs);
     }

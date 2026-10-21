@@ -6,6 +6,7 @@
 
 import { EVENTS } from '../events.js';
 import { dispatch, subscribe } from '../StateManager.js';
+import { beginBusy } from '../BusyRegistry.js';
 import {
   getPosition as historyPosition,
   isApplying as historyIsApplying,
@@ -93,11 +94,12 @@ export function clearDirty() {
 
 /** Blocking save/discard/cancel modal for unsaved changes. */
 export function confirmDirty() {
+  const end = beginBusy('dialog');
   return new Promise(resolve => {
     dispatch(EVENTS.MODAL_OPEN, {
       id: 'dirtyConfirm',
       blocking: true,
-      onClose: (r) => resolve(r || 'cancel'),
+      onClose: (r) => { end(); resolve(r || 'cancel'); },
     });
   });
 }
@@ -116,8 +118,12 @@ let _saveInFlight = null;
  * @template T @param {() => Promise<T>} fn @returns {Promise<T>}
  */
 export function runExclusiveSave(fn) {
+  const end = beginBusy('save');
   const run = whenSaveIdle().then(fn);
-  const settled = run.then(() => {}, () => {}).then(() => { if (_saveInFlight === settled) _saveInFlight = null; });
+  const settled = run.then(() => {}, () => {}).then(() => {
+    end();
+    if (_saveInFlight === settled) _saveInFlight = null;
+  });
   _saveInFlight = settled;
   return run;
 }

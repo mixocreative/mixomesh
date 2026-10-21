@@ -14,6 +14,7 @@
 
 import { materialSrgbColor } from './shaders/ColorSpace.js';
 import { initCsg2 } from './vendorUrl.js';
+import { whileBusy } from './BusyRegistry.js';
 
 /**
  * Default summed-triangle ceiling for a Boolean on the web build. Chosen below
@@ -216,7 +217,11 @@ function _applyResultMaterial(result, firstOperand, name, scene) {
  * @param {import('@babylonjs/core').Mesh[]} meshes  >=2, application order
  * @param {{ name?: string, signal?: AbortSignal }} [opts]
  */
-export async function computeBooleanAsync(op, meshes, opts = {}) {
+export function computeBooleanAsync(op, meshes, opts = {}) {
+  return whileBusy('boolean', () => _computeBooleanAsync(op, meshes, opts));
+}
+
+async function _computeBooleanAsync(op, meshes, opts) {
   if (!Array.isArray(meshes) || meshes.length < 2) throw new Error('computeBoolean: need ≥2 meshes');
   if (!['union', 'subtract', 'intersect'].includes(op)) throw new Error(`computeBoolean: bad op ${op}`);
   // Loaded on use: this module must stay importable headless (gating tests).

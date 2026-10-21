@@ -129,7 +129,7 @@ let _runner = null;
 /** Wire the real deps (lazy UI imports keep this module headless-safe) and start. */
 async function init() {
   if (_runner) return;
-  const [{ PersistenceManager }, { AssetPanel }, { ViewportDrop }, { Toast }, { t }, { AssetLoader }, { isLoading }] =
+  const [{ PersistenceManager }, { AssetPanel }, { ViewportDrop }, { Toast }, { t }, { AssetLoader }, { isLoading }, Busy] =
     await Promise.all([
       import('./PersistenceManager.js'),
       import('../ui/AssetPanel.js'),
@@ -138,6 +138,7 @@ async function init() {
       import('../i18n/index.js'),
       import('./AssetLoader.js'),
       import('./persist/LoadGate.js'),
+      import('./BusyRegistry.js'),
     ]);
   _runner = createLaunchRunner({
     storage: defaultStorage,
@@ -146,7 +147,7 @@ async function init() {
     importAssets: picked => ViewportDrop.importPicked(picked),
     toast: (m, type, ms) => Toast.show(m, type, ms),
     t,
-    isBusy: () => AssetLoader.isImporting() || isLoading(),
+    isBusy: () => AssetLoader.isImporting() || isLoading() || Busy.isBusy(),
     lane: externalLane,
   });
   await _runner.init();
