@@ -1316,9 +1316,10 @@
   "stats.region": "ビューポートの統計",
   "stats.selected": "選択 {n} / {total}",
   "stats.scene": "シーン · オブジェクト {total}",
-  "stats.triangles": "三角形",
+  "stats.faces": "面数",
+  "stats.facesLong": "面数（三角形）",
   "stats.vertices": "頂点",
   "stats.hide": "統計を隠す",
   "viewport.toggle.stats": "統計",
-  "viewport.statsTitle": "統計：選択またはシーンのオブジェクト・三角形・頂点の数"
+  "viewport.statsTitle": "統計：選択またはシーンのオブジェクト・面（三角形）・頂点の数"
 }

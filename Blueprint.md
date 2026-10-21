@@ -2632,9 +2632,10 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   `slice()`.
 - **Desktop:** `electron/HeapFlags.cjs` sets `js-flags=--max-old-space-size=4096` before ready.
 - **Statistics HUD (owner request 2026-10-21):** `ui/StatsHud.js` + pure `core/scene/SceneStats.js`.
-  Bottom-left of the viewport, above the centred toolbar: "Selected n / total · Triangles · Vertices"
+  Bottom-left of the viewport, above the centred toolbar: "Selected n / total · Faces · Vertices"
   (or "Scene · Objects total" when nothing is selected), locale number formatting, translated
-  labels. Counts come from buffer lengths (`getTotalIndices`/`getTotalVertices`, unindexed =
+  labels ("Faces" = triangle count, every mesh being triangulated; the accessible label reads
+  "Faces (triangles)"; ja 面数, zh-Hant 面數). Counts come from buffer lengths (`getTotalIndices`/`getTotalVertices`, unindexed =
   vertices/3), cached per mesh against its GeometryStore revision; refined (subdivided) meshes are
   counted when they are what the viewport shows. Event-driven and coalesced (selection, geometry,
   history, import/delete, refinement, project events) — no per-frame polling. A geometry change

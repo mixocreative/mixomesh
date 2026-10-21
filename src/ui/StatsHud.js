@@ -1,5 +1,5 @@
 // Viewport statistics HUD (owner request 2026-10-21), bottom-left of the
-// viewport: "Selected 2 / 5 · Triangles 1,234,567 · Vertices 617,890", or the
+// viewport: "Selected 2 / 5 · Faces 1,234,567 · Vertices 617,890", or the
 // scene totals when nothing is selected. After a geometry change (Subdivide,
 // decimate, Boolean, repair, undo/redo, import) the changed count reads
 // "12,000 → 48,000" for ~3 s, then settles. Event-driven and coalesced — no
@@ -123,7 +123,7 @@ function _render(geometryChanged = false) {
   _els.verts.textContent = view.vertices;
   _els.tris.classList.toggle('sh-changed', view.changed.tris);
   _els.verts.classList.toggle('sh-changed', view.changed.verts);
-  _root.setAttribute('aria-label', `${t('stats.region')}: ${view.label}`);
+  _root.setAttribute('aria-label', `${t('stats.region')}: ${view.ariaLabel}`);
   _els.hide.setAttribute('aria-label', t('stats.hide'));
   _els.hide.title = t('stats.hide');
   _root.hidden = !_visible;

@@ -1316,9 +1316,10 @@
   "stats.region": "Viewport statistics",
   "stats.selected": "Selected {n} / {total}",
   "stats.scene": "Scene · Objects {total}",
-  "stats.triangles": "Triangles",
+  "stats.faces": "Faces",
+  "stats.facesLong": "Faces (triangles)",
   "stats.vertices": "Vertices",
   "stats.hide": "Hide statistics",
   "viewport.toggle.stats": "Statistics",
-  "viewport.statsTitle": "Statistics: object, triangle and vertex counts of the selection or the scene"
+  "viewport.statsTitle": "Statistics: object, face (triangle) and vertex counts of the selection or the scene"
 }

@@ -15,7 +15,7 @@ export const HIGHLIGHT_MS = 3000;
 const _cache = new WeakMap();   // mesh → { rev, indices, vertices, tris, verts }
 
 /**
- * Triangles + vertices of one mesh, from buffer lengths, cached per revision.
+ * Faces (triangles) + vertices of one mesh, from buffer lengths, cached per revision.
  * Unindexed meshes count vertices / 3 triangles.
  * @param {any} mesh  Babylon mesh (duck-typed: getTotalIndices / getTotalVertices)
  * @returns {{ tris: number, verts: number }}
@@ -84,7 +84,10 @@ export function statsView({ selected, total, tris, verts, highlight = null, now 
   const scope = selected > 0
     ? t('stats.selected', { n: f(selected), total: f(total) })
     : t('stats.scene', { total: f(total) });
-  const triangles = `${t('stats.triangles')} ${arrow(live?.tris, tris, changed.tris)}`;
+  // Owner wording: "Faces" (every mesh is triangulated, so faces = triangles);
+  // the accessible label spells out "Faces (triangles)".
+  const triangles = `${t('stats.faces')} ${arrow(live?.tris, tris, changed.tris)}`;
   const vertices = `${t('stats.vertices')} ${arrow(live?.verts, verts, changed.verts)}`;
-  return { scope, triangles, vertices, changed, label: `${scope} · ${triangles} · ${vertices}` };
+  const longFaces = `${t('stats.facesLong')} ${arrow(live?.tris, tris, changed.tris)}`;
+  return { scope, triangles, vertices, changed, label: `${scope} · ${triangles} · ${vertices}`, ariaLabel: `${scope} · ${longFaces} · ${vertices}` };
 }

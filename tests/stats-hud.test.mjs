@@ -33,7 +33,7 @@ const engine = new BABYLON.NullEngine({ renderWidth: 32, renderHeight: 32, textu
 const scene = new BABYLON.Scene(engine);
 const tt = (key, p = {}) => ({
   'stats.selected': `Selected ${p.n} / ${p.total}`, 'stats.scene': `Scene · Objects ${p.total}`,
-  'stats.triangles': 'Triangles', 'stats.vertices': 'Vertices',
+  'stats.faces': 'Faces', 'stats.facesLong': 'Faces (triangles)', 'stats.vertices': 'Vertices',
 }[key] ?? key);
 
 function grid(n, name = 'g') {
@@ -80,10 +80,11 @@ test('highlight: geometry change within the same scope shows before → after fo
 
 test('view text: selection vs scene labels, arrows only on changed counts', () => {
   const v = Stats.statsView({ selected: 2, total: 5, tris: 48000, verts: 24002, highlight: { from: { tris: 12000, verts: 24002 }, until: 100 }, now: 50, locale: 'en', t: tt });
-  assert.equal(v.label, 'Selected 2 / 5 · Triangles 12,000 → 48,000 · Vertices 24,002');
+  assert.equal(v.label, 'Selected 2 / 5 · Faces 12,000 → 48,000 · Vertices 24,002');
+  assert.equal(v.ariaLabel, 'Selected 2 / 5 · Faces (triangles) 12,000 → 48,000 · Vertices 24,002');
   assert.deepEqual(v.changed, { tris: true, verts: false });
   const s = Stats.statsView({ selected: 0, total: 5, tris: 1234567, verts: 617890, locale: 'en', t: tt });
-  assert.equal(s.label, 'Scene · Objects 5 · Triangles 1,234,567 · Vertices 617,890');
+  assert.equal(s.label, 'Scene · Objects 5 · Faces 1,234,567 · Vertices 617,890');
 });
 
 test('HUD updates after a Subdivide-style geometry change on the selection, then settles', async () => {
@@ -117,9 +118,9 @@ test('HUD updates after a Subdivide-style geometry change on the selection, then
   await new Promise(r => setTimeout(r, 0));
   const after = HUD.snapshot();
   assert.equal(after.tris, 800);
-  assert.equal(tris(), 'Triangles 200 → 800', 'before → after while highlighted');
+  assert.equal(tris(), 'Faces 200 → 800', 'before → after while highlighted');
   now += 3100;
   HUD.refresh(false);
-  assert.equal(tris(), 'Triangles 800', 'settles to the new value');
+  assert.equal(tris(), 'Faces 800', 'settles to the new value');
   HUD.setClock(null);
 });
