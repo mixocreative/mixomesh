@@ -503,20 +503,19 @@ async function _connect(root, desc, refresh) {
   S.connBusy = true; S.connMsg = { ok: true, text: t('publish.connect.testing') };
   refresh('#pub-conn-msg');
   try {
-    if (!skipPlatform) await api.setCredentials(M.platformCredentialId(desc.id), secret);
-    if (hostSecret) await api.setCredentials(M.fileHostCredentialId(M.S3_HOST_ID), hostSecret);
+    // The main process tests a record before saving it: a failed test leaves the saved account as it was.
     const results = [];
-    if (!skipPlatform && desc.testConnection) results.push({ id: M.platformCredentialId(desc.id), res: await api.testConnection(M.platformCredentialId(desc.id)) });
-    if (hostSecret) results.push({ id: M.fileHostCredentialId(M.S3_HOST_ID), res: await api.testConnection(M.fileHostCredentialId(M.S3_HOST_ID)) });
+    if (!skipPlatform) results.push({ id: M.platformCredentialId(desc.id), res: await api.setCredentials(M.platformCredentialId(desc.id), secret) });
+    if (hostSecret) results.push({ id: M.fileHostCredentialId(M.S3_HOST_ID), res: await api.setCredentials(M.fileHostCredentialId(M.S3_HOST_ID), hostSecret) });
+    for (const r of results) {
+      if (!r.res?.ok) continue;
+      if (r.id.startsWith('filehost:')) S.s3Connected = true;
+      else { S.connected[desc.id] = true; delete S.options[desc.id]; }
+    }
     const bad = results.find(r => !r.res?.ok);
     if (bad) {
-      await api.clearCredentials(bad.id).catch(() => {});
-      if (bad.id.startsWith('filehost:')) S.s3Connected = false; else S.connected[desc.id] = false;
       S.connMsg = { ok: false, text: String(bad.res?.message ?? t('publish.connect.failed')) };
     } else {
-      S.connected[desc.id] = true;
-      delete S.options[desc.id];
-      if (hostSecret) S.s3Connected = true;
       S.editingConn = false;
       S.connMsg = null;
     }

@@ -304,11 +304,19 @@ function registerListbridgeIpc(handle, deps = {}) {
     return credentials.has(p.id);
   });
 
+  // Only a record that passes its connection test is saved: a typo or being offline while changing
+  // the account never replaces the one that works (cia F-09). Never echoes the secret back.
   handle('publish:setCredentials', async (_e, id, secret) => {
     const p = await parseAccountId(id);
-    await credentials.set(p.id, checkShape(p, secret));
+    const record = checkShape(p, secret);
+    const canTest = p.kind === 'filehost' || typeof p.adapter.testConnection === 'function';
+    if (canTest) {
+      const res = await testRecord(p, record);
+      if (!res.ok) return { ok: false, message: res.message };
+    }
+    await credentials.set(p.id, record);
     dropListOptions(p.id);
-    return { ok: true };   // never echo the secret back
+    return { ok: true };
   });
 
   handle('publish:clearCredentials', async (_e, id) => {
@@ -321,6 +329,10 @@ function registerListbridgeIpc(handle, deps = {}) {
     const p = await parseAccountId(id);
     const record = await credentials.get(p.id);
     if (!record) return { ok: false, message: 'No saved credentials for this account.' };
+    return testRecord(p, record);
+  });
+
+  async function testRecord(p, record) {
     try {
       if (p.kind === 'filehost') {
         const host = makeFileHost(record);
@@ -338,7 +350,7 @@ function registerListbridgeIpc(handle, deps = {}) {
     } catch (err) {
       return { ok: false, message: String(err?.message || err) };
     }
-  });
+  }
 
   // Category + license lists (needs a saved account). Never throws for platform / network trouble:
   // { ok:false, message } lets the renderer fall back to free-text fields. Cached in memory per

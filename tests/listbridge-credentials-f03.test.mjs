@@ -42,7 +42,8 @@ test('the Publish tab is told once that saved accounts were reset', async () => 
   const dir = strandedFile();
   const handlers = new Map();
   registerListbridgeIpc((c, fn) => handlers.set(c, fn), {
-    userDataDir: dir, safeStorage, adapters: [core.cults3dAdapter], fetchImpl: async () => { throw new Error('no network'); }, loadCore: async () => core,
+    userDataDir: dir, safeStorage, adapters: [core.cults3dAdapter], loadCore: async () => core,
+    fetchImpl: async () => ({ status: 200, headers: new Map(), text: async () => JSON.stringify({ data: { me: { nick: 'n' } } }) }),
   });
   const call = (c, ...a) => handlers.get(c)({ sender: { id: 1 } }, ...a);
   assert.equal((await call('publish:describe')).credentialsReset, true);

@@ -225,7 +225,7 @@ async function main() {
       leaked: document.body.innerHTML.includes(${JSON.stringify(SECRET)}) || JSON.stringify(localStorage).includes(${JSON.stringify(SECRET)}) })`);
     assert(JSON.stringify(afterConnect.args) === JSON.stringify([['cults3d:default', ['nickname', 'apiKey']]]),
       `automatic delivery must save only the platform credentials: ${JSON.stringify(afterConnect.args)}`);
-    assert(afterConnect.calls.includes('test:cults3d:default'), 'Connect must test the connection');
+    // The main process tests a record before it saves it (publish:setCredentials, cia F-09).
     assert(!afterConnect.leaked, 'secret leaked into DOM or localStorage');
 
     // 2. Ready

@@ -80,7 +80,7 @@ test('publish:listOptions: needs credentials, parses, caches 10 min per platform
     categories: [{ id: 'C1', name: 'Art', children: [{ id: 'C2', name: 'Busts' }] }],
     licenses: [{ code: 'cults_cu', name: 'Personal', allowsCommercialUse: false, availableOnFreeDesigns: true, availableOnPricedDesigns: true }],
   } };
-  const { call, seen } = setup(() => { hits++; return mode === 'ok' ? { status: 200, body } : mode === '401' ? { status: 401, body: {} } : { status: 200, body: { errors: [{ message: 'boom' }] } }; });
+  const { call, seen } = setup(init => { if (String(init.body).includes('ListOptions')) hits++; return mode === 'ok' ? { status: 200, body } : mode === '401' ? { status: 401, body: {} } : { status: 200, body: { errors: [{ message: 'boom' }] } }; });
   assert.deepEqual(await call('publish:listOptions', 'cults3d', 'en'), { ok: false, message: 'No saved credentials for this account.' });
   assert.equal(hits, 0);
   await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY });
@@ -97,10 +97,10 @@ test('publish:listOptions: needs credentials, parses, caches 10 min per platform
   await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY });
   await call('publish:listOptions', 'cults3d', 'ja');
   assert.equal(hits, 3, 'saving credentials drops the cache');
-  mode = '401'; await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY });
+  await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY }); mode = '401';
   const bad = await call('publish:listOptions', 'cults3d', 'ja');
   assert.deepEqual([bad.ok, bad.message], [false, 'The platform rejected these credentials.']);
-  mode = 'gql'; await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY });
+  mode = 'ok'; await call('publish:setCredentials', 'cults3d:default', { nickname: 'nick', apiKey: KEY }); mode = 'gql';
   const g = await call('publish:listOptions', 'cults3d', 'ja');
   assert.equal(g.ok, false);
   assert.match(g.message, /boom/);
