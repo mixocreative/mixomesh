@@ -176,7 +176,7 @@ async function _synthesizeSolidShaderTextures(meshList, materialNames) {
   const blobByName = new Map();
   const filenameByMaterialName = new Map();
   const seenMaterials = new Set();
-  for (const { mesh } of meshList) {
+  for (const { mesh, logicalName } of meshList) {
     const mat = mesh.material;
     if (!mat) continue;
     if (seenMaterials.has(mat)) continue;
@@ -189,8 +189,12 @@ async function _synthesizeSolidShaderTextures(meshList, materialNames) {
     const filename = `solid_${hex}.png`;
     filenameByMaterialName.set(materialNames.get(mat), filename);
     if (!blobByName.has(filename)) {
+      // Fail closed like ExportTextures._readTextureOrThrow: the MTL already
+      // names this PNG, so a missing blob would ship a dangling `map_Kd`.
       try { blobByName.set(filename, await _solidColorBlob(r, g, b, a)); }
-      catch (err) { console.error(`Solid PNG synthesis failed for ${hex}:`, err); }
+      catch (err) {
+        throw new Error(`Solid colour #${hex} of "${logicalName ?? mesh.name ?? 'part'}" could not be written as a PNG — export aborted so the print would not lose it (${err?.message ?? err})`);
+      }
     }
   }
   return { blobByName, filenameByMaterialName };
