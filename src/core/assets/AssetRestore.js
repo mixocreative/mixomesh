@@ -9,7 +9,7 @@ import { ShaderLibrary } from '../ShaderLibrary.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
-import { setBlobUrl, getBlobUrl, revokeBlobUrl } from './BlobUrls.js';
+import { setBlobUrl, getBlobUrl, getBlob, revokeBlobUrl } from './BlobUrls.js';
 import {
   newId, registerContainer, removeContainer, getContainer, registerMesh, hasMesh, trackOrphan,
   getBabylonMesh, bindRestoredMesh,
@@ -57,7 +57,7 @@ export async function getAssetBytes(assetId) {
 export async function restoreContainer(assetId, blob, extension, opts = {}) {
   const scene = SceneManager.getScene();
   const blobUrl = URL.createObjectURL(blob);
-  setBlobUrl(assetId, blobUrl);
+  setBlobUrl(assetId, blobUrl, blob);
 
   // Synthetic baked geometry (Boolean result, ADR 0002): decode raw VertexData and
   // build the mesh directly — it is ALREADY world-space, so NO import normalization
@@ -125,7 +125,7 @@ export function applyPersistedRatioBake(mesh, asset, ratio, rebaked = null) {
  * The per-asset runtime registry slots a replacement swaps: container, source
  * blob URL (what getAssetBytes reads back), OBJ sibling map. `meshes` is the
  * ordered geometry list the container produced.
- * @typedef {{container:any, blobUrl:string|null, siblings:Map<string,string>|null, meshes:any[]}} AssetSet
+ * @typedef {{container:any, blobUrl:string|null, blob?:Blob|null, siblings:Map<string,string>|null, meshes:any[]}} AssetSet
  */
 
 /** Snapshot an asset's current registry slots (nothing is copied or disposed). */
@@ -133,6 +133,7 @@ export function captureAssetSet(assetId, meshes = []) {
   return {
     container: getContainer(assetId),
     blobUrl: getBlobUrl(assetId),
+    blob: getBlob(assetId),
     siblings: getObjSiblings(assetId) ?? null,
     meshes,
   };
@@ -141,7 +142,7 @@ export function captureAssetSet(assetId, meshes = []) {
 /** Make `set` the asset's live registry slots (no disposal, no URL revoke). */
 export function installAssetSet(assetId, set) {
   if (set.container) registerContainer(assetId, set.container); else removeContainer(assetId);
-  setBlobUrl(assetId, set.blobUrl ?? null);
+  setBlobUrl(assetId, set.blobUrl ?? null, set.blob ?? null);
   setObjSiblings(assetId, set.siblings ?? null);
 }
 
@@ -177,7 +178,7 @@ export async function prepareAssetReplacement(assetId, blob, extension, opts = {
  * assets use this on project restore when they have no SceneObjects yet.
  */
 export function cacheAssetBlob(assetId, blob) {
-  setBlobUrl(assetId, URL.createObjectURL(blob));
+  setBlobUrl(assetId, URL.createObjectURL(blob), blob);
 }
 
 // Rebuild a Boolean result from its `.mxvd` bytes — verbatim world-space geometry,

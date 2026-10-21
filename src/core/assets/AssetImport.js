@@ -22,7 +22,7 @@ import {
 } from '../import/ImportMetadata.js';
 import { buildImportHierarchy } from '../import/ImportHierarchy.js';
 import { SUPPORTED_EXTENSIONS, extOf } from './AssetTypes.js';
-import { setBlobUrl, getBlobUrl, revokeBlobUrl } from './BlobUrls.js';
+import { setBlobUrl, getBlobUrl, getBlob, revokeBlobUrl } from './BlobUrls.js';
 import {
   newId, registerContainer, removeContainer,
 } from './MeshRegistry.js';
@@ -54,40 +54,65 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 // ── Import progress overlay (field request) ─────────────────────────────
 // An import changes the scene the user is editing, so it keeps the blocking
 // overlay (heavy-mesh spec §5.4) — with Cancel: parsing runs in a worker, the
-// UI stays live, and Cancel aborts every running import (nothing half-added).
+// UI stays live, and Cancel aborts every running import (nothing half-added)
+// AND the rest of a multi-file drop (importCancelGeneration). The overlay is
+// the ONE progress surface for an import (its worker jobs are hidden from the
+// activity panel) and follows the same NN/g timing: it appears only after
+// OVERLAY_DELAY_MS and, once shown, stays at least OVERLAY_MIN_MS.
 // Ref-counted so a multi-file drop keeps one overlay up until the LAST import
 // finishes.
 
+const OVERLAY_DELAY_MS = 400;
+const OVERLAY_MIN_MS = 500;
 let _importDepth = 0;
 const _importAborts = new Set();
+let _cancelGen = 0;
+let _overlayTimer = null;
+let _overlayShownAt = 0;
+let _overlayLast = { frac: 0.02, label: '' };
 
-/** Import stages reported by the worker → overlay text. */
-const STAGE_LABEL = {
-  read: (f) => `Reading ${f}…`,
-  parse: (f) => `Parsing ${f}…`,
-  weld: (f) => `Welding vertices of ${f}…`,
-  normals: (f) => `Computing normals for ${f}…`,
-};
+/** Bumped by every Cancel. A drop loop that sees it change stops (review I5). */
+export function importCancelGeneration() { return _cancelGen; }
+
+function _cancelImports() {
+  _cancelGen++;
+  for (const a of [..._importAborts]) a.abort();
+}
+
+function _overlayUpdate(frac, label) {
+  _overlayLast = { frac, label };
+  if (_overlayShownAt) ProgressOverlay.update(frac, label);
+}
 
 function _importBegin(label, abort = null) {
   if (abort) _importAborts.add(abort);
-  if (++_importDepth === 1) {
-    ProgressOverlay.show('Importing…', {
-      onCancel: () => { for (const a of [..._importAborts]) a.abort(); },
-    });
+  if (++_importDepth === 1 && !_overlayShownAt && !_overlayTimer) {
+    _overlayTimer = setTimeout(() => {
+      _overlayTimer = null;
+      if (_importDepth === 0) return;
+      ProgressOverlay.show(t('job.importModel'), { onCancel: _cancelImports });
+      _overlayShownAt = Date.now();
+      ProgressOverlay.update(_overlayLast.frac, _overlayLast.label);
+    }, OVERLAY_DELAY_MS);
   }
-  ProgressOverlay.update(0.02, label);
+  _overlayUpdate(0.02, label);
+}
+
+/** Overlay text for a worker stage: "<file> — <translated stage>". */
+function _stageText(filename, stage) {
+  const key = `job.stage.${stage ?? 'read'}`;
+  const text = t(key);
+  return `${filename} — ${text === key ? stage : text}`;
 }
 
 function _importProgress(filename) {
   return (evt) => {
     if (evt && typeof evt.fraction === 'number') {
-      const label = STAGE_LABEL[evt.stage]?.(filename) ?? `Reading ${filename}…`;
-      ProgressOverlay.update(0.02 + 0.73 * Math.min(1, evt.fraction), label);
+      _overlayUpdate(0.02 + 0.73 * Math.min(1, evt.fraction), _stageText(filename, evt.stage));
     } else if (evt?.lengthComputable && evt.total > 0) {
-      ProgressOverlay.update(0.02 + 0.73 * (evt.loaded / evt.total), `Reading ${filename}…`);
+      _overlayUpdate(0.02 + 0.73 * (evt.loaded / evt.total), _stageText(filename, 'read'));
     } else {
-      ProgressOverlay.update(0.4, `Reading ${filename}…`);
+      _overlayUpdate(0.4, _stageText(filename, evt?.stage ?? 'read'));
     }
   };
 }
@@ -95,7 +120,12 @@ function _importProgress(filename) {
 function _importEnd(abort = null) {
   if (abort) _importAborts.delete(abort);
   _importDepth = Math.max(0, _importDepth - 1);
-  if (_importDepth === 0) ProgressOverlay.hide();
+  if (_importDepth !== 0) return;
+  if (_overlayTimer) { clearTimeout(_overlayTimer); _overlayTimer = null; }
+  if (!_overlayShownAt) return;
+  const hide = () => { if (_importDepth === 0) { ProgressOverlay.hide(); _overlayShownAt = 0; } };
+  const left = OVERLAY_MIN_MS - (Date.now() - _overlayShownAt);
+  if (left > 0) setTimeout(hide, left); else hide();
 }
 
 function _throwIfAborted(signal, container) {
@@ -143,20 +173,22 @@ export function mayFallBackToMainThread(err, size) {
  * @param {BABYLON.Scene} scene
  * @param {Function|null} onProgress
  * @param {Map<string,string>|null} siblings
- * @param {{ signal?: AbortSignal, size?: number }} [opts]
+ * @param {{ signal?: AbortSignal, size?: number, hidden?: boolean }} [opts]
+ *   `hidden`: the caller shows its own progress (the import overlay), so the
+ *   worker job stays out of the activity panel (one progress surface).
  */
 export async function loadContainer(blobUrl, ext, scene, onProgress, siblings, opts = {}) {
-  const { signal, size } = opts;
+  const { signal, size, hidden = false } = opts;
   if (isMeshWorkerImport(ext)) {
     try {
-      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal });
+      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal, hidden });
     } catch (err) {
       if (!mayFallBackToMainThread(err, size)) throw err;
       console.warn(`${ext} worker parse failed — main-thread fallback:`, err);
     }
   } else if (ext === '.obj' && isWorkerImportSupported()) {
     try {
-      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal });
+      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal, hidden });
     } catch (err) {
       if (!mayFallBackToMainThread(err, size)) throw err;
       console.warn('OBJ worker parse failed — main-thread fallback:', err);
@@ -245,11 +277,16 @@ export function askDuplicateImport({ filename, existingName }) {
 export async function importWithDedupe(blob, filename, position, opts = {}, deps = {}) {
   _assertNoProjectLoad();
   assertImportFileSize(blob.size, filename);   // before reading the bytes to hash
-  // Heavy-mesh spec §3: refuse/warn on the triangle count BEFORE hashing.
-  const preParse = await preParseCheck(blob, filename);
+  // Heavy-mesh spec §3: refuse on the triangle count BEFORE hashing; the
+  // over-budget warning waits until the dedupe decision (loadFromBlob shows it).
+  const preParse = await preParseCheck(blob, filename, { warn: false });
   let contentHash = null;
-  try { contentHash = await sha256HexOfBlob(blob); }
-  catch { /* no hash → no dedupe; loadFromBlob proceeds as before */ }
+  try { contentHash = await sha256HexOfBlob(blob, { cancellable: true }); }
+  catch (err) {
+    // Cancel from the activity panel ends this import and the rest of the drop.
+    if (err?.name === 'AbortError') { _cancelGen++; throw err; }
+    /* no hash → no dedupe; loadFromBlob proceeds as before */
+  }
   const existingId = findByHash(contentHash);
   if (existingId) {
     const existing = getState().scene.assetLibrary[existingId];
@@ -277,7 +314,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
  * @param {string} filename
  * @returns {Promise<'ok'|'warn'|'unknown'>}
  */
-export async function preParseCheck(blob, filename) {
+export async function preParseCheck(blob, filename, { warn = true } = {}) {
   const estimate = await estimateFileTriangles(blob, extOf(filename));
   const scene = SceneManager.getScene?.();
   const sceneTriangles = scene ? countSceneTriangles(scene) : 0;
@@ -285,12 +322,19 @@ export async function preParseCheck(blob, filename) {
     sceneTriangles, budget: caps.triangleBudget, filename, desktop: isDesktop(),
   });
   if (verdict === 'warn') {
-    Toast.show(t('toast.triangleBudget', {
-      current: formatTriCount(sceneTriangles + estimate.triangles),
-      budget: formatTriCount(caps.triangleBudget),
-    }), 'warning');
+    _lastEstimate = { blob, projected: sceneTriangles + estimate.triangles };
+    if (warn) _showBudgetWarning(sceneTriangles + estimate.triangles);
   }
   return verdict;
+}
+
+let _lastEstimate = null;
+
+function _showBudgetWarning(projected) {
+  Toast.show(t('toast.triangleBudget', {
+    current: formatTriCount(projected),
+    budget: formatTriCount(caps.triangleBudget),
+  }), 'warning');
 }
 
 // Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
@@ -364,22 +408,27 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.
   const abort = new AbortController();
-  _importBegin(`Reading ${filename}…`, abort);
+  _importBegin(_stageText(filename, 'read'), abort);
   let restoreUrls = () => {};
   const scene = SceneManager.getScene();
   const assetId = newId('asset');
   const blobUrl = URL.createObjectURL(blob);
-  setBlobUrl(assetId, blobUrl);
+  setBlobUrl(assetId, blobUrl, blob);
 
   try {
     const preParse = opts.preParse ?? await preParseCheck(blob, filename);
+    // importWithDedupe refused-or-passed before hashing but held the warning
+    // until the duplicate prompt was answered (review M12).
+    if (opts.preParse === 'warn') {
+      _showBudgetWarning(_lastEstimate?.blob === blob ? _lastEstimate.projected : caps.triangleBudget);
+    }
 
     // §10b texture-identity scope: hash the source bytes once. Reused as the
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
     let sourceFileHash = opts.contentHash ?? null;
     if (!sourceFileHash) {
-      try { sourceFileHash = await sha256HexOfBlob(blob); }
-      catch { /* hash is an identity optimisation — import proceeds without it */ }
+      try { sourceFileHash = await sha256HexOfBlob(blob, { signal: abort.signal }); }
+      catch (err) { if (err?.name === 'AbortError') throw err; /* hash is an identity optimisation — import proceeds without it */ }
     }
 
     // OBJ: resolve mtllib/texture references against drop-set or directory
@@ -393,10 +442,10 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
     restoreUrls = installSiblingUrls(siblings);
     const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings,
-      { signal: abort.signal, size: blob.size });
+      { signal: abort.signal, size: blob.size, hidden: true });
     _throwIfAborted(abort.signal, container);
     _assertContainerCapacity(scene, container);
-    ProgressOverlay.update(0.8, `Materials for ${filename}…`);
+    _overlayUpdate(0.8, `Materials for ${filename}…`);
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
     const modelRatio = extractModelRatio(container) ?? 1;
@@ -409,7 +458,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceUnit,
       modelRatio,
     })) {
-      ProgressOverlay.update(0.98, `${filename} added to assets`);
+      _overlayUpdate(0.98, `${filename} added to assets`);
       try { container.dispose?.(); } catch { /* not scene-owned */ }
       return [];
     }
@@ -426,7 +475,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceAssetId: assetId, sourceFileHash,
     });
 
-    ProgressOverlay.update(0.9, `Adding ${filename} to scene…`);
+    _overlayUpdate(0.9, `Adding ${filename} to scene…`);
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
@@ -466,7 +515,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const collectionId = createCollectionFromFilename(filename, assetId);
     const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, modelRatio);
 
-    ProgressOverlay.update(0.98, `${filename} ready`);
+    _overlayUpdate(0.98, `${filename} ready`);
 
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
@@ -509,13 +558,18 @@ export async function instantiateAsset(assetId, position) {
 
   const scene = SceneManager.getScene();
   const abort = new AbortController();
-  _importBegin(`Reading ${asset.filename}…`, abort);
+  const sourceBlob = getBlob(assetId);
+  _importBegin(_stageText(asset.filename, 'read'), abort);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
   const siblings = getObjSiblings(assetId);
   const restoreUrls = installSiblingUrls(siblings);
   try {
+    // Another copy of a heavy mesh gets the same pre-parse budget check and
+    // the same no-main-thread-retry rule as a fresh import (review I4).
+    if (sourceBlob) await preParseCheck(sourceBlob, asset.filename);
     const container = await loadContainer(
-      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings, { signal: abort.signal }
+      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings,
+      { signal: abort.signal, size: sourceBlob?.size, hidden: true }
     );
     _throwIfAborted(abort.signal, container);
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
@@ -586,7 +640,7 @@ async function _tryRegisterLibraryImport({
       const root = roots[i];
       const assetId = i === 0 ? initialAssetId : newId('asset');
       const assetBlobUrl = i === 0 ? initialBlobUrl : URL.createObjectURL(blob);
-      setBlobUrl(assetId, assetBlobUrl);
+      setBlobUrl(assetId, assetBlobUrl, blob);
       createdIds.push(assetId);
 
       const fileHandleKey = opts.fileHandleKey ?? null;

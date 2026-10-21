@@ -34,11 +34,11 @@ export function isWorkerImportSupported() {
   return typeof Worker === 'function';
 }
 
-async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs, signal) {
+async function _parseInWorker(blobUrl, ext, siblings, onProgress, timeoutMs, signal, hidden) {
   try {
     return await _task.run(
       { blobUrl, ext, siblings: [...(siblings ?? new Map()).entries()] },
-      { timeoutMs, onProgress, signal, cancellable: true },
+      { timeoutMs, onProgress, signal, hidden: !!hidden, cancellable: true },
     );
   } catch (err) {
     const secs = Math.round(timeoutMs / 1000);
@@ -136,7 +136,7 @@ function _buildContainer(scene, parsed, siblings) {
  */
 export async function loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? WORKER_JOB_TIMEOUT_MS;
-  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs, opts.signal);
+  const parsed = await _parseInWorker(blobUrl, '.obj', siblings, onProgress, timeoutMs, opts.signal, opts.hidden);
   if (!parsed.meshes?.length) throw new Error('worker returned no geometry');
   _assertParsedShape(parsed);
   return _buildContainer(scene, parsed, siblings);

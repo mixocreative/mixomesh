@@ -6,7 +6,7 @@ import { reportError, safeAsync } from './Status.js';
 import { t } from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
 // Decision 16: new-file imports go through the "already in this project" check.
-import { importWithDedupe } from '../core/assets/AssetImport.js';
+import { importWithDedupe, importCancelGeneration } from '../core/assets/AssetImport.js';
 import { SESSION_KEY } from '../core/assets/DirMounts.js';   // one shared constant (4.9)
 import { MM_PER_BU } from '../core/scene/SceneConstants.js';
 
@@ -87,7 +87,10 @@ export async function importPicked(picked, position = BABYLON.Vector3.Zero()) {
     return;
   }
   let at = position;
+  const cancelGen = importCancelGeneration();
   for (const { file, ref } of meshes) {
+    // Cancel ends the whole pick, not just the file that was running (review I5).
+    if (importCancelGeneration() !== cancelGen) break;
     const ids = await safeImport(async () => {
       const fileHandleKey = await _persistedKey(ref);
       return importWithDedupe(file, file.name, at, {
@@ -244,9 +247,15 @@ function _handleDrop(e, position) {
     const failures = [];
     let ok = 0;
     let at = position;   // staggered along +X per placed file (overhaul 5.6)
+    const cancelGen = importCancelGeneration();
     for (const entry of meshEntries) {
+      // Cancel ends the whole drop: no further files, no "partial" report (review I5).
+      if (importCancelGeneration() !== cancelGen) return;
       try { at = _nextStaggerPosition(at, await importOne(entry, at)); ok++; }
-      catch (err) { failures.push({ name: entry.file.name, err }); }
+      catch (err) {
+        if (err?.name === 'AbortError') return;
+        failures.push({ name: entry.file.name, err });
+      }
     }
     if (!failures.length) {
       Toast.show(t('toast.importedAll', { n: ok }), 'success', 3000);

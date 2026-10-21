@@ -53,14 +53,16 @@ export function fractionOf(fields) {
 
 /**
  * Register a running job.
- * @param {{ label: string, cancel?: (() => void) | null }} opts
- *   `label` = an i18n key ("job.*") or plain text; `cancel` present = cancellable.
+ * @param {{ label: string, cancel?: (() => void) | null, hidden?: boolean }} opts
+ *   `label` = an i18n key ("job.*") or plain text; `cancel` present = cancellable;
+ *   `hidden` = the caller shows its own progress (the import overlay) — the job
+ *   is tracked but never rendered, so there is ONE progress surface.
  * @returns {{ id: number, progress(fields: object): void, end(error?: any): void }}
  */
-export function beginJob({ label, cancel = null }) {
+export function beginJob({ label, cancel = null, hidden = false }) {
   const id = ++_seq;
   const job = {
-    id, label: String(label || 'job.working'), stage: null, fraction: null,
+    id, label: String(label || 'job.working'), stage: null, fraction: null, hidden: !!hidden,
     startedAt: _clock(), firstProgressAt: null, shownAt: null,
     endedAt: null, outcome: null, error: null, cancel,
   };
@@ -112,6 +114,10 @@ export function cancelJob(id) {
 export function viewModel(now = _clock()) {
   const rows = [];
   for (const job of [..._jobs.values()]) {
+    if (job.hidden) {
+      if (job.endedAt != null) _jobs.delete(job.id);
+      continue;
+    }
     const age = now - job.startedAt;
     if (job.endedAt != null) {
       const wasShown = job.shownAt != null;
