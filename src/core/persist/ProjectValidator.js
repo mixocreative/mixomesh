@@ -11,6 +11,10 @@ const ARRAY_FIELDS = [
   'collections', 'groups', 'userSwatches',
 ];
 // Fields spread or Object.entries()'d as plain objects (null = absent).
+// Lists whose entries the loader dereferences by `.id` before any guard.
+const ID_ENTRY_FIELDS = ['assetLibrary', 'sceneObjects', 'shaders', 'collections', 'groups'];
+// Entries carrying a saved world transform the loader applies verbatim.
+const TRANSFORM_ENTRY_FIELDS = ['sceneObjects', 'groups'];
 const OBJECT_FIELDS = [
   'scene', 'sceneSettings', 'project', 'print', 'uvOverrides',
   'selection', 'gizmo', 'ui',
@@ -18,6 +22,15 @@ const OBJECT_FIELDS = [
 
 function _isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function _isFiniteTuple(v, n) {
+  return Array.isArray(v) && v.length === n && v.every(Number.isFinite);
+}
+
+function _isTransform(t) {
+  return t === undefined || t === null
+    || (_isPlainObject(t) && _isFiniteTuple(t.p, 3) && _isFiniteTuple(t.q, 4) && _isFiniteTuple(t.s, 3));
 }
 
 function _major(version) {
@@ -116,5 +129,22 @@ export function validateDocument(doc) {
     if (v !== undefined && v !== null && !Array.isArray(v)) {
       throw new Error(`.mixo is malformed: ${f} must be an array`);
     }
+  }
+  for (const f of ID_ENTRY_FIELDS) {
+    (doc[f] ?? []).forEach((entry, i) => {
+      if (!_isPlainObject(entry) || typeof entry.id !== 'string' || !entry.id) {
+        throw new Error(`.mixo is malformed: ${f}[${i}] must be an object with an id`);
+      }
+    });
+  }
+  for (const f of TRANSFORM_ENTRY_FIELDS) {
+    for (const entry of doc[f] ?? []) {
+      if (!_isTransform(entry.transform)) {
+        throw new Error(`.mixo is malformed: ${f} "${entry.id}" has an invalid transform`);
+      }
+    }
+  }
+  for (const [i, image] of (doc.textureImages ?? []).entries()) {
+    if (!_isPlainObject(image)) throw new Error(`.mixo is malformed: textureImages[${i}] must be an object`);
   }
 }
