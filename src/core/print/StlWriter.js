@@ -49,11 +49,15 @@ export function encodeBinarySTL(meshEntries, solidName = 'mixomesh') {
   return encodeBinarySTLFromArrays(_partsOf(meshEntries), solidName);
 }
 
+/** Worker timeout for one STL job: 60 s plus 10 s per million triangles. */
+export function stlWorkerTimeoutFor(triangles) {
+  return 60_000 + Math.ceil(triangles / 100_000) * 1_000;
+}
+
 // Large exports: encode in a worker. Parts are transferred (they are fresh
 // print-space copies), the encoded bytes come back transferred.
 const _stlTask = new WorkerTask({
   name: 'STL encoder',
-  timeoutMs: 600_000,
   create: typeof Worker === 'function'
     ? () => new Worker(new URL('../workers/StlEncode.worker.js', import.meta.url), { type: 'module' })
     : null,
@@ -61,11 +65,14 @@ const _stlTask = new WorkerTask({
 
 /** Encode, in the STL worker when the job is large (bytes identical to encodeBinarySTL). */
 export async function encodeBinarySTLAsync(meshEntries, solidName = 'mixomesh') {
-  const parts = _partsOf(meshEntries).map(p => ({ ...p, indices: Uint32Array.from(p.indices) }));
+  const parts = _partsOf(meshEntries);   // fresh print-space copies (typed), safe to transfer
   const triangles = parts.reduce((n, p) => n + Math.floor(p.indices.length / 3), 0);
   if (!shouldEncodeStlInWorker(triangles, typeof Worker === 'function')) return encodeBinarySTLFromArrays(parts, solidName);
   try {
-    return await _stlTask.run({ parts, solidName }, { transfer: parts.flatMap(p => [p.positions.buffer, p.indices.buffer]) });
+    return await _stlTask.run({ parts, solidName }, {
+      transfer: parts.flatMap(p => [p.positions.buffer, p.indices.buffer]),
+      timeoutMs: stlWorkerTimeoutFor(triangles),
+    });
   } catch (err) {
     if (/index out of range/.test(err?.message ?? '')) throw err;
     return encodeBinarySTL(meshEntries, solidName);   // worker unavailable/crashed: same bytes inline

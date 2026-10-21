@@ -63,7 +63,7 @@ export function frontFaceIsClockwise(mesh) {
  */
 export function printIndices(mesh) {
   const idx = mesh.getIndices?.() ?? [];
-  const out = new Array(idx.length);
+  const out = new Uint32Array(idx.length);   // typed: no per-index JS array on big meshes
   if (frontFaceIsClockwise(mesh)) {
     for (let i = 0; i + 2 < idx.length; i += 3) {
       out[i] = idx[i]; out[i + 1] = idx[i + 2]; out[i + 2] = idx[i + 1];

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { installEnv } from './env.mjs';
 installEnv();
-const { encodeBinarySTL, encodeBinarySTLFromArrays, shouldEncodeStlInWorker, STL_WORKER_TRIANGLES } =
+const { encodeBinarySTL, encodeBinarySTLFromArrays, shouldEncodeStlInWorker, STL_WORKER_TRIANGLES, stlWorkerTimeoutFor } =
   await import('../src/core/print/StlWriter.js');
 const { positionsToPrintSpace, printIndices } = await import('../src/core/print/PrintSpace.js');
 
@@ -91,4 +91,9 @@ test('worker encode only for large jobs with a Worker available', () => {
   assert.equal(shouldEncodeStlInWorker(STL_WORKER_TRIANGLES, true), true);
   assert.equal(shouldEncodeStlInWorker(STL_WORKER_TRIANGLES - 1, true), false);
   assert.equal(shouldEncodeStlInWorker(10_000_000, false), false);
+});
+
+test('the STL worker timeout scales with the job (a failed worker does not wait 10 minutes)', () => {
+  assert.equal(stlWorkerTimeoutFor(200_000), 60_000 + 2_000);
+  assert.equal(stlWorkerTimeoutFor(5_000_000), 60_000 + 50_000);
 });

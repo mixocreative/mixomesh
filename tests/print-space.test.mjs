@@ -76,12 +76,13 @@ await test('printIndices: ClockWise-flagged (glTF) mesh is reversed, CounterCloc
   const nativeMesh = { sideOrientation: 1, material: { sideOrientation: null }, getIndices: () => idx };
   assert.equal(frontFaceIsClockwise(gltfMesh), true);
   assert.equal(frontFaceIsClockwise(nativeMesh), false);
-  assert.deepEqual(printIndices(gltfMesh), [0, 1, 2, 0, 3, 1]);
-  assert.deepEqual(printIndices(nativeMesh), [0, 2, 1, 0, 1, 3]);
+  assert.ok(printIndices(gltfMesh) instanceof Uint32Array, 'typed: no per-index JS array on big meshes');
+  assert.deepEqual([...printIndices(gltfMesh)], [0, 1, 2, 0, 3, 1]);
+  assert.deepEqual([...printIndices(nativeMesh)], [0, 2, 1, 0, 1, 3]);
   assert.deepEqual(idx, [0, 2, 1, 0, 1, 3], 'source buffer not mutated');
   // material.sideOrientation wins over the mesh flag (Babylon _getEffectiveOrientation).
   const matWins = { sideOrientation: 1, material: { sideOrientation: 0 }, getIndices: () => idx };
-  assert.deepEqual(printIndices(matWins), [0, 1, 2, 0, 3, 1]);
+  assert.deepEqual([...printIndices(matWins)], [0, 1, 2, 0, 3, 1]);
 });
 
 await test('glTF-imported solid: print-space output is counter-clockwise-outward (signed volume +1000 mm³)', () => {
