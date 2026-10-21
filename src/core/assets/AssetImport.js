@@ -8,7 +8,8 @@ import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
 import { sha256Hex } from '../hash.js';
-import { assertImportFileSize, assertTriangleCapacity } from '../import/ImportLimits.js';
+import { assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity } from '../import/ImportLimits.js';
+import { estimateFileTriangles } from '../import/TriangleEstimate.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
@@ -37,7 +38,7 @@ import {
 } from './AssetRegistration.js';
 import { queueThumbnail } from './AssetThumbnail.js';
 import { isLoading as isProjectLoading } from '../persist/LoadGate.js';
-import { caps } from '../storage/capabilities.js';
+import { caps, isDesktop } from '../storage/capabilities.js';
 import { t } from '../../i18n/index.js';
 import { Toast } from '../../ui/Toast.js';
 import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../scene/TriangleCount.js';
@@ -188,6 +189,8 @@ export function askDuplicateImport({ filename, existingName }) {
 export async function importWithDedupe(blob, filename, position, opts = {}, deps = {}) {
   _assertNoProjectLoad();
   assertImportFileSize(blob.size, filename);   // before reading the bytes to hash
+  // Heavy-mesh spec §3: refuse/warn on the triangle count BEFORE hashing.
+  const preParse = await preParseCheck(blob, filename);
   let contentHash = null;
   try { contentHash = await sha256Hex(await blob.arrayBuffer()); }
   catch { /* no hash → no dedupe; loadFromBlob proceeds as before */ }
@@ -206,7 +209,32 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
       return [];
     }
   }
-  return loadFromBlob(blob, filename, position, { ...opts, contentHash });
+  return loadFromBlob(blob, filename, position, { ...opts, contentHash, preParse });
+}
+
+/**
+ * Pre-parse budget decision (heavy-mesh spec §1/§3): estimate the file's
+ * triangles from a few small slices and refuse above 4× the budget (throws the
+ * user-readable message) before anything is parsed, hashed or copied. Shows the
+ * over-budget warning toast here, once, when the estimate is already over 1×.
+ * @param {Blob} blob
+ * @param {string} filename
+ * @returns {Promise<'ok'|'warn'|'unknown'>}
+ */
+export async function preParseCheck(blob, filename) {
+  const estimate = await estimateFileTriangles(blob, extOf(filename));
+  const scene = SceneManager.getScene?.();
+  const sceneTriangles = scene ? countSceneTriangles(scene) : 0;
+  const verdict = assertPreParseCapacity(estimate, {
+    sceneTriangles, budget: caps.triangleBudget, filename, desktop: isDesktop(),
+  });
+  if (verdict === 'warn') {
+    Toast.show(t('toast.triangleBudget', {
+      current: formatTriCount(sceneTriangles + estimate.triangles),
+      budget: formatTriCount(caps.triangleBudget),
+    }), 'warning');
+  }
+  return verdict;
 }
 
 // Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
@@ -261,10 +289,12 @@ function _warnIfOverBudget(scene, container) {
  * @param {string} filename
  * @param {BABYLON.Vector3} [position]
  * @param {{ originalPath?: string, directoryHandleKey?: string,
- *           fileHandleKey?: string, contentHash?: string|null }} [opts]
+ *           fileHandleKey?: string, contentHash?: string|null,
+ *           preParse?: 'ok'|'warn'|'unknown' }} [opts]
  *   `fileHandleKey` = an already-persisted storage-adapter key for a loose
  *   file (ViewportDrop persists the ref before calling); `contentHash` = the
- *   sha256 `importWithDedupe` already computed (skips a second hash).
+ *   sha256 `importWithDedupe` already computed (skips a second hash);
+ *   `preParse` = its pre-parse verdict (skips a second estimate).
  * @returns {Promise<string[]>} created meshIds
  */
 export async function loadFromBlob(blob, filename, position, opts = {}) {
@@ -285,6 +315,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   setBlobUrl(assetId, blobUrl);
 
   try {
+    const preParse = opts.preParse ?? await preParseCheck(blob, filename);
+
     // §10b texture-identity scope: hash the source bytes once. Reused as the
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
     let sourceFileHash = opts.contentHash ?? null;
@@ -340,7 +372,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
 
-    _warnIfOverBudget(scene, container);
+    if (preParse !== 'warn') _warnIfOverBudget(scene, container);   // warned pre-parse already
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 

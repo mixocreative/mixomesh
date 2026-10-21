@@ -55,3 +55,29 @@ export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model
     throw new Error(`${label} has ${triangles.toLocaleString('en-US')} triangles; the polygon handling limit for this runtime is ${limit.toLocaleString('en-US')}. Simplify or split the model before importing.`);
   }
 }
+
+/** Margin on sampled (non-exact) estimates before they may refuse an import. */
+export const ESTIMATE_REFUSE_MARGIN = 1.25;
+
+/**
+ * Pre-parse budget decision (heavy-mesh spec §1/§3). Throws the refusal
+ * message when the scene would exceed 4× the budget — on an exact count, or on
+ * an estimate above 4× × ESTIMATE_REFUSE_MARGIN. Returns 'warn' above 1×,
+ * 'ok' otherwise, or 'unknown' when there is no estimate.
+ * @param {{ triangles: number, exact: boolean } | null} estimate
+ * @param {{ sceneTriangles?: number, budget: number, filename: string, desktop?: boolean }} ctx
+ * @returns {'ok'|'warn'|'unknown'}
+ */
+export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, filename, desktop = false }) {
+  if (!estimate || !(budget > 0)) return 'unknown';
+  const projected = sceneTriangles + estimate.triangles;
+  const limit = budget * 4;
+  const refuseAt = estimate.exact ? limit : limit * ESTIMATE_REFUSE_MARGIN;
+  if (projected > refuseAt) {
+    const about = estimate.exact ? '' : 'about ';
+    const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';
+    const next = desktop ? 'Simplify or split the model before importing.' : 'Simplify or split the model, or use the desktop app.';
+    throw new Error(`"${filename}" has ${about}${estimate.triangles.toLocaleString('en-US')} triangles${scene}; this ${desktop ? 'desktop' : 'web'} build handles up to ${limit.toLocaleString('en-US')}. ${next}`);
+  }
+  return projected > budget ? 'warn' : 'ok';
+}
