@@ -87,13 +87,14 @@ function createLaunchQueue({ maxPending = MAX_PENDING_BATCHES } = {}) {
   let pending = [];
   let ready = false;
   let seq = 0;
+  let dropped = 0;   // batches refused while full; reported in the next pulled batch
   return {
     nextId: () => `launch-${Date.now().toString(36)}-${++seq}`,
     isReady: () => ready,
     reset() { ready = false; },
     enqueue(batch) {
       if (ready) return batch;
-      if (pending.length >= maxPending) { console.warn('launch: queue full, batch dropped'); return null; }
+      if (pending.length >= maxPending) { dropped++; return null; }
       pending.push(batch);
       return null;
     },
@@ -102,7 +103,11 @@ function createLaunchQueue({ maxPending = MAX_PENDING_BATCHES } = {}) {
       if (!pending.length) return null;
       const taken = pending;
       pending = [];
-      return taken.length === 1 ? taken[0] : mergeBatches(taken, taken[taken.length - 1].id);
+      if (!dropped) return taken.length === 1 ? taken[0] : mergeBatches(taken, taken[taken.length - 1].id);
+      const out = mergeBatches(taken, taken[taken.length - 1].id);
+      out.errors.push({ name: '', reason: `${dropped} more launch request(s) were not opened: too many were waiting` });
+      dropped = 0;
+      return out;
     },
   };
 }
