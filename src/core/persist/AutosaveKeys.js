@@ -6,15 +6,11 @@
 // boot scan for `autosave_*` never mistakes an image for a snapshot.
 
 import { storage } from '../storage/StorageAdapter.js';
-import { EVENTS } from '../events.js';
 import { AUTOSAVE_PREFIX, AUTOSAVE_IMG_PREFIX } from './constants.js';
 
 // ── Autosave liveness (cia B-02) ───────────────────────────
 // Lives here, not in Autosave.js, so the status bar can read it without
 // importing the loader graph (which reaches the status bar itself).
-
-/** Dispatched with `{ state, failures, lastError, reason }` whenever a tick fails or is paused. */
-export const AUTOSAVE_FAILED_EVENT = EVENTS.AUTOSAVE_FAILED ?? 'project:autosaveFailed';
 
 /** Ticks skipped in a row (busy world, slow snapshot) before the status reads paused. */
 export const AUTOSAVE_PAUSED_AFTER_SKIPS = 3;

@@ -1262,7 +1262,8 @@ export const EVENTS = {
   PROJECT_SAVED:           'project:saved',
   PROJECT_DIRTY:           'project:dirty',
   PROJECT_RENAMED:         'project:renamed',
-  AUTOSAVE_WRITTEN:        'project:autosaved',
+  AUTOSAVE_WRITTEN:        'project:autosaved',        // autosave status object (was {})
+  AUTOSAVE_FAILED:         'project:autosaveFailed',   // { state, failures, lastError, reason } — a tick failed or is paused (cia B-02)
 
   // Camera
   CAMERA_PRESET_CHANGED:   'camera:presetChanged',

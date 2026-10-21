@@ -2,7 +2,7 @@ import { EVENTS } from '../core/events.js';
 import { subscribe } from '../core/StateManager.js';
 import { getUndoLabel, getRedoLabel, undo, redo } from '../core/HistoryManager.js';
 import { isDirty } from '../core/persist/DirtyTracker.js';
-import { autosaveStatus, AUTOSAVE_FAILED_EVENT } from '../core/persist/AutosaveKeys.js';
+import { autosaveStatus } from '../core/persist/AutosaveKeys.js';
 import { icon } from '../core/Icons.js';
 import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
@@ -106,7 +106,7 @@ export function init() {
   subscribe(EVENTS.PROJECT_DIRTY,  _onDirty);
   subscribe(EVENTS.PROJECT_SAVED,  _onSaved);
   subscribe(EVENTS.AUTOSAVE_WRITTEN, _updateRight);
-  subscribe(AUTOSAVE_FAILED_EVENT,   _updateRight);
+  subscribe(EVENTS.AUTOSAVE_FAILED,  _updateRight);
   subscribe(EVENTS.LOCALE_CHANGED, () => {
     if (_leftDefault) _elLeft.textContent = t('status.defaultHint');
     _updateRight();

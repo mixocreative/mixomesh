@@ -16,7 +16,7 @@ import { mintProjectId } from './ProjectId.js';
 import {
   autosaveKey, autosaveImageKey, autosaveImagePrefix, projectIdFromAutosaveKey, deleteAutosave,
   isImageStored, markImageStored,
-  AUTOSAVE_FAILED_EVENT, AUTOSAVE_PAUSED_AFTER_SKIPS, autosaveStatus, setAutosaveStatus,
+  AUTOSAVE_PAUSED_AFTER_SKIPS, autosaveStatus, setAutosaveStatus,
 } from './AutosaveKeys.js';
 
 export { autosaveStatus };
@@ -32,7 +32,7 @@ function _skipped(reason) {
   setAutosaveStatus({ skips, reason });
   if (skips >= AUTOSAVE_PAUSED_AFTER_SKIPS) {
     setAutosaveStatus({ state: 'paused' });
-    dispatch(AUTOSAVE_FAILED_EVENT, autosaveStatus());
+    dispatch(EVENTS.AUTOSAVE_FAILED, autosaveStatus());
   }
   return false;
 }
@@ -94,7 +94,7 @@ export async function autosaveTick() {
     return true;
   } catch (err) {
     setAutosaveStatus({ state: 'failing', failures: autosaveStatus().failures + 1, lastError: err?.message ?? String(err) });
-    dispatch(AUTOSAVE_FAILED_EVENT, autosaveStatus());
+    dispatch(EVENTS.AUTOSAVE_FAILED, autosaveStatus());
     if (_autosaveWarned) {
       console.error('Autosave failed:', err);
     } else {
