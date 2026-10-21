@@ -24,15 +24,19 @@
  * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade.
  */
 
-// Triangle-budget tiering (watertight-repair-and-cost task 7).
-// Imports warn above this budget and reject above 4x (ImportLimits). Desktop's Node-fs
-// backed shell can push more triangles through a session than a browser tab
-// before layout/GC pressure makes imports crawl or the tab crashes — same
-// reasoning as DEFAULT_BOOLEAN_TRIANGLE_CAP's desktop-raises-the-cap note and
-// the existing 100k auto-validate skip. This is a runtime-tier constant, not a
-// shell-reported capability, so it is keyed off `desktop` directly rather than
-// trusted verbatim from `desktopCaps` (Electron never injects it).
-export const WEB_TRIANGLE_BUDGET = 1_500_000;
+// Triangle-budget tiering (watertight-repair-and-cost task 7; numbers MEASURED in
+// docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md §2/§6).
+// Imports warn above this budget and are refused above 4x (ImportLimits) — before
+// parsing when the format allows a count. With worker import + welded geometry a
+// tab peaks at ~1.8 GB renderer + ~1.1 GB GPU process for 10M triangles (≈ 4x the
+// web budget) and ~0.6 GB at the 2.5M warning line. Desktop keeps 6M / 24M: the
+// renderer heap is raised to 4 GiB (electron/HeapFlags.cjs), the extrapolated 24M
+// peak is ~4 GB renderer + ~2.2 GB GPU, and the 1 GB file cap stops binary STL at
+// ~21M anyway. This is a runtime-tier constant, not a shell-reported capability,
+// so it is keyed off `desktop` directly rather than trusted verbatim from
+// `desktopCaps` (Electron never injects it). Change it only together with the
+// spec's measured table.
+export const WEB_TRIANGLE_BUDGET = 2_500_000;
 export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
 /** Boolean ceiling when Booleans run in the Manifold worker (BooleanService
  *  keeps DEFAULT_BOOLEAN_TRIANGLE_CAP for the inline main-thread fallback). */

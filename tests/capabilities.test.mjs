@@ -52,10 +52,10 @@ test('desktop flag without desktopCaps falls back to feature detection', () => {
     'triangle budget is a runtime tier, not a shell-reported capability — desktop keeps its budget');
 });
 
-test('watertight-repair-and-cost task 7: desktop triangle budget is 4x the web budget', () => {
-  assert.equal(DESKTOP_TRIANGLE_BUDGET, WEB_TRIANGLE_BUDGET * 4);
-  assert.equal(WEB_TRIANGLE_BUDGET, 1_500_000);
+test('measured triangle budgets (heavy-mesh spec §2): web 2.5M, desktop 6M, desktop above web', () => {
+  assert.equal(WEB_TRIANGLE_BUDGET, 2_500_000);
   assert.equal(DESKTOP_TRIANGLE_BUDGET, 6_000_000);
+  assert.ok(DESKTOP_TRIANGLE_BUDGET > WEB_TRIANGLE_BUDGET);
 });
 
 const UA = {
