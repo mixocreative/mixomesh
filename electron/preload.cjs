@@ -60,6 +60,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeFileRef: (ref, data) => ipcRenderer.invoke('fs:writeFileRef', ref, data),
   pickImportAssets: (opts) => ipcRenderer.invoke('dialog:pickImport', opts),
   saveExport: (opts, data) => ipcRenderer.invoke('export:save', opts, data),
+  // Streamed export save (big files): opaque session id, never a path.
+  beginExportSave: (opts) => ipcRenderer.invoke('export:beginSave', opts),
+  writeExportChunk: (id, data) => ipcRenderer.invoke('export:writeChunk', id, data),
+  commitExportSave: (id) => ipcRenderer.invoke('export:commitSave', id),
+  abortExportSave: (id) => ipcRenderer.invoke('export:abortSave', id),
   // OS drag-drop: the File's path is looked up HERE (isolated preload world) and
   // goes straight to main; the page gets back a read-only {ref,name} token.
   refForDroppedFile: (file) => {

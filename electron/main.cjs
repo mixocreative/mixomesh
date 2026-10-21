@@ -526,6 +526,20 @@ handle('export:save', async (event, opts, data) => {
   return true;
 });
 
+// Streamed export save for big files: the renderer sends ≤16 MiB chunks instead
+// of one whole-file buffer (no 2-3x peak from Blob → ArrayBuffer → IPC clone).
+// Same whitelisted dialog as export:save; the session id is opaque and bound to
+// the sender, the temp file is renamed into place only on commit.
+handle('export:beginSave', async (event, opts) => {
+  const { ext, defaultName, filters } = exportDialogOptions(opts); // throws on a non-whitelisted type
+  const result = await dialog.showSaveDialog(_winOf(event), { defaultPath: defaultName, filters });
+  if (result.canceled || !result.filePath) return null;
+  return _fileRefs.beginDialogWrite(withExtension(result.filePath, ext), event.sender.id);
+});
+handle('export:writeChunk', (event, id, data) => _fileRefs.appendWrite(id, data, event.sender.id));
+handle('export:commitSave', (event, id) => _fileRefs.commitWrite(id, event.sender.id));
+handle('export:abortSave', (event, id) => _fileRefs.abortWrite(id, event.sender.id));
+
 // ── Listbridge marketplace publishing (ADR 0004, plan PB.4) ──
 // `publish:*` channels, registered through `handle` (trusted sender) once the app is
 // ready. Credentials: safeStorage-encrypted <userData>/listbridge-credentials.bin, never

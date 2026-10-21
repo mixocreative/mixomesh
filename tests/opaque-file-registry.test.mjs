@@ -270,6 +270,14 @@ function writeFs() {
     writeFile: async (p, bytes) => { temps.set(p, Buffer.from(bytes)); },
     rename: async (from, to) => { disk.set(to, temps.get(from)); temps.delete(from); },
     unlink: async p => { temps.delete(p); },
+    // Streaming writes (chunked export save): a FileHandle that appends.
+    open: async (p) => {
+      temps.set(p, Buffer.alloc(0));
+      return {
+        write: async (bytes) => { temps.set(p, Buffer.concat([temps.get(p), Buffer.from(bytes)])); },
+        close: async () => {},
+      };
+    },
   };
   return { fsm, disk, temps, deps };
 }
@@ -352,4 +360,48 @@ await check('recents: the writable grant persists, survives restart, and a read-
   await assert.rejects(() => reg2.writeFile(texToken, 'x'), /read-only/);
 });
 
-assert.equal(cases, 11);
+await check('chunked export save: begin/append/commit lands the concatenation atomically', async () => {
+  const { disk, temps, deps } = writeFs();
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore() });
+  const id = await reg.beginDialogWrite('C:\\p\\big.stl', 'owner-1');
+  assert.match(id, /^save_/);
+  assert.equal(JSON.stringify(id).includes('big'), false, 'session id carries no path');
+  await reg.appendWrite(id, new Uint8Array([1, 2]), 'owner-1');
+  await reg.appendWrite(id, new Uint8Array([3]).buffer, 'owner-1');
+  assert.equal(disk.has('C:\\p\\big.stl'), false, 'nothing at the target before commit');
+  assert.equal(await reg.commitWrite(id, 'owner-1'), true);
+  assert.deepEqual([...disk.get('C:\\p\\big.stl')], [1, 2, 3]);
+  assert.equal(temps.size, 0);
+  await assert.rejects(() => reg.appendWrite(id, new Uint8Array([4]), 'owner-1'), /Unknown save/, 'session ends at commit');
+});
+
+await check('chunked export save: abort removes the temp file and leaves the target untouched', async () => {
+  const { disk, temps, deps } = writeFs();
+  disk.set('C:\\p\\keep.stl', Buffer.from([7]));
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore() });
+  const id = await reg.beginDialogWrite('C:\\p\\keep.stl', 'o');
+  await reg.appendWrite(id, new Uint8Array([1]), 'o');
+  assert.equal(await reg.abortWrite(id, 'o'), true);
+  assert.equal(temps.size, 0);
+  assert.deepEqual([...disk.get('C:\\p\\keep.stl')], [7]);
+  assert.equal(await reg.abortWrite(id, 'o'), false, 'second abort is a no-op');
+});
+
+await check('chunked export save: size cap, chunk cap, owner and bad input are refused (and clean up)', async () => {
+  const { temps, deps } = writeFs();
+  const reg = createOpaqueFileRegistry({ ...deps, store: createMemoryStore(), maxWriteBytes: 8, maxChunkBytes: 4 });
+  const id = await reg.beginDialogWrite('C:\\p\\x.stl', 'o');
+  await assert.rejects(() => reg.appendWrite(id, new Uint8Array(5), 'o'), /chunk is too large/);
+  await assert.rejects(() => reg.appendWrite(id, new Uint8Array(1), 'someone-else'), /Unknown save/);
+  await reg.appendWrite(id, new Uint8Array(4), 'o');
+  await reg.appendWrite(id, new Uint8Array(4), 'o');
+  await assert.rejects(() => reg.appendWrite(id, new Uint8Array(1), 'o'), /too large/);
+  assert.equal(temps.size, 0, 'oversize ends the session and removes the temp');
+  await assert.rejects(() => reg.commitWrite(id, 'o'), /Unknown save/);
+  const id2 = await reg.beginDialogWrite('C:\\p\\y.stl', 'o');
+  await assert.rejects(() => reg.appendWrite(id2, 'not bytes', 'o'), /expects bytes/);
+  await assert.rejects(() => reg.beginDialogWrite('relative.stl', 'o'), /Invalid save target/);
+  await assert.rejects(() => reg.commitWrite('save_forged', 'o'), /Unknown save/);
+});
+
+assert.equal(cases, 14);

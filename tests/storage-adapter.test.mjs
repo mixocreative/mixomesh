@@ -565,6 +565,55 @@ await test('[desktop] saveExport hands bytes to main and reports cancel as false
   }
 });
 
+await test('[desktop] saveExport streams big files in chunks; cancel, failure and old shells handled', async () => {
+  const { setExportStreaming } = await import('../src/core/storage/DesktopStorageAdapter.js');
+  const previousWindow = globalThis.window;
+  globalThis.window = previousWindow ?? {};
+  const previousApi = window.electronAPI;
+  const prev = setExportStreaming({ thresholdBytes: 4, chunkBytes: 3 });
+  const calls = [];
+  const api = (overrides = {}) => ({
+    saveExport: async (opts, data) => { calls.push(['oneShot', data.length]); return true; },
+    beginExportSave: async (opts) => { calls.push(['begin', opts.ext]); return 'save_1'; },
+    writeExportChunk: async (id, data) => { calls.push(['chunk', id, [...new Uint8Array(data)]]); return true; },
+    commitExportSave: async (id) => { calls.push(['commit', id]); return true; },
+    abortExportSave: async (id) => { calls.push(['abort', id]); return true; },
+    ...overrides,
+  });
+  try {
+    const big = new Blob([Uint8Array.from([1,2,3,4,5,6,7,8,9,10])]);
+    window.electronAPI = api();
+    assert.equal(await DesktopStorageAdapter.saveExport(big, 'big.stl'), true);
+    assert.deepEqual(calls, [['begin', 'stl'], ['chunk', 'save_1', [1,2,3]], ['chunk', 'save_1', [4,5,6]],
+      ['chunk', 'save_1', [7,8,9]], ['chunk', 'save_1', [10]], ['commit', 'save_1']]);
+
+    calls.length = 0;
+    assert.equal(await DesktopStorageAdapter.saveExport(new Blob([Uint8Array.from([1,2])]), 'small.stl'), true);
+    assert.deepEqual(calls, [['oneShot', 2]], 'small files keep the one-shot save');
+
+    calls.length = 0;
+    window.electronAPI = api({ beginExportSave: async () => null });
+    assert.equal(await DesktopStorageAdapter.saveExport(big, 'big.stl'), false, 'dialog cancelled');
+
+    calls.length = 0;
+    let n = 0;
+    window.electronAPI = api({ writeExportChunk: async () => { if (++n === 2) throw new Error('disk full'); return true; } });
+    await assert.rejects(DesktopStorageAdapter.saveExport(big, 'big.stl'), /disk full/);
+    assert.deepEqual(calls.at(-1), ['abort', 'save_1'], 'a failed chunk aborts the session');
+
+    calls.length = 0;
+    const old = api(); delete old.beginExportSave;
+    window.electronAPI = old;
+    assert.equal(await DesktopStorageAdapter.saveExport(big, 'big.stl'), true);
+    assert.deepEqual(calls, [['oneShot', 10]], 'an older shell without streaming still saves');
+  } finally {
+    setExportStreaming(prev);
+    window.electronAPI = previousApi;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 await test('[desktop] ready(): incomplete bridge / failed handshake → storageUnavailable; full bridge → ok', async () => {
   const previousWindow = globalThis.window;
   globalThis.window = previousWindow ?? {};

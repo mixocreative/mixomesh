@@ -166,10 +166,12 @@ export const DesktopStorageAdapter = {
     // No browser download manager to fall back to: a failed native save is final.
     if (hint.forceDownload) throw new Error('The export could not be saved');
     const ext = String(hint.ext || (suggestedName.split('.').pop() || '')).replace(/^\./, '').toLowerCase();
-    return !!(await _requireApi('saveExport').saveExport(
-      { suggestedName, ext, description: hint.description || `${ext.toUpperCase()} file` },
-      await _bytesOf(blob),
-    ));
+    const opts = { suggestedName, ext, description: hint.description || `${ext.toUpperCase()} file` };
+    const api = _api();
+    if (blob?.size >= _streaming.thresholdBytes && typeof api?.beginExportSave === 'function') {
+      return _streamExport(api, blob, opts);
+    }
+    return !!(await _requireApi('saveExport').saveExport(opts, await _bytesOf(blob)));
   },
 
   // NOT async: the File must be taken from the item inside the drop event. The
@@ -240,3 +242,32 @@ export const DesktopStorageAdapter = {
     };
   },
 };
+
+// ── Streamed export save (big files) ──
+// Above the threshold the Blob goes to main in chunks (blob.slice → one chunk
+// in memory at a time) instead of one whole-file ArrayBuffer + IPC clone.
+export const EXPORT_STREAM_THRESHOLD_BYTES = 64 * 1024 * 1024;
+export const EXPORT_STREAM_CHUNK_BYTES = 16 * 1024 * 1024;   // = main's MAX_CHUNK_BYTES
+let _streaming = { thresholdBytes: EXPORT_STREAM_THRESHOLD_BYTES, chunkBytes: EXPORT_STREAM_CHUNK_BYTES };
+
+/** Test seam: override the streaming threshold / chunk size. Returns the previous values. */
+export function setExportStreaming(next) {
+  const prev = _streaming;
+  _streaming = { ..._streaming, ...next };
+  return prev;
+}
+
+async function _streamExport(api, blob, opts) {
+  const id = await api.beginExportSave(opts);
+  if (!id) return false;   // dialog cancelled
+  try {
+    for (let at = 0; at < blob.size; at += _streaming.chunkBytes) {
+      const chunk = await blob.slice(at, at + _streaming.chunkBytes).arrayBuffer();
+      await api.writeExportChunk(id, chunk);
+    }
+    return !!(await api.commitExportSave(id));
+  } catch (err) {
+    try { await api.abortExportSave(id); } catch { /* main already ended the session */ }
+    throw err;
+  }
+}

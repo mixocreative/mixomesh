@@ -9,6 +9,8 @@ const DEFAULT_FIND_LIMIT = 4000;
 const MAX_FIND_LIMIT = 20000;
 // Upper bound for one renderer-initiated write (project save / export) — task 4.4.
 const MAX_WRITE_BYTES = 1024 * 1024 * 1024;
+// One chunk of a streamed export save (renderer slices big Blobs to this).
+const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
 // ── Dialog descriptors (task 6.2) ──
 // The renderer describes a save dialog with `{suggestedName, ext?, description?}`
@@ -111,6 +113,10 @@ function createOpaqueFileRegistry(deps = {}) {
   const platform = deps.platform ?? process.platform;
   const store = deps.store ?? createMemoryStore();
   const maxWriteBytes = deps.maxWriteBytes ?? MAX_WRITE_BYTES;
+  const maxChunkBytes = deps.maxChunkBytes ?? MAX_CHUNK_BYTES;
+  const openFs = deps.open ?? fs.open;
+  // Streamed export saves: opaque session id → { owner, target, tmp, handle, bytes }.
+  const saves = new Map();
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const refs = new Map();       // token → {kind, absolutePath, name, writable}
   const tokenByPath = new Map(); // `${kind}\0${normalisedPath}` → token (bounded re-registration)
@@ -189,6 +195,29 @@ function createOpaqueFileRegistry(deps = {}) {
     return true;
   }
 
+  function requireSave(id, owner) {
+    const save = saves.get(id);
+    if (!save || save.owner !== owner) throw new Error('Unknown save session');
+    return save;
+  }
+
+  /** Close the temp file, then rename it into place (commit) or delete it. */
+  async function endSave(id, save, commit) {
+    saves.delete(id);
+    try { await save.handle.close(); } catch { /* already closed */ }
+    if (commit) {
+      try {
+        await rename(save.tmp, save.target);
+      } catch (err) {
+        try { await unlink(save.tmp); } catch { /* gone */ }
+        throw err;
+      }
+      return true;
+    }
+    try { await unlink(save.tmp); } catch { /* never created / already gone */ }
+    return true;
+  }
+
   async function readPayload(absolutePath, name) {
     const bytes = await readFile(absolutePath);
     const copy = Uint8Array.from(bytes);
@@ -227,6 +256,54 @@ function createOpaqueFileRegistry(deps = {}) {
     async writeDialogTarget(absolutePath, data) {
       if (typeof absolutePath !== 'string' || !pathApi.isAbsolute(absolutePath)) throw new Error('Invalid save target');
       return writeAtomic(absolutePath, data);
+    },
+
+    /**
+     * MAIN-ONLY start of a streamed export save to a path the user just chose
+     * in the dialog. Writes go to a temp file beside it; commitWrite renames
+     * it over the target, abortWrite deletes it. The renderer only ever sees
+     * the opaque session id, and only `owner` (the sender's webContents id)
+     * may append / commit / abort.
+     */
+    async beginDialogWrite(absolutePath, owner) {
+      if (typeof absolutePath !== 'string' || !pathApi.isAbsolute(absolutePath)) throw new Error('Invalid save target');
+      const tmp = `${absolutePath}.${makeId()}.tmp`;
+      const handle = await openFs(tmp, 'w');
+      const id = `save_${makeId()}`;
+      saves.set(id, { owner, target: absolutePath, tmp, handle, bytes: 0 });
+      return id;
+    },
+
+    async appendWrite(id, data, owner) {
+      const save = requireSave(id, owner);
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data)
+        : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null;
+      if (!bytes) throw new TypeError('appendWrite expects bytes');
+      if (bytes.byteLength > maxChunkBytes) throw new Error('Save chunk is too large');
+      if (save.bytes + bytes.byteLength > maxWriteBytes) {
+        await endSave(id, save, false);
+        throw new Error('File is too large to write');
+      }
+      try {
+        await save.handle.write(bytes);
+      } catch (err) {
+        await endSave(id, save, false);
+        throw err;
+      }
+      save.bytes += bytes.byteLength;
+      return true;
+    },
+
+    async commitWrite(id, owner) {
+      const save = requireSave(id, owner);
+      return endSave(id, save, true);
+    },
+
+    async abortWrite(id, owner) {
+      const save = saves.get(id);
+      if (!save || save.owner !== owner) return false;
+      await endSave(id, save, false);
+      return true;
     },
 
     async listDirectory(ref, parentPath = '') {

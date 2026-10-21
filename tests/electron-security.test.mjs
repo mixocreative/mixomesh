@@ -231,6 +231,28 @@ await check('launch integration: single instance + trusted launch:pull + two-met
   assert.doesNotMatch(preloadSource, /send\(\s*['"]launch:/, 'the renderer cannot send launch requests');
 });
 
+await check('chunked export save: sender-checked channels, owner-bound sessions, no path crosses IPC', () => {
+  for (const ch of ['export:beginSave', 'export:writeChunk', 'export:commitSave', 'export:abortSave']) {
+    assert.ok(mainSource.includes(`handle('${ch}'`), `${ch} registered through the sender-checking handle()`);
+  }
+  // Begin shows the SAME whitelisted dialog as export:save; sessions are bound to the sender.
+  const begin = mainSource.slice(mainSource.indexOf("handle('export:beginSave'"));
+  const beginBody = begin.slice(0, begin.indexOf('\n});'));
+  for (const part of ['exportDialogOptions(opts)', 'dialog.showSaveDialog', 'beginDialogWrite(', 'event.sender.id']) {
+    assert.ok(beginBody.includes(part), `export:beginSave uses ${part}`);
+  }
+  for (const fn of ['appendWrite', 'commitWrite', 'abortWrite']) {
+    assert.match(mainSource, new RegExp(`_fileRefs\.${fn}\([^)]*event\.sender\.id\)`), `${fn} checks the session owner`);
+  }
+  // Preload: exactly these four methods, none takes a path.
+  for (const line of [
+    "beginExportSave: (opts) => ipcRenderer.invoke('export:beginSave', opts)",
+    "writeExportChunk: (id, data) => ipcRenderer.invoke('export:writeChunk', id, data)",
+    "commitExportSave: (id) => ipcRenderer.invoke('export:commitSave', id)",
+    "abortExportSave: (id) => ipcRenderer.invoke('export:abortSave', id)",
+  ]) assert.ok(preloadSource.includes(line), `preload exposes ${line}`);
+});
+
 await check('automation API: sender-checked channels, five optional preload methods, session file only under userData', () => {
   // Every API channel is registered through the sender-checking handle(); no raw ipcMain use.
   for (const ch of ['api:response', 'api:notify', 'api:setEnabled', 'api:status']) {
@@ -268,4 +290,4 @@ await check('automation API: sender-checked channels, five optional preload meth
   }
 });
 
-assert.equal(cases, 12);
+assert.equal(cases, 13);
