@@ -1305,6 +1305,11 @@
   "activity.timeout": "{label}がタイムアウトしました。もう一度お試しください。繰り返す場合はモデルを軽量化または分割してください。",
   "activity.restarted": "別の処理が失敗したため{label}が中断されました。もう一度お試しください。",
   "activity.failed": "{label}に失敗しました：{message}。もう一度お試しください。",
+  "activity.failedNext": "{label}に失敗しました：{message}。{next}",
+  "activity.timeoutNext": "{label}がタイムアウトしました。{next}",
+  "activity.next.pickIndex": "選択は引き続き使えますが、少し遅くなります。",
+  "activity.next.checkMesh": "モデルはそのまま使えます。印刷パネルからもう一度確認してください。",
+  "activity.next.hashFile": "ファイルは重複の確認なしで読み込まれます。",
   "activity.remaining": "残り約 {time}",
   "activity.elapsed": "{time} 経過",
   "activity.dismiss": "閉じる"

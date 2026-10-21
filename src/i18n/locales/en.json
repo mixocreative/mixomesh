@@ -1305,6 +1305,11 @@
   "activity.timeout": "{label} timed out. Try again; if it keeps happening, simplify or split the model.",
   "activity.restarted": "{label} was interrupted because another job failed. Try again.",
   "activity.failed": "{label} failed: {message}. Try again.",
+  "activity.failedNext": "{label} failed: {message}. {next}",
+  "activity.timeoutNext": "{label} timed out. {next}",
+  "activity.next.pickIndex": "Picking still works, just slower.",
+  "activity.next.checkMesh": "The model is still usable; check it again from the Print panel.",
+  "activity.next.hashFile": "The file still imports, without duplicate detection.",
   "activity.remaining": "about {time} left",
   "activity.elapsed": "{time} so far",
   "activity.dismiss": "Dismiss"

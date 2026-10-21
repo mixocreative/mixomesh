@@ -176,6 +176,10 @@ test('activity rows say what is running and, on failure, what to do next', async
   const { rowText, failureText } = await import('../src/ui/JobActivity.js');
   assert.match(failureText({ label: 'job.importStl', error: { code: 'timeout' } }), /timed out\. Try again; if it keeps happening, simplify or split the model\./);
   assert.match(failureText({ label: 'job.boolean', error: { message: 'Manifold rejected the input' } }), /Combining shapes failed: Manifold rejected the input\. Try again\./);
+  assert.equal(failureText({ label: 'job.pickIndex', error: { message: 'worker crashed' } }),
+    'Building pick index failed: worker crashed. Picking still works, just slower.', 'no "Try again" for background jobs (review M13)');
+  assert.equal(failureText({ label: 'job.hashFile', error: { code: 'timeout' } }),
+    'Checking whether the file is already in the project timed out. The file still imports, without duplicate detection.');
   assert.deepEqual(rowText({ label: 'job.importStl', state: 'determinate', percent: 40, stage: 'weld', remainingMs: 3000 }),
     { label: 'Loading STL — welding vertices', meta: '40% · about 3 s left' });
   assert.deepEqual(rowText({ label: 'job.checkMesh', state: 'indeterminate', percent: null, showElapsed: true, elapsedMs: 12000 }),

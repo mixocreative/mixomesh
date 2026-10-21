@@ -31,9 +31,24 @@ function _fmtTime(ms) {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 }
 
+// Background jobs the user did not start and cannot simply retry get their own
+// next step instead of "Try again" (review M13).
+const NEXT_STEP = {
+  'job.pickIndex': 'activity.next.pickIndex',
+  'job.checkMesh': 'activity.next.checkMesh',
+  'job.hashFile': 'activity.next.hashFile',
+};
+
 /** Plain-words failure text with what to do next. Exported for tests. */
 export function failureText(row) {
   const label = _tr(row.label);
+  const nextKey = NEXT_STEP[row.label];
+  if (nextKey) {
+    const next = t(nextKey);
+    if (row.error?.code === 'timeout') return t('activity.timeoutNext', { label, next });
+    const message = String(row.error?.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    return t('activity.failedNext', { label, message, next });
+  }
   if (row.error?.code === 'timeout') return t('activity.timeout', { label });
   if (row.error?.code === 'restarted') return t('activity.restarted', { label });
   const message = String(row.error?.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);

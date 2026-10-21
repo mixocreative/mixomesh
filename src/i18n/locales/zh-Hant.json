@@ -1305,6 +1305,11 @@
   "activity.timeout": "{label}逾時。請再試一次；若仍發生，請簡化或拆分模型。",
   "activity.restarted": "因另一項工作失敗，{label}已中斷。請再試一次。",
   "activity.failed": "{label}失敗：{message}。請再試一次。",
+  "activity.failedNext": "{label}失敗：{message}。{next}",
+  "activity.timeoutNext": "{label}逾時。{next}",
+  "activity.next.pickIndex": "仍可點選，只是速度較慢。",
+  "activity.next.checkMesh": "模型仍可使用；請從列印面板再檢查一次。",
+  "activity.next.hashFile": "檔案仍會匯入，但不檢查是否重複。",
   "activity.remaining": "約剩 {time}",
   "activity.elapsed": "已經過 {time}",
   "activity.dismiss": "關閉"

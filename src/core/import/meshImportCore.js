@@ -85,7 +85,10 @@ export async function importThreeMFBuffer(buffer, { JSZip, triangleBudget = 0, p
     })) parser.write(chunk);
     const parsed = parser.close();
     doneBytes += size;
-    const geometry = [...parsed.geometry.entries()];
+    // Builder views sit on capacity buffers up to 2x their length: trim here,
+    // off the UI thread, so the transfer carries no slack (review M11).
+    const fit = (a) => (a.byteLength === a.buffer.byteLength ? a : a.slice());
+    const geometry = [...parsed.geometry.entries()].map(([id, g]) => [id, { positions: fit(g.positions), triangles: fit(g.triangles) }]);
     for (const [, g] of geometry) transfer.push(g.positions.buffer, g.triangles.buffer);
     models.push({ path: name, xml: parsed.xml, geometry });
   }

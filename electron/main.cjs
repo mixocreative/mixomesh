@@ -242,6 +242,8 @@ function _runSecuritySmoke(win) {
     r.bridge = typeof window.electronAPI?.storageReady === 'function';
     r.csp = !!document.querySelector('meta[http-equiv="Content-Security-Policy"]');
     r.popupDenied = window.open('https://example.com/') === null;
+    // Heavy-mesh review M14: the renderer's V8 heap limit reflects HeapFlags (4 GiB old space).
+    r.heapLimitMB = Math.round((performance.memory?.jsHeapSizeLimit ?? 0) / 1048576);
     try {
       const mod = await import(new URL('vendor/manifold-3d/manifold.js', document.baseURI).href);
       const wasm = await mod.default(); wasm.setup();
@@ -291,7 +293,9 @@ function _runSecuritySmoke(win) {
     await new Promise(res => setTimeout(res, 800));
     if (win.isDestroyed()) return;
     r.navigationDenied = win.webContents.getURL() === before;
-    const ok = r.booted && r.noNode && r.bridge && r.csp && r.popupDenied && r.manifold === true
+    r.jsFlags = app.commandLine.getSwitchValue('js-flags');
+    const heapOk = /--max-old-space-size=4096/.test(r.jsFlags) && r.heapLimitMB >= 3500;
+    const ok = heapOk && r.booted && r.noNode && r.bridge && r.csp && r.popupDenied && r.manifold === true
       && r.moduleWorker && r.blobWorker && r.navigationDenied && r.listbridge === true
       && r.booleanWorker === true;
     console.log(`MIXO_SMOKE: security ${ok ? 'ok' : 'FAIL'}`, JSON.stringify(r));

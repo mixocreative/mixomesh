@@ -53,6 +53,10 @@ test('3MF via the worker core = the SceneLoader plugin path; texture parts come 
   const stages = [];
   const { result } = await core.importThreeMFBuffer(zipBytes.buffer, { JSZip, progress: e => stages.push(e.stage) });
   assert.equal(result.rootPath, '3D/3dmodel.model');
+  for (const [, g] of result.models[0].geometry) {
+    assert.equal(g.positions.byteLength, g.positions.buffer.byteLength, 'no slack in transferred buffers (review M11)');
+    assert.equal(g.triangles.byteLength, g.triangles.buffer.byteLength);
+  }
   assert.deepEqual(result.parts.map(([p]) => p).sort(), ['3D/Textures/a.png', '_rels/.rels']);
   assert.ok(stages.includes('parse'));
   const viaWorker = await Loader.buildThreeMFContainerFromParsed(scene, result);
