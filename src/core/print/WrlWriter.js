@@ -24,10 +24,10 @@ import { collectMimakiTextures } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
+import { exportUVs } from './UvTransform.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
-const UV_KIND = 'uv';
 const FALLBACK_RGB = { r: 0.8, g: 0.8, b: 0.8 };
 
 const _num = (v, digits) => String(+Number(v).toFixed(digits));
@@ -53,7 +53,7 @@ function _shape(mesh, texUrl, usedNames) {
     if (!(i >= 0 && i < count)) throw new Error(`WrlWriter: triangle index out of range in "${mesh.name ?? '?'}"`);
   }
   const pos = positionsToPrintSpace(raw);
-  const uvs = texUrl ? mesh.getVerticesData?.(UV_KIND) : null;
+  const uvs = texUrl ? exportUVs(mesh) : null;
   const textured = !!(uvs && uvs.length === count * 2);
 
   let def = vrmlName(mesh.name);

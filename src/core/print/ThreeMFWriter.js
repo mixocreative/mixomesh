@@ -20,6 +20,7 @@ import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { applyBambuFlavour } from './ThreeMFBambu.js';
+import { exportUVs } from './UvTransform.js';
 
 const BABYLON = window.BABYLON;
 
@@ -512,7 +513,7 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = 
     if (!groupId) continue;
     const texPath = pathByMesh.get(mesh);
     const texId = tex2dIdByPath.get(texPath);
-    const uvs = mesh.getVerticesData(BABYLON.VertexBuffer.UVKind) || [];
+    const uvs = exportUVs(mesh) || [];
     let coords = '';
     for (let i = 0; i < uvs.length; i += 2) {
       coords += `<m:tex2coord u="${+uvs[i].toFixed(6)}" v="${+uvs[i + 1].toFixed(6)}"/>`;

@@ -7,6 +7,7 @@ import { textureToPngBlob } from '../assets/TextureReadback.js';
 import { getTextureSource } from '../assets/TextureSource.js';
 import { getTextureImage } from '../assets/TextureImageStore.js';
 import { hasCaptureFailed, currentCapPx } from '../assets/TextureCap.js';
+import { baseColorTexture } from './UvTransform.js';
 
 /**
  * Pixel size of the texture an export would ship for `assetId` (1.4 readiness).
@@ -139,10 +140,6 @@ export function textureExportFilename(texture, assetId, usedNames = new Set(), s
   return filename;
 }
 
-function _baseColorTexture(mat) {
-  return mat ? (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture || null) : null;
-}
-
 /** Accept bare meshes or export entries (`{mesh, logicalId, logicalName, …}`). */
 function _asEntry(item) {
   return item && typeof item === 'object' && 'mesh' in item ? item : { mesh: item };
@@ -213,7 +210,7 @@ export async function collectTextureExportData(items, state = getState()) {
   const uses = [];
 
   for (const entry of entries) {
-    const tex = _baseColorTexture(entry.mesh?.material);
+    const tex = baseColorTexture(entry.mesh?.material);
     if (!tex) continue;
     const assetId = getAssetIdForTexture(tex, state);
     if (!assetId) continue;
@@ -269,7 +266,7 @@ export async function collectMimakiTextures(meshList, BABYLON, state = getState(
   for (const item of meshList ?? []) {
     const entry = _asEntry(item);
     const mesh = entry.mesh;
-    const tex = _baseColorTexture(mesh?.material);
+    const tex = baseColorTexture(mesh?.material);
     if (!tex) continue;
     // Need UVs to map this texture to geometry. Without them, fall through
     // to colorgroup with the material's diffuse colour.

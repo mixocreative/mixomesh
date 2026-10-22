@@ -1,0 +1,44 @@
+// The texture coordinates a writer emits: the mesh's UVs with its base-colour
+// texture's offset / scale / rotation (UV Override, glTF KHR_texture_transform)
+// baked in, exactly as Babylon's vertex shader applies them
+// (`vUV = vec2(textureMatrix * vec4(uv, 1.0, 0.0))`), so the print shows the
+// mapping the viewport shows (cia C-04).
+
+/** The base-colour texture an export ships for a material (diffuse / albedo / base). */
+export function baseColorTexture(mat) {
+  return mat ? (mat.diffuseTexture || mat.albedoTexture || mat.baseTexture || null) : null;
+}
+
+/**
+ * Apply a Babylon texture matrix (column-major `m`, as uploaded to the shader)
+ * to an interleaved u,v array.
+ * @param {ArrayLike<number>} uvs
+ * @param {ArrayLike<number>} m 16 entries
+ * @returns {number[]}
+ */
+export function applyTextureMatrix(uvs, m) {
+  const out = new Array(uvs.length);
+  for (let i = 0; i + 1 < uvs.length; i += 2) {
+    const u = uvs[i], v = uvs[i + 1];
+    out[i] = m[0] * u + m[4] * v + m[8];
+    out[i + 1] = m[1] * u + m[5] * v + m[9];
+  }
+  return out;
+}
+
+function _isIdentityUV(m) {
+  return m[0] === 1 && m[1] === 0 && m[4] === 0 && m[5] === 1 && m[8] === 0 && m[9] === 0;
+}
+
+/**
+ * The UVs to write for `mesh`: raw UVs when the mesh has no transformed
+ * base-colour texture, else the coordinates Babylon samples that texture at.
+ * @returns {ArrayLike<number>|null}
+ */
+export function exportUVs(mesh) {
+  const uvs = mesh?.getVerticesData?.('uv') ?? null;
+  if (!uvs?.length) return uvs;
+  const m = baseColorTexture(mesh.material)?.getTextureMatrix?.()?.m;
+  if (!m || _isIdentityUV(m)) return uvs;
+  return applyTextureMatrix(uvs, m);
+}

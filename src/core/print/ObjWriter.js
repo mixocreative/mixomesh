@@ -21,6 +21,7 @@ import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, bufferZUpToYUp } from './PrintSpace.js';
 import { getPrinterProfile, PRINTER_OBJ_AXES } from './PrinterProfiles.js';
 import { isFaceted } from '../scene/FlatShading.js';
+import { exportUVs } from './UvTransform.js';
 
 const DEFAULT_OBJ_AXIS = 'y-up';
 
@@ -138,7 +139,7 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null,
     const nRaw = isFaceted(mesh) ? null : mesh.getVerticesData?.('normal');
     const zNrm = nRaw && nRaw.length === count * 3 ? positionsToPrintSpace(nRaw) : null;
     const nrm = zNrm && yUp ? bufferZUpToYUp(zNrm) : zNrm;
-    const uvRaw = mesh.getVerticesData?.('uv');
+    const uvRaw = exportUVs(mesh);
     const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
 
     lines.push(`o ${objToken(mesh.name || `mesh${j}`)}`);

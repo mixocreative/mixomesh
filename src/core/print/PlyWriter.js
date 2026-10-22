@@ -24,10 +24,10 @@ import { collectMimakiTextures, clamp255 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, toPrintSpace } from './PrintSpace.js';
+import { exportUVs } from './UvTransform.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
-const UV_KIND = 'uv';
 const NORMAL_KIND = 'normal';
 const FALLBACK_RGB = { r: 0.8, g: 0.8, b: 0.8 };
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -228,7 +228,7 @@ export function encodeBinaryPLY(meshEntries, imageByMesh = new Map()) {
     const pos = positionsToPrintSpace(raw);
     const nrm = _normalsToPrintSpace(mesh.getVerticesData?.(NORMAL_KIND), count) ?? _computeNormals(pos, idx);
     const img = imageByMesh.get(mesh) ?? null;
-    const uvRaw = mesh.getVerticesData?.(UV_KIND);
+    const uvRaw = exportUVs(mesh);
     const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
     parts.push({ pos, nrm, idx, count, img: uv ? img : null, uv, solid: _solidRgba(mesh.material) });
   }
