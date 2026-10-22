@@ -17,7 +17,7 @@ test('a refusal keeps its category however its English text is worded', () => {
   assert.equal(err?.code, 'over-budget');
   const reworded = Object.assign(new Error('Too many faces for this build.'), { code: err.code });
   assert.equal(classifyImportFailure(reworded).category, 'polygons');
-  const pre = refusal(() => assertPreParseCapacity({ triangles: 900, confidence: 'exact', exact: true }, { budget: 100, filename: 'a.stl' }));
+  const pre = refusal(() => assertPreParseCapacity({ triangles: 900, confidence: 'exact' }, { budget: 100, filename: 'a.stl' }));
   assert.equal(pre?.code, 'over-budget');
 });
 

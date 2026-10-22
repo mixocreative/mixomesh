@@ -62,17 +62,21 @@ export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model
   }
 }
 
-/** Margin on sampled (non-exact) estimates before they may refuse an import. */
 /** Sampled estimates refuse only far above the limit (review M9): a wrong
  *  refusal blocks a file the user may well be able to load. */
 export const ESTIMATE_REFUSE_MARGIN = 2;
 
+/** Multiple of the limit at which an estimate of each confidence refuses. A
+ *  'rough' estimate (3MF bytes per triangle) never refuses; the parse-time
+ *  check is its backstop. */
+const REFUSE_FACTOR = { exact: 1, sampled: ESTIMATE_REFUSE_MARGIN, rough: Infinity };
+
 /**
  * Pre-parse budget decision (heavy-mesh spec §1/§3). Throws the refusal
- * message when the scene would exceed 4× the budget — on an exact count, or on
- * a sampled estimate above 4× × ESTIMATE_REFUSE_MARGIN (never for `warnOnly`). Returns 'warn' above 1×,
- * 'ok' otherwise, or 'unknown' when there is no estimate.
- * @param {{ triangles: number, exact: boolean } | null} estimate
+ * message when the scene would exceed 4× the budget times the estimate's
+ * REFUSE_FACTOR. Returns 'warn' above 1×, 'ok' otherwise, or 'unknown' when
+ * there is no estimate.
+ * @param {{ triangles: number, confidence: 'exact'|'sampled'|'rough' } | null} estimate
  * @param {{ sceneTriangles?: number, budget: number, filename: string, desktop?: boolean }} ctx
  * @returns {'ok'|'warn'|'unknown'}
  */
@@ -80,11 +84,8 @@ export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, f
   if (!estimate || !(budget > 0)) return 'unknown';
   const projected = sceneTriangles + estimate.triangles;
   const limit = budget * 4;
-  // `warnOnly` estimates (3MF: bytes per triangle vary with per-triangle
-  // attributes) never refuse; the parse-time check is their backstop.
-  const refuseAt = estimate.exact ? limit : estimate.warnOnly ? Infinity : limit * ESTIMATE_REFUSE_MARGIN;
-  if (projected > refuseAt) {
-    const about = estimate.exact ? '' : 'about ';
+  if (projected > limit * REFUSE_FACTOR[estimate.confidence]) {
+    const about = estimate.confidence === 'exact' ? '' : 'about ';
     const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';
     const next = desktop ? 'Simplify or split the model before importing.' : 'Simplify or split the model, or use the desktop app.';
     throw overBudget(`"${filename}" has ${about}${estimate.triangles.toLocaleString('en-US')} triangles${scene}; this ${desktop ? 'desktop' : 'web'} build handles up to ${limit.toLocaleString('en-US')}. ${next}`);

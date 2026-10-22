@@ -281,7 +281,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   assertImportFileSize(blob.size, filename);   // before reading the bytes to hash
   // Heavy-mesh spec §3: refuse on the triangle count BEFORE hashing; the
   // over-budget warning waits until the dedupe decision (loadFromBlob shows it).
-  const preParse = await preParseCheck(blob, filename, { warn: false });
+  const preParse = await preParseCheck(blob, filename);
   let contentHash = null;
   try { contentHash = await sha256HexOfBlob(blob, { cancellable: true }); }
   catch (err) {
@@ -310,27 +310,22 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
 /**
  * Pre-parse budget decision (heavy-mesh spec §1/§3): estimate the file's
  * triangles from a few small slices and refuse above 4× the budget (throws the
- * user-readable message) before anything is parsed, hashed or copied. Shows the
- * over-budget warning toast here, once, when the estimate is already over 1×.
+ * user-readable message) before anything is parsed, hashed or copied. The
+ * caller that owns the moment shows the over-budget warning for 'warn'.
  * @param {Blob} blob
  * @param {string} filename
- * @returns {Promise<'ok'|'warn'|'unknown'>}
+ * @returns {Promise<{ verdict: 'ok'|'warn'|'unknown', projected: number }>}
+ *   `projected` = scene triangles plus this file's estimate
  */
-export async function preParseCheck(blob, filename, { warn = true } = {}) {
+export async function preParseCheck(blob, filename) {
   const estimate = await estimateFileTriangles(blob, extOf(filename));
   const scene = SceneManager.getScene?.();
   const sceneTriangles = scene ? countSceneTriangles(scene) : 0;
   const verdict = assertPreParseCapacity(estimate, {
     sceneTriangles, budget: caps.triangleBudget, filename, desktop: isDesktop(),
   });
-  if (verdict === 'warn') {
-    _lastEstimate = { blob, projected: sceneTriangles + estimate.triangles };
-    if (warn) _showBudgetWarning(sceneTriangles + estimate.triangles);
-  }
-  return verdict;
+  return { verdict, projected: sceneTriangles + (estimate?.triangles ?? 0) };
 }
-
-let _lastEstimate = null;
 
 function _showBudgetWarning(projected) {
   Toast.show(t('toast.triangleBudget', {
@@ -392,7 +387,8 @@ function _warnIfOverBudget(scene, container) {
  * @param {BABYLON.Vector3} [position]
  * @param {{ originalPath?: string, directoryHandleKey?: string,
  *           fileHandleKey?: string, contentHash?: string|null,
- *           preParse?: 'ok'|'warn'|'unknown', signal?: AbortSignal }} [opts]
+ *           preParse?: { verdict: 'ok'|'warn'|'unknown', projected: number },
+ *           signal?: AbortSignal }} [opts]
  *   `fileHandleKey` = an already-persisted storage-adapter key for a loose
  *   file (ViewportDrop persists the ref before calling); `contentHash` = the
  *   sha256 `importWithDedupe` already computed (skips a second hash);
@@ -423,12 +419,10 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
   setBlobUrl(assetId, blobUrl, blob);
 
   try {
-    const preParse = opts.preParse ?? await preParseCheck(blob, filename);
     // importWithDedupe refused-or-passed before hashing but held the warning
     // until the duplicate prompt was answered (review M12).
-    if (opts.preParse === 'warn') {
-      _showBudgetWarning(_lastEstimate?.blob === blob ? _lastEstimate.projected : caps.triangleBudget);
-    }
+    const preParse = opts.preParse ?? await preParseCheck(blob, filename);
+    if (preParse.verdict === 'warn') _showBudgetWarning(preParse.projected);
 
     // §10b texture-identity scope: hash the source bytes once. Reused as the
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
@@ -487,7 +481,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
 
-    if (preParse !== 'warn') _warnIfOverBudget(scene, container);   // warned pre-parse already
+    if (preParse.verdict !== 'warn') _warnIfOverBudget(scene, container);   // warned pre-parse already
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
@@ -574,7 +568,8 @@ export async function instantiateAsset(assetId, position) {
   try {
     // Another copy of a heavy mesh gets the same pre-parse budget check and
     // the same no-main-thread-retry rule as a fresh import (review I4).
-    if (sourceBlob) await preParseCheck(sourceBlob, asset.filename);
+    const preParse = sourceBlob ? await preParseCheck(sourceBlob, asset.filename) : null;
+    if (preParse?.verdict === 'warn') _showBudgetWarning(preParse.projected);
     const container = await loadContainer(
       blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings,
       { signal: abort.signal, size: sourceBlob?.size, hidden: true }
@@ -590,7 +585,7 @@ export async function instantiateAsset(assetId, position) {
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
       fileName: String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, ''),
     });
-    _warnIfOverBudget(scene, container);
+    if (preParse?.verdict !== 'warn') _warnIfOverBudget(scene, container);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;

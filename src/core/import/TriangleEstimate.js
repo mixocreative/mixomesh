@@ -3,9 +3,10 @@
 // an import can be refused or warned about BEFORE the file is parsed, hashed
 // or copied. Pure helpers take bytes; `estimateFileTriangles` slices a Blob.
 //
-// Result: { triangles, exact } or null when the format gives no cheap answer.
-// `exact` = the count is the real number (binary STL, GLB/glTF accessors);
-// otherwise it is a sampled estimate and callers must allow a margin.
+// Result: { triangles, confidence } or null when the format gives no cheap answer.
+// `confidence`: 'exact' = the real number (binary STL, GLB/glTF accessors);
+// 'sampled' = scaled from a slice, callers allow a margin; 'rough' = a size
+// heuristic (3MF bytes per triangle, GPU-instanced glTF) that may only warn.
 
 export const HEAD_BYTES = 1024 * 1024;
 const STL_HEADER = 84;
@@ -32,19 +33,19 @@ export function estimateStl(head, size, tail) {
   if (size > STL_HEADER && head.length >= STL_HEADER) {
     const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
     const count = view.getUint32(80, true);
-    if (STL_HEADER + count * STL_FACET === size) return { triangles: count, exact: true };
+    if (STL_HEADER + count * STL_FACET === size) return { triangles: count, confidence: 'exact' };
   }
   const start = _ascii.decode(head.subarray(0, 5));
   if (start !== 'solid') {
-    return size > STL_HEADER ? { triangles: Math.floor((size - STL_HEADER) / STL_FACET), exact: false } : null;
+    return size > STL_HEADER ? { triangles: Math.floor((size - STL_HEADER) / STL_FACET), confidence: 'sampled' } : null;
   }
   const count = (bytes) => (_ascii.decode(bytes).match(/endfacet/g) ?? []).length;
   const facets = count(head);
-  if (head.length >= size) return facets ? { triangles: facets, exact: true } : null;
+  if (head.length >= size) return facets ? { triangles: facets, confidence: 'exact' } : null;
   const tailFacets = tail?.length ? count(tail) : 0;
   const sampled = head.length + (tail?.length ?? 0);
   if (!facets && !tailFacets) return null;
-  return { triangles: Math.round((facets + tailFacets) * (size / sampled)), exact: false };
+  return { triangles: Math.round((facets + tailFacets) * (size / sampled)), confidence: 'sampled' };
 }
 
 /** OBJ: face lines in the head (an n-gon is n−2 triangles), scaled to the file size. */
@@ -56,9 +57,9 @@ export function estimateObj(head, size) {
     const corners = line.trim().split(/\s+/).length - 1;
     if (corners >= 3) tris += corners - 2;
   }
-  if (head.length >= size) return { triangles: tris, exact: true };
+  if (head.length >= size) return { triangles: tris, confidence: 'exact' };
   if (!tris) return null;   // head is all vertices: no basis for a sample
-  return { triangles: Math.round(tris * (size / head.length)), exact: false };
+  return { triangles: Math.round(tris * (size / head.length)), confidence: 'sampled' };
 }
 
 /**
@@ -138,8 +139,8 @@ export function countGltfJsonTriangles(json) {
 export function gltfEstimate(json) {
   const instanced = (json?.extensionsUsed ?? []).includes('EXT_mesh_gpu_instancing');
   return instanced
-    ? { triangles: countGltfJsonTriangles(json), exact: false, warnOnly: true }
-    : { triangles: countGltfJsonTriangles(json), exact: true };
+    ? { triangles: countGltfJsonTriangles(json), confidence: 'rough' }
+    : { triangles: countGltfJsonTriangles(json), confidence: 'exact' };
 }
 
 /** GLB header → byte length of its JSON chunk (or null when not a GLB). */
@@ -157,7 +158,7 @@ const _slice = async (blob, start, end) => new Uint8Array(await blob.slice(start
  * Estimate a file's triangle count from a few small slices.
  * @param {Blob} blob
  * @param {string} ext  lower-case with dot ('.stl', '.obj', '.3mf', '.glb', '.gltf')
- * @returns {Promise<{ triangles: number, exact: boolean } | null>}
+ * @returns {Promise<{ triangles: number, confidence: 'exact'|'sampled'|'rough' } | null>}
  */
 export async function estimateFileTriangles(blob, ext) {
   const size = blob?.size ?? 0;
@@ -174,7 +175,7 @@ export async function estimateFileTriangles(blob, ext) {
       const tail = await _slice(blob, size - tailLen, size);
       const modelBytes = await threeMFModelBytes(tail, size, (off, len) => _slice(blob, off, off + len));
       // Warn-only: paint / segmentation attributes make bytes per triangle vary widely.
-      return modelBytes ? { triangles: Math.round(modelBytes / THREEMF_BYTES_PER_TRIANGLE), exact: false, warnOnly: true } : null;
+      return modelBytes ? { triangles: Math.round(modelBytes / THREEMF_BYTES_PER_TRIANGLE), confidence: 'rough' } : null;
     }
     if (ext === '.glb') {
       const len = glbJsonChunkLength(await _slice(blob, 0, 20));
