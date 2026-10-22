@@ -79,21 +79,21 @@ export function reportBatchRepairResult(count, result) {
  */
 export async function repairWithOverlay(meshIds, opts = {}) {
   const title = opts.title ?? t('print.repairing');
-  ProgressOverlay.show(title);
+  const overlay = ProgressOverlay.open(title);
   try {
     const result = await MeshValidator.repairObjects(meshIds, {
       onProgress: (frac, name) => {
-        ProgressOverlay.update(frac, name ?? '');
+        overlay.update(frac, name ?? '');
         opts.onProgress?.(frac, name);
       },
     });
-    ProgressOverlay.update(1, t('progress.done'));
+    overlay.update(1, t('progress.done'));
     reportBatchRepairResult(meshIds.length, result);
     return result;
   } catch (err) {
     reportError(err, { title: t('toast.autoFixFailed') });
     return { holesFilled: 0, nmFixed: 0, repaired: 0, failed: [{ meshId: null, name: '', error: err }] };
   } finally {
-    ProgressOverlay.hide();
+    overlay.close();
   }
 }

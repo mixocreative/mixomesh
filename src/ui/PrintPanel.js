@@ -248,17 +248,17 @@ async function _runValidationAction(label, fn) {
   // Blocking overlay WITH the inline strip (owner ask 2026-09-18): the
   // screen is blocked while the engine runs, with title + percentage +
   // current object; the strip then keeps the outcome on screen afterwards.
-  ProgressOverlay.show(label);
+  const overlay = ProgressOverlay.open(label);
   try {
     _valStatus = await fn((frac, name) => {
       _setValidationProgress(frac, name ? `${label} — ${name}` : label);
-      ProgressOverlay.update(frac, name ?? '');
+      overlay.update(frac, name ?? '');
     });
   } catch (err) {
     _valStatus = { kind: 'done', tone: 'error', text: t('print.valResult.failed', { error: err?.message ?? String(err) }) };
     reportError(err, { title: t('toast.autoFixFailed') });
   } finally {
-    ProgressOverlay.hide();
+    overlay.close();
     _render();
   }
 }
@@ -419,13 +419,13 @@ async function _runExport(fn, opts, _regated = false, label = null) {
       if (choice === 'autofix') {
         const ids = _affectedObjectIds(currentReadiness.issues);
         if (ids.length) {
-          ProgressOverlay.show(t('progress.working'));
+          const overlay = ProgressOverlay.open(t('progress.working'));
           try {
             await MeshValidator.repairObjects(ids, {
-              onProgress: (frac, name) => ProgressOverlay.update(frac, name),
+              onProgress: (frac, name) => overlay.update(frac, name),
             });
           } finally {
-            ProgressOverlay.hide();
+            overlay.close();
           }
         }
         const afterFix = PrintManager.getPrintReadiness(opts);
@@ -457,16 +457,16 @@ async function _runExport(fn, opts, _regated = false, label = null) {
     // Cancel on the export overlay aborts the run (STL encode in its worker,
     // and no file is saved for any format) — review I6.
     const abort = new AbortController();
-    ProgressOverlay.show(t('progress.exporting'), { controller: abort });
+    const overlay = ProgressOverlay.open(t('progress.exporting'), { controller: abort });
     try {
-      await fn({ ...exportOpts, signal: abort.signal, onProgress: (frac, msg) => ProgressOverlay.update(frac, msg) });
+      await fn({ ...exportOpts, signal: abort.signal, onProgress: (frac, msg) => overlay.update(frac, msg) });
     } catch (err) {
       if (err?.name === 'AbortError') {
         Toast.show(t('toast.exportCancelled', { filename: label ?? t('progress.exporting') }), 'info', 3000);
       } else if (err?.needsAcknowledgement && !_regated) {
         // The pipeline enforces the gate itself; readiness changed between
         // the panel's check and the run. Re-open the three-way prompt once.
-        ProgressOverlay.hide();
+        overlay.close();
         return _runExport(fn, opts, true, label);
       } else if (err?.validationErrors?.length) {
         Modal.open('validationErrors', { errors: err.validationErrors });
@@ -477,7 +477,7 @@ async function _runExport(fn, opts, _regated = false, label = null) {
         reportError(err, { title: t('print.exportFailed'), modal: true });
       }
     } finally {
-      ProgressOverlay.hide();
+      overlay.close();
     }
   }
 }

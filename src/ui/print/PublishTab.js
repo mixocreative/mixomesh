@@ -254,7 +254,7 @@ async function _addGalleryShot(refresh, max) {
  * @param {{ onDone?: () => void }} [opts]
  */
 export async function saveListingPackageFromView({ onDone } = {}) {
-  ProgressOverlay.show(t('publish.overlay.building'));
+  const overlay = ProgressOverlay.open(t('publish.overlay.building'));
   try {
     let heroBlob = S.hero?.blob;
     if (!heroBlob) heroBlob = await _captureShot('studio');
@@ -270,18 +270,18 @@ export async function saveListingPackageFromView({ onDone } = {}) {
       galleryBlobs: S.gallery.map(g => g.blob),
     });
     if (res.blocked) {
-      ProgressOverlay.hide();
+      overlay.close();
       reportError(new Error(t('print.readiness.blockedHint')), { title: t('print.readiness.blocked'), modal: true });
       return;
     }
     S.built = res.pkg.files.map(f => ({ name: f.name, size: f.bytes.byteLength }));
-    ProgressOverlay.hide();
+    overlay.close();
     const saved = await saveListingPackage(res.pkg);
     if (saved !== false) Toast.show(t('publish.toast.packageSaved'), 'success');
   } catch (err) {
     reportError(err, { title: t('publish.packageFailed'), modal: true });
   } finally {
-    ProgressOverlay.hide();
+    overlay.close();
     onDone?.();
   }
 }

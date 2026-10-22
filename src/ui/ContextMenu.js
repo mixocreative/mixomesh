@@ -544,14 +544,14 @@ const BOOLEAN_TITLES = { union: 'context.booleanUnion', subtract: 'context.boole
  *  would otherwise stay editable mid-run); Cancel aborts it. */
 async function _runBoolean(ids, op, opts = {}) {
   const controller = new AbortController();
-  ProgressOverlay.show(t(BOOLEAN_TITLES[op] ?? 'progress.working'), { controller });
+  const overlay = ProgressOverlay.open(t(BOOLEAN_TITLES[op] ?? 'progress.working'), { controller });
   try {
     return await performBoolean(ids, op, { ...opts, signal: controller.signal });
   } catch (err) {
     if (err?.name === 'AbortError') return null;
     throw err;
   } finally {
-    ProgressOverlay.hide();
+    overlay.close();
   }
 }
 

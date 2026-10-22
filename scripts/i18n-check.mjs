@@ -31,7 +31,7 @@ const INLINE_TEXT_ALLOW_LINE = [/\bdata-i18n-key=/];
 
 // Calls whose string arguments the user reads. A literal passed here must be a
 // t() key, not English.
-const SINK_CALL = /\b(?:Toast\.(?:show|error|info|success|warn)|ProgressOverlay\.(?:update|show)|onProgress\??\.?|progress|_overlayUpdate|reportError)\(/g;
+const SINK_CALL = /\b(?:Toast\.(?:show|error|info|success|warn)|ProgressOverlay\.open|\w*[oO]verlay\.update|onProgress\??\.?|progress|_overlayUpdate|reportError)\(/g;
 const KEY_LIKE = /^[a-z][\w-]*(?:\.[\w-]+)+$/;
 const NON_TEXT_ARGS = new Set(['info', 'error', 'warn', 'warning', 'success', 'loading']);
 

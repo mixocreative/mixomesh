@@ -56,7 +56,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 test('an import finishing mid-export leaves the export overlay and its Cancel', async () => {
   StateManager.replaceState(StateManager.freshState());
   const exportAbort = new AbortController();
-  ProgressOverlay.show('Exporting', { controller: exportAbort });
+  const exportOverlay = ProgressOverlay.open('Exporting', { controller: exportAbort });
   B.SceneLoader = { LoadAssetContainerAsync: async () => { await sleep(700); throw new Error('import done'); } };
   await assert.rejects(AssetLoader.loadFromBlob(new Blob([Buffer.concat([...binaryStlChunks(2)])]), 'late.stl'), /import done/);
   await sleep(600);   // past the import overlay's minimum visible time
@@ -64,7 +64,7 @@ test('an import finishing mid-export leaves the export overlay and its Cancel', 
   assert.equal(title(), 'Exporting');
   assert.equal(pressEscape().defaultPrevented, true, 'keyboard still blocked');
   assert.equal(exportAbort.signal.aborted, true, 'Esc cancels the export');
-  ProgressOverlay.hide();
+  exportOverlay.close();
   assert.equal(visible(), false);
 });
 

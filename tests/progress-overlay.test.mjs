@@ -90,11 +90,13 @@ globalThis.window = { BABYLON: {} };
 
 const { ProgressOverlay } = await import('../src/ui/ProgressOverlay.js');
 
+let session = null;
+
 test('ProgressOverlay blocks document-level keydown while visible', () => {
   let delivered = 0;
   document.addEventListener('keydown', () => { delivered++; });
 
-  ProgressOverlay.show('Exporting');
+  session = ProgressOverlay.open('Exporting');
   const ev = keyboardEvent();
   document.dispatchEvent(ev);
 
@@ -102,8 +104,8 @@ test('ProgressOverlay blocks document-level keydown while visible', () => {
   assert.equal(delivered, 0, 'background keyboard listener should not run');
 });
 
-test('ProgressOverlay releases document-level keydown after hide', () => {
-  ProgressOverlay.hide();
+test('ProgressOverlay releases document-level keydown after close', () => {
+  session.close();
   let delivered = 0;
   document.addEventListener('keydown', () => { delivered++; });
 
@@ -116,31 +118,31 @@ test('ProgressOverlay releases document-level keydown after hide', () => {
 
 test('ProgressOverlay without onCancel: Esc does nothing but is still blocked', () => {
   const cancelled = 0;
-  ProgressOverlay.show('Exporting');
+  const s = ProgressOverlay.open('Exporting');
   const ev = keyboardEvent('Escape');
   document.dispatchEvent(ev);
   assert.equal(ev.defaultPrevented, true);
   assert.equal(cancelled, 0);
-  ProgressOverlay.hide();
+  s.close();
 });
 
 test('ProgressOverlay Esc triggers onCancel once and shows Cancelling', () => {
   let cancelled = 0;
-  ProgressOverlay.show('Exporting', { onCancel: () => { cancelled++; } });
+  const s = ProgressOverlay.open('Exporting', { onCancel: () => { cancelled++; } });
   const ev = keyboardEvent('Escape');
   document.dispatchEvent(ev);
   document.dispatchEvent(keyboardEvent('Escape'));
   assert.equal(ev.defaultPrevented, true);
   assert.equal(cancelled, 1, 'cancel fires exactly once');
   const msg = document.body.__root?.querySelector?.('.po-msg');
-  ProgressOverlay.update(0.5, 'later message');
+  s.update(0.5, 'later message');
   if (msg) assert.notEqual(msg.textContent, 'later message');
-  ProgressOverlay.hide();
+  s.close();
 });
 
 test('ProgressOverlay Cancel button click triggers an AbortController', () => {
   const controller = new AbortController();
-  ProgressOverlay.show('Exporting', { controller });
+  const s = ProgressOverlay.open('Exporting', { controller });
   const btn = document.__lastRoot.querySelector('.po-cancel');
   assert.equal(btn.hidden, false);
   const click = { type: 'click', target: btn, defaultPrevented: false,
@@ -148,13 +150,12 @@ test('ProgressOverlay Cancel button click triggers an AbortController', () => {
   document.__lastRoot.dispatch(click);
   assert.equal(controller.signal.aborted, true);
   assert.equal(btn.disabled, true);
-  ProgressOverlay.hide();
+  s.close();
 });
 
 test('ProgressOverlay hidden after cancel run does not swallow Esc', () => {
   let cancelled = 0;
-  ProgressOverlay.show('x', { onCancel: () => { cancelled++; } });
-  ProgressOverlay.hide();
+  ProgressOverlay.open('x', { onCancel: () => { cancelled++; } }).close();
   let delivered = 0;
   document.addEventListener('keydown', () => { delivered++; });
   const ev = keyboardEvent('Escape');

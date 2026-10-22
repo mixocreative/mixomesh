@@ -8,7 +8,7 @@ test('flags English passed to progress, toast and overlay sinks outside src/ui',
     'progress(0.3, `Preparing ${i}/${n}…`);',
     "_overlayUpdate(0.98, `${filename} ready`);",
     "Toast.show('Export failed', 'error');",
-    'ProgressOverlay.update(f,',
+    'overlay.update(f,',
     "  'Writing file');",
   ].join('\n');
   const found = findHardcodedSinkText(src, 'src/core/x.js').map(f => f.split(': ')[1]);

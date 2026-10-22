@@ -5820,11 +5820,9 @@ shortcuts while export is running.
 
 ```js
 ProgressOverlay.open(title, { onCancel?, controller?, delayMs?, minVisibleMs? }) → { update(frac, message?), close() }
-// legacy single-slot (one shared session, until every caller holds its own):
-ProgressOverlay.show(title, opts?) / update(frac, message?) / hide()
 ```
 
-Sessions stack. The newest *shown* session is rendered and owns Esc and the Cancel button; `close()` is idempotent, drops the session's Cancel at once, and lingers for `minVisibleMs` only when no other session keeps the overlay up. So an import (its own session, `delayMs = JobActivity.SHOW_DELAY_MS`, `minVisibleMs = MIN_VISIBLE_MS`) that starts and ends during an export leaves the export's overlay, lock and Cancel in place (cia B-08 / A-03). `Status.runTask` and `AssetImport` hold sessions; `PrintPanel` (validation action, export auto-fix, export), `ContextMenu._runBoolean`, `RepairFeedback.repairWithOverlay` and `PublishTab.saveListingPackageFromView` move to sessions with `.audit/pending/B-08-overlay-callers.patch`, after which `show/update/hide` can be deleted. `PrintPipeline._runExport` reports `onProgress(frac, msg)`; `PrintPanel` closes its session in `finally`.
+Sessions stack. The newest *shown* session is rendered and owns Esc and the Cancel button; `close()` is idempotent, drops the session's Cancel at once, and lingers for `minVisibleMs` only when no other session keeps the overlay up. So an import (its own session, `delayMs = JobActivity.SHOW_DELAY_MS`, `minVisibleMs = MIN_VISIBLE_MS`) that starts and ends during an export leaves the export's overlay, lock and Cancel in place (cia B-08 / A-03). Every caller holds its own session (`Status.runTask`, `AssetImport`, `PrintPanel` validation action / export auto-fix / export, `ContextMenu._runBoolean`, `RepairFeedback.repairWithOverlay`, `PublishTab.saveListingPackageFromView`), so one operation ending never takes down another's overlay; there is no shared show/hide slot. `PrintPipeline._runExport` reports `onProgress(frac, msg)`; `PrintPanel` closes its session in `finally`. A closed session lingering for `minVisibleMs` is drawn without blocking: no key or pointer capture (`pointer-events: none`), since its work is over.
 
 ---
 

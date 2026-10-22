@@ -9,9 +9,6 @@ installEnv();
 
 export const B = window.BABYLON;
 const { ProgressOverlay } = await import('../src/ui/ProgressOverlay.js');
-ProgressOverlay.show = () => {};
-ProgressOverlay.update = () => {};
-ProgressOverlay.hide = () => {};
 ProgressOverlay.open = () => ({ update() {}, close() {} });
 
 const { Toast } = await import('../src/ui/Toast.js');

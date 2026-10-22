@@ -145,30 +145,4 @@ export function open(title = t('progress.working'), opts = {}) {
   };
 }
 
-// Single-slot API for callers not yet holding a session: one shared session.
-let _legacy = null;
-
-/**
- * Show the overlay (shared session; prefer `open()`).
- * @param {string} [title]
- * @param {{ onCancel?: () => void, controller?: AbortController }} [opts]
- */
-export function show(title = t('progress.working'), opts = {}) {
-  _legacy?.close();
-  _legacy = open(title, opts);
-}
-
-/**
- * @param {number} frac 0..1
- * @param {string} [message]
- */
-export function update(frac, message) {
-  _legacy?.update(frac, message);
-}
-
-export function hide() {
-  _legacy?.close();
-  _legacy = null;
-}
-
-export const ProgressOverlay = { open, show, update, hide };
+export const ProgressOverlay = { open };
