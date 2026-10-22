@@ -6,6 +6,25 @@ import { t } from '../../i18n/index.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { applyTransforms, captureWorld, transformedMeshIds } from './support.js';
 
+/** Longest side, in mm, a typed Scale or Size may give an object (100 m; cia W-07). */
+export const MAX_SIDE_MM = 100_000;
+
+/**
+ * Why a typed scale factor or size cannot be applied, or null when it can.
+ * Zero gives a print part with no volume, a negative value mirrors it inside
+ * out (Mirror does that properly), and past the ceiling no printer or viewport
+ * copes.
+ * @param {number} value  the typed scale factor or size in mm
+ * @param {number} longestSideMM  the longest side the object would end up with
+ * @returns {'properties.enterNumber'|'properties.mustBePositive'|'properties.sizeTooLarge'|null} i18n key
+ */
+export function sizeEntryProblem(value, longestSideMM) {
+  if (!Number.isFinite(value)) return 'properties.enterNumber';
+  if (value <= 0) return 'properties.mustBePositive';
+  if (!(longestSideMM <= MAX_SIDE_MM)) return 'properties.sizeTooLarge';
+  return null;
+}
+
 /**
  * Apply per-NODE absolute transforms. `prev` and `next` are objects keyed by
  * node id — an object meshId or a user groupId (overhaul 2.2) — with

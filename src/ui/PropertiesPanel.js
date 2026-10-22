@@ -19,6 +19,7 @@ import {
   PrintPartCommand, SourceUnitCommand, RescaleObjectCommand,
   SetScaleLabelCommand, ratioSourceOf, RATIO_SOURCE,
   BedPlacementCommand, UngroupCommand, collectGroupSubtree,
+  sizeEntryProblem, MAX_SIDE_MM,
 } from '../core/HistoryManager.js';
 import { findGroupNode, captureWorldNode } from '../core/commands/support.js';
 import { dropToBedDelta } from '../core/placement/BedPlacement.js';
@@ -412,9 +413,9 @@ function _renderTransformSection(mesh, multi, resolved = []) {
       </div>
       <div class="pp-grid3 pp-axes pp-scale-row ${lockedCls}">
         <label>${_escape(t('properties.scaleXyz'))}</label>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}${roTitle}>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}${roTitle}>
-        <input type="number" step="0.001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}${roTitle}>
+        <input type="number" step="0.001" min="0.0001" data-xform="scaling" data-axis="x" value="${_fmt(sc.x, 4)}" ${dis}${roTitle}>
+        <input type="number" step="0.001" min="0.0001" data-xform="scaling" data-axis="y" value="${_fmt(sc.y, 4)}" ${dis}${roTitle}>
+        <input type="number" step="0.001" min="0.0001" data-xform="scaling" data-axis="z" value="${_fmt(sc.z, 4)}" ${dis}${roTitle}>
       </div>
       <div class="pp-row pp-row-inline">
         <button class="pp-icon-btn pp-scale-lock" data-action="scaleLock" title="${escapeAttr(t(scaleLocked ? 'properties.unlockScaleTitle' : 'properties.lockScaleTitle'))}">${icon(lockIcon, { width: 13, height: 13 })}</button>
@@ -621,13 +622,13 @@ function _wireScaleRow() {
   });
   ratioInput?.addEventListener('change', () => {
     const parsed = parseScaleRatioText(ratioInput.value);
-    if (parsed) _stageRatio(parsed); else _render();
+    if (parsed) _stageRatio(parsed); else _refuseEntry('[data-ratio-input]', 'properties.ratioInvalid');
   });
   ratioInput?.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const parsed = parseScaleRatioText(ratioInput.value);
-    if (!parsed) { _render(); return; }
+    if (!parsed) { ratioInput.blur(); return; }   // the change handler says why, once
     _pendingRatio = parsed;
     const verb = _bodyEl.querySelector('.pp-ratio-row')?.dataset.scaleDefault ?? 'label';
     const cons = scaleConsequence(_scaleTargets().map(id => objectRatio(getState().scene.objects[id])), parsed);
@@ -638,6 +639,18 @@ function _wireScaleRow() {
     b.addEventListener('click', () => _applyScale(b.dataset.scaleVerb));
   });
 }
+
+// A refused entry snaps back and says why, at the field and in a toast (cia W-07).
+function _refuseEntry(selector, key) {
+  _render();
+  const message = t(key, { max: MAX_SIDE_MM / 1000 });
+  const input = _bodyEl.querySelector(selector);
+  input?.setAttribute('aria-invalid', 'true');
+  input?.setAttribute('title', message);
+  Toast.show(message, 'warning', 4000);
+}
+
+const _longestMM = sizeBU => (sizeBU ? Math.max(sizeBU.x, sizeBU.y, sizeBU.z) * BU_TO_MM : 0);
 
 function _wireTransformSection(meshId) {
   if (!meshId) return;
@@ -727,13 +740,16 @@ function _commitSizeInput(meshId, input) {
     ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
     : _hierarchyWorldSize(mesh);
   const curMM = sizeBU ? sizeBU[axis] * BU_TO_MM : 0;
-  if (!Number.isFinite(newMM) || newMM <= 0 || curMM <= 1e-6) { _render(); return; }
+  const locked = getState().ui?.scaleLocked !== false;
+  const longest = _longestMM(sizeBU);
+  const problem = sizeEntryProblem(newMM, locked && curMM > 1e-6 ? longest * newMM / curMM : Math.max(longest, newMM));
+  if (problem) { _refuseEntry(`[data-size-axis="${axis}"]`, problem); return; }
+  if (curMM <= 1e-6) { _render(); return; }
   const factor = newMM / curMM;
   if (Math.abs(factor - 1) < 1e-9) return;
 
   const prev = {};
   const next = {};
-  const locked = getState().ui?.scaleLocked !== false;
   for (const id of targetIds) {
     const target = AssetLoader.getBabylonMesh(id);
     if (!target) continue;
@@ -762,7 +778,17 @@ function _commitTransformInput(meshId, input) {
   const which = input.dataset.xform;
   const axis  = input.dataset.axis;
   const value = parseFloat(input.value);
-  if (!Number.isFinite(value)) { _render(); return; }
+  const field = `[data-xform="${which}"][data-axis="${axis}"]`;
+  if (!Number.isFinite(value)) { _refuseEntry(field, 'properties.enterNumber'); return; }
+  if (which === 'scaling') {
+    const prevVal = _captureAbsolute(mesh).scaling[axis];
+    const factor = Math.abs(prevVal) > 1e-9 ? value / Math.abs(prevVal) : 1;
+    const sizeBU = targetIds.length > 1
+      ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
+      : _hierarchyWorldSize(mesh);
+    const problem = sizeEntryProblem(value, _longestMM(sizeBU) * Math.max(1, factor));
+    if (problem) { _refuseEntry(field, problem); return; }
+  }
 
   for (const id of targetIds) {
     const target = AssetLoader.getBabylonMesh(id);
