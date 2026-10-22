@@ -139,9 +139,8 @@ await test('M4: Print panel routes every persisted print/geometryFixes write thr
   // Regression guard on the source itself (the Print panel is not importable
   // headless). Since task 1.3 the per-project print settings (printer, bed,
   // format, split, bake, individually, reference) are written ONLY through
-  // PrinterCommands (undoable), whose execute() marks dirty; the one direct
-  // .mixo-persisted print write left in the panel (strictExport) must still be
-  // followed by markDirty() within a few lines.
+  // PrinterCommands (undoable), whose execute() marks dirty. strictExport is a
+  // per-user preference the .mixo never stores (tests/strict-export-clean-d13).
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
   const cmd = read('../src/core/commands/PrinterCommands.js');
   assert.match(cmd, /execute\(\) \{ _applyPrintPatch\(this\._next\); markDirty\(\); \}/,
@@ -153,10 +152,6 @@ await test('M4: Print panel routes every persisted print/geometryFixes write thr
         `${file} never writes print.${key} outside a command`);
     }
   }
-  const lines = read('../src/ui/print/ExportTab.js').split(/\r?\n/);
-  const at0 = lines.findIndex(l => l.includes('strictExport: on'));
-  assert.ok(at0 >= 0, 'write site present: strictExport');
-  assert.match(lines.slice(at0, at0 + 6).join('\n'), /markDirty\(\)/, 'markDirty() follows the strictExport write');
   const src = read('../src/ui/PrintPanel.js');
   // geometryFixes writes moved out of PrintPanel into RepairSession
   // (_recordGeometryFixes) when the per-result Auto-Fix button joined the

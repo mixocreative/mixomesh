@@ -3506,13 +3506,13 @@ Every field persisted. Restored exactly.
     "workingRatio": 12, "targetRatio": 35,         // any positive float (e.g. 0.5 for 2:1 upscale)
     "targetPrinterId": "mimaki-3duj-553",
     "bedDimensions": {"x":508,"y":508,"z":305},
-    "objBakeSolidTextures": false,
-    "strictExport": false                          // watertight-repair-and-cost task 4
-    /* `print.repairOnImport` is NOT in this document (2026-09-18, review I8):
-       it is a per-user preference (SettingsStore / localStorage) like the
+    "objBakeSolidTextures": false
+    /* `print.repairOnImport` and `print.strictExport` are NOT in this document
+       (2026-09-18, review I8; cia D-13): each is a per-user preference (SettingsStore / localStorage) like the
        `cost` slice below. `print` is merged WHOLESALE on open, so a document
        carrying it would flip the opener's own setting, "file wins".
-       ProjectSerializer strips it on save and ProjectLoader on load. */
+       ProjectSerializer strips them on save and ProjectLoader on load, and
+       toggling one does not mark the project unsaved. */
   },
   /* state.cost (§12 Cost quote) is NOT in this document — material price
      assumptions are a per-user SettingsStore section (localStorage), never

@@ -15,7 +15,7 @@
  * SettingsStore (Decision 15).
  */
 
-import { getState, setState, markDirty } from '../../core/StateManager.js';
+import { getState, setState } from '../../core/StateManager.js';
 import { t } from '../../i18n/index.js';
 import { icon, sectionIcon } from '../../core/Icons.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
@@ -204,11 +204,10 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
   wireToggles(el, '#pp-split-material', (_cb, on) => setProject({ splitByMaterial: on }, 'Split by material'));
   wireToggles(el, '#pp-bake-solid', (_cb, on) => setProject({ objBakeSolidTextures: on }, 'Bake solid colours'));
   // Per-user preferences (Decision 15): state + SettingsStore (its capture
-  // listener on #rp-print-body schedules the save), not project history.
-  // markDirty because the current .mixo writer still carries the print slice.
+  // listener on #rp-print-body schedules the save), not project history; the
+  // .mixo never stores it, so it does not dirty the project.
   wireToggles(el, '#pp-strict-export', (_cb, on) => {
     setState(s => ({ ...s, print: { ...s.print, strictExport: on } }), { silent: true });
-    markDirty();
     rerender();
   });
 
