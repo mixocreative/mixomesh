@@ -3400,7 +3400,11 @@ on `m:texture2d` (Materials ext ch.6, default wrap), WRL writes
 `repeatS/repeatT FALSE` for clamp, PLY samples with the same clamp / mirror
 / repeat. OBJ stays repeat: an MTL `map_Kd -clamp on` makes trimesh (and
 any reader that takes the rest of the line as the file name) load no
-texture at all. Pinned by `tests/uv-transform-export-c04.test.mjs`; live
+texture at all; instead readiness raises the `texture-clamp-obj` hint (info,
+`data.formats: ['obj']`) for every part whose clamped base-colour texture has
+exported UVs outside [0,1] (`UvTransform.clampedUVsLeaveUnitSquare`, computed
+per part in `PrintPipeline.buildReadinessReport` as `clampedTextureOverflow`;
+`tests/obj-clamp-hint-r4.test.mjs`). Pinned by `tests/uv-transform-export-c04.test.mjs`; live
 check `tests/browser-uv-transform-c04.mjs` (viewport pixels vs python
 trimesh on the exported OBJ and PLY, repeat and clamp).
 
@@ -5504,6 +5508,13 @@ export [default] / Export anyway / Cancel) and re-calls with
 `strictExport`, any clone whose post-repair watertight verdict is not
 confirmed true (open, unknown, engine unavailable, `repair:false`) aborts with
 `validationErrors` ("could not verify watertight" for unknown).
+
+**OBJ clamp hint.** `texture-clamp-obj` (info; never blocks or asks for
+acknowledgement) names the parts whose clamped texture is sampled past its
+edge: 3MF and WRL carry the clamp, an OBJ export repeats the texture there.
+Keys `print.issue.texture-clamp-obj` / `print.issueAction.texture-clamp-obj`
+in all three locales; `ReadinessStrip.issueActionLabel` carries the literal
+`case` the i18n checks need.
 
 **Per-printer readiness hints (task 1.4).** `buildReadiness({parts, targets,
 bedDimensions, reference, profile, strictExport})` adds four profile-driven

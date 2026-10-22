@@ -53,3 +53,26 @@ export function exportUVs(mesh) {
   if (!m || _isIdentityUV(m)) return uvs;
   return applyTextureMatrix(uvs, m);
 }
+
+const UV_EDGE_EPSILON = 1e-6;
+
+/**
+ * True when the viewport clamps this mesh's base-colour texture on an axis
+ * whose exported UVs leave [0,1]: the print then depends on the format
+ * carrying the clamp (3MF tilestyle, VRML repeatS/T). OBJ/MTL cannot say it
+ * (`-clamp on` breaks trimesh), so an OBJ export of such a mesh repeats the
+ * texture where the viewport shows the edge texel.
+ */
+export function clampedUVsLeaveUnitSquare(mesh) {
+  const texture = baseColorTexture(mesh?.material);
+  if (!texture) return false;
+  const { u, v } = textureAddressing(texture);
+  if (u !== 'clamp' && v !== 'clamp') return false;
+  const uvs = exportUVs(mesh);
+  if (!uvs?.length) return false;
+  const outside = (x) => x < -UV_EDGE_EPSILON || x > 1 + UV_EDGE_EPSILON;
+  for (let i = 0; i + 1 < uvs.length; i += 2) {
+    if ((u === 'clamp' && outside(uvs[i])) || (v === 'clamp' && outside(uvs[i + 1]))) return true;
+  }
+  return false;
+}

@@ -49,6 +49,7 @@ export function issueActionLabel(issue) {
     case 'mixed-scales': return t('print.issueAction.mixed-scales');
     case 'texture-too-large': return t('print.issueAction.texture-too-large');
     case 'texture-count': return t('print.issueAction.texture-count');
+    case 'texture-clamp-obj': return t('print.issueAction.texture-clamp-obj');
     case 'thin-feature': return t('print.issueAction.thin-feature');
     case 'watertight-required': return t('print.issueAction.watertight-required');
     case 'refinement-unavailable': return t('print.issueAction.refinement-unavailable');

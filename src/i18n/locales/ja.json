@@ -722,6 +722,8 @@
   "print.issueAction.texture-too-large": "テクスチャを縮小するか、より大きな画像に対応するプリンターを選んでください。",
   "print.issue.texture-count": "{n} 個のオブジェクトが、このプリンターの上限を超える数のテクスチャを使用しています",
   "print.issueAction.texture-count": "テクスチャを1枚のアトラスにまとめるか、マテリアル数を減らしてください。",
+  "print.issue.texture-clamp-obj": "{n} 個のオブジェクトがテクスチャの端をクランプしていますが、OBJ では表現できません",
+  "print.issueAction.texture-clamp-obj": "クランプを保つには 3MF（または WRL）で書き出してください。OBJ ではその部分がタイル状に繰り返されます。",
   "print.issue.thin-feature": "{n} 個のオブジェクトに、このプリンターで造形できない薄い壁がある可能性があります（推定）",
   "print.issueAction.thin-feature": "薄い部分を厚くするか、大きいサイズで出力してください。簡易推定であり、厳密な肉厚チェックではありません。",
   "print.issue.watertight-required": "{n} 個のオブジェクトが水密ではありません（このプリンターでは必須）",

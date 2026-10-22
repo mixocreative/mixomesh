@@ -49,6 +49,11 @@ export function buildReadiness({
     if (unconfirmed.length) issues.push(issue('unit-unconfirmed', 'warning', unconfirmed));
     const pending = partIds(parts, part => part.validationPending === true);
     if (pending.length) issues.push(issue('validation-pending', 'warning', pending));
+    // OBJ/MTL has no clamp (`-clamp on` breaks trimesh), so a clamped texture
+    // whose UVs leave [0,1] prints repeated there; 3MF and VRML carry the
+    // clamp. A hint, never a gate: info, named per format like below-bed.
+    const clamped = partIds(parts, part => part.clampedTextureOverflow === true);
+    if (clamped.length) issues.push(issue('texture-clamp-obj', 'info', clamped, { formats: ['obj'] }));
 
     const geometryErrors = parts.filter(part => part.validationResults?.some(r => r.severity === 'error'));
     const geometryWarnings = parts.filter(part => part.validationResults?.some(r => r.severity === 'warning'));

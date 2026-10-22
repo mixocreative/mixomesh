@@ -34,6 +34,7 @@ import { serializeSTL } from './StlWriter.js';
 import { serializePLY } from './PlyWriter.js';
 import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
+import { clampedUVsLeaveUnitSquare } from './UvTransform.js';
 import { getTextureDimensions } from './ExportTextures.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { initCsg2 } from '../vendorUrl.js';
@@ -430,6 +431,7 @@ export function getPrintReadiness(options = {}) {
       // 1.4 profile hints: distinct diffuse textures (what export ships) with
       // pixel size, the validator's thickness proxy, and an open-shell verdict.
       textures: _partTextures(ids, objects, state),
+      clampedTextureOverflow: (unitsById.get(obj.id)?.parts ?? []).some(part => clampedUVsLeaveUnitSquare(part.mesh)),
       thicknessBU: _minThickness(ids, state),
       watertight: _watertightVerdict(ids, state),
     };

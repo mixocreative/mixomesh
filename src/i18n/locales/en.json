@@ -722,6 +722,8 @@
   "print.issueAction.texture-too-large": "Downscale the texture or pick a printer that accepts larger images.",
   "print.issue.texture-count": "{n} object(s) use more textures than this printer allows",
   "print.issueAction.texture-count": "Merge the textures into one atlas or reduce the materials.",
+  "print.issue.texture-clamp-obj": "{n} object(s) clamp a texture past its edge, which OBJ cannot express",
+  "print.issueAction.texture-clamp-obj": "Export 3MF (or WRL) to keep the clamped edge; an OBJ export repeats the texture there.",
   "print.issue.thin-feature": "{n} object(s) may have walls thinner than this printer can print (estimate)",
   "print.issueAction.thin-feature": "Thicken the thin section, or print larger. This is a rough estimate, not a full wall check.",
   "print.issue.watertight-required": "{n} object(s) are not watertight, which this printer requires",
