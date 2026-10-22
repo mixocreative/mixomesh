@@ -31,6 +31,16 @@ export function hexToColor3(hex) {
 
 const alphaOf = hex => (/^#[0-9a-f]{8}$/i.test(hex || '') ? parseInt(hex.slice(7, 9), 16) / 255 : 1);
 
+// Materials ext ch.6 `tilestyleu/v` → Babylon address mode. The writer emits
+// what the viewport sampled (UvTransform.textureAddressing), so a clamped
+// texture comes back clamped. `none` (no tiling, nothing drawn outside 0..1)
+// has no Babylon mode; clamp is the nearest.
+const TILE_STYLE_TO_WRAP = { wrap: 1, mirror: 2, clamp: 0, none: 0 };
+const tileStyleOf = (value) => {
+  const style = String(value ?? 'wrap').trim().toLowerCase();
+  return style in TILE_STYLE_TO_WRAP ? style : 'wrap';
+};
+
 /**
  * Read a texture part out of the package and turn it into a blob URL that a
  * Babylon StandardMaterial.diffuseTexture can be constructed from. Returns
@@ -73,12 +83,15 @@ export async function readModelContext(path, parsed, pkg) {
     colorAlphas.set(group.getAttribute('id'), bases.map(base => alphaOf(base.getAttribute('displaycolor'))));
   }
 
-  // texture2d id → { path, url } (blob URLs resolved from the package).
+  // texture2d id → { path, url, tileStyleU, tileStyleV } (blob URLs resolved from the package).
   const textures = new Map();
   for (const t of doc.getElementsByTagNameNS(NS_MATERIAL, 'texture2d')) {
     const texPath = resolvePackagePath(t.getAttribute('path') || '', path);
     const url = await texturePartToUrl(pkg, texPath, t.getAttribute('contenttype') || 'image/png');
-    textures.set(t.getAttribute('id'), { path: texPath, url });
+    textures.set(t.getAttribute('id'), {
+      path: texPath, url,
+      tileStyleU: tileStyleOf(t.getAttribute('tilestyleu')), tileStyleV: tileStyleOf(t.getAttribute('tilestylev')),
+    });
   }
 
   // texture2dgroup id → { texId, coords[{u,v}, ...] }
@@ -119,6 +132,8 @@ export function createMaterial(scene, container, ctx, name, key, usedTexIds) {
     // the glTF top-left one (cia C-01).
     const bt = new BABYLON.Texture(tex.url, scene, false, true);
     bt.name = `${name}__tex`;
+    bt.wrapU = TILE_STYLE_TO_WRAP[tex.tileStyleU];
+    bt.wrapV = TILE_STYLE_TO_WRAP[tex.tileStyleV];
     mat.diffuseTexture = bt;
     container.textures?.push?.(bt);
     usedTexIds.add(`${ctx.path}:${key.tg.texId}`);

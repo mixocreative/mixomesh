@@ -2443,7 +2443,13 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    Extension 1.2.1 ch.3 puts tex2coord (0,0) at the image's lower-left corner,
    the OBJ/MTL convention, not glTF's top-left (cia C-01; pinned by
    `tests/browser-3mf-orientation-c01.mjs`, which renders a glTF quad and its
-   3MF round trip and compares the corner colours). Repeated component references instantiate
+   3MF round trip and compares the corner colours). `m:texture2d`
+   `tilestyleu/v` (Materials ext ch.6) sets the texture's `wrapU/wrapV`:
+   `wrap` → WRAP (the default and for an unknown value), `mirror` → MIRROR,
+   `clamp` and `none` → CLAMP (Babylon has no "draw nothing outside" mode;
+   `threeMFResources.TILE_STYLE_TO_WRAP`). TextureView keeps the modes, so a
+   texture the writer emitted as clamped renders clamped after the round trip
+   (`tests/threemf-tilestyle-r4.test.mjs`). Repeated component references instantiate
    editable mesh copies rather than shared geometry. Returns an AssetContainer
    so every downstream path (shaders, re-instantiate, project restore) is
    identical to other formats. Vertices are raw mm → handled by the normal
