@@ -78,8 +78,12 @@ async function _capturePng({ width, height, transparent = false, pose = null } =
     // WebGL: Babylon's screenshot helper is correct (incl. transparent alpha
     // coverage) and stays the proven default path. WebGPU: that helper returns
     // an empty image (never submits the command buffer before readback), so use
-    // the manual render → flush → readPixels → encode path instead.
-    if (engine.isWebGPU) return await _capturePngWebGPU(scene, engine, cam, w, h, transparent);
+    // the manual render → flush → readPixels → encode path instead. Engines
+    // without OffscreenCanvas (WebKit 27.2) take it too: the helper's
+    // `instanceof OffscreenCanvas` throws there and its promise never settles.
+    if (engine.isWebGPU || typeof OffscreenCanvas === 'undefined') {
+      return await _capturePngManual(scene, engine, cam, w, h, transparent);
+    }
     const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
       engine, cam, { width: w, height: h }, 'image/png'
     );
@@ -95,12 +99,13 @@ async function _capturePng({ width, height, transparent = false, pose = null } =
   }
 }
 
-// WebGPU PNG capture: manual one-frame render → flush (submit the command
-// buffer) → readPixels → encode. Mirrors the offline video frame renderer.
+// Manual PNG capture (WebGPU, or no OffscreenCanvas): one-frame render →
+// flush (submit the command buffer) → readPixels → encode. Mirrors the
+// offline video frame renderer.
 // Orientation matches the displayed image (verified against the canvas
 // screenshot in test:webgpu). For transparent capture the RTT clears to alpha 0
 // and the caller has already disabled the backdrop layer / shadow-only floor.
-async function _capturePngWebGPU(scene, engine, cam, w, h, transparent) {
+async function _capturePngManual(scene, engine, cam, w, h, transparent) {
   const texture = createFrameTarget(scene, cam, w, h);
   if (transparent) texture.clearColor = new BABYLON.Color4(0, 0, 0, 0);
   try {
