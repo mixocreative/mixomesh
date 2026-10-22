@@ -67,7 +67,7 @@ function buildPng() {
   ]);
 }
 
-function buildGeometry() {
+export function buildGeometry() {
   const pos = [], uv = [], idx = [];
   FACES.forEach((f, i) => {
     const col = i % COLS, row = Math.floor(i / COLS);
