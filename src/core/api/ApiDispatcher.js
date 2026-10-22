@@ -158,13 +158,23 @@ export function createDispatcher(deps) {
       errors: countSeverity(p?.results, 'error'), warnings: countSeverity(p?.results, 'warning'),
     })]],
     projectOpened: [['PROJECT_LOADED', () => projectInfo()], ['PROJECT_NEW', () => ({ ...projectInfo(), new: true })]],
-    projectSaved: [['PROJECT_SAVED', () => projectInfo()]],
+    projectSaved: [['PROJECT_SAVED', () => {
+      // PROJECT_SAVED also fires when undo returns to the saved point and on
+      // New; only a moved write generation means bytes reached disk (cia A-05).
+      const gen = writeGeneration();
+      if (gen !== undefined && gen === lastWriteGen) return null;
+      lastWriteGen = gen;
+      return projectInfo();
+    }]],
   };
+  const writeGeneration = () => deps.persistence?.saveGeneration?.();
+  let lastWriteGen = writeGeneration();
 
   function setSubscriptions(types) {
     for (const off of subs) { try { off(); } catch { /* noop */ } }
     subs = [];
     subscribedTypes = new Set(types);
+    lastWriteGen = writeGeneration();
     for (const type of types) {
       for (const [evKey, map] of EVENT_SOURCES[type] ?? []) {
         const name = deps.EVENTS?.[evKey];

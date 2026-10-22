@@ -152,6 +152,7 @@ export async function createAppDispatcher(extra = {}) {
     },
     persistence: {
       isDirty: () => PersistenceManager.isDirty(),
+      saveGeneration: () => Dirty.saveGeneration(),
       // Returns the undo: PROJECT_DIRTY marks the work unsaved again (sticky) if the replacement fails.
       discardChanges: () => {
         Dirty.clearDirty();
