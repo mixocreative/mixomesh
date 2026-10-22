@@ -482,11 +482,25 @@ function _setPrintPreviewMode(enabled) {
   }
 }
 
+// Base-color mode's image processing: no tone map, contrast or exposure, so a
+// pixel shows its texel (the scene's ACES look read ~16% darker, L2-14).
+let _neutralImageProcessing = null;
+function _neutralIP() {
+  if (!_neutralImageProcessing) {
+    _neutralImageProcessing = new BABYLON.ImageProcessingConfiguration();
+    _neutralImageProcessing.toneMappingEnabled = false;
+    _neutralImageProcessing.contrast = 1;
+    _neutralImageProcessing.exposure = 1;
+  }
+  return _neutralImageProcessing;
+}
+
 /**
  * Base-color (flat albedo) inspection mode — shows what Mimaki actually inks,
- * unlit. PBR → `unlit`; Standard → `disableLighting` with diffuse copied to
- * emissive so the colour still shows. Stores + restores per material, exactly
- * like print-preview's metallic swap (viewport-only; export reads source).
+ * unlit and without the viewport's tone map. PBR → `unlit`; Standard →
+ * `disableLighting` with diffuse copied to emissive so the colour still
+ * shows. Stores + restores per material, exactly like print-preview's
+ * metallic swap (viewport-only; export reads source).
  */
 function _setBaseColorMode(enabled) {
   if (enabled) {
@@ -499,8 +513,10 @@ function _setBaseColorMode(enabled) {
           unlit: mat.unlit,
           disableLighting: mat.disableLighting,
           emissive: mat.emissiveColor?.clone?.() ?? null,
+          imageProcessing: mat.imageProcessingConfiguration ?? null,
         });
       }
+      if ('imageProcessingConfiguration' in mat) mat.imageProcessingConfiguration = _neutralIP();
       if ('unlit' in mat) {
         mat.unlit = true;                                   // PBR — flat albedo
       } else if ('disableLighting' in mat) {
@@ -514,6 +530,7 @@ function _setBaseColorMode(enabled) {
       if (!mat) continue;
       const stored = _baseColorMaterialMap.get(mat.uniqueId.toString());
       if (!stored) continue;
+      if (stored.imageProcessing) mat.imageProcessingConfiguration = stored.imageProcessing;
       if ('unlit' in mat) mat.unlit = stored.unlit ?? false;
       else if ('disableLighting' in mat) {
         mat.disableLighting = stored.disableLighting ?? false;
