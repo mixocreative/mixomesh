@@ -665,7 +665,7 @@
   "toast.workspaceSwitched": "{name} に切り替えました - クリックで {back} に戻る",
   "toast.exportSelectedNone": "先に書き出すオブジェクトを選択してください",
   "toast.selectShaderFirst": "マテリアルを選択してください",
-  "toast.validateSkipped": "{name}: 自動検証をスキップ（10万頂点超）",
+  "toast.validateSkipped": "{name} は大きいため自動では検証していません。プリントの「すべて検証」で検証できます。",
   "toast.validating": "{name} を検証中…",
   "toast.validateOk": "✓ {name}",
   "toast.validateErrors": "✗ {name}: エラー {errs} 件",

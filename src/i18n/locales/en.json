@@ -668,7 +668,7 @@
   "toast.workspaceSwitched": "Switched to {name} - click to go back to {back}",
   "toast.exportSelectedNone": "Select an object to export first",
   "toast.selectShaderFirst": "Select a material first",
-  "toast.validateSkipped": "{name}: skipped auto-validate (>100k verts)",
+  "toast.validateSkipped": "{name} is large, so it was not checked automatically. Use Validate All in Print to check it.",
   "toast.validating": "Validating {name}…",
   "toast.validateOk": "✓ {name}",
   "toast.validateErrors": "✗ {name}: {errs} error(s)",

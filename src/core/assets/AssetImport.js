@@ -530,7 +530,9 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     registerAssetEntry(entry);
 
     const collectionId = createCollectionFromFilename(filename, assetId);
-    const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, modelRatio);
+    const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, modelRatio, {
+      singleObjectName: ext === '.stl' ? entry.name : null,
+    });
 
     _overlayUpdate(0.98, t('import.progress.ready', { filename }));
 
@@ -598,9 +600,8 @@ export async function instantiateAsset(assetId, position) {
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
       sourceAssetId: assetId, sourceFileHash: asset.contentHash ?? null,
     });
-    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
-      fileName: String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, ''),
-    });
+    const fileStem = String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, '');
+    const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, { fileName: fileStem });
     if (preParse?.verdict !== 'warn') _warnIfOverBudget(container);
     container.addAllToScene();
 
@@ -609,7 +610,9 @@ export async function instantiateAsset(assetId, position) {
     hierarchy.attachFileGroup(scene);
 
     const collectionId = createCollectionFromFilename(asset.displayName ?? asset.filename, assetId);
-    const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1);
+    const meshIds = registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy, asset.modelRatio ?? 1, {
+      singleObjectName: asset.extension === '.stl' ? fileStem || null : null,
+    });
     for (const meshId of meshIds) queueValidation(meshId);
     await _selectImported(hierarchy, meshIds);
     if (!meshIds.length) throw new Error(`${asset.displayName ?? asset.filename}: no geometry found in asset`);

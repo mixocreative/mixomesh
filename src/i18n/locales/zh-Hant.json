@@ -665,7 +665,7 @@
   "toast.workspaceSwitched": "已切換至「{name}」- 點擊可回到「{back}」",
   "toast.exportSelectedNone": "請先選取要匯出的物件",
   "toast.selectShaderFirst": "請先選擇材質",
-  "toast.validateSkipped": "{name}：略過自動驗證（超過 10 萬頂點）",
+  "toast.validateSkipped": "{name} 較大，未自動驗證。可在「列印」按「全部驗證」檢查。",
   "toast.validating": "正在驗證 {name}…",
   "toast.validateOk": "✓ {name}",
   "toast.validateErrors": "✗ {name}：{errs} 個錯誤",

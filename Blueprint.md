@@ -2320,7 +2320,11 @@ silently deleting a user's group.
   SceneObject is registered (import, duplicate, instantiate). If `baseName`
   is already taken, the helper appends `.NNN` (zero-padded, scanned
   upward) until it finds a free slot. The first `.NNN` collision is
-  parsed off the stem so collisions of collisions stay readable.
+  parsed off the stem so collisions of collisions stay readable. The base
+  name is the loader's mesh name, except for an STL that yields exactly one
+  mesh: its object is named after the file stem (`My Part.stl` → "My Part"),
+  never the loader's `stlmesh` (owner decision 2026-10-22, cia W-13). A
+  multi-solid ASCII STL keeps its `solid` names under the file-named group.
 - **`HistoryManager._setName(id, prev, next)`** — rename collisions are
   resolved by the same `.NNN` scheme, excluding `self` from the taken
   set so renaming to the current name is a no-op. The command dispatches
@@ -2674,8 +2678,9 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   `workers/MeshImport.worker.js` (via `MeshImportWorker.js`), `.obj` to ObjParse. The worker
   fetches the blob URL itself. STL welds exact-equal corners (open-addressing hash on float bits,
   no strings) and splits vertices only at creases > 40° (flat CAD edges, smooth scans at ~T/2
-  vertices); names, axis swap (file x,y,z → x,z,y) and corner order match Babylon's STL loader, so
-  triangle counts and placement are unchanged. **The faceted look is kept**: `scene/FlatShading.js`
+  vertices); mesh names, axis swap (file x,y,z → x,z,y) and corner order match Babylon's STL loader, so
+  triangle counts and placement are unchanged (the single-mesh STL OBJECT is then named after the file,
+  see *Name uniqueness invariant*). **The faceted look is kept**: `scene/FlatShading.js`
   registers a Standard/PBR material plugin (`MXFLAT` define per mesh, injected at
   `CUSTOM_FRAGMENT_BEFORE_LIGHTS`, GLSL + WGSL) that shades meshes with `metadata.flatShading`
   (set by `buildStlContainer`) with the screen-space face normal; the **Smooth shading** viewport

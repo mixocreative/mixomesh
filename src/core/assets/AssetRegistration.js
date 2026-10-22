@@ -89,9 +89,12 @@ export function registerAssetEntry(entry) {
 /**
  * Mint SceneObjects (+ groups) for every geometry mesh in a freshly loaded
  * container: metadata stamp, shader link, logical-object grouping, ratio seed.
+ * @param {{ singleObjectName?: string|null }} [opts]  `singleObjectName`: the
+ *   object's name when the container holds exactly one geometry mesh (an STL
+ *   names its mesh `stlmesh`, so the importer passes the file stem).
  * @returns {string[]} created meshIds
  */
-export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy = null, modelRatio = 1) {
+export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMaterial, collectionId, hierarchy = null, modelRatio = 1, opts = {}) {
   const meshIds = [];
   const instantiatedEvents = [];
   const objectsToAdd = {};
@@ -101,9 +104,12 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
     groupsToAdd[id] = { ...group, childIds: [] };
   }
   const logicalLeadByKey = new Map();
+  const isGeometry = mesh => mesh.geometry && (mesh.getTotalVertices?.() ?? 0) > 0;
+  const singleName = opts.singleObjectName && container.meshes.filter(isGeometry).length === 1
+    ? opts.singleObjectName : null;
 
   for (const mesh of container.meshes) {
-    if (!mesh.geometry || (mesh.getTotalVertices?.() ?? 0) === 0) continue;
+    if (!isGeometry(mesh)) continue;
     const meshId = newId('mesh');
     mesh.metadata = { ...(mesh.metadata ?? {}), meshId, assetId, sourceUnit };
     registerMesh(meshId, mesh);
@@ -150,7 +156,7 @@ export function registerInstantiatedMeshes(container, assetId, sourceUnit, byMat
     }
     const displayName = isInternalPart
       ? _uniqueObjectName(mesh.name || 'mesh', { ...getState().scene.objects, ...objectsToAdd })
-      : _uniqueObjectName(_logicalDisplayName(mesh), { ...getState().scene.objects, ...objectsToAdd });
+      : _uniqueObjectName(singleName ?? _logicalDisplayName(mesh), { ...getState().scene.objects, ...objectsToAdd });
 
     const sceneObject = {
       id: meshId,
