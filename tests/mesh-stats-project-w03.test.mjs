@@ -25,7 +25,9 @@ function openedMesh() {
   const B = window.BABYLON;
   const mesh = {
     metadata: { meshId: 'opened' }, geometry: {}, getTotalIndices: () => 30,
-    computeWorldMatrix() {},
+    getTotalVertices: () => 2,
+    getVerticesData: () => new Float32Array([0, 0, 0, 0.01, 0.02, 0.03]),
+    computeWorldMatrix: () => ({ m: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }),
     getBoundingInfo: () => ({ boundingBox: {
       minimumWorld: new B.Vector3(0, 0, 0), maximumWorld: new B.Vector3(0.01, 0.02, 0.03),
     } }),
@@ -46,7 +48,7 @@ test('after Open the HUD shows the opened scene and its restored selection', asy
   dispatch(EVENTS.PROJECT_LOADED, {});
   await flush();
   assert.match(hudText, /^\S+ 10 \//, `scene total is the opened mesh's 10 triangles: "${hudText}"`);
-  assert.match(hudText, /10×30×20 mm/, `selection dims shown: "${hudText}"`);
+  assert.match(hudText, /10×20×30 mm/, `selection dims shown in X×Y×Z order: "${hudText}"`);
 });
 
 test('after New the HUD drops the previous project numbers', async () => {

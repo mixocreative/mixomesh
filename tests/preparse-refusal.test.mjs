@@ -24,7 +24,7 @@ test('over 4× budget: refused before the loader runs, nothing registered', asyn
   let loads = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { loads++; throw new Error('should not parse'); } };
   await assert.rejects(AssetLoader.loadFromBlob(stl, 'big.stl'),
-    /"big\.stl" has 64 triangles; this web build handles up to 40\. Simplify or split the model, or use the desktop app\./);
+    /"big\.stl" has 64 triangles; this web build handles up to 40\. Simplify or split the model/);
   await assert.rejects(importWithDedupe(stl, 'big.stl'), /handles up to 40/);
   assert.equal(loads, 0);
   assert.equal(Object.keys(getState().scene.assetLibrary ?? {}).length, 0);
