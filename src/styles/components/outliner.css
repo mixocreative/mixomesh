@@ -17,6 +17,7 @@
 .ol-title { font-weight: 600; }
 .ol-list {
   flex: 1;
+  container-type: inline-size;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--sp-2) 0;
@@ -121,6 +122,11 @@
 }
 .ol-empty-badge { flex: none; margin-left: var(--sp-3); font-size: var(--fs-xs); font-weight: 400; color: var(--text-2); }
 .ol-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* A narrow Outliner drops the pill words (icon / count and tooltip stay) so
+   the name keeps room beside them (L2-07). */
+@container (max-width: 320px) {
+  .ol-pill-label { display: none; }
+}
 
 .ol-icon-btn {
   background: transparent;
@@ -142,9 +148,11 @@
 }
 /* Row toggles are hover-revealed; a non-default state (hidden, locked, locked
    by a group, excluded from print) stays visible so it never goes unnoticed.
-   Hidden toggles keep their space: revealing them must not slide the pills
-   left under the pointer, or a click aimed at Repair lands on Lock (cia W-08). */
-.ol-row .ol-icon-btn { visibility: hidden; }
+   Hidden toggles take no space, so the name keeps room beside the pills
+   (L2-07); the pills sit right of the toggles, so revealing a toggle never
+   slides a pill under the pointer and a click aimed at Repair cannot land on
+   Lock (cia W-08). */
+.ol-row .ol-icon-btn { display: none; }
 .ol-row:hover .ol-icon-btn,
 .ol-row:focus-within .ol-icon-btn,
 .ol-row.ol-selected .ol-vis,
@@ -152,7 +160,7 @@
 .ol-row.ol-hidden .ol-vis,
 .ol-row.ol-locked .ol-lock,
 .ol-row.ol-locked-inherited .ol-lock,
-.ol-row.ol-print-off .ol-print { visibility: visible; }
+.ol-row.ol-print-off .ol-print { display: inline-flex; }
 .ol-row.ol-locked .ol-lock,
 .ol-row.ol-locked .ol-lock:hover { color: var(--warning); }
 .ol-row.ol-locked-inherited .ol-lock { color: var(--text-disabled); }

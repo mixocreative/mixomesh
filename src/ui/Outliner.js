@@ -275,7 +275,7 @@ function _statusPill(meshId) {
   const open = fixable ? 'button type="button"' : 'span';
   const close = fixable ? 'button' : 'span';
   const dataAction = fixable ? ' data-action="repair"' : '';
-  return `<${open} class="${cls}" title="${title}"${dataAction}>${glyph}<span>${_escape(label)}</span></${close}>`;
+  return `<${open} class="${cls}" title="${title}" aria-label="${escapeAttr(label)}"${dataAction}>${glyph}<span class="ol-pill-label">${_escape(label)}</span></${close}>`;
 }
 
 function _renderRow({ id, kind, name, count = 0, partCount = 0, pill = '', visible, locked, inheritedLock = false, isPrintPart, depth, hasChildren, isCollapsed, iconName, typeTitle = '', isGhost, isUnlinked }) {
@@ -293,7 +293,7 @@ function _renderRow({ id, kind, name, count = 0, partCount = 0, pill = '', visib
     ? `<span class="ol-badge ol-num" title="${escapeAttr(t('outliner.itemCount', { n: count }))}">${count}</span>`
     : '';
   const partsPill = partCount > 0
-    ? `<button type="button" class="ol-pill ol-parts-pill" data-action="parts" title="${escapeAttr(t('outliner.showParts'))}" aria-label="${escapeAttr(t('outliner.showParts'))}">${_escape(t('outliner.partsLabel'))} <span class="ol-num">${partCount}</span></button>`
+    ? `<button type="button" class="ol-pill ol-parts-pill" data-action="parts" title="${escapeAttr(t('outliner.showParts'))}" aria-label="${escapeAttr(t('outliner.showParts'))}"><span class="ol-pill-label">${_escape(t('outliner.partsLabel'))}</span> <span class="ol-num">${partCount}</span></button>`
     : '';
   const printBtn = kind === 'object'
     ? `<button class="ol-icon-btn ol-print ${isPrintPart ? 'ol-print-on' : ''}" type="button" data-action="print" aria-pressed="${isPrintPart ? 'true' : 'false'}" title="${escapeAttr(t(isPrintPart ? 'outliner.removeFromPrint' : 'outliner.markPrintPart'))}">${icon('Printer', { width: 13, height: 13 })}</button>`
@@ -311,12 +311,12 @@ function _renderRow({ id, kind, name, count = 0, partCount = 0, pill = '', visib
          style="--ol-depth:${depth}">
       ${twirl}
       <span class="ol-icon" title="${escapeAttr(typeTitle)}">${icon(iconName, { width: 14, height: 14 })}</span>
-      <span class="ol-name-cell"><span class="ol-name" data-name>${_escape(name)}</span>${kind === 'group' && count === 0 ? `<span class="ol-empty-badge">${_escape(t('outliner.emptyGroup'))}</span>` : ''}</span>
+      <span class="ol-name-cell"><span class="ol-name" data-name title="${escapeAttr(name)}">${_escape(name)}</span>${kind === 'group' && count === 0 ? `<span class="ol-empty-badge">${_escape(t('outliner.emptyGroup'))}</span>` : ''}</span>
       <span class="ol-trail">
-        ${pill}${partsPill}${badge}
         <button class="ol-icon-btn ol-vis" type="button" data-action="vis" aria-pressed="${visible ? 'false' : 'true'}" title="${escapeAttr(t(visible ? 'outliner.hide' : 'outliner.show'))}">${icon(visible ? 'Eye' : 'EyeOff', { width: 13, height: 13 })}</button>
         <button class="ol-icon-btn ol-lock" type="button" data-action="lock" aria-pressed="${locked ? 'true' : 'false'}" title="${escapeAttr(t(locked ? 'outliner.unlock' : 'outliner.lock'))}">${icon(locked ? 'Lock' : 'Unlock', { width: 13, height: 13 })}</button>
         ${printBtn}
+        ${pill}${partsPill}${badge}
       </span>
     </div>
   `;
