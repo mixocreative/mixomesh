@@ -277,8 +277,8 @@ async function main() {
     // alive — MeshStats.countSceneTriangles fix), so the HUD's numeric
     // prefix must be exactly 4, not the pre-fix "8" (a doubled export clone).
     console.log(`HUD text: "${result.hudText}"`);
-    const hudMatch = /^tris (\d+) \//.exec(result.hudText);
-    assert(hudMatch, `HUD should read "tris <n> / <budget>", got: "${result.hudText}"`);
+    const hudMatch = /^faces (\d+) \//.exec(result.hudText);
+    assert(hudMatch, `HUD should read "faces <n> / <budget>", got: "${result.hudText}"`);
     assert(hudMatch[1] === '4', `HUD triangle count should read exactly 4, got "${hudMatch[1]}" (full text: "${result.hudText}")`);
     console.log(`cost block text: "${result.costText}"`);
     assert(result.costText && result.costText !== '\u2014',
