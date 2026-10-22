@@ -1214,10 +1214,9 @@ export const EVENTS = {
   ASSET_REGISTERED:        'asset:registered',
   ASSET_REMOVED:           'asset:removed',
   ASSET_INSTANTIATED:      'asset:instantiated',
-  ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',
 
-  // Scene object lifecycle
+  // Scene object lifecycle (structural changes to state.scene.objects)
   OBJECT_REMOVED:          'object:removed',
   OBJECT_RESTORED:         'object:restored',
   OBJECT_UPDATED:          'object:updated',
@@ -1225,14 +1224,28 @@ export const EVENTS = {
   // Validation
   VALIDATION_STARTED:      'validation:started',
   VALIDATION_COMPLETE:     'validation:complete',
+  VALIDATION_FOCUS_REQUESTED: 'validation:focusRequested', // toast click-through → Print Panel Validation tab (B5)
+
+  // Manual Mixo print refinement (lead-owned intent, transient worker lifecycle)
+  REFINEMENT_CHANGED:      'refinement:changed',
+  REFINEMENT_PROGRESS:     'refinement:progress',
+  REFINEMENT_READY:        'refinement:ready',
+  REFINEMENT_FAILED:       'refinement:failed',
+  REFINEMENT_CANCELLED:    'refinement:cancelled',
+  REFINEMENT_STALE:        'refinement:stale',
 
   // Selection
   SELECTION_CHANGED:       'selection:changed',
-  SCOPE_CHANGED:           'selection:scopeChanged',   // { scopeId } click-depth scope (task 3.2); null = root
   ACTIVE_OBJECT_CHANGED:   'selection:activeChanged',
+  PIVOT_MODE_CHANGED:      'selection:pivotModeChanged',
+  SCOPE_CHANGED:           'selection:scopeChanged',   // { scopeId } click-depth scope (task 3.2); null = root
+
+  // 3D cursor
+  CURSOR_CHANGED:          'scene:cursorChanged',
 
   // Transform
   TRANSFORM_COMMITTED:     'transform:committed',
+  GIZMO_CHANGED:           'transform:gizmoChanged',   // gizmo mode/space — keeps the toolbar in sync with hotkeys
 
   // Shaders
   SHADER_CREATED:          'shader:created',
@@ -1250,20 +1263,17 @@ export const EVENTS = {
   VISIBILITY_CHANGED:      'hierarchy:visibilityChanged',
   LOCK_CHANGED:            'hierarchy:lockChanged',
 
-  // Collections (file-import display buckets in the outliner; see §13 Outliner)
+  // Material presets (config/materials.json) finished loading at boot
+  MATERIALS_LOADED:        'materials:loaded',
+
+  // Collections (file-import display buckets in the outliner)
   COLLECTION_CREATED:      'collection:created',
-  COLLECTION_REMOVED:      'collection:removed',
   COLLECTION_RENAMED:      'collection:renamed',
-  COLLECTION_MEMBERSHIP:   'collection:membership',
 
   // History
   HISTORY_PUSHED:          'history:pushed',
   HISTORY_UNDONE:          'history:undone',
   HISTORY_REDONE:          'history:redone',
-
-  // Print
-  EXPORT_STARTED:          'print:exportStarted',
-  EXPORT_COMPLETE:         'print:exportComplete',
 
   // Project
   PROJECT_NEW:             'project:new',
@@ -1271,21 +1281,32 @@ export const EVENTS = {
   PROJECT_SAVED:           'project:saved',
   PROJECT_DIRTY:           'project:dirty',
   PROJECT_RENAMED:         'project:renamed',
-  AUTOSAVE_WRITTEN:        'project:autosaved',        // autosave status object (was {})
-  AUTOSAVE_FAILED:         'project:autosaveFailed',   // { state, failures, lastError, reason } — a tick failed or is paused (cia B-02)
+  AUTOSAVE_WRITTEN:        'project:autosaved',        // autosave status { state, failures, lastError, reason, lastWrittenAt }
+  AUTOSAVE_FAILED:         'project:autosaveFailed',   // same status object — a tick failed or is paused (B-02)
 
   // Camera
   CAMERA_PRESET_CHANGED:   'camera:presetChanged',
 
   // Environment
-  HDRI_STATUS:             'env:hdriStatus',   // { status: 'loaded'|'error', preset } — ScenePanel toasts user-initiated changes
+  HDRI_STATUS:             'env:hdriStatus',   // { status: 'loaded'|'error', preset }
+
+  // Workspaces (PART 13b)
+  WORKSPACE_CHANGED:       'ui:workspaceChanged',
+  PANEL_COLLAPSED_CHANGED: 'ui:panelCollapsedChanged',
+
+  // Per-user settings (SettingsStore) — fired after a section / all reset so
+  // the Scene + Print panels re-render to the restored values.
+  SETTINGS_RESET:          'settings:reset',
+
+  // i18n
+  LOCALE_CHANGED:          'i18n:localeChanged',
+  UI_STYLE_CHANGED:        'ui:styleChanged',
+  GEOMETRY_CHANGED:        'geometry:changed',
 
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
   MODAL_CLOSE:             'ui:modalClose',
-  UI_PANEL_CHANGED:        'ui:panelChanged',
-  UI_CONTEXT_MENU:         'ui:contextMenu',
 };
 ```
 

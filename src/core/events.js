@@ -3,7 +3,6 @@ export const EVENTS = {
   ASSET_REGISTERED:        'asset:registered',
   ASSET_REMOVED:           'asset:removed',
   ASSET_INSTANTIATED:      'asset:instantiated',
-  ASSET_MISSING:           'asset:missing',
   ASSET_RELINKED:          'asset:relinked',
 
   // Scene object lifecycle (structural changes to state.scene.objects)
@@ -58,18 +57,12 @@ export const EVENTS = {
 
   // Collections (file-import display buckets in the outliner)
   COLLECTION_CREATED:      'collection:created',
-  COLLECTION_REMOVED:      'collection:removed',
   COLLECTION_RENAMED:      'collection:renamed',
-  COLLECTION_MEMBERSHIP:   'collection:membership',
 
   // History
   HISTORY_PUSHED:          'history:pushed',
   HISTORY_UNDONE:          'history:undone',
   HISTORY_REDONE:          'history:redone',
-
-  // Print
-  EXPORT_STARTED:          'print:exportStarted',
-  EXPORT_COMPLETE:         'print:exportComplete',
 
   // Project
   PROJECT_NEW:             'project:new',
@@ -103,6 +96,4 @@ export const EVENTS = {
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
   MODAL_CLOSE:             'ui:modalClose',
-  UI_PANEL_CHANGED:        'ui:panelChanged',
-  UI_CONTEXT_MENU:         'ui:contextMenu',
 };
