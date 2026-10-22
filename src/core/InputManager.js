@@ -10,7 +10,7 @@ import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
 import { BU_TO_MM } from './PrintManager.js';
 import { Hover, hoverTarget } from './Hover.js';
-import { setGizmoSnap } from './scene/PivotSession.js';
+import { setGizmoSnap, isNoopTransform } from './scene/PivotSession.js';
 import { touchOrbit, touchPan, touchPinch } from './scene/CameraRig.js';
 import { createTouchGestures, TOUCH_LONG_PRESS_MS } from './TouchGestures.js';
 import { isReadOnlyShortcut } from './ViewerModel.js';
@@ -662,7 +662,7 @@ function _commitModal() {
   if (!_modal) return;
   const prev = _modal.snapshots;
   const next = _captureCurrent(_modal);
-  const same = _modalIsNoop(prev, next);
+  const same = isNoopTransform(prev, next);
   _exitModal();
   if (!same) {
     push(new TransformCommand(prev, next, { alreadyApplied: true }));
@@ -934,21 +934,6 @@ function _captureCurrent(modal) {
     if (node) out[id] = _snapshotMesh(node);
   }
   return out;
-}
-
-function _modalIsNoop(prev, next) {
-  for (const id of Object.keys(prev)) {
-    const a = prev[id], b = next[id];
-    if (!b) return false;
-    for (const k of ['x', 'y', 'z']) {
-      if (Math.abs(a.position[k] - b.position[k]) > 1e-9) return false;
-      if (Math.abs(a.scaling[k]  - b.scaling[k])  > 1e-9) return false;
-    }
-    for (const k of ['x', 'y', 'z', 'w']) {
-      if (Math.abs(a.rotation[k] - b.rotation[k]) > 1e-9) return false;
-    }
-  }
-  return true;
 }
 
 // ── Status hint ──────────────────────────────────────────

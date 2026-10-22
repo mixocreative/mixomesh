@@ -440,6 +440,28 @@ function _snapshotAbsolute(nodes) {
   return out;
 }
 
+/** True when two snapshot maps (same shape as _snapshotAbsolute) hold the same transforms. */
+export function isNoopTransform(prev, next) {
+  for (const id of Object.keys(prev)) {
+    const a = prev[id], b = next[id];
+    if (!b) return false;
+    for (const k of ['x', 'y', 'z']) {
+      if (Math.abs(a.position[k] - b.position[k]) > 1e-9) return false;
+      if (Math.abs(a.scaling[k]  - b.scaling[k])  > 1e-9) return false;
+    }
+    for (const k of ['x', 'y', 'z', 'w']) {
+      if (Math.abs(a.rotation[k] - b.rotation[k]) > 1e-9) return false;
+    }
+  }
+  return true;
+}
+
+// A press and release on the gizmo or the body with no movement is a click,
+// not an edit: no undo step (L2-08).
+function _commitDrag(prev, next) {
+  if (_onTransformCommit && !isNoopTransform(prev, next)) _onTransformCommit({ prev, next, alreadyApplied: true });
+}
+
 function _onGizmoDragStart() {
   _dragSnapshot = _snapshotAbsolute(_selectedMeshes);
 }
@@ -449,7 +471,7 @@ function _onGizmoDragEnd() {
   const prev = _dragSnapshot;
   const next = _snapshotAbsolute(_selectedMeshes);
   _dragSnapshot = null;
-  if (_onTransformCommit) _onTransformCommit({ prev, next, alreadyApplied: true });
+  _commitDrag(prev, next);
   // Rebuild pivot so it tracks the new median / active position for the next drag.
   attachToSelection(_selectedMeshes, _currentPivotMode, _activeMesh, _activeGeometry);
 }
@@ -501,7 +523,7 @@ export function endBodyDrag() {
   const next = _snapshotAbsolute(_selectedMeshes);
   _dragSnapshot = null;
   _bodyDragOriginPivot = null;
-  if (_onTransformCommit) _onTransformCommit({ prev, next, alreadyApplied: true });
+  _commitDrag(prev, next);
   attachToSelection(_selectedMeshes, _currentPivotMode, _activeMesh, _activeGeometry);
 }
 
