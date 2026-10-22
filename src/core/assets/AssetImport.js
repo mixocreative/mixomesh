@@ -8,8 +8,10 @@ import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
 import { sha256HexOfBlob } from '../hash.js';
-import { assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, OVER_BUDGET } from '../import/ImportLimits.js';
-import { estimateFileTriangles } from '../import/TriangleEstimate.js';
+import {
+  assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, needsExactCount, OVER_BUDGET,
+} from '../import/ImportLimits.js';
+import { estimateFileTriangles, countFileTriangles } from '../import/TriangleEstimate.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
 } from '../ImportNormalizer.js';
@@ -318,9 +320,13 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
  *   `projected` = scene triangles plus this file's estimate
  */
 export async function preParseCheck(blob, filename) {
-  const estimate = await estimateFileTriangles(blob, extOf(filename));
+  const ext = extOf(filename);
   const scene = SceneManager.getScene?.();
   const sceneTriangles = scene ? countSceneTriangles(scene) : 0;
+  let estimate = await estimateFileTriangles(blob, ext);
+  if (needsExactCount(estimate, { sceneTriangles, budget: caps.triangleBudget })) {
+    estimate = (await countFileTriangles(blob, ext)) ?? estimate;
+  }
   const verdict = assertPreParseCapacity(estimate, {
     sceneTriangles, budget: caps.triangleBudget, filename, desktop: isDesktop(),
   });

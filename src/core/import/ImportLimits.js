@@ -72,6 +72,19 @@ export const ESTIMATE_REFUSE_MARGIN = 2;
 const REFUSE_FACTOR = { exact: 1, sampled: ESTIMATE_REFUSE_MARGIN, rough: Infinity };
 
 /**
+ * A sampled estimate near or over the limit cannot settle the decision: it may
+ * be off by up to ESTIMATE_REFUSE_MARGIN either way. Count exactly first, so the
+ * import is refused before parsing instead of warning "continuing" and failing
+ * after it.
+ * @param {{ triangles: number, confidence: string } | null} estimate
+ * @param {{ sceneTriangles?: number, budget: number }} ctx
+ */
+export function needsExactCount(estimate, { sceneTriangles = 0, budget }) {
+  return estimate?.confidence === 'sampled' && budget > 0
+    && sceneTriangles + estimate.triangles > (budget * 4) / ESTIMATE_REFUSE_MARGIN;
+}
+
+/**
  * Pre-parse budget decision (heavy-mesh spec §1/§3). Throws the refusal
  * message when the scene would exceed 4× the budget times the estimate's
  * REFUSE_FACTOR. Returns 'warn' above 1×, 'ok' otherwise, or 'unknown' when

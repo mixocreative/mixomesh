@@ -39,7 +39,7 @@ export function estimateStl(head, size, tail) {
   if (start !== 'solid') {
     return size > STL_HEADER ? { triangles: Math.floor((size - STL_HEADER) / STL_FACET), confidence: 'sampled' } : null;
   }
-  const count = (bytes) => (_ascii.decode(bytes).match(/endfacet/g) ?? []).length;
+  const count = (bytes) => _stlFacets(_ascii.decode(bytes));
   const facets = count(head);
   if (head.length >= size) return facets ? { triangles: facets, confidence: 'exact' } : null;
   const tailFacets = tail?.length ? count(tail) : 0;
@@ -48,15 +48,13 @@ export function estimateStl(head, size, tail) {
   return { triangles: Math.round((facets + tailFacets) * (size / sampled)), confidence: 'sampled' };
 }
 
+const _stlFacets = (text) => (text.match(/endfacet/g) ?? []).length;
+
 /** OBJ: face lines in the head (an n-gon is n−2 triangles), scaled to the file size. */
 export function estimateObj(head, size) {
-  const text = _ascii.decode(head);
-  let tris = 0;
-  for (const line of text.split('\n')) {
-    if (line.charCodeAt(0) !== 102 || (line.charCodeAt(1) !== 32 && line.charCodeAt(1) !== 9)) continue;
-    const corners = line.trim().split(/\s+/).length - 1;
-    if (corners >= 3) tris += corners - 2;
-  }
+  const counter = _objFaceCounter();
+  counter.push(head);
+  const tris = counter.total();
   if (head.length >= size) return { triangles: tris, confidence: 'exact' };
   if (!tris) return null;   // head is all vertices: no basis for a sample
   return { triangles: Math.round(tris * (size / head.length)), confidence: 'sampled' };
@@ -191,4 +189,74 @@ export async function estimateFileTriangles(blob, ext) {
     return null;   // unreadable header: no pre-parse decision, the post-parse check decides
   }
   return null;
+}
+
+/**
+ * Exact count for formats whose text can be counted without parsing it (OBJ
+ * face lines, ASCII STL facets): one streamed pass over the bytes, far cheaper
+ * than the parse it can save. Null for every other format.
+ * @param {Blob} blob
+ * @param {string} ext
+ * @returns {Promise<{ triangles: number, confidence: 'exact' } | null>}
+ */
+export async function countFileTriangles(blob, ext) {
+  if (typeof blob?.stream !== 'function') return null;
+  const isAsciiStl = ext === '.stl' && _ascii.decode(await _slice(blob, 0, 5)) === 'solid';
+  if (ext !== '.obj' && !isAsciiStl) return null;
+  const counter = isAsciiStl ? _textCounter(_stlFacets) : _objFaceCounter();
+  const reader = blob.stream().getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    counter.push(value);
+  }
+  return { triangles: counter.total(), confidence: 'exact' };
+}
+
+/** Counts with `countText` over whole lines, carrying a partial line between chunks. */
+function _textCounter(countText) {
+  const decoder = new TextDecoder('latin1');
+  let carry = '';
+  let triangles = 0;
+  return {
+    push(bytes) {
+      const text = carry + decoder.decode(bytes, { stream: true });
+      const cut = text.lastIndexOf('\n') + 1;
+      triangles += countText(text.slice(0, cut));
+      carry = text.slice(cut);
+    },
+    total: () => triangles + countText(carry + decoder.decode()),
+  };
+}
+
+const LF = 10, SPACE = 32, TAB = 9, CR = 13, F = 102;
+
+/** OBJ face-line triangles (an n-gon is n−2), byte by byte across chunks: no
+ *  string per line, so ~10M face lines count in well under a second. */
+function _objFaceCounter() {
+  let triangles = 0;
+  let col = 0;          // byte index within the current line
+  let face = false;     // the line starts with "f" + whitespace
+  let corners = 0;
+  let inToken = false;
+  const endLine = () => {
+    if (face && corners >= 3) triangles += corners - 2;
+    col = 0; face = false; corners = 0; inToken = false;
+  };
+  return {
+    push(bytes) {
+      for (let i = 0; i < bytes.length; i++) {
+        const b = bytes[i];
+        if (b === LF) { endLine(); continue; }
+        const at = col++;
+        if (at === 0) { face = b === F; continue; }
+        if (!face) continue;
+        const blank = b === SPACE || b === TAB || b === CR;
+        if (at === 1) { face = blank; continue; }
+        if (blank) inToken = false;
+        else if (!inToken) { inToken = true; corners++; }
+      }
+    },
+    total() { endLine(); return triangles; },
+  };
 }
