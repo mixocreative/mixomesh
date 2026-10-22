@@ -1170,13 +1170,13 @@ async function main() {
       `resin grey wrong value: ${JSON.stringify(stlDiag.color)}`);
 
     // Task 7: the status-bar centre HUD shows the scene-wide triangle budget
-    // (`tris <current> / <budget>`) unconditionally — not selection-gated —
+    // (`faces <current> / <budget>`) unconditionally — not selection-gated —
     // so it is already live right after this import with nothing selected.
     // T2: assert the NUMERIC PREFIX, not just the word — this STL is one
     // triangle and the scene holds nothing else, so the count must read
     // exactly 1 over a positive budget. `tris \d` alone would still pass on
     // a double-counted or zeroed walk.
-    const hudMatch = /^tris (\d+(?:\.\d+)?[kM]?) \/ (\d+(?:\.\d+)?[kM]?)/.exec(stlDiag.hudText);
+    const hudMatch = /^faces (\d+(?:\.\d+)?[kM]?) \/ (\d+(?:\.\d+)?[kM]?)/.exec(stlDiag.hudText);
     assert(hudMatch, `HUD triangle budget text missing or malformed: "${stlDiag.hudText}"`);
     assert(hudMatch[1] === '1',
       `HUD should read exactly 1 triangle for this one-facet STL, got "${hudMatch[1]}" (full: "${stlDiag.hudText}")`);
