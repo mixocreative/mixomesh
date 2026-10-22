@@ -3624,6 +3624,9 @@ budgets, not a promise that every device can allocate that much memory.
 `import/ImportFailure.js` maps failures to localized plain-language reasons and
 specific recovery actions (size, polygons, allocation, storage, geometry, XML,
 package references, missing embedded textures/OBJ sidecars, units and access).
+The polygons, memory and timeout hints have a web variant (`import.fix.<category>Web`)
+that points at the desktop app; `classifyImportFailure(err, filename, { desktop })` picks the
+plain one in the desktop app, so it never sends a desktop user to itself (cia B-17).
 `ui/ImportError.js` keeps the filename and recovery action visible and original
 message/stack under Technical details in EN/繁中/日本語. Referenced 3MF textures
 that cannot be resolved reject import instead of silently producing grey parts.

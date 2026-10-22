@@ -39,3 +39,12 @@ test('triangle capacity checks report count and limit before mesh creation', asy
   const xml = '<model><resources><object id="1"><mesh><vertices><vertex x="0" y="0" z="0"/></vertices><triangles>' + '<triangle v1="0" v2="0" v3="0"/>'.repeat(5) + '</triangles></mesh></object></resources></model>';
   await assert.rejects(parseThreeMFXml(xml, { triangleBudget: 1 }), /5 triangles.*4/);
 });
+
+test('cia B-17: web users get the hint that names the desktop app; desktop users do not', () => {
+  const overBudget = (() => { try { assertTriangleCapacity(401, 100); } catch (err) { return err; } })();
+  assert.equal(classifyImportFailure(overBudget, 'a.stl', { desktop: false }).hintKey, 'import.fix.polygonsWeb');
+  assert.equal(classifyImportFailure(overBudget, 'a.stl', { desktop: true }).hintKey, 'import.fix.polygons');
+  assert.equal(classifyImportFailure('out of memory', 'a.stl', { desktop: false }).hintKey, 'import.fix.memoryWeb');
+  assert.equal(classifyImportFailure('timed out', 'a.stl', { desktop: false }).hintKey, 'import.fix.timeoutWeb');
+  assert.equal(classifyImportFailure('corrupt zip', 'a.3mf', { desktop: false }).hintKey, 'import.fix.damaged', 'other hints have no web variant');
+});
