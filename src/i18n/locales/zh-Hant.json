@@ -56,6 +56,7 @@
   "asset.empty.noFolder": "尚未掛載資料夾。按「掛載」選取資料夾後，檔案即可跨專案拖曳使用。",
   "asset.empty.noMatch": "沒有符合目前篩選條件的素材。",
   "asset.empty.session": "將 3D 檔案（.glb / .gltf / .obj / .stl / .3mf）拖到視窗，或掛載目錄。",
+  "asset.empty.sessionNoFolders": "將 3D 檔案（.glb / .gltf / .obj / .stl / .3mf）拖到視窗。",
   "asset.empty.noSupported": "此資料夾沒有支援的檔案。",
   "asset.summary": "{filtered} / {total} {noun}",
   "asset.assetSingular": "個素材",

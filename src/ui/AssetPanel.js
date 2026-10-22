@@ -120,7 +120,10 @@ export function init() {
   // Capability-gate (ADR 0001): folder mounting needs a filesystem the runtime
   // exposes. Hidden — not shown-and-broken — when unsupported (e.g. a no-FSA
   // browser). No-op on Chrome/Edge/Electron where mountDirectory is true.
-  if (!caps.mountDirectory) _mountBtn.hidden = true;
+  if (!caps.mountDirectory) {
+    _mountBtn.hidden = true;
+    _treeWrapEl.querySelector('.ap-tab[data-tab="library"]').hidden = true;
+  }
   _treeWrapEl.querySelectorAll('.ap-tab').forEach(btn =>
     btn.addEventListener('click', () => _setTab(btn.dataset.tab)));
   _listEl.addEventListener('click', _onTreeClick);
@@ -446,7 +449,7 @@ function _renderGridBody() {
         ${total
           ? _escape(t('asset.empty.noMatch'))
           : _activeTab === 'session'
-          ? _escape(t('asset.empty.session'))
+          ? _escape(t(caps.mountDirectory ? 'asset.empty.session' : 'asset.empty.sessionNoFolders'))
           : _escape(t('asset.empty.noSupported'))}
       </div>`;
     return;

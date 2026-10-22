@@ -56,6 +56,7 @@
   "asset.empty.noFolder": "フォルダがマウントされていません。「マウント」をクリックして選択すると、ファイルをプロジェクト間でドラッグできます。",
   "asset.empty.noMatch": "現在のフィルタに一致するアセットはありません。",
   "asset.empty.session": "3Dファイル（.glb / .gltf / .obj / .stl / .3mf）をビューポートへドロップするか、ディレクトリをマウントしてください。",
+  "asset.empty.sessionNoFolders": "3Dファイル（.glb / .gltf / .obj / .stl / .3mf）をビューポートへドロップしてください。",
   "asset.empty.noSupported": "このフォルダに対応ファイルはありません。",
   "asset.summary": "{filtered} / {total} {noun}",
   "asset.assetSingular": "件",

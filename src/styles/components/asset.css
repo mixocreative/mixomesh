@@ -303,6 +303,7 @@
 
 /* ── Tabs: Project · Folders counts (task 4.6) ────────── */
 .ap-tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.ap-tab[hidden] { display: none; }   /* tiers without folder access (L2-11) */
 .ap-tab.active { font-weight: 600; }
 .ap-tab-count {
   font-family: var(--font-mono);

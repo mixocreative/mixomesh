@@ -56,6 +56,7 @@
   "asset.empty.noFolder": "No folder mounted. Click Mount to pick one. Its files become draggable across projects.",
   "asset.empty.noMatch": "No assets match the current filter.",
   "asset.empty.session": "Drop a 3D file (.glb / .gltf / .obj / .stl / .3mf) onto the viewport, or mount a directory.",
+  "asset.empty.sessionNoFolders": "Drop a 3D file (.glb / .gltf / .obj / .stl / .3mf) onto the viewport.",
   "asset.empty.noSupported": "No supported files in this folder.",
   "asset.summary": "{filtered} of {total} {noun}",
   "asset.assetSingular": "asset",
