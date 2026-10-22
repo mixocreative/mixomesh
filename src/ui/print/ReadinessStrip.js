@@ -13,6 +13,9 @@
 import { t } from '../../i18n/index.js';
 import { icon } from '../../core/Icons.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
+import { getState } from '../../core/StateManager.js';
+import { canonicalObjectId } from '../../core/LogicalObjects.js';
+import { getPrinterProfile } from '../../core/print/PrinterProfiles.js';
 
 const STATUS_ICON = { ready: 'CheckCircle', warning: 'AlertTriangle', blocked: 'AlertCircle' };
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -30,7 +33,14 @@ export function issueLabel(issue) {
   if (issue.code === 'below-bed') {
     return `${t(key)} · ${Number(issue.data?.belowBedMM ?? 0).toFixed(1)} mm`;
   }
-  return t(key, { n: issue.objectIds?.length ?? 0 });
+  // objectIds are parts; the user counts objects (one scan split in three
+  // parts is one object).
+  const objects = getState().scene?.objects;
+  const n = new Set((issue.objectIds ?? []).map(id => canonicalObjectId(id, objects))).size;
+  const printer = getPrinterProfile().displayName;
+  if (issue.code === 'texture-count') return t(key, { n, printer, max: issue.data?.maxTexturesPerObject });
+  if (issue.code === 'texture-too-large') return t(key, { n, printer, max: issue.data?.maxTextureSize });
+  return t(key, { n });
 }
 
 /** Translated "what to do" hint for a readiness issue ('' when none). */
