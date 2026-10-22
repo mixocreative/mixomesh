@@ -132,9 +132,19 @@ function _componentModelPath(component) {
     || '';
 }
 
-function _matrixFor(componentOrItem, kind) {
+/**
+ * Placement of an item/component in millimetres. The translation row is in
+ * the unit of the model part that holds the element (Core §3.4: `unit`
+ * covers "all vertices, locations, or measurements"), so it is scaled here;
+ * the 3x3 part is unitless (cia C-06).
+ */
+function _matrixFor(componentOrItem, kind, unitScale) {
   const where = `${kind} objectid=${componentOrItem?.getAttribute('objectid')}`;
-  return _itemMatrix(componentOrItem?.getAttribute('transform'), where) ?? BABYLON.Matrix.Identity();
+  const matrix = _itemMatrix(componentOrItem?.getAttribute('transform'), where);
+  if (!matrix) return BABYLON.Matrix.Identity();
+  const m = matrix.m;
+  matrix.setTranslationFromFloats(m[12] * unitScale, m[13] * unitScale, m[14] * unitScale);
+  return matrix;
 }
 
 function _multiplyMatrices(a, b) {
@@ -669,7 +679,7 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
         childCtx = await loadContext(resolved);
         if (!childCtx) throw new Error(`3MF: component path "${childPath}" not found in package`);
       }
-      const childMatrix = _multiplyMatrices(matrix, _matrixFor(component, 'component'));
+      const childMatrix = _multiplyMatrices(matrix, _matrixFor(component, 'component', ctx.unitScale));
       childCount += await instantiateObject(childCtx, childObjectId, childMatrix, node, 'component', nextStack);
     }
     if (!childCount) {
@@ -684,7 +694,7 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   const buildEl = rootContext.doc.getElementsByTagName('build')[0];
   const buildItems = buildEl ? _directChildren(buildEl, 'item') : [];
   const placements = buildItems.length
-    ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it, 'item') }))
+    ? buildItems.map(it => ({ id: it.getAttribute('objectid'), matrix: _matrixFor(it, 'item', rootContext.unitScale) }))
     : [...rootContext.objectsById.keys()].map(id => ({ id, matrix: BABYLON.Matrix.Identity() }));
 
   for (const placement of placements) {
