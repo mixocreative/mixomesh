@@ -357,6 +357,7 @@ src/
       MaterialPresets.js   ← preset material defs by printer (not yet used; future color/filament picker)
       ExportPlanner.js     ← pure filename math (consumed by PrintNaming)
       ExportTextures.js    ← export-side texture collection (OBJ + Mimaki shared); texture file names unique case-INsensitively (first keeps casing, later get _N)
+      UvTransform.js       ← the UVs every writer emits: the base-colour texture's Babylon texture matrix baked in (UV Override, glTF KHR_texture_transform); the texture's address mode (wrapU/wrapV)
       Download.js          ← save picker + anchor fallback
       PrintCost.js         ← per-unit volume (never Boolean-unioned) × density × price +
                              support premium; overlap = AABB flag only, never subtracted —
@@ -3316,6 +3317,27 @@ hex is already sRGB.
 { meshId, shaderId, offsetX, offsetY, scaleX, scaleY, rotation }
 ```
 
+**Export contract (cia C-04).** A UV Override, or an imported
+KHR_texture_transform (offset / scale / rotation and its rotation centre),
+lives only on the Babylon texture. Every writer that emits texture
+coordinates (OBJ `vt`, 3MF `m:tex2coord`, PLY `s/t` and its sampled vertex
+colours, WRL `TextureCoordinate`) gets them from
+`print/UvTransform.exportUVs(mesh)`, which applies that texture's own
+`getTextureMatrix()` the way the vertex shader does
+(`uv' = (m0·u + m4·v + m8, m1·u + m5·v + m9)`), so the print shows the
+mapping the viewport shows. The texture is the base-colour slot the export
+ships (`UvTransform.baseColorTexture`, diffuse → albedo → base, the same
+order ShaderLibrary writes the override to). The PNG itself is never
+transformed. Out-of-range UVs follow the texture's address mode
+(`UvTransform.textureAddressing`): 3MF writes `tilestyleu/v="clamp|mirror"`
+on `m:texture2d` (Materials ext ch.6, default wrap), WRL writes
+`repeatS/repeatT FALSE` for clamp, PLY samples with the same clamp / mirror
+/ repeat. OBJ stays repeat: an MTL `map_Kd -clamp on` makes trimesh (and
+any reader that takes the rest of the line as the file name) load no
+texture at all. Pinned by `tests/uv-transform-export-c04.test.mjs`; live
+check `tests/browser-uv-transform-c04.mjs` (viewport pixels vs python
+trimesh on the exported OBJ and PLY, repeat and clamp).
+
 ### Material Management
 - Maintain private `Map<shaderId, BABYLON.StandardMaterial>` (or PBRMaterial).
 - On `updateShader`, mutate the Babylon material directly → all linked meshes update.
@@ -5153,7 +5175,7 @@ Hierarchy drops are a separate MIME payload from shader drops.
 ### Properties Panel (`src/ui/PropertiesPanel.js`)
 Subscribes to `SELECTION_CHANGED`. Renders sections for Active Object:
 1. **Object** — name, visible, locked
-2. **Transform** — per-object **Ratio** dropdown (scale ratio, `RescaleObjectCommand`), Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand` (node transform — never baked, so it stays editable + persists). On multi-select, fields show `—` when values differ; editing applies delta. Editable **Size (mm)** row derived from world AABB (so a wrong-unit import is visible). (The old "Apply Rotation/Scale" bake-to-vertices buttons were removed 2026-06-16 — they destroyed the editable, persisted transform and were lost on reload.) **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`).
+2. **Transform** — per-object **Ratio** dropdown (scale ratio, `RescaleObjectCommand`), Position XYZ (mm), Rotation XYZ (deg), Scale XYZ. Tab/Enter commits via `TransformCommand` (node transform — never baked, so it stays editable + persists). On multi-select, fields show `—` when values differ; editing applies delta. Editable **Size (mm)** row derived from world AABB (so a wrong-unit import is visible). (The old "Apply Rotation/Scale" bake-to-vertices buttons were removed 2026-06-16 — they destroyed the editable, persisted transform and were lost on reload.) **Scale lock** (default on, toggled via icon below the Scale row) makes per-axis edits mirror proportionally across XYZ; the viewport scale gizmo's per-axis arrows are hidden in this mode so only the central uniform handle remains (`SceneManager.setScaleLock`). Typed Scale XYZ and Size values must be greater than 0 and may not make the object's longest side exceed `MAX_SIDE_MM` (100 m), checked by `sizeEntryProblem` in `src/core/commands/TransformCommands.js`. Negative scale is refused (Mirror flips an object). A refused entry, including a non-number and an unparsable ratio, snaps back, marks the field `aria-invalid` with the reason as its tooltip, and shows the reason as a warning toast (`properties.enterNumber`, `properties.mustBePositive`, `properties.sizeTooLarge`, `properties.ratioInvalid`). Scale inputs carry `min="0.0001"` so wheel-scrub stops above 0 (cia W-07).
 3. **File units** — dropdown + `AlertTriangle` if unconfirmed + "Looks right" button.
 4. **Shader** (Phase 4, binding-only) — Lists distinct shaders bound to current selection as **slots**. Active mesh's shader appears first. Multi-selection across meshes with different shaders → one slot per shader. Per-slot UI: texture thumbnail chip or color preview, shader name, linked mesh-count badge, combined `<select>` with optgroup "Replace with → [list of all scene shaders]" + synthetic action "Duplicate in place". Click chip/name area → Library `focus(shaderId)`. **No color picker, sliders, or UV inputs here** — those live only in the Shader Library. Properties Shader is binding-only.
 5. **UV Override** — offset/scale/rotation inputs per-mesh; "Reset to Default" button. Mesh-specific UI.
@@ -6149,6 +6171,12 @@ occlusion, performance. Collapsed by default; collapse state persists per user i
 Background, HDRI and the floor stay in Environment. No new schema keys.
 
 ## PART 13b — WORKSPACES & PANEL HIERARCHY
+
+Open, Recent, Recover and New reset the state to factory (`resetWorld`), which
+includes `ui.workspace` / `ui.panelCollapsed`. `Workspace.js` remembers the
+user's own workspace and overrides as last shown and writes them back on
+`PROJECT_LOADED` / `PROJECT_NEW`, so the screen and the state never disagree
+after a load (a disagreement made the Layout button a no-op; cia W-05).
 
 **Status:** SHIPPED v1 (2026-06-12) — `src/ui/Workspace.js`, `ui.workspace` +
 `ui.panelCollapsed` in state, `WORKSPACE_CHANGED` / `PANEL_COLLAPSED_CHANGED`
