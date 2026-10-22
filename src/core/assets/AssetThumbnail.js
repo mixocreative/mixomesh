@@ -7,6 +7,7 @@ import { dispatch, setState, getState } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { getContainer } from './MeshRegistry.js';
 import { withRenderLock } from '../render/RenderLock.js';
+import { renderPng } from '../render/FrameCapture.js';
 
 const BABYLON = window.BABYLON;
 
@@ -87,9 +88,13 @@ async function _renderThumbnail(meshes) {
 
   let dataUrl;
   try {
-    dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
-      engine, cam, { width: THUMB_SIZE, height: THUMB_SIZE }, 'image/png'
-    );
+    const png = await renderPng(scene, engine, cam, THUMB_SIZE, THUMB_SIZE);
+    dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(png);
+    });
   } finally {
     for (const [m, mask] of prevMasks) m.layerMask = mask;
     cam.dispose();

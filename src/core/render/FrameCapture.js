@@ -75,19 +75,7 @@ async function _capturePng({ width, height, transparent = false, pose = null } =
     SceneManager.setFloorShadowOnly(true);
   }
   try {
-    // WebGL: Babylon's screenshot helper is correct (incl. transparent alpha
-    // coverage) and stays the proven default path. WebGPU: that helper returns
-    // an empty image (never submits the command buffer before readback), so use
-    // the manual render → flush → readPixels → encode path instead. Engines
-    // without OffscreenCanvas (WebKit 27.2) take it too: the helper's
-    // `instanceof OffscreenCanvas` throws there and its promise never settles.
-    if (engine.isWebGPU || typeof OffscreenCanvas === 'undefined') {
-      return await _capturePngManual(scene, engine, cam, w, h, transparent);
-    }
-    const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
-      engine, cam, { width: w, height: h }, 'image/png'
-    );
-    return await (await fetch(dataUrl)).blob();
+    return await renderPng(scene, engine, cam, w, h, transparent);
   } finally {
     if (transparent) {
       SceneManager.setFloorShadowOnly(false);
@@ -97,6 +85,27 @@ async function _capturePng({ width, height, transparent = false, pose = null } =
     SceneManager.suspendFollow(false);
     if (navPose) SceneManager.restoreCameraState(navPose);
   }
+}
+
+/**
+ * Render `cam` off-screen at w×h and encode a PNG. Callers hold the render
+ * lock. WebGL: Babylon's screenshot helper is correct (incl. transparent alpha
+ * coverage) and stays the proven default path. WebGPU: that helper returns an
+ * empty image (never submits the command buffer before readback), so use the
+ * manual render → flush → readPixels → encode path instead. Engines without
+ * OffscreenCanvas (WebKit 27.2) take it too: the helper's `instanceof
+ * OffscreenCanvas` throws there and its promise never settles, holding the
+ * render lock for good (L2-10).
+ * @returns {Promise<Blob>}
+ */
+export async function renderPng(scene, engine, cam, w, h, transparent = false) {
+  if (engine.isWebGPU || typeof OffscreenCanvas === 'undefined') {
+    return _capturePngManual(scene, engine, cam, w, h, transparent);
+  }
+  const dataUrl = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(
+    engine, cam, { width: w, height: h }, 'image/png'
+  );
+  return (await fetch(dataUrl)).blob();
 }
 
 // Manual PNG capture (WebGPU, or no OffscreenCanvas): one-frame render →
