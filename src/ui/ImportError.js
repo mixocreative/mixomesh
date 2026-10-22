@@ -16,6 +16,7 @@ import { desktopAppOffered } from '../core/storage/capabilities.js';
 // adapter over guard, exactly as safeAsync is the toast adapter.
 export function init() {
   Modal.register('importError', _render);
+  Modal.register('errorDetail', _renderErrorDetail);
 }
 
 /**
@@ -51,6 +52,22 @@ function _render({ data, close }) {
     <p class="import-error-msg">${escapeHtml(t(failure.reasonKey))}</p>
     <p class="import-error-hint">${escapeHtml(t(failure.hintKey))}</p>
     ${detail ? `<details class="import-error-details"><summary>${escapeHtml(t('import.technicalDetails'))}</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
+    <div class="modal-actions">
+      <button class="btn btn-primary" data-action="close" type="button">${escapeHtml(t('btn.close'))}</button>
+    </div>`;
+  el.querySelector('[data-action="close"]').addEventListener('click', () => close());
+  return el;
+}
+
+// A failed save / export / publish: its own title and message up front, the
+// stack under Technical details.
+function _renderErrorDetail({ data, close }) {
+  const el = document.createElement('div');
+  el.className = 'modal-content import-error';
+  el.innerHTML = `
+    <h3>${escapeHtml(data?.title ?? t('toast.somethingWentWrong'))}</h3>
+    <p class="import-error-msg">${escapeHtml(data?.message ?? t('toast.unknownError'))}</p>
+    ${data?.detail ? `<details class="import-error-details"><summary>${escapeHtml(t('import.technicalDetails'))}</summary><pre>${escapeHtml(data.detail)}</pre></details>` : ''}
     <div class="modal-actions">
       <button class="btn btn-primary" data-action="close" type="button">${escapeHtml(t('btn.close'))}</button>
     </div>`;

@@ -18,18 +18,21 @@ import { t } from '../i18n/index.js';
 
 /**
  * Surface a failure to the user. `modal` routes opaque/heavy operations
- * (import, export, save) to the detail modal (filename + hint + stack);
- * everything else gets a persistent error toast.
+ * (import, export, save) to a detail modal; an import (`filename` or
+ * `importing`) gets the import wording (filename + reason + hint), any other
+ * operation its own title and message (L2-05: a failed save read "Import
+ * failed"). Everything else gets a persistent error toast.
  * @param {unknown} err
- * @param {{ title?: string, modal?: boolean, filename?: string }} [opts]
+ * @param {{ title?: string, modal?: boolean, filename?: string, importing?: boolean }} [opts]
  */
-export function reportError(err, { title, modal = false, filename } = {}) {
+export function reportError(err, { title, modal = false, filename, importing = filename != null } = {}) {
   const resolvedTitle = title ?? t('toast.somethingWentWrong');
   const message = err?.message ? String(err.message) : String(err ?? t('toast.unknownError'));
   console.error(`${resolvedTitle}:`, err);
   if (modal) {
     const detail = err?.stack ? String(err.stack) : err?.cause ? String(err.cause) : '';
-    Modal.open('importError', { filename: filename ?? resolvedTitle, message, detail, code: err?.code ?? null });
+    if (importing) Modal.open('importError', { filename: filename ?? resolvedTitle, message, detail, code: err?.code ?? null });
+    else Modal.open('errorDetail', { title: resolvedTitle, message, detail });
     return;
   }
   Toast.show(t('toast.titleMessage', { title: resolvedTitle, msg: message }), 'error', 0);

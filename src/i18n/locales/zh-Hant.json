@@ -817,6 +817,7 @@
   "storage.opfs.unsupported.body": "此瀏覽器既沒有 File System Access，也沒有 Origin Private File System。",
   "storage.opfs.unavailable.title": "無法使用儲存空間",
   "storage.opfs.unavailable.body": "MIXOMESH 無法開啟此瀏覽器的私人檔案儲存空間（無痕模式可能會封鎖它）。",
+  "project.saveFailed": "儲存失敗",
   "storage.saveFailedPreviousKept": "無法寫入 {name}。此裝置上先前的副本仍完好。({reason})",
   "storage.saveFailedNewKept": "無法取代 {name}。新文件已保留為 {copy}；請開啟它並另存新檔以復原。({reason})",
   "context.enterGroup": "進入群組",

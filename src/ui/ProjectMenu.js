@@ -286,7 +286,7 @@ async function _runProjectSave(saveFn) {
       Modal.open('portableSaveBlocked', { issues: err.portableIssues });
       return;
     }
-    reportError(err, { title: t('toast.errorTitle'), modal: true });
+    reportError(err, { title: t('project.saveFailed'), modal: true });
   }
 }
 

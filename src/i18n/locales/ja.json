@@ -817,6 +817,7 @@
   "storage.opfs.unsupported.body": "このブラウザーには File System Access も Origin Private File System もありません。",
   "storage.opfs.unavailable.title": "ストレージを利用できません",
   "storage.opfs.unavailable.body": "MIXOMESH はこのブラウザーのプライベートなファイル保存領域を開けませんでした（プライベートブラウズでは使えない場合があります）。",
+  "project.saveFailed": "保存できませんでした",
   "storage.saveFailedPreviousKept": "{name} を書き込めませんでした。この端末にある以前のコピーはそのまま残っています。({reason})",
   "storage.saveFailedNewKept": "{name} を置き換えられませんでした。新しいドキュメントは {copy} として保存されています。開いて「名前を付けて保存」で復元してください。({reason})",
   "context.enterGroup": "グループに入る",

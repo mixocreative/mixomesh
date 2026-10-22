@@ -291,6 +291,7 @@ function _handleDrop(e, position) {
     const code = codes.size === 1 ? [...codes][0] : null;
     reportError(Object.assign(new Error(detail), code ? { code } : {}), {
       modal: true,
+      importing: true,
       title: t('toast.importedPartial', { ok, n: meshEntries.length }),
     });
   });

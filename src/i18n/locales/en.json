@@ -817,6 +817,7 @@
   "storage.opfs.unsupported.body": "This browser has neither File System Access nor the Origin Private File System.",
   "storage.opfs.unavailable.title": "Storage unavailable",
   "storage.opfs.unavailable.body": "MIXOMESH could not open this browser's private file storage (Private Browsing may block it).",
+  "project.saveFailed": "Save failed",
   "storage.saveFailedPreviousKept": "Could not write {name}. The previous copy on this device is intact. ({reason})",
   "storage.saveFailedNewKept": "Could not replace {name}. The new document was kept as {copy}; open it and Save As to recover. ({reason})",
   "context.enterGroup": "Enter group",
