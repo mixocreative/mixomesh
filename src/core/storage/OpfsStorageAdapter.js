@@ -24,10 +24,11 @@
 //   path (`dir_`/`file_` + 32 hex, stable across restarts) and the record
 //   `{opfs:1, kind, path}` lives in the IndexedDB `handles` store. `restoreRef`
 //   re-walks the path from the OPFS root (null when gone / unreadable).
-// - `writeFile`: `createWritable()` (atomic swap file) when the engine has it;
-//   older WebKit (no createWritable on the main thread) writes through a worker
-//   with `createSyncAccessHandle`: temp file first, then move()/copy over the
-//   target, so a failed write keeps the previous save (OpfsWrite.worker.js).
+// - `writeFile`: temp file first, then over the target, so a failed write keeps
+//   the previous save. `createWritable()` when the engine has it, each pass
+//   checked by reading back the size; older WebKit (no createWritable on the
+//   main thread) writes through a worker with `createSyncAccessHandle`
+//   (OpfsWrite.worker.js).
 //
 // Everything browser-global is touched at CALL time only (headless-safe import).
 
@@ -166,6 +167,15 @@ export function recoveryNameFor(name) {
 // phase leaves the previous file intact (`previousKept: true`); one in the
 // 'swap' phase leaves the complete new document under `recoveryName`. The
 // persistence façade turns these into the user's message.
+function _writeError(name, stage, err) {
+  const previousKept = stage !== 'swap';
+  const reason = err?.message ?? String(err);
+  const message = previousKept
+    ? `Could not write ${name} (previous copy intact): ${reason}`
+    : `Could not replace ${name} (new document kept as ${recoveryNameFor(name)}): ${reason}`;
+  return Object.assign(new Error(message, { cause: err }), { previousKept, recoveryName: recoveryNameFor(name), stage });
+}
+
 async function _writeViaWorker(path, data) {
   const bytes = await _bytesOf(data);
   const copy = bytes.slice();   // own buffer → transferable without detaching the caller's
@@ -178,13 +188,46 @@ async function _writeViaWorker(path, data) {
       onProgress: (e) => { if (e?.stage) stage = e.stage; },
     });
   } catch (err) {
-    const previousKept = stage !== 'swap';
-    const reason = err?.message ?? String(err);
-    const message = previousKept
-      ? `Could not write ${name} (previous copy intact): ${reason}`
-      : `Could not replace ${name} (new document kept as ${recoveryNameFor(name)}): ${reason}`;
-    throw Object.assign(new Error(message, { cause: err }), { previousKept, recoveryName: recoveryNameFor(name), stage });
+    throw _writeError(name, stage, err);
   }
+}
+
+// One createWritable() pass, then read back the size: WebKit 27.2 resolves
+// write() and close() yet commits 0 bytes (L2-05).
+async function _writeChecked(handle, blob) {
+  const w = await handle.createWritable();
+  try {
+    await w.write(blob);
+    await w.close();
+  } catch (err) {
+    try { await w.abort?.(); } catch { /* already closed / aborted */ }
+    throw err;
+  }
+  const landed = (await handle.getFile()).size;
+  if (landed !== blob.size) throw new Error(`only ${landed} of ${blob.size} bytes reached the file`);
+}
+
+// Same temp-then-swap as the worker tier: the new bytes are staged and checked
+// in a sibling first, so an engine that drops writes never touches the
+// previous save.
+async function _writeViaWritable(ref, path, data) {
+  const blob = data instanceof Blob ? data : new Blob([data]);
+  let dir = await _root();
+  for (const seg of path.slice(0, -1)) dir = await dir.getDirectoryHandle(seg);
+  const name = path[path.length - 1];
+  const tempName = recoveryNameFor(name);
+  try {
+    await _writeChecked(await dir.getFileHandle(tempName, { create: true }), blob);
+  } catch (err) {
+    try { await dir.removeEntry(tempName); } catch { /* never created */ }
+    throw _writeError(name, 'temp', err);
+  }
+  try {
+    await _writeChecked(ref, blob);
+  } catch (err) {
+    throw _writeError(name, 'swap', err);
+  }
+  await dir.removeEntry(tempName);
 }
 
 /**
@@ -439,20 +482,10 @@ export const OpfsStorageAdapter = {
 
   async writeFile(ref, data) {
     if (!_isHandle(ref) || ref.kind !== 'file') throw new TypeError('writeFile: expected an OPFS file handle (picked files are read-only)');
-    if (typeof ref.createWritable === 'function') {
-      const w = await ref.createWritable();
-      try {
-        await w.write(data);
-        await w.close();
-      } catch (err) {
-        try { await w.abort?.(); } catch { /* already closed / aborted */ }
-        throw err;
-      }
-      return;
-    }
     const path = await _pathOf(ref);
-    if (!path) throw new TypeError('writeFile: handle is not inside the origin private file system');
-    await _writeViaWorker(path, data);
+    if (!path?.length) throw new TypeError('writeFile: handle is not inside the origin private file system');
+    if (typeof ref.createWritable === 'function') await _writeViaWritable(ref, path, data);
+    else await _writeViaWorker(path, data);
   },
 
   async pickImportAssets(opts = {}) {
