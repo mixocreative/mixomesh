@@ -54,7 +54,13 @@ class BatchCommand {
 }
 
 function _retained(cmd, side) {
-  try { return cmd?.retainedTriangles?.(side) ?? 0; } catch { return 0; }
+  try { return cmd?.retainedTriangles?.(side) ?? 0; }
+  catch (err) {
+    // Unknown size counts as over any cap, so the trim releases it (and every
+    // older step) instead of pinning its meshes for the session.
+    console.error('History retainedTriangles failed:', err);
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 function _release(cmd, side) {

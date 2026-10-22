@@ -2729,7 +2729,7 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   branch and, once the retained total passes the tier budget, cuts the undo stack just after the newest
   entry that must be released for the rest to fit (everything older goes with it, since a released
   step cannot be undone through). Entries that hold no triangles are never dropped for the budget, the
-  newest entry always stays, and any cut shows the `toast.undoTrimmed` message (cia A-06). Delete/Boolean free hidden meshes with `MeshRegistry.releaseMesh`, which
+  newest entry always stays, and any cut shows the `toast.undoTrimmed` message (cia A-06). An entry whose `retainedTriangles` throws counts as over any budget, so it is released as soon as it is not the newest instead of pinning its meshes (cia thermo #8). Delete/Boolean free hidden meshes with `MeshRegistry.releaseMesh`, which
   keeps the container slot so `containerMeshIndex` never shifts. `GeometryStore.extract` copies with
   `slice()`.
 - **Desktop:** `electron/HeapFlags.cjs` sets `js-flags=--max-old-space-size=4096` before ready.
