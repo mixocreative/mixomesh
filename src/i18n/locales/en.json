@@ -1356,5 +1356,6 @@
   "stats.vertices": "Vertices",
   "stats.hide": "Hide statistics",
   "viewport.toggle.stats": "Statistics",
-  "viewport.statsTitle": "Statistics: object, face (triangle) and vertex counts of the selection or the scene"
+  "viewport.statsTitle": "Statistics: object, face (triangle) and vertex counts of the selection or the scene",
+  "toast.threeMFHelperVolumesSkipped": "{n, plural, one{Skipped 1 slicer helper volume (negative volume, modifier or support blocker) - it is not printable geometry.} other{Skipped # slicer helper volumes (negative volumes, modifiers or support blockers) - they are not printable geometry.}}"
 }

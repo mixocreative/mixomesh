@@ -1356,5 +1356,6 @@
   "stats.vertices": "頂点",
   "stats.hide": "統計を隠す",
   "viewport.toggle.stats": "統計",
-  "viewport.statsTitle": "統計：選択またはシーンのオブジェクト・面（三角形）・頂点の数"
+  "viewport.statsTitle": "統計：選択またはシーンのオブジェクト・面（三角形）・頂点の数",
+  "toast.threeMFHelperVolumesSkipped": "{n, plural, other{スライサーの補助ボリューム（ネガティブボリューム、モディファイア、サポートブロッカー）を # 個スキップしました。印刷用の形状ではありません。}}"
 }

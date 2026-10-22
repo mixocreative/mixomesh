@@ -2347,12 +2347,27 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    and `<build><item>` form the placement tree. If a component carries
    `p:path` / `path`, the loader resolves that OPC path relative to the current
    model part, parses the related `.model` part, and instantiates the referenced
-   `objectid` from that part. Component/build transforms are composed in 3MF
+   `objectid` from that part. Slicer helper volumes are not printable geometry and
+   never import (cia C-05): PrusaSlicer `Metadata/Slic3r_PE_model.config` volumes
+   whose `volume_type` is not `ModelPart` (pre-2.2: `modifier="1"`) drop their
+   `firstid..lastid` triangles from the object's mesh, Bambu Studio
+   `Metadata/model_settings.config` parts whose `subtype` is not `normal_part`
+   drop that component (or triangle range), and a Core `type="other"` object is
+   never built (Core ch.4). One warning toast
+   (`toast.threeMFHelperVolumesSkipped`) names how many were skipped. Pinned by
+   `tests/threemf-helper-volumes-c05.test.mjs` against a PrusaSlicer-authored
+   fixture (`tests/fixtures/make-slicer-helper-volumes.mjs`). Component/build transforms are composed in 3MF
    space and baked into child mesh vertices, then each vertex goes through
    `print/PrintSpace.fromPrintSpace` (3MF right-handed Z-up → Babylon
    left-handed Y-up: `(x, y, z) → (-x, z, -y)`, a reflection — the exact
    inverse of the writer's `toPrintSpace`). The model `unit` attribute scales
-   to mm (micron/millimeter/centimeter/inch/foot/meter; anything else throws);
+   to mm (micron/millimeter/centimeter/inch/foot/meter; anything else throws),
+   vertices AND the translation row of every build-item / component transform,
+   each by the unit of the model part that holds it (Core 1.4.0 §3.4: "all
+   vertices, locations, or measurements"; trimesh agrees; PrusaSlicer 2.9.3
+   scales vertices only and so disagrees for non-mm files; cia C-06, pinned by
+   `tests/threemf-units-c06.test.mjs`). Owner decision pending: follow the spec
+   (current behaviour) or match PrusaSlicer for non-mm assemblies;
    triangle indices outside the vertex range and non-numeric coordinates
    throw instead of producing a garbage mesh. Triangle order is kept as
    written (the reflection already makes 3MF's CCW-outward read as Babylon's
@@ -2362,7 +2377,11 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    `basematerials`/`base displaycolor` (Core, including MixoTile) and
    `m:colorgroup`+`pid/pindex` to
    `StandardMaterial.diffuseColor`, or `m:texture2dgroup` to
-   `StandardMaterial.diffuseTexture`. Repeated component references instantiate
+   `StandardMaterial.diffuseTexture`, uploaded with `invertY = true`: Materials
+   Extension 1.2.1 ch.3 puts tex2coord (0,0) at the image's lower-left corner,
+   the OBJ/MTL convention, not glTF's top-left (cia C-01; pinned by
+   `tests/browser-3mf-orientation-c01.mjs`, which renders a glTF quad and its
+   3MF round trip and compares the corner colours). Repeated component references instantiate
    editable mesh copies rather than shared geometry. Returns an AssetContainer
    so every downstream path (shaders, re-instantiate, project restore) is
    identical to other formats. Vertices are raw mm → handled by the normal
