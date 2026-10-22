@@ -29,7 +29,9 @@ export function serveTask(handler, scope) {
         wrapped ? out.transfer : [],
       );
     } catch (err) {
-      target().postMessage({ id, type: 'error', message: err?.message ?? String(err) });
+      // The code crosses the boundary so callers branch on it, not on the text.
+      const code = err?.code != null ? { code: err.code } : {};
+      target().postMessage({ id, type: 'error', message: err?.message ?? String(err), ...code });
     }
   };
 }

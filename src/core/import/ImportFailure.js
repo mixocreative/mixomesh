@@ -1,13 +1,25 @@
 // Pure classification shared by the web and Electron import-error dialog.
 // Keep the original loader message/stack in Technical details; these keys
 // explain the failure and the next useful action without exposing a stack.
-export function classifyImportFailure(message, filename = '') {
-  const text = String(message ?? '');
+// Our own failures carry `code`; the message patterns cover third-party text
+// (Babylon, JSZip, the browser).
+
+import { OVER_BUDGET } from './ImportLimits.js';
+
+const CATEGORY_BY_CODE = { [OVER_BUDGET]: 'polygons', timeout: 'timeout' };
+
+/**
+ * @param {{ message?: string, code?: string } | string} failure  the error (or its message)
+ * @param {string} [filename]
+ */
+export function classifyImportFailure(failure, filename = '') {
+  const text = String((typeof failure === 'object' ? failure?.message : failure) ?? '');
+  const byCode = typeof failure === 'object' ? CATEGORY_BY_CODE[failure?.code] : null;
+  if (byCode) return { category: byCode, reasonKey: `import.reason.${byCode}`, hintKey: `import.fix.${byCode}` };
   const threeMF = /\.3mf$/i.test(filename) || /3mf/i.test(text);
   let category = 'unknown';
   if (/quota|storage.*full|disk.*full/i.test(text)) category = 'storage';
   else if (/out of memory|allocation|array buffer|arraybuffer|invalid (?:array|typed array) length|insufficient memory/i.test(text)) category = 'memory';
-  else if (/polygon handling limit|build handles up to/i.test(text)) category = 'polygons';
   else if (/timed out/i.test(text)) category = 'timeout';
   else if (/too large|limit is .*MB|uncompressed|too many entries/i.test(text)) category = 'size';
   else if (/unsafe.*path|path.*traversal/i.test(text)) category = 'unsafePath';

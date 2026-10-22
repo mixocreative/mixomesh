@@ -29,7 +29,7 @@ export function reportError(err, { title, modal = false, filename } = {}) {
   console.error(`${resolvedTitle}:`, err);
   if (modal) {
     const detail = err?.stack ? String(err.stack) : err?.cause ? String(err.cause) : '';
-    Modal.open('importError', { filename: filename ?? resolvedTitle, message, detail });
+    Modal.open('importError', { filename: filename ?? resolvedTitle, message, detail, code: err?.code ?? null });
     return;
   }
   Toast.show(t('toast.titleMessage', { title: resolvedTitle, msg: message }), 'error', 0);

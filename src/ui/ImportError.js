@@ -41,7 +41,7 @@ function _render({ data, close }) {
   const filename = data?.filename ?? 'file';
   const message = data?.message ?? 'Unknown error';
   const detail = [message, data?.detail].filter(Boolean).join('\n\n');
-  const failure = classifyImportFailure(message, filename);
+  const failure = classifyImportFailure({ message, code: data?.code }, filename);
   const el = document.createElement('div');
   el.className = 'modal-content import-error';
   el.innerHTML = `

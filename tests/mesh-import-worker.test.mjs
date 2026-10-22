@@ -75,5 +75,5 @@ test('main-thread fallback only for small files that failed for other reasons', 
   assert.equal(mayFallBackToMainThread(new Error('bundle missing'), MAIN_THREAD_FALLBACK_MAX_BYTES + 1), false);
   assert.equal(mayFallBackToMainThread(Object.assign(new Error('x'), { code: 'timeout' }), 10), false);
   assert.equal(mayFallBackToMainThread(new DOMException('c', 'AbortError'), 10), false);
-  assert.equal(mayFallBackToMainThread(new Error('3MF model has 9 triangles; the polygon handling limit'), 10), false);
+  assert.equal(mayFallBackToMainThread(Object.assign(new Error('3MF model has 9 triangles'), { code: 'over-budget' }), 10), false);
 });

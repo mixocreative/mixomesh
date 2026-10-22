@@ -266,7 +266,10 @@ function _handleDrop(e, position) {
       return;
     }
     const detail = failures.map(f => `${f.name}: ${f.err?.message ?? f.err}`).join('\n');
-    reportError(new Error(detail), {
+    // One shared cause keeps its code, so the modal explains it (e.g. over budget).
+    const codes = new Set(failures.map(f => f.err?.code ?? null));
+    const code = codes.size === 1 ? [...codes][0] : null;
+    reportError(Object.assign(new Error(detail), code ? { code } : {}), {
       modal: true,
       title: t('toast.importedPartial', { ok, n: meshEntries.length }),
     });

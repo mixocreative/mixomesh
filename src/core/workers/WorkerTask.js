@@ -173,7 +173,10 @@ export class WorkerTask {
       }
       return;
     }
-    if (msg.type === 'error') this._settle(job, new Error(msg.message || `${this._name} failed`));
+    if (msg.type === 'error') {
+      const message = msg.message || `${this._name} failed`;
+      this._settle(job, msg.code != null ? coded(message, msg.code) : new Error(message));
+    }
   }
 
   _timeout(job) {

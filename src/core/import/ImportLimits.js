@@ -13,6 +13,12 @@ export const IMPORT_LIMITS = Object.freeze({
 
 const mb = (n) => (n / 1024 / 1024).toFixed(0);
 
+/** `err.code` of a triangle-budget refusal. Retry and failure-classification
+ *  decisions key on it, never on the message wording. */
+export const OVER_BUDGET = 'over-budget';
+
+const overBudget = (message) => Object.assign(new Error(message), { code: OVER_BUDGET });
+
 /** Throw when a file exceeds the size cap. */
 export function assertImportFileSize(size, filename, limits = IMPORT_LIMITS) {
   if (Number.isFinite(size) && size > limits.maxFileBytes) {
@@ -52,7 +58,7 @@ export function assertZipSafe(zip, label = 'archive', limits = IMPORT_LIMITS) {
 export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model') {
   const limit = triangleBudget * 4;
   if (limit > 0 && triangles > limit) {
-    throw new Error(`${label} has ${triangles.toLocaleString('en-US')} triangles; the polygon handling limit for this runtime is ${limit.toLocaleString('en-US')}. Simplify or split the model before importing.`);
+    throw overBudget(`${label} has ${triangles.toLocaleString('en-US')} triangles; the polygon handling limit for this runtime is ${limit.toLocaleString('en-US')}. Simplify or split the model before importing.`);
   }
 }
 
@@ -81,7 +87,7 @@ export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, f
     const about = estimate.exact ? '' : 'about ';
     const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';
     const next = desktop ? 'Simplify or split the model before importing.' : 'Simplify or split the model, or use the desktop app.';
-    throw new Error(`"${filename}" has ${about}${estimate.triangles.toLocaleString('en-US')} triangles${scene}; this ${desktop ? 'desktop' : 'web'} build handles up to ${limit.toLocaleString('en-US')}. ${next}`);
+    throw overBudget(`"${filename}" has ${about}${estimate.triangles.toLocaleString('en-US')} triangles${scene}; this ${desktop ? 'desktop' : 'web'} build handles up to ${limit.toLocaleString('en-US')}. ${next}`);
   }
   return projected > budget ? 'warn' : 'ok';
 }

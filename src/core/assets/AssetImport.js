@@ -8,7 +8,7 @@ import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
 import { sha256HexOfBlob } from '../hash.js';
-import { assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity } from '../import/ImportLimits.js';
+import { assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, OVER_BUDGET } from '../import/ImportLimits.js';
 import { estimateFileTriangles } from '../import/TriangleEstimate.js';
 import {
   bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
@@ -154,11 +154,13 @@ function _assertNoProjectLoad() {
  *  freeze or kill the tab there (audit area 2c). */
 export const MAIN_THREAD_FALLBACK_MAX_BYTES = 32 * 1024 * 1024;
 
+/** Worker failures the main thread must not retry: it would freeze or refuse too. */
+const NO_RETRY_CODES = new Set(['timeout', OVER_BUDGET]);
+
 /** Worker failure → may the main-thread SceneLoader retry it? */
 export function mayFallBackToMainThread(err, size) {
   if (err?.name === 'AbortError') return false;
-  if (err?.code === 'timeout') return false;
-  if (/triangles|handles up to|polygon handling limit/.test(String(err?.message))) return false;
+  if (NO_RETRY_CODES.has(err?.code)) return false;
   return !(size > MAIN_THREAD_FALLBACK_MAX_BYTES);
 }
 
