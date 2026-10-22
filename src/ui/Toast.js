@@ -1,6 +1,7 @@
 import { EVENTS } from '../core/events.js';
 import { subscribe } from '../core/StateManager.js';
 import { icon } from '../core/Icons.js';
+import { t } from '../i18n/index.js';
 
 const MAX_TOASTS = 4;
 const TYPE_ICONS = {
@@ -17,7 +18,7 @@ const _active = new Map(); // id → { el, timerId }
 let _idCounter = 0;
 function _nextId() { return `toast_${++_idCounter}`; }
 
-function _render(id, message, type, onClick) {
+function _render(id, message, type, onClick, closable) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.dataset.id = id;
@@ -28,6 +29,19 @@ function _render(id, message, type, onClick) {
   msgEl.className = 'toast-msg';
   msgEl.textContent = message;
   el.append(iconEl, msgEl);
+  // A toast that never times out (a persistent error) must still be closable,
+  // or it covers the workspace until reload (L2-13).
+  if (closable) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.dataset.action = 'dismiss';
+    close.setAttribute('aria-label', t('btn.close'));
+    close.title = t('btn.close');
+    close.innerHTML = icon('X', { width: 14, height: 14 });
+    close.addEventListener('click', (e) => { e.stopPropagation(); dismiss(id); });
+    el.append(close);
+  }
   if (typeof onClick === 'function') {
     el.classList.add('toast-clickable');
     el.setAttribute('role', 'button');
@@ -75,10 +89,10 @@ export function show(message, type = 'info', duration = 4000, opts = {}) {
   _evict();
 
   const id = _nextId();
-  const el = _render(id, message, type, opts.onClick);
+  const autoDismiss = type !== 'loading' && duration > 0;
+  const el = _render(id, message, type, opts.onClick, type !== 'loading' && !autoDismiss);
   _container.appendChild(el);
 
-  const autoDismiss = type !== 'loading' && duration > 0;
   const timerId = autoDismiss ? setTimeout(() => dismiss(id), duration) : null;
   _active.set(id, { el, timerId, tag: opts.tag ?? null });
   return id;

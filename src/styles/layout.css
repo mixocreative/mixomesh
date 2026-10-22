@@ -303,6 +303,13 @@
 
 .toast-icon { display: flex; align-items: center; flex-shrink: 0; }
 .toast-msg  { flex: 1; line-height: 1.4; }
+.toast-close {
+  display: flex; align-items: center; flex-shrink: 0;
+  background: transparent; border: 0; padding: 2px; border-radius: var(--r-sm);
+  color: var(--text-2); cursor: pointer;
+}
+.toast-close:hover { color: var(--text-0); background: var(--bg-4); }
+.toast-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* B5 click-through: validation toasts act as buttons → Print Panel */
 .toast.toast-clickable { cursor: pointer; }
