@@ -1274,5 +1274,6 @@
   "viewer.retry": "再試一次",
   "import.fix.polygonsWeb": "技術詳細資料會顯示三角面數及上限。請減面或拆成較小的部件；桌面版的上限較高。",
   "import.fix.memoryWeb": "請關閉其他分頁或程式，將模型減面或拆分後重試；桌面版可能有較大的處理容量。",
-  "import.fix.timeoutWeb": "請再試一次。若仍發生，請簡化模型或拆成較小的部件；桌面版可處理更大的模型。"
+  "import.fix.timeoutWeb": "請再試一次。若仍發生，請簡化模型或拆成較小的部件；桌面版可處理更大的模型。",
+  "toast.loadInProgress": "未儲存：專案仍在載入中。載入完成後請再儲存一次。"
 }

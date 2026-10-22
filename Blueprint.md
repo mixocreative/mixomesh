@@ -2654,9 +2654,20 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   guessed): warn above 1×, refuse above 4×. **Refusal happens before parsing**:
   `import/TriangleEstimate.estimateFileTriangles(blob, ext)` reads only small slices — exact for
   binary STL (`(size−84)/50`) and GLB/glTF accessors, sampled for ASCII STL (head + tail), OBJ (face
-  lines) and 3MF (model size from the zip central directory ÷ 66 B/triangle) — and
-  `ImportLimits.assertPreParseCapacity` throws above 4× on exact counts (glTF counted per referencing node), above 8× on sampled ASCII STL / OBJ estimates, never on 3MF or GPU-instanced glTF estimates (warn-only). It runs in
-  `importWithDedupe` before hashing and in `loadFromBlob`; the over-budget toast shows once, up front.
+  lines) and 3MF (model size from the zip central directory ÷ 66 B/triangle).
+  Each estimate carries `confidence: 'exact' | 'sampled' | 'rough'`, and
+  `ImportLimits.assertPreParseCapacity` refuses above 4× the budget times `REFUSE_FACTOR`
+  (exact 1, sampled 2 = `ESTIMATE_REFUSE_MARGIN`, rough ∞: 3MF bytes per triangle and GPU-instanced
+  glTF only warn). `AssetImport.preParseCheck(blob, filename)` returns `{ verdict, projected }` and
+  shows nothing; it runs in `importWithDedupe` before hashing (the value rides along in
+  `opts.preParse`) and otherwise in `loadFromBlob` / `instantiateAsset`, whose caller shows the
+  over-budget toast once with that import's own projected count (no module state, so concurrent
+  imports never swap counts) (cia thermo #5). A sampled estimate whose projection passes half the hard
+  limit (`ImportLimits.needsExactCount`) cannot settle the decision, so `preParseCheck` first counts
+  exactly with `TriangleEstimate.countFileTriangles` (one streamed byte pass: OBJ face lines, ASCII STL
+  facets; ~0.55 s for an 84 MB, 10.5M-face OBJ in Node) and decides on that count. An over-limit OBJ /
+  ASCII STL is therefore refused before parsing, never warned "continuing" and refused after the
+  parse (cia W-11).
   The post-parse `_assertContainerCapacity` stays as the backstop.
 - **Import off the UI thread:** `loadContainer` routes `.stl` / `.3mf` to
   `workers/MeshImport.worker.js` (via `MeshImportWorker.js`), `.obj` to ObjParse. The worker
@@ -2675,7 +2686,13 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   into the push SAX parser (`createThreeMFXmlParser`; no string over V8's limit), triangles packed
   Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` (textures via a
   zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did
-  not time out, were not cancelled and were not refused (`mayFallBackToMainThread`). glTF/GLB stays
+  not time out, were not cancelled and were not refused (`mayFallBackToMainThread`, keyed on
+  `err.code` `'timeout'` / `'over-budget'`, never on message text). Triangle refusals
+  (`ImportLimits.assertTriangleCapacity` / `assertPreParseCapacity`) throw `code: OVER_BUDGET`;
+  `serveTask` posts a thrown error's `code` and `WorkerTask` rethrows it with that code, so a worker
+  refusal keeps it. `ImportFailure.classifyImportFailure(err, filename)` maps codes first
+  (`over-budget` -> polygons, `timeout` -> timeout) and keeps message patterns only for third-party text
+  (cia thermo #4). glTF/GLB stays
   on Babylon's loader (scene-bound materials/extensions) with the exact pre-parse count.
 - **Cancel:** the import overlay (blocking, because an import changes the scene being edited) has
   Cancel; it aborts every running import and nothing is half-added (`_throwIfAborted`). `guard()`
@@ -2703,8 +2720,10 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
 - **History never pins a big mesh forever:** commands that keep meshes alive expose
   `retainedTriangles(side)` / `release(side)` (side `'undo'` = on the undo stack, `'redo'` = on the
   redo stack). `HistoryManager` releases entries leaving the 200-step window or a dropped redo
-  branch and trims the oldest undo entries once the retained total passes the tier budget (the
-  newest always stays). Delete/Boolean free hidden meshes with `MeshRegistry.releaseMesh`, which
+  branch and, once the retained total passes the tier budget, cuts the undo stack just after the newest
+  entry that must be released for the rest to fit (everything older goes with it, since a released
+  step cannot be undone through). Entries that hold no triangles are never dropped for the budget, the
+  newest entry always stays, and any cut shows the `toast.undoTrimmed` message (cia A-06). Delete/Boolean free hidden meshes with `MeshRegistry.releaseMesh`, which
   keeps the container slot so `containerMeshIndex` never shifts. `GeometryStore.extract` copies with
   `slice()`.
 - **Desktop:** `electron/HeapFlags.cjs` sets `js-flags=--max-old-space-size=4096` before ready.
@@ -2816,7 +2835,14 @@ viewport context menu's "Repair geometry" (`repairObjects` for a multi-
 selection), and the Print panel's "Repair all" button — so an applied fix is
 recorded identically (`geometryFixes` on the object, `markDirty()`, then
 persisted through `.mixo` and replayed on reload) no matter which surface
-triggered it.
+triggered it. Repair is undoable. `repairObjects` (every user surface and the automation API's `repair`
+call) copies each object's live geometry and `geometryFixes` before it repairs, and pushes ONE
+`RepairCommand` (`src/core/commands/RepairCommands.js`, label "Repair") for every object the batch
+changed. Undo puts the copied geometry and `geometryFixes` back (so a later save does not replay the
+fix) and re-validates; redo puts the repaired geometry back. Each side holds one geometry copy and
+reports it through `retainedTriangles`, so the heavy-mesh undo budget trims it like any other
+entry. The import-time auto-repair (`repairOnImport`) and the load replay call `repairObject`
+directly and push nothing: import itself is not an undo step (cia W-12).
 
 ### Logical-object-aware topology checks
 
@@ -3423,7 +3449,10 @@ capture still writes an imported texture's bytes (cia A-09); then it takes every
 (state slices, object and group world transforms, camera, texture image list) in one tick
 before its next await; only the byte encoding is async (cia A-02). The built document is handed
 to the adapter by `serialiseDocument`: one string for a small document, a Blob of parts around
-each large base64 `fileData` for a heavy one (cia W-00 part 1).
+each large base64 `fileData` for a heavy one (cia W-00 part 1). Save and Save As refuse while a project
+load (Open, Recent, Recover, launch/API open) is in flight: nothing is written, `save()`/`saveAs()`
+resolve `false`, and a warning toast (`toast.loadInProgress`) tells the user to save again once the load
+has finished. Autosave already skips a tick while a load or import is in flight (cia A-08).
 Constants (in `src/core/persist/constants.js`): `SCHEMA_VERSION = '3.4'` (3.4 adds
 the AssetEntry `source` descriptor + `displayName` and formalises `project.id`;
 3.3 added top-level content-addressed `textureImages` plus `imageContentHash` /

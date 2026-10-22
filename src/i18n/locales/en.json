@@ -1274,5 +1274,6 @@
   "viewer.retry": "Try again",
   "import.fix.polygonsWeb": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts; the desktop app has a higher limit.",
   "import.fix.memoryWeb": "Close other tabs/apps, simplify or split the model, and try again. The desktop app may have more capacity.",
-  "import.fix.timeoutWeb": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models."
+  "import.fix.timeoutWeb": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models.",
+  "toast.loadInProgress": "Not saved: a project is still loading. Save again once it has finished."
 }
