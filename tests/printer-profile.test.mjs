@@ -51,26 +51,23 @@ await test('v1 row (displayName/vendor/bed/defaultMaterialId only) normalises wi
   assert.deepEqual(p.bed, { x: 100, y: 90, z: 80 });
   assert.equal(p.colour.mode, 'none');
   assert.equal(p.export.recommended, 'stl');
-  assert.equal(p.export.formats.length, 8, 'every format available by default');
   assert.equal(p.export.splitByMaterial, false);
   assert.equal(p.export.obj.axis, 'y-up');
   assert.equal(p.export.threeMF.flavour, 'core');
   assert.equal(p.validation.requireWatertight, true);
   assert.equal(p.defaultMaterialId, 'petg');
-  assert.equal(p.verified, 'unverified');
   const bare = normalizePrinterProfile('x', {});
   assert.deepEqual(bare.bed, { x: null, y: null, z: null });
   assert.equal(bare.defaultMaterialId, 'pla');
 });
 
-await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, all unverified, Custom bed is unset', () => {
+await test('v2 rows resolve: Mimaki recommends OBJ, Bambu/Prusa flavours, Custom bed is unset', () => {
   assert.equal(getPrinterProfile('mimaki-3duj-553').export.recommended, 'obj-mtl');
   assert.equal(getPrinterProfile('bambu-x1c').export.threeMF.flavour, 'bambu');
   assert.equal(getPrinterProfile('prusa-xl').export.threeMF.flavour, 'prusa');
   for (const id of ['stratasys-j55', 'stratasys-j850', 'hp-mjf-580', 'bambu-h2d', 'prusa-xl', 'creality-k1', 'creality-ender-3', 'elegoo-centauri-carbon', 'anycubic-kobra-3', 'anycubic-photon-mono', 'formlabs-form-4']) {
     assert.ok(printerProfileExists(id), id);
   }
-  assert.ok(listPrinterProfiles().every(p => p.verified === 'unverified'));
   assert.deepEqual(getPrinterProfile('custom').bed, { x: null, y: null, z: null });
 });
 

@@ -12,36 +12,25 @@
       "mode": "texture",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": true,
-      "vertexColour": true
+      "alpha": true
     },
     "export": {
       "recommended": "obj-mtl",
-      "formats": [
-        "obj-mtl",
-        "3mf-textured",
-        "wrl",
-        "ply",
-        "stl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 1.0,
-      "minFeatureMM": 0.5,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.5
     },
-    "defaultMaterialId": "mimaki-model",
-    "verified": "unverified"
+    "defaultMaterialId": "mimaki-model"
   },
   "mimaki-3duj-2207": {
     "displayName": "Mimaki 3DUJ-2207",
@@ -56,36 +45,25 @@
       "mode": "texture",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": true,
-      "vertexColour": true
+      "alpha": true
     },
     "export": {
       "recommended": "obj-mtl",
-      "formats": [
-        "obj-mtl",
-        "3mf-textured",
-        "wrl",
-        "ply",
-        "stl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 1.0,
-      "minFeatureMM": 0.5,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.5
     },
-    "defaultMaterialId": "mimaki-model",
-    "verified": "unverified"
+    "defaultMaterialId": "mimaki-model"
   },
   "stratasys-j55": {
     "displayName": "Stratasys J55",
@@ -100,36 +78,25 @@
       "mode": "texture",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": true,
-      "vertexColour": true
+      "alpha": true
     },
     "export": {
       "recommended": "wrl",
-      "formats": [
-        "wrl",
-        "obj-mtl",
-        "3mf-textured",
-        "ply",
-        "stl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.6,
-      "minFeatureMM": 0.3,
-      "maxTrianglesHint": 1500000
+      "minFeatureMM": 0.3
     },
-    "defaultMaterialId": "resin-std",
-    "verified": "unverified"
+    "defaultMaterialId": "resin-std"
   },
   "stratasys-j850": {
     "displayName": "Stratasys J850",
@@ -144,36 +111,25 @@
       "mode": "texture",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": true,
-      "vertexColour": true
+      "alpha": true
     },
     "export": {
       "recommended": "wrl",
-      "formats": [
-        "wrl",
-        "obj-mtl",
-        "3mf-textured",
-        "ply",
-        "stl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.6,
-      "minFeatureMM": 0.3,
-      "maxTrianglesHint": 1500000
+      "minFeatureMM": 0.3
     },
-    "defaultMaterialId": "resin-std",
-    "verified": "unverified"
+    "defaultMaterialId": "resin-std"
   },
   "hp-mjf-580": {
     "displayName": "HP Jet Fusion 580 Color",
@@ -188,36 +144,25 @@
       "mode": "vertex",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": false,
-      "vertexColour": true
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-textured",
-      "formats": [
-        "3mf-textured",
-        "obj-mtl",
-        "wrl",
-        "ply",
-        "stl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.5,
-      "minFeatureMM": 0.5,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.5
     },
-    "defaultMaterialId": "pa12-sls",
-    "verified": "unverified"
+    "defaultMaterialId": "pa12-sls"
   },
   "bambu-x1c": {
     "displayName": "Bambu Lab X1 Carbon",
@@ -232,36 +177,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "bambu-h2d": {
     "displayName": "Bambu Lab H2D",
@@ -276,36 +210,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "bambu-a1": {
     "displayName": "Bambu Lab A1",
@@ -320,36 +243,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "bambu-a1-mini": {
     "displayName": "Bambu Lab A1 mini",
@@ -364,36 +276,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "prusa-mk4": {
     "displayName": "Prusa MK4 / MK3S+",
@@ -408,35 +309,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "prusa-xl": {
     "displayName": "Prusa XL",
@@ -451,36 +342,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-prusa",
-      "formats": [
-        "3mf-prusa",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "prusa",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "creality-k1": {
     "displayName": "Creality K1",
@@ -495,35 +375,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "creality-ender-3": {
     "displayName": "Creality Ender-3",
@@ -538,35 +408,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "elegoo-centauri-carbon": {
     "displayName": "Elegoo Centauri Carbon",
@@ -581,36 +441,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "elegoo-saturn-4-ultra": {
     "displayName": "Elegoo Saturn 4 Ultra",
@@ -625,35 +474,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.5,
-      "minFeatureMM": 0.3,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.3
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "resin-std"
   },
   "anycubic-kobra-3": {
     "displayName": "Anycubic Kobra 3 (ACE)",
@@ -668,36 +507,25 @@
       "mode": "per-part",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "3mf-bambu",
-      "formats": [
-        "3mf-bambu",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "stl",
-        "ply"
-      ],
       "splitByMaterial": true,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "bambu",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 1000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "anycubic-photon-mono": {
     "displayName": "Anycubic Photon Mono",
@@ -712,35 +540,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.5,
-      "minFeatureMM": 0.3,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.3
     },
-    "defaultMaterialId": "resin-std",
-    "verified": "unverified"
+    "defaultMaterialId": "resin-std"
   },
   "formlabs-form-4": {
     "displayName": "Formlabs Form 4",
@@ -755,35 +573,25 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "stl",
-        "3mf-colorgroup",
-        "obj-mtl",
-        "ply"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "z-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.5,
-      "minFeatureMM": 0.3,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.3
     },
-    "defaultMaterialId": "resin-std",
-    "verified": "unverified"
+    "defaultMaterialId": "resin-std"
   },
   "generic-obj-mtl-png": {
     "displayName": "Generic OBJ + MTL + textures",
@@ -798,39 +606,25 @@
       "mode": "texture",
       "maxTextureSize": 4096,
       "maxTexturesPerObject": 1,
-      "alpha": true,
-      "vertexColour": true
+      "alpha": true
     },
     "export": {
       "recommended": "obj-mtl",
-      "formats": [
-        "obj-mtl",
-        "3mf-textured",
-        "3mf-colorgroup",
-        "3mf-bambu",
-        "3mf-prusa",
-        "stl",
-        "ply",
-        "wrl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   },
   "custom": {
     "displayName": "Custom",
@@ -845,38 +639,24 @@
       "mode": "none",
       "maxTextureSize": 0,
       "maxTexturesPerObject": 0,
-      "alpha": false,
-      "vertexColour": false
+      "alpha": false
     },
     "export": {
       "recommended": "stl",
-      "formats": [
-        "obj-mtl",
-        "3mf-textured",
-        "3mf-colorgroup",
-        "3mf-bambu",
-        "3mf-prusa",
-        "stl",
-        "ply",
-        "wrl"
-      ],
       "splitByMaterial": false,
       "obj": {
         "axis": "y-up"
       },
       "threeMF": {
         "flavour": "core",
-        "seatOnBed": true,
         "metadata": true
       }
     },
     "validation": {
       "requireWatertight": true,
       "minWallMM": 0.8,
-      "minFeatureMM": 0.4,
-      "maxTrianglesHint": 2000000
+      "minFeatureMM": 0.4
     },
-    "defaultMaterialId": "pla",
-    "verified": "unverified"
+    "defaultMaterialId": "pla"
   }
 }

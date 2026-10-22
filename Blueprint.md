@@ -4377,7 +4377,7 @@ command + UI land in tasks 1.2/1.3; this section is the data contract.)
 
 Schema v2 (one entry per printer, keyed by id; v1 rows with only
 `displayName/vendor/bed/defaultMaterialId` still load - `getPrinterProfile(id)`
-normalises missing fields to plain single-colour FDM defaults, all formats):
+normalises missing fields to plain single-colour FDM defaults that recommend STL):
 ```js
 {
   "<id>": {
@@ -4386,21 +4386,23 @@ normalises missing fields to plain single-colour FDM defaults, all formats):
     bed: { x: number|null, y: number|null, z: number|null },  // mm; null (Custom only) falls back to Mimaki default helper
     colour: { mode: 'texture'|'vertex'|'per-part'|'paint'|'none',
               maxTextureSize: number, maxTexturesPerObject: number,
-              alpha: boolean, vertexColour: boolean },
-    export: { recommended: <format>, formats: <format>[],   // formats = suggested list; UI still offers every writer
+              alpha: boolean },
+    export: { recommended: <format>,   // UI still offers every writer; a profile never hides a format
               splitByMaterial: boolean,
               obj: { axis: 'y-up'|'z-up' },
-              threeMF: { flavour: 'core'|'bambu'|'prusa', seatOnBed: boolean, metadata: boolean } },
-    validation: { requireWatertight: boolean, minWallMM: number, minFeatureMM: number, maxTrianglesHint: number },
-    defaultMaterialId: string,      // must exist in public/config/materials.json
-    verified: 'unverified'|'verified'
+              threeMF: { flavour: 'core'|'bambu'|'prusa', metadata: boolean } },
+    validation: { requireWatertight: boolean, minWallMM: number, minFeatureMM: number },
+    defaultMaterialId: string       // must exist in public/config/materials.json and match the printer's process
   }
 }
 // <format> = obj-mtl | 3mf-textured | 3mf-colorgroup | 3mf-bambu | 3mf-prusa | stl | ply | wrl
 ```
 `tests/hygiene.test.mjs` validates every row (required fields, numeric bed,
 known enums) and asserts AGENTS.md rule 6 mentions "Printer default".
-Every row ships `verified: 'unverified'` until the owner records verification.
+Five fields with no reader were removed (cia D-06): `colour.vertexColour`, `export.formats`, `threeMF.seatOnBed`
+(the 3MF writer always seats the model), `validation.maxTrianglesHint` (the triangle budget is
+`caps.triangleBudget`) and `verified`. Add a field only together with its reader.
+`tests/printers-schema-d06.test.mjs` pins the absence and that each printer's default material suits its process.
 
 Current profile ids:
 - `mimaki-3duj-553`: default, `508 × 508 × 305` mm.

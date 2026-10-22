@@ -45,7 +45,7 @@ await test('printers.json v2: every row validates (required fields, numeric bed,
     assert.ok(printers[id], `legacy id ${id} still present`);
   }
   for (const [id, p] of Object.entries(printers)) {
-    for (const k of ['displayName', 'vendor', 'process', 'bed', 'colour', 'export', 'validation', 'defaultMaterialId', 'verified']) assert.ok(k in p, `${id}: ${k}`);
+    for (const k of ['displayName', 'vendor', 'process', 'bed', 'colour', 'export', 'validation', 'defaultMaterialId']) assert.ok(k in p, `${id}: ${k}`);
     assert.ok(P.PRINTER_PROCESSES.includes(p.process), `${id}: process`);
     for (const ax of ['x', 'y', 'z']) {
       if (id === 'custom') assert.ok(p.bed[ax] === null || num(p.bed[ax]), `${id}: bed.${ax}`);
@@ -53,20 +53,15 @@ await test('printers.json v2: every row validates (required fields, numeric bed,
     }
     assert.ok(P.PRINTER_COLOUR_MODES.includes(p.colour.mode), `${id}: colour.mode`);
     assert.equal(typeof p.colour.alpha, 'boolean', id);
-    assert.equal(typeof p.colour.vertexColour, 'boolean', id);
     assert.ok(Number.isInteger(p.colour.maxTextureSize) && p.colour.maxTextureSize >= 0, `${id}: maxTextureSize`);
     assert.ok(Number.isInteger(p.colour.maxTexturesPerObject) && p.colour.maxTexturesPerObject >= 0, `${id}: maxTexturesPerObject`);
-    assert.ok(Array.isArray(p.export.formats) && p.export.formats.length > 0, `${id}: export.formats`);
-    for (const f of p.export.formats) assert.ok(P.PRINTER_FORMATS.includes(f), `${id}: format ${f}`);
-    assert.ok(p.export.formats.includes(p.export.recommended), `${id}: recommended in formats`);
+    assert.ok(P.PRINTER_FORMATS.includes(p.export.recommended), `${id}: recommended is a known format`);
     assert.equal(typeof p.export.splitByMaterial, 'boolean', id);
     assert.ok(P.PRINTER_OBJ_AXES.includes(p.export.obj.axis), `${id}: obj.axis`);
     assert.ok(P.PRINTER_3MF_FLAVOURS.includes(p.export.threeMF.flavour), `${id}: 3mf flavour`);
-    assert.equal(typeof p.export.threeMF.seatOnBed, 'boolean', id);
     assert.equal(typeof p.export.threeMF.metadata, 'boolean', id);
     assert.equal(typeof p.validation.requireWatertight, 'boolean', id);
-    for (const k of ['minWallMM', 'minFeatureMM', 'maxTrianglesHint']) assert.ok(num(p.validation[k]), `${id}: validation.${k}`);
-    assert.ok(P.PRINTER_VERIFIED.includes(p.verified), `${id}: verified`);
+    for (const k of ['minWallMM', 'minFeatureMM']) assert.ok(num(p.validation[k]), `${id}: validation.${k}`);
   }
 });
 
