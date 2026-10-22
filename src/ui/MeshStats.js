@@ -33,6 +33,8 @@ import { t } from '../i18n/index.js';
 import { canonicalObjectId, logicalObjectPartIds, isGroupId } from '../core/LogicalObjects.js';
 import { Hover } from '../core/Hover.js';
 import { repairWithOverlay } from './RepairFeedback.js';
+import { worldSizeOf } from '../core/scene/WorldExtents.js';
+import { BU_TO_MM } from '../core/print/ExportContext.js';
 
 // Result types that mean "this geometry is not a closed, correctly wound
 // solid". The validator has no 'error' severity tier (CIA F1), so the HUD
@@ -141,7 +143,6 @@ function _queueRecompute() {
 function _render() {
   const scene = SceneManager.getScene?.();
   if (!scene) return;
-  const B = window.BABYLON;
 
   const budget = caps.triangleBudget || 0;
   const ratio = budget > 0 ? _cachedSceneTris / budget : 0;
@@ -153,18 +154,11 @@ function _render() {
   const sel = getState().selection?.selectedIds ?? [];
   const selMeshes = _selectionMeshes(sel);
   const selTris = displayedCounts(selMeshes).tris;
-  let min = null, max = null;
-  for (const m of selMeshes) {
-    if (!m.geometry) continue;
-    m.computeWorldMatrix(true);
-    const bb = m.getBoundingInfo().boundingBox;
-    if (!min) { min = bb.minimumWorld.clone(); max = bb.maximumWorld.clone(); }
-    else { min = B.Vector3.Minimize(min, bb.minimumWorld); max = B.Vector3.Maximize(max, bb.maximumWorld); }
-  }
-  if (min) {
-    // Print-space W×D×H: print X = Babylon X, depth = Babylon Z, height = Babylon Y.
-    const d = max.subtract(min).scale(1000);   // BU → mm
-    const mm = (n) => Math.round(n);
+  if (selMeshes.length) {
+    // X × Y × Z, the order Properties lists them in.
+    const size = worldSizeOf(selMeshes);
+    const mm = (n) => Math.round(n * BU_TO_MM);
+    const sizeText = size ? ` · ${mm(size.x)}×${mm(size.y)}×${mm(size.z)} mm` : '';
 
     // CIA F1: the validator NEVER emits severity 'error' — non-manifold
     // geometry is deliberately a warning (owner rule), so the old
@@ -176,7 +170,7 @@ function _render() {
     const open = !!val?.results?.some(r => OPEN_GEOMETRY_TYPES.has(r.type));
     const water = val?.results ? (open ? ` · ${t('hud.notWatertight')}` : ` · ${t('hud.watertight')}`) : '';
 
-    text += ` · ${t('hud.sel')} ${formatTriCount(selTris)} · ${mm(d.x)}×${mm(d.z)}×${mm(d.y)} mm${water}`;
+    text += ` · ${t('hud.sel')} ${formatTriCount(selTris)}${sizeText}${water}`;
     // "not watertight" is actionable right here (owner ask 2026-09-18): the
     // badge carries a Fix button that repairs the selected objects under the
     // blocking overlay. Only when a cached result says something is fixable.

@@ -36,6 +36,7 @@ import { escEnter, wireNumbers, wireToggles, reflectToggle } from './lib/fields.
 import { createCollapseController } from './lib/sections.js';
 import { renderRefinementSection, wireRefinementSection } from './refinement/RefinementSection.js';
 import { RefinementController } from '../core/refinement/RefinementController.js';
+import { worldSizeOf, hierarchyMeshes } from '../core/scene/WorldExtents.js';
 
 const BABYLON = window.BABYLON;
 
@@ -375,8 +376,8 @@ function _renderTransformSection(mesh, multi, resolved = []) {
 
   // Print-space size from world AABB. The number to compare against the real
   // model spec on the box — "1:35 hull should be ~245 mm long".
-  const sizeBU = (multi || resolved.length > 1) ? _aggregateWorldSize(resolved.map(r => r.mesh))
-                                                : _hierarchyWorldSize(mesh);
+  const sizeBU = (multi || resolved.length > 1) ? _worldSize(resolved.map(r => r.mesh))
+                                                : _worldSize([mesh]);
   const sizeMM = sizeBU ? { x: sizeBU.x * BU_TO_MM, y: sizeBU.y * BU_TO_MM, z: sizeBU.z * BU_TO_MM } : null;
 
   const scaleLocked = getState().ui?.scaleLocked !== false;
@@ -577,40 +578,10 @@ function _ratioTargetIds(selectedIds, objects) {
   return [...ids].filter(id => objects?.[id]);
 }
 
-function _hierarchyWorldSize(mesh) {
-  if (!mesh) return null;
-  // getHierarchyBoundingVectors includes child meshes — correct for multi-mesh
-  // glTF imports where the picked node is a parent transform.
-  try {
-    const r = mesh.getHierarchyBoundingVectors(true);
-    return { x: r.max.x - r.min.x, y: r.max.y - r.min.y, z: r.max.z - r.min.z };
-  } catch {
-    const bi = mesh.getBoundingInfo?.();
-    if (!bi) return null;
-    const d = bi.boundingBox.maximumWorld.subtract(bi.boundingBox.minimumWorld);
-    return { x: d.x, y: d.y, z: d.z };
-  }
-}
-
-function _aggregateWorldSize(meshes) {
-  if (!meshes.length) return null;
-  let min = new BABYLON.Vector3( Infinity,  Infinity,  Infinity);
-  let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
-  for (const m of meshes) {
-    if (!m) continue;
-    try {
-      const r = m.getHierarchyBoundingVectors(true);
-      min = BABYLON.Vector3.Minimize(min, r.min);
-      max = BABYLON.Vector3.Maximize(max, r.max);
-    } catch {
-      const bi = m.getBoundingInfo?.();
-      if (!bi) continue;
-      min = BABYLON.Vector3.Minimize(min, bi.boundingBox.minimumWorld);
-      max = BABYLON.Vector3.Maximize(max, bi.boundingBox.maximumWorld);
-    }
-  }
-  if (!Number.isFinite(min.x)) return null;
-  return { x: max.x - min.x, y: max.y - min.y, z: max.z - min.z };
+// True world extents of the nodes and every mesh under them (a picked glTF
+// root, a group node), not Babylon's rotated local box (L2-04).
+function _worldSize(nodes) {
+  return worldSizeOf(nodes.flatMap(hierarchyMeshes));
 }
 
 function _wireScaleRow() {
@@ -737,8 +708,8 @@ function _commitSizeInput(meshId, input) {
   const axis = input.dataset.sizeAxis;
   const newMM = parseFloat(input.value);
   const sizeBU = targetIds.length > 1
-    ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
-    : _hierarchyWorldSize(mesh);
+    ? _worldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
+    : _worldSize([mesh]);
   const curMM = sizeBU ? sizeBU[axis] * BU_TO_MM : 0;
   const locked = getState().ui?.scaleLocked !== false;
   const longest = _longestMM(sizeBU);
@@ -784,8 +755,8 @@ function _commitTransformInput(meshId, input) {
     const prevVal = _captureAbsolute(mesh).scaling[axis];
     const factor = Math.abs(prevVal) > 1e-9 ? value / Math.abs(prevVal) : 1;
     const sizeBU = targetIds.length > 1
-      ? _aggregateWorldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
-      : _hierarchyWorldSize(mesh);
+      ? _worldSize(targetIds.map(id => AssetLoader.getBabylonMesh(id)).filter(Boolean))
+      : _worldSize([mesh]);
     const problem = sizeEntryProblem(value, _longestMM(sizeBU) * Math.max(1, factor));
     if (problem) { _refuseEntry(field, problem); return; }
   }
@@ -866,7 +837,7 @@ function _renderGroup(groupId) {
     const w = captureWorldNode(node);
     const pos = { x: w.position.x * BU_TO_MM, y: w.position.y * BU_TO_MM, z: w.position.z * BU_TO_MM };
     const rot = _quatToEulerDeg(w.rotation);
-    const size = _hierarchyWorldSize(node);
+    const size = _worldSize([node]);
     const sizeMM = size ? { x: size.x * BU_TO_MM, y: size.y * BU_TO_MM, z: size.z * BU_TO_MM } : null;
     const sizeDis = dis || (sizeMM ? '' : 'disabled');
     xformHtml = `
@@ -976,7 +947,7 @@ function _commitGroupTransform(groupId, which, axis, value) {
 
 function _commitGroupSize(groupId, axis, newMM) {
   _pushGroupTransform(groupId, (next, prev, node) => {
-    const size = _hierarchyWorldSize(node);
+    const size = _worldSize([node]);
     const curMM = size ? size[axis] * BU_TO_MM : 0;
     if (!Number.isFinite(newMM) || newMM <= 0 || curMM <= 1e-6) return false;
     const factor = newMM / curMM;
