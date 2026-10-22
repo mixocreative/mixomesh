@@ -6230,9 +6230,13 @@ restores the file's slices directly and never re-seeds — so a loaded project's
 look is authoritative.
 
 **Save trigger:** debounced `scheduleSave()` on USER edits only — a capturing
-`change`/`input` listener on `#rp-scene-body` + `#rp-print-body`, plus the
-`GIZMO_CHANGED`/`PIVOT_MODE_CHANGED` events. Programmatic applies (boot/load)
-bypass it, preserving File-wins.
+`change`/`input`/`click` listener on `#rp-scene-body` + `#rp-print-body` (toggle
+BUTTONS fire `click` only), the viewport strip's grid/axes/smooth-shading
+buttons and its shading-mode `<select>` (`ViewportToggles` calls `scheduleSave()`
+itself), plus the `GIZMO_CHANGED`/`PIVOT_MODE_CHANGED` events. Programmatic
+applies (boot/load) bypass it, preserving File-wins. Pinned by
+`tests/browser-settings-toggle-d01.mjs` (real clicks, one control per fresh
+profile; cia D-01).
 
 **Reset:** per-section `↺` buttons (`SettingsStore.SECTION_KEYS`:
 grid/environment/camera/rendering on the Scene panel, one `print` button on the

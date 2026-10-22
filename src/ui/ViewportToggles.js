@@ -29,7 +29,7 @@ const FEATURE_TOGGLES = [
   { id: 'bedPreview', kind: 'overlay', iconName: 'Box',  key: 'viewport.toggle.bed',     fallback: 'Build volume' },
   { id: 'section', kind: 'section', iconName: 'Scissors', key: 'viewport.toggle.section', fallback: 'Cross-section' },
   // View-only, per-user (persisted): welded STL renders faceted unless this is on (review I1).
-  { id: 'smoothShading', kind: 'overlay', iconName: 'Disc3', key: 'viewport.toggle.smooth', fallback: 'Smooth shading', titleKey: 'viewport.smoothShadingTitle', persist: true },
+  { id: 'smoothShading', kind: 'overlay', iconName: 'Disc3', key: 'viewport.toggle.smooth', fallback: 'Smooth shading', titleKey: 'viewport.smoothShadingTitle' },
   // Statistics HUD (bottom-left): per-user, default on, never in a project.
   { id: 'stats', kind: 'hud', iconName: 'Gauge', key: 'viewport.toggle.stats', fallback: 'Statistics', titleKey: 'viewport.statsTitle' },
 ];
@@ -108,6 +108,7 @@ function _setMode(mode) {
   SceneManager.setOverlay('printPreview', matte);
   SceneManager.setOverlay('baseColorView', base);
   SceneManager.setOverlay('uvCheckerView', uv);
+  SettingsStore.scheduleSave();
 }
 
 function _wire() {
@@ -124,6 +125,7 @@ function _wire() {
         scene: { ...s.scene, overlays: { ...s.scene.overlays, [name]: enabled } },
       }), { silent: true });
       SceneManager.setOverlay(name, enabled);
+      SettingsStore.scheduleSave();
       _render();
     });
   });
@@ -154,7 +156,7 @@ function _toggleFeature(id) {
       scene: { ...s.scene, overlays: { ...s.scene.overlays, [id]: enabled } },
     }), { silent: true });
     SceneManager.setOverlay(id, enabled);
-    if (f.persist) SettingsStore.scheduleSave();
+    SettingsStore.scheduleSave();
   }
   _render();
   ScenePanel.refresh();   // keep the Scene panel's own toggles in step

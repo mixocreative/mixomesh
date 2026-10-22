@@ -288,7 +288,7 @@ export function resetAll() {
 
 /**
  * Wire user-edit → debounced save. A capturing listener on the stable Scene /
- * Print panel containers fires on any control change; gizmo + pivot have their
+ * Print panel containers fires on any control change or click; gizmo + pivot have their
  * own events. Programmatic applies (boot/load) bypass these, so File-wins holds.
  */
 export function init() {
@@ -300,6 +300,8 @@ export function init() {
     if (!el) continue;
     el.addEventListener('change', scheduleSave, true);
     el.addEventListener('input', scheduleSave, true);
+    // Toggle BUTTONS only fire click (fields.js wireToggles), never change.
+    el.addEventListener('click', scheduleSave, true);
   }
 }
 
