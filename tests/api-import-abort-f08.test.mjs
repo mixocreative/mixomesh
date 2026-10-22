@@ -20,11 +20,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 test('aborting the caller signal stops a started import and adds nothing', async () => {
   StateManager.replaceState(StateManager.freshState());
   let disposed = 0;
-  B.SceneLoader = { LoadAssetContainerAsync: async () => { await sleep(200); return { meshes: [], dispose() { disposed++; } }; } };
+  let loaderEntered;
+  const entered = new Promise(r => { loaderEntered = r; });
+  B.SceneLoader = { LoadAssetContainerAsync: async () => { loaderEntered(); await sleep(200); return { meshes: [], dispose() { disposed++; } }; } };
   const batch = AI.beginImportBatch();
   const caller = new AbortController();
   const run = AssetLoader.loadFromBlob(stl, 'api.stl', undefined, { signal: caller.signal });
-  await sleep(20);
+  await entered;
   caller.abort();
   await assert.rejects(run, { name: 'AbortError' });
   assert.equal(disposed, 1, 'nothing half-added');
