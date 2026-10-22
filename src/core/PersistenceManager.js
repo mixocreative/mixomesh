@@ -50,7 +50,7 @@ let _fileRef = null;        // adapter-owned opaque ref of the open .mixo
  * Write to the currently-open file, or prompt if none. Saves run one at a
  * time; a second Save queues behind the first.
  * @returns {Promise<boolean>} true when bytes hit disk; false when the user
- *   cancelled the save picker. Callers in "save then continue" flows MUST
+ *   cancelled the save picker or a project was still loading. Callers in "save then continue" flows MUST
  *   abort on false — proceeding discards the project the user asked to keep
  *   (review H9).
  */
@@ -58,7 +58,17 @@ export function save() {
   return runExclusiveSave(_save);
 }
 
+// A load replaces the world piece by piece: a document built meanwhile is half
+// one project and half the other. Refuse and say so; the user saves again once
+// the load has finished.
+function _refusedWhileLoading() {
+  if (!isLoading()) return false;
+  Toast.show(t('toast.loadInProgress'), 'warning', 4000);
+  return true;
+}
+
 async function _save() {
+  if (_refusedWhileLoading()) return false;
   // The target is read ONCE: the write goes to the file bound when this save
   // started, whatever gets bound meanwhile (cia A-08).
   const target = _fileRef;
@@ -128,13 +138,14 @@ async function _afterWrite(attempt, target, staleId = null) {
  * written to the picked handle FIRST; only a successful write binds the
  * handle and renames the project (audit 2026-09-17 M1) — a failed write
  * leaves the previous handle/name untouched instead of adopting a 0-byte file.
- * @returns {Promise<boolean>} true on save, false on picker cancel.
+ * @returns {Promise<boolean>} true on save, false on picker cancel or while a project loads.
  */
 export function saveAs(presetTarget = null) {
   return runExclusiveSave(() => _saveAs(presetTarget));
 }
 
 async function _saveAs(presetTarget) {
+  if (_refusedWhileLoading()) return false;
   const previousName = getState().project.name || 'Untitled';
   const suggested = `${previousName}${FILE_EXT}`;
   // presetTarget = an already-validated `{ref, name}` (automation API: the host
