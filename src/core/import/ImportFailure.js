@@ -10,20 +10,21 @@ const CATEGORY_BY_CODE = { [OVER_BUDGET]: 'polygons', timeout: 'timeout' };
 // Hints whose web wording points at the desktop app's higher limits.
 const WEB_HINT = new Set(['polygons', 'memory', 'timeout']);
 
-function _result(category, desktop) {
-  const hint = !desktop && WEB_HINT.has(category) ? `${category}Web` : category;
+function _result(category, desktopApp) {
+  const hint = desktopApp && WEB_HINT.has(category) ? `${category}Web` : category;
   return { category, reasonKey: `import.reason.${category}`, hintKey: `import.fix.${hint}` };
 }
 
 /**
  * @param {{ message?: string, code?: string } | string} failure  the error (or its message)
  * @param {string} [filename]
- * @param {{ desktop?: boolean }} [runtime]  desktop: the hint never sends the user to the desktop app
+ * @param {{ desktop?: boolean, desktopApp?: boolean }} [runtime]  desktopApp: the
+ *   hint may point at the desktop app (default: not already in it)
  */
-export function classifyImportFailure(failure, filename = '', { desktop = false } = {}) {
+export function classifyImportFailure(failure, filename = '', { desktop = false, desktopApp = !desktop } = {}) {
   const text = String((typeof failure === 'object' ? failure?.message : failure) ?? '');
   const byCode = typeof failure === 'object' ? CATEGORY_BY_CODE[failure?.code] : null;
-  if (byCode) return _result(byCode, desktop);
+  if (byCode) return _result(byCode, desktopApp);
   const threeMF = /\.3mf$/i.test(filename) || /3mf/i.test(text);
   let category = 'unknown';
   if (/quota|storage.*full|disk.*full/i.test(text)) category = 'storage';
@@ -39,5 +40,5 @@ export function classifyImportFailure(failure, filename = '', { desktop = false 
   else if (/no importable|no geometry|no meshes|empty model/i.test(text)) category = 'empty';
   else if (/handle|permission|not allowed|file.*(?:moved|not found)|NotFoundError/i.test(text)) category = 'permission';
   else if (/xml|zip|central directory|end of data|corrupt|unexpected|unclosed|unbound namespace/i.test(text)) category = 'damaged';
-  return _result(category, desktop);
+  return _result(category, desktopApp);
 }

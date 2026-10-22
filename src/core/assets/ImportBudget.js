@@ -6,7 +6,7 @@
 import { assertTriangleCapacity, assertPreParseCapacity, needsExactCount } from '../import/ImportLimits.js';
 import { estimateFileTriangles, countFileTriangles } from '../import/TriangleEstimate.js';
 import { extOf } from './AssetTypes.js';
-import { caps, isDesktop } from '../storage/capabilities.js';
+import { caps, isDesktop, desktopAppOffered } from '../storage/capabilities.js';
 import { t } from '../../i18n/index.js';
 import { Toast } from '../../ui/Toast.js';
 import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../scene/TriangleCount.js';
@@ -29,7 +29,7 @@ export async function preParseCheck(blob, filename) {
     estimate = (await countFileTriangles(blob, ext)) ?? estimate;
   }
   const verdict = assertPreParseCapacity(estimate, {
-    sceneTriangles, budget: caps.triangleBudget, limit: caps.triangleLimit, filename, desktop: isDesktop(),
+    sceneTriangles, budget: caps.triangleBudget, limit: caps.triangleLimit, filename, desktop: isDesktop(), desktopApp: desktopAppOffered(),
   });
   return { verdict, projected: sceneTriangles + (estimate?.triangles ?? 0) };
 }

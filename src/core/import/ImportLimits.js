@@ -89,16 +89,17 @@ export function needsExactCount(estimate, { sceneTriangles = 0, limit }) {
  * REFUSE_FACTOR. Returns 'warn' above the budget, 'ok' otherwise, or 'unknown'
  * when there is no estimate.
  * @param {{ triangles: number, confidence: 'exact'|'sampled'|'rough' } | null} estimate
- * @param {{ sceneTriangles?: number, budget: number, limit: number, filename: string, desktop?: boolean }} ctx
+ * @param {{ sceneTriangles?: number, budget: number, limit: number, filename: string, desktop?: boolean, desktopApp?: boolean }} ctx
+ *   desktopApp: the refusal may point at the desktop app (default: not already in it)
  * @returns {'ok'|'warn'|'unknown'}
  */
-export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, limit, filename, desktop = false }) {
+export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, limit, filename, desktop = false, desktopApp = !desktop }) {
   if (!estimate || !(budget > 0) || !(limit > 0)) return 'unknown';
   const projected = sceneTriangles + estimate.triangles;
   if (projected > limit * REFUSE_FACTOR[estimate.confidence]) {
     const about = estimate.confidence === 'exact' ? '' : 'about ';
     const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';
-    const next = desktop ? 'Simplify or split the model before importing.' : 'Simplify or split the model, or use the desktop app.';
+    const next = desktopApp ? 'Simplify or split the model, or use the desktop app.' : 'Simplify or split the model before importing.';
     throw overBudget(`"${filename}" has ${about}${estimate.triangles.toLocaleString('en-US')} triangles${scene}; this ${desktop ? 'desktop' : 'web'} build handles up to ${limit.toLocaleString('en-US')}. ${next}`);
   }
   return projected > budget ? 'warn' : 'ok';

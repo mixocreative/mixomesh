@@ -216,6 +216,16 @@ export function isDesktop() {
 }
 
 /**
+ * Whether a "use the desktop app" pointer helps this user: they are in a
+ * browser on Windows, the only platform the desktop app ships for (Mac is
+ * deferred, ADR 0001). Safari and every iOS browser never qualify (L2-12).
+ * @param {string} [ua]
+ */
+export function desktopAppOffered(ua = globalThis.navigator?.userAgent ?? '') {
+  return !isDesktop() && /\bWindows\b/.test(ua);
+}
+
+/**
  * Override the live capabilities in place (Electron boot / tests). Mutates the
  * shared `caps` object so existing imports see the change.
  * @param {Partial<Capabilities>} overrides

@@ -9,7 +9,7 @@ import { reportError, guard } from './Status.js';
 import { escapeHtml } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { classifyImportFailure } from '../core/import/ImportFailure.js';
-import { isDesktop } from '../core/storage/capabilities.js';
+import { desktopAppOffered } from '../core/storage/capabilities.js';
 
 // Owns the `importError` modal RENDERER; the error POLICY (when to show it)
 // lives in Status (reportError modal route / guard). safeImport is the import
@@ -42,7 +42,7 @@ function _render({ data, close }) {
   const filename = data?.filename ?? 'file';
   const message = data?.message ?? 'Unknown error';
   const detail = [message, data?.detail].filter(Boolean).join('\n\n');
-  const failure = classifyImportFailure({ message, code: data?.code }, filename, { desktop: isDesktop() });
+  const failure = classifyImportFailure({ message, code: data?.code }, filename, { desktopApp: desktopAppOffered() });
   const el = document.createElement('div');
   el.className = 'modal-content import-error';
   el.innerHTML = `
