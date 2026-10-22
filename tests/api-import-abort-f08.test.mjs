@@ -21,7 +21,7 @@ test('aborting the caller signal stops a started import and adds nothing', async
   StateManager.replaceState(StateManager.freshState());
   let disposed = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { await sleep(200); return { meshes: [], dispose() { disposed++; } }; } };
-  const gen = AI.importCancelGeneration();
+  const batch = AI.beginImportBatch();
   const caller = new AbortController();
   const run = AssetLoader.loadFromBlob(stl, 'api.stl', undefined, { signal: caller.signal });
   await sleep(20);
@@ -29,7 +29,8 @@ test('aborting the caller signal stops a started import and adds nothing', async
   await assert.rejects(run, { name: 'AbortError' });
   assert.equal(disposed, 1, 'nothing half-added');
   assert.equal(Object.keys(StateManager.getState().scene.objects).length, 0);
-  assert.equal(AI.importCancelGeneration(), gen, "the user's own drop is not cancelled");
+  assert.equal(batch.signal.aborted, false, "the user's own drop is not cancelled");
+  batch.end();
   assert.equal(AssetLoader.isImporting(), false);
 });
 

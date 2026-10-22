@@ -2702,8 +2702,7 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   failures in the summary modal plus "n file(s) not imported: cancelled" (`import.restCancelled`), or
   `toast.importCancelledRest` when nothing failed; only files that produced objects count as
   imported (a declined duplicate prompt does not). `guard()` treats AbortError as the user's choice,
-  never an error modal. (ViewerMode still uses `importCancelGeneration` until
-  `.audit/pending/thermo-step5-ViewerMode.patch` lands, which deletes the counter.) (cia B-09)
+  never an error modal. Viewer-mode Open runs its files as one batch too. (cia B-09)
 - **Hashing:** `hash.sha256HexOfBlob` hashes blobs ≥ 8 MiB in `workers/Hash.worker.js`.
 - **Every worker job shows progress:** `WorkerTask` reports each job to
   `workers/JobActivity.js` under a translated `label` (`job.*`), forwards `progress({ fraction |

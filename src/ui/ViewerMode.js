@@ -21,7 +21,7 @@ import { SceneManager } from '../core/SceneManager.js';
 import { InputManager } from '../core/InputManager.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
 import { storage } from '../core/storage/StorageAdapter.js';
-import { importWithDedupe, importCancelGeneration } from '../core/assets/AssetImport.js';
+import { importWithDedupe, beginImportBatch } from '../core/assets/AssetImport.js';
 import { isTextureExt } from '../core/assets/AssetTypes.js';
 import { canonicalObjectId } from '../core/LogicalObjects.js';
 import { BU_TO_MM } from '../core/print/ExportContext.js';
@@ -258,17 +258,21 @@ async function _openFiles(files) {
   }
   const B = window.BABYLON;
   let at = B.Vector3.Zero();
-  const cancelGen = importCancelGeneration();
-  for (const file of meshes) {
-    if (importCancelGeneration() !== cancelGen) break;   // Cancel ends the whole open (review I5)
-    const ids = await safeImport(() => importWithDedupe(file, file.name, at, siblingFiles.length ? { siblingFiles } : {}), file.name);
-    if (Array.isArray(ids) && ids.length) {
-      const w = withRestTransform(() => {
-        const bb = selectionMeshes(ids).map(m => { m?.computeWorldMatrix?.(true); return m?.getBoundingInfo?.()?.boundingBox; }).filter(Boolean);
-        return bb.length ? Math.max(...bb.map(b => b.maximumWorld.x - b.minimumWorld.x)) : 0;
-      });
-      if (w) at = at.add(new B.Vector3(w * 1.1, 0, 0));
+  const batch = beginImportBatch();   // Cancel ends the whole open (review I5)
+  try {
+    for (const file of meshes) {
+      if (batch.signal.aborted) break;
+      const ids = await safeImport(() => batch.run(signal => importWithDedupe(file, file.name, at, { ...(siblingFiles.length ? { siblingFiles } : {}), signal })), file.name);
+      if (Array.isArray(ids) && ids.length) {
+        const w = withRestTransform(() => {
+          const bb = selectionMeshes(ids).map(m => { m?.computeWorldMatrix?.(true); return m?.getBoundingInfo?.()?.boundingBox; }).filter(Boolean);
+          return bb.length ? Math.max(...bb.map(b => b.maximumWorld.x - b.minimumWorld.x)) : 0;
+        });
+        if (w) at = at.add(new B.Vector3(w * 1.1, 0, 0));
+      }
     }
+  } finally {
+    batch.end();
   }
   if (_hasContent()) _show('view');
 }

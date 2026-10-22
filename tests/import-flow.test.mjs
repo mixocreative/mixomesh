@@ -73,18 +73,19 @@ test('M2: a fast (refused) import never flashes the overlay', async (t) => {
   assert.equal(overlay.shows, 0);
 });
 
-test('I5: Cancel aborts the running import, disposes its result and bumps the drop generation', async () => {
+test('I5: Cancel aborts the running import, disposes its result and ends the drop batch', async () => {
   fresh();
   let disposed = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { await sleep(700); return { meshes: [], dispose() { disposed++; } }; } };
-  const gen = AI.importCancelGeneration();
+  const batch = AI.beginImportBatch();
   const run = AssetLoader.loadFromBlob(stl, 'slow.stl');
   await sleep(450);
   assert.equal(overlay.shows, 1, 'overlay appears after the 400 ms delay');
   overlay.onCancel();
   await assert.rejects(run, { name: 'AbortError' });
   assert.equal(disposed, 1, 'nothing half-added');
-  assert.equal(AI.importCancelGeneration(), gen + 1, 'drop loops see the cancel and stop');
+  assert.equal(batch.signal.aborted, true, 'drop loops see the cancel and stop');
+  batch.end();
 });
 
 test('M12: the over-budget warning waits for the duplicate prompt; a dismissed prompt warns about nothing', async (t) => {

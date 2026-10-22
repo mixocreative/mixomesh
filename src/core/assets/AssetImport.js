@@ -58,7 +58,7 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 // An import changes the scene the user is editing, so it keeps the blocking
 // overlay (heavy-mesh spec §5.4) — with Cancel: parsing runs in a worker, the
 // UI stays live, and Cancel aborts every running import (nothing half-added)
-// AND the rest of a multi-file drop (importCancelGeneration). The overlay is
+// AND the rest of a multi-file drop (beginImportBatch). The overlay is
 // the ONE progress surface for an import (its worker jobs are hidden from the
 // activity panel) and follows JobActivity's NN/g timing (shown after
 // SHOW_DELAY_MS, then at least MIN_VISIBLE_MS). Imports running together share
@@ -67,14 +67,9 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 
 let _importDepth = 0;
 const _importAborts = new Set();
-let _cancelGen = 0;
 let _overlay = null;
 
-/** Bumped by every Cancel. A drop loop that sees it change stops (review I5). */
-export function importCancelGeneration() { return _cancelGen; }
-
 function _cancelImports() {
-  _cancelGen++;
   for (const a of [..._importAborts]) a.abort();
 }
 
@@ -305,7 +300,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   try { contentHash = await sha256HexOfBlob(blob, { cancellable: true, signal: opts.signal }); }
   catch (err) {
     // Cancel from the activity panel ends this import and the rest of the drop.
-    if (err?.name === 'AbortError') { _cancelGen++; throw err; }
+    if (err?.name === 'AbortError') throw err;
     /* no hash → no dedupe; loadFromBlob proceeds as before */
   }
   const existingId = findByHash(contentHash);
