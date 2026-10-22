@@ -1,7 +1,5 @@
 MIXOMESH END USER LICENCE AGREEMENT
 
-<!-- Unreviewed template. Drafted by an AI assistant as a best-practice starting point; it has not been reviewed by a lawyer. -->
-
 Last updated: 2026-10-22
 
 This agreement is between you and Mixo Creative ("Mixo Creative", "we"). By installing or using MIXOMESH ("the Software") you accept it. If you do not accept it, do not install or use the Software.
