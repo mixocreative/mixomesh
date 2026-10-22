@@ -24,6 +24,8 @@ import { withRestTransform } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from './Weld.js';
 import { bump } from '../geometry/GeometryStore.js';
 import { whileBusy } from '../BusyRegistry.js';
+import { push as historyPush } from '../HistoryManager.js';
+import { captureRepairState, RepairCommand } from '../commands/RepairCommands.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -165,7 +167,8 @@ export async function autoFix(mesh, results, report = null, opts = {}) {
 
 /**
  * Record applied fix types on ONE object. Persisted in .mixo (replayed on
- * reload via replayGeometryFixes) — not undoable, must dirty (M4).
+ * reload via replayGeometryFixes); must dirty (M4). A batch repair's
+ * RepairCommand restores the previous list on undo.
  */
 function _recordGeometryFixes(meshId, applied) {
   if (!applied.length) return;
@@ -216,6 +219,14 @@ async function _repairGroupParts(ids, { record = true, onProgress } = {}) {
   return { holesFilled: r.holesFilled, nmFixed: r.nmFixed, applied };
 }
 
+// The object's live, non-ghost parts (just itself when it has none).
+function _liveParts(meshId) {
+  const objects = getState().scene.objects;
+  const partIds = logicalObjectPartIds(meshId, objects)
+    .filter(id => objects[id] && !objects[id].isGhost && AssetLoader.getBabylonMesh(id));
+  return partIds.length ? partIds : (AssetLoader.getBabylonMesh(meshId) ? [meshId] : []);
+}
+
 /**
  * One-click repair entry point shared by every UI surface (import toast,
  * Outliner badge, context menu, Print panel "Repair all") so applied fixes
@@ -236,10 +247,7 @@ async function _repairGroupParts(ids, { record = true, onProgress } = {}) {
  *                     remaining: ValidationResult[] }>}
  */
 export async function repairObject(meshId, { record = true, onProgress } = {}) {
-  const objects = getState().scene.objects;
-  const partIds = logicalObjectPartIds(meshId, objects)
-    .filter(id => objects[id] && !objects[id].isGhost && AssetLoader.getBabylonMesh(id));
-  const ids = partIds.length ? partIds : (AssetLoader.getBabylonMesh(meshId) ? [meshId] : []);
+  const ids = _liveParts(meshId);
   if (!ids.length) return { holesFilled: 0, nmFixed: 0, applied: [], remaining: [] };
 
   const runOnce = () => (ids.length > 1
@@ -271,6 +279,7 @@ export async function repairObject(meshId, { record = true, onProgress } = {}) {
  * is recorded in `failed` rather than aborting the rest of the batch.
  * `repaired` counts the objects where a fix was actually applied — 0 means
  * "nothing to repair", which callers must NOT report as success (I7b/I7c).
+ * Every object the batch changed is ONE undo step (RepairCommand, cia W-12).
  * @param {string[]} meshIds
  * @param {{ onProgress?: (frac: number, name: string) => void }} [opts]
  * @returns {Promise<{ holesFilled: number, nmFixed: number, repaired: number,
@@ -285,6 +294,7 @@ async function _repairObjects(meshIds, { onProgress }) {
   let nmFixed = 0;
   let repaired = 0;
   const failed = [];
+  const changed = [];   // one undo step for the whole batch (AGENTS rule 2, cia W-12)
   const total = meshIds.length;
   for (let i = 0; i < total; i++) {
     const meshId = meshIds[i];
@@ -301,14 +311,16 @@ async function _repairObjects(meshIds, { onProgress }) {
         if (f > 1) f /= 100;
         onProgress?.((i + Math.max(0, Math.min(1, f))) / total, name);
       };
+      const before = captureRepairState(_liveParts(meshId));
       const res = await repairObject(meshId, { onProgress: inner });
       holesFilled += res.holesFilled;
       nmFixed += res.nmFixed;
-      if (res.applied.length) repaired++;
+      if (res.applied.length) { repaired++; changed.push({ objectId: meshId, before }); }
     } catch (error) {
       failed.push({ meshId, name, error });
     }
   }
+  if (changed.length) historyPush(new RepairCommand(changed));
   return { holesFilled, nmFixed, repaired, failed };
 }
 
