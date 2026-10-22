@@ -78,6 +78,34 @@ function _cancelImports() {
   for (const a of [..._importAborts]) a.abort();
 }
 
+/**
+ * A multi-file import (drop, pick, open) is one batch with one cancel: the
+ * overlay's Cancel, the caller's `signal`, or any file's AbortError (e.g. its
+ * hash cancelled in the activity panel) ends the running file and every file
+ * after it.
+ * @param {{ signal?: AbortSignal }} [opts]  the caller's cancel (API request)
+ * @returns {{ signal: AbortSignal, run<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T>, end(): void }}
+ *   pass `signal` to each file's import inside `run`; call `end()` in finally
+ */
+export function beginImportBatch({ signal } = {}) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  _importAborts.add(controller);
+  return {
+    signal: controller.signal,
+    async run(fn) {
+      try { return await fn(controller.signal); }
+      catch (err) { if (err?.name === 'AbortError') abort(); throw err; }
+    },
+    end() {
+      _importAborts.delete(controller);
+      signal?.removeEventListener('abort', abort);
+    },
+  };
+}
+
 function _overlayUpdate(frac, label) {
   _overlay?.update(frac, label);
 }
@@ -274,7 +302,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   // over-budget warning waits until the dedupe decision (loadFromBlob shows it).
   const preParse = await preParseCheck(blob, filename);
   let contentHash = null;
-  try { contentHash = await sha256HexOfBlob(blob, { cancellable: true }); }
+  try { contentHash = await sha256HexOfBlob(blob, { cancellable: true, signal: opts.signal }); }
   catch (err) {
     // Cancel from the activity panel ends this import and the rest of the drop.
     if (err?.name === 'AbortError') { _cancelGen++; throw err; }

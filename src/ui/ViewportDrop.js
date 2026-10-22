@@ -6,7 +6,7 @@ import { reportError, safeAsync } from './Status.js';
 import { t } from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
 // Decision 16: new-file imports go through the "already in this project" check.
-import { importWithDedupe, importCancelGeneration } from '../core/assets/AssetImport.js';
+import { importWithDedupe, beginImportBatch } from '../core/assets/AssetImport.js';
 import { SESSION_KEY } from '../core/assets/DirMounts.js';   // one shared constant (4.9)
 import { MM_PER_BU } from '../core/scene/SceneConstants.js';
 
@@ -90,19 +90,23 @@ export async function importPicked(picked, position = BABYLON.Vector3.Zero(), { 
     return;
   }
   let at = position;
-  const cancelGen = importCancelGeneration();
-  for (const { file, ref } of meshes) {
-    // Cancel ends the whole pick, not just the file that was running (review I5).
-    if (importCancelGeneration() !== cancelGen || signal?.aborted) break;
-    const ids = await safeImport(async () => {
-      const fileHandleKey = await _persistedKey(ref);
-      return importWithDedupe(file, file.name, at, {
-        ...(fileHandleKey ? { fileHandleKey } : {}),
-        ...(siblingFiles.length ? { siblingFiles } : {}),
-        ...(signal ? { signal } : {}),
-      });
-    }, file.name);
-    at = _nextStaggerPosition(at, ids);
+  // Cancel ends the whole pick, not just the file that was running (review I5).
+  const batch = beginImportBatch({ signal });
+  try {
+    for (const { file, ref } of meshes) {
+      if (batch.signal.aborted) break;
+      const ids = await safeImport(() => batch.run(async (batchSignal) => {
+        const fileHandleKey = await _persistedKey(ref);
+        return importWithDedupe(file, file.name, at, {
+          ...(fileHandleKey ? { fileHandleKey } : {}),
+          ...(siblingFiles.length ? { siblingFiles } : {}),
+          signal: batchSignal,
+        });
+      }), file.name);
+      at = _nextStaggerPosition(at, ids);
+    }
+  } finally {
+    batch.end();
   }
 }
 
@@ -230,11 +234,12 @@ function _handleDrop(e, position) {
     return;
   }
 
-  const importOne = async ({ file, refP }, at = position) => {
+  const importOne = async ({ file, refP }, at = position, signal = undefined) => {
     const fileHandleKey = await _persistedKey(await refP);
     return importWithDedupe(file, file.name, at, {
       ...(fileHandleKey ? { fileHandleKey } : {}),
       ...(siblingFiles.length ? { siblingFiles } : {}),
+      ...(signal ? { signal } : {}),
     });
   };
 
@@ -250,22 +255,37 @@ function _handleDrop(e, position) {
   safeAsync(async () => {
     const failures = [];
     let ok = 0;
+    let done = 0;        // files that reached an outcome (imported, declined or failed)
     let at = position;   // staggered along +X per placed file (overhaul 5.6)
-    const cancelGen = importCancelGeneration();
-    for (const entry of meshEntries) {
-      // Cancel ends the whole drop: no further files, no "partial" report (review I5).
-      if (importCancelGeneration() !== cancelGen) return;
-      try { at = _nextStaggerPosition(at, await importOne(entry, at)); ok++; }
-      catch (err) {
-        if (err?.name === 'AbortError') return;
-        failures.push({ name: entry.file.name, err });
+    // Cancel ends the whole drop: no further files (review I5), but what
+    // already happened is still reported (cia B-09).
+    const batch = beginImportBatch();
+    try {
+      for (const entry of meshEntries) {
+        if (batch.signal.aborted) break;
+        try {
+          const ids = await batch.run((signal) => importOne(entry, at, signal));
+          at = _nextStaggerPosition(at, ids);
+          if (ids?.length) ok++;   // a declined duplicate prompt imports nothing
+          done++;
+        } catch (err) {
+          if (err?.name === 'AbortError') break;
+          failures.push({ name: entry.file.name, err });
+          done++;
+        }
       }
+    } finally {
+      batch.end();
     }
+    const cancelled = meshEntries.length - done;
     if (!failures.length) {
-      Toast.show(t('toast.importedAll', { n: ok }), 'success', 3000);
+      if (cancelled) Toast.show(t('toast.importCancelledRest', { ok, n: meshEntries.length }), 'info', 5000);
+      else Toast.show(t('toast.importedAll', { n: ok }), 'success', 3000);
       return;
     }
-    const detail = failures.map(f => `${f.name}: ${f.err?.message ?? f.err}`).join('\n');
+    const lines = failures.map(f => `${f.name}: ${f.err?.message ?? f.err}`);
+    if (cancelled) lines.push(t('import.restCancelled', { n: cancelled }));
+    const detail = lines.join('\n');
     // One shared cause keeps its code, so the modal explains it (e.g. over budget).
     const codes = new Set(failures.map(f => f.err?.code ?? null));
     const code = codes.size === 1 ? [...codes][0] : null;
