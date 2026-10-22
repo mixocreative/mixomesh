@@ -3655,8 +3655,8 @@ missing assigned textures.
 
 **A manual save embeds the whole session library** (owner decision 2026-10-22, cia W-00 part 2):
 every session library asset whose bytes are available is embedded, used by an object or not, so a
-`.mixo` is self-contained and reopens with the same library on another machine
-(`tests/portable-project.test.mjs`). If file size becomes a complaint, the answer is an explicit
+`.mixo` is self-contained and reopens with the same library on another machine (pinned by the
+"explicit save embeds handle-backed / loose-drop asset" cases of `tests/persistence-abort.test.mjs`). If file size becomes a complaint, the answer is an explicit
 "Save compact" option, not a change of the default.
 
 **Import caps (task 6.4, Decision 19, `import/ImportLimits.js`).** Max file
