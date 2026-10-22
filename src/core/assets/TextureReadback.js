@@ -93,10 +93,9 @@ export async function textureToPngBlob(texture, { flipY = EXPORT_FLIP_Y, toSrgb 
   const r = await readTextureRGBA(texture);
   if (!r) return null;
   // Colour-space contract (task 1.9): `toSrgb` is set ONLY by the export
-  // readback fallback (ExportTextures.textureToBlob): a texture flagged linear
-  // (gammaSpace === false) is encoded to sRGB there; sRGB textures (incl.
-  // _useSRGBBuffer ones — readPixels returns the stored sRGB bytes) pass
-  // unchanged. Source CAPTURE (TextureCap) stays raw: the viewport cap
+  // readback fallback (ExportTextures.textureToBlob): a texture whose stored
+  // bytes are linear (ColorSpace.isLinearTexture) is encoded to sRGB there;
+  // sRGB textures, sRGB-buffer uploads included, pass unchanged. Source CAPTURE (TextureCap) stays raw: the viewport cap
   // re-uploads those bytes, and converting a linear map (normal/roughness)
   // would corrupt it. Captured source bytes are exported verbatim.
   if (toSrgb && isLinearTexture(texture)) linearRgbaToSrgbInPlace(r.rgba);

@@ -1,3 +1,5 @@
+import { isLinearTexture } from '../shaders/ColorSpace.js';
+
 const DEFAULT_VIEW = Object.freeze({
   colorSpace: 'srgb',
   invertY: false,
@@ -34,7 +36,7 @@ export function textureViewKey(view) {
 export function textureViewFromBabylon(texture, imageContentHash) {
   return normalizeTextureView({
     imageContentHash,
-    colorSpace: texture?.gammaSpace === false ? 'linear' : 'srgb',
+    colorSpace: isLinearTexture(texture) ? 'linear' : 'srgb',
     invertY: texture?._invertY ?? false,
     wrapU: texture?.wrapU,
     wrapV: texture?.wrapV,

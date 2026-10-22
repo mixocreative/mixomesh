@@ -61,7 +61,12 @@ export function linearRgbaToSrgbInPlace(rgba) {
   return rgba;
 }
 
-/** True when a Babylon texture's bytes are linear-encoded (flagged `gammaSpace === false`). */
+/**
+ * True when a Babylon texture's stored bytes are linear-encoded. Babylon's
+ * `gammaSpace` getter also reports false for an sRGB-buffer upload (the glTF
+ * loader's base-colour path), where the GPU decodes on sampling but the
+ * stored bytes, and so readPixels, stay sRGB.
+ */
 export function isLinearTexture(texture) {
-  return texture?.gammaSpace === false;
+  return texture?.gammaSpace === false && !texture._texture?._useSRGBBuffer;
 }

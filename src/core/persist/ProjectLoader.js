@@ -468,7 +468,7 @@ async function _loadProjectInner(doc, previousId) {
       const container = AssetLoader.getContainer(a.id);
       for (const t of importedBySource.get(a.id) ?? []) {
         const tex = container?.textures?.find?.(x => x?.name === t.babylonTextureName);
-        if (tex) AssetLoader.bindRestoredTexture(t.id, tex);
+        if (tex) AssetLoader.bindRestoredTexture(t.id, tex, t);
       }
       // Only nag for assets that were SUPPOSED to track a live file (had a
       // dir or file handle) but fell back to the embedded snapshot. A loose

@@ -11,8 +11,8 @@ import { extOf as _extOf, isTextureExt } from './AssetTypes.js';
 import { textureToDataUrl } from './TextureReadback.js';
 import { setBlobUrl, revokeBlobUrl } from './BlobUrls.js';
 import { captureAndCap, applyCapToTexture, currentCapPx, clearCapUrl, clearCapUrls } from './TextureCap.js';
-import { clearTextureSource, clearTextureSources } from './TextureSource.js';
-import { clearTextureImages, storeTextureImage } from './TextureImageStore.js';
+import { clearTextureSource, clearTextureSources, setTextureSource } from './TextureSource.js';
+import { clearTextureImages, getTextureImage, storeTextureImage } from './TextureImageStore.js';
 import { normalizeTextureView, textureViewFromBabylon, textureViewKey } from './TextureView.js';
 
 const BABYLON = window.BABYLON;
@@ -290,15 +290,30 @@ export async function captureUnstoredTextureImages() {
 /**
  * Bind a restored container-owned texture instance under its persisted
  * assetId (§10b reload rebind). PersistenceManager matches the instance by
- * `babylonTextureName` inside the freshly restored container; this just
- * registers it so `getBabylonTexture` / shader restore resolve it live.
+ * `babylonTextureName` inside the freshly restored container; this registers
+ * it so `getBabylonTexture` / shader restore resolve it live, and restores its
+ * export source from the stored image.
  * @param {string} assetId   persisted imported-texture asset id
  * @param {BABYLON.BaseTexture} texture
+ * @param {object} [entry]    its persisted AssetEntry, when not in state yet
  */
-export function bindRestoredTexture(assetId, texture) {
+export function bindRestoredTexture(assetId, texture, entry = getState().scene.assetLibrary[assetId]) {
   if (!assetId || !texture) return;
   _tagTextureAsset(texture, assetId);
   _textures.set(assetId, texture);
+  _seedSourceFromStoredImage(entry);
+  _scheduleIdle(() => _awaitTextureReady(texture)
+    .then(() => captureAndCap(assetId, texture))
+    .catch(err => console.warn(`Texture cap after reopen failed for ${assetId}:`, err)));
+}
+
+// An imported texture's stored image is the export PNG captureAndCap froze at
+// import, so on reopen it is the export source as-is. A fresh readback of the
+// reloaded GPU copy is not: it can re-encode, or be capped.
+function _seedSourceFromStoredImage(entry) {
+  if (!entry?.isImported || !entry.imageContentHash) return;
+  const image = getTextureImage(entry.imageContentHash);
+  if (image) setTextureSource(entry.id, image.blob, image.width, image.height, image.hash);
 }
 
 /**
@@ -328,6 +343,7 @@ export async function restoreTexture(entry, blob) {
   _tagTextureAsset(texture, entry.id);
   _textures.set(entry.id, texture);
   if (entry.isImported) _ownedImported.add(texture);
+  _seedSourceFromStoredImage(entry);
   setState(s => ({
     ...s,
     scene: { ...s.scene, assetLibrary: { ...s.scene.assetLibrary, [entry.id]: { ...entry, thumbnailDataUrl: blobUrl } } },
