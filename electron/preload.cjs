@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kvGet: (key) => ipcRenderer.invoke('kv:get', key),
   kvDelete: (key) => ipcRenderer.invoke('kv:delete', key),
   kvKeys: () => ipcRenderer.invoke('kv:keys'),
+  kvDamaged: () => ipcRenderer.invoke('kv:damaged'),
   // Mounted asset directories use opaque refs; OS paths never enter renderer state.
   mountDirectory: () => ipcRenderer.invoke('dialog:mountDirectory'),
   listDirectory: (ref, parentPath) => ipcRenderer.invoke('fs:listDirectoryRef', ref, parentPath),

@@ -1269,6 +1269,7 @@
   "viewport.toggle.stats": "Statistics",
   "viewport.statsTitle": "Statistics: object, face (triangle) and vertex counts of the selection or the scene",
   "toast.threeMFHelperVolumesSkipped": "{n, plural, one{Skipped 1 slicer helper volume (negative volume, modifier or support blocker) - it is not printable geometry.} other{Skipped # slicer helper volumes (negative volumes, modifiers or support blockers) - they are not printable geometry.}}",
+  "toast.appDataDamaged": "Saved app data (recent projects, autosave, preferences) could not be read and was reset. A copy of the damaged file was kept.",
   "toast.settingsDamaged": "Your saved panel settings were unreadable and have been reset to defaults. A copy of the damaged data was kept.",
   "viewer.projectsError": "Your saved projects could not be read.",
   "viewer.retry": "Try again",

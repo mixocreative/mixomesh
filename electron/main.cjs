@@ -468,6 +468,8 @@ handle('kv:set', (_e, key, value) => _kv.set(key, value));
 handle('kv:get', (_e, key) => _kv.get(key));
 handle('kv:delete', (_e, key) => _kv.delete(key));
 handle('kv:keys', () => _kv.keys());
+// A read first, so a file nothing has touched yet is checked; only a boolean leaves main.
+handle('kv:damaged', async () => { await _kv.keys().catch(() => {}); return !!_kv.damaged(); });
 
 // ── Mounted asset directories (opaque renderer refs) ──
 handle('dialog:mountDirectory', async event => {

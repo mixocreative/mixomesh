@@ -78,6 +78,8 @@ export const DesktopStorageAdapter = {
   async kvGet(key) { return (await _api()?.kvGet(key)) ?? undefined; },
   async kvDelete(key) { return _api()?.kvDelete(key); },
   async kvKeys() { return (await _api()?.kvKeys()) ?? []; },
+  /** True when main quarantined an unreadable KV file at startup (no path crosses the bridge). */
+  async kvDamaged() { return !!(await _api()?.kvDamaged?.()); },
   async mountDirectory() {
     const api = _api();
     if (!api?.mountDirectory) throw new Error('Directory mounting is unavailable');

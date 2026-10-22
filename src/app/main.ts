@@ -39,6 +39,7 @@ import { CopyPaste } from '../ui/CopyPaste.js';
 import { ViewportEmptyState } from '../ui/ViewportEmptyState.js';
 import * as i18n from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
+import { reportKvDamage } from '../core/persist/KvDamage.js';
 import { engine, engineGate } from '../core/storage/capabilities.js';
 
 type TransformCommit = {
@@ -79,6 +80,7 @@ async function gateStorage(): Promise<boolean> {
 
 async function bootstrap() {
   Toast.init();
+  void reportKvDamage(storage);
   StatusBar.init();
   JobActivityPanel.init();   // every worker job shows up here (heavy-mesh spec §5)
 

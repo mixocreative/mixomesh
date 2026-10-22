@@ -42,6 +42,7 @@ import {
  * @property {(key:string)=>Promise<any>} kvGet
  * @property {(key:string)=>Promise<void>} kvDelete
  * @property {()=>Promise<string[]>} kvKeys
+ * @property {()=>Promise<boolean>} [kvDamaged]  desktop only: main quarantined an unreadable KV file
  * @property {()=>Promise<{ref:any,name:string}>} mountDirectory
  * @property {(ref:any, parentPath?:string)=>Promise<Array<{name:string,path:string,kind:'file'|'directory',ref:any}>>} listDirectory
  * @property {(ref:any)=>Promise<File|Blob|any>} readFile

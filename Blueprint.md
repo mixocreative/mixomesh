@@ -6294,7 +6294,7 @@ buttons and its shading-mode `<select>` (`ViewportToggles` calls `scheduleSave()
 itself), plus the `GIZMO_CHANGED`/`PIVOT_MODE_CHANGED` events. Programmatic
 applies (boot/load) bypass it, preserving File-wins. A stored blob that exists but
 fails `parseStored` is reported once with `toast.settingsDamaged` and kept as
-`mx-settings-v1.damaged` (cia B-13, `tests/settings-damaged-b13.test.mjs`). Pinned by
+`mx-settings-v1.damaged` (cia B-13, `tests/settings-damaged-b13.test.mjs`). On the desktop, a `mixo-kv.json` that `KvStore` quarantined at startup (recents, autosave, preferences reset) is reported once with `toast.appDataDamaged`: the renderer asks `storage.kvDamaged()` after `Toast.init()`, main answers `kv:damaged` with a boolean only (no path crosses the bridge) (`persist/KvDamage.js`, `tests/kv-damage-b13.test.mjs`). Pinned by
 `tests/browser-settings-toggle-d01.mjs` (real clicks, one control per fresh
 profile; cia D-01).
 
