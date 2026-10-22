@@ -109,6 +109,10 @@ async function main() {
       && !!document.querySelector('#rp-print-body')
       && !!document.querySelector('#status-bar')
     `), 30000, 'main UI');
+    // Many checks below bind meshes to asset ids that have no library entry, a
+    // state no import produces. The 60 s autosave tick would refuse that scene
+    // ("required asset bytes are missing") whenever a slow run crossed a tick.
+    await evaluate(cdp, `import('/src/core/PersistenceManager.js').then(m => m.PersistenceManager.stopAutosave())`);
 
     const snapshot = await evaluate(cdp, `(() => {
       const splitter = document.querySelector('[data-rp-splitter]');
