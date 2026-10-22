@@ -98,6 +98,10 @@ const _widthsByStyle = { original: {}, new: {} };
 const _widths = () => _widthsByStyle[getStyle()];
 const _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
 let _pillEl = null;
+// The user's own workspace + overrides, as last shown. Not project state: a
+// load or New resets the whole state to factory (ProjectLoader.resetWorld),
+// so it is put back from here once the load is done (cia W-05).
+let _mine = null;
 
 // ── Init ─────────────────────────────────────────────────
 
@@ -117,8 +121,11 @@ export function init() {
 
   _renderPill();
   _applyDom();
+  _remember();
 
   subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_pillEl));
+  subscribe(EVENTS.PROJECT_LOADED, _restoreMine);
+  subscribe(EVENTS.PROJECT_NEW, _restoreMine);
   subscribe(EVENTS.UI_STYLE_CHANGED, _applyDom);
 
   InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
@@ -254,7 +261,20 @@ function _captureWidths(workspace) {
   };
 }
 
+function _remember() {
+  const { workspace, panelCollapsed } = getState().ui;
+  _mine = { workspace, panelCollapsed };
+}
+
+function _restoreMine() {
+  if (!_mine) return;
+  const { workspace, panelCollapsed } = _mine;
+  setState(s => ({ ...s, ui: { ...s.ui, workspace, panelCollapsed } }), SILENT);
+  _applyDom();
+}
+
 function _persist() {
+  _remember();
   if (typeof localStorage === 'undefined') return;
   const { workspace, panelCollapsed } = getState().ui;
   try {
