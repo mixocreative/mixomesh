@@ -2,11 +2,11 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
-> **OPEN OWNER DECISIONS (2026-10-22 /cia run, `docs/reviews/2026-10-22-cia-full.md` end of file):**
-> W-00 embed unused library assets? · C-06 3MF non-mm units: spec or PrusaSlicer? · W-13 STL object
-> naming · A-11 settings copy file values into personal defaults? · E-03 WebKit triangle budget ·
-> F-08 automation requestId. Master 0633548 = 94 fix commits, NOT pushed; after pushing, read the first
-> CI run (it now runs lint/typecheck/tests/i18n before deploy).
+> **2026-10-22 /cia run (`docs/reviews/2026-10-22-cia-full.md`): every owner decision is closed.**
+> W-13 bda8066, A-11 84dd6ef, E-03 7a5df43, F-08 632fefe; W-00 and C-06 kept as is (recorded in
+> Blueprint). Master is NOT pushed; after pushing, read the first CI run (it now runs
+> lint/typecheck/tests/i18n before deploy). Open: a real iPad / iPhone measurement to raise the
+> unmeasured WebKit budget (1M / 3M).
 
 > **2026-10-22 — Release 0.3.0 shipped (master 4e7a81e, tag v0.3.0, Pages live,
 > installer `installers/MIXOMESH-Setup-0.3.0.exe`).** Heavy-mesh handling per

@@ -2407,8 +2407,8 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    each by the unit of the model part that holds it (Core 1.4.0 §3.4: "all
    vertices, locations, or measurements"; trimesh agrees; PrusaSlicer 2.9.3
    scales vertices only and so disagrees for non-mm files; cia C-06, pinned by
-   `tests/threemf-units-c06.test.mjs`). Owner decision pending: follow the spec
-   (current behaviour) or match PrusaSlicer for non-mm assemblies;
+   `tests/threemf-units-c06.test.mjs`). Owner decision 2026-10-22: follow the spec
+   (current behaviour, 913e481); revisit only on a real PrusaSlicer file that misplaces;
    triangle indices outside the vertex range and non-numeric coordinates
    throw instead of producing a garbage mesh. Triangle order is kept as
    written (the reflection already makes 3MF's CCW-outward read as Babylon's
@@ -3652,6 +3652,12 @@ Unused Asset Panel library entries are conveniences: they may remain linked or
 unembedded without blocking save, because they do not determine whether the
 saved scene reopens or exports. Export/readiness still blocks on ghosts and
 missing assigned textures.
+
+**A manual save embeds the whole session library** (owner decision 2026-10-22, cia W-00 part 2):
+every session library asset whose bytes are available is embedded, used by an object or not, so a
+`.mixo` is self-contained and reopens with the same library on another machine
+(`tests/portable-project.test.mjs`). If file size becomes a complaint, the answer is an explicit
+"Save compact" option, not a change of the default.
 
 **Import caps (task 6.4, Decision 19, `import/ImportLimits.js`).** Max file
 size 1 GiB (checked before hashing/reading); zip packages (3MF): no default
