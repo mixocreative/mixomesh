@@ -1,0 +1,37 @@
+MIXOMESH END USER LICENCE AGREEMENT
+
+<!-- Unreviewed template. Drafted by an AI assistant as a best-practice starting point; it has not been reviewed by a lawyer. -->
+
+Last updated: 2026-10-22
+
+This agreement is between you and Mixo Creative ("Mixo Creative", "we"). By installing or using MIXOMESH ("the Software") you accept it. If you do not accept it, do not install or use the Software.
+
+1. Licence
+We grant you a personal, non-exclusive, non-transferable licence to install and use the Software on your own devices, for your own use. The licence is per user: each person who uses the Software needs their own licence.
+
+2. What you may not do
+You may not sell, rent, lend, sublicense or redistribute the Software or your licence key. You may not reverse engineer, decompile or disassemble the Software, except to the extent the law allows this despite this restriction.
+
+3. Your models and output
+You own the models, projects and files you create or import, and the output you produce with the Software. We do not claim any rights in them. Your files stay on your device unless you choose to export or share them.
+
+4. Third-party components
+The Software includes components made by others. They are licensed under their own terms, which are listed in THIRD_PARTY_NOTICES.txt. Those terms apply to those components instead of this agreement. Product and company names mentioned in the Software belong to their owners; there is no affiliation or endorsement.
+
+5. No warranty
+The Software is provided "as is" and "as available", without warranties of any kind, express or implied, including fitness for a particular purpose, merchantability and non-infringement. We do not promise that the Software will be error-free or that it will suit your project. Keep backups of your work. Nothing in this agreement removes rights you have under mandatory consumer law.
+
+6. Limitation of liability
+To the extent the law allows, our total liability to you for any claim related to the Software is limited to the amount you paid for the Software. We are not liable for indirect or consequential loss, lost profits, or lost data. Nothing in this agreement limits liability that cannot be limited by law.
+
+7. Termination
+This agreement ends automatically if you breach it. We may also end it by notice if you breach it. When it ends, you must stop using the Software and delete your copies. Sections 2 to 8 continue to apply after termination.
+
+8. Governing law and courts
+This agreement is governed by the laws of Taiwan (Republic of China). The Taipei District Court has first-instance jurisdiction, subject to any mandatory consumer rights to bring a claim elsewhere.
+[ASSUMPTION - the owner may change this jurisdiction line before release; it was chosen as a best guess from the owner's location.]
+
+9. General
+If any part of this agreement is unenforceable, the rest stays in force. This is the whole agreement between you and us about the Software. We may update it for new versions; the terms shipped with the version you install apply to that version.
+
+Contact: Mixo Creative, mixoadrian@gmail.com

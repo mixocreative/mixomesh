@@ -35,6 +35,8 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   include: electron/installer.nsh
+  # EULA shown on the installer licence page (EULA.txt in the repo root).
+  license: EULA.txt
   # Installer file name used by scripts/build-installer.mjs (copied to installers/).
   artifactName: MIXOMESH-Setup-${version}.${ext}
 
