@@ -118,6 +118,7 @@ export function buildNotices({ root = ROOT } = {}) {
     '  - Lucide icons (ISC) incl. Feather (MIT) — icon path data',
     '  - Zen Kaku Gothic New font (SIL OFL 1.1)',
     '  - MeshFixLib (MIT), Manifold (Apache-2.0, embeds Clipper2 BSL-1.0 and oneTBB Apache-2.0) — vendored WASM',
+    '  - Draco glTF decoder 1.5.7 (Apache-2.0) — vendored WASM',
     '  - HDRI environment maps from the Babylon.js Assets repository (CC BY 4.0)',
   ].join('\n')}\n\n`);
   for (const p of pkgs) parts.push(packageSection(p));
@@ -130,6 +131,7 @@ export function buildNotices({ root = ROOT } = {}) {
 Manifold's WebAssembly build also embeds Clipper2 (Boost Software License 1.0,
 https://github.com/AngusJohnson/Clipper2) and oneTBB initialisation code
 (Apache License 2.0, https://github.com/oneapi-src/oneTBB).`));
+  parts.push(section('Draco glTF decoder licence (vendor/draco/LICENSE)', read('public/vendor/draco/LICENSE')));
   parts.push(section('HDRI environment maps (Babylon.js Assets, CC BY 4.0)', read('scripts/notices/environments.txt')));
   return parts.join('');
 }

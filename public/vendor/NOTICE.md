@@ -1,8 +1,8 @@
 # Vendored third-party code
 
 Everything under `public/vendor/` is third-party code committed into this
-repository on purpose: the repair engine and the CSG kernel must work with **no
-network access** (offline desktop use, and no runtime CDN fetch in the export
+repository on purpose: the repair engine, the CSG kernel and the Draco decoder
+must work with **no network access** (offline desktop use, and no runtime CDN fetch in the export
 path — see `Blueprint.md` § *Watertight repair (MeshFixLib)*). Nothing here is
 written or maintained by this project; do not edit these files. To update one,
 re-vendor it from upstream and update this file.
@@ -50,3 +50,22 @@ fetches `manifold.wasm` relative to itself, so the directory is handed to
 `BABYLON.InitializeCSG2Async({ manifoldUrl })` — by `src/core/BooleanService.js`
 (interactive Boolean) and `src/core/print/PrintPipeline.js` (CSG re-bake on
 export), both through `src/core/vendorUrl.js`.
+
+## `draco/` — Draco glTF decoder
+
+| | |
+|---|---|
+| Upstream | <https://github.com/google/draco> |
+| Licence | Apache-2.0 — full text in `draco/LICENSE` |
+| Version | draco `1.5.7`, the tag's `javascript/` glTF build. The `.wasm` is byte-identical to the one in `npm pack draco3dgltf@1.5.7` |
+| Re-vendor / verify | `node scripts/fetch-draco.mjs` (downloads, SHA-256 pinned) / `node scripts/fetch-draco.mjs --check` (no network) |
+| Files | `draco_wasm_wrapper_gltf.js`, `draco_decoder_gltf.wasm`, `LICENSE` |
+
+Decodes `KHR_draco_mesh_compression` glTF/GLB, the encoding of every real
+customer scan. Babylon's default points at `cdn.babylonjs.com`, which the
+Content-Security-Policy blocks (and offline machines cannot reach), so
+`configureDraco` in `src/core/vendorUrl.js` points `DracoDecoder` here at boot.
+Babylon runs the decoder in `blob:` workers that `importScripts` the wrapper and
+receive the `.wasm` bytes from the page. The asm.js fallback
+(`draco_decoder_gltf.js`) is not shipped: the app already requires
+WebAssembly. The only URL in the wrapper is the attribution header.

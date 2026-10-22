@@ -15,6 +15,7 @@ import {
   CSG2,
   CubeTexture,
   DirectionalLight,
+  DracoDecoder,
   DynamicTexture,
   EasingFunction,
   Effect,
@@ -59,6 +60,7 @@ import {
 import { CustomMaterial, GridMaterial, ShadowOnlyMaterial } from '@babylonjs/materials';
 import { OBJExport, STLExport } from '@babylonjs/serializers';
 import '@babylonjs/loaders';
+import { configureDraco } from '../core/vendorUrl.js';
 
 declare global {
   interface Window {
@@ -127,5 +129,7 @@ window.BABYLON = {
   VertexData,
   WebGPUEngine,
 };
+
+configureDraco(DracoDecoder);
 
 await import('./main');

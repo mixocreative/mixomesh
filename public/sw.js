@@ -7,7 +7,7 @@
 //    a CACHE_VERSION bump.
 // Bump CACHE_VERSION whenever vendored files change; old caches are deleted.
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE = `mixomesh-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -18,6 +18,8 @@ const PRECACHE = [
   './icons/apple-touch-icon.png',
   './vendor/manifold-3d/manifold.js',
   './vendor/manifold-3d/manifold.wasm',
+  './vendor/draco/draco_wasm_wrapper_gltf.js',
+  './vendor/draco/draco_decoder_gltf.wasm',
   './vendor/meshfix/mesh-fix-core.js',
   './vendor/meshfix/mesh-fix-core.wasm',
   './vendor/meshfix/mesh-fix-lib.js',

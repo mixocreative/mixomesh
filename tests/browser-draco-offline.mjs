@@ -27,6 +27,7 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const MODE = process.argv.includes('--electron') ? 'electron' : process.argv.includes('--preview') ? 'preview' : 'dev';
 const FILE = resolve(process.env.DRACO_FILE ?? join(ROOT, 'tests/fixtures/draco-torus.glb'));
 const EXPECTED_TRIS = Number(process.env.DRACO_TRIS ?? 576);
+let finished = false;
 const LOCAL = /^(?:https?:\/\/(?:127\.0\.0\.1|localhost)[:/]|file:|data:|blob:|devtools:|chrome)/;
 
 const BOOTED = `document.readyState === 'complete' && document.querySelector('#boot-status') === null
@@ -131,7 +132,7 @@ async function startElectron(processes, tempDirs) {
   const output = [];
   electron.stdout.on('data', c => output.push(String(c)));
   electron.stderr.on('data', c => output.push(String(c)));
-  electron.on('exit', code => { if (code) console.error(`electron exited ${code}:\n${output.join('').slice(-2000)}`); });
+  electron.on('exit', code => { if (code && !finished) console.error(`electron exited ${code}:\n${output.join('').slice(-2000)}`); });
   let page = null;
   await waitFor(async () => {
     const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
@@ -170,6 +171,7 @@ async function main() {
     assert(blocked.length === 0, `the app tried to reach the network: ${blocked.join(', ')}`);
     console.log(`PASS ${MODE}: ${basename(FILE)} imported offline, ${res.tris} triangles, decoder from vendor/draco`);
   } finally {
+    finished = true;
     for (const p of processes.reverse()) await stopProcess(p);
     await sleep(200);
     for (const dir of tempDirs) removeTempDir(dir);

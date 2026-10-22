@@ -54,3 +54,20 @@ export async function initCsg2(B) {
   const wasm = await _manifold;
   return B.InitializeCSG2Async({ manifoldInstance: wasm.Manifold, manifoldMeshInstance: wasm.Mesh });
 }
+
+/**
+ * Point Babylon's Draco decoder (KHR_draco_mesh_compression glTF) at the
+ * vendored copy. Babylon defaults to cdn.babylonjs.com, which the
+ * Content-Security-Policy blocks and offline machines cannot reach. Must run
+ * before the first glTF load: the decoder reads this configuration once, when
+ * it is first used.
+ * No asm.js fallback is shipped; the app already requires WebAssembly.
+ *
+ * @param {{ DefaultConfiguration: object }} DracoDecoder Babylon's DracoDecoder class
+ */
+export function configureDraco(DracoDecoder) {
+  DracoDecoder.DefaultConfiguration = {
+    wasmUrl: vendorUrl('vendor/draco/draco_wasm_wrapper_gltf.js'),
+    wasmBinaryUrl: vendorUrl('vendor/draco/draco_decoder_gltf.wasm'),
+  };
+}
