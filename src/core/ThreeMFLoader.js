@@ -24,6 +24,8 @@ import { fromPrintSpace } from './print/PrintSpace.js';
 import { IMPORT_LIMITS, assertImportFileSize, assertZipSafe, assertTriangleCapacity } from './import/ImportLimits.js';
 
 import { caps } from './storage/capabilities.js';
+import { Toast } from '../ui/Toast.js';
+import { t } from '../i18n/index.js';
 
 const BABYLON = window.BABYLON;
 
@@ -184,6 +186,102 @@ async function _texturePartToUrl(zip, partPath, contentType = 'image/png') {
   } catch { return null; }
 }
 
+/**
+ * Slicer helper volumes (cia C-05): negative volumes, modifiers, support
+ * blockers/enforcers. They live in the 3MF as ordinary mesh triangles and are
+ * told apart only by the slicer's own config part, keyed by root object id:
+ *   PrusaSlicer  Metadata/Slic3r_PE_model.config  <volume firstid lastid> +
+ *                metadata volume_type (ModelPart = printable; pre-2.2 files:
+ *                metadata modifier="1")
+ *   Bambu Studio Metadata/model_settings.config  <part id subtype> where id is
+ *                the root object's component objectid (or firstid/lastid),
+ *                normal_part = printable (BambuStudio Model.cpp type_to_string)
+ * @returns {Promise<{ ranges: Map<string, number[][]>, components: Map<string, Set<string>>, count: number }>}
+ */
+async function _readSlicerHelpers(zip) {
+  const ranges = new Map();
+  const components = new Map();
+  let count = 0;
+  const readXml = async (path) => {
+    const file = zip?.file(path);
+    if (!file) return null;
+    try { return new DOMParser().parseFromString(await file.async('text'), 'application/xml'); } catch { return null; }
+  };
+  const meta = (el, key) => _directChildren(el, 'metadata').find(m => m.getAttribute('key') === key)?.getAttribute('value');
+  const addRange = (objectId, el) => {
+    const first = parseInt(el.getAttribute('firstid'), 10);
+    const last = parseInt(el.getAttribute('lastid'), 10);
+    if (!Number.isInteger(first) || !Number.isInteger(last) || last < first) return false;
+    if (!ranges.has(objectId)) ranges.set(objectId, []);
+    ranges.get(objectId).push([first, last]);
+    return true;
+  };
+
+  const prusa = await readXml('Metadata/Slic3r_PE_model.config');
+  for (const obj of _directChildren(prusa?.documentElement, 'object')) {
+    for (const vol of _directChildren(obj, 'volume')) {
+      const type = meta(vol, 'volume_type');
+      const helper = type ? type !== 'ModelPart' : meta(vol, 'modifier') === '1';
+      if (helper && addRange(obj.getAttribute('id'), vol)) count++;
+    }
+  }
+  const bambu = await readXml('Metadata/model_settings.config');
+  for (const obj of _directChildren(bambu?.documentElement, 'object')) {
+    const objectId = obj.getAttribute('id');
+    for (const part of _directChildren(obj, 'part')) {
+      const subtype = part.getAttribute('subtype');
+      if (!subtype || subtype === 'normal_part') continue;
+      if (part.hasAttribute('lastid') && parseInt(part.getAttribute('lastid'), 10) > 0) {
+        if (addRange(objectId, part)) count++;
+        continue;
+      }
+      if (!components.has(objectId)) components.set(objectId, new Set());
+      components.get(objectId).add(part.getAttribute('id'));
+      count++;
+    }
+  }
+  return { ranges, components, count };
+}
+
+/**
+ * Geometry minus the triangles inside `ranges` (inclusive triangle indices),
+ * with the vertex pool compacted so dropped volumes leave no stray vertices.
+ * An out-of-range index maps to -1 so the caller's range check still throws.
+ */
+function _withoutTriangleRanges(geometry, ranges) {
+  const tri = geometry.triangles;
+  const triangleCount = tri.length / 7;
+  const vertexCount = geometry.positions.length / 3;
+  const drop = (i) => ranges.some(([first, last]) => i >= first && i <= last);
+  const remap = new Int32Array(vertexCount).fill(-1);
+  let kept = 0;
+  let verts = 0;
+  for (let i = 0; i < triangleCount; i++) {
+    if (drop(i)) continue;
+    kept++;
+    for (let c = 0; c < 3; c++) {
+      const v = tri[i * 7 + c];
+      if (Number.isInteger(v) && v >= 0 && v < vertexCount && remap[v] < 0) remap[v] = verts++;
+    }
+  }
+  const positions = new Float32Array(verts * 3);
+  for (let v = 0; v < vertexCount; v++) {
+    const o = remap[v];
+    if (o >= 0) positions.set(geometry.positions.subarray(v * 3, v * 3 + 3), o * 3);
+  }
+  const triangles = new Int32Array(kept * 7);
+  for (let i = 0, k = 0; i < triangleCount; i++) {
+    if (drop(i)) continue;
+    for (let c = 0; c < 7; c++) {
+      const value = tri[i * 7 + c];
+      triangles[k * 7 + c] = c >= 3 ? value
+        : (Number.isInteger(value) && value >= 0 && value < vertexCount ? remap[value] : -1);
+    }
+    k++;
+  }
+  return { positions, triangles };
+}
+
 let _splitSeq = 0;
 
 /**
@@ -294,6 +392,8 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   };
 
   const rootContext = await loadContext(opts.modelPath || '3D/3dmodel.model', modelXml);
+  const helpers = await _readSlicerHelpers(zip);
+  const skippedOther = new Set();
 
   const container = new BABYLON.AssetContainer(scene);
   const usedTexIds = new Set();   // model path + texture2d ids actually bound to a material
@@ -350,7 +450,9 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   };
 
   const createMeshInstance = (ctx, objectId, obj, matrix, parentNode) => {
-    const geometry = ctx.geometry.get(objectId);
+    const helperRanges = ctx === rootContext ? helpers.ranges.get(objectId) : null;
+    const sourceGeometry = ctx.geometry.get(objectId);
+    const geometry = helperRanges && sourceGeometry ? _withoutTriangleRanges(sourceGeometry, helperRanges) : sourceGeometry;
     if (!geometry?.positions.length || !geometry.triangles.length) return 0;
     const vertexCount = geometry.positions.length / 3;
     const triangleCount = geometry.triangles.length / 7;
@@ -539,6 +641,10 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     if (stack.has(stackKey)) throw new Error(`3MF: component cycle at object ${objectId}`);
     const obj = ctx?.objectsById.get(objectId);
     if (!obj) throw new Error(`3MF: ${ref} references missing object "${objectId}" in ${ctx?.path || 'model'}`);
+    if (obj.getAttribute('type') === 'other') {                         // Core ch.4: MUST NOT be built
+      skippedOther.add(stackKey);
+      return 0;
+    }
     const nextStack = new Set(stack);
     nextStack.add(stackKey);
     const meshEl = _firstDirect(obj, 'mesh');
@@ -552,8 +658,10 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     container.transformNodes.push(node);
 
     let childCount = 0;
+    const helperParts = ctx === rootContext ? helpers.components.get(objectId) : null;
     for (const component of _directChildren(componentsEl, 'component')) {
       const childObjectId = component.getAttribute('objectid');
+      if (helperParts?.has(childObjectId)) continue;
       const childPath = _componentModelPath(component);
       let childCtx = ctx;
       if (childPath) {
@@ -601,6 +709,8 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   }
 
   if (!made) throw new Error('3MF: no importable mesh objects');
+  const skipped = helpers.count + skippedOther.size;
+  if (skipped) Toast.show(t('toast.threeMFHelperVolumesSkipped', { n: skipped }), 'warning', 8000);
   return container;
 }
 
