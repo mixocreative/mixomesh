@@ -74,13 +74,13 @@
   "import.reason.storage": "儲存空間不足，無法完成操作。",
   "import.fix.storage": "請先匯出專案備份，再釋放瀏覽器或磁碟空間後重試。",
   "import.reason.memory": "模型所需的工作記憶體超出目前可用容量。",
-  "import.fix.memory": "請關閉其他分頁或程式，將模型減面或拆分後重試；桌面版可能有較大的處理容量。",
+  "import.fix.memory": "請關閉其他分頁或程式，將模型減面或拆分後重試。",
   "import.reason.size": "檔案或解壓縮後的內容超出匯入大小限制。",
   "import.fix.size": "請在技術詳細資料中查看實際大小，降低貼圖解析度、拆分模型或匯出較小的檔案後重試。",
   "import.reason.polygons": "模型將超出此版本的多邊形處理上限。",
-  "import.fix.polygons": "技術詳細資料會顯示三角面數及上限。請減面或拆成較小的部件；桌面版的上限較高。",
+  "import.fix.polygons": "技術詳細資料會顯示三角面數及上限。請減面或拆成較小的部件。",
   "import.reason.timeout": "匯入耗時過久，已停止。",
-  "import.fix.timeout": "請再試一次。若仍發生，請簡化模型或拆成較小的部件；桌面版可處理更大的模型。",
+  "import.fix.timeout": "請再試一次。若仍發生，請簡化模型或拆成較小的部件。",
   "import.reason.unsafePath": "封裝檔內含不安全的檔案路徑。",
   "import.fix.unsafePath": "請用原本的軟體重新匯出，使用正常的相對路徑；不要略過此檢查。",
   "import.reason.format": "目前不支援匯入此檔案格式。",
@@ -1271,5 +1271,8 @@
   "toast.threeMFHelperVolumesSkipped": "{n, plural, other{已略過 # 個切片軟體輔助體積（負體積、修改器或支撐阻擋器），它們不是可列印的幾何體。}}",
   "toast.settingsDamaged": "已儲存的面板設定無法讀取，已重設為預設值。損毀資料的副本已保留。",
   "viewer.projectsError": "無法讀取已儲存的專案。",
-  "viewer.retry": "再試一次"
+  "viewer.retry": "再試一次",
+  "import.fix.polygonsWeb": "技術詳細資料會顯示三角面數及上限。請減面或拆成較小的部件；桌面版的上限較高。",
+  "import.fix.memoryWeb": "請關閉其他分頁或程式，將模型減面或拆分後重試；桌面版可能有較大的處理容量。",
+  "import.fix.timeoutWeb": "請再試一次。若仍發生，請簡化模型或拆成較小的部件；桌面版可處理更大的模型。"
 }

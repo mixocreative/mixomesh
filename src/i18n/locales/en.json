@@ -74,13 +74,13 @@
   "import.reason.storage": "There is not enough storage to complete this operation.",
   "import.fix.storage": "Export a backup of your project, then free up browser or disk storage and try again.",
   "import.reason.memory": "The model needs more working memory than is available.",
-  "import.fix.memory": "Close other tabs/apps, simplify or split the model, and try again. The desktop app may have more capacity.",
+  "import.fix.memory": "Close other tabs/apps, simplify or split the model, and try again.",
   "import.reason.size": "The file or its unpacked contents exceed the import size limit.",
   "import.fix.size": "Check the actual size in Technical details. Reduce texture resolution, split the model or export a smaller file, then retry.",
   "import.reason.polygons": "The model would exceed this version’s polygon handling limit.",
-  "import.fix.polygons": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts; the desktop app has a higher limit.",
+  "import.fix.polygons": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts.",
   "import.reason.timeout": "The import took too long and was stopped.",
-  "import.fix.timeout": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models.",
+  "import.fix.timeout": "Try again. If it keeps happening, simplify the model or split it into smaller parts.",
   "import.reason.unsafePath": "The package contains an unsafe internal file path.",
   "import.fix.unsafePath": "Open it in the original app and export a new package using normal relative paths. Do not bypass this check.",
   "import.reason.format": "This file format is not supported for import.",
@@ -1271,5 +1271,8 @@
   "toast.threeMFHelperVolumesSkipped": "{n, plural, one{Skipped 1 slicer helper volume (negative volume, modifier or support blocker) - it is not printable geometry.} other{Skipped # slicer helper volumes (negative volumes, modifiers or support blockers) - they are not printable geometry.}}",
   "toast.settingsDamaged": "Your saved panel settings were unreadable and have been reset to defaults. A copy of the damaged data was kept.",
   "viewer.projectsError": "Your saved projects could not be read.",
-  "viewer.retry": "Try again"
+  "viewer.retry": "Try again",
+  "import.fix.polygonsWeb": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts; the desktop app has a higher limit.",
+  "import.fix.memoryWeb": "Close other tabs/apps, simplify or split the model, and try again. The desktop app may have more capacity.",
+  "import.fix.timeoutWeb": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models."
 }
