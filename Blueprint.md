@@ -1871,6 +1871,7 @@ changes). Read-only by construction, in three layers:
 3. *No dispatch:* the module itself only loads and selects. Leaving the tier (resize >= 768) restores both switches.
 
 Screens: **Projects** (list from `storage.listProjects()` when the tier provides it — OPFS — else just the Open button;
+a failed read shows "Your saved projects could not be read." with a Try again button, never the empty hint, cia B-15;
 "Open a file…" = hidden `<input type=file multiple>` accepting `.mixo .glb .gltf .3mf .obj .stl` plus `.mtl`/textures as OBJ
 siblings) and **View** (full-screen viewport, bar with back-to-projects and object-list buttons). A `.mixo` goes through
 `PersistenceManager.openPicked({ref,file})` (same dirty-confirm + load pipeline as `open()`; the OPFS tier first copies it

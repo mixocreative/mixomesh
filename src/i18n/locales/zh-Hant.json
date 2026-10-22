@@ -1269,5 +1269,7 @@
   "viewport.toggle.stats": "統計",
   "viewport.statsTitle": "統計：所選物件或整個場景的物件、面（三角面）與頂點數",
   "toast.threeMFHelperVolumesSkipped": "{n, plural, other{已略過 # 個切片軟體輔助體積（負體積、修改器或支撐阻擋器），它們不是可列印的幾何體。}}",
-  "toast.settingsDamaged": "已儲存的面板設定無法讀取，已重設為預設值。損毀資料的副本已保留。"
+  "toast.settingsDamaged": "已儲存的面板設定無法讀取，已重設為預設值。損毀資料的副本已保留。",
+  "viewer.projectsError": "無法讀取已儲存的專案。",
+  "viewer.retry": "再試一次"
 }

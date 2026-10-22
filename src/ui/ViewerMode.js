@@ -172,10 +172,17 @@ async function _renderProjects() {
   el.hidden = _screen !== 'home';
   if (_screen !== 'home') return;
   let projects = [];
+  let failed = false;
   if (typeof storage.listProjects === 'function') {
-    try { projects = await storage.listProjects(); } catch { projects = []; }
+    try { projects = await storage.listProjects(); } catch { failed = true; }
   }
   if (_screen !== 'home') return;   // switched while the list loaded
+  if (failed) {
+    el._projects = [];
+    el.innerHTML = `<p class="vm-empty vm-error" role="alert">${escapeHtml(tr('viewer.projectsError', 'Your saved projects could not be read.'))}</p>
+      <button type="button" class="vm-open" data-vm="retry">${escapeHtml(tr('viewer.retry', 'Try again'))}</button>`;
+    return;
+  }
   const now = Date.now();
   el.innerHTML = projects.length
     ? projects.map((p, i) => {
@@ -273,6 +280,7 @@ function _onClick(e) {
   if (vm === 'home') { _show('home'); return; }
   if (vm === 'back') { _show('view'); return; }
   if (vm === 'list') { _listOpen = !_listOpen; render(); return; }
+  if (vm === 'retry') { _renderProjects(); return; }
   const itemId = /** @type {HTMLElement|null} */ (target.closest('[data-vm-item]'))?.dataset.vmItem;
   if (itemId) {
     Selection.setScope?.(null);
