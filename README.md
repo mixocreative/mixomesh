@@ -448,7 +448,7 @@ Console.WriteLine(line);
 - `render.thumbnail` — export small listing image as PNG
 
 **Events:**
-- `events.subscribe` — subscribe to push notifications (`objectAdded`, `objectRemoved`, `selectionChanged`, `validationDone`, `exportDone`, `projectOpened`, `projectSaved`, `busy`)
+- `events.subscribe` — subscribe to push notifications (`objectAdded`, `objectRemoved`, `selectionChanged`, `validationDone`, `exportDone`, `projectOpened`, `projectSaved`, `busy`); `projectSaved` fires only when a save wrote the `.mixo`, not when undo or File > New merely make the project clean
 
 ### Error codes
 

@@ -1275,5 +1275,11 @@
   "import.fix.polygonsWeb": "Technical details show the triangle count and limit. Reduce polygons or import smaller parts; the desktop app has a higher limit.",
   "import.fix.memoryWeb": "Close other tabs/apps, simplify or split the model, and try again. The desktop app may have more capacity.",
   "import.fix.timeoutWeb": "Try again. If it keeps happening, simplify the model or split it into smaller parts; the desktop app handles larger models.",
-  "toast.loadInProgress": "Not saved: a project is still loading. Save again once it has finished."
+  "toast.loadInProgress": "Not saved: a project is still loading. Save again once it has finished.",
+  "toast.importCancelledRest": "Imported {ok} of {n} files; the rest were cancelled",
+  "import.restCancelled": "{n} file(s) not imported: cancelled",
+  "properties.enterNumber": "Not applied: enter a number.",
+  "properties.mustBePositive": "Not applied: the value must be greater than 0. To flip an object, use Mirror.",
+  "properties.sizeTooLarge": "Not applied: the object would be longer than {max} m on its longest side.",
+  "properties.ratioInvalid": "Not applied: enter a scale such as 1:10 or 1:35, with both numbers greater than 0."
 }

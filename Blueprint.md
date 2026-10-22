@@ -399,7 +399,7 @@ src/
       ImportBounce.js      ← scale-pop on ASSET_INSTANTIATED (exact-restore, reduced-motion aware)
       EdgeOverlay.js       ← wireframe-edges overlay clones + emissive wire material
       AdaptiveResolution.js ← capped DPR + safety-valve dynamic downscale for heavy scenes
-      TriangleCount.js     ← scene budget tracking: cap + color-coded budget bar
+      TriangleCount.js     ← THE triangle count (budget check, status bar, Stats HUD): scene objects as displayed, per-mesh revision cache
     RenderOutput.js        ← Scene ▸ Rendering façade over render/* (frozen export names)
     render/
       RenderMath.js        ← pure: turntable easing, video format pick, frame fit, filenames
@@ -450,7 +450,7 @@ src/
     renderSafe.js          ← escaping helpers + validated image data URLs
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
     SliceConnectorSession.js ← viewport-first cut plane + connector placement session — §Slice Connector
-    ProgressOverlay.js     ← full-screen blocking overlay during exports (§13b); optional Cancel (show(title,{onCancel|controller}), Esc/Cancel fire once → "Cancelling…"; hidden overlay never blocks keys — 5.8)
+    ProgressOverlay.js     ← full-screen blocking overlay; each blocking operation owns a session (open(title,{onCancel|controller,delayMs,minVisibleMs}) → {update, close}); the newest shown session is drawn and gets Esc/Cancel; closing it restores the one underneath (cia B-08); hidden overlay never blocks keys — 5.8
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportEmptyState.js  ← zero-object Import Model / Open Project entry point
     ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
@@ -1952,7 +1952,7 @@ In the renderer, launch batches (`LaunchRequests`) and automation requests (`Api
 
 **Job batch transport** (`--job job.json --result result.json [--hidden] [--quit]`, API.7): JSON file containing `{apiVersion:1, steps:[{method,params}], stopOnError?:boolean}`. Validation gate: each step's method and params are validated by the live API method; ≤64 steps, 20 min total timeout. Result written to `--result` as `{apiVersion, ok, steps:[{method, ok, result|error, ms}]}`. When an instance is running, the job is forwarded over the named pipe (the second process acts as a client); otherwise it runs locally. Exit codes: 0 (ok), 2 (step error), 3 (job malformed), 4 (timeout), 5 (API unavailable).
 
-**Live API via named pipe** (`\\.\pipe\mixomesh-<16-char-hash>`, JSON-RPC 2.0 NDJSON, API.4): per-user per-session. First frame must be `hello {token, apiVersion}` with a 32-byte token from `<userData>/api/session.json` (created on start, deleted on quit, ACL = user profile). Token verified using constant-time comparison. ≤4 clients, 1 MiB frame cap, 10 min request timeout. Methods dispatch through `ApiDispatcher` (injection-based) to existing seams: `PersistenceManager`, `ViewportDrop.importPicked`, `AssetPanel.mountFromRef`, `MeshValidator`, `PrintReadiness`, `PrintCost`, `PrintPipeline.collectExportFiles`, `RenderOutput`. Results are same bytes as the Export / Render buttons. **Background throttling (2026-10-21):** while a window has pending API requests, `electron/ApiThrottle.cjs` turns its `backgroundThrottling` off (restored when the last request settles; job mode never throttles), so render-backed requests (thumbnail, save, export) complete even when the window is occluded or the display is asleep — Chromium stops producing frames for occluded windows otherwise. `events.subscribe` is per client: main records each client's types and sends the renderer the UNION of all live clients' types (the renderer keeps one set), answers each client with its own list, and `notify` delivers an event only to clients that asked for its type. One client's subscribe never narrows another's stream (cia F-05).
+**Live API via named pipe** (`\\.\pipe\mixomesh-<16-char-hash>`, JSON-RPC 2.0 NDJSON, API.4): per-user per-session. First frame must be `hello {token, apiVersion}` with a 32-byte token from `<userData>/api/session.json` (created on start, deleted on quit, ACL = user profile). Token verified using constant-time comparison. ≤4 clients, 1 MiB frame cap, 10 min request timeout. Methods dispatch through `ApiDispatcher` (injection-based) to existing seams: `PersistenceManager`, `ViewportDrop.importPicked`, `AssetPanel.mountFromRef`, `MeshValidator`, `PrintReadiness`, `PrintCost`, `PrintPipeline.collectExportFiles`, `RenderOutput`. Results are same bytes as the Export / Render buttons. **Background throttling (2026-10-21):** while a window has pending API requests, `electron/ApiThrottle.cjs` turns its `backgroundThrottling` off (restored when the last request settles; job mode never throttles), so render-backed requests (thumbnail, save, export) complete even when the window is occluded or the display is asleep — Chromium stops producing frames for occluded windows otherwise. `events.subscribe` is per client: main records each client's types and sends the renderer the UNION of all live clients' types (the renderer keeps one set), answers each client with its own list, and `notify` delivers an event only to clients that asked for its type. One client's subscribe never narrows another's stream (cia F-05). `projectSaved` fires only when a save wrote the `.mixo` (the DirtyTracker write generation moved); undo back to the saved point and File > New make the project clean without writing and do not emit it (cia A-05; the dispatcher filters the internal `PROJECT_SAVED` by `DirtyTracker.saveGeneration()`).
 
 **Cancellation (cia F-08).** A request whose pipe client disconnects, or that hits the 10 min timeout, is aborted: main sends the renderer `{cancel: id}` on `api:request`, the dispatcher drops it with `E_CANCELLED` if it has not started (still queued on the external lane or waiting for idle), and ApiServer writes no output file for it afterwards. Handlers receive the request's `signal`; `scene.import` passes it to `ViewportDrop.importPicked(picked, position, {signal})` → `importWithDedupe` → `AssetImport.loadFromBlob(opts.signal)`, where it aborts that import's own AbortController (nothing half-added, like the overlay's Cancel, but without bumping the user's drop generation) and stops the rest of the pick, so re-running a timed-out job does not import its files twice. Other started work (save, export, render) still completes; mutating methods carry no idempotency key.
 
@@ -2695,8 +2695,15 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   (cia thermo #4). glTF/GLB stays
   on Babylon's loader (scene-bound materials/extensions) with the exact pre-parse count.
 - **Cancel:** the import overlay (blocking, because an import changes the scene being edited) has
-  Cancel; it aborts every running import and nothing is half-added (`_throwIfAborted`). `guard()`
-  treats AbortError as the user's choice, never an error modal.
+  Cancel; it aborts every running import and nothing is half-added (`_throwIfAborted`). A
+  multi-file import is one batch (`AssetImport.beginImportBatch({ signal })` → `{ signal, run, end }`):
+  the overlay's Cancel, the caller's signal or any file's AbortError ends the running file and the
+  rest, and each loop stops on `batch.signal.aborted`. A cancelled drop still reports what happened:
+  failures in the summary modal plus "n file(s) not imported: cancelled" (`import.restCancelled`), or
+  `toast.importCancelledRest` when nothing failed; only files that produced objects count as
+  imported (a declined duplicate prompt does not). `guard()` treats AbortError as the user's choice,
+  never an error modal. (ViewerMode still uses `importCancelGeneration` until
+  `.audit/pending/thermo-step5-ViewerMode.patch` lands, which deletes the counter.) (cia B-09)
 - **Hashing:** `hash.sha256HexOfBlob` hashes blobs ≥ 8 MiB in `workers/Hash.worker.js`.
 - **Every worker job shows progress:** `WorkerTask` reports each job to
   `workers/JobActivity.js` under a translated `label` (`job.*`), forwards `progress({ fraction |
@@ -2731,9 +2738,9 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   Bottom-left of the viewport, above the centred toolbar: "Selected n / total · Faces · Vertices"
   (or "Scene · Objects total" when nothing is selected), locale number formatting, translated
   labels ("Faces" = triangle count, every mesh being triangulated; the accessible label reads
-  "Faces (triangles)"; ja 面数, zh-Hant 面數). Counts come from buffer lengths (`getTotalIndices`/`getTotalVertices`, unindexed =
+  "Faces (triangles)"; ja 面数, zh-Hant 面數). Counts come from `scene/TriangleCount` (`displayedCounts`, the same number as the budget check and the status bar): buffer lengths (`getTotalIndices`/`getTotalVertices`, unindexed =
   vertices/3), cached per mesh against its GeometryStore revision; refined (subdivided) meshes are
-  counted when they are what the viewport shows. Event-driven and coalesced (selection, geometry,
+  counted when they are what the viewport shows. `SceneStats.js` keeps only formatting and the highlight state machine. Event-driven and coalesced (selection, geometry,
   history, import/delete, refinement, project events) — no per-frame polling. A geometry change
   within the same scope shows "before → after" for 3 s (`nextHighlight`; chained operations keep the
   original before; Delete never highlights). Read-only glass (pointer-events none) except a hide
@@ -5742,11 +5749,7 @@ Single bar at bottom. Segments:
   - `AssetImport.js` reuses the same scene/container triangle counters for a
     non-blocking `toast.triangleBudget` warning before both
     `container.addAllToScene()` call sites (`loadFromBlob`,
-    `instantiateAsset`) — one traversal, two consumers. The counting itself
-    lives in `src/core/scene/TriangleCount.js` (2026-09-18, review M5) so a
-    core import path no longer depends on a UI module; `MeshStats` re-exports
-    the three functions and keeps owning the cache, the HUD text, and the
-    `MeshStats.countSceneTriangles` indirection the spy test relies on.
+    `instantiateAsset`) — one traversal, two consumers. The counting lives in `src/core/scene/TriangleCount.js`, the one counter (cia W-02 / B-10): `countSceneTriangles(objects = state.scene.objects)` sums the live registered mesh of every object in the scene document (a soft-deleted object has left it, even while undo keeps its mesh; an export clone is never the registered mesh), each as displayed (`displayedMeshes`: refined meshes replace their sources while the refinement preview is visible), from `meshCounts` (buffer lengths, cached per GeometryStore revision). The budget check, the status-bar `faces` / `sel` segments and the Stats HUD all read `displayedCounts`, so they agree. `MeshStats` re-exports the counters, keeps the HUD text and the `MeshStats.countSceneTriangles` indirection the spy test relies on, and recounts on refinement and GEOMETRY_CHANGED events too.
     Selection stats resolve their meshes through `AssetLoader.getBabylonMesh`
     rather than a `scene.meshes` scan, for the same reason the scene walk does
     (review M4).
@@ -5816,12 +5819,12 @@ not the overlay sibling, so the document guard is what blocks viewport
 shortcuts while export is running.
 
 ```js
-ProgressOverlay.show(title = 'Working…')   → void
-ProgressOverlay.update(frac, message?)      → void   // frac 0..1; clamps to 0..100%
-ProgressOverlay.hide()                      → void
+ProgressOverlay.open(title, { onCancel?, controller?, delayMs?, minVisibleMs? }) → { update(frac, message?), close() }
+// legacy single-slot (one shared session, until every caller holds its own):
+ProgressOverlay.show(title, opts?) / update(frac, message?) / hide()
 ```
 
-`PrintPipeline._runExport` reports `onProgress(frac, msg)` across collect / prep / validate / serialize / package / download; `PrintPanel.runExport` wraps the call in `show / hide` via `try…finally` so a thrown error still tears the overlay down.
+Sessions stack. The newest *shown* session is rendered and owns Esc and the Cancel button; `close()` is idempotent, drops the session's Cancel at once, and lingers for `minVisibleMs` only when no other session keeps the overlay up. So an import (its own session, `delayMs = JobActivity.SHOW_DELAY_MS`, `minVisibleMs = MIN_VISIBLE_MS`) that starts and ends during an export leaves the export's overlay, lock and Cancel in place (cia B-08 / A-03). `Status.runTask` and `AssetImport` hold sessions; `PrintPanel` (validation action, export auto-fix, export), `ContextMenu._runBoolean`, `RepairFeedback.repairWithOverlay` and `PublishTab.saveListingPackageFromView` move to sessions with `.audit/pending/B-08-overlay-callers.patch`, after which `show/update/hide` can be deleted. `PrintPipeline._runExport` reports `onProgress(frac, msg)`; `PrintPanel` closes its session in `finally`.
 
 ---
 
