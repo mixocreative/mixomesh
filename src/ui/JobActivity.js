@@ -10,6 +10,7 @@ import { JobActivity } from '../core/workers/JobActivity.js';
 import { EVENTS } from '../core/events.js';
 import { subscribe as subscribeState } from '../core/StateManager.js';
 import { t } from '../i18n/index.js';
+import { stageText } from './ProgressOverlay.js';   // the overlay draws the registry's blocking job
 
 const TICK_MS = 250;
 
@@ -61,13 +62,11 @@ export function rowText(row) {
   if (row.state === 'failed') return { label: failureText(row), meta: '' };
   if (row.state === 'cancelled') return { label: t('activity.cancelled', { label }), meta: '' };
   if (row.cancelling) return { label, meta: t('activity.cancelling') };
-  const stageKey = row.stage ? `job.stage.${row.stage}` : null;
-  const stageText = stageKey ? (t(stageKey) === stageKey ? row.stage : t(stageKey)) : '';
   const meta = [];
   if (row.percent != null) meta.push(`${row.percent}%`);
   if (row.remainingMs != null) meta.push(t('activity.remaining', { time: _fmtTime(row.remainingMs) }));
   else if (row.showElapsed) meta.push(t('activity.elapsed', { time: _fmtTime(row.elapsedMs) }));
-  return { label: stageText ? `${label} — ${stageText}` : `${label}…`, meta: meta.join(' · ') };
+  return { label: row.stage ? `${label} — ${stageText(row.stage)}` : `${label}…`, meta: meta.join(' · ') };
 }
 
 function _ensure() {

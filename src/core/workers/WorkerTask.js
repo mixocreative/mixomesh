@@ -69,7 +69,9 @@ export class WorkerTask {
    * @param {any} payload
    * @param {{ transfer?: Transferable[], signal?: AbortSignal, timeoutMs?: number,
    *           onProgress?: (e: object) => void, revision?: number,
-   *           label?: string, cancellable?: boolean, hidden?: boolean }} [opts]
+   *           label?: string, cancellable?: boolean }} [opts]
+   *   `signal` also scopes the job: run with a blocking job's signal, it is a
+   *   step of that job in JobActivity (its progress surface), not a row.
    */
   run(payload, opts = {}) {
     if (opts.signal?.aborted) return Promise.reject(abortError(this._name));
@@ -81,7 +83,7 @@ export class WorkerTask {
     const activity = beginJob({
       label: opts.label ?? this.label ?? this._name,
       cancel: (opts.cancellable || outer) ? () => ctrl.abort() : null,
-      hidden: !!opts.hidden,
+      signal: outer ?? null,
     });
     const userProgress = opts.onProgress;
     const inner = {

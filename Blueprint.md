@@ -257,8 +257,9 @@ src/
     MeshImportWorker.js    ← main side of worker STL/3MF import: welded arrays → AssetContainer (heavy meshes)
     ValidateWorker.js      ← main side of worker topology validation (transfer pos/idx, get counts)
     workers/
-      WorkerTask.js        ← the ONE job runner (ADR 0006); every job → JobActivity (label, progress, Cancel)
-      JobActivity.js       ← registry of running jobs + NN/g timing rules (pure; ui/JobActivity.js renders it)
+      WorkerTask.js        ← the ONE job runner (ADR 0006); every job → JobActivity (label, progress `{stage, fraction?}`, Cancel)
+      JobActivity.js       ← registry of running jobs + NN/g timing rules (pure); rows → ui/JobActivity.js, the blocking job (an import) → ui/ProgressOverlay.js; a job on a blocking job's signal is its step, never a row
+      serveTask.js         ← worker side of the protocol; owns the ONE progress shape (ProgressFields)
       MeshImport.worker.js ← STL parse+weld / 3MF streamed SAX, reads the blob URL itself (heavy meshes)
       TriangleBvh.worker.js ← pick-index (BVH) builder for heavy meshes
       Hash.worker.js       ← sha256 of big import blobs (the UI thread never copies the bytes)
@@ -322,7 +323,7 @@ src/
     placement/BedPlacement.js ← pure drop/centre/face-normal quaternion math
     PersistenceManager.js  ← persistence façade + file-handle lifecycle: save/saveAs/open/newProject/openRecent (impl in persist/)
                              open/openRecent/newProject call assertNoImportInFlight BEFORE the dirty confirm;
-                             AssetImport flags the import (_importBegin) before its first await (F20, task 0.5)
+                             AssetImport begins the import's blocking job (_beginImport) before its first await (F20, task 0.5)
     persist/
       constants.js         ← schema version, file types, recent/autosave keys, scan cap, SILENT
       ProjectIntegrity.js  ← portable .mixo save gate: required asset refs + missing-byte error shape
@@ -385,7 +386,7 @@ src/
       ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
       AssetRegistration.js ← SceneObject/collection minting, unique names, logical-object grouping, validation queue
       AssetThumbnail.js    ← idle asset thumbnail (THUMB_LAYER camera-mask isolation)
-      AssetImport.js       ← live import: blob/handle → container → scene, overlay, library-GLB path, re-instantiate
+      AssetImport.js       ← live import: blob/handle → container → scene as one blocking JobActivity job, library-GLB path, re-instantiate
       AssetRestore.js      ← project restore + clones: restoreContainer, cloneMeshAsNewObject, asset bytes
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
@@ -451,7 +452,7 @@ src/
     renderSafe.js          ← escaping helpers + validated image data URLs
     ProjectMenu.js         ← header toolbar (new/open/save/recent) + persistence modals (§13b)
     SliceConnectorSession.js ← viewport-first cut plane + connector placement session — §Slice Connector
-    ProgressOverlay.js     ← full-screen blocking overlay; each blocking operation owns a session (open(title,{onCancel|controller,delayMs,minVisibleMs}) → {update, close}); the newest shown session is drawn and gets Esc/Cancel; closing it restores the one underneath (cia B-08); hidden overlay never blocks keys — 5.8
+    ProgressOverlay.js     ← full-screen blocking overlay; each blocking operation owns a session (open(title,{onCancel|controller,delayMs,minVisibleMs}) → {update, close}); the newest shown session is drawn and gets Esc/Cancel; closing it restores the one underneath (cia B-08); hidden overlay never blocks keys; also renders JobActivity.blockingJob() (the import) as one session — 5.8
     ViewportDrop.js        ← drag-and-drop onto viewport (asset panel + OS files)
     ViewportEmptyState.js  ← zero-object Import Model / Open Project entry point
     ImportError.js         ← safeImport wrapper + importError detail modal (import failures)
@@ -2727,9 +2728,25 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   imported (a declined duplicate prompt does not). `guard()` treats AbortError as the user's choice,
   never an error modal. Viewer-mode Open runs its files as one batch too. (cia B-09)
 - **Hashing:** `hash.sha256HexOfBlob` hashes blobs ≥ 8 MiB in `workers/Hash.worker.js`.
+- **One progress shape:** every worker posts `progress({ stage, fraction? })`
+  (`serveTask.ProgressFields`; `stage` = a `job.stage.*` key suffix, `fraction` 0..1 of the whole
+  job or absent = indeterminate). The main-thread SceneLoader fallback wraps Babylon's
+  `{ loaded, total }` into the same shape in `AssetImport.loadContainer`; MixoRefine maps Topology's
+  phases to stage keys in the worker and `MixoRefinementWorker` hands RefinementController its
+  `{ phase, completed, total }` entry. `tests/progress-format-r4.test.mjs` pins it.
+- **One progress model:** an import is a `blocking: true` job in `workers/JobActivity.js`
+  (`AssetImport._beginImport`, label `job.importModel`, `detail` = filename, `cancel` = abort every
+  import), covering `importWithDedupe`'s estimate + hash (closed before the duplicate prompt),
+  `loadFromBlob` and `instantiateAsset`. A worker job run with that import's `signal` (its hash,
+  parse, weld) is filed as a STEP of it by construction (`_scopeBySignal`): never a row, gone when
+  it ends. `JobActivity.blockingJob()` is the newest running blocking job;
+  `ui/ProgressOverlay.js` subscribes and holds ONE session while it is non-null (title `t(label)`,
+  text `detail — stageText(stage)`, Cancel → `cancelJob`). `AssetImport.isImporting()` =
+  `JobActivity.isRunning('job.importModel')`. There is no `hidden` flag anywhere
+  (`tests/progress-model-r4.test.mjs`).
 - **Every worker job shows progress:** `WorkerTask` reports each job to
-  `workers/JobActivity.js` under a translated `label` (`job.*`), forwards `progress({ fraction |
-  loaded/total | completed/total, stage | phase })`, and gives jobs run with a `signal` or
+  `workers/JobActivity.js` under a translated `label` (`job.*`), forwards `progress({ stage,
+  fraction? })`, and gives jobs run with a `signal` or
   `cancellable: true` a Cancel. `ui/JobActivity.js` renders one non-blocking panel above the status
   bar: hidden < 400 ms, kept ≥ 500 ms once shown, indeterminate + plain label, determinate % +
   stage (+ time left once ≥ 3 s / ≥ 10 % of progress), elapsed after 10 s, failures in plain words
@@ -5876,7 +5893,7 @@ shortcuts while export is running.
 ProgressOverlay.open(title, { onCancel?, controller?, delayMs?, minVisibleMs? }) → { update(frac, message?), close() }
 ```
 
-Sessions stack. The newest *shown* session is rendered and owns Esc and the Cancel button; `close()` is idempotent, drops the session's Cancel at once, and lingers for `minVisibleMs` only when no other session keeps the overlay up. So an import (its own session, `delayMs = JobActivity.SHOW_DELAY_MS`, `minVisibleMs = MIN_VISIBLE_MS`) that starts and ends during an export leaves the export's overlay, lock and Cancel in place (cia B-08 / A-03). Every caller holds its own session (`Status.runTask`, `AssetImport`, `PrintPanel` validation action / export auto-fix / export, `ContextMenu._runBoolean`, `RepairFeedback.repairWithOverlay`, `PublishTab.saveListingPackageFromView`), so one operation ending never takes down another's overlay; there is no shared show/hide slot. `PrintPipeline._runExport` reports `onProgress(frac, msg)`; `PrintPanel` closes its session in `finally`. A closed session lingering for `minVisibleMs` is drawn without blocking: no key or pointer capture (`pointer-events: none`), since its work is over.
+Sessions stack. The newest *shown* session is rendered and owns Esc and the Cancel button; `close()` is idempotent, drops the session's Cancel at once, and lingers for `minVisibleMs` only when no other session keeps the overlay up. So an import (the session the overlay itself opens for `JobActivity.blockingJob()`, `delayMs = JobActivity.SHOW_DELAY_MS`, `minVisibleMs = MIN_VISIBLE_MS`) that starts and ends during an export leaves the export's overlay, lock and Cancel in place (cia B-08 / A-03). Every caller holds its own session (`Status.runTask`, the JobActivity subscriber for imports, `PrintPanel` validation action / export auto-fix / export, `ContextMenu._runBoolean`, `RepairFeedback.repairWithOverlay`, `PublishTab.saveListingPackageFromView`), so one operation ending never takes down another's overlay; there is no shared show/hide slot. `stageText(stage)` (exported here, shared with `ui/JobActivity.rowText`) translates a `job.stage.*` suffix. `PrintPipeline._runExport` reports `onProgress(frac, msg)`; `PrintPanel` closes its session in `finally`. A closed session lingering for `minVisibleMs` is drawn without blocking: no key or pointer capture (`pointer-events: none`), since its work is over.
 
 ---
 

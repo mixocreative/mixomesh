@@ -5,8 +5,13 @@
 // The newest shown session is drawn and its Cancel is the one Esc / the button
 // reach; closing it brings the one underneath back, so an import that ends
 // mid-export never unlocks the scene or drops the export's Cancel (cia B-08).
+//
+// JobActivity's blocking job (an import) is rendered here too: one session is
+// open while `JobActivity.blockingJob()` is non-null, its Cancel cancels that
+// job, and its text is the job's detail plus its current stage.
 
 import { t } from '../i18n/index.js';
+import { JobActivity, SHOW_DELAY_MS, MIN_VISIBLE_MS } from '../core/workers/JobActivity.js';
 
 let _root = null;
 let _bar = null;
@@ -145,4 +150,36 @@ export function open(title = t('progress.working'), opts = {}) {
   };
 }
 
-export const ProgressOverlay = { open };
+/** Translated stage text for a `job.stage.*` suffix; an unknown stage shows as itself. */
+export function stageText(stage) {
+  const key = `job.stage.${stage}`;
+  const text = t(key);
+  return text === key ? String(stage) : text;
+}
+
+let _jobSession = null;
+
+function _cancelBlockingJob() {
+  const job = JobActivity.blockingJob();
+  if (job) JobActivity.cancelJob(job.id);
+}
+
+function _syncJobSession() {
+  const job = JobActivity.blockingJob();
+  if (!job) {
+    _jobSession?.close();
+    _jobSession = null;
+    return;
+  }
+  if (!_jobSession) {
+    _jobSession = ProgressOverlay.open(t(job.label), {
+      onCancel: job.cancellable ? _cancelBlockingJob : null,
+      delayMs: SHOW_DELAY_MS, minVisibleMs: MIN_VISIBLE_MS,
+    });
+  }
+  _jobSession.update(job.fraction ?? 0, job.stage ? `${job.detail} — ${stageText(job.stage)}` : job.detail);
+}
+
+JobActivity.subscribe(_syncJobSession);
+
+export const ProgressOverlay = { open, stageText };

@@ -59,15 +59,15 @@ export function buildStlContainer(scene, meshes) {
  * @param {BABYLON.Scene} scene
  * @param {string} blobUrl
  * @param {string} ext  '.stl' | '.3mf'
- * @param {{ onProgress?: (e: { stage: string, fraction: number }) => void, signal?: AbortSignal, hidden?: boolean }} [opts]
+ * @param {{ onProgress?: (e: import('./workers/serveTask.js').ProgressFields) => void, signal?: AbortSignal }} [opts]
  * @returns {Promise<BABYLON.AssetContainer>}
  */
-export async function loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress, signal, hidden = false } = {}) {
+export async function loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress, signal } = {}) {
   const kind = KINDS[ext];
   if (!kind) throw new Error(`No worker import for ${ext}`);
   const result = await _task.run(
     { kind, blobUrl, triangleLimit: caps.triangleLimit },
-    { onProgress, signal, hidden, label: kind === 'stl' ? 'job.importStl' : 'job.import3mf', cancellable: true },
+    { onProgress, signal, label: kind === 'stl' ? 'job.importStl' : 'job.import3mf', cancellable: true },
   );
   if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
   if (kind === 'stl') {

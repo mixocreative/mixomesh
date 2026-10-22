@@ -6,8 +6,7 @@ import { dispatch, setState, getState, markDirty } from '../StateManager.js';
 import { EVENTS } from '../events.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
-import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
-import { SHOW_DELAY_MS, MIN_VISIBLE_MS } from '../workers/JobActivity.js';
+import { beginJob, isRunning } from '../workers/JobActivity.js';
 import { sha256HexOfBlob } from '../hash.js';
 import {
   assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, needsExactCount, OVER_BUDGET,
@@ -54,20 +53,17 @@ import '../import/MixoPrimitiveExtras.js';
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
-// ── Import progress overlay (field request) ─────────────────────────────
-// An import changes the scene the user is editing, so it keeps the blocking
-// overlay (heavy-mesh spec §5.4) — with Cancel: parsing runs in a worker, the
-// UI stays live, and Cancel aborts every running import (nothing half-added)
-// AND the rest of a multi-file drop (beginImportBatch). The overlay is
-// the ONE progress surface for an import (its worker jobs are hidden from the
-// activity panel) and follows JobActivity's NN/g timing (shown after
-// SHOW_DELAY_MS, then at least MIN_VISIBLE_MS). Imports running together share
-// one overlay session until the LAST one finishes; it is a session of its own,
-// so an export's overlay underneath survives it (cia B-08).
+// ── Import progress (field request) ──────────────────────────────────────
+// An import changes the scene the user is editing, so it is a BLOCKING job in
+// JobActivity (heavy-mesh spec §5.4): the overlay (ui/ProgressOverlay.js)
+// renders it with Cancel, which aborts every running import (nothing
+// half-added) AND the rest of a multi-file drop (beginImportBatch). The
+// import's worker steps (hash, parse, weld) run on the import's own signal, so
+// the registry files them under the import instead of the activity panel: one
+// progress surface, by construction.
 
-let _importDepth = 0;
+const IMPORT_JOB = 'job.importModel';
 const _importAborts = new Set();
-let _overlay = null;
 
 function _cancelImports() {
   for (const a of [..._importAborts]) a.abort();
@@ -101,41 +97,36 @@ export function beginImportBatch({ signal } = {}) {
   };
 }
 
-function _overlayUpdate(frac, label) {
-  _overlay?.update(frac, label);
+/** An AbortController that also fires when the caller's `signal` does. */
+function _linkedAbort(signal) {
+  const abort = new AbortController();
+  const relay = () => abort.abort();
+  signal?.addEventListener('abort', relay, { once: true });
+  if (signal?.aborted) abort.abort();
+  abort.unlink = () => signal?.removeEventListener('abort', relay);
+  return abort;
 }
 
-function _importBegin(label, abort = null) {
-  if (abort) _importAborts.add(abort);
-  if (++_importDepth === 1) {
-    _overlay = ProgressOverlay.open(t('job.importModel'), {
-      onCancel: _cancelImports, delayMs: SHOW_DELAY_MS, minVisibleMs: MIN_VISIBLE_MS,
-    });
-  }
-  _overlayUpdate(0.02, label);
-}
-
-/** Overlay text for a worker stage: "<file> — <translated stage>". */
-function _stageText(filename, stage) {
-  const key = `job.stage.${stage ?? 'read'}`;
-  const text = t(key);
-  return `${filename} — ${text === key ? stage : text}`;
+/** Start one import's blocking job; Cancel in the overlay aborts every import. */
+function _beginImport(filename, abort) {
+  _importAborts.add(abort);
+  const job = beginJob({ label: IMPORT_JOB, detail: filename, blocking: true, signal: abort.signal, cancel: _cancelImports });
+  job.progress({ stage: 'read', fraction: 0.02 });
+  return job;
 }
 
 /** Parse progress (`{ stage, fraction? }`) fills the first three quarters of the overlay bar. */
-function _importProgress(filename) {
-  return (evt) => {
-    const fraction = Number.isFinite(evt?.fraction) ? 0.02 + 0.73 * Math.min(1, evt.fraction) : 0.4;
-    _overlayUpdate(fraction, _stageText(filename, evt?.stage ?? 'read'));
-  };
+function _importProgress(job) {
+  return (evt) => job.progress({
+    stage: evt?.stage ?? 'read',
+    fraction: Number.isFinite(evt?.fraction) ? 0.02 + 0.73 * Math.min(1, evt.fraction) : 0.4,
+  });
 }
 
-function _importEnd(abort = null) {
-  if (abort) _importAborts.delete(abort);
-  _importDepth = Math.max(0, _importDepth - 1);
-  if (_importDepth !== 0) return;
-  _overlay?.close();
-  _overlay = null;
+function _endImport(job, abort) {
+  _importAborts.delete(abort);
+  abort.unlink();
+  job.end();
 }
 
 function _throwIfAborted(signal, container) {
@@ -144,9 +135,9 @@ function _throwIfAborted(signal, container) {
   throw new DOMException('Import cancelled', 'AbortError');
 }
 
-/** True while any loadFromBlob / instantiateAsset is in flight (F20 / M2). */
+/** True while any import (dedupe hash, loadFromBlob, instantiateAsset) is in flight (F20 / M2). */
 export function isImporting() {
-  return _importDepth > 0;
+  return isRunning(IMPORT_JOB);
 }
 
 export const PROJECT_LOADING_MESSAGE =
@@ -185,22 +176,22 @@ export function mayFallBackToMainThread(err, size) {
  * @param {BABYLON.Scene} scene
  * @param {Function|null} onProgress
  * @param {Map<string,string>|null} siblings
- * @param {{ signal?: AbortSignal, size?: number, hidden?: boolean }} [opts]
- *   `hidden`: the caller shows its own progress (the import overlay), so the
- *   worker job stays out of the activity panel (one progress surface).
+ * @param {{ signal?: AbortSignal, size?: number }} [opts]
+ *   `signal`: the import's own signal, which also files the worker job under
+ *   the import's blocking job (one progress surface).
  */
 export async function loadContainer(blobUrl, ext, scene, onProgress, siblings, opts = {}) {
-  const { signal, size, hidden = false } = opts;
+  const { signal, size } = opts;
   if (isMeshWorkerImport(ext)) {
     try {
-      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal, hidden });
+      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal });
     } catch (err) {
       if (!mayFallBackToMainThread(err, size)) throw err;
       console.warn(`${ext} worker parse failed — main-thread fallback:`, err);
     }
   } else if (ext === '.obj' && isWorkerImportSupported()) {
     try {
-      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal, hidden });
+      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal });
     } catch (err) {
       if (!mayFallBackToMainThread(err, size)) throw err;
       console.warn('OBJ worker parse failed — main-thread fallback:', err);
@@ -293,15 +284,25 @@ export function askDuplicateImport({ filename, existingName }) {
 export async function importWithDedupe(blob, filename, position, opts = {}, deps = {}) {
   _assertNoProjectLoad();
   assertImportFileSize(blob.size, filename);   // before reading the bytes to hash
-  // Heavy-mesh spec §3: refuse on the triangle count BEFORE hashing; the
-  // over-budget warning waits until the dedupe decision (loadFromBlob shows it).
-  const preParse = await preParseCheck(blob, filename);
+  // The estimate and the hash are the import's first steps: its blocking job
+  // covers them (Cancel ends this import and the rest of the drop) and closes
+  // before the duplicate prompt, which needs the input the overlay swallows.
+  const abort = _linkedAbort(opts.signal);
+  const job = _beginImport(filename, abort);
+  let preParse;
   let contentHash = null;
-  try { contentHash = await sha256HexOfBlob(blob, { cancellable: true, signal: opts.signal }); }
-  catch (err) {
-    // Cancel from the activity panel ends this import and the rest of the drop.
-    if (err?.name === 'AbortError') throw err;
-    /* no hash → no dedupe; loadFromBlob proceeds as before */
+  try {
+    // Heavy-mesh spec §3: refuse on the triangle count BEFORE hashing; the
+    // over-budget warning waits until the dedupe decision (loadFromBlob shows it).
+    preParse = await preParseCheck(blob, filename);
+    job.progress({ stage: 'hash' });
+    try { contentHash = await sha256HexOfBlob(blob, { signal: abort.signal }); }
+    catch (err) {
+      if (err?.name === 'AbortError') throw err;
+      /* no hash → no dedupe; loadFromBlob proceeds as before */
+    }
+  } finally {
+    _endImport(job, abort);
   }
   const existingId = findByHash(contentHash);
   if (existingId) {
@@ -423,11 +424,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.
-  const abort = new AbortController();
-  const callerAbort = () => abort.abort();
-  opts.signal?.addEventListener('abort', callerAbort, { once: true });
-  if (opts.signal?.aborted) abort.abort();
-  _importBegin(_stageText(filename, 'read'), abort);
+  const abort = _linkedAbort(opts.signal);
+  const job = _beginImport(filename, abort);
   let restoreUrls = () => {};
   const scene = SceneManager.getScene();
   const assetId = newId('asset');
@@ -444,7 +442,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
     let sourceFileHash = opts.contentHash ?? null;
     if (!sourceFileHash) {
-      try { sourceFileHash = await sha256HexOfBlob(blob, { signal: abort.signal, hidden: true }); }
+      try { sourceFileHash = await sha256HexOfBlob(blob, { signal: abort.signal }); }
       catch (err) { if (err?.name === 'AbortError') throw err; /* hash is an identity optimisation — import proceeds without it */ }
     }
 
@@ -458,11 +456,11 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     }
 
     restoreUrls = installSiblingUrls(siblings);
-    const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings,
-      { signal: abort.signal, size: blob.size, hidden: true });
+    const container = await loadContainer(blobUrl, ext, scene, _importProgress(job), siblings,
+      { signal: abort.signal, size: blob.size });
     _throwIfAborted(abort.signal, container);
     _assertContainerCapacity(container);
-    _overlayUpdate(0.8, t('import.progress.materials', { filename }));
+    job.progress({ stage: 'materials', fraction: 0.8 });
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
     const modelRatio = extractModelRatio(container) ?? 1;
@@ -475,7 +473,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceUnit,
       modelRatio,
     })) {
-      _overlayUpdate(0.98, t('import.progress.addedToAssets', { filename }));
+      job.progress({ stage: 'addedToAssets', fraction: 0.98 });
       try { container.dispose?.(); } catch { /* not scene-owned */ }
       return [];
     }
@@ -492,7 +490,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       sourceAssetId: assetId, sourceFileHash,
     });
 
-    _overlayUpdate(0.9, t('import.progress.addingToScene', { filename }));
+    job.progress({ stage: 'addingToScene', fraction: 0.9 });
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
@@ -534,7 +532,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       singleObjectName: ext === '.stl' ? entry.name : null,
     });
 
-    _overlayUpdate(0.98, t('import.progress.ready', { filename }));
+    job.progress({ stage: 'ready', fraction: 0.98 });
 
     queueThumbnail(assetId);
     for (const meshId of meshIds) queueValidation(meshId);
@@ -554,9 +552,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     removeContainer(assetId);
     throw err;
   } finally {
-    opts.signal?.removeEventListener('abort', callerAbort);
     restoreUrls();
-    _importEnd(abort);
+    _endImport(job, abort);
   }
 }
 
@@ -577,9 +574,9 @@ export async function instantiateAsset(assetId, position) {
   if (!blobUrl) throw new Error(`No cached data for ${asset.filename} — cannot re-instantiate`);
 
   const scene = SceneManager.getScene();
-  const abort = new AbortController();
+  const abort = _linkedAbort(null);
   const sourceBlob = getBlob(assetId);
-  _importBegin(_stageText(asset.filename, 'read'), abort);
+  const job = _beginImport(asset.filename, abort);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
   const siblings = getObjSiblings(assetId);
   const restoreUrls = installSiblingUrls(siblings);
@@ -589,8 +586,8 @@ export async function instantiateAsset(assetId, position) {
     const preParse = sourceBlob ? await preParseCheck(sourceBlob, asset.filename) : null;
     if (preParse?.verdict === 'warn') _showBudgetWarning(preParse.projected);
     const container = await loadContainer(
-      blobUrl, asset.extension, scene, _importProgress(asset.filename), siblings,
-      { signal: abort.signal, size: sourceBlob?.size, hidden: true }
+      blobUrl, asset.extension, scene, _importProgress(job), siblings,
+      { signal: abort.signal, size: sourceBlob?.size }
     );
     _throwIfAborted(abort.signal, container);
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
@@ -620,7 +617,7 @@ export async function instantiateAsset(assetId, position) {
     return meshIds;
   } finally {
     restoreUrls();
-    _importEnd(abort);
+    _endImport(job, abort);
   }
 }
 

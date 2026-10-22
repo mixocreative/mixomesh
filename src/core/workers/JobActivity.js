@@ -1,8 +1,16 @@
-// JobActivity — the ONE registry of running background jobs (heavy-mesh spec
-// §5). WorkerTask reports every job here (begin / progress / end); the UI
-// (src/ui/JobActivity.js) subscribes once and renders `viewModel(now)`. Pure:
-// no DOM, no timers — the timing rules (NN/g response-time limits) live in
-// `viewModel` so they are unit-testable with a fake clock.
+// JobActivity — the ONE registry of running jobs (heavy-mesh spec §5).
+// WorkerTask reports every worker job here (begin / progress / end); a user
+// operation that must block the UI (an import) registers itself as a
+// `blocking` job. Two renderers subscribe: src/ui/JobActivity.js draws
+// `viewModel(now)` (the non-blocking rows) and src/ui/ProgressOverlay.js draws
+// `blockingJob()`. Pure: no DOM, no timers — the timing rules (NN/g
+// response-time limits) live in `viewModel` so they are unit-testable with a
+// fake clock.
+//
+// Scope by cancel signal: a blocking job owns an AbortSignal; a worker job
+// started with that same signal is a STEP of it (the import's hash, parse,
+// weld) and never a row of its own. Membership is derived from "what cancels
+// together", so no caller threads a visibility flag through its layers.
 
 /** A job only appears after this long, so fast jobs never flash a loader. */
 export const SHOW_DELAY_MS = 400;
@@ -19,6 +27,7 @@ export const ETA_MIN_FRACTION = 0.1;
 
 const _jobs = new Map();
 const _subs = new Set();
+const _scopeBySignal = new WeakMap();   // AbortSignal → the blocking job it cancels
 let _seq = 0;
 let _clock = () => Date.now();
 
@@ -39,19 +48,24 @@ export function subscribe(fn) {
 
 /**
  * Register a running job.
- * @param {{ label: string, cancel?: (() => void) | null, hidden?: boolean }} opts
+ * @param {{ label: string, cancel?: (() => void) | null, signal?: AbortSignal | null,
+ *           blocking?: boolean, detail?: string }} opts
  *   `label` = an i18n key ("job.*") or plain text; `cancel` present = cancellable;
- *   `hidden` = the caller shows its own progress (the import overlay) — the job
- *   is tracked but never rendered, so there is ONE progress surface.
+ *   `signal` = the AbortSignal this job stops on. A `blocking` job (shown in the
+ *   overlay, never a row) registers its signal as a scope; any later job on that
+ *   signal is one of its steps. `detail` = free text the overlay shows (a filename).
  * @returns {{ id: number, progress(fields: object): void, end(error?: any): void }}
  */
-export function beginJob({ label, cancel = null, hidden = false }) {
+export function beginJob({ label, cancel = null, signal = null, blocking = false, detail = '' }) {
   const id = ++_seq;
+  const scope = !blocking && signal ? _scopeBySignal.get(signal) : null;
   const job = {
-    id, label: String(label || 'job.working'), stage: null, fraction: null, hidden: !!hidden,
+    id, label: String(label || 'job.working'), detail: String(detail ?? ''), stage: null, fraction: null,
+    blocking: !!blocking, parentId: scope && scope.endedAt == null ? scope.id : null,
     startedAt: _clock(), firstProgressAt: null, shownAt: null,
     endedAt: null, outcome: null, error: null, cancel,
   };
+  if (blocking && signal) _scopeBySignal.set(signal, job);
   _jobs.set(id, job);
   _notify();
   return {
@@ -74,6 +88,9 @@ export function beginJob({ label, cancel = null, hidden = false }) {
       else if (error?.name === 'AbortError') job.outcome = 'cancelled';
       else { job.outcome = 'failed'; job.error = { code: error?.code ?? null, message: String(error?.message ?? error) }; }
       job.cancel = null;
+      // A blocking job's outcome reaches the user through its caller (modal /
+      // toast), and a step's through its blocking job: neither lingers here.
+      if (job.blocking || job.parentId != null) _jobs.delete(id);
       _notify();
     },
   };
@@ -100,10 +117,7 @@ export function cancelJob(id) {
 export function viewModel(now = _clock()) {
   const rows = [];
   for (const job of [..._jobs.values()]) {
-    if (job.hidden) {
-      if (job.endedAt != null) _jobs.delete(job.id);
-      continue;
-    }
+    if (job.blocking || job.parentId != null) continue;
     const age = now - job.startedAt;
     if (job.endedAt != null) {
       const wasShown = job.shownAt != null;
@@ -145,10 +159,35 @@ export function viewModel(now = _clock()) {
   return rows;
 }
 
+/**
+ * The blocking job the overlay should show: the newest one still running, or
+ * null. Its steps' progress reaches it through the caller's own progress
+ * callback, so `stage` / `fraction` are what the owner last reported.
+ * @returns {{ id: number, label: string, detail: string, stage: string|null,
+ *             fraction: number|null, cancellable: boolean, cancelling: boolean } | null}
+ */
+export function blockingJob() {
+  let top = null;
+  for (const job of _jobs.values()) {
+    if (job.blocking && job.endedAt == null && (!top || job.startedAt >= top.startedAt)) top = job;
+  }
+  if (!top) return null;
+  return {
+    id: top.id, label: top.label, detail: top.detail, stage: top.stage, fraction: top.fraction,
+    cancellable: !!top.cancel, cancelling: !!top.cancelling,
+  };
+}
+
+/** True while a job with this label is running (steps included). */
+export function isRunning(label) {
+  for (const job of _jobs.values()) if (job.label === label && job.endedAt == null) return true;
+  return false;
+}
+
 /** True while any job is registered (running or lingering). */
 export function hasJobs() { return _jobs.size > 0; }
 
 /** Test seam: forget everything. */
 export function resetJobs() { _jobs.clear(); _seq = 0; _notify(); }
 
-export const JobActivity = { beginJob, cancelJob, subscribe, viewModel, hasJobs, setClock, resetJobs };
+export const JobActivity = { beginJob, cancelJob, subscribe, viewModel, blockingJob, isRunning, hasJobs, setClock, resetJobs };
