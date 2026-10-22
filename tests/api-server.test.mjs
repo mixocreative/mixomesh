@@ -323,6 +323,16 @@ test('scene.import rewrites paths to refs; read-only registration; renderer sees
   assert.equal(reply(sock, 1).result.ok, true);
 });
 
+test('a requestId rides along to the renderer on path methods (cia F-08)', async () => {
+  const ctx = build(); await ctx.server.start();
+  const sock = await connected(ctx);
+  rpc(sock, 1, 'scene.import', { files: ['C:\\in\\a.glb'], requestId: 'job-1' });
+  rpc(sock, 2, 'project.open', { file: 'C:\\in\\p.mixo', confirm: true, requestId: 'job-2' });
+  await settle();
+  assert.equal(ctx.calls[0].params.requestId, 'job-1');
+  assert.equal(ctx.calls[1].params.requestId, 'job-2');
+});
+
 test('library.mount -> registerMount; project.open -> writable file ref', async () => {
   const ctx = build(); await ctx.server.start();
   const sock = await connected(ctx);

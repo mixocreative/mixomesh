@@ -1957,6 +1957,20 @@ In the renderer, launch batches (`LaunchRequests`) and automation requests (`Api
 
 **Cancellation (cia F-08).** A request whose pipe client disconnects, or that hits the 10 min timeout, is aborted: main sends the renderer `{cancel: id}` on `api:request`, the dispatcher drops it with `E_CANCELLED` if it has not started (still queued on the external lane or waiting for idle), and ApiServer writes no output file for it afterwards. Handlers receive the request's `signal`; `scene.import` passes it to `ViewportDrop.importPicked(picked, position, {signal})` → `importWithDedupe` → `AssetImport.loadFromBlob(opts.signal)`, where it aborts that import's own AbortController (nothing half-added, like the overlay's Cancel, but without bumping the user's drop generation) and stops the rest of the pick, so re-running a timed-out job does not import its files twice. Other started work (save, export, render) still completes; mutating methods carry no idempotency key.
 
+**Idempotent retries (`requestId`, owner decision 2026-10-22, cia F-08).** Any request (pipe or job
+step) may carry `params.requestId`, a 1..128 character string (`ApiSchema.takeRequestId` splits it
+off before the method's own validation; main's `PATH_METHODS.allow` lists it for path methods).
+`ApiDispatcher` remembers each id's outcome promise for `REQUEST_ID_WINDOW_MS` (10 min, at most
+`REQUEST_ID_MAX_REMEMBERED` = 256 ids, oldest dropped first). A repeat of a known id is answered
+with the first outcome (the same result, or it waits for the first if still running) and never
+runs again. A rejected request is forgotten, so a retry after `E_CANCELLED` / `E_BUSY` / a failure
+runs normally. An id reused for another method is refused with `E_INVALID_PARAMS`. The answer is
+the first result itself, not a new error code: the fixed error set stays unchanged and a caller's
+retry needs no special case. Output files are still written by main under its overwrite rule, so
+a replayed `export.run` / `render.*` without `overwrite:true` gets `E_PATH_REJECTED` (`exists`).
+`app.capabilities.limits` carries `maxRequestIdChars` and `requestIdWindowMs`
+(`tests/api-request-id-f08.test.mjs`, `tests/api-server.test.mjs`).
+
 **Path validation** (integrated with launch, API.3): Paths in `scene.import.files`, `library.mount.dir`, `project.open/saveAs.file`, `export.run.outDir`, `render.*.outFile` are validated in main (realpath, kind, permissions, size ≤1GiB) then replaced by opaque tokens (`ref`, `name` only to renderer). Output write is atomic (temp+rename) in main, refuses to overwrite unless `overwrite:true`, returns absolute paths to caller only. Renderer frames never contain OS paths; a regex test asserts this over captured frames.
 
 **Method list** (v1, API.1): `app.info/capabilities/ping` · `project.new/open/save/saveAs/info` · `scene.list/get/import/remove/select/transform` · `library.mount/list` · `printer.list/get/set` · `validate.run` · `repair.run` (behind `confirm:true` gate) · `readiness.get` · `cost.quote` · `export.run` · `render.png/thumbnail` · `events.subscribe`.

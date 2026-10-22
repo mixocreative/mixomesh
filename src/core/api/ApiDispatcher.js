@@ -11,18 +11,24 @@
 //    render.* -> {name, bytes}; main writes them.
 //  - dispatch() resolves to the method result or rejects with an apiError object
 //    (`{code, message, data:{code:'E_...'}}`), never a bare Error.
+//  - A request may carry `params.requestId`. A repeat of that id within
+//    REQUEST_ID_WINDOW_MS is answered with the first request's outcome (the
+//    same result, or it waits for the first if that is still running) and
+//    never runs again; a failed request is forgotten so its retry runs (cia F-08).
 //  - Requests run one at a time (serial queue). Each waits for isBusy() to clear
 //    (poll, like LaunchRequests) and fails with E_BUSY after busyTimeoutMs.
 //    `app.*` and `events.subscribe` are answered at once, outside the queue, so
 //    health checks work during a long export.
 
 import { API_VERSION, apiError, isApiError } from './ApiErrors.js';
-import { METHODS, EVENT_TYPES, LIMITS, getMethod, methodNames, validateParams } from './ApiSchema.js';
+import { METHODS, EVENT_TYPES, LIMITS, getMethod, methodNames, validateParams, takeRequestId } from './ApiSchema.js';
 import { createExternalLane } from './ExternalLane.js';
 
 export const BUSY_TIMEOUT_MS = 30000;
 export const BUSY_POLL_MS = 250;
 export const EVENTS_PER_SECOND = 50;
+export const REQUEST_ID_WINDOW_MS = 10 * 60 * 1000;
+export const REQUEST_ID_MAX_REMEMBERED = 256;
 
 const IMMEDIATE = new Set(['app.info', 'app.capabilities', 'app.ping', 'events.subscribe']);
 const COST_NUMBER_KEYS = ['pricePerGram', 'supportPricePerGram', 'supportPercent', 'setupFee'];
@@ -298,7 +304,7 @@ export function createDispatcher(deps) {
       supportsRefs,
       methods: METHODS.map(m => ({ name: m.name, destructive: m.destructive, needsPath: m.needsPath, since: m.since })),
       events: [...EVENT_TYPES],
-      limits: { ...LIMITS, eventsPerSecond: maxEventsPerSec },
+      limits: { ...LIMITS, eventsPerSecond: maxEventsPerSec, requestIdWindowMs: REQUEST_ID_WINDOW_MS },
     }),
     'app.ping': async () => ({ pong: true, time: now() }),
 
@@ -524,13 +530,38 @@ export function createDispatcher(deps) {
     return enqueue(() => H[method](p, signal), signal);
   }
 
+  // requestId -> { method, at, outcome }; Map order is arrival order, so the
+  // oldest entries are pruned from the front.
+  const outcomes = new Map();
+  function once(requestId, method, run) {
+    const t = now();
+    for (const [id, r] of outcomes) {
+      if (t - r.at <= REQUEST_ID_WINDOW_MS) break;
+      outcomes.delete(id);
+    }
+    const prior = outcomes.get(requestId);
+    if (prior) {
+      if (prior.method !== method) {
+        throw apiError('E_INVALID_PARAMS', `${method}: "requestId" was already used for ${prior.method}`, { field: 'requestId' });
+      }
+      return prior.outcome;
+    }
+    const outcome = run();
+    outcomes.set(requestId, { method, at: t, outcome });
+    if (outcomes.size > REQUEST_ID_MAX_REMEMBERED) outcomes.delete(outcomes.keys().next().value);
+    outcome.catch(() => { if (outcomes.get(requestId)?.outcome === outcome) outcomes.delete(requestId); });
+    return outcome;
+  }
+
   /**
    * Run one method. Resolves to the result; rejects with an apiError object. An aborted
    * `signal` drops a request that has not started yet (E_CANCELLED).
    */
   async function dispatch(method, params, { signal } = {}) {
     try {
-      return await execute(method, params, signal);
+      const { requestId, params: rest } = takeRequestId(method, params);
+      if (!requestId) return await execute(method, rest, signal);
+      return await once(requestId, method, () => execute(method, rest, signal));
     } catch (e) {
       if (isApiError(e)) throw e;
       throw apiError('E_INTERNAL', scrubPaths(e?.message ?? e));

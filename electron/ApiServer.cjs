@@ -63,15 +63,16 @@ const RPC_INVALID_REQUEST = -32600;
 
 // Path-typed methods. `pathKey` is removed from the forwarded params; `allow` is the
 // exhaustive set of OTHER keys that may be forwarded (unknown keys are refused so a
-// stray path can never ride along in a field the renderer would see).
+// stray path can never ride along in a field the renderer would see). `requestId`
+// (ApiSchema.takeRequestId) is allowed on every method.
 const PATH_METHODS = Object.freeze({
-  'scene.import': { pathKey: 'files', allow: [] },
-  'library.mount': { pathKey: 'dir', allow: [] },
-  'project.open': { pathKey: 'file', allow: ['confirm'] },
-  'project.saveAs': { pathKey: 'file', allow: ['overwrite'], consume: ['overwrite'] },
-  'export.run': { pathKey: 'outDir', allow: ['formats', 'selectedOnly', 'overwrite', 'options'], consume: ['overwrite'] },
-  'render.png': { pathKey: 'outFile', allow: ['width', 'height', 'preset', 'overwrite'], consume: ['overwrite'] },
-  'render.thumbnail': { pathKey: 'outFile', allow: ['size', 'overwrite'], consume: ['overwrite'] },
+  'scene.import': { pathKey: 'files', allow: ['requestId'] },
+  'library.mount': { pathKey: 'dir', allow: ['requestId'] },
+  'project.open': { pathKey: 'file', allow: ['confirm', 'requestId'] },
+  'project.saveAs': { pathKey: 'file', allow: ['overwrite', 'requestId'], consume: ['overwrite'] },
+  'export.run': { pathKey: 'outDir', allow: ['formats', 'selectedOnly', 'overwrite', 'options', 'requestId'], consume: ['overwrite'] },
+  'render.png': { pathKey: 'outFile', allow: ['width', 'height', 'preset', 'overwrite', 'requestId'], consume: ['overwrite'] },
+  'render.thumbnail': { pathKey: 'outFile', allow: ['size', 'overwrite', 'requestId'], consume: ['overwrite'] },
 });
 const SINGLE_OUTPUT_EXT = Object.freeze({ 'project.saveAs': 'mixo', 'render.png': 'png', 'render.thumbnail': 'png' });
 // Fields only main knows, merged into the renderer's answer to these methods. Whitelisted

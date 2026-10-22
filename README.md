@@ -322,6 +322,13 @@ MIXOMESH.exe --job job.json --result result.json --hidden --quit
 - `4` — job timed out (exceeded 20 minutes or app took too long to start)
 - `5` — automation API unavailable (disabled in Preferences or not installed)
 
+**Retrying safely (`requestId`):** any request or job step may carry `"requestId": "<your id>"`
+in its `params` (1 to 128 characters). If the same id arrives again within 10 minutes, MIXOMESH
+does not run it again: it answers with the first request's result, or waits for the first if it
+is still running. Give each step of a job its own stable id, and a job you re-run after a
+timeout will not import the same files twice. A request that failed is not remembered, so its
+retry runs normally. Reusing an id for a different method is refused with `E_INVALID_PARAMS`.
+
 ### Live API via named pipe
 
 For long-running sessions or real-time monitoring, connect to a live MIXOMESH instance over a per-user Windows named pipe.

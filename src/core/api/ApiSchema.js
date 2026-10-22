@@ -15,6 +15,7 @@ export const LIMITS = Object.freeze({
   maxStringChars: 1024,
   maxFormats: 16,
   maxImageDim: 8192,
+  maxRequestIdChars: 128,
 });
 
 export const EVENT_TYPES = Object.freeze([
@@ -193,6 +194,25 @@ export function getMethod(name) {
 
 export function methodNames() {
   return METHODS.map(m => m.name);
+}
+
+/**
+ * Split the optional `requestId` (any method; the dispatcher answers a repeat
+ * within its window with the first outcome) off `params`. Throws
+ * E_INVALID_PARAMS when it is present but not a 1..128 character string.
+ * @param {string} method
+ * @param {unknown} params
+ * @returns {{ requestId: string|null, params: unknown }}
+ */
+export function takeRequestId(method, params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params) || !('requestId' in params)) {
+    return { requestId: null, params };
+  }
+  const { requestId, ...rest } = /** @type {Record<string, unknown>} */ (params);
+  if (typeof requestId !== 'string' || requestId === '' || requestId.length > LIMITS.maxRequestIdChars) {
+    throw bad(String(method).slice(0, 64), 'requestId', `must be a string of 1 to ${LIMITS.maxRequestIdChars} characters`);
+  }
+  return { requestId, params: rest };
 }
 
 /**
