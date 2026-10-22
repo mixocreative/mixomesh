@@ -12,6 +12,7 @@
 //   node --test tests/listbridge-tunnel.test.mjs
 
 import assert from 'node:assert/strict';
+import { localFetch } from './local-fetch.mjs';
 import { test, after } from 'node:test';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -54,7 +55,7 @@ function makeHost({ mode = 'ok', ...opts } = {}) {
     spawned.push({ child: c, args });
     return c;
   };
-  const fetchImpl = (url, o) => fetch(String(url).replace(PUBLIC, host.localOrigin), o);
+  const fetchImpl = (url, o) => localFetch(String(url).replace(PUBLIC, host.localOrigin), o);
   host = createTunnelFileHost({ binaryPath: FAKE, spawnImpl, fetchImpl, dohFetchImpl: dohAllOk, sleep: noSleep, ...opts });
   return host;
 }
@@ -79,14 +80,14 @@ test('put → presignGet → GET serves the bytes with the right headers; HEAD h
     assert.match(host.localOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
     assert.deepEqual(spawned.at(-1).args, ['tunnel', '--no-autoupdate', '--url', host.localOrigin]);
 
-    const res = await fetch(local(host, url));
+    const res = await localFetch(local(host, url));
     assert.equal(res.status, 200);
     assert.equal(await res.text(), 'hello-3mf');
     assert.equal(res.headers.get('content-type'), 'model/3mf');
     assert.equal(res.headers.get('content-length'), '9');
     assert.equal(res.headers.get('content-disposition'), `attachment; filename="Dragon Bust (v2).3mf"; filename*=UTF-8''Dragon%20Bust%20%28v2%29.3mf`);
     assert.equal(res.headers.get('access-control-allow-origin'), null, 'no CORS');
-    const head = await fetch(local(host, url), { method: 'HEAD' });
+    const head = await localFetch(local(host, url), { method: 'HEAD' });
     assert.equal(head.status, 200);
     assert.equal(head.headers.get('content-length'), '9');
     assert.equal(await head.text(), '');
@@ -95,7 +96,7 @@ test('put → presignGet → GET serves the bytes with the right headers; HEAD h
     const k2 = (await host.put('ドラゴン.png', enc('png'), 'image/png')).key;
     const u2 = await host.presignGet(k2);
     assert.equal(spawned.filter(s => s.args.includes(host.localOrigin)).length, 1, 'one tunnel per host');
-    const r2 = await fetch(local(host, u2));
+    const r2 = await localFetch(local(host, u2));
     assert.equal(r2.status, 200);
     assert.match(r2.headers.get('content-disposition'), /filename="____\.png"; filename\*=UTF-8''%E3%83%89/);
   } finally { await host.close(); }
@@ -109,7 +110,7 @@ test('only exact /<token>/<name> GET|HEAD is served: unknown token, traversal, l
     const u = new URL(local(host, url));
     const token = u.pathname.split('/')[1];
     const o = host.localOrigin;
-    const status = async (p, init) => (await fetch(o + p, init)).status;
+    const status = async (p, init) => (await localFetch(o + p, init)).status;
     assert.equal(await status(`/${'0'.repeat(32)}/part.stl`), 404, 'unknown token');
     assert.equal(await status(`/${token}/other.stl`), 404, 'wrong name');
     assert.equal(await status(`/${token}/`), 404, 'directory listing');
@@ -128,7 +129,7 @@ test('only exact /<token>/<name> GET|HEAD is served: unknown token, traversal, l
     });
     assert.equal(raw, 404);
     for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']) {
-      const r = await fetch(u, { method, ...(method === 'POST' || method === 'PUT' ? { body: 'x' } : {}) });
+      const r = await localFetch(u, { method, ...(method === 'POST' || method === 'PUT' ? { body: 'x' } : {}) });
       assert.equal(r.status, 405, method);
       assert.equal(r.headers.get('allow'), 'GET, HEAD');
     }
@@ -141,16 +142,16 @@ test('links expire at the presign expiry (410); remove() → 404', async () => {
   try {
     const { key } = await host.put('a.zip', enc('zip'), 'application/zip');
     const url = await host.presignGet(key, 60);
-    assert.equal((await fetch(local(host, url))).status, 200);
+    assert.equal((await localFetch(local(host, url))).status, 200);
     clock.t += 59_000;
-    assert.equal((await fetch(local(host, url))).status, 200);
+    assert.equal((await localFetch(local(host, url))).status, 200);
     clock.t += 1_000;
-    assert.equal((await fetch(local(host, url))).status, 410);
+    assert.equal((await localFetch(local(host, url))).status, 410);
     const again = await host.presignGet(key);   // default 3600 s
     assert.equal(again, url, 'same token/name: re-presign extends the expiry');
-    assert.equal((await fetch(local(host, url))).status, 200);
+    assert.equal((await localFetch(local(host, url))).status, 200);
     await host.remove(key);
-    assert.equal((await fetch(local(host, url))).status, 404);
+    assert.equal((await localFetch(local(host, url))).status, 404);
     await host.remove(key);   // idempotent
     await assert.rejects(host.presignGet(key), /unknown object key/);
     await assert.rejects(host.presignGet((await host.put('b', enc('b'))).key, 0), /positive/);
@@ -168,7 +169,7 @@ test('close() kills cloudflared and stops the server; the host is single-use', a
   assert.ok(await waitDead(pid), 'cloudflared process tree killed');
   assert.equal(host.running, false);
   assert.equal(host.localOrigin, null);
-  await assert.rejects(fetch(url.replace(PUBLIC, origin)), 'server no longer listening');
+  await assert.rejects(localFetch(url.replace(PUBLIC, origin)), 'server no longer listening');
   await assert.rejects(host.put('b', enc('b')), /closed/);
   await host.close();   // idempotent
 });
@@ -181,33 +182,33 @@ test('Range: 206 + Content-Range + Accept-Ranges; suffix / open ranges; 416; mul
   try {
     const { key } = await host.put('r.bin', enc('0123456789'), 'application/octet-stream');
     const url = local(host, await host.presignGet(key));
-    const full = await fetch(url);
+    const full = await localFetch(url);
     assert.equal(full.headers.get('accept-ranges'), 'bytes');
     await full.arrayBuffer();
-    const r1 = await fetch(url, { headers: { Range: 'bytes=2-5' } });
+    const r1 = await localFetch(url, { headers: { Range: 'bytes=2-5' } });
     assert.equal(r1.status, 206);
     assert.equal(r1.headers.get('content-range'), 'bytes 2-5/10');
     assert.equal(r1.headers.get('content-length'), '4');
     assert.equal(await r1.text(), '2345');
-    const r2 = await fetch(url, { headers: { Range: 'bytes=7-' } });
+    const r2 = await localFetch(url, { headers: { Range: 'bytes=7-' } });
     assert.equal(await r2.text(), '789');
-    const r3 = await fetch(url, { headers: { Range: 'bytes=-3' } });
+    const r3 = await localFetch(url, { headers: { Range: 'bytes=-3' } });
     assert.equal(r3.headers.get('content-range'), 'bytes 7-9/10');
     assert.equal(await r3.text(), '789');
-    const r4 = await fetch(url, { headers: { Range: 'bytes=8-100' } });
+    const r4 = await localFetch(url, { headers: { Range: 'bytes=8-100' } });
     assert.equal(r4.headers.get('content-range'), 'bytes 8-9/10');
     await r4.arrayBuffer();
-    const r416 = await fetch(url, { headers: { Range: 'bytes=10-' } });
+    const r416 = await localFetch(url, { headers: { Range: 'bytes=10-' } });
     assert.equal(r416.status, 416);
     assert.equal(r416.headers.get('content-range'), 'bytes */10');
     await r416.arrayBuffer();
-    const multi = await fetch(url, { headers: { Range: 'bytes=0-1,4-5' } });
+    const multi = await localFetch(url, { headers: { Range: 'bytes=0-1,4-5' } });
     assert.equal(multi.status, 200);
     assert.equal(await multi.text(), '0123456789');
-    const ifr = await fetch(url, { headers: { Range: 'bytes=0-1', 'If-Range': '"x"' } });
+    const ifr = await localFetch(url, { headers: { Range: 'bytes=0-1', 'If-Range': '"x"' } });
     assert.equal(ifr.status, 200);
     await ifr.arrayBuffer();
-    const headR = await fetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
+    const headR = await localFetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
     assert.equal(headR.status, 206);
     assert.equal(await headR.text(), '');
   } finally { await host.close(); }
@@ -222,22 +223,22 @@ test('stats(): served = every byte delivered at least once by finished GETs; HEA
     const ub = local(host, await host.presignGet(b));
     assert.deepEqual(host.stats(), { served: 0, total: 2 });
 
-    await (await fetch(ua, { method: 'HEAD' })).arrayBuffer();
-    await (await fetch(ua, { headers: { Range: 'bytes=20-' } })).arrayBuffer();     // 416
-    await (await fetch(ua.replace(/\/[^/]+$/, '/wrong.3mf'))).arrayBuffer();        // 404
+    await (await localFetch(ua, { method: 'HEAD' })).arrayBuffer();
+    await (await localFetch(ua, { headers: { Range: 'bytes=20-' } })).arrayBuffer();     // 416
+    await (await localFetch(ua.replace(/\/[^/]+$/, '/wrong.3mf'))).arrayBuffer();        // 404
     await tick();
     assert.deepEqual(host.stats(), { served: 0, total: 2 }, 'HEAD / 416 / 404 do not count');
 
     // Range-only fetch: two overlapping halves, the second leaves a gap, then the gap.
-    await (await fetch(ua, { headers: { Range: 'bytes=0-4' } })).arrayBuffer();
-    await (await fetch(ua, { headers: { Range: 'bytes=3-6' } })).arrayBuffer();
+    await (await localFetch(ua, { headers: { Range: 'bytes=0-4' } })).arrayBuffer();
+    await (await localFetch(ua, { headers: { Range: 'bytes=3-6' } })).arrayBuffer();
     await tick();
     assert.equal(host.stats().served, 0, 'bytes 7-9 not delivered yet');
-    await (await fetch(ua, { headers: { Range: 'bytes=-3' } })).arrayBuffer();
+    await (await localFetch(ua, { headers: { Range: 'bytes=-3' } })).arrayBuffer();
     await tick();
     assert.deepEqual(host.stats(), { served: 1, total: 2 }, 'ranges merged → fully covered');
 
-    await (await fetch(ub)).arrayBuffer();
+    await (await localFetch(ub)).arrayBuffer();
     await tick();
     assert.deepEqual(host.stats(), { served: 2, total: 2 });
 
@@ -263,7 +264,7 @@ test('stats(): a GET aborted mid-body is not counted as served', async () => {
     await new Promise(r => setTimeout(r, 200));
     assert.deepEqual(host.stats(), { served: 0, total: 1 });
     // A later complete fetch does count.
-    const res = await fetch(url);
+    const res = await localFetch(url);
     assert.equal((await res.arrayBuffer()).byteLength, big.byteLength);
     await tick();
     assert.deepEqual(host.stats(), { served: 1, total: 1 });
@@ -407,7 +408,7 @@ function setupRunner({ adapter, responder, holdMs = 60_000, retryWindowMs = 60_0
 // Fetch every URL the platform was given (file + image), fully, through the loopback origin.
 async function platformFetchAll(ctx, call = ctx.calls[0]) {
   for (const u of [...call.files, ...call.images]) {
-    const res = await fetch(local(ctx.hosts.at(-1), u));
+    const res = await localFetch(local(ctx.hosts.at(-1), u));
     assert.equal(res.status, 200);
     await res.arrayBuffer();
   }
@@ -526,7 +527,7 @@ test('PB.16 gate: waits for BOTH DoH resolvers, then 2 stable polls, then probes
   };
   const host = makeHost({
     dohFetchImpl, sleep: async ms => { sleeps.push(ms); },
-    fetchImpl: async (url, o) => { log.push('probe'); return fetch(String(url).replace(PUBLIC, host.localOrigin), o); },
+    fetchImpl: async (url, o) => { log.push('probe'); return localFetch(String(url).replace(PUBLIC, host.localOrigin), o); },
   });
   try {
     const phases = [];
@@ -550,7 +551,7 @@ test('PB.16 probe: retries 530 with 2 s backoff then succeeds; probe is hidden f
     fetchImpl: async (url, o) => {
       if (++n <= 2) return new Response('edge', { status: 530 });
       during = host.stats();
-      return fetch(String(url).replace(PUBLIC, host.localOrigin), o);
+      return localFetch(String(url).replace(PUBLIC, host.localOrigin), o);
     },
   });
   try {

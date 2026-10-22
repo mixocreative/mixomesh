@@ -75,14 +75,24 @@ test('ray length and backwards hits are rejected like Babylon', () => {
   assert.ok(back, 'two-sided');
 });
 
+// CPU time this process spent, not wall clock: `npm test` runs files in
+// parallel, and a wall-clock budget failed whenever the machine was busy
+// (9.5 s with four suites running at once). An algorithmic regression still
+// shows up as CPU time.
+function cpuMs(fn) {
+  const start = process.cpuUsage();
+  const value = fn();
+  const { user, system } = process.cpuUsage(start);
+  return { value, ms: (user + system) / 1000 };
+}
+
 test('builds a 1M-triangle mesh in well under the worker budget', () => {
   const { positions, indices } = blob(710, 704, 11);
-  const t0 = performance.now();
-  const bvh = buildTriangleBvh(positions, indices);
-  const ms = performance.now() - t0;
+  const { value: bvh, ms } = cpuMs(() => buildTriangleBvh(positions, indices));
   assert.ok(indices.length / 3 > 990_000);
-  assert.ok(ms < 6000, `${Math.round(ms)} ms`);
-  const t1 = performance.now();
-  for (let i = 0; i < 1000; i++) raycastBvh(bvh, positions, indices, { x: 5, y: 0.01 * i - 5, z: 0.3 }, { x: -1, y: 0, z: 0 });
-  assert.ok(performance.now() - t1 < 1000);
+  assert.ok(ms < 6000, `build took ${Math.round(ms)} ms of CPU`);
+  const rays = cpuMs(() => {
+    for (let i = 0; i < 1000; i++) raycastBvh(bvh, positions, indices, { x: 5, y: 0.01 * i - 5, z: 0.3 }, { x: -1, y: 0, z: 0 });
+  });
+  assert.ok(rays.ms < 1000, `1000 rays took ${Math.round(rays.ms)} ms of CPU`);
 });

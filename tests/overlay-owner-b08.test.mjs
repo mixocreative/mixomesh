@@ -85,14 +85,19 @@ test('sessions stack: closing the newest brings the one underneath back with its
   assert.equal(visible(), false, 'work that ends before the delay never shows');
 });
 
-test('a finished session lingering for its minimum time no longer blocks the keyboard', async () => {
+test('a finished session lingering for its minimum time no longer blocks the keyboard', (t) => {
+  // Mocked clock: with real timers a busy machine let the 10 ms wait outlast
+  // the 200 ms minimum, and the overlay was already gone.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = ProgressOverlay.open('Loading model');
   s.close();
   const done = ProgressOverlay.open('Loading model', { minVisibleMs: 200 });
-  await sleep(10);
+  t.mock.timers.tick(10);
   done.close();
   assert.equal(visible(), true, 'still drawn for its minimum time');
   assert.equal(pressEscape().defaultPrevented, false, 'Esc reaches the app');
-  await sleep(250);
-  assert.equal(visible(), false);
+  t.mock.timers.tick(189);
+  assert.equal(visible(), true, 'still drawn 1 ms before the minimum is up');
+  t.mock.timers.tick(1);
+  assert.equal(visible(), false, 'gone once the minimum is up');
 });

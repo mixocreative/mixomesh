@@ -113,6 +113,13 @@ npm run test:repair
 npm run test:group
 ```
 
+`npm test` prints the spec report and also writes every failing test to
+`.tmp/last-test-failures.txt` (file:line, test name, error; for a file that
+failed as a whole, the last lines it printed), rewritten on each run, so a
+failure in a long run cannot scroll away unnamed. Failures are written as they
+happen and a finished run ends with a `done:` count line, so a run that hung
+still names what failed before it stopped.
+
 `npm run probe:scans [dir]` (not part of `test:all`) runs every model in
 `tests/fixtures/real-scans/` (git-ignored — drop your own scans there) through
 import → validate → repair → re-validate → 3MF export and prints one row per

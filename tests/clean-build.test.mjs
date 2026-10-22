@@ -46,7 +46,14 @@ test('isPortListening detects a live dev-server port', async () => {
   const server = createServer().listen(0, '127.0.0.1');
   await new Promise(r => server.once('listening', r));
   const { port } = server.address();
-  assert.equal(await isPortListening(port), true);
-  await new Promise(r => server.close(r));
+  try {
+    // The default 300 ms connect timeout can lapse on a loaded machine
+    // (parallel test files); the live port must still read as listening.
+    assert.equal(await isPortListening(port, 10_000), true);
+  } finally {
+    // A failed assert must not leave the server open: it kept this file's
+    // process alive and hung the whole `npm test` run.
+    await new Promise(r => server.close(r));
+  }
   assert.equal(await isPortListening(port), false);
 });

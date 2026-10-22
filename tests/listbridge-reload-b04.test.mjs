@@ -116,7 +116,9 @@ test('the app dies while createCreation is out: the project is blocked until a c
   const win = { id: 1, isDestroyed: () => false, send() {} };
   await call(win, 'publish:setCredentials', 'cults3d:default', { nickname: 'n', apiKey: 'k' });
   void call(win, 'publish:start', payload({ projectKey: 'proj-2' }));
-  for (let i = 0; i < 50 && remote.createCalls === 0; i++) await new Promise(r => setTimeout(r, 5));
+  // Await the condition, not a fixed 250 ms: a busy machine took longer.
+  const deadline = Date.now() + 10_000;
+  while (remote.createCalls === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 5));
   assert.equal(remote.createCalls, 1);
 
   remote.hangCreate = false;

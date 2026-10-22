@@ -4,6 +4,7 @@
 //   node --test tests/listbridge-s3.test.mjs
 
 import assert from 'node:assert/strict';
+import { localFetch } from './local-fetch.mjs';
 import { test, before, after } from 'node:test';
 import { createRequire } from 'node:module';
 import http from 'node:http';
@@ -190,12 +191,12 @@ test('put -> presignGet -> fetch bytes -> remove -> GET 404', async () => {
   assert.match(key, /^listbridge\/rnd\d{6}\/model\.stl$/);
   const url = s3.presignGet(key, 600);
   assert.ok(new URL(url).pathname.endsWith('/model.stl'), 'extension visible at end of URL path');
-  const res = await fetch(url);
+  const res = await localFetch(url);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'model/stl');
   assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes);
   await s3.remove(key);
-  assert.equal((await fetch(s3.presignGet(key))).status, 404);
+  assert.equal((await localFetch(s3.presignGet(key))).status, 404);
   await s3.remove(key);   // already gone -> 404 counts as success
 });
 
@@ -207,7 +208,7 @@ test('unicode + space filename round-trips', async () => {
   const url = s3.presignGet(key);
   assert.ok(url.split('?')[0].endsWith('.3mf'));
   assert.ok(!/[ ()#]/.test(url.split('?')[0].slice(endpoint.length)), 'path is percent-encoded');
-  assert.equal(await (await fetch(url)).text(), 'hello');
+  assert.equal(await (await localFetch(url)).text(), 'hello');
   assert.ok(store.has(key));
   await s3.remove(key);
   assert.ok(!store.has(key));
@@ -217,11 +218,11 @@ test('expired presigned URL is rejected; tampered URL fails signature', async ()
   const s3 = host();
   const { key } = await s3.put('a.png', Buffer.from([1, 2, 3]), 'image/png');
   const old = host({ now: () => new Date(Date.now() - 2 * 3600 * 1000) });
-  const expired = await fetch(old.presignGet(key, 60));
+  const expired = await localFetch(old.presignGet(key, 60));
   assert.equal(expired.status, 403);
   assert.match(await expired.text(), /expired/);
   const tampered = s3.presignGet(key).replace('X-Amz-Expires=3600', 'X-Amz-Expires=604800');
-  assert.equal((await fetch(tampered)).status, 403);
+  assert.equal((await localFetch(tampered)).status, 403);
   const wrongSecret = host({ secretAccessKey: 'nope' });
   await assert.rejects(wrongSecret.put('b.png', Buffer.from([1])), /HTTP 403.*SignatureDoesNotMatch/);
   await s3.remove(key);
