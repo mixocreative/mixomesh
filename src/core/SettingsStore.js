@@ -16,6 +16,7 @@ import { getState, setState, dispatch, subscribe } from './StateManager.js';
 import { SceneManager } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { EVENTS } from './events.js';
+import { t } from '../i18n/index.js';
 
 const SILENT = { silent: true };
 const STORAGE_KEY = 'mx-settings-v1';
@@ -241,8 +242,22 @@ function _clearStored() {
 
 // ── Boot + apply ─────────────────────────────────────────
 
+let _reportedDamage = null;
+// A stored blob that exists but cannot be read is not a first run: keep the
+// text aside (the next save overwrites the key) and tell the user once.
+function _noteDamage() {
+  if (typeof localStorage === 'undefined') return;
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch { return; }
+  if (!raw || parseStored(raw) || raw === _reportedDamage) return;
+  _reportedDamage = raw;
+  try { localStorage.setItem(`${STORAGE_KEY}.damaged`, raw); } catch { /* quota — still tell the user */ }
+  dispatch(EVENTS.TOAST, { message: t('toast.settingsDamaged'), type: 'warning', duration: 8000 });
+}
+
 /** Merge persisted per-user settings onto the current (factory) state. No scene apply. */
 export function seedBootState() {
+  _noteDamage();
   setState(s => mergeSettings(s, load()), SILENT);
 }
 
