@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  detectCapabilities, detectEngine, engineGate, detectStorageTier, WEB_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_BUDGET, DESKTOP_BOOLEAN_TRIANGLE_CAP,
+  detectCapabilities, detectEngine, engineGate, detectStorageTier, WEB_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_LIMIT, DESKTOP_BOOLEAN_TRIANGLE_CAP,
 } from '../src/core/storage/capabilities.js';
 
 let passed = 0, failed = 0;
@@ -40,7 +40,7 @@ test('desktop → trusts injected shell capabilities verbatim (all true incl. wa
   });
   assert.deepEqual(c, {
     persistAssets: true, mountDirectory: true, relinkByPath: true, watchFiles: true, writeFiles: true, publish: false,
-    triangleBudget: DESKTOP_TRIANGLE_BUDGET, booleanTriangleCap: DESKTOP_BOOLEAN_TRIANGLE_CAP,
+    triangleBudget: DESKTOP_TRIANGLE_BUDGET, triangleLimit: DESKTOP_TRIANGLE_LIMIT, booleanTriangleCap: DESKTOP_BOOLEAN_TRIANGLE_CAP,
   });
 });
 

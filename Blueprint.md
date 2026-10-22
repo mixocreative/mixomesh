@@ -2655,13 +2655,16 @@ no regression.
 
 ### Heavy meshes (2026-10-21 — `docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md`)
 Contract for 2M–10M+ triangle print meshes; the spec carries the measured numbers.
-- **Budgets:** `caps.triangleBudget` per runtime tier (`storage/capabilities.js`, measured, not
-  guessed): warn above 1×, refuse above 4×. **Refusal happens before parsing**:
+- **Budgets:** `caps.triangleBudget` (warn) and `caps.triangleLimit` (refuse) per runtime tier
+  (`storage/capabilities.js` `TRIANGLE_TIERS`): Chromium web 2.5M / 10M and desktop 6M / 24M,
+  measured; WebKit (Safari, every iOS / iPadOS browser, `engine === 'webkit'`) 1M / 3M, an
+  UNMEASURED conservative guess the owner accepted 2026-10-22 (cia E-03) until a real iPad /
+  iPhone run measures it (`tests/capabilities-webkit-e03.test.mjs`). **Refusal happens before parsing**:
   `import/TriangleEstimate.estimateFileTriangles(blob, ext)` reads only small slices — exact for
   binary STL (`(size−84)/50`) and GLB/glTF accessors, sampled for ASCII STL (head + tail), OBJ (face
   lines) and 3MF (model size from the zip central directory ÷ 66 B/triangle).
   Each estimate carries `confidence: 'exact' | 'sampled' | 'rough'`, and
-  `ImportLimits.assertPreParseCapacity` refuses above 4× the budget times `REFUSE_FACTOR`
+  `ImportLimits.assertPreParseCapacity` refuses above the limit times `REFUSE_FACTOR`
   (exact 1, sampled 2 = `ESTIMATE_REFUSE_MARGIN`, rough ∞: 3MF bytes per triangle and GPU-instanced
   glTF only warn). `AssetImport.preParseCheck(blob, filename)` returns `{ verdict, projected }` and
   shows nothing; it runs in `importWithDedupe` before hashing (the value rides along in
@@ -5745,7 +5748,7 @@ Single bar at bottom. Segments:
   watertight-repair-and-cost task 7 + fix round 1). Two independent halves:
   - **Triangle budget — scene-wide, ALWAYS ON**, even with nothing selected:
     `tris <scene> / <budget>` against `caps.triangleBudget` (web 2.5M /
-    desktop 6M — measured, heavy-mesh spec 2026-10-21). Gains `hud-warn` (≥70% of budget) / `hud-danger` (≥90%)
+    desktop 6M — measured, heavy-mesh spec 2026-10-21; WebKit 1M, unmeasured). Gains `hud-warn` (≥70% of budget) / `hud-danger` (≥90%)
     classes; tooltip `t('hud.triangleBudget')`. The scene-wide count is a full
     `scene.meshes` walk, so it is CACHED and only recomputed on events that
     change scene geometry (asset add/remove, undo/redo, repair-completion

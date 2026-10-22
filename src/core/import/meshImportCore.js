@@ -59,9 +59,9 @@ export function modelPathFromRels(relsText) {
  * skeletons) plus every other package part's bytes (textures), ready for
  * ThreeMFLoader.buildThreeMFContainerFromParsed on the main thread.
  * @param {ArrayBuffer} buffer
- * @param {{ JSZip: any, triangleBudget?: number, progress?: Function, limits?: object }} opts
+ * @param {{ JSZip: any, triangleLimit?: number, progress?: Function, limits?: object }} opts
  */
-export async function importThreeMFBuffer(buffer, { JSZip, triangleBudget = 0, progress, limits = IMPORT_LIMITS }) {
+export async function importThreeMFBuffer(buffer, { JSZip, triangleLimit = 0, progress, limits = IMPORT_LIMITS }) {
   assertImportFileSize(buffer.byteLength, '3MF file', limits);
   const zip = await JSZip.loadAsync(buffer);
   assertZipSafe(zip, '3MF file', limits);
@@ -79,7 +79,7 @@ export async function importThreeMFBuffer(buffer, { JSZip, triangleBudget = 0, p
   for (const name of [rootPath, ...modelNames.filter(n => n !== rootPath)]) {
     const file = zip.file(name);
     const size = file._data?.uncompressedSize ?? 0;
-    const parser = createThreeMFXmlParser({ triangleBudget });
+    const parser = createThreeMFXmlParser({ triangleLimit });
     for await (const chunk of zipEntryTextChunks(file, {
       onProgress: f => progress?.({ stage: 'parse', fraction: (doneBytes + f * size) / totalModelBytes }),
     })) parser.write(chunk);

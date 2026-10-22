@@ -335,11 +335,11 @@ export async function preParseCheck(blob, filename) {
   const ext = extOf(filename);
   const sceneTriangles = countSceneTriangles();
   let estimate = await estimateFileTriangles(blob, ext);
-  if (needsExactCount(estimate, { sceneTriangles, budget: caps.triangleBudget })) {
+  if (needsExactCount(estimate, { sceneTriangles, limit: caps.triangleLimit })) {
     estimate = (await countFileTriangles(blob, ext)) ?? estimate;
   }
   const verdict = assertPreParseCapacity(estimate, {
-    sceneTriangles, budget: caps.triangleBudget, filename, desktop: isDesktop(),
+    sceneTriangles, budget: caps.triangleBudget, limit: caps.triangleLimit, filename, desktop: isDesktop(),
   });
   return { verdict, projected: sceneTriangles + (estimate?.triangles ?? 0) };
 }
@@ -378,7 +378,7 @@ function _applyResinDefault(container) {
  */
 function _assertContainerCapacity(container) {
   try {
-    assertTriangleCapacity(countSceneTriangles() + countContainerTriangles(container), caps.triangleBudget, 'Scene after import');
+    assertTriangleCapacity(countSceneTriangles() + countContainerTriangles(container), caps.triangleLimit, 'Scene after import');
   } catch (err) {
     try { container.dispose?.(); } catch { /* retain the capacity error */ }
     throw err;

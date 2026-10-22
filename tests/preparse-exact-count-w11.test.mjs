@@ -24,12 +24,12 @@ function unevenObj() {
 
 test('an OBJ whose sample under-reads it is refused before parsing, with no "continuing" warning', async (t) => {
   StateManager.replaceState(StateManager.freshState());
-  const before = caps.triangleBudget;
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
   const show = Toast.show;
   const warnings = [];
-  t.after(() => { setCapabilities({ triangleBudget: before }); Toast.show = show; });
+  t.after(() => { setCapabilities(before); Toast.show = show; });
   Toast.show = (msg, kind) => { if (kind === 'warning') warnings.push(msg); };
-  setCapabilities({ triangleBudget: 2000 });
+  setCapabilities({ triangleBudget: 2000, triangleLimit: 8000 });
   let loads = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { loads++; throw new Error('parsed'); } };
   await assert.rejects(importWithDedupe(unevenObj(), 'dense.obj'), (err) => err.code === 'over-budget' && /136,072 triangles/.test(err.message));

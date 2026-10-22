@@ -67,7 +67,7 @@ test('3MF via the worker core = the SceneLoader plugin path; texture parts come 
 
 test('3MF over the triangle budget is refused inside the worker parse', async () => {
   const zipBytes = await new JSZip().file('3D/3dmodel.model', Buffer.from([...threeMFModelChunks(8)].join(''))).generateAsync({ type: 'uint8array' });
-  await assert.rejects(core.importThreeMFBuffer(zipBytes.buffer, { JSZip, triangleBudget: 10 }), /polygon handling limit/);
+  await assert.rejects(core.importThreeMFBuffer(zipBytes.buffer, { JSZip, triangleLimit: 40 }), /polygon handling limit/);
 });
 
 test('main-thread fallback only for small files that failed for other reasons', () => {

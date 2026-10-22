@@ -54,9 +54,8 @@ export function assertZipSafe(zip, label = 'archive', limits = IMPORT_LIMITS) {
   }
 }
 
-/** Reject a model before mesh creation when it exceeds the runtime's hard budget. */
-export function assertTriangleCapacity(triangles, triangleBudget, label = 'Model') {
-  const limit = triangleBudget * 4;
+/** Reject a model before mesh creation when it exceeds the runtime's triangle limit (`caps.triangleLimit`). */
+export function assertTriangleCapacity(triangles, limit, label = 'Model') {
   if (limit > 0 && triangles > limit) {
     throw overBudget(`${label} has ${triangles.toLocaleString('en-US')} triangles; the polygon handling limit for this runtime is ${limit.toLocaleString('en-US')}. Simplify or split the model before importing.`);
   }
@@ -77,26 +76,25 @@ const REFUSE_FACTOR = { exact: 1, sampled: ESTIMATE_REFUSE_MARGIN, rough: Infini
  * import is refused before parsing instead of warning "continuing" and failing
  * after it.
  * @param {{ triangles: number, confidence: string } | null} estimate
- * @param {{ sceneTriangles?: number, budget: number }} ctx
+ * @param {{ sceneTriangles?: number, limit: number }} ctx
  */
-export function needsExactCount(estimate, { sceneTriangles = 0, budget }) {
-  return estimate?.confidence === 'sampled' && budget > 0
-    && sceneTriangles + estimate.triangles > (budget * 4) / ESTIMATE_REFUSE_MARGIN;
+export function needsExactCount(estimate, { sceneTriangles = 0, limit }) {
+  return estimate?.confidence === 'sampled' && limit > 0
+    && sceneTriangles + estimate.triangles > limit / ESTIMATE_REFUSE_MARGIN;
 }
 
 /**
  * Pre-parse budget decision (heavy-mesh spec §1/§3). Throws the refusal
- * message when the scene would exceed 4× the budget times the estimate's
- * REFUSE_FACTOR. Returns 'warn' above 1×, 'ok' otherwise, or 'unknown' when
- * there is no estimate.
+ * message when the scene would exceed the limit times the estimate's
+ * REFUSE_FACTOR. Returns 'warn' above the budget, 'ok' otherwise, or 'unknown'
+ * when there is no estimate.
  * @param {{ triangles: number, confidence: 'exact'|'sampled'|'rough' } | null} estimate
- * @param {{ sceneTriangles?: number, budget: number, filename: string, desktop?: boolean }} ctx
+ * @param {{ sceneTriangles?: number, budget: number, limit: number, filename: string, desktop?: boolean }} ctx
  * @returns {'ok'|'warn'|'unknown'}
  */
-export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, filename, desktop = false }) {
-  if (!estimate || !(budget > 0)) return 'unknown';
+export function assertPreParseCapacity(estimate, { sceneTriangles = 0, budget, limit, filename, desktop = false }) {
+  if (!estimate || !(budget > 0) || !(limit > 0)) return 'unknown';
   const projected = sceneTriangles + estimate.triangles;
-  const limit = budget * 4;
   if (projected > limit * REFUSE_FACTOR[estimate.confidence]) {
     const about = estimate.confidence === 'exact' ? '' : 'about ';
     const scene = sceneTriangles > 0 ? ` (with the ${sceneTriangles.toLocaleString('en-US')} already in the scene)` : '';

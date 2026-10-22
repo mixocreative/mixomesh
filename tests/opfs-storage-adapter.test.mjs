@@ -11,7 +11,7 @@ import {
   OpfsStorageAdapter as A, OPFS_PROJECTS_DIR, sanitizeProjectName, isTouchApple, setOpfsWriteTimeout, opfsWriteTimeoutFor,
 } from '../src/core/storage/OpfsStorageAdapter.js';
 import {
-  detectStorageTier, detectCapabilities, storageTier, WEB_TRIANGLE_BUDGET, WEB_BOOLEAN_TRIANGLE_CAP,
+  detectStorageTier, detectCapabilities, storageTier, WEB_TRIANGLE_BUDGET, WEB_TRIANGLE_LIMIT, WEB_BOOLEAN_TRIANGLE_CAP,
 } from '../src/core/storage/capabilities.js';
 import { storage, ADAPTERS, BrowserStorageAdapter } from '../src/core/storage/StorageAdapter.js';
 import { DesktopStorageAdapter } from '../src/core/storage/DesktopStorageAdapter.js';
@@ -52,7 +52,7 @@ await test('tier: Electron → desktop; FSA → browser; OPFS without FSA → op
 await test('tier: opfs caps = no mount / relink / watch, in-place writes, IDB-backed persistence', () => {
   assert.deepEqual(detectCapabilities({ hasFSA: false, hasOPFS: true, hasIDB: true }), {
     persistAssets: true, mountDirectory: false, relinkByPath: false, watchFiles: false, writeFiles: true, publish: false,
-    triangleBudget: WEB_TRIANGLE_BUDGET, booleanTriangleCap: WEB_BOOLEAN_TRIANGLE_CAP,
+    triangleBudget: WEB_TRIANGLE_BUDGET, triangleLimit: WEB_TRIANGLE_LIMIT, booleanTriangleCap: WEB_BOOLEAN_TRIANGLE_CAP,
   });
   assert.equal(detectCapabilities({ hasOPFS: true, hasIDB: false }).persistAssets, false);
   // FSA present wins: OPFS does not downgrade Chrome.

@@ -59,10 +59,10 @@ function numericAttribute(attributes, name, optional = false) {
  * Push parser: feed decoded text with write(chunk), then close() → result.
  * Geometry goes into packed typed arrays; only the small XML skeleton
  * (resources, materials, build, components) is kept as text.
- * @param {{ triangleBudget?: number }} [opts]
+ * @param {{ triangleLimit?: number }} [opts]
  * @returns {{ write(chunk: string): void, close(): { xml: string, geometry: Map<string, { positions: Float64Array, triangles: Int32Array }> } }}
  */
-export function createThreeMFXmlParser({ triangleBudget = 0 } = {}) {
+export function createThreeMFXmlParser({ triangleLimit = 0 } = {}) {
   const parser = new SaxesParser({ xmlns: true });
   const skeleton = [];
   const geometry = new Map();
@@ -88,7 +88,7 @@ export function createThreeMFXmlParser({ triangleBudget = 0 } = {}) {
       if (core && name === 'vertex' && parent === 'vertices') {
         for (const field of ['x', 'y', 'z']) mesh.positions.push(numericAttribute(node.attributes, field));
       } else if (core && name === 'triangle' && parent === 'triangles') {
-        assertTriangleCapacity(++triangleCount, triangleBudget, '3MF model');
+        assertTriangleCapacity(++triangleCount, triangleLimit, '3MF model');
         for (const field of TRIANGLE_FIELDS) mesh.triangles.push(numericAttribute(node.attributes, field, field[0] === 'p'));
       }
       return;
@@ -130,8 +130,8 @@ export function createThreeMFXmlParser({ triangleBudget = 0 } = {}) {
  * Parse geometry into packed numbers and return only small XML resources/hierarchy.
  * @param {string | AsyncIterable<string>} source  whole XML text, or decoded chunks
  */
-export async function parseThreeMFXml(source, { triangleBudget = 0, yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
-  const push = createThreeMFXmlParser({ triangleBudget });
+export async function parseThreeMFXml(source, { triangleLimit = 0, yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
+  const push = createThreeMFXmlParser({ triangleLimit });
   if (typeof source === 'string') {
     for (let offset = 0; offset < source.length; offset += CHUNK_CHARS) {
       push.write(source.slice(offset, offset + CHUNK_CHARS));

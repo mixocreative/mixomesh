@@ -66,7 +66,7 @@ const MEASURE_IN_PAGE = (fileUrl, filename, budget) => `(async () => {
   const al = await import('/src/core/AssetLoader.js');
   const sm = await import('/src/core/SceneManager.js');
   const capsMod = await import('/src/core/storage/capabilities.js');
-  ${budget ? `capsMod.setCapabilities({ triangleBudget: ${budget} });` : ''}
+  ${budget ? `capsMod.setCapabilities({ triangleBudget: ${budget}, triangleLimit: ${budget * 4} });` : ''}
   const B = window.BABYLON;
   const scene = sm.SceneManager.getScene();
   const res = await fetch(${JSON.stringify(fileUrl)});

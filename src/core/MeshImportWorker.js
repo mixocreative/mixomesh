@@ -66,7 +66,7 @@ export async function loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgre
   const kind = KINDS[ext];
   if (!kind) throw new Error(`No worker import for ${ext}`);
   const result = await _task.run(
-    { kind, blobUrl, triangleBudget: caps.triangleBudget },
+    { kind, blobUrl, triangleLimit: caps.triangleLimit },
     { onProgress, signal, hidden, label: kind === 'stl' ? 'job.importStl' : 'job.import3mf', cancellable: true },
   );
   if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');

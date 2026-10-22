@@ -17,7 +17,7 @@ test('capacity and corrupt-file failures select a relevant reason and recovery a
     ['Loading model timed out after 300000 ms', 'timeout'],
   ];
   for (const [message, expected] of cases) assert.equal(classifyImportFailure(message).category, expected, message);
-  assert.throws(() => assertTriangleCapacity(401, 100), (err) => classifyImportFailure(err).category === 'polygons');
+  assert.throws(() => assertTriangleCapacity(401, 400), (err) => classifyImportFailure(err).category === 'polygons');
   assert.equal(classifyImportFailure('texture missing', 'tile.3mf').category, 'embeddedTexture');
   assert.equal(classifyImportFailure('texture missing', 'tile.obj').category, 'sidecars');
   assert.equal(classifyImportFailure('other failure').category, 'unknown');
@@ -34,14 +34,14 @@ test('every recovery message is translated in English, Traditional Chinese and J
 });
 
 test('triangle capacity checks report count and limit before mesh creation', async () => {
-  assert.doesNotThrow(() => assertTriangleCapacity(400, 100));
-  assert.throws(() => assertTriangleCapacity(401, 100), /401 triangles.*400/);
+  assert.doesNotThrow(() => assertTriangleCapacity(400, 400));
+  assert.throws(() => assertTriangleCapacity(401, 400), /401 triangles.*400/);
   const xml = '<model><resources><object id="1"><mesh><vertices><vertex x="0" y="0" z="0"/></vertices><triangles>' + '<triangle v1="0" v2="0" v3="0"/>'.repeat(5) + '</triangles></mesh></object></resources></model>';
-  await assert.rejects(parseThreeMFXml(xml, { triangleBudget: 1 }), /5 triangles.*4/);
+  await assert.rejects(parseThreeMFXml(xml, { triangleLimit: 4 }), /5 triangles.*4/);
 });
 
 test('cia B-17: web users get the hint that names the desktop app; desktop users do not', () => {
-  const overBudget = (() => { try { assertTriangleCapacity(401, 100); } catch (err) { return err; } })();
+  const overBudget = (() => { try { assertTriangleCapacity(401, 400); } catch (err) { return err; } })();
   assert.equal(classifyImportFailure(overBudget, 'a.stl', { desktop: false }).hintKey, 'import.fix.polygonsWeb');
   assert.equal(classifyImportFailure(overBudget, 'a.stl', { desktop: true }).hintKey, 'import.fix.polygons');
   assert.equal(classifyImportFailure('out of memory', 'a.stl', { desktop: false }).hintKey, 'import.fix.memoryWeb');

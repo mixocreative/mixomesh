@@ -7,7 +7,7 @@ import JSZip from 'jszip';
 import { serveTask, transferable } from './serveTask.js';
 import { readUrl, importStlBuffer, importThreeMFBuffer } from '../import/meshImportCore.js';
 
-serveTask(async ({ kind, blobUrl, triangleBudget }, { progress }) => {
+serveTask(async ({ kind, blobUrl, triangleLimit }, { progress }) => {
   const stage = (lo, hi) => (e) => progress({ stage: e.stage, fraction: lo + (hi - lo) * (e.fraction ?? 0) });
   const buffer = await readUrl(blobUrl, stage(0, 0.25));
   if (kind === 'stl') {
@@ -15,7 +15,7 @@ serveTask(async ({ kind, blobUrl, triangleBudget }, { progress }) => {
     return transferable(result, transfer);
   }
   if (kind === '3mf') {
-    const { result, transfer } = await importThreeMFBuffer(buffer, { JSZip, triangleBudget, progress: stage(0.25, 1) });
+    const { result, transfer } = await importThreeMFBuffer(buffer, { JSZip, triangleLimit, progress: stage(0.25, 1) });
     return transferable(result, transfer);
   }
   throw new Error(`Unsupported worker import: ${kind}`);

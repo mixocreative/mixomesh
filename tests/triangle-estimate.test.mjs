@@ -77,8 +77,8 @@ test('3MF: model part size from the central directory → estimate near the trut
   assert.equal(r.confidence, 'rough', '3MF estimates never refuse');
 });
 
-test('pre-parse capacity: exact refuses above 4×, estimates only far above it, 3MF never; warn above 1×', () => {
-  const ctx = { budget: 1_000_000, filename: 'big.stl' };
+test('pre-parse capacity: exact refuses above the limit, estimates only far above it, 3MF never; warn above 1×', () => {
+  const ctx = { budget: 1_000_000, limit: 4_000_000, filename: 'big.stl' };
   assert.throws(() => assertPreParseCapacity({ triangles: 4_000_001, confidence: 'exact' }, ctx),
     /"big\.stl" has 4,000,001 triangles; this web build handles up to 4,000,000\. Simplify or split the model, or use the desktop app\./);
   assert.equal(assertPreParseCapacity({ triangles: 7_900_000, confidence: 'sampled' }, ctx), 'warn');
@@ -87,6 +87,6 @@ test('pre-parse capacity: exact refuses above 4×, estimates only far above it, 
   assert.equal(assertPreParseCapacity({ triangles: 900_000, confidence: 'exact' }, ctx), 'ok');
   assert.equal(assertPreParseCapacity({ triangles: 900_000, confidence: 'exact' }, { ...ctx, sceneTriangles: 200_000 }), 'warn');
   assert.equal(assertPreParseCapacity(null, ctx), 'unknown');
-  assert.throws(() => assertPreParseCapacity({ triangles: 30e6, confidence: 'exact' }, { ...ctx, budget: 6e6, desktop: true }),
+  assert.throws(() => assertPreParseCapacity({ triangles: 30e6, confidence: 'exact' }, { ...ctx, budget: 6e6, limit: 24e6, desktop: true }),
     /desktop build handles up to 24,000,000\. Simplify or split the model before importing\.$/);
 });

@@ -37,14 +37,14 @@ function dropTarget() {
 
 test('Cancel mid-drop still reports the file that already failed', async (t) => {
   StateManager.replaceState(StateManager.freshState());
-  const before = caps.triangleBudget;
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
   const open = Modal.open, show = Toast.show;
   const reports = [];
   const toasts = [];
-  t.after(() => { setCapabilities({ triangleBudget: before }); Modal.open = open; Toast.show = show; });
+  t.after(() => { setCapabilities(before); Modal.open = open; Toast.show = show; });
   Modal.open = (id, data) => reports.push({ id, ...data });
   Toast.show = (msg, kind) => { toasts.push([String(msg), kind]); return ''; };
-  setCapabilities({ triangleBudget: 10 });   // 64 triangles refuse, 4 pass
+  setCapabilities({ triangleBudget: 10, triangleLimit: 40 });   // 64 triangles refuse, 4 pass
   let started = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { started++; await sleep(300); return { meshes: [], dispose() {} }; } };
   const drop = dropTarget();

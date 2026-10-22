@@ -34,9 +34,9 @@ function libraryAsset(id, extra = {}) {
 
 test('I4: Add another copy runs the pre-parse budget check on the cached source blob', async (t) => {
   fresh();
-  const before = caps.triangleBudget;
-  t.after(() => setCapabilities({ triangleBudget: before }));
-  setCapabilities({ triangleBudget: 10 });
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
+  t.after(() => setCapabilities(before));
+  setCapabilities({ triangleBudget: 10, triangleLimit: 40 });
   let loads = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { loads++; throw new Error('should not parse'); } };
   libraryAsset('asset_heavy');
@@ -65,9 +65,9 @@ test('I4: a failed worker parse of a big cached source is not retried on the mai
 
 test('M2: a fast (refused) import never flashes the overlay', async (t) => {
   fresh();
-  const before = caps.triangleBudget;
-  t.after(() => setCapabilities({ triangleBudget: before }));
-  setCapabilities({ triangleBudget: 10 });
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
+  t.after(() => setCapabilities(before));
+  setCapabilities({ triangleBudget: 10, triangleLimit: 40 });
   await assert.rejects(AssetLoader.loadFromBlob(stl, 'fast.stl'));
   await sleep(450);
   assert.equal(overlay.shows, 0);
@@ -90,12 +90,12 @@ test('I5: Cancel aborts the running import, disposes its result and ends the dro
 
 test('M12: the over-budget warning waits for the duplicate prompt; a dismissed prompt warns about nothing', async (t) => {
   fresh();
-  const before = caps.triangleBudget;
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
   const show = Toast.show;
   const toasts = [];
-  t.after(() => { setCapabilities({ triangleBudget: before }); Toast.show = show; });
+  t.after(() => { setCapabilities(before); Toast.show = show; });
   Toast.show = (msg, kind) => toasts.push(kind);
-  setCapabilities({ triangleBudget: 50 });   // 64 triangles → warn, not refuse
+  setCapabilities({ triangleBudget: 50, triangleLimit: 200 });   // 64 triangles → warn, not refuse
   const hash = await sha256Hex(stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.length));
   libraryAsset('asset_dupe', { contentHash: hash });
   setBlobUrl('asset_dupe', 'blob:dupe', stl);

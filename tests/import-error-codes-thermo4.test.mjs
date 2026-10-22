@@ -13,11 +13,11 @@ const { mayFallBackToMainThread } = await import('../src/core/assets/AssetImport
 const refusal = (fn) => { try { fn(); } catch (err) { return err; } return null; };
 
 test('a refusal keeps its category however its English text is worded', () => {
-  const err = refusal(() => assertTriangleCapacity(500, 100));
+  const err = refusal(() => assertTriangleCapacity(500, 400));
   assert.equal(err?.code, 'over-budget');
   const reworded = Object.assign(new Error('Too many faces for this build.'), { code: err.code });
   assert.equal(classifyImportFailure(reworded).category, 'polygons');
-  const pre = refusal(() => assertPreParseCapacity({ triangles: 900, confidence: 'exact' }, { budget: 100, filename: 'a.stl' }));
+  const pre = refusal(() => assertPreParseCapacity({ triangles: 900, confidence: 'exact' }, { budget: 100, limit: 400, filename: 'a.stl' }));
   assert.equal(pre?.code, 'over-budget');
 });
 
@@ -30,7 +30,7 @@ test('a refusal thrown inside a worker reaches the caller with its code', async 
   const task = new WorkerTask({ create: () => {
     const worker = { postMessage: (data) => scope.onmessage({ data }), terminate() {} };
     const scope = { postMessage: (data) => worker.onmessage?.({ data }) };
-    serveTask(() => assertTriangleCapacity(500, 100), scope);
+    serveTask(() => assertTriangleCapacity(500, 400), scope);
     return worker;
   } });
   await assert.rejects(task.run({}, { label: 'job.importModel' }), (err) => err.code === 'over-budget');

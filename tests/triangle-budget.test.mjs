@@ -122,7 +122,7 @@ let passed = 0, failed = 0;
 const out = [];
 async function test(name, fn) {
   resetState();
-  setCapabilities({ triangleBudget: 100 }); // small, deterministic budget for every case
+  setCapabilities({ triangleBudget: 100, triangleLimit: 400 }); // small, deterministic budget for every case
   const capturedToasts = [];
   Toast.show = (message, type) => { capturedToasts.push({ message, type }); return ''; };
   try { await fn({ capturedToasts }); out.push(`PASS  ${name}`); passed++; }

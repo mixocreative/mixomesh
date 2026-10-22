@@ -18,12 +18,12 @@ const stl = (n) => new Blob([Buffer.concat([...binaryStlChunks(n)])]);
 
 test('two imports dropped together each warn with their own projected count', async (t) => {
   StateManager.replaceState(StateManager.freshState());
-  const before = caps.triangleBudget;
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
   const show = Toast.show;
   const toasts = [];
-  t.after(() => { setCapabilities({ triangleBudget: before }); Toast.show = show; });
+  t.after(() => { setCapabilities(before); Toast.show = show; });
   Toast.show = (msg, kind) => { if (kind === 'warning') toasts.push(String(msg)); };
-  setCapabilities({ triangleBudget: 50 });
+  setCapabilities({ triangleBudget: 50, triangleLimit: 200 });
   B.SceneLoader = { LoadAssetContainerAsync: async () => { throw new Error('stop after the check'); } };
   const results = await Promise.allSettled([importWithDedupe(stl(4), 'a.stl'), importWithDedupe(stl(5), 'b.stl')]);
   assert.deepEqual(results.map(r => r.reason?.message), ['stop after the check', 'stop after the check']);

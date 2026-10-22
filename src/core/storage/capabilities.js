@@ -21,13 +21,14 @@
  * @property {boolean} watchFiles      Can watch mounted files for external changes (desktop only).
  * @property {boolean} writeFiles      Can write to a chosen location via a picker (else blob-download).
  * @property {boolean} publish        Marketplace publish available (Electron shell exposing `electronAPI.listbridge`; never web/opfs).
- * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade.
+ * @property {number}  triangleBudget  Safe scene-wide triangle ceiling before imports/tab perf degrade (imports warn above it).
+ * @property {number}  triangleLimit   Scene-wide triangle count above which imports are refused.
  */
 
 // Triangle-budget tiering (watertight-repair-and-cost task 7; numbers MEASURED in
 // docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md §2/§6).
-// Imports warn above this budget and are refused above 4x (ImportLimits) — before
-// parsing when the format allows a count. With worker import + welded geometry a
+// Imports warn above the budget and are refused above the limit (ImportLimits),
+// before parsing when the format allows a count. With worker import + welded geometry a
 // tab peaks at ~1.8 GB renderer + ~1.1 GB GPU process for 10M triangles (≈ 4x the
 // web budget) and ~0.6 GB at the 2.5M warning line. Desktop keeps 6M / 24M: the
 // renderer heap is raised to 4 GiB (electron/HeapFlags.cjs), the extrapolated 24M
@@ -37,7 +38,18 @@
 // `desktopCaps` (Electron never injects it). Change it only together with the
 // spec's measured table.
 export const WEB_TRIANGLE_BUDGET = 2_500_000;
+export const WEB_TRIANGLE_LIMIT = 10_000_000;
 export const DESKTOP_TRIANGLE_BUDGET = 6_000_000;
+export const DESKTOP_TRIANGLE_LIMIT = 24_000_000;
+// WebKit (Safari, every iOS / iPadOS browser) is UNMEASURED, a
+// conservative guess (owner 2026-10-22, cia E-03); raise after a real-device test.
+export const WEBKIT_TRIANGLE_BUDGET = 1_000_000;
+export const WEBKIT_TRIANGLE_LIMIT = 3_000_000;
+const TRIANGLE_TIERS = {
+  desktop: { triangleBudget: DESKTOP_TRIANGLE_BUDGET, triangleLimit: DESKTOP_TRIANGLE_LIMIT },
+  web: { triangleBudget: WEB_TRIANGLE_BUDGET, triangleLimit: WEB_TRIANGLE_LIMIT },
+  webkit: { triangleBudget: WEBKIT_TRIANGLE_BUDGET, triangleLimit: WEBKIT_TRIANGLE_LIMIT },
+};
 /** Boolean ceiling when Booleans run in the Manifold worker (BooleanService
  *  keeps DEFAULT_BOOLEAN_TRIANGLE_CAP for the inline main-thread fallback). */
 export const WEB_BOOLEAN_TRIANGLE_CAP = 250_000;
@@ -125,7 +137,7 @@ export function detectStorageTier(env = {}) {
 export function detectCapabilities(env = {}) {
   const { hasFSA, hasIDB, desktop, desktopCaps } = env;
   const publish = !!desktop && !!env.hasListbridge;
-  const triangleBudget = desktop ? DESKTOP_TRIANGLE_BUDGET : WEB_TRIANGLE_BUDGET;
+  const { triangleBudget, triangleLimit } = TRIANGLE_TIERS[desktop ? 'desktop' : env.engine === 'webkit' ? 'webkit' : 'web'];
   const booleanTriangleCap = desktop ? DESKTOP_BOOLEAN_TRIANGLE_CAP : WEB_BOOLEAN_TRIANGLE_CAP;
   if (desktop && desktopCaps) {
     // Trust the desktop shell's declared capabilities (Node fs backed).
@@ -137,6 +149,7 @@ export function detectCapabilities(env = {}) {
       writeFiles: !!desktopCaps.writeFiles,
       publish,
       triangleBudget,
+      triangleLimit,
       booleanTriangleCap,
     };
   }
@@ -151,6 +164,7 @@ export function detectCapabilities(env = {}) {
       writeFiles: true,
       publish,
       triangleBudget,
+      triangleLimit,
       booleanTriangleCap,
     };
   }
@@ -164,6 +178,7 @@ export function detectCapabilities(env = {}) {
     watchFiles: false,
     publish,
     triangleBudget,
+    triangleLimit,
     booleanTriangleCap,
   };
 }

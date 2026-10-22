@@ -18,9 +18,9 @@ const stl = new Blob([Buffer.concat([...binaryStlChunks(4)])]);   // 64 triangle
 
 test('over 4× budget: refused before the loader runs, nothing registered', async (t) => {
   StateManager.replaceState(StateManager.freshState());
-  const before = caps.triangleBudget;
-  t.after(() => setCapabilities({ triangleBudget: before }));
-  setCapabilities({ triangleBudget: 10 });
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
+  t.after(() => setCapabilities(before));
+  setCapabilities({ triangleBudget: 10, triangleLimit: 40 });
   let loads = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { loads++; throw new Error('should not parse'); } };
   await assert.rejects(AssetLoader.loadFromBlob(stl, 'big.stl'),
@@ -33,12 +33,12 @@ test('over 4× budget: refused before the loader runs, nothing registered', asyn
 
 test('over 1× budget: one warning toast before parsing, import proceeds to the loader', async (t) => {
   StateManager.replaceState(StateManager.freshState());
-  const before = caps.triangleBudget;
+  const before = { triangleBudget: caps.triangleBudget, triangleLimit: caps.triangleLimit };
   const show = Toast.show;
   const toasts = [];
-  t.after(() => { setCapabilities({ triangleBudget: before }); Toast.show = show; });
+  t.after(() => { setCapabilities(before); Toast.show = show; });
   Toast.show = (msg, kind) => toasts.push([msg, kind]);
-  setCapabilities({ triangleBudget: 50 });
+  setCapabilities({ triangleBudget: 50, triangleLimit: 200 });
   let loads = 0;
   B.SceneLoader = { LoadAssetContainerAsync: async () => { loads++; throw new Error('stop after the check'); } };
   await assert.rejects(AssetLoader.loadFromBlob(stl, 'warn.stl'), /stop after the check/);

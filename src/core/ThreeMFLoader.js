@@ -321,7 +321,7 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
   // (MeshImport.worker.js) — the SAX pass already ran off the main thread.
   const makeContext = async (modelPath, xml) => {
     const preparsed = opts.preparsed?.get(_cleanPackagePath(modelPath) || '3D/3dmodel.model');
-    const parsed = preparsed ?? await parseThreeMFXml(xml, { triangleBudget: caps.triangleBudget });
+    const parsed = preparsed ?? await parseThreeMFXml(xml, { triangleLimit: caps.triangleLimit });
     const doc = _parseModelXml(parsed.xml);
     const cleanPath = _cleanPackagePath(modelPath) || '3D/3dmodel.model';
     const unitAttr = (doc.documentElement?.getAttribute?.('unit')
@@ -467,7 +467,7 @@ async function _buildContainer(scene, zip, modelXml, opts = {}) {
     const vertexCount = geometry.positions.length / 3;
     const triangleCount = geometry.triangles.length / 7;
     placedTriangles += triangleCount;
-    assertTriangleCapacity(placedTriangles, caps.triangleBudget, '3MF assembly');
+    assertTriangleCapacity(placedTriangles, caps.triangleLimit, '3MF assembly');
     const positions = new Float32Array(geometry.positions.length);
     const unitScale = ctx.unitScale;
     // Same arithmetic as Vector3.TransformCoordinates + fromPrintSpace, without
