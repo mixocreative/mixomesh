@@ -6320,6 +6320,15 @@ them to the engine (replaces the old inline boot block in `main.ts`). New
 restores the file's slices directly and never re-seeds — so a loaded project's
 look is authoritative.
 
+**A save writes only what the user changed** (owner decision 2026-10-22, cia
+A-11). `SettingsStore` keeps a baseline, the live settings as last reconciled:
+after `seedBootState()` (boot, New), after `resetAll()`, after each save, and on
+`PROJECT_LOADED` (a `.mixo` open or recovery, which also drops a pending
+debounced save). `save()` writes `diffSettings(baseline, live)` field by field
+over the stored blob, so tweaking one setting after opening a teammate's file
+stores that one key and never copies the file's printer or render values into
+the personal defaults New starts from (`tests/settings-scope-a11.test.mjs`).
+
 **Save trigger:** debounced `scheduleSave()` on USER edits only — a capturing
 `change`/`input`/`click` listener on `#rp-scene-body` + `#rp-print-body` (toggle
 BUTTONS fire `click` only), the viewport strip's grid/axes/smooth-shading

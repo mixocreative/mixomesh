@@ -220,15 +220,56 @@ export function load() {
   return parseStored(localStorage.getItem(STORAGE_KEY))?.settings ?? {};
 }
 
-/** Write the current settings to localStorage immediately. */
+/**
+ * The settings the user changed between two `pickSettings` snapshots, as a
+ * partial blob: scalar slices whole, object slices only their changed fields.
+ */
+export function diffSettings(before, after) {
+  const out = {};
+  for (const e of SCHEMA) {
+    if (!(e.key in after)) continue;
+    const a = after[e.key], b = before?.[e.key];
+    if (e.scalar) {
+      if (JSON.stringify(a) !== JSON.stringify(b)) out[e.key] = a;
+      continue;
+    }
+    const changed = {};
+    for (const f of Object.keys(a ?? {})) {
+      if (JSON.stringify(a[f]) !== JSON.stringify(b?.[f])) changed[f] = _clone(a[f]);
+    }
+    if (Object.keys(changed).length) out[e.key] = changed;
+  }
+  return out;
+}
+
+// What the stored settings were last reconciled against: the live settings
+// after boot / New (stored merged over factory), after a save, and after a
+// .mixo open (the file's values belong to the project, not the user). A save
+// writes only what differs from it, so an opened file's printer and render
+// setup never become personal defaults (cia A-11).
+let _baseline = null;
+
+/** Write the settings changed since the last reconcile to localStorage immediately. */
 export function save() {
   if (typeof localStorage === 'undefined') return;
+  const live = pickSettings(getState());
+  const changes = _baseline ? diffSettings(_baseline, live) : live;
+  _baseline = live;
+  if (!Object.keys(changes).length) return;
+  const settings = load();
+  for (const [key, value] of Object.entries(changes)) {
+    settings[key] = SCHEMA_BY_KEY[key].scalar ? value : { ...(settings[key] ?? {}), ...value };
+  }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: VERSION, settings: pickSettings(getState()) }));
-  } catch { /* private mode / quota — non-fatal */ }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: VERSION, settings }));
+  } catch { /* private mode / quota: non-fatal */ }
 }
 
 let _saveTimer = null;
+function _rebase() {
+  clearTimeout(_saveTimer);
+  _baseline = pickSettings(getState());
+}
 /** Debounced save — call on any user-driven settings edit. */
 export function scheduleSave() {
   clearTimeout(_saveTimer);
@@ -259,6 +300,7 @@ function _noteDamage() {
 export function seedBootState() {
   _noteDamage();
   setState(s => mergeSettings(s, load()), SILENT);
+  _rebase();
 }
 
 /** Push the live settings slices to the engine. Reused on boot, New, and reset. */
@@ -295,6 +337,7 @@ export function resetSection(sectionKey) {
 export function resetAll() {
   setState(factoryState, SILENT);
   _clearStored();
+  _rebase();
   applyToScene();
   dispatch(EVENTS.SETTINGS_RESET, { section: null });
 }
@@ -309,6 +352,7 @@ export function resetAll() {
 export function init() {
   subscribe(EVENTS.GIZMO_CHANGED, scheduleSave);
   subscribe(EVENTS.PIVOT_MODE_CHANGED, scheduleSave);
+  subscribe(EVENTS.PROJECT_LOADED, _rebase);
   if (typeof document === 'undefined') return;
   for (const id of ['rp-scene-body', 'rp-print-body']) {
     const el = document.getElementById(id);
@@ -322,7 +366,7 @@ export function init() {
 
 export const SettingsStore = {
   DEFAULTS, SECTION_KEYS, PRINT_PROJECT_FIELDS, PRINT_USER_FIELDS,
-  pickSettings, mergeSettings, parseStored, applySectionToState, factoryState,
+  pickSettings, mergeSettings, diffSettings, parseStored, applySectionToState, factoryState,
   load, save, scheduleSave, seedBootState, applyToScene,
   resetSection, resetAll, init,
 };
