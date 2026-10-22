@@ -27,6 +27,7 @@ const viewport = fakeEl();
 globalThis.document = { ...globalThis.document, createElement: () => fakeEl(), getElementById: (id) => (id === 'viewport' ? viewport : null), addEventListener() {} };
 
 const Stats = await import('../src/core/scene/SceneStats.js');
+const Count = await import('../src/core/scene/TriangleCount.js');
 const { bump } = await import('../src/core/geometry/GeometryStore.js');
 
 const engine = new BABYLON.NullEngine({ renderWidth: 32, renderHeight: 32, textureSize: 32 });
@@ -44,15 +45,15 @@ function grid(n, name = 'g') {
 test('counts come from buffer lengths, are cached, and refresh on a revision bump', () => {
   const m = grid(10);
   m.metadata = { meshId: 'mesh_g1' };
-  const a = Stats.meshCounts(m);
+  const a = Count.meshCounts(m);
   assert.deepEqual([a.tris, a.verts], [200, 121]);
-  assert.equal(Stats.meshCounts(m), a, 'cached object reused');
+  assert.equal(Count.meshCounts(m), a, 'cached object reused');
   bump('mesh_g1');
-  assert.notEqual(Stats.meshCounts(m), a, 'revision change invalidates');
+  assert.notEqual(Count.meshCounts(m), a, 'revision change invalidates');
   const flat = new BABYLON.Mesh('soup', scene);
   flat.setVerticesData('position', new Float32Array(18));
-  assert.equal(Stats.meshCounts(flat).tris, 2, 'unindexed: vertices / 3');
-  assert.deepEqual(Stats.sumCounts([m, m, flat]), { tris: 202, verts: 127 }, 'each mesh once');
+  assert.equal(Count.meshCounts(flat).tris, 2, 'unindexed: vertices / 3');
+  assert.deepEqual(Count.displayedCounts([m, m, flat], { objects: {}, derivedFor: () => null }), { tris: 202, verts: 127 }, 'each mesh once');
 });
 
 test('locale number formatting', () => {

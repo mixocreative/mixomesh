@@ -26,7 +26,7 @@ import { subscribe, getState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { StatusBar } from './StatusBar.js';
 import { getBabylonMesh } from '../core/AssetLoader.js';
-import { countSceneTriangles, countContainerTriangles, formatTriCount, meshTriangles }
+import { countSceneTriangles, countContainerTriangles, formatTriCount, displayedCounts }
   from '../core/scene/TriangleCount.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
@@ -59,6 +59,12 @@ const GEOMETRY_EVENTS = [
   EVENTS.HISTORY_UNDONE,
   EVENTS.HISTORY_REDONE,
   EVENTS.VALIDATION_COMPLETE,
+  // The count is what the viewport shows, so a refinement preview changes it.
+  EVENTS.GEOMETRY_CHANGED,
+  EVENTS.REFINEMENT_READY,
+  EVENTS.REFINEMENT_CHANGED,
+  EVENTS.REFINEMENT_CANCELLED,
+  EVENTS.REFINEMENT_STALE,
 ];
 
 let _cachedSceneTris = 0;
@@ -113,11 +119,10 @@ export const selectionMeshes = _selectionMeshes;
 
 /** Re-walk the scene and cache the total. Only called (debounced) from geometry events. */
 function _recomputeSceneTris() {
-  const scene = SceneManager.getScene?.();
   // Indirect through the exported object, not the bare function, so tests can
   // spy on `MeshStats.countSceneTriangles` and observe exactly how many real
   // walks happen.
-  _cachedSceneTris = scene ? MeshStats.countSceneTriangles(scene) : 0;
+  _cachedSceneTris = MeshStats.countSceneTriangles();
   const budget = caps.triangleBudget || 0;
   Hover.setBudgetExceeded(budget > 0 && _cachedSceneTris / budget >= WARN_RATIO);
 }
@@ -146,10 +151,11 @@ function _render() {
   let action = null;
 
   const sel = getState().selection?.selectedIds ?? [];
-  let selTris = 0, min = null, max = null;
-  for (const m of _selectionMeshes(sel)) {
+  const selMeshes = _selectionMeshes(sel);
+  const selTris = displayedCounts(selMeshes).tris;
+  let min = null, max = null;
+  for (const m of selMeshes) {
     if (!m.geometry) continue;
-    selTris += meshTriangles(m);
     m.computeWorldMatrix(true);
     const bb = m.getBoundingInfo().boundingBox;
     if (!min) { min = bb.minimumWorld.clone(); max = bb.maximumWorld.clone(); }

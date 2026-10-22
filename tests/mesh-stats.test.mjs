@@ -107,18 +107,18 @@ await test('HISTORY_UNDONE / HISTORY_REDONE / VALIDATION_COMPLETE also queue a r
 await test('countSceneTriangles counts a meshId ONCE even when a stale/clone mesh shares it', () => {
   const liveMesh = { metadata: { meshId: 'm1' }, geometry: {}, getTotalIndices: () => 12 };
   AssetLoader.bindRestoredMesh('m1', liveMesh, 'asset1');
+  setState(s => ({ ...s, scene: { ...s.scene, objects: { m1: { id: 'm1', name: 'm1' } } } }), { silent: true });
   // A clone sharing the SAME metadata object (Babylon's Mesh.clone behaviour)
   // — same meshId, but NOT the registered live mesh for it.
   const exportClone = { metadata: liveMesh.metadata, geometry: {}, getTotalIndices: () => 12 };
-  const scene = { meshes: [liveMesh, exportClone] };
-  const total = MeshStats.countSceneTriangles(scene);
+  SceneManager.getScene = () => ({ meshes: [liveMesh, exportClone] });
+  const total = MeshStats.countSceneTriangles();
   assert.equal(total, 4, `expected the live mesh's 4 triangles counted exactly once (not doubled by the clone), got ${total}`);
 });
 
 await test('countSceneTriangles counts a mesh with no live registration at all as zero', () => {
-  const orphan = { metadata: { meshId: 'never-registered' }, geometry: {}, getTotalIndices: () => 30 };
-  const scene = { meshes: [orphan] };
-  assert.equal(MeshStats.countSceneTriangles(scene), 0, 'a meshId with no live registry match must not be counted');
+  setState(s => ({ ...s, scene: { ...s.scene, objects: { 'never-registered': { id: 'never-registered' } } } }), { silent: true });
+  assert.equal(MeshStats.countSceneTriangles(), 0, 'a meshId with no live registry match must not be counted');
 });
 
 // ── CIA F1: the watertight badge keys on result TYPES, not severity ──────

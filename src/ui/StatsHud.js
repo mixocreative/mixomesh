@@ -3,7 +3,7 @@
 // scene totals when nothing is selected. After a geometry change (Subdivide,
 // decimate, Boolean, repair, undo/redo, import) the changed count reads
 // "12,000 → 48,000" for ~3 s, then settles. Event-driven and coalesced — no
-// per-frame polling; counts come from buffer lengths (core/scene/SceneStats).
+// per-frame polling; counts come from core/scene/TriangleCount (the one counter).
 // Non-interactive except its hide button; toggled from the viewport display
 // strip ("Statistics"), default on, per-user persisted, never stored in a
 // project. Not a live region (it would spam screen readers); the readout is
@@ -11,10 +11,9 @@
 
 import { EVENTS } from '../core/events.js';
 import { subscribe, getState, setState } from '../core/StateManager.js';
-import { getBabylonMesh } from '../core/AssetLoader.js';
 import { canonicalObjectId } from '../core/LogicalObjects.js';
-import { getDerivedMeshes } from '../core/refinement/RefinementController.js';
-import { sumCounts, nextHighlight, statsView } from '../core/scene/SceneStats.js';
+import { nextHighlight, statsView } from '../core/scene/SceneStats.js';
+import { displayedCounts, sceneObjectMeshes } from '../core/scene/TriangleCount.js';
 import { selectionMeshes } from './MeshStats.js';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { t, getLocale } from '../i18n/index.js';
@@ -41,27 +40,6 @@ let _now = () => Date.now();
 /** Test seam: replace the clock. */
 export function setClock(fn) { _now = fn ?? (() => Date.now()); }
 
-/** Displayed geometry of one logical object: its refined (subdivided) meshes when they are what the viewport shows. */
-function _displayed(leadId, sourceMeshes) {
-  const derived = getDerivedMeshes?.(leadId);
-  if (derived?.length && derived.some(m => m?.isVisible)) return derived;
-  return sourceMeshes;
-}
-
-/** Group meshes by logical object and swap in refined meshes where shown. */
-function _resolve(meshes, objects) {
-  const byLead = new Map();
-  for (const m of meshes) {
-    const id = m?.metadata?.meshId;
-    const lead = id && objects[id] ? canonicalObjectId(id, objects) : id;
-    if (!byLead.has(lead)) byLead.set(lead, []);
-    byLead.get(lead).push(m);
-  }
-  const out = [];
-  for (const [lead, list] of byLead) out.push(..._displayed(lead, list));
-  return out;
-}
-
 /**
  * Current snapshot (pure over state + registry; exported for tests).
  * @returns {{ kind: string, key: string, selected: number, total: number, tris: number, verts: number }}
@@ -72,13 +50,8 @@ export function snapshot() {
   const sel = state.selection?.selectedIds ?? [];
   const leads = new Set(Object.keys(objects).filter(id => !objects[id]?.isGhost).map(id => canonicalObjectId(id, objects)));
   const total = leads.size;
-  let meshes;
-  if (sel.length) {
-    meshes = selectionMeshes(sel);
-  } else {
-    meshes = Object.keys(objects).map(id => getBabylonMesh(id)).filter(Boolean);
-  }
-  const { tris, verts } = sumCounts(_resolve(meshes, objects));
+  const meshes = sel.length ? selectionMeshes(sel) : sceneObjectMeshes(objects);
+  const { tris, verts } = displayedCounts(meshes, { objects });
   return {
     kind: sel.length ? 'selection' : 'scene',
     key: sel.length ? [...sel].sort().join('|') : 'scene',

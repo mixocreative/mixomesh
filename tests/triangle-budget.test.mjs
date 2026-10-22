@@ -110,15 +110,13 @@ function makeContainer(trisList) {
   };
 }
 
-// Pre-existing scene content (already has a meshId — a real print part).
-// Registered through AssetLoader.bindRestoredMesh (not just given a
-// metadata.meshId) so it matches what MeshStats.countSceneTriangles now
-// requires (fix round 1, task 8 follow-up): only the CURRENTLY REGISTERED
-// live mesh for an id is counted, so a real print part must actually be the
-// live-registered mesh, same as production.
+// Pre-existing scene content: an object in the scene document whose live
+// registered mesh carries the triangles, same as production (the count reads
+// the objects in the scene, each through the mesh registry).
 function makeSceneMesh(meshId, tris) {
   const mesh = { metadata: {}, geometry: {}, getTotalIndices: () => tris * 3 };
   AssetLoader.bindRestoredMesh(meshId, mesh, 'test-asset');
+  StateManager.setState(s => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, [meshId]: { id: meshId, name: meshId } } } }), { silent: true });
   return mesh;
 }
 
@@ -199,8 +197,8 @@ await test('instantiateAsset (re-drop of an already-loaded asset) also warns ove
   const assetId = Object.keys(StateManager.getState().scene.assetLibrary)[0];
   assert.ok(assetId, 'asset registered after loadFromBlob');
 
-  // Re-instantiate at a new drop position: this container alone pushes
-  // scene(40) + incoming(70) over the 100 budget.
+  // Re-instantiate at a new drop position: scene (40 + the first copy's 10)
+  // + incoming (70) is over the 100 budget.
   const bigContainer = makeContainer([70]);
   B.SceneLoader = { LoadAssetContainerAsync: async () => bigContainer };
   const meshIds = await AssetLoader.instantiateAsset(assetId, new B.Vector3(0, 0, 0));
@@ -209,7 +207,7 @@ await test('instantiateAsset (re-drop of an already-loaded asset) also warns ove
   assert.equal(budgetToasts.length, 1, 'instantiateAsset path also warns over budget');
   assert.equal(
     budgetToasts[0].message,
-    t('toast.triangleBudget', { current: formatTriCount(110), budget: formatTriCount(100) }),
+    t('toast.triangleBudget', { current: formatTriCount(120), budget: formatTriCount(100) }),
   );
   assert.equal(bigContainer.added, true, 're-instantiate proceeds despite the warning');
   assert.equal(meshIds.length, 1);

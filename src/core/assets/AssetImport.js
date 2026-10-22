@@ -321,8 +321,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
  */
 export async function preParseCheck(blob, filename) {
   const ext = extOf(filename);
-  const scene = SceneManager.getScene?.();
-  const sceneTriangles = scene ? countSceneTriangles(scene) : 0;
+  const sceneTriangles = countSceneTriangles();
   let estimate = await estimateFileTriangles(blob, ext);
   if (needsExactCount(estimate, { sceneTriangles, budget: caps.triangleBudget })) {
     estimate = (await countFileTriangles(blob, ext)) ?? estimate;
@@ -363,22 +362,21 @@ function _applyResinDefault(container) {
  * has a meshId yet (that lands later, in registerInstantiatedMeshes, after
  * `addAllToScene()`). Shared by `loadFromBlob` AND `instantiateAsset` — both
  * call `container.addAllToScene()` and both need the same check.
- * @param {BABYLON.Scene} scene
  * @param {BABYLON.AssetContainer} container
  */
-function _assertContainerCapacity(scene, container) {
+function _assertContainerCapacity(container) {
   try {
-    assertTriangleCapacity(countSceneTriangles(scene) + countContainerTriangles(container), caps.triangleBudget, 'Scene after import');
+    assertTriangleCapacity(countSceneTriangles() + countContainerTriangles(container), caps.triangleBudget, 'Scene after import');
   } catch (err) {
     try { container.dispose?.(); } catch { /* retain the capacity error */ }
     throw err;
   }
 }
 
-function _warnIfOverBudget(scene, container) {
+function _warnIfOverBudget(container) {
   const budget = caps.triangleBudget;
   if (!(budget > 0)) return;
-  const projectedTris = countSceneTriangles(scene) + countContainerTriangles(container);
+  const projectedTris = countSceneTriangles() + countContainerTriangles(container);
   if (projectedTris <= budget) return;
   Toast.show(t('toast.triangleBudget', {
     current: formatTriCount(projectedTris),
@@ -451,7 +449,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     const container = await loadContainer(blobUrl, ext, scene, _importProgress(filename), siblings,
       { signal: abort.signal, size: blob.size, hidden: true });
     _throwIfAborted(abort.signal, container);
-    _assertContainerCapacity(scene, container);
+    _assertContainerCapacity(container);
     _overlayUpdate(0.8, t('import.progress.materials', { filename }));
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
@@ -487,7 +485,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
 
-    if (preParse.verdict !== 'warn') _warnIfOverBudget(scene, container);   // warned pre-parse already
+    if (preParse.verdict !== 'warn') _warnIfOverBudget(container);   // warned pre-parse already
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
@@ -582,7 +580,7 @@ export async function instantiateAsset(assetId, position) {
     );
     _throwIfAborted(abort.signal, container);
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
-    _assertContainerCapacity(scene, container);
+    _assertContainerCapacity(container);
     splitMultiMaterialMeshesInContainer(container);
     registerContainer(assetId, container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
@@ -591,7 +589,7 @@ export async function instantiateAsset(assetId, position) {
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, {
       fileName: String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, ''),
     });
-    if (preParse?.verdict !== 'warn') _warnIfOverBudget(scene, container);
+    if (preParse?.verdict !== 'warn') _warnIfOverBudget(container);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
