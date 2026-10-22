@@ -68,17 +68,16 @@ export async function guard(fn, { title, modal = false, filename, loadingToastId
  * @template T
  */
 export async function runTask(label, fn, { overlay = false } = {}) {
-  let toastId = null;
-  if (overlay) ProgressOverlay.show(label);
-  else toastId = Toast.show(label, 'loading');
-  const onProgress = overlay
-    ? (frac, msg) => ProgressOverlay.update(frac, msg ?? label)
+  const session = overlay ? ProgressOverlay.open(label) : null;
+  const toastId = overlay ? null : Toast.show(label, 'loading');
+  const onProgress = session
+    ? (frac, msg) => session.update(frac, msg ?? label)
     : () => {};
   try {
     return await fn(onProgress);
   } finally {
-    if (overlay) ProgressOverlay.hide();
-    else if (toastId) dismiss(toastId);
+    session?.close();
+    if (toastId) dismiss(toastId);
   }
 }
 

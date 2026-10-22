@@ -10,6 +10,7 @@ const { ProgressOverlay } = await import('../src/ui/ProgressOverlay.js');
 ProgressOverlay.show = () => {};
 ProgressOverlay.update = () => {};
 ProgressOverlay.hide = () => {};
+ProgressOverlay.open = () => ({ update() {}, close() {} });
 const { StateManager, getState } = await import('../src/core/StateManager.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { importWithDedupe } = await import('../src/core/assets/AssetImport.js');

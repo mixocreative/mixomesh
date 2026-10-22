@@ -7,6 +7,7 @@ import { EVENTS } from '../events.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
 import { ProgressOverlay } from '../../ui/ProgressOverlay.js';
+import { SHOW_DELAY_MS, MIN_VISIBLE_MS } from '../workers/JobActivity.js';
 import { sha256HexOfBlob } from '../hash.js';
 import {
   assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, needsExactCount, OVER_BUDGET,
@@ -59,19 +60,15 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 // UI stays live, and Cancel aborts every running import (nothing half-added)
 // AND the rest of a multi-file drop (importCancelGeneration). The overlay is
 // the ONE progress surface for an import (its worker jobs are hidden from the
-// activity panel) and follows the same NN/g timing: it appears only after
-// OVERLAY_DELAY_MS and, once shown, stays at least OVERLAY_MIN_MS.
-// Ref-counted so a multi-file drop keeps one overlay up until the LAST import
-// finishes.
+// activity panel) and follows JobActivity's NN/g timing (shown after
+// SHOW_DELAY_MS, then at least MIN_VISIBLE_MS). Imports running together share
+// one overlay session until the LAST one finishes; it is a session of its own,
+// so an export's overlay underneath survives it (cia B-08).
 
-const OVERLAY_DELAY_MS = 400;
-const OVERLAY_MIN_MS = 500;
 let _importDepth = 0;
 const _importAborts = new Set();
 let _cancelGen = 0;
-let _overlayTimer = null;
-let _overlayShownAt = 0;
-let _overlayLast = { frac: 0.02, label: '' };
+let _overlay = null;
 
 /** Bumped by every Cancel. A drop loop that sees it change stops (review I5). */
 export function importCancelGeneration() { return _cancelGen; }
@@ -82,20 +79,15 @@ function _cancelImports() {
 }
 
 function _overlayUpdate(frac, label) {
-  _overlayLast = { frac, label };
-  if (_overlayShownAt) ProgressOverlay.update(frac, label);
+  _overlay?.update(frac, label);
 }
 
 function _importBegin(label, abort = null) {
   if (abort) _importAborts.add(abort);
-  if (++_importDepth === 1 && !_overlayShownAt && !_overlayTimer) {
-    _overlayTimer = setTimeout(() => {
-      _overlayTimer = null;
-      if (_importDepth === 0) return;
-      ProgressOverlay.show(t('job.importModel'), { onCancel: _cancelImports });
-      _overlayShownAt = Date.now();
-      ProgressOverlay.update(_overlayLast.frac, _overlayLast.label);
-    }, OVERLAY_DELAY_MS);
+  if (++_importDepth === 1) {
+    _overlay = ProgressOverlay.open(t('job.importModel'), {
+      onCancel: _cancelImports, delayMs: SHOW_DELAY_MS, minVisibleMs: MIN_VISIBLE_MS,
+    });
   }
   _overlayUpdate(0.02, label);
 }
@@ -123,11 +115,8 @@ function _importEnd(abort = null) {
   if (abort) _importAborts.delete(abort);
   _importDepth = Math.max(0, _importDepth - 1);
   if (_importDepth !== 0) return;
-  if (_overlayTimer) { clearTimeout(_overlayTimer); _overlayTimer = null; }
-  if (!_overlayShownAt) return;
-  const hide = () => { if (_importDepth === 0) { ProgressOverlay.hide(); _overlayShownAt = 0; } };
-  const left = OVERLAY_MIN_MS - (Date.now() - _overlayShownAt);
-  if (left > 0) setTimeout(hide, left); else hide();
+  _overlay?.close();
+  _overlay = null;
 }
 
 function _throwIfAborted(signal, container) {

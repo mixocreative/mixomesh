@@ -8,6 +8,7 @@ const { ProgressOverlay } = await import('../src/ui/ProgressOverlay.js');
 ProgressOverlay.show = () => {};
 ProgressOverlay.update = () => {};
 ProgressOverlay.hide = () => {};
+ProgressOverlay.open = () => ({ update() {}, close() {} });
 
 const { StateManager, setState } = await import('../src/core/StateManager.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');

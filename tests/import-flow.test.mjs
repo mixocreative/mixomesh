@@ -8,9 +8,11 @@ installEnv();
 const B = window.BABYLON;
 const { ProgressOverlay } = await import('../src/ui/ProgressOverlay.js');
 const overlay = { shows: 0, onCancel: null, hides: 0 };
-ProgressOverlay.show = (_title, opts) => { overlay.shows++; overlay.onCancel = opts?.onCancel ?? null; };
-ProgressOverlay.update = () => {};
-ProgressOverlay.hide = () => { overlay.hides++; };
+ProgressOverlay.open = (_title, opts) => {
+  overlay.onCancel = opts?.onCancel ?? null;
+  const timer = setTimeout(() => { overlay.shows++; }, opts?.delayMs ?? 0);
+  return { update() {}, close() { clearTimeout(timer); overlay.hides++; } };
+};
 const { StateManager, setState } = await import('../src/core/StateManager.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const AI = await import('../src/core/assets/AssetImport.js');
