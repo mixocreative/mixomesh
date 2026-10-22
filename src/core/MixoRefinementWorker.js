@@ -52,10 +52,12 @@ async function runWorker(input, level, { signal, sourceRevision = 0, onProgress,
   try {
     result = await _task.run({ kind: multiple ? 'refine-parts' : 'refine', level, geometry }, {
       transfer: buffers, signal, timeoutMs, revision: sourceRevision,
-      onProgress: ({ phase, completed, total }) => {
-        if (typeof phase !== 'string' || !Number.isSafeInteger(completed) || !Number.isSafeInteger(total)
-          || completed < 0 || total < 1 || completed > total) throw new Error('invalid refinement progress');
-        onProgress?.({ phase, completed, total, jobId, sourceRevision });
+      // RefinementController keeps its `{ phase, completed, total }` progress
+      // entry (RefinementSection renders completed/total); the wire is
+      // `{ stage, fraction }` like every other worker.
+      onProgress: ({ stage, fraction }) => {
+        if (typeof stage !== 'string' || !(fraction >= 0 && fraction <= 1)) throw new Error('invalid refinement progress');
+        onProgress?.({ phase: stage, completed: fraction, total: 1, jobId, sourceRevision });
       },
     });
   } catch (error) {

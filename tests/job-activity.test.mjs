@@ -47,15 +47,15 @@ test('progress makes it determinate with %, stage, and time left once stable', (
   assert.equal(row.percent, 5);
   assert.equal(row.stage, 'read');
   assert.equal(row.remainingMs, null, 'no ETA before 3 s / 10 %');
-  now = 4500; job.progress({ stage: 'weld', loaded: 45, total: 100 });
+  now = 4500; job.progress({ stage: 'weld', fraction: 0.45 });
   [row] = JA.viewModel(now);
   assert.equal(row.percent, 45);
   assert.equal(row.stage, 'weld');
   assert.equal(row.remainingMs, Math.round((4000 / 0.4) * 0.55));
-  job.progress({ phase: 'Subdivide', completed: 3, total: 4 });
+  job.progress({ stage: 'refining', fraction: 0.75 });
   [row] = JA.viewModel(now);
   assert.equal(row.percent, 75);
-  assert.equal(row.stage, 'Subdivide');
+  assert.equal(row.stage, 'refining');
 });
 
 test('long jobs without progress show elapsed time after 10 s', () => {

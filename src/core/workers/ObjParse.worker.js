@@ -63,11 +63,7 @@ async function _parse({ blobUrl, ext, siblings }, progress) {
   try {
     const container = await SceneLoader.LoadAssetContainerAsync(
       blobUrl, '', scene,
-      (evt) => progress({
-        lengthComputable: !!evt?.lengthComputable,
-        loaded: evt?.loaded ?? 0,
-        total: evt?.total ?? 0,
-      }),
+      (evt) => progress({ stage: 'read', ...(evt?.lengthComputable && evt.total > 0 ? { fraction: evt.loaded / evt.total } : {}) }),
       ext
     );
 

@@ -21,7 +21,7 @@ test('forwards progress and accepts a validated result without detaching source'
   assert.equal(posted.type, 'run');
   assert.equal(posted.revision, 3);
   assert.notEqual(posted.payload.geometry.positions, source.positions);
-  worker.reply({ id: posted.id, type: 'progress', phase: 'Refining', completed: 1, total: 1 });
+  worker.reply({ id: posted.id, type: 'progress', stage: 'refining', fraction: 1 });
   worker.reply({ id: posted.id, type: 'done', revision: 3, result: { geometry: valid() } });
   const result = await promise;
   assert.equal(result.sourceRevision, 3);

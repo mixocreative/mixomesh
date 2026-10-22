@@ -43,15 +43,15 @@ serveTask(async ({ path, tempName, bytes } = {}, { progress } = {}) => {
   const total = bytes.byteLength;
 
   const temp = await dir.getFileHandle(tempName, { create: true });
-  progress?.({ stage: 'temp', loaded: 0, total });
+  progress?.({ stage: 'temp', fraction: 0 });
   try {
-    await writeAll(temp, bytes, loaded => progress?.({ stage: 'temp', loaded, total }));
+    await writeAll(temp, bytes, loaded => progress?.({ stage: 'temp', fraction: total > 0 ? loaded / total : 1 }));
   } catch (err) {
     await remove(dir, tempName);
     throw err;
   }
 
-  progress?.({ stage: 'swap', loaded: total, total });
+  progress?.({ stage: 'swap', fraction: 1 });
   if (typeof temp.move === 'function') {
     await temp.move(name);
     return true;

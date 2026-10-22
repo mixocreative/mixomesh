@@ -37,20 +37,6 @@ export function subscribe(fn) {
   return () => _subs.delete(fn);
 }
 
-/** Fraction 0..1 from a worker progress message, or null when it carries none. */
-export function fractionOf(fields) {
-  if (!fields || typeof fields !== 'object') return null;
-  if (Number.isFinite(fields.fraction)) return Math.max(0, Math.min(1, fields.fraction));
-  if (Number.isFinite(fields.loaded) && Number.isFinite(fields.total) && fields.total > 0) {
-    return Math.max(0, Math.min(1, fields.loaded / fields.total));
-  }
-  const done = Number.isFinite(fields.done) ? fields.done : fields.completed;
-  if (Number.isFinite(done) && Number.isFinite(fields.total) && fields.total > 0) {
-    return Math.max(0, Math.min(1, done / fields.total));
-  }
-  return null;
-}
-
 /**
  * Register a running job.
  * @param {{ label: string, cancel?: (() => void) | null, hidden?: boolean }} opts
@@ -70,15 +56,15 @@ export function beginJob({ label, cancel = null, hidden = false }) {
   _notify();
   return {
     id,
+    /** @param {import('./serveTask.js').ProgressFields} fields */
     progress(fields) {
       if (job.endedAt != null) return;
-      const f = fractionOf(fields);
-      if (f != null) {
+      if (Number.isFinite(fields?.fraction)) {
+        const f = Math.max(0, Math.min(1, fields.fraction));
         if (job.firstProgressAt == null) job.firstProgressAt = { at: _clock(), fraction: f };
         job.fraction = f;
       }
-      const stage = fields?.stage ?? fields?.phase;
-      if (typeof stage === 'string') job.stage = stage;
+      if (typeof fields?.stage === 'string') job.stage = fields.stage;
       _notify();
     },
     end(error) {
@@ -165,4 +151,4 @@ export function hasJobs() { return _jobs.size > 0; }
 /** Test seam: forget everything. */
 export function resetJobs() { _jobs.clear(); _seq = 0; _notify(); }
 
-export const JobActivity = { beginJob, cancelJob, subscribe, viewModel, hasJobs, fractionOf, setClock, resetJobs };
+export const JobActivity = { beginJob, cancelJob, subscribe, viewModel, hasJobs, setClock, resetJobs };

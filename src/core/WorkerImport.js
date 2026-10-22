@@ -130,7 +130,7 @@ function _buildContainer(scene, parsed, siblings) {
  * @param {BABYLON.Scene} scene
  * @param {string} blobUrl
  * @param {Map<string,string>|null} siblings  lowercase filename → object URL
- * @param {(evt:{lengthComputable:boolean,loaded:number,total:number})=>void} [onProgress]
+ * @param {(evt: import('./workers/serveTask.js').ProgressFields) => void} [onProgress]
  * @param {{ timeoutMs?: number, signal?: AbortSignal }} [opts]  per-job timeout (default WORKER_JOB_TIMEOUT_MS), Cancel
  * @returns {Promise<BABYLON.AssetContainer>}
  */

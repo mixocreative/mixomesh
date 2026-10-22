@@ -122,15 +122,11 @@ function _stageText(filename, stage) {
   return `${filename} — ${text === key ? stage : text}`;
 }
 
+/** Parse progress (`{ stage, fraction? }`) fills the first three quarters of the overlay bar. */
 function _importProgress(filename) {
   return (evt) => {
-    if (evt && typeof evt.fraction === 'number') {
-      _overlayUpdate(0.02 + 0.73 * Math.min(1, evt.fraction), _stageText(filename, evt.stage));
-    } else if (evt?.lengthComputable && evt.total > 0) {
-      _overlayUpdate(0.02 + 0.73 * (evt.loaded / evt.total), _stageText(filename, 'read'));
-    } else {
-      _overlayUpdate(0.4, _stageText(filename, evt?.stage ?? 'read'));
-    }
+    const fraction = Number.isFinite(evt?.fraction) ? 0.02 + 0.73 * Math.min(1, evt.fraction) : 0.4;
+    _overlayUpdate(fraction, _stageText(filename, evt?.stage ?? 'read'));
   };
 }
 
@@ -211,7 +207,11 @@ export async function loadContainer(blobUrl, ext, scene, onProgress, siblings, o
     }
   }
   if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
-  return BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, onProgress, ext);
+  // Babylon reports { loaded, total }; every other producer speaks { stage, fraction }.
+  const babylonProgress = onProgress && ((evt) => onProgress(evt?.lengthComputable && evt.total > 0
+    ? { stage: 'read', fraction: evt.loaded / evt.total }
+    : { stage: 'read' }));
+  return BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, babylonProgress ?? null, ext);
 }
 
 /**

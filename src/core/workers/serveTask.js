@@ -4,6 +4,15 @@
 //     or { result, transfer: Transferable[] } via the `transferable()` wrapper.
 // The revision from the request is echoed on 'done' so the client can drop
 // stale results.
+//
+// Progress is ONE shape for every worker: `{ stage, fraction? }` (see
+// ProgressFields). JobActivity and the import overlay read nothing else.
+
+/**
+ * @typedef {object} ProgressFields
+ * @property {string} stage  a `job.stage.*` key suffix ('read', 'parse', 'weld', …)
+ * @property {number} [fraction]  0..1 of the whole job; absent = indeterminate
+ */
 
 const TRANSFER = Symbol('transfer');
 
@@ -20,6 +29,7 @@ export function serveTask(handler, scope) {
     const msg = event.data;
     if (!msg || msg.type !== 'run') return;
     const { id, payload, revision } = msg;
+    /** @param {ProgressFields} fields */
     const progress = (fields) => target().postMessage({ ...fields, id, type: 'progress' });
     try {
       const out = await handler(payload, { progress, revision });
