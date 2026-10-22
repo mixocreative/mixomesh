@@ -1,39 +1,27 @@
-// Live import paths: blob/handle → AssetContainer → scene, with progress
-// overlay, OBJ sibling resolution, split-on-import, library-GLB registration,
-// and asset re-instantiation from the cached blob URL.
+// Live import paths: blob/handle → AssetContainer → scene, and asset
+// re-instantiation from the cached blob URL. The pieces live beside it:
+//   ImportSession.js  blocking job, cancel scope, multi-file batch
+//   ImportBudget.js   pre-parse estimate + triangle-budget warnings
+//   ContainerLoad.js  blob URL → container (worker first, plugin fallback)
+//   ImportDedupe.js   "already in this project" lookup + prompt
+//   LibraryImport.js  library-GLB registration + item filtering
+// This module is their façade for AssetLoader, the UI and the tests.
 
-import { dispatch, setState, getState, markDirty } from '../StateManager.js';
-import { EVENTS } from '../events.js';
+import { getState, markDirty } from '../StateManager.js';
 import { SceneManager } from '../SceneManager.js';
 import { ShaderLibrary } from '../ShaderLibrary.js';
-import { beginJob, isRunning } from '../workers/JobActivity.js';
 import { sha256HexOfBlob } from '../hash.js';
-import {
-  assertImportFileSize, assertTriangleCapacity, assertPreParseCapacity, needsExactCount, OVER_BUDGET,
-} from '../import/ImportLimits.js';
-import { estimateFileTriangles, countFileTriangles } from '../import/TriangleEstimate.js';
-import {
-  bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT,
-} from '../ImportNormalizer.js';
-import {
-  extractModelRatio,
-  findLibraryItemRoots,
-  findLibraryRootByItem,
-  isLibraryImport,
-  isNodeWithinRoot,
-} from '../import/ImportMetadata.js';
+import { assertImportFileSize } from '../import/ImportLimits.js';
+import { bakeImportTransform, importScaleFactor, DEFAULT_SOURCE_UNIT } from '../ImportNormalizer.js';
+import { extractModelRatio } from '../import/ImportMetadata.js';
 import { buildImportHierarchy } from '../import/ImportHierarchy.js';
 import { SUPPORTED_EXTENSIONS, extOf } from './AssetTypes.js';
 import { setBlobUrl, getBlobUrl, getBlob, revokeBlobUrl } from './BlobUrls.js';
-import {
-  newId, registerContainer, removeContainer,
-} from './MeshRegistry.js';
+import { newId, registerContainer, removeContainer } from './MeshRegistry.js';
 import {
   collectObjSiblings, rememberObjSiblings, getObjSiblings,
   installSiblingUrls, noteMissingMtl, revokeObjSiblings,
 } from './ObjSiblings.js';
-import { isWorkerImportSupported, loadObjContainerViaWorker } from '../WorkerImport.js';
-import { isMeshWorkerImport, loadMeshContainerViaWorker } from '../MeshImportWorker.js';
 import { splitMultiMaterialMeshesInContainer } from './MeshSplit.js';
 import {
   uniqueHierarchyName, registerAssetEntry, registerInstantiatedMeshes,
@@ -41,104 +29,17 @@ import {
 } from './AssetRegistration.js';
 import { queueThumbnail } from './AssetThumbnail.js';
 import { isLoading as isProjectLoading } from '../persist/LoadGate.js';
-import { caps, isDesktop } from '../storage/capabilities.js';
-import { t } from '../../i18n/index.js';
-import { Toast } from '../../ui/Toast.js';
-import { countSceneTriangles, countContainerTriangles, formatTriCount } from '../scene/TriangleCount.js';
-// Side-effect: registers the `.3mf` SceneLoader plugin so the LoadAssetContainer
-// paths below (drop / re-instantiate / project restore) handle 3MF unchanged.
-import '../ThreeMFLoader.js';
-import '../import/MixoPrimitiveExtras.js';
+import { linkedAbort, beginImport, importProgress, endImport, throwIfAborted } from './ImportSession.js';
+import { preParseCheck, showBudgetWarning, assertContainerCapacity, warnIfOverBudget } from './ImportBudget.js';
+import { loadContainer } from './ContainerLoad.js';
+import { DUPLICATE_CHOICE, findByHash, askDuplicateImport } from './ImportDedupe.js';
+import { tryRegisterLibraryImport, filterContainerToLibraryItem } from './LibraryImport.js';
 
-const BABYLON = window.BABYLON;
-if (!BABYLON) throw new Error('Babylon.js failed to load');
-
-// ── Import progress (field request) ──────────────────────────────────────
-// An import changes the scene the user is editing, so it is a BLOCKING job in
-// JobActivity (heavy-mesh spec §5.4): the overlay (ui/ProgressOverlay.js)
-// renders it with Cancel, which aborts every running import (nothing
-// half-added) AND the rest of a multi-file drop (beginImportBatch). The
-// import's worker steps (hash, parse, weld) run on the import's own signal, so
-// the registry files them under the import instead of the activity panel: one
-// progress surface, by construction.
-
-const IMPORT_JOB = 'job.importModel';
-const _importAborts = new Set();
-
-function _cancelImports() {
-  for (const a of [..._importAborts]) a.abort();
-}
-
-/**
- * A multi-file import (drop, pick, open) is one batch with one cancel: the
- * overlay's Cancel, the caller's `signal`, or any file's AbortError (e.g. its
- * hash cancelled in the activity panel) ends the running file and every file
- * after it.
- * @param {{ signal?: AbortSignal }} [opts]  the caller's cancel (API request)
- * @returns {{ signal: AbortSignal, run<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T>, end(): void }}
- *   pass `signal` to each file's import inside `run`; call `end()` in finally
- */
-export function beginImportBatch({ signal } = {}) {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal?.addEventListener('abort', abort, { once: true });
-  if (signal?.aborted) abort();
-  _importAborts.add(controller);
-  return {
-    signal: controller.signal,
-    async run(fn) {
-      try { return await fn(controller.signal); }
-      catch (err) { if (err?.name === 'AbortError') abort(); throw err; }
-    },
-    end() {
-      _importAborts.delete(controller);
-      signal?.removeEventListener('abort', abort);
-    },
-  };
-}
-
-/** An AbortController that also fires when the caller's `signal` does. */
-function _linkedAbort(signal) {
-  const abort = new AbortController();
-  const relay = () => abort.abort();
-  signal?.addEventListener('abort', relay, { once: true });
-  if (signal?.aborted) abort.abort();
-  abort.unlink = () => signal?.removeEventListener('abort', relay);
-  return abort;
-}
-
-/** Start one import's blocking job; Cancel in the overlay aborts every import. */
-function _beginImport(filename, abort) {
-  _importAborts.add(abort);
-  const job = beginJob({ label: IMPORT_JOB, detail: filename, blocking: true, signal: abort.signal, cancel: _cancelImports });
-  job.progress({ stage: 'read', fraction: 0.02 });
-  return job;
-}
-
-/** Parse progress (`{ stage, fraction? }`) fills the first three quarters of the overlay bar. */
-function _importProgress(job) {
-  return (evt) => job.progress({
-    stage: evt?.stage ?? 'read',
-    fraction: Number.isFinite(evt?.fraction) ? 0.02 + 0.73 * Math.min(1, evt.fraction) : 0.4,
-  });
-}
-
-function _endImport(job, abort) {
-  _importAborts.delete(abort);
-  abort.unlink();
-  job.end();
-}
-
-function _throwIfAborted(signal, container) {
-  if (!signal?.aborted) return;
-  try { container?.dispose?.(); } catch { /* not scene-owned */ }
-  throw new DOMException('Import cancelled', 'AbortError');
-}
-
-/** True while any import (dedupe hash, loadFromBlob, instantiateAsset) is in flight (F20 / M2). */
-export function isImporting() {
-  return isRunning(IMPORT_JOB);
-}
+export { beginImportBatch, isImporting } from './ImportSession.js';
+export { preParseCheck } from './ImportBudget.js';
+export { loadContainer, mayFallBackToMainThread, MAIN_THREAD_FALLBACK_MAX_BYTES } from './ContainerLoad.js';
+export { DUPLICATE_CHOICE, findByHash, askDuplicateImport } from './ImportDedupe.js';
+export { filterContainerToLibraryItem } from './LibraryImport.js';
 
 export const PROJECT_LOADING_MESSAGE =
   'A project is still loading — wait for it to finish before importing';
@@ -148,61 +49,6 @@ export const PROJECT_LOADING_MESSAGE =
 // Surfaced through the normal safeImport modal by the caller.
 function _assertNoProjectLoad() {
   if (isProjectLoading()) throw new Error(PROJECT_LOADING_MESSAGE);
-}
-
-/** Above this size a failed worker parse is NOT retried on the main thread:
- *  the files that time out or crash a worker are exactly the ones that would
- *  freeze or kill the tab there (audit area 2c). */
-export const MAIN_THREAD_FALLBACK_MAX_BYTES = 32 * 1024 * 1024;
-
-/** Worker failures the main thread must not retry: it would freeze or refuse too. */
-const NO_RETRY_CODES = new Set(['timeout', OVER_BUDGET]);
-
-/** Worker failure → may the main-thread SceneLoader retry it? */
-export function mayFallBackToMainThread(err, size) {
-  if (err?.name === 'AbortError') return false;
-  if (NO_RETRY_CODES.has(err?.code)) return false;
-  return !(size > MAIN_THREAD_FALLBACK_MAX_BYTES);
-}
-
-/**
- * Load an AssetContainer from a blob URL. STL and 3MF parse + weld in
- * workers/MeshImport.worker.js and OBJ in workers/ObjParse.worker.js when
- * Worker exists; a worker failure on a small file falls back to the
- * main-thread SceneLoader path (which the installed PreprocessUrl sibling
- * swap still covers); a big file, a timeout or Cancel never does.
- * @param {string} blobUrl
- * @param {string} ext
- * @param {BABYLON.Scene} scene
- * @param {Function|null} onProgress
- * @param {Map<string,string>|null} siblings
- * @param {{ signal?: AbortSignal, size?: number }} [opts]
- *   `signal`: the import's own signal, which also files the worker job under
- *   the import's blocking job (one progress surface).
- */
-export async function loadContainer(blobUrl, ext, scene, onProgress, siblings, opts = {}) {
-  const { signal, size } = opts;
-  if (isMeshWorkerImport(ext)) {
-    try {
-      return await loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgress: onProgress ?? undefined, signal });
-    } catch (err) {
-      if (!mayFallBackToMainThread(err, size)) throw err;
-      console.warn(`${ext} worker parse failed — main-thread fallback:`, err);
-    }
-  } else if (ext === '.obj' && isWorkerImportSupported()) {
-    try {
-      return await loadObjContainerViaWorker(scene, blobUrl, siblings, onProgress ?? undefined, { signal });
-    } catch (err) {
-      if (!mayFallBackToMainThread(err, size)) throw err;
-      console.warn('OBJ worker parse failed — main-thread fallback:', err);
-    }
-  }
-  if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
-  // Babylon reports { loaded, total }; every other producer speaks { stage, fraction }.
-  const babylonProgress = onProgress && ((evt) => onProgress(evt?.lengthComputable && evt.total > 0
-    ? { stage: 'read', fraction: evt.loaded / evt.total }
-    : { stage: 'read' }));
-  return BABYLON.SceneLoader.LoadAssetContainerAsync(blobUrl, '', scene, babylonProgress ?? null, ext);
 }
 
 /**
@@ -219,55 +65,10 @@ export async function loadFromHandle(fileHandle, position, opts = {}) {
   return importWithDedupe(file, file.name, position, opts);
 }
 
-// ── Re-import dedupe (Decision 16, §4.4 rule 2) ──────────────────────────
-
-/** Choices of the "already in this project" prompt. */
-export const DUPLICATE_CHOICE = Object.freeze({ COPY: 'copy', SEPARATE: 'separate' });
-
-/**
- * In-project dedupe: the first instantiable mesh asset whose source bytes hash
- * to `contentHash`, in library order. Library-pack items (one file → many
- * assets) and assets without cached bytes (ghosts) never match — "add another
- * copy" must be able to re-instantiate what it found.
- * @param {string|null|undefined} contentHash  sha256 hex
- * @param {object} [state]
- * @returns {string|null} assetId
- */
-export function findByHash(contentHash, state = getState()) {
-  if (!contentHash) return null;
-  for (const a of Object.values(state.scene?.assetLibrary ?? {})) {
-    if (!a || a.contentHash !== contentHash) continue;
-    if ((a.kind ?? 'mesh') !== 'mesh' || a.libraryItem || a.isGhost) continue;
-    if (!getBlobUrl(a.id)) continue;
-    return a.id;
-  }
-  return null;
-}
-
-/**
- * Decision 16 prompt — the designed "already in this project" dialog
- * (`duplicateImport`, rendered by AssetPanel): [Import as separate asset]
- * [Add another copy]. "Add another copy" is the primary, focused default;
- * × / Esc / backdrop = cancel the import.
- * @param {{ filename: string, existingName: string }} info
- * @returns {Promise<'copy'|'separate'|null>}
- */
-export function askDuplicateImport({ filename, existingName }) {
-  return new Promise(resolve => {
-    dispatch(EVENTS.MODAL_OPEN, {
-      id: 'duplicateImport',
-      filename,
-      existingName,
-      onClose: (r) => resolve(r === 'copy' ? DUPLICATE_CHOICE.COPY
-        : r === 'separate' ? DUPLICATE_CHOICE.SEPARATE : null),
-    });
-  });
-}
-
 /**
  * New-file import entry point for UI drops / picks (OS drop, Import picker,
- * mounted-folder file). Hashes the bytes BEFORE the progress overlay goes up
- * (the overlay swallows input, the prompt needs it); identical bytes already
+ * mounted-folder file). Hashes the bytes BEFORE the duplicate prompt (the
+ * overlay swallows input, the prompt needs it); identical bytes already
  * in the project prompt (Decision 16):
  *   copy     → re-instantiate the existing asset (no new AssetEntry)
  *   separate → a normal import that mints a second asset with the same hash
@@ -287,8 +88,8 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   // The estimate and the hash are the import's first steps: its blocking job
   // covers them (Cancel ends this import and the rest of the drop) and closes
   // before the duplicate prompt, which needs the input the overlay swallows.
-  const abort = _linkedAbort(opts.signal);
-  const job = _beginImport(filename, abort);
+  const abort = linkedAbort(opts.signal);
+  const job = beginImport(filename, abort);
   let preParse;
   let contentHash = null;
   try {
@@ -302,7 +103,7 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
       /* no hash → no dedupe; loadFromBlob proceeds as before */
     }
   } finally {
-    _endImport(job, abort);
+    endImport(job, abort);
   }
   const existingId = findByHash(contentHash);
   if (existingId) {
@@ -322,36 +123,6 @@ export async function importWithDedupe(blob, filename, position, opts = {}, deps
   return loadFromBlob(blob, filename, position, { ...opts, contentHash, preParse });
 }
 
-/**
- * Pre-parse budget decision (heavy-mesh spec §1/§3): estimate the file's
- * triangles from a few small slices and refuse above 4× the budget (throws the
- * user-readable message) before anything is parsed, hashed or copied. The
- * caller that owns the moment shows the over-budget warning for 'warn'.
- * @param {Blob} blob
- * @param {string} filename
- * @returns {Promise<{ verdict: 'ok'|'warn'|'unknown', projected: number }>}
- *   `projected` = scene triangles plus this file's estimate
- */
-export async function preParseCheck(blob, filename) {
-  const ext = extOf(filename);
-  const sceneTriangles = countSceneTriangles();
-  let estimate = await estimateFileTriangles(blob, ext);
-  if (needsExactCount(estimate, { sceneTriangles, limit: caps.triangleLimit })) {
-    estimate = (await countFileTriangles(blob, ext)) ?? estimate;
-  }
-  const verdict = assertPreParseCapacity(estimate, {
-    sceneTriangles, budget: caps.triangleBudget, limit: caps.triangleLimit, filename, desktop: isDesktop(),
-  });
-  return { verdict, projected: sceneTriangles + (estimate?.triangles ?? 0) };
-}
-
-function _showBudgetWarning(projected) {
-  Toast.show(t('toast.triangleBudget', {
-    current: formatTriCount(projected),
-    budget: formatTriCount(caps.triangleBudget),
-  }), 'warning');
-}
-
 // Resin-grey is applied ONLY to SHADERLESS meshes — those imported with NO
 // material at all (STL / missing). Imported materials are NEVER touched, even
 // if white: that is authored content.
@@ -366,35 +137,6 @@ function _applyResinDefault(container) {
     if (!mesh.geometry) continue;            // skip root / transform nodes
     if (!mesh.material) mesh.material = grey; // shaderless → shared default; imports untouched
   }
-}
-
-/**
- * Triangle-budget warning (watertight-repair-and-cost task 7): non-blocking —
- * the import always proceeds, this only tells the user before the tab starts
- * feeling it. Checked against the container's own meshes since nothing in it
- * has a meshId yet (that lands later, in registerInstantiatedMeshes, after
- * `addAllToScene()`). Shared by `loadFromBlob` AND `instantiateAsset` — both
- * call `container.addAllToScene()` and both need the same check.
- * @param {BABYLON.AssetContainer} container
- */
-function _assertContainerCapacity(container) {
-  try {
-    assertTriangleCapacity(countSceneTriangles() + countContainerTriangles(container), caps.triangleLimit, 'Scene after import');
-  } catch (err) {
-    try { container.dispose?.(); } catch { /* retain the capacity error */ }
-    throw err;
-  }
-}
-
-function _warnIfOverBudget(container) {
-  const budget = caps.triangleBudget;
-  if (!(budget > 0)) return;
-  const projectedTris = countSceneTriangles() + countContainerTriangles(container);
-  if (projectedTris <= budget) return;
-  Toast.show(t('toast.triangleBudget', {
-    current: formatTriCount(projectedTris),
-    budget: formatTriCount(budget),
-  }), 'warning');
 }
 
 /**
@@ -424,8 +166,8 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
 
   // F20: flag the import BEFORE the first await (hash / sibling collection
   // below) — otherwise Open/New started in that window races a running import.
-  const abort = _linkedAbort(opts.signal);
-  const job = _beginImport(filename, abort);
+  const abort = linkedAbort(opts.signal);
+  const job = beginImport(filename, abort);
   let restoreUrls = () => {};
   const scene = SceneManager.getScene();
   const assetId = newId('asset');
@@ -436,7 +178,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     // importWithDedupe refused-or-passed before hashing but held the warning
     // until the duplicate prompt was answered (review M12).
     const preParse = opts.preParse ?? await preParseCheck(blob, filename);
-    if (preParse.verdict === 'warn') _showBudgetWarning(preParse.projected);
+    if (preParse.verdict === 'warn') showBudgetWarning(preParse.projected);
 
     // §10b texture-identity scope: hash the source bytes once. Reused as the
     // AssetEntry contentHash so persistence doesn't re-hash at save time.
@@ -456,16 +198,16 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     }
 
     restoreUrls = installSiblingUrls(siblings);
-    const container = await loadContainer(blobUrl, ext, scene, _importProgress(job), siblings,
+    const container = await loadContainer(blobUrl, ext, scene, importProgress(job), siblings,
       { signal: abort.signal, size: blob.size });
-    _throwIfAborted(abort.signal, container);
-    _assertContainerCapacity(container);
+    throwIfAborted(abort.signal, container);
+    assertContainerCapacity(container);
     job.progress({ stage: 'materials', fraction: 0.8 });
 
     const sourceUnit = DEFAULT_SOURCE_UNIT;
     const modelRatio = extractModelRatio(container) ?? 1;
 
-    if (await _tryRegisterLibraryImport({
+    if (await tryRegisterLibraryImport({
       container, blob, filename, ext, opts,
       initialAssetId: assetId,
       initialBlobUrl: blobUrl,
@@ -495,7 +237,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
       fileName: filename.replace(/\.[^.]+$/, ''),
     });
 
-    if (preParse.verdict !== 'warn') _warnIfOverBudget(container);   // warned pre-parse already
+    if (preParse.verdict !== 'warn') warnIfOverBudget(container);   // warned pre-parse already
     container.addAllToScene();
     _applyResinDefault(container);   // AFTER add — container meshes have geometry bound now
 
@@ -553,7 +295,7 @@ export async function loadFromBlob(blob, filename, position, opts = {}) {
     throw err;
   } finally {
     restoreUrls();
-    _endImport(job, abort);
+    endImport(job, abort);
   }
 }
 
@@ -574,9 +316,9 @@ export async function instantiateAsset(assetId, position) {
   if (!blobUrl) throw new Error(`No cached data for ${asset.filename} — cannot re-instantiate`);
 
   const scene = SceneManager.getScene();
-  const abort = _linkedAbort(null);
+  const abort = linkedAbort(null);
   const sourceBlob = getBlob(assetId);
-  const job = _beginImport(asset.filename, abort);
+  const job = beginImport(asset.filename, abort);
   // Re-instantiated OBJs need their sibling map again for MTL/textures.
   const siblings = getObjSiblings(assetId);
   const restoreUrls = installSiblingUrls(siblings);
@@ -584,14 +326,14 @@ export async function instantiateAsset(assetId, position) {
     // Another copy of a heavy mesh gets the same pre-parse budget check and
     // the same no-main-thread-retry rule as a fresh import (review I4).
     const preParse = sourceBlob ? await preParseCheck(sourceBlob, asset.filename) : null;
-    if (preParse?.verdict === 'warn') _showBudgetWarning(preParse.projected);
+    if (preParse?.verdict === 'warn') showBudgetWarning(preParse.projected);
     const container = await loadContainer(
-      blobUrl, asset.extension, scene, _importProgress(job), siblings,
+      blobUrl, asset.extension, scene, importProgress(job), siblings,
       { signal: abort.signal, size: sourceBlob?.size }
     );
-    _throwIfAborted(abort.signal, container);
+    throwIfAborted(abort.signal, container);
     if (asset.libraryItem) filterContainerToLibraryItem(container, asset.libraryItem);
-    _assertContainerCapacity(container);
+    assertContainerCapacity(container);
     splitMultiMaterialMeshesInContainer(container);
     registerContainer(assetId, container);
     const { byMaterial } = await ShaderLibrary.registerFromContainer(container, {
@@ -599,7 +341,7 @@ export async function instantiateAsset(assetId, position) {
     });
     const fileStem = String(asset.displayName ?? asset.filename ?? '').replace(/\.[^.]+$/, '');
     const hierarchy = buildImportHierarchy(container, newId, uniqueHierarchyName, { fileName: fileStem });
-    if (preParse?.verdict !== 'warn') _warnIfOverBudget(container);
+    if (preParse?.verdict !== 'warn') warnIfOverBudget(container);
     container.addAllToScene();
 
     const sourceUnit = asset.sourceUnit ?? DEFAULT_SOURCE_UNIT;
@@ -617,7 +359,7 @@ export async function instantiateAsset(assetId, position) {
     return meshIds;
   } finally {
     restoreUrls();
-    _endImport(job, abort);
+    endImport(job, abort);
   }
 }
 
@@ -632,120 +374,4 @@ async function _selectImported(hierarchy, meshIds) {
     const { Selection } = await import('../Selection.js');
     Selection.set(ids);
   } catch { /* selection is a convenience; never fail an import over it */ }
-}
-
-function _stripExtension(filename) {
-  return String(filename || 'asset').replace(/\.[^.]+$/, '');
-}
-
-function _safePartName(value) {
-  return String(value || 'Object').trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'Object';
-}
-
-async function _tryRegisterLibraryImport({
-  container, blob, filename, ext, opts, initialAssetId, initialBlobUrl,
-  sourceFileHash, sourceUnit, modelRatio,
-}) {
-  if ((ext !== '.glb' && ext !== '.gltf') || !isLibraryImport(container)) return false;
-
-  const createdIds = [];
-  try {
-    const roots = findLibraryItemRoots(container);
-    if (!roots.length) throw new Error('No geometry-bearing library objects found.');
-
-    const sourceStem = _stripExtension(filename);
-    const entries = [];
-    for (let i = 0; i < roots.length; i++) {
-      const root = roots[i];
-      const assetId = i === 0 ? initialAssetId : newId('asset');
-      const assetBlobUrl = i === 0 ? initialBlobUrl : URL.createObjectURL(blob);
-      setBlobUrl(assetId, assetBlobUrl, blob);
-      createdIds.push(assetId);
-
-      const fileHandleKey = opts.fileHandleKey ?? null;
-      const partName = _safePartName(root.name);
-      entries.push({
-        id: assetId,
-        name: partName,
-        displayName: `${sourceStem} / ${partName}`,
-        filename: `${sourceStem}__${partName}${ext}`,
-        originalPath: opts.originalPath ?? filename,
-        extension: ext,
-        kind: 'mesh',
-        sourceUnit,
-        unitConfirmed: true,
-        modelRatio,
-        directoryHandleKey: opts.directoryHandleKey ?? null,
-        fileHandleKey,
-        contentHash: sourceFileHash,
-        thumbnailDataUrl: null,
-        libraryItem: {
-          sourceFilename: filename,
-          rootName: root.name,
-          rootPath: root.path,
-        },
-      });
-    }
-
-    setState(s => {
-      const next = { ...s.scene.assetLibrary };
-      for (const entry of entries) next[entry.id] = entry;
-      return { ...s, scene: { ...s.scene, assetLibrary: next } };
-    }, { silent: true });
-    for (const entry of entries) dispatch(EVENTS.ASSET_REGISTERED, { assetId: entry.id, entry });
-    return true;
-  } catch (err) {
-    console.warn(`${filename}: library import failed, falling back to normal GLB import:`, err);
-    for (const id of createdIds) {
-      if (id !== initialAssetId) revokeBlobUrl(id);
-    }
-    return false;
-  }
-}
-
-/**
- * Trim a loaded container down to ONE library item's node subtree (meshes,
- * transform ancestors/descendants, used materials); everything else disposes.
- */
-export function filterContainerToLibraryItem(container, libraryItem) {
-  const root = findLibraryRootByItem(container, libraryItem);
-  if (!root) {
-    throw new Error(`Library object not found: ${libraryItem?.rootPath ?? libraryItem?.rootName ?? 'unknown'}`);
-  }
-
-  const allMeshes = container.meshes ?? [];
-  const allTransforms = container.transformNodes ?? [];
-  const keepMeshes = allMeshes.filter(mesh =>
-    mesh === root.node || isNodeWithinRoot(mesh, root.node));
-  if (!keepMeshes.some(m => m.geometry && (m.getTotalVertices?.() ?? 0) > 0)) {
-    throw new Error(`Library object has no geometry: ${root.path || root.name}`);
-  }
-
-  const keepTransforms = new Set();
-  let ancestor = root.node;
-  while (ancestor) {
-    if (allTransforms.includes(ancestor)) keepTransforms.add(ancestor);
-    ancestor = ancestor.parent;
-  }
-  for (const t of allTransforms) {
-    if (isNodeWithinRoot(t, root.node)) keepTransforms.add(t);
-  }
-
-  for (const mesh of allMeshes) {
-    if (!keepMeshes.includes(mesh)) {
-      try { mesh.dispose?.(); } catch { /* not scene-owned */ }
-    }
-  }
-  for (const node of allTransforms) {
-    if (!keepTransforms.has(node)) {
-      try { node.dispose?.(); } catch { /* not scene-owned */ }
-    }
-  }
-
-  const usedMaterials = new Set(keepMeshes.map(m => m.material).filter(Boolean));
-  container.meshes = keepMeshes;
-  container.transformNodes = allTransforms.filter(t => keepTransforms.has(t));
-  if (Array.isArray(container.materials) && usedMaterials.size) {
-    container.materials = container.materials.filter(mat => usedMaterials.has(mat));
-  }
 }

@@ -284,8 +284,14 @@ src/
       TriangleEstimate.js  ← pre-parse triangle count/estimate from small slices (STL/OBJ/3MF/GLB/glTF)
       stlParse.js          ← STL → welded indexed geometry, Babylon STL conventions (pure)
       weld.js              ← typed-array exact weld + crease-aware normals (pure)
-      meshImportCore.js    ← worker-side STL/3MF import cores (pure)
+      meshImportCore.js    ← the ONE STL/3MF parse core (pure): worker and main-thread plugins both call it
       zipText.js           ← zip entry → decoded text chunks (no giant strings)
+      StlLoader.js         ← `.stl` SceneLoader plugin over meshImportCore (replaces Babylon's unwelded loader) + buildStlContainer
+      threeMFPackage.js    ← 3MF package reader (rootPath / model(path) / partBytes / partText): preparsedPackage from the core's result, loosePackage test seam
+      threeMFGeometry.js   ← pure typed-array 3MF build steps: placeVertices, withoutTriangleRanges, groupTriangles, soupIndices, compactGroup
+      threeMFDom.js        ← model-skeleton DOM helpers: prefix-blind lookups, item/component matrices, instance names
+      threeMFResources.js  ← per-model-part context: unit, colorgroup/basematerials, texture2d blob URLs, texture2dgroup UVs, createMaterial
+      threeMFSlicerHelpers.js ← PrusaSlicer / Bambu helper-volume config → triangle ranges + component ids to skip (cia C-05)
     ImportNormalizer.js    ← import-normalization seam (units/ratio/RH→LH bake)
     ShaderLibrary.js
     vendorUrl.js           ← the ONE public/vendor/ URL resolver (document.baseURI-relative)
@@ -386,7 +392,12 @@ src/
       ObjSiblings.js       ← OBJ mtllib/texture sibling map + PreprocessUrl swap + revoke
       AssetRegistration.js ← SceneObject/collection minting, unique names, logical-object grouping, validation queue
       AssetThumbnail.js    ← idle asset thumbnail (THUMB_LAYER camera-mask isolation)
-      AssetImport.js       ← live import: blob/handle → container → scene as one blocking JobActivity job, library-GLB path, re-instantiate
+      AssetImport.js       ← live import façade: blob/handle → container → scene, re-instantiate; re-exports the five below for AssetLoader / UI / tests
+      ImportSession.js     ← an import's blocking JobActivity job, cancel scope (linkedAbort), multi-file batch (beginImportBatch), isImporting
+      ImportBudget.js      ← preParseCheck + triangle-budget warnings/refusal on the loaded container
+      ContainerLoad.js     ← loadContainer: worker first (STL/3MF/OBJ), main-thread plugin fallback (mayFallBackToMainThread, 32 MiB cap)
+      ImportDedupe.js      ← findByHash + the "already in this project" prompt (Decision 16)
+      LibraryImport.js     ← library-GLB registration (one asset per root) + filterContainerToLibraryItem
       AssetRestore.js      ← project restore + clones: restoreContainer, cloneMeshAsNewObject, asset bytes
     scene/
       SceneConstants.js    ← viewport/grid/camera/outline constants (+ dark bg pair)
@@ -410,7 +421,7 @@ src/
       SweepRig.js          ← rigid camera/lights/env turntable rotation (shared by preview + recorder)
       TurntablePreview.js  ← live viewport sweep (Esc / tab-hide cancel), owns preview handle
       VideoRecorder.js     ← offline WebCodecs encode → mp4 (mp4-muxer lazy), owns recording flag
-    ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export
+    ThreeMFLoader.js       ← `.3mf` SceneLoader plugin = inverse of 3MF export; walks the build/component tree over a threeMFPackage reader, pure steps in import/threeMF*.js
     SnapUnits.js           ← snap steps in mm/deg/× → BU/rad, gizmo snap distances, arrow-nudge step + direction (§6)
     Hover.js               ← hover highlight driver: ≤1 pick/frame, click-depth target, budget gate, cursor (§6 Mouse, §7 outline)
     idb.js                 ← IndexedDB layer for FileSystemHandles + kv store (§11b)
@@ -896,7 +907,8 @@ match what the specced responsibilities actually cost.
 | `SceneManager.js` | < 450 (engine/lighting/overlays orchestrator; camera, pivot, outline, bed/grid all split into `core/scene/`) |
 | each `core/scene/*.js` | < 250 (`CameraRig.js` < 550 — creation + custom nav + presets + framing + follow + optics + pose save/restore are one cohesive rig) |
 | `AssetLoader.js` | < 150 (thin façade + release/remove/reset lifecycle — import/restore/minting all in `core/assets/`) |
-| each `core/assets/*.js` | < 400 (AssetImport ≈ 380 — both live-import paths + library-GLB registration) |
+| each `core/assets/*.js` | < 400 (AssetImport ≈ 380 — both live-import paths; session, budget, container load, dedupe and library-GLB registration are its own modules beside it) |
+| each `core/import/*.js` | < 300 (pure cores and the 3MF build steps; threeMFGeometry ≈ 205 is the largest) |
 | `ImportNormalizer.js` | < 150 |
 | `ShaderLibrary.js` | < 1100 (registry + merge + UV clones + type rebuild; split candidate if it grows) |
 | `MeshValidator.js` | < 550 (topology worker plumbing + group-union + result cache; pure topology lives in `workers/MeshValidate.worker.js`, repair orchestration in `core/repair/`) |
@@ -908,7 +920,7 @@ match what the specced responsibilities actually cost.
 | each `src/ui/print/*.js` | < 300 (CostBlock ≈ 230 — Export-tab cost block render + wiring + live preview) |
 | `RenderOutput.js` | < 80 (thin façade only — capture/sweep/preview/recorder in `core/render/`) |
 | each `core/render/*.js` | < 300 (FrameCapture ≈ 230 — both engines' PNG paths + offline frame renderer) |
-| `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export) |
+| `ThreeMFLoader.js` | < 300 (3MF import = inverse of 3MF export; measured 2026-10-22: 284) |
 | Each `src/ui/*.js` | < 900 (PropertiesPanel/ShaderPanel are section stacks; split per-section when a panel exceeds this) |
 | each `src/ui/lib/*.js` | < 100 (shared wiring helpers only — no panel-init/locale framework) |
 | `AppShell.js` | < 300 (shell controls + resize/collapse wiring) |
@@ -2378,12 +2390,20 @@ Each `AssetLoader.loadFromBlob` / `instantiateAsset` mints exactly one Collectio
    inside the worker. Any worker failure falls back to the main-thread
    SceneLoader path (headless tests always take the fallback; the worker path
    is pinned by the browser export smoke's OBJ block).
-   Supported: `.glb .gltf .obj .stl` (Babylon loaders package) + `.3mf`
-   (`src/core/ThreeMFLoader.js`, a self-registered SceneLoader plugin — Babylon
-   ships none). 3MF import is the exact INVERSE of `PrintManager.exportThreeMF`
-   for files we write, plus the production-extension component layout emitted
-   by slicers such as Bambu Studio:
-   unzip OPC → `_rels/.rels` target / `3D/3dmodel.model` → mesh `<object>`
+   Supported: `.glb .gltf .obj` (Babylon loaders package), `.stl`
+   (`src/core/import/StlLoader.js`, a self-registered SceneLoader plugin that
+   REPLACES Babylon's STLFileLoader with the worker's `stlParse` core, so a
+   main-thread STL is welded, crease-split and flat-flagged exactly like a
+   worker STL) + `.3mf` (`src/core/ThreeMFLoader.js`, a self-registered
+   SceneLoader plugin — Babylon ships none). ONE parse per format (thermo #6):
+   the plugin runs `meshImportCore.importThreeMFBuffer` inline (the same rels
+   resolver, SAX pass and part collection the worker runs) and hands its
+   result to `buildThreeMFContainerFromParsed`; `tests/import-parity-r4.test.mjs`
+   asserts the worker entry and the plugin entry give identical positions,
+   indices and counts for the same STL and 3MF bytes. 3MF import is the exact
+   INVERSE of `PrintManager.exportThreeMF` for files we write, plus the
+   production-extension component layout emitted by slicers such as Bambu
+   Studio: unzip OPC → `_rels/.rels` target / `3D/3dmodel.model` → mesh `<object>`
    resources become Babylon meshes; component `<object>` resources become
    meshless TransformNodes for import hierarchy; `<component objectid transform>`
    and `<build><item>` form the placement tree. If a component carries
@@ -2708,8 +2728,9 @@ Contract for 2M–10M+ triangle print meshes; the spec carries the measured numb
   (geometric face normal); OBJ export omits `vn` for faceted meshes, decided by the mesh flag only
   (`isFaceted`), never by the view toggle. 3MF model parts are inflated and decoded in chunks
   into the push SAX parser (`createThreeMFXmlParser`; no string over V8's limit), triangles packed
-  Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` (textures via a
-  zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did
+  Int32; the main thread builds the container with `buildThreeMFContainerFromParsed` over a
+  `threeMFPackage` reader (`preparsedPackage`: pre-parsed model parts + raw bytes of every other
+  part; no zip stand-in). A worker failure is retried on the main thread **only** for files ≤ 32 MiB that did
   not time out, were not cancelled and were not refused (`mayFallBackToMainThread`, keyed on
   `err.code` `'timeout'` / `'over-budget'`, never on message text). Triangle refusals
   (`ImportLimits.assertTriangleCapacity` / `assertPreParseCapacity`) throw `code: OVER_BUDGET`;

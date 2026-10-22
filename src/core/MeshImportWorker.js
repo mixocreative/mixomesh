@@ -1,17 +1,15 @@
 // Main-thread side of the STL / 3MF import worker (heavy-mesh spec §7.3).
 // workers/MeshImport.worker.js reads the blob URL, parses and welds off the UI
 // thread and transfers typed arrays back; this module turns them into an
-// AssetContainer exactly like Babylon's own STL loader / the 3MF plugin would
-// (same names, axes, materials), so the normal import flow continues
-// unchanged. Not available under Node (no Worker) — callers fall back to the
-// SceneLoader plugins.
+// AssetContainer through the same builders the `.stl` / `.3mf` SceneLoader
+// plugins use (import/StlLoader.js, ThreeMFLoader.js), so a worker import and
+// the main-thread fallback give identical geometry. Not available under Node
+// (no Worker) — callers fall back to the plugins.
 
 import { WorkerTask } from './workers/WorkerTask.js';
 import { buildThreeMFContainerFromParsed } from './ThreeMFLoader.js';
+import { buildStlContainer } from './import/StlLoader.js';
 import { caps } from './storage/capabilities.js';
-import { markFlat } from './scene/FlatShading.js';
-
-const BABYLON = window.BABYLON;
 
 /** Generous wall clock for a 1 GB file on a slow disk; the UI stays live meanwhile. */
 export const MESH_IMPORT_TIMEOUT_MS = 600_000;
@@ -28,29 +26,6 @@ const _task = new WorkerTask({
 /** True when `ext` imports through the worker in this runtime. */
 export function isMeshWorkerImport(ext) {
   return typeof Worker === 'function' && !!KINDS[ext];
-}
-
-/** Welded STL meshes → container, mirroring STLFileLoader.loadAssetContainer. */
-export function buildStlContainer(scene, meshes) {
-  const container = new BABYLON.AssetContainer(scene);
-  scene._blockEntityCollection = true;
-  try {
-    for (const m of meshes) {
-      const mesh = new BABYLON.Mesh(m.name || 'stlmesh', scene);
-      const vd = new BABYLON.VertexData();
-      vd.positions = m.positions;
-      vd.normals = m.normals;
-      vd.indices = m.indices;
-      vd.applyToMesh(mesh);
-      // Welded geometry, faceted look: STL always rendered flat (review I1).
-      markFlat(mesh);
-      mesh.computeWorldMatrix(true);
-      container.meshes.push(mesh);
-    }
-  } finally {
-    scene._blockEntityCollection = false;
-  }
-  return container;
 }
 
 /**
@@ -77,4 +52,5 @@ export async function loadMeshContainerViaWorker(scene, blobUrl, ext, { onProgre
   return buildThreeMFContainerFromParsed(scene, result);
 }
 
+export { buildStlContainer };
 export const MeshImportWorker = { isMeshWorkerImport, loadMeshContainerViaWorker, buildStlContainer, MESH_IMPORT_TIMEOUT_MS };
