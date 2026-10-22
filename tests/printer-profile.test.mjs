@@ -5,7 +5,7 @@ installEnv();
 console.error = () => {};
 
 const { setState } = await import('../src/core/StateManager.js');
-const { getPrinterProfile, normalizePrinterProfile, listPrinterProfiles, printerProfileExists } = await import('../src/core/print/PrinterProfiles.js');
+const { getPrinterProfile, normalizePrinterProfile, printerProfileExists } = await import('../src/core/print/PrinterProfiles.js');
 const DS = (await import('../src/config/default-settings.json', { with: { type: 'json' } })).default;
 
 let passed = 0, failed = 0;
