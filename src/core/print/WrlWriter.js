@@ -24,7 +24,7 @@ import { collectMimakiTextures } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
-import { exportUVs } from './UvTransform.js';
+import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
@@ -42,6 +42,11 @@ function _alpha01(mat) {
   if (mat?.alpha == null) return 1;
   const n = Number(mat.alpha);
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1;
+}
+
+// VRML can only clamp or repeat; a mirrored axis stays repeat.
+function _repeatFields({ u, v }) {
+  return (u === 'clamp' ? ' repeatS FALSE' : '') + (v === 'clamp' ? ' repeatT FALSE' : '');
 }
 
 function _shape(mesh, texUrl, usedNames) {
@@ -71,7 +76,7 @@ function _shape(mesh, texUrl, usedNames) {
   if (textured) {
     appearance = 'Appearance {\n'
       + '      material Material { diffuseColor 1 1 1 }\n'
-      + `      texture ImageTexture { url "${texUrl}" }\n`
+      + `      texture ImageTexture { url "${texUrl}"${_repeatFields(textureAddressing(baseColorTexture(mat)))} }\n`
       + '    }';
   } else {
     const c = materialSrgbColor(mat) || FALLBACK_RGB;

@@ -8,6 +8,7 @@ const { encodeOBJ } = await import('../src/core/print/ObjWriter.js');
 const { encodeVRML } = await import('../src/core/print/WrlWriter.js');
 const { encodeBinaryPLY } = await import('../src/core/print/PlyWriter.js');
 const { buildMaterialsExtEntries } = await import('../src/core/print/ThreeMFWriter.js');
+const { serializeOBJ } = await import('../src/core/print/ObjWriter.js');
 const { setTextureSource } = await import('../src/core/assets/TextureSource.js');
 
 const RAW_UV = [0, 0, 1, 0, 0, 1];
@@ -119,4 +120,49 @@ test('an untransformed texture exports its UVs unchanged', async () => {
   const mesh = texturedTri({});
   assert.deepEqual(objUVs(mesh), RAW_UV);
   assert.deepEqual(await threeMfUVs(mesh), RAW_UV);
+});
+
+const CLAMP = { wrapU: 0, wrapV: 0 };
+const IMG = { rgba: [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255], width: 2, height: 2 };
+
+async function exportedFiles(mesh) {
+  const out = await serializeOBJ({
+    meshes: [{ mesh }], cloneGroups: [], individually: false,
+    projectName: 'P', referenceRatio: 1, targetRatio: 1, prefs: {}, state: { print: {}, scene: { assetLibrary: {}, objects: {} } },
+  });
+  const files = Object.fromEntries(out.entries.map(e => [e.path, String(e.data)]));
+  const threeMf = String((await buildMaterialsExtEntries([{ mesh }])).find(e => e.path === '3D/3dmodel.model').data);
+  return {
+    mtl: files['P_r1to1.mtl'],
+    threeMf,
+    wrl: encodeVRML([{ mesh }], new Map([[mesh, 'textures/paint.png']])),
+  };
+}
+
+test('a clamped texture is written as clamped, so UVs past the edge print the edge texel', async () => {
+  const { mtl, threeMf, wrl } = await exportedFiles(texturedTri({ uOffset: 0.25, ...CLAMP }));
+  // No MTL `-clamp on`: trimesh takes the rest of the map_Kd line as the file
+  // name and then loads no texture at all, which is worse than repeating.
+  assert.match(mtl, /^map_Kd textures\/\S+\.png$/m);
+  assert.match(threeMf, /<m:texture2d [^>]*tilestyleu="clamp" tilestylev="clamp"/);
+  assert.match(wrl, /ImageTexture \{ url "textures\/paint\.png" repeatS FALSE repeatT FALSE \}/);
+});
+
+test('PLY samples a clamped texture at its edge texel instead of wrapping', () => {
+  // Raw (1,0) shifted to (1.25, 0.25): repeat wraps to the bottom-left texel
+  // (blue); clamp stays on the bottom-right texel (white), as the viewport does.
+  const plyRgba = (mesh) => {
+    const u8 = encodeBinaryPLY([{ mesh }], new Map([[mesh, IMG]]));
+    const end = new TextDecoder('latin1').decode(u8).indexOf('end_header\n') + 'end_header\n'.length;
+    return [...u8.subarray(end + 36 + 24, end + 36 + 28)];
+  };
+  assert.deepEqual(plyRgba(texturedTri({ uOffset: 0.25, vOffset: 0.25, ...CLAMP })), [255, 255, 255, 255]);
+  assert.deepEqual(plyRgba(texturedTri({ uOffset: 0.25, vOffset: 0.25 })), [0, 0, 255, 255]);
+});
+
+test('a repeating texture carries no clamp flags', async () => {
+  const { mtl, threeMf, wrl } = await exportedFiles(texturedTri({ uOffset: 0.25 }));
+  assert.match(mtl, /^map_Kd textures\/\S+\.png$/m);
+  assert.doesNotMatch(threeMf, /tilestyle/);
+  assert.doesNotMatch(wrl, /repeat[ST]/);
 });

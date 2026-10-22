@@ -26,6 +26,17 @@ export function applyTextureMatrix(uvs, m) {
   return out;
 }
 
+const ADDRESS_MODES = { 0: 'clamp', 1: 'wrap', 2: 'mirror' };
+
+/**
+ * How the viewport samples UVs outside [0,1] (Babylon `wrapU` / `wrapV`), so
+ * a writer can say the same in its format.
+ * @returns {{u:'wrap'|'clamp'|'mirror', v:'wrap'|'clamp'|'mirror'}}
+ */
+export function textureAddressing(texture) {
+  return { u: ADDRESS_MODES[texture?.wrapU] ?? 'wrap', v: ADDRESS_MODES[texture?.wrapV] ?? 'wrap' };
+}
+
 function _isIdentityUV(m) {
   return m[0] === 1 && m[1] === 0 && m[4] === 0 && m[5] === 1 && m[8] === 0 && m[9] === 0;
 }

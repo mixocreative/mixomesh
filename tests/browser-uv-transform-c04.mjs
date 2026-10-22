@@ -3,14 +3,17 @@
 // ShaderLibrary, renders it, and reads the viewport colour at barycentric
 // points on each triangle. Then it exports OBJ through the real PrintManager
 // (repair off, so vertex order is kept) and has python trimesh (an independent
-// consumer) sample the exported texture at the same barycentric points. Every point away from a quadrant edge must
-// show the same colour in both. The same points sampled at the untransformed
-// UVs must disagree, so the check can tell a lost transform from a kept one.
+// consumer) sample the exported texture at the same barycentric points. Every
+// point away from a quadrant edge must show the same colour in both. The same
+// points sampled at the untransformed UVs must disagree, so the check can tell
+// a lost transform from a kept one. It runs twice: with the glTF's repeating
+// texture, and with the texture set to clamp, where the viewport smears the
+// edge texels and the MTL must say `-clamp on`.
 // Not part of `npm test` (needs Chrome + Vite + python trimesh):
 //
 //   node tests/browser-uv-transform-c04.mjs
 //
-// UV_OUT=<dir> keeps the render and the exported OBJ zip there.
+// UV_OUT=<dir> keeps each scenario's render and exported OBJ there.
 
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +32,7 @@ const SAMPLER = join(ROOT, 'tests/fixtures/obj-uv-sample.py');
 const OUT = process.env.UV_OUT ? resolve(process.env.UV_OUT) : null;
 const UV_OVERRIDE = { offsetX: 0.3, offsetY: 0.15, scaleX: 1.7, scaleY: 1.3, rotation: 0.6 };
 
-const PAGE = (uvOverride) => `(async () => {
+const PAGE = (uvOverride, clamp) => `(async () => {
   try {
     const { AssetLoader } = await import('/src/core/AssetLoader.js');
     const { PrintManager } = await import('/src/core/PrintManager.js');
@@ -41,6 +44,7 @@ const PAGE = (uvOverride) => `(async () => {
     const mesh = root.getTotalVertices?.() > 0 ? root : root.getChildMeshes().find(m => m.getTotalVertices() > 0);
     const scene = mesh.getScene();
     const tex = mesh.material.diffuseTexture || mesh.material.albedoTexture;
+    if (${clamp}) { tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE; tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE; }
     for (let i = 0; i < 400 && !(tex.isReady() && mesh.isReady(true)); i++) await new Promise(r => setTimeout(r, 25));
     await scene.whenReadyAsync();
     let prev = '';
@@ -70,6 +74,15 @@ const PAGE = (uvOverride) => `(async () => {
         const p = world(verts[0]).scale(bary[0]).add(world(verts[1]).scale(bary[1])).add(world(verts[2]).scale(bary[2]));
         samples.push({ verts, bary, p });
       }
+    }
+    // Just inside each vertex: what the viewport shows where a PLY stores that vertex's colour.
+    for (let v = 0; v < pos.length / 3; v++) {
+      const first = idx.indexOf(v);
+      const t = first - (first % 3);
+      const verts = [idx[t], idx[t + 1], idx[t + 2]];
+      const bary = verts.map(i => (i === v ? 0.94 : 0.03));
+      const p = world(verts[0]).scale(bary[0]).add(world(verts[1]).scale(bary[1])).add(world(verts[2]).scale(bary[2]));
+      samples.push({ verts, bary, p, vertex: v });
     }
     const { min, max } = root.getHierarchyBoundingVectors(true);
     const c = min.add(max).scale(0.5);
@@ -106,14 +119,20 @@ const PAGE = (uvOverride) => `(async () => {
     }
     let captured = null;
     window.showSaveFilePicker = async () => ({ createWritable: async () => ({ write: async (d) => { captured = d; }, close: async () => {} }) });
+    const b64 = async () => {
+      const u8 = new Uint8Array(captured.arrayBuffer ? await captured.arrayBuffer() : captured);
+      let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return btoa(bin);
+    };
     await PrintManager.exportOBJ({ acknowledgeWarnings: true, repair: false });
-    const u8 = new Uint8Array(captured.arrayBuffer ? await captured.arrayBuffer() : captured);
-    let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    const obj = await b64();
+    await PrintManager.exportPLY({ acknowledgeWarnings: true, repair: false });
+    const ply = await b64();
     return {
-      sides, samples: samples.map(({ verts, bary }) => ({ verts, bary })),
+      sides, samples: samples.map(({ verts, bary, vertex }) => ({ verts, bary, vertex })),
       rawUV: Array.from(mesh.getVerticesData('uv')),
       worldPos: Array.from({ length: pos.length / 3 }, (_, i) => world(i).asArray()),
-      textureMatrix: Array.from(tex.getTextureMatrix().m), obj: btoa(bin),
+      textureMatrix: Array.from(tex.getTextureMatrix().m), obj, ply,
     };
   } catch (err) { return { error: String(err?.stack ?? err) }; }
 })()`;
@@ -128,10 +147,13 @@ function colourClass([r, g, b]) {
   return `?${r},${g},${b}`;
 }
 
-// A uv within this distance of a quadrant edge (0 or 0.5 after wrapping) can
-// legitimately differ between bilinear (viewport) and nearest (trimesh).
-function nearQuadrantEdge([u, v]) {
-  const d = x => { const f = ((x % 0.5) + 0.5) % 0.5; return Math.min(f, 0.5 - f); };
+// A uv within this distance of a quadrant edge can legitimately differ between
+// bilinear (viewport) and nearest (trimesh). Repeating, the edges are every
+// 0.5; clamped to [0,1], only the middle one is left.
+function nearQuadrantEdge([u, v], clamp) {
+  const d = clamp
+    ? x => Math.abs(x - 0.5)
+    : x => { const f = ((x % 0.5) + 0.5) % 0.5; return Math.min(f, 0.5 - f); };
   return d(u) < 0.04 || d(v) < 0.04;
 }
 
@@ -152,6 +174,13 @@ function assertSameVertexOrder(scene, obj) {
   assert(ok, 'exported OBJ vertices are not in scene vertex order');
 }
 
+function trimeshPly(plyPath) {
+  const py = resolveCommand('python') ?? resolveCommand('python3');
+  const r = spawnSync(py, ['-I', SAMPLER, '--ply', plyPath], { encoding: 'utf8' });
+  assert(r.status === 0, `trimesh PLY read failed: ${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
+
 function trimeshSample(objPath, samples, dir, name) {
   const py = resolveCommand('python') ?? resolveCommand('python3');
   assert(py, 'python not found (needs trimesh)');
@@ -160,6 +189,83 @@ function trimeshSample(objPath, samples, dir, name) {
   const r = spawnSync(py, ['-I', SAMPLER, objPath, file], { encoding: 'utf8' });
   assert(r.status === 0, `trimesh sampler failed: ${r.stderr}`);
   return JSON.parse(r.stdout);
+}
+
+async function compare({ name, clamp }, res, dir) {
+  mkdirSync(dir, { recursive: true });
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(Buffer.from(res.obj, 'base64'));
+  const objName = Object.keys(zip.files).find(n => n.endsWith('.obj'));
+  for (const [entry, f] of Object.entries(zip.files)) {
+    if (f.dir) continue;
+    mkdirSync(join(dir, entry, '..'), { recursive: true });
+    writeFileSync(join(dir, entry), await f.async('uint8array'));
+  }
+  const objText = String(await zip.file(objName).async('string'));
+  const objPos = objText.split('\n').filter(l => l.startsWith('v ')).map(l => l.slice(2).trim().split(/\s+/).map(Number));
+  assertSameVertexOrder(res.worldPos, objPos);
+  const exported = trimeshSample(join(dir, objName), res.samples, dir, 'samples');
+  // The quad is single-sided; the side that shows it shows several colours,
+  // the other shows only background.
+  const distinct = s => new Set(res.sides[s].rgb.map(colourClass)).size;
+  const side = distinct('front') >= distinct('back') ? 'front' : 'back';
+  writeFileSync(join(dir, 'viewport.png'), Buffer.from(res.sides[side].png, 'base64'));
+
+  // Untransformed control: the same OBJ with its vt lines replaced by the raw UVs.
+  let k = 0;
+  const rawObj = objText.split('\n').map(l => {
+    if (!l.startsWith('vt ')) return l;
+    const i = k++;
+    return `vt ${res.rawUV[i * 2]} ${res.rawUV[i * 2 + 1]}`;
+  }).join('\n');
+  const rawPath = join(dir, objName.replace(/\.obj$/, '_rawuv.obj'));
+  writeFileSync(rawPath, rawObj);
+  const control = trimeshSample(rawPath, res.samples, dir, 'control');
+
+  const covered = rgb => Math.max(...rgb) - Math.min(...rgb) > 40;
+  const view = i => colourClass(res.sides[side].rgb[i]);
+  const usable = (i, uv) => !nearQuadrantEdge(uv, clamp) && !covered(res.sides[side].overlay[i]);
+
+  // OBJ cannot say "clamp" without breaking trimesh's texture load, so only
+  // the repeating texture is compared on the OBJ.
+  if (!clamp) {
+    let compared = 0, controlDiffers = 0;
+    const mismatches = [];
+    res.samples.forEach((s, i) => {
+      if (!usable(i, exported[i].uv)) return;
+      const file = colourClass(exported[i].rgba);
+      compared++;
+      if (view(i) !== file) mismatches.push({ bary: s.bary, verts: s.verts, uv: exported[i].uv, view: view(i), file });
+      if (!nearQuadrantEdge(control[i].uv, clamp) && colourClass(control[i].rgba) !== view(i)) controlDiffers++;
+    });
+    console.log(JSON.stringify({ name, format: 'obj', side, compared, mismatches: mismatches.length, controlDiffers }));
+    assert(compared >= 20, `${name}: only ${compared} samples away from quadrant edges`);
+    assert(controlDiffers >= 5, `${name}: the untransformed UVs agree with the viewport too (${controlDiffers} differ); the check cannot see a lost transform`);
+    assert(mismatches.length === 0, `${name}: exported OBJ texture differs from the viewport at ${mismatches.length}/${compared} points: ${JSON.stringify(mismatches.slice(0, 5))}`);
+    console.log(`PASS ${name}: trimesh reads the exported OBJ texture with the viewport's colour at all ${compared} points (untransformed UVs disagree at ${controlDiffers})`);
+  }
+
+  // PLY bakes the sampled colour per vertex: compare it with the viewport just
+  // inside each vertex. The control is the repeat-sampled OBJ colour there.
+  const plyPath = join(dir, 'export.ply');
+  writeFileSync(plyPath, Buffer.from(res.ply, 'base64'));
+  const ply = trimeshPly(plyPath);
+  assertSameVertexOrder(res.worldPos, ply.vertices);
+  const clampUV = uv => (clamp ? uv.map(x => Math.min(1, Math.max(0, x))) : uv);
+  let plyCompared = 0, plyControlDiffers = 0;
+  const plyMismatches = [];
+  res.samples.forEach((s, i) => {
+    if (s.vertex == null || !usable(i, clampUV(exported[i].uv))) return;
+    const file = colourClass(ply.rgba[s.vertex]);
+    plyCompared++;
+    if (view(i) !== file) plyMismatches.push({ vertex: s.vertex, uv: exported[i].uv, view: view(i), file });
+    if (colourClass(exported[i].rgba) !== view(i)) plyControlDiffers++;
+  });
+  console.log(JSON.stringify({ name, format: 'ply', compared: plyCompared, mismatches: plyMismatches.length, repeatDiffers: plyControlDiffers }));
+  assert(plyCompared >= 2, `${name}: only ${plyCompared} PLY vertices away from quadrant edges`);
+  if (clamp) assert(plyControlDiffers >= 1, `${name}: repeat sampling agrees with the clamped viewport at every vertex; the check cannot see clamp`);
+  assert(plyMismatches.length === 0, `${name}: PLY vertex colours differ from the viewport: ${JSON.stringify(plyMismatches)}`);
+  console.log(`PASS ${name}: trimesh reads the PLY vertex colours the viewport shows at all ${plyCompared} vertices (repeat sampling differs at ${plyControlDiffers})`);
 }
 
 async function main() {
@@ -201,60 +307,22 @@ async function main() {
         return new Real(url, protocols);
       };
     }` });
-    await cdp.send('Page.navigate', { url: `http://127.0.0.1:${appPort}/index.html` });
-    await waitFor(() => evaluate(cdp, `document.readyState === 'complete'
-      && location.pathname.endsWith('/index.html') && document.querySelector('#boot-status') === null
-      && !!window.BABYLON?.SceneLoader && !!document.querySelector('#renderCanvas')`), 30000, 'app boot');
-    const res = await evaluate(cdp, PAGE(UV_OVERRIDE));
-    if (res?.error) throw new Error(res.error);
-    await cdp.close();
-
-    const { default: JSZip } = await import('jszip');
-    const zip = await JSZip.loadAsync(Buffer.from(res.obj, 'base64'));
-    const objName = Object.keys(zip.files).find(n => n.endsWith('.obj'));
-    for (const [name, f] of Object.entries(zip.files)) {
-      if (f.dir) continue;
-      mkdirSync(join(work, name, '..'), { recursive: true });
-      writeFileSync(join(work, name), await f.async('uint8array'));
+    for (const scenario of [{ name: 'repeat', clamp: false }, { name: 'clamp', clamp: true }]) {
+      let res = null;
+      // A first dynamic import can make Vite re-optimise its deps, which
+      // invalidates the page's module URLs; a fresh load then works.
+      for (let attempt = 0; attempt < 3 && !res; attempt++) {
+        await cdp.send('Page.navigate', { url: `http://127.0.0.1:${appPort}/index.html` });
+        await waitFor(() => evaluate(cdp, `document.readyState === 'complete'
+          && location.pathname.endsWith('/index.html') && document.querySelector('#boot-status') === null
+          && !!window.BABYLON?.SceneLoader && !!document.querySelector('#renderCanvas')`), 30000, 'app boot');
+        res = await evaluate(cdp, PAGE(UV_OVERRIDE, scenario.clamp));
+        if (res?.error?.includes('Failed to fetch dynamically imported module')) res = null;
+      }
+      if (!res || res.error) throw new Error(res?.error ?? 'page never loaded its modules');
+      await compare(scenario, res, join(work, scenario.name));
     }
-    if (OUT) writeFileSync(join(work, 'export-obj.zip'), Buffer.from(res.obj, 'base64'));
-    const objText = String(await zip.file(objName).async('string'));
-    const objPos = objText.split('\n').filter(l => l.startsWith('v ')).map(l => l.slice(2).trim().split(/\s+/).map(Number));
-    assertSameVertexOrder(res.worldPos, objPos);
-    const exported = trimeshSample(join(work, objName), res.samples, work, 'samples');
-    // The quad is single-sided; the side that shows it shows several colours,
-    // the other shows only background.
-    const distinct = s => new Set(res.sides[s].rgb.map(colourClass)).size;
-    const side = distinct('front') >= distinct('back') ? 'front' : 'back';
-    if (OUT) writeFileSync(join(work, 'viewport.png'), Buffer.from(res.sides[side].png, 'base64'));
-
-    // Untransformed control: the same OBJ with its vt lines replaced by the raw UVs.
-    let k = 0;
-    const rawObj = objText.split('\n').map(l => {
-      if (!l.startsWith('vt ')) return l;
-      const i = k++;
-      return `vt ${res.rawUV[i * 2]} ${res.rawUV[i * 2 + 1]}`;
-    }).join('\n');
-    const rawPath = join(work, objName.replace(/\.obj$/, '_rawuv.obj'));
-    writeFileSync(rawPath, rawObj);
-    const control = trimeshSample(rawPath, res.samples, work, 'control');
-
-    let compared = 0, controlDiffers = 0;
-    const mismatches = [];
-    const covered = rgb => Math.max(...rgb) - Math.min(...rgb) > 40;
-    res.samples.forEach((s, i) => {
-      if (nearQuadrantEdge(exported[i].uv) || covered(res.sides[side].overlay[i])) return;
-      const view = colourClass(res.sides[side].rgb[i]);
-      const file = colourClass(exported[i].rgba);
-      compared++;
-      if (view !== file) mismatches.push({ bary: s.bary, verts: s.verts, uv: exported[i].uv, view, file });
-      if (!nearQuadrantEdge(control[i].uv) && colourClass(control[i].rgba) !== view) controlDiffers++;
-    });
-    console.log(JSON.stringify({ side, textureMatrix: res.textureMatrix, compared, mismatches: mismatches.length, controlDiffers }, null, 1));
-    assert(compared >= 20, `only ${compared} samples away from quadrant edges`);
-    assert(controlDiffers >= 5, `the untransformed UVs agree with the viewport too (${controlDiffers} differ); the check cannot see a lost transform`);
-    assert(mismatches.length === 0, `exported OBJ texture differs from the viewport at ${mismatches.length}/${compared} points: ${JSON.stringify(mismatches.slice(0, 5))}`);
-    console.log(`PASS trimesh reads the exported OBJ texture with the viewport's colour at all ${compared} points (untransformed UVs disagree at ${controlDiffers})`);
+    await cdp.close();
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);

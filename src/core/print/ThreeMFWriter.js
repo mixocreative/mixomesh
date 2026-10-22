@@ -20,7 +20,7 @@ import { collectMimakiTextures, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { applyBambuFlavour } from './ThreeMFBambu.js';
-import { exportUVs } from './UvTransform.js';
+import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
 
 const BABYLON = window.BABYLON;
 
@@ -501,9 +501,16 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = 
   // Pass 2: rotate vertices into 3MF space and find union bounds.
   const { converted, cx, cy, cz } = _convertVertices(flat);
 
-  // Resources — texture2d.
+  // Resources — texture2d. Tile style says what the viewport does with UVs
+  // outside [0,1] (Materials ext ch.6, default wrap).
+  const addressingByPath = new Map();
+  for (const { mesh } of flat) {
+    const path = pathByMesh.get(mesh);
+    if (path && !addressingByPath.has(path)) addressingByPath.set(path, textureAddressing(baseColorTexture(mesh.material)));
+  }
+  const tileAttrs = ({ u, v }) => (u === 'wrap' ? '' : ` tilestyleu="${u}"`) + (v === 'wrap' ? '' : ` tilestylev="${v}"`);
   const tex2dXml = [...tex2dIdByPath.entries()]
-    .map(([path, id]) => `<m:texture2d id="${id}" path="/${path}" contenttype="image/png"/>`)
+    .map(([path, id]) => `<m:texture2d id="${id}" path="/${path}" contenttype="image/png"${tileAttrs(addressingByPath.get(path))}/>`)
     .join('');
 
   // Resources — texture2dgroup (one per textured mesh, coord per vertex).

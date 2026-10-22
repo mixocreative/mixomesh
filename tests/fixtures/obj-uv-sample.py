@@ -10,6 +10,10 @@ Run with an isolated interpreter:
 samples.json: [{"verts": [i0, i1, i2], "bary": [b0, b1, b2]}, ...] where i is
 the OBJ's own vertex order (the `v` lines). Prints one JSON object per sample
 with the interpolated uv and the RGBA trimesh returns.
+
+    python -I tests/fixtures/obj-uv-sample.py --ply <file.ply>
+
+prints the PLY's vertices and the vertex colours trimesh reads.
 """
 import json
 import sys
@@ -46,5 +50,17 @@ def main(obj_path, samples_path):
     print(json.dumps([{"uv": p.tolist(), "rgba": c.tolist()} for p, c in zip(pts, colours)]))
 
 
+def ply_colours(ply_path):
+    mesh = trimesh.load(ply_path, process=False)
+    # With s/t present trimesh builds texture visuals; the vertex colour
+    # properties stay in the raw PLY element it parsed.
+    v = mesh.metadata["_ply_raw"]["vertex"]["data"]
+    rgba = np.stack([v[k] for k in ("red", "green", "blue", "alpha")], axis=1)
+    print(json.dumps({"vertices": mesh.vertices.tolist(), "rgba": rgba.tolist()}))
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    if sys.argv[1] == "--ply":
+        ply_colours(sys.argv[2])
+    else:
+        main(sys.argv[1], sys.argv[2])

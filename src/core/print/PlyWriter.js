@@ -24,7 +24,7 @@ import { collectMimakiTextures, clamp255 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, toPrintSpace } from './PrintSpace.js';
-import { exportUVs } from './UvTransform.js';
+import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
@@ -150,20 +150,29 @@ async function _decodeViaCanvas(blob) {
 
 // ── sampling ─────────────────────────────────────────────
 
+const TEXEL_ADDRESS = {
+  wrap: (n, m) => ((n % m) + m) % m,
+  clamp: (n, m) => Math.max(0, Math.min(m - 1, n)),
+  mirror: (n, m) => { const k = ((n % (2 * m)) + 2 * m) % (2 * m); return k < m ? k : 2 * m - 1 - k; },
+};
+
 /**
- * Bilinear RGBA sample with REPEAT wrap (Babylon's default address mode).
+ * Bilinear RGBA sample, addressing texels outside the image the way the
+ * viewport texture does (Babylon wrapU / wrapV; default repeat).
  * UV origin is bottom-left (row-from-top = (1 − v)·H), texel centres at +0.5.
  * @param {{rgba:ArrayLike<number>, width:number, height:number}} img
+ * @param {{u?:'wrap'|'clamp'|'mirror', v?:'wrap'|'clamp'|'mirror'}} [addressing]
  * @returns {number[]} [r, g, b, a] bytes
  */
-export function sampleBilinear(img, u, v) {
+export function sampleBilinear(img, u, v, addressing = {}) {
   const { rgba, width: w, height: h } = img;
   const x = (Number(u) || 0) * w - 0.5;
   const y = (1 - (Number(v) || 0)) * h - 0.5;
   const x0 = Math.floor(x), y0 = Math.floor(y);
   const fx = x - x0, fy = y - y0;
-  const wrap = (n, m) => ((n % m) + m) % m;
-  const xa = wrap(x0, w), xb = wrap(x0 + 1, w), ya = wrap(y0, h), yb = wrap(y0 + 1, h);
+  const ax = TEXEL_ADDRESS[addressing.u] ?? TEXEL_ADDRESS.wrap;
+  const ay = TEXEL_ADDRESS[addressing.v] ?? TEXEL_ADDRESS.wrap;
+  const xa = ax(x0, w), xb = ax(x0 + 1, w), ya = ay(y0, h), yb = ay(y0 + 1, h);
   const out = [0, 0, 0, 0];
   for (let k = 0; k < 4; k++) {
     const top = rgba[(ya * w + xa) * 4 + k] * (1 - fx) + rgba[(ya * w + xb) * 4 + k] * fx;
@@ -230,7 +239,8 @@ export function encodeBinaryPLY(meshEntries, imageByMesh = new Map()) {
     const img = imageByMesh.get(mesh) ?? null;
     const uvRaw = exportUVs(mesh);
     const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
-    parts.push({ pos, nrm, idx, count, img: uv ? img : null, uv, solid: _solidRgba(mesh.material) });
+    parts.push({ pos, nrm, idx, count, img: uv ? img : null, uv, solid: _solidRgba(mesh.material),
+      addressing: textureAddressing(baseColorTexture(mesh.material)) });
   }
   const textured = parts.some(p => p.img);
   const vertexCount = parts.reduce((s, p) => s + p.count, 0);
@@ -262,7 +272,7 @@ export function encodeBinaryPLY(meshEntries, imageByMesh = new Map()) {
       for (let k = 0; k < 3; k++) view.setFloat32(o + 12 + k * 4, p.nrm[v * 3 + k], true);
       const s = p.uv ? p.uv[v * 2] : 0;
       const t = p.uv ? p.uv[v * 2 + 1] : 0;
-      const rgba = p.img ? sampleBilinear(p.img, s, t) : p.solid;
+      const rgba = p.img ? sampleBilinear(p.img, s, t, p.addressing) : p.solid;
       bytes[o + 24] = rgba[0]; bytes[o + 25] = rgba[1]; bytes[o + 26] = rgba[2]; bytes[o + 27] = rgba[3];
       if (textured) { view.setFloat32(o + 28, s, true); view.setFloat32(o + 32, t, true); }
       o += vStride;
