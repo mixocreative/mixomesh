@@ -18,6 +18,7 @@ import { canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
 import { withDetachedPivot, removeSceneObject, restoreSceneObject } from './support.js';
 import { retainedTrianglesOf } from './HierarchyCommands.js';
 import { markFlat } from '../scene/FlatShading.js';
+import { settleImportBounce } from '../scene/ImportBounce.js';
 
 export function _isMaterialTextured(mat) {   // exported for tests
   if (!mat) return false;
@@ -108,6 +109,9 @@ export async function performBoolean(meshIds, op, opts = {}) {
   // blocking overlay, but a project load / API call could still interleave):
   // one at a time, and discard the result if any operand changed meanwhile.
   if (_booleanRunning) return { blocked: true, reason: 'busy' };
+  // An operand imported a moment ago may still be mid scale-pop; combine its
+  // resting shape, never the transient scale (same rule as save and export).
+  settleImportBounce();
   const before = _operandSnapshot(operandIds);
   const compute = opts.compute ?? computeBooleanAsync;
   let result;

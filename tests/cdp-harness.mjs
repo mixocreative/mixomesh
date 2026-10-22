@@ -3,7 +3,8 @@
 // launch, port allocation, CDP socket, evaluate/wait helpers — so the checks
 // themselves carry only their assertions, not 150 lines of copy-pasted setup.
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -199,4 +200,86 @@ export async function stopProcess(child) {
   if (child.exitCode == null) await Promise.race([once(child, 'exit'), sleep(3000)]);
   child.stdout?.destroy();
   child.stderr?.destroy();
+}
+
+const APP_ROOT = join(import.meta.dirname, '..');
+const BOOTED = `document.readyState === 'complete'
+  && location.pathname.endsWith('/index.html') && document.querySelector('#boot-status') === null
+  && !!window.BABYLON?.SceneLoader && !!document.querySelector('#renderCanvas')`;
+
+/**
+ * Start Vite + headless Chrome on free ports and boot the app. The page gets
+ * no Vite HMR socket, so another session editing src/ cannot reload it
+ * mid-check. `run(expr)` evaluates in the page and retries once on a fresh
+ * load when Vite's dep re-optimisation invalidated a dynamic import.
+ * @returns {Promise<{cdp: Cdp, run: (expr: string) => Promise<any>, exceptions: string[], close: () => Promise<void>}>}
+ */
+export async function launchApp({ prefix = 'mixomesh-app-' } = {}) {
+  const browserPath = findBrowser();
+  assert(browserPath, 'Chrome/Edge executable not found.');
+  const appPort = await freePort();
+  const debugPort = await freePort();
+  const userDataDir = mkdtempSync(join(tmpdir(), prefix));
+  const vite = spawn(process.execPath, [join(APP_ROOT, 'node_modules/vite/bin/vite.js'),
+    '--host', '127.0.0.1', '--port', String(appPort), '--strictPort'],
+  { cwd: APP_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  const viteOutput = [];
+  vite.stdout.on('data', c => viteOutput.push(String(c)));
+  vite.stderr.on('data', c => viteOutput.push(String(c)));
+  const browser = spawn(browserPath, [
+    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
+    '--use-angle=swiftshader', '--use-gl=angle', '--enable-unsafe-swiftshader',
+    '--window-size=1600,950', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${userDataDir}`, 'about:blank',
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const browserStderr = [];
+  browser.stderr.on('data', c => browserStderr.push(String(c)));
+  const close = async () => {
+    await stopProcess(browser);
+    await stopProcess(vite);
+    removeTempDir(userDataDir);
+  };
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/index.html`, 20000, viteOutput);
+    await waitForBrowserWs(debugPort, browserStderr);
+    const target = await openTarget(debugPort, 'about:blank');
+    const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
+    const exceptions = [];
+    cdp.onEvent = (msg) => {
+      if (msg.method !== 'Runtime.exceptionThrown') return;
+      const d = msg.params.exceptionDetails;
+      exceptions.push(d?.exception?.description ?? d?.text ?? 'unknown');
+    };
+    await cdp.send('Runtime.enable');
+    await cdp.send('Page.enable');
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
+      const Real = WebSocket;
+      window.WebSocket = function (url, protocols) {
+        if (String(protocols).includes('vite-hmr')) return { readyState: 0, addEventListener() {}, send() {}, close() {} };
+        return new Real(url, protocols);
+      };
+    }` });
+    const boot = async () => {
+      await cdp.send('Page.navigate', { url: `http://127.0.0.1:${appPort}/index.html` });
+      await waitFor(() => evaluate(cdp, BOOTED), 30000, 'app boot');
+    };
+    await boot();
+    const run = async (expr) => {
+      try {
+        return await evaluate(cdp, expr);
+      } catch (err) {
+        if (!String(err?.message).includes('Failed to fetch dynamically imported module')) throw err;
+        await boot();
+        return await evaluate(cdp, expr);
+      }
+    };
+    return {
+      cdp, run, exceptions,
+      close: async () => { await cdp.close(); await close(); },
+    };
+  } catch (err) {
+    console.error(`--- vite output (tail) ---\n${viteOutput.join('').slice(-2500)}`);
+    await close();
+    throw err;
+  }
 }

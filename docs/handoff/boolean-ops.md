@@ -54,8 +54,14 @@ from "arranges parts" to "kitbashes").
       smoke: union 2 cubes → watertight, operands consumed, undo restores, `.mixo` round-trip. GREEN.
 - [x] **Bake-or-cancel modal (1ab3dba):** a textured operand opens `Modal` `booleanTextureBake`
       (`ContextMenu.js`); "combine as solid" re-runs `performBoolean` with `bakeTexturedToSolid`.
-- [ ] **Open:** subtract/intersect dedicated browser smokes (only union and the textured gate are in
-      `tests/browser-smoke.mjs`); a Placement-panel min/max align. Colour note: result
+- [x] **Subtract/intersect browser smokes (2026-10-22):** `npm run test:boolean`
+      (`tests/browser-boolean-smoke.mjs`) imports two 10 mm OBJ cubes 5 mm apart, runs Combine >
+      Subtract / Intersect from the real context menu, and checks the result in world space: 500 mm^3,
+      watertight, 5 x 10 x 10 mm, in place; undo brings both cubes back. Subtract runs again with
+      Worker hidden for the main-thread CSG2 path. It caught two bugs, both fixed: the result jumped
+      to the world origin (CSG2-style centring dropped the position), and an operand still in its
+      import scale-pop was combined at the transient scale (`performBoolean` now settles it first).
+- [ ] **Open:** a Placement-panel min/max align. Colour note: result
       inherits operand[0]'s shaderId (persists via ShaderLibrary); `.mxvd` stores geometry only.
 - [ ] ~~Slice 2 remainder~~ (superseded — done above):
       execute: build operand descriptors → `evaluateBooleanEligibility` → `computeBoolean` →
@@ -69,8 +75,8 @@ from "arranges parts" to "kitbashes").
       delta=modelRatio/ratio must be 1.**
 - [x] **Slice 3:** ContextMenu Union/Subtract/Intersect + texture bake-or-cancel modal + i18n
       (en/ja/zh-Hant). Non-manifold operands are gated by the validator.
-- [x] **Slice 4 (partly):** end-to-end browser smoke with real CSG2 covers union and the textured gate;
-      subtract and intersect have no browser smoke yet (the one open row above).
+- [x] **Slice 4:** end-to-end browser smokes with real CSG2 cover union, the textured gate,
+      subtract and intersect.
       Booleans now run in a Manifold worker (0b2b1f0), no longer main-thread.
 
 ## Slice 2 debate — captured audit (do NOT re-run)
@@ -89,8 +95,8 @@ result (solid-colour → assign default), contentHash for the embedded-only reco
 
 ## RESUME POINTER
 
-**Current:** all four slices are built and committed. **Next:** add browser smokes for subtract and
-intersect, then nothing is left on this tracker. Textured operands stay gated by design (bake to solid
+**Current:** all four slices are built and committed, and every operation has a browser smoke.
+Only the Placement-panel min/max align is left on this tracker. Textured operands stay gated by design (bake to solid
 or cancel). Read ADR 0002 §Decision for the shape.
 
 ## Code map (where the panel should look)
@@ -102,4 +108,4 @@ Worker pattern: `src/core/ValidateWorker.js`, `WorkerImport.js`. Commands/undo:
 `src/core/PersistenceManager.js`. Shaders/UV: `src/core/ShaderLibrary.js`. Context menu:
 `src/ui/ContextMenu.js`.
 
-## Verify: typecheck · npm test · build · test:browser · test:export
+## Verify: typecheck · npm test · build · test:browser · test:export · test:boolean

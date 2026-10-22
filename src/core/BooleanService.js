@@ -180,13 +180,43 @@ export async function computeBoolean(op, meshes, opts = {}) {
       made.push(acc);
     }
     const name = opts.name || `${op}_result`;
-    const result = acc.toMesh(name, scene);   // NOT in `made` — this is the kept output
+    // NOT in `made`: this is the kept output. CSG2's own centring bakes the
+    // shift away, so the result would jump to the world origin; keep it in place.
+    const result = acc.toMesh(name, scene, { centerMesh: false });
+    _centreInPlace(result);
     _applyResultMaterial(result, meshes[0], name, scene);
     return result;
   } finally {
     for (const csg of made) { try { csg.dispose?.(); } catch { /* already gone */ } }
     for (const mesh of operands) { try { mesh.dispose?.(); } catch { /* already gone */ } }
   }
+}
+
+/** Move the vertices so the bounding-box centre is the mesh origin, and put
+ *  the mesh there: the pivot sits on the part, the part stays where it was. */
+function _centreInPlace(mesh) {
+  const B = window.BABYLON;
+  const positions = mesh.getVerticesData(B.VertexBuffer.PositionKind);
+  if (!positions?.length) return;
+  const centre = _centreOf(positions);
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] -= centre[0]; positions[i + 1] -= centre[1]; positions[i + 2] -= centre[2];
+  }
+  mesh.setVerticesData(B.VertexBuffer.PositionKind, positions, false);
+  mesh.refreshBoundingInfo();
+  mesh.position.set(centre[0], centre[1], centre[2]);
+}
+
+function _centreOf(positions) {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      const v = positions[i + c];
+      if (v < min[c]) min[c] = v;
+      if (v > max[c]) max[c] = v;
+    }
+  }
+  return [0, 1, 2].map(c => (min[c] + max[c]) / 2);
 }
 
 /** Solid colour from the first operand (sRGB read: a PBR source keeps
@@ -208,8 +238,8 @@ function _applyResultMaterial(result, firstOperand, name, scene) {
 /**
  * Boolean off the main thread when a Worker is available (raw manifold-3d in
  * workers/Boolean.worker.js), else the inline CSG2 path. The result matches
- * computeBoolean: world-space geometry re-centred on the origin (CSG2's
- * toMesh `centerMesh` default) with the first operand's solid colour. A worker
+ * computeBoolean: world-space geometry centred on its own origin, the mesh
+ * placed where the operands were, with the first operand's solid colour. A worker
  * that cannot start or crashes falls back inline only when the job is small
  * enough for the main thread; a Manifold error (open operand) is reported.
  *
@@ -249,20 +279,7 @@ async function _computeBooleanAsync(op, meshes, opts) {
   }
   const scene = meshes[0].getScene();
   const name = opts.name || `${op}_result`;
-  // CSG2 toMesh centerMesh: shift so the bounding-box centre sits at the origin.
   const { positions } = out;
-  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < positions.length; i += 3) {
-    for (let c = 0; c < 3; c++) {
-      const v = positions[i + c];
-      if (v < min[c]) min[c] = v;
-      if (v > max[c]) max[c] = v;
-    }
-  }
-  const centre = [0, 1, 2].map(c => (min[c] + max[c]) / 2);
-  for (let i = 0; i < positions.length; i += 3) {
-    positions[i] -= centre[0]; positions[i + 1] -= centre[1]; positions[i + 2] -= centre[2];
-  }
   const result = new B.Mesh(name, scene);
   const vd = new B.VertexData();
   vd.positions = positions;
@@ -270,6 +287,7 @@ async function _computeBooleanAsync(op, meshes, opts) {
   if (out.normals) vd.normals = out.normals;
   else { const n = []; B.VertexData.ComputeNormals(positions, out.indices, n); vd.normals = n; }
   vd.applyToMesh(result);
+  _centreInPlace(result);
   _applyResultMaterial(result, meshes[0], name, scene);
   return result;
 }
