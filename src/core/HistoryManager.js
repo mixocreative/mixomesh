@@ -70,18 +70,19 @@ function _trimUndo() {
   while (_undoStack.length > STACK_LIMIT) _release(_undoStack.shift(), 'undo');
   const cap = _retainCap ?? caps.triangleBudget;
   if (!(cap > 0)) return;
-  let total = 0;
-  for (const cmd of _undoStack) total += _retained(cmd, 'undo');
-  let freed = false;
-  while (total > cap && _undoStack.length > 1) {
-    const cmd = _undoStack.shift();
-    const held = _retained(cmd, 'undo');
-    total -= held;
-    if (held > 0) freed = true;
-    _release(cmd, 'undo');
+  const held = _undoStack.map(cmd => _retained(cmd, 'undo'));
+  let excess = held.reduce((a, b) => a + b, 0) - cap;
+  // A released step cannot be undone through, so everything older goes with
+  // it. Cut after the last entry that must be released for the rest to fit;
+  // steps that hold nothing are kept, since dropping them frees nothing.
+  let cut = 0;
+  for (let i = 0; excess > 0 && i < _undoStack.length - 1; i++) {
+    if (held[i] > 0) { excess -= held[i]; cut = i + 1; }
   }
+  if (!cut) return;
+  for (const cmd of _undoStack.splice(0, cut)) _release(cmd, 'undo');
   // Never drop an undo step silently (review M5).
-  if (freed) dispatch(EVENTS.TOAST, { message: t('toast.undoTrimmed'), type: 'info', duration: 6000 });
+  dispatch(EVENTS.TOAST, { message: t('toast.undoTrimmed'), type: 'info', duration: 6000 });
 }
 
 /** Test seam: override the retained-triangle cap (null = tier budget). */
