@@ -127,7 +127,7 @@ file with the manifold/volume verdict; see the header of
 `tests/scan-probe.mjs` for the `PROBE_*` switches.
 
 `npm run test:all` chains the test commands listed in the `test:all` script of
-`package.json` (currently `test && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle`). The browser smokes
+`package.json` (currently `test && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle && test:outliner-hover && test:boolean && test:uv-transform && test:consumers`). The browser smokes
 stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so
 the headless node:test suite must remain runnable without either.
 
@@ -140,6 +140,20 @@ repairs it, exports it, and checks the result is actually watertight).
 import (`tests/fixtures/open-tetra.glb`, `tests/fixtures/textured-quad.glb`)
 from their generator scripts; `tests/hygiene.test.mjs` fails if a committed
 fixture has drifted from its generator.
+
+`npm run test:consumers` exports reference models (`quadrant-quad.glb`,
+`open-tetra.glb`, the three-colour `cat-model-3mat.obj` imported as
+`猫　モデル.obj`) through the real export pipeline to every format the app
+writes (3MF textured, 3MF colour groups, 3MF Bambu flavour, OBJ + MTL + PNG,
+STL, PLY, VRML), then has programs that share no code with MIXOMESH read each
+file: PrusaSlicer `--info` and python trimesh / pymeshlab
+(`tests/consumers.py`, run with `python -I`). Facets, size, watertightness,
+volume, colour per face direction, texture colour near each corner and part
+names are compared with a truth table written from the fixture sources.
+Needs PrusaSlicer (`PRUSA_SLICER` overrides the default install path) and
+`pip install trimesh pymeshlab pillow`; a missing consumer fails the run unless
+`SKIP_CONSUMERS=1`, which prints UNVERIFIED instead. Defects it found that are
+not fixed yet are listed in its `KNOWN` table and print as KNOWN.
 
 `npm run test:video` is an OPTIONAL headed check — it opens a small visible
 browser window for a full-size turntable recording (`VIDEO_CHECK_EDGE=1`

@@ -261,7 +261,8 @@ export async function launchApp({ prefix = 'mixomesh-app-' } = {}) {
     }` });
     const boot = async () => {
       await cdp.send('Page.navigate', { url: `http://127.0.0.1:${appPort}/index.html` });
-      await waitFor(() => evaluate(cdp, BOOTED), 30000, 'app boot');
+      // A cold Vite start optimises deps first; on a busy machine that passes 30 s.
+      await waitFor(() => evaluate(cdp, BOOTED), 90000, 'app boot');
     };
     await boot();
     const run = async (expr) => {

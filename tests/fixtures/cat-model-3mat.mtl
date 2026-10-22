@@ -1,0 +1,8 @@
+newmtl Red
+Kd 1 0 0
+
+newmtl Green
+Kd 0 1 0
+
+newmtl Blue
+Kd 0 0 1

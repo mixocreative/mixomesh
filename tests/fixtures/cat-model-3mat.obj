@@ -1,0 +1,22 @@
+# 10 x 20 x 30 mm box, Y up, outward counter-clockwise faces. Three materials:
+# top (+Y) red, +X side green, the other four faces blue. The object name
+# is non-ASCII (U+732B U+3000 U+30E2 U+30C7 U+30EB). Read by tests/consumers.mjs.
+mtllib cat-model-3mat.mtl
+o 猫　モデル
+v 0 0 0
+v 10 0 0
+v 10 20 0
+v 0 20 0
+v 0 0 30
+v 10 0 30
+v 10 20 30
+v 0 20 30
+usemtl Red
+f 4 8 7 3
+usemtl Green
+f 2 3 7 6
+usemtl Blue
+f 1 4 3 2
+f 5 6 7 8
+f 1 2 6 5
+f 1 5 8 4
