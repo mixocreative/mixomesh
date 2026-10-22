@@ -51,3 +51,17 @@ Owner asked "do items 1-5 on your own", then asked to pause safely. Master is NO
 - Serve a production build copy for browser walks while other agents edit src (HMR reloads otherwise).
 - Real scans in `tests/fixtures/real-scans` are customer data: git-ignored, never commit; decoded copies in
   `.audit/live2/undraco/`.
+
+## Pause point (verified)
+
+HEAD ac0d3f3, tree clean, `npm test` 1083/1083 (0 skipped), lint clean. Not run at the pause: typecheck,
+i18n:check, build, test:all, test:electron (run them first on resume).
+- L2-02 CRITICAL fixed: ac2fa4e (tests af06af5). Reopened texture colour 202,134,113 = fresh export.
+- F's L2-04..L2-14 committed (see `.audit/pending/F-handoff.md`); L2-09 not started; NavCube mirror is a
+  Playwright-WebKit limit, needs real Safari.
+- L2-03 resume: restore `.audit/pending/E-export-welded-seams-l2.test.mjs` to `tests/`, apply
+  `.audit/pending/E-wip.patch`, then trace why export prep re-points the cube's triangles to the X faces' UVs
+  (4 of 12 faces match; suspect repair or optimizeIndices; check if it predates the patch) per `E-handoff.md`.
+  After it lands, delete the colorgroup manifold rows from the KNOWN table in `tests/consumers.mjs`.
+- Pending merges for other owners: `L2-04-bedfit-cost.patch` (bed-fit/cost use the loose box), L2-01 locales +
+  ImportFailure note, `L2-10-csp.md` (no change needed).
