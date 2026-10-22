@@ -1,7 +1,7 @@
 import globals from 'globals';
 
 export default [
-  { ignores: ['dist/', 'node_modules/', 'public/', '.tmp/', '.npm-cache/', '**/*.ts'] },
+  { ignores: ['dist/', 'node_modules/', 'public/', '.tmp/', '.audit/', '.npm-cache/', '**/*.ts'] },
   {
     files: ['src/**/*.js', 'tests/**/*.mjs', 'scripts/**/*.mjs', 'eslint.config.js'],
     languageOptions: {
