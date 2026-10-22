@@ -25,9 +25,12 @@ function _top() {
 
 function _render() {
   const s = _top();
-  _visible = !!s;
+  // A closed session lingering for its minimum visible time is only a picture:
+  // its work is over, so it never swallows input.
+  _visible = !!s && !s.closed;
   if (!s) { if (_root) _root.classList.add('hidden'); return; }
   _ensure();
+  _root.style.pointerEvents = s.closed ? 'none' : '';
   _title.textContent = s.title;
   if (_cancelBtn) {
     _cancelBtn.hidden = !s.onCancel;
@@ -137,7 +140,7 @@ export function open(title = t('progress.working'), opts = {}) {
       // Linger only when nothing else keeps the overlay up.
       const alone = !_sessions.some(o => o !== s && o.shown);
       const left = s.shown && alone ? minVisibleMs - (Date.now() - s.shownAt) : 0;
-      if (left > 0) setTimeout(remove, left); else remove();
+      if (left > 0) { setTimeout(remove, left); _render(); } else remove();
     },
   };
 }

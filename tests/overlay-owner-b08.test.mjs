@@ -84,3 +84,15 @@ test('sessions stack: closing the newest brings the one underneath back with its
   await sleep(80);
   assert.equal(visible(), false, 'work that ends before the delay never shows');
 });
+
+test('a finished session lingering for its minimum time no longer blocks the keyboard', async () => {
+  const s = ProgressOverlay.open('Loading model');
+  s.close();
+  const done = ProgressOverlay.open('Loading model', { minVisibleMs: 200 });
+  await sleep(10);
+  done.close();
+  assert.equal(visible(), true, 'still drawn for its minimum time');
+  assert.equal(pressEscape().defaultPrevented, false, 'Esc reaches the app');
+  await sleep(250);
+  assert.equal(visible(), false);
+});
