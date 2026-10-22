@@ -57,6 +57,7 @@ type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
 // desktop: the preload bridge is complete and main answers `storage:ready`.
 // Failure = one blocking screen naming the problem, never a half-booted app.
 async function gateStorage(): Promise<boolean> {
+  i18n.init();    // detect locale, set _locale, apply <html lang>, fire LOCALE_CHANGED; the gate's messages read it
   const blocked = engineGate(engine);
   if (blocked) {
     renderBlockingMessage(blocked.title, blocked.message);
@@ -66,18 +67,17 @@ async function gateStorage(): Promise<boolean> {
     await storage.ready();
     return true;
   } catch (err) {
-    const e = err as { title?: string; message?: string } | null;
+    const e = err as { title?: string; message?: string; textKey?: string } | null;
     console.error('Storage unavailable:', err);
     renderBlockingMessage(
-      e?.title || 'Storage unavailable',
-      e?.message || 'MIXOMESH could not initialise its file storage.',
+      (e?.textKey && i18n.t(`${e.textKey}.title`)) || e?.title || 'Storage unavailable',
+      (e?.textKey && i18n.t(`${e.textKey}.body`)) || e?.message || 'MIXOMESH could not initialise its file storage.',
     );
     return false;
   }
 }
 
 async function bootstrap() {
-  i18n.init();    // detect locale, set _locale, apply <html lang>, fire LOCALE_CHANGED
   Toast.init();
   StatusBar.init();
   JobActivityPanel.init();   // every worker job shows up here (heavy-mesh spec §5)

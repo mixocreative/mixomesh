@@ -3912,7 +3912,9 @@ Caps (opfs): `mountDirectory/relinkByPath/watchFiles:false`, `writeFiles:true`
   previous save untouched; the error carries `previousKept` and
   `recoveryName` and the façade tells the user which copy survived (cia B-05).
 - `ready()`: no OPFS → "Browser not supported"; OPFS/Projects open fails →
-  "Storage unavailable" (Private Browsing); then `navigator.storage.persist()`
+  "Storage unavailable" (Private Browsing); each error carries a `textKey`
+  (`storage.opfs.unsupported` / `.unavailable`) that the boot screen translates,
+  since `main.ts` runs `i18n.init()` before the gate (cia D-11); then `navigator.storage.persist()`
   best-effort (OPFS is the only copy; WebKit evicts idle origins) and the
   5 s IndexedDB probe (failure → `persistAssets=false`, non-blocking).
 - Tests: `tests/storage-adapter.test.mjs` runs the shared conformance suite as

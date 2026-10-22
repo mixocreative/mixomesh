@@ -336,12 +336,14 @@ export const OpfsStorageAdapter = {
   async ready() {
     if (typeof _nav()?.storage?.getDirectory !== 'function') {
       throw storageUnavailable('Browser not supported',
-        'This browser has neither File System Access nor the Origin Private File System.');
+        'This browser has neither File System Access nor the Origin Private File System.',
+        undefined, 'storage.opfs.unsupported');
     }
     try { await _projectsDir(); }
     catch (err) {
       throw storageUnavailable('Storage unavailable',
-        'MIXOMESH could not open this browser\'s private file storage (Private Browsing may block it).', err);
+        'MIXOMESH could not open this browser\'s private file storage (Private Browsing may block it).',
+        err, 'storage.opfs.unavailable');
     }
     try {
       const p = _nav().storage.persist?.();

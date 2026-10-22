@@ -213,19 +213,22 @@ export function setCapabilities(overrides) {
 
 /**
  * Boot-gate failure (task 4.4): `storage.ready()` rejects with this when the
- * runtime's storage layer cannot initialise. `title` + `message` are shown
- * verbatim in the blocking boot screen.
+ * runtime's storage layer cannot initialise. The blocking boot screen shows
+ * `t(textKey + '.title')` / `t(textKey + '.body')` when a key is given (the
+ * storage layer stays free of i18n), else `title` + `message` verbatim.
  * @param {string} title
  * @param {string} message
  * @param {unknown} [cause]
- * @returns {Error & {title:string, storageUnavailable:true}}
+ * @param {string} [textKey]  i18n key prefix with `.title` and `.body` entries
+ * @returns {Error & {title:string, storageUnavailable:true, textKey?:string}}
  */
-export function storageUnavailable(title, message, cause) {
+export function storageUnavailable(title, message, cause, textKey) {
   const err = /** @type {Error & {title:string, storageUnavailable:true}} */ (
     new Error(message, cause === undefined ? undefined : { cause })
   );
   err.name = 'StorageUnavailableError';
   err.title = title;
   err.storageUnavailable = true;
+  if (textKey) err.textKey = textKey;
   return err;
 }

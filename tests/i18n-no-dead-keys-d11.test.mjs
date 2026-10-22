@@ -1,7 +1,8 @@
 // cia D-11: every en.json key is referenced by code (literal or a dynamic
 // prefix such as t(`import.fix.${code}`)), so translators never pay for dead
 // strings. KEEP lists keys that docs/TRANSLATIONS.md uses as worked examples and
-// the storage.opfs.* boot-gate texts (to be wired into OpfsStorageAdapter.js).
+// the storage.opfs.* boot-gate texts, which the storage layer names by prefix
+// (storageUnavailable's textKey) and main.ts translates.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
