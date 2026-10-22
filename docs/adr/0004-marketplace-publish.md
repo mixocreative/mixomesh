@@ -1,6 +1,6 @@
 # ADR 0004 — Listbridge: marketplace publishing (Cults3D first, self-hosted shops later)
 
-Status: **Accepted (planning)** · Date: 2026-10-14 · Plan: `docs/plans/2026-10-14-marketplace-publish.md`.
+Status: **Accepted (implemented; the live Cults3D run waits on the owner's API key)** · Date: 2026-10-14 · Plan: `docs/plans/2026-10-14-marketplace-publish.md`.
 
 ## Context
 

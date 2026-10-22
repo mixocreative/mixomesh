@@ -114,15 +114,15 @@ FS-only features (mount / relink / watch / recent-by-path) gate behind `caps`.
 - [x] Phase 1b (directory slice): `src/core/storage/StorageAdapter.js` domain interface +
       `BrowserStorageAdapter` delegating to today's code (opaque ref = FileSystemHandle);
       boot `storage` singleton; desktop directory refs are main-process registry tokens.
-- [ ] Phase 1b: route LEAF modules through the adapter (idb.js, persist/*, DirMounts,
+- [x] Phase 1b: route LEAF modules through the adapter (idb.js, persist/*, DirMounts,
       TextureAssets, Download, PersistenceManager doc I/O).
-- [ ] Phase 1b: gate remaining UI controls behind caps — ProjectMenu open/save/saveAs
+- [x] Phase 1b: gate remaining UI controls behind caps — ProjectMenu open/save/saveAs
       (`writeFiles`), recent (`persistAssets`), relink (`relinkByPath`); ViewportDrop OS-file handle.
-- [ ] Phase 1c: refactor LEAKED modules (AssetImport `_fileHandleKeyFor`, ObjSiblings dir-walk,
+- [x] Phase 1c: refactor LEAKED modules (AssetImport `_fileHandleKeyFor`, ObjSiblings dir-walk,
       AssetPanel `_scanDirectory`/`_cacheHandles`, ViewportDrop DataTransferItem) to go via adapter.
 - [x] Phase 2 (directory slice): Windows Electron shell + `DesktopStorageAdapter`; mounted
       assets use allowlisted opaque-ref IPC and never expose OS paths to the renderer.
-- [ ] Phase 3: electron-builder (NSIS) installer, security hardening, optional auto-update.
+- [x] Phase 3: electron-builder (NSIS) installer (`build-installer.cmd`, `electron-builder.yml`) and security hardening. Auto-update is not built.
 - Verify green (typecheck · 102 headless · build · browser smoke ×N · export) at EACH commit.
 
 ## AUDIT RESULTS (captured — do NOT re-run the agents)

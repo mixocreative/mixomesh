@@ -52,9 +52,10 @@ from "arranges parts" to "kitbashes").
       (skips normalization; neutral fields modelRatio=ratio=1) · CSG2+InitializeCSG2Async added to
       `boot.ts` (were missing) · ContextMenu "Combine: Union/Subtract/Intersect" + i18n. Browser
       smoke: union 2 cubes → watertight, operands consumed, undo restores, `.mixo` round-trip. GREEN.
-- [ ] **Remaining polish:** textured-operand **bake-or-cancel modal** (currently textured is
-      solid-color-assumed / blocked via toast; the modal is the designed UX) · subtract/intersect
-      dedicated smokes · a Placement-panel min/max align + Boolean affordances. Colour note: result
+- [x] **Bake-or-cancel modal (1ab3dba):** a textured operand opens `Modal` `booleanTextureBake`
+      (`ContextMenu.js`); "combine as solid" re-runs `performBoolean` with `bakeTexturedToSolid`.
+- [ ] **Open:** subtract/intersect dedicated browser smokes (only union and the textured gate are in
+      `tests/browser-smoke.mjs`); a Placement-panel min/max align. Colour note: result
       inherits operand[0]'s shaderId (persists via ShaderLibrary); `.mxvd` stores geometry only.
 - [ ] ~~Slice 2 remainder~~ (superseded — done above):
       execute: build operand descriptors → `evaluateBooleanEligibility` → `computeBoolean` →
@@ -66,9 +67,11 @@ from "arranges parts" to "kitbashes").
       `bakeImportTransform`. Browser smoke: union two solid cubes → one watertight mesh → survives reload.
       **Field invariant (both debate agents got this wrong): `modelRatio` MUST equal `ratio` (use 1,1) —
       delta=modelRatio/ratio must be 1.**
-- [ ] **Slice 3:** ContextMenu Union/Subtract/Intersect + modals (texture bake-or-cancel,
-      non-manifold→validator) + i18n (en/ja/zh-Hant).
-- [ ] **Slice 4:** end-to-end browser smoke (real CSG2, all 3 ops; textured→gated).
+- [x] **Slice 3:** ContextMenu Union/Subtract/Intersect + texture bake-or-cancel modal + i18n
+      (en/ja/zh-Hant). Non-manifold operands are gated by the validator.
+- [x] **Slice 4 (partly):** end-to-end browser smoke with real CSG2 covers union and the textured gate;
+      subtract and intersect have no browser smoke yet (the one open row above).
+      Booleans now run in a Manifold worker (0b2b1f0), no longer main-thread.
 
 ## Slice 2 debate — captured audit (do NOT re-run)
 
@@ -86,12 +89,9 @@ result (solid-colour → assign default), contentHash for the embedded-only reco
 
 ## RESUME POINTER
 
-**Current:** Slice 1 (pure gating) DONE + green + committed. **Next = Slice 2** (see checklist):
-add the CSG2 compute wrapper to `BooleanService.js` reusing the `PrintPipeline._ensureCSG2` init
-pattern, then `BooleanCommand` + the synthetic-embedded-asset persistence path, guarded by a browser
-smoke (union two solid cubes → watertight → survives reload). Read ADR 0002 §Decision + §Implementation
-plan for the exact shape. Keep the suite green; commit per slice. Do NOT attempt textured Booleans
-(gated by design) or a worker (deferred).
+**Current:** all four slices are built and committed. **Next:** add browser smokes for subtract and
+intersect, then nothing is left on this tracker. Textured operands stay gated by design (bake to solid
+or cancel). Read ADR 0002 §Decision for the shape.
 
 ## Code map (where the panel should look)
 

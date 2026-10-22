@@ -594,9 +594,9 @@ tests/                     ← headless harness — Node-native, no build (§14b
 
 **npm test scripts.** `npm test` is the headless node:test suite ONLY — the
 browser smokes launch a real Chrome/Edge plus a Vite server, so they must
-never be reachable from it. `npm run test:all` chains them in order:
-`test && test:browser && test:export && test:repair` (2026-09-18, review
-CIA F8). `npm run fixtures` regenerates the committed `.glb` fixtures.
+never be reachable from it. `npm run test:all` chains them in order. The `test:all` script in
+`package.json` is the single list (currently `test && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle`); other docs point there
+instead of copying it (2026-09-18, review CIA F8; cia D-08). `npm run fixtures` regenerates the committed `.glb` fixtures.
 
 ### 0.3b Rebuild Architecture Map
 
@@ -6504,7 +6504,7 @@ build history. Detailed behaviour contracts live in the module sections above.
 - **Primary workflow:** import textured/full-colour models, assemble and transform parts, assign/override shaders and UVs, validate printability, then export via the explicit OBJ / 3MF / STL format buttons.
 - **Primary target:** Mimaki 3DUJ-553 by default (`state.print.targetPrinterId = 'mimaki-3duj-553'`, bed `508 × 508 × 305` mm). Mimaki targets preserve continuous-tone textures through 3MF Materials Extension or OBJ+MTL+PNG.
 - **Secondary workflows:** solid-only scenes export 3MF `<colorgroup>` for Bambu / Prusa / Orca-style slicing (task 1.11). Textured content always uses the 3MF Materials Extension and solid content `<colorgroup>` (content picks the colour REPRESENTATION, AGENTS rule 6); the package FLAVOUR (core / bambu / prusa) is a printer-profile default the user may override (task 1.11).
-- **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run i18n:check`, `npm run build`, and `npm run test:all` (= `test` → `test:browser` → `test:export` → `test:repair`). Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
+- **Verification baseline:** run `npm run lint`, `npm run typecheck`, `npm run i18n:check`, `npm run build`, and `npm run test:all` (the chain in `package.json`, see §0.3). Lint is ESLint flat config (`eslint.config.js`): ~10 core rules (no-unused-vars w/ `^_` + rest-sibling exemptions, no-console except warn/error, prefer-const, no-duplicate-imports, no-undef w/ `BABYLON` global, …); `tests/` and `scripts/` are exempt from no-console (harnesses report via stdout); `.ts` files stay tsc-only. Do not hard-code total test counts in this spec; counts drift as coverage changes. Manual Chrome file-picker checks and external slicer acceptance checks remain useful when changing persistence/export behaviour, but they are not tracked as an active handoff.
 
 ### Build history
 
@@ -6513,7 +6513,7 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 
 ### Locked Design Decisions
 
-- Printer presets are build-area data only (`displayName`, `vendor`, XYZ bed). Adding one never changes or selects an export writer.
+- A printer preset carries the bed plus SUGGESTED export defaults (format, split-by-material, OBJ axis, 3MF flavour). Selecting a printer applies them as one undoable step, each stays an ordinary per-project setting the user may change, and **Printer default** reverts them. A preset never hides, disables or blocks a format (AGENTS rule 6, §12).
 - Mimaki targets must never collapse textures to solid colours. Filament targets intentionally collapse to solid per-part colours.
 - One-mesh-one-shader remains an invariant. MultiMaterial imports split into single-material siblings sharing a `logicalObjectId`; validator/exporter re-union by it (`sourceGroupId` is migrate-only).
 - Export prep is non-destructive: clones get unique geometry before any world flattening, welding, normal creation, CSG, or serialization.
@@ -6533,7 +6533,7 @@ the contracts below — baseline, locked decisions, and accepted scope cuts.
 |---|---|
 | Chrome / Edge / Safari (WebKit) only | Single startup check (`engineGate`); blocking dialog otherwise |
 | Source unit assumed mm (Blender default) | Per-asset override in Properties Panel; flips `unitConfirmed: false` until reviewed |
-| Validation v1 = 3 checks only | Future Pro version adds thin-wall, self-intersect, overhang |
+| Validation covers holes, non-manifold edges, inverted normals and thin features | Self-intersection and overhang analysis are not built |
 | Numpad shortcuts assume numpad | `Alt+1/3/7` registered as alternates |
 | OBJ+MTL slicer support varies | Informational tooltip — not a blocking warning |
 | IndexedDB FS handle permission resets per session | Boot remount-folder modal (AssetPanel.promptRemount) re-grants via its button gesture; per-asset relink via the unmatched-assets modal |
@@ -6576,8 +6576,9 @@ synthetic asset. One-mesh-one-shader holds (solid result = one material).
 `.subtract()`, `.intersect()`, `.toMesh(name, scene)`, `.dispose()`. `BooleanService.computeBoolean`
 wraps it (main-thread, init cached).
 
-**Threading.** Main-thread CSG2 (init cached once, mirrors `PrintPipeline._ensureCSG2`); a worker is
-a deferred perf knob (no proven Manifold-in-worker path). Invocation: ContextMenu Union/Subtract/
+**Threading.** Off the main thread in a raw Manifold worker when a Worker is available (0b2b1f0;
+`booleanTriangleCap` raises the cap then), else main-thread CSG2 (init cached once, mirrors
+`PrintPipeline._ensureCSG2`). Invocation: ContextMenu Union/Subtract/
 Intersect on a 2+ selection (Subtract base = active object).
 
 **Status — COMPLETE (union/subtract/intersect).** `BooleanService` (gating + `computeBoolean` CSG2
@@ -6587,8 +6588,8 @@ undo/redo · `AssetRestore` `registerBakedResult` + the `.mxvd` restore branch (
 normalization) · ContextMenu "Combine: Union/Subtract/Intersect" + i18n. **CSG2 + InitializeCSG2Async
 now imported in `boot.ts`** (were absent → the export re-bake also silently skipped; now active).
 Browser smoke: union two solid cubes → watertight result, operands consumed, undo restores, survives
-`.mixo` reload. Remaining polish (textured bake-or-cancel modal; subtract/intersect UI smokes) in
-`docs/handoff/boolean-ops.md`.
+`.mixo` reload. A textured operand opens the `booleanTextureBake` bake-or-cancel modal. Still
+open: subtract/intersect browser smokes (`docs/handoff/boolean-ops.md`).
 
 ---
 

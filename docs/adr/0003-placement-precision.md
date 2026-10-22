@@ -1,6 +1,6 @@
 # ADR 0003 — Placement precision (kitbash assembly verbs)
 
-Status: **Accepted (planning)** · Date: 2026-06-17 · Roadmap: `docs/roadmap-kitbash.md` Phase B.
+Status: **Accepted (implemented)** · Date: 2026-06-17 · Roadmap: `docs/roadmap-kitbash.md` Phase B.
 Synthesised from a 2-agent debate panel (mate+align · mirror+array).
 
 ## Context

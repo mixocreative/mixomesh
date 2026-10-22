@@ -119,8 +119,8 @@ import → validate → repair → re-validate → 3MF export and prints one row
 file with the manifold/volume verdict; see the header of
 `tests/scan-probe.mjs` for the `PROBE_*` switches.
 
-`npm run test:all` chains the five test commands in that order
-(`test && test:browser && test:export && test:repair && test:group`). The browser smokes
+`npm run test:all` chains the test commands listed in the `test:all` script of
+`package.json` (currently `test && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle`). The browser smokes
 stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so
 the headless node:test suite must remain runnable without either.
 
@@ -176,8 +176,7 @@ marketplace by hand.
 
 ### Packaged-app smoke (desktop build)
 
-`npm run dist` needs `electron-builder`, which is **not** a declared dependency
-(`npm i -D electron-builder` first; it also downloads build tooling). It writes the
+`npm run dist` runs `electron-builder` (a declared devDependency). It writes the
 installer and `release/win-unpacked/` (cloudflared is no longer bundled; `npm run build:installer -- --keep-build` does this too). To prove the packaged app can publish, run:
 
 ```bash

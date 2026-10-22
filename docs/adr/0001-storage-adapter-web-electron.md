@@ -1,6 +1,6 @@
 # ADR 0001 — StorageAdapter: one codebase for Web + Windows (Electron)
 
-Status: **Accepted (planning)** · Date: 2026-06-17 · Supersedes: none
+Status: **Accepted (implemented)** · Date: 2026-06-17 · Supersedes: none
 
 > Companion runtime tracker: `HANDOFF.md` (resume state). Design lives here.
 

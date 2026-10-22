@@ -1,6 +1,6 @@
 # ADR 0002 — Interactive Boolean (pre-slice kitbash combine)
 
-Status: **Accepted (planning)** · Date: 2026-06-17 · Companion resume tracker:
+Status: **Accepted (implemented)** · Date: 2026-06-17 · Companion resume tracker:
 `docs/handoff/boolean-ops.md`. Synthesised from a 3-agent debate panel
 (engine/threading · data-model · texture/UX).
 

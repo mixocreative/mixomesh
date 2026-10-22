@@ -20,11 +20,15 @@ Align → Mirror → Mate → Array.
       (multi-select gated) → `_align('align-<axis>-<mode>')` → `AlignCommand`; i18n en/ja/zh-Hant.
       typecheck · 106 headless · build · browser smoke green. (min/max modes exposed via a future
       Placement panel — the command already supports them.)
-- [ ] **Mirror:** vertex-bake reflection + `flipFaces` (determinant<0, copy ImportNormalizer:100) +
+- [x] **Mirror (246a1c8):** vertex-bake reflection + `flipFaces` (determinant<0, copy ImportNormalizer:100) +
       `makeGeometryUnique`; expand `logicalObjectCommandIds`; export-winding smoke.
-- [ ] **Mate:** face pick (`scene.pick`.faceId, `getFacetNormal`/`getFacetPosition`) → `FromToRef`
+- [x] **Mate (6feb630):** face pick (`scene.pick`.faceId, `getFacetNormal`/`getFacetPosition`) → `FromToRef`
       rotation + coincident centres; snap at pick-time.
-- [ ] **Array:** linear/radial N clones, atomic single-`push`, pre-register before mutate.
+- [x] **Array (d32385f):** linear/radial N clones, atomic single-`push`, pre-register before mutate.
+
+`MirrorCommand`, `MateCommand` and `ArrayCommand` live in `src/core/commands/PlacementCommands.js`
+and are reached from the ContextMenu (Mirror X/Y/Z, Mate, Array X/Y/Z). The whole Phase B verb set is
+built. Still open: a Placement panel for Align min/max (the command already supports it).
 
 ## Watch-outs (from the debate interrogation)
 
