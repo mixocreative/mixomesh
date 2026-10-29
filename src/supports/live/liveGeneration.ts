@@ -36,17 +36,20 @@ import { EVENTS } from '../../core/events.js';
 import { t } from '../../i18n/index.js';
 import { supportUi, type PanelProblem } from '../../panels/supports/supportUi';
 import { supportMode } from '../SupportMode';
-import { emptySupports, isBuilt, readStamps, type ObjectSupports } from '../model';
+import { emptySupports, isBuilt, readStamps, samePose, type ObjectSupports } from '../model';
 import { readSupports, supportsOwner } from '../store';
 import { cachePlacement, cacheSupportMesh, cachedPlacement, dropSupportMesh } from '../supportCache';
-import { forgetObjectModel, objectModelStaged, type ObjectModel } from '../objectModel';
+import { forgetObjectModel, leadPosition, objectModelStaged, type ObjectModel } from '../objectModel';
+import { positionsFromEngine, type Vec3 } from '../frame';
+import { anchorOffset, supportToBabylon } from '../BabylonViewportPort';
+import { withRestTransform } from '../../core/scene/ImportBounce.js';
 import { createSceneSource } from '../sceneSource';
 import { scenePose } from '../sceneSource';
 import { appSupportLayers } from '../layers/index';
 import { commitSupportEdits, LiftForSupportsCommand, RegenerateRekeyCommand } from '../commands';
 import { JobScheduler, type JobRequest } from './jobScheduler';
 import { statusText } from './statusText';
-import { buildJob, needsPlacement, placementChanged } from './jobInputs';
+import { buildJob, needsPlacement, placementChanged, scaledJobInputs } from './jobInputs';
 import { notify } from './notices';
 import { fixSpotChecked } from './fixSpot';
 
@@ -335,6 +338,76 @@ export function liftObject(id: string, liftMm?: number): boolean {
   return true;
 }
 
+// ── export build (P4.2) ──
+
+/** Supports of one object as an export reads them: the export-mode build (engine mode 1), not the preview. */
+export interface SupportExportBuild {
+  /** Vertices relative to `origin`, Babylon axes, scene units, already at the export size. */
+  positions: Float32Array;
+  indices: Uint32Array;
+  /** Babylon world position (scene units, as shown) of the support-frame origin (the object's box centre). */
+  origin: Vec3;
+  /** Distinct contacts the build carries (one per tip). */
+  contactIds: string[];
+}
+
+/** Why supports cannot be exported now: stale (they no longer fit their object). */
+export function supportsStaleError(objectId: string, reason: string): Error {
+  return Object.assign(new Error(`Supports of "${objectId}" are out of date (${reason}); open Support Mode to rebuild them before exporting.`), {
+    code: 'EXPORT_SUPPORTS_STALE', objectId, reason,
+  });
+}
+
+/** Last export build per object (tests and the walk compare it with the drawn supports). */
+export const exportStats: { last: Record<string, { scale: number; contactIds: string[]; tris: number }> } = { last: {} };
+
+/**
+ * Build the supports of `id` for an export at `scale` x the shown size (1 = as shown). The record is
+ * the only input, as for the preview; at another scale the model and the contact positions are
+ * scaled and the supports built anew at that size (ratio rule: tips are never scaled). Stale
+ * supports (flag, or a geometry hash / pose that no longer matches the build) throw
+ * `EXPORT_SUPPORTS_STALE`. Resolves null when the object has no built supports or the engine builds
+ * none (every support removed).
+ */
+export async function buildSupportsForExport(id: string, scale = 1): Promise<SupportExportBuild | null> {
+  const owner = supportsOwner(id);
+  const record = readSupports(owner);
+  if (!record || !isBuilt(record)) return null;
+  if (record.stale) throw supportsStaleError(owner, record.stale);
+  const om = await objectModelStaged(owner, yieldToMain);
+  if (!om) return null;
+  const hash = await sceneSource.sourceHashStaged(owner, yieldToMain);
+  if (hash !== null && hash !== record.sourceHash) throw supportsStaleError(owner, 'geometry');
+  const pose = scenePose(owner);
+  if (pose && record.pose && !samePose(pose, record.pose)) throw supportsStaleError(owner, 'pose');
+  await ensureEngine();
+  let points = cachedPlacement(owner);
+  if (!points) {
+    // A loaded project before Support Mode was opened: the placement is derived data (same geometry
+    // and settings give the same contacts), rebuilt here exactly as the restoring path does.
+    const placed = await analyse(`${owner}|export`, { kind: 'place', job: { mesh: om.model.local, orientation: ORIGIN, settings: toPlacementSettings(record.settings) } });
+    if (!placed || placed.kind !== 'placed') throw new Error(`Support placement for the export of "${owner}" did not finish`);
+    points = placed.result.points;
+    cachePlacement(owner, points);
+  }
+  const inputs = { ...contactInputs(owner, record), points };
+  const sized = scale === 1 ? { model: om.model, inputs } : scaledJobInputs(om.model, inputs, scale);
+  // As shown, the preview's own model is reused (the worker keeps it); another size is a unit of its own, freed after.
+  const unitId = scale === 1 ? owner : `${owner}#export`;
+  const built = await mesher().build(unitId, { ...buildJob(sized.model, record, sized.inputs), mode: 'export' }, { key: 'Support building' });
+  if (unitId !== owner) mesher().forget(unitId);
+  if (!built || built.indices.length === 0) return null;
+  const offset = anchorOffset(om.anchor, withRestTransform(() => leadPosition(owner)));
+  const contactIds = [...new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : [])))];
+  exportStats.last[owner] = { scale, contactIds, tris: built.indices.length / 3 };
+  return {
+    positions: positionsFromEngine(built.positions),
+    indices: Uint32Array.from(built.indices),
+    origin: supportToBabylon([0, 0, 0], om.anchor, offset),
+    contactIds,
+  };
+}
+
 // ── wiring ──
 
 /** Generate / Regenerate: lift to the bed, then a job with a fresh placement. Also the first build when a hand-added support comes before any Generate. */
@@ -400,5 +473,5 @@ export function installLiveGeneration(): void {
   subscribe(EVENTS.PROJECT_LOADED, () => forgetObjectModel());
   supportMode.onChange(onModeChanged);
   if (supportMode.isActive()) onModeChanged({ active: true, objectIds: supportMode.getObjectIds() });
-  (window as any).__mxSupportLive = { stats: liveStats, request: requestJob, cancel: cancelJob, busy: isJobBusy, lift: liftObject, generate, test: testHooks };
+  (window as any).__mxSupportLive = { stats: liveStats, exportStats, request: requestJob, cancel: cancelJob, busy: isJobBusy, lift: liftObject, generate, test: testHooks };
 }

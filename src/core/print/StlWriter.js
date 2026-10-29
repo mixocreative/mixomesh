@@ -93,7 +93,8 @@ export async function serializeSTL(ctx) {
     const entries = [];
     for (const unit of ctx.cloneGroups) {
       const base = perMeshBaseName(ctx, unit.name);
-      entries.push({ path: `${base}.stl`, data: await encodeBinarySTLAsync(unit.meshes, base, { signal: ctx.options?.signal }) });
+      const unitMeshes = [...unit.meshes, ...(unit.supports ?? [])];   // P4.2: supports in the same soup
+      entries.push({ path: `${base}.stl`, data: await encodeBinarySTLAsync(unitMeshes, base, { signal: ctx.options?.signal }) });
     }
     return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
   }

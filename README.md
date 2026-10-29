@@ -471,7 +471,7 @@ Console.WriteLine(line);
 - `cost.quote` — estimate material volume and cost
 
 **Export & render:**
-- `export.run` — export to 3MF, OBJ, STL, PLY, WRL (specify `formats` array and `outDir` path)
+- `export.run` — export to 3MF, OBJ, STL, PLY, WRL (specify `formats` array and `outDir` path; `options`: `acknowledgeWarnings`, `individually` (booleans), `includeSupports`: `none` | `printable` | `supportsOnly` — absent = model + supports when an object has built supports)
 - `render.png` — capture viewport as PNG (specify `outFile` path, `width`, `height`)
 - `render.thumbnail` — export small listing image as PNG
 

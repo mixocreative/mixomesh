@@ -79,8 +79,9 @@ export async function serializeOBJ(ctx) {
       let base = stem;
       for (let n = 2; taken.has(base.toLowerCase()); n++) base = `${stem}_${n}`;
       taken.add(base.toLowerCase());
-      entries.push({ path: `${base}.obj`, data: encodeOBJ(unit.meshes, { axis, mtllib: base, materialNames }) });
-      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unit.meshes, materialNames, filenameByMaterialName) });
+      const unitMeshes = [...unit.meshes, ...(unit.supports ?? [])];
+      entries.push({ path: `${base}.obj`, data: encodeOBJ(unitMeshes, { axis, mtllib: base, materialNames }) });
+      entries.push({ path: `${base}.mtl`, data: _buildOBJMtl(unitMeshes, materialNames, filenameByMaterialName) });
     }
   } else {
     const base = objToken(exportBaseName(ctx));
@@ -122,7 +123,7 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null,
   if (mtllib != null) lines.push(`mtllib ${objToken(mtllib)}.mtl`);
   lines.push(`# mixomesh export: millimetres, right-handed, ${yUp ? 'Y-up' : 'Z-up'}`);
   let vBase = 0, vtBase = 0;
-  meshEntries.forEach(({ mesh }, j) => {
+  meshEntries.forEach(({ mesh, isSupport, name: entryName }, j) => {
     const raw = mesh.getVerticesData?.('position');
     const idx = printIndices(mesh);
     if (!raw || !idx.length) return;
@@ -143,6 +144,8 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null,
     const uv = uvRaw && uvRaw.length === count * 2 ? uvRaw : null;
 
     lines.push(`o ${objToken(mesh.name || `mesh${j}`)}`);
+    // P4.2: support structures are a group of their own (solid MTL material), never the model's.
+    if (isSupport) lines.push(`g ${objToken(entryName || mesh.name || `supports${j}`)}`);
     if (mesh.material) lines.push(`usemtl ${materialNames.get(mesh.material)}`);
     for (let i = 0; i < pos.length; i += 3) lines.push(`v ${pos[i]} ${pos[i + 1]} ${pos[i + 2]}`);
     if (uv) for (let i = 0; i < uv.length; i += 2) lines.push(`vt ${uv[i]} ${uv[i + 1]}`);

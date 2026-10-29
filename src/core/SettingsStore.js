@@ -32,7 +32,7 @@ export const DEFAULTS = DS;
 // print sizes, reference object and the export options.
 export const PRINT_PROJECT_FIELDS = Object.freeze([
   'targetPrinterId', 'bedDimensions', 'exportFormat', 'objAxis', 'threeMFFlavour',
-  'exportTargets', 'referenceObjectId', 'objBakeSolidTextures', 'splitByMaterial', 'individually',
+  'exportTargets', 'referenceObjectId', 'objBakeSolidTextures', 'splitByMaterial', 'individually', 'includeSupports',
 ]);
 // Per-USER only (localStorage; the opener's own choice): strict export and
 // repair-on-import (+ the whole `cost` slice below).
@@ -46,7 +46,7 @@ const PRINT_SEED_FIELDS = ['targetPrinterId', 'bedDimensions', 'objBakeSolidText
 // The Print ↺ reset restores the seed fields AND returns every profile-driven
 // override + the individually option to factory (null = printer default), so
 // the reset never leaves a "modified" format behind on the factory printer.
-const PRINT_RESET_FIELDS = [...PRINT_SEED_FIELDS, 'exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour', 'individually'];
+const PRINT_RESET_FIELDS = [...PRINT_SEED_FIELDS, 'exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour', 'individually', 'includeSupports'];
 
 // ── Schema ───────────────────────────────────────────────
 // Each entry: which state path is a persisted settings slice, and (optionally)

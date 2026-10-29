@@ -34,6 +34,7 @@ import { logicalObjectLeadIds } from '../../core/LogicalObjects.js';
 import { SetPrintRefinementCommand } from '../../core/commands/RefinementCommands.js';
 import { RefinementController } from '../../core/refinement/RefinementController.js';
 import { safeAsync } from '../Status.js';
+import { hasBuiltSupports, resolveIncludeSupports, INCLUDE_SUPPORTS } from '../../core/print/ExportContext.js';
 
 // Disclosure state survives the panel's full re-render.
 let _advancedOpen = false;
@@ -71,6 +72,32 @@ export function exportRepresentationsHtml(state) {
     }
     html += '</div>';
   }
+  return `${html}</div>`;
+}
+
+/**
+ * P4.2: what the export carries of the supports. Shown only when an exported object has built
+ * supports (or the project asks for supports only); the select shows the EFFECTIVE choice
+ * (absent = automatic: model + supports when there are any).
+ */
+export function exportSupportsHtml(state) {
+  const objects = state.scene?.objects ?? {};
+  const leads = logicalObjectLeadIds(objects).map(id => objects[id]).filter(obj => obj?.isPrintPart && !obj.isGhost);
+  const any = leads.some(hasBuiltSupports);
+  const pref = state.print?.includeSupports ?? null;
+  if (!any && pref !== 'supportsOnly') return '';
+  const eff = resolveIncludeSupports(pref, any);
+  const label = {
+    none: t('print.includeSupports.none'),
+    printable: t('print.includeSupports.printable'),
+    supportsOnly: t('print.includeSupports.supportsOnly'),
+  };
+  let html = '<div class="pp-field-group pp-export-supports">';
+  html += `<div class="pp-row"><label for="pp-include-supports">${escapeHtml(t('print.includeSupports'))}</label>`;
+  html += '<select id="pp-include-supports" class="pp-preset-select" data-setting="includeSupports">';
+  for (const key of INCLUDE_SUPPORTS) html += `<option value="${key}"${key === eff ? ' selected' : ''}>${escapeHtml(label[key])}</option>`;
+  html += '</select></div>';
+  html += `<p class="pp-help">${escapeHtml(t('print.includeSupports.help'))}</p>`;
   return `${html}</div>`;
 }
 
@@ -146,6 +173,7 @@ export function renderExportTab({ readiness, preview, runExport, rerender }) {
   let html = '<div class="pp-tab-content pp-export-tab">';
   html += printSizesHtml({ preview, readiness });
   html += _formatHtml(eff, mods, profile);
+  html += exportSupportsHtml(state);
   html += exportRepresentationsHtml(state);
   if (readiness.issues.length) html += renderIssueList(readiness);
   html += '<div id="pp-cost-block"></div>';

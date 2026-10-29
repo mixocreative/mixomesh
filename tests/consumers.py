@@ -48,9 +48,13 @@ class Model:
         self.face_image = [None] * len(self.faces)     # PIL image per face
         self.names = []
         self.part_colours = {}                         # 3MF object id -> colours
+        self.part_ranges = []                          # (name, first face, end face) per leaf part
+        self.structure = None                          # 3MF build items / components
 
     def append(self, other):
         base = len(self.vertices)
+        faces0 = len(self.faces)
+        self.part_ranges += [(n, a + faces0, b + faces0) for n, a, b in other.part_ranges]
         self.vertices = np.vstack([self.vertices, other.vertices])
         self.faces = np.vstack([self.faces, other.faces + base])
         self.face_rgb += other.face_rgb
@@ -99,7 +103,7 @@ def read_3mf(path):
 
     def resources(part):
         res = doc(part).find(f"{{{NS_CORE}}}resources")
-        colors, texgroups, textures, objects = {}, {}, {}, {}
+        colors, texgroups, textures, objects, bases = {}, {}, {}, {}, {}
         for el in res:
             tag = el.tag.split("}")[1]
             if tag == "colorgroup":
@@ -110,7 +114,9 @@ def read_3mf(path):
                 texgroups[el.get("id")] = (el.get("texid"), [(float(c.get("u")), float(c.get("v"))) for c in el])
             elif tag == "object":
                 objects[el.get("id")] = el
-        return colors, texgroups, textures, objects
+            elif tag == "basematerials":
+                bases[el.get("id")] = [b.get("displaycolor") for b in el]
+        return colors, texgroups, textures, objects, bases
 
     def image(tex_path):
         if tex_path not in images:
@@ -118,7 +124,7 @@ def read_3mf(path):
         return images[tex_path]
 
     def build_object(part, oid, matrix):
-        colors, texgroups, textures, objects = resources(part)
+        colors, texgroups, textures, objects, bases = resources(part)
         obj = objects[oid]
         model = Model(np.zeros((0, 3)), np.zeros((0, 3)))
         mesh = obj.find(f"{{{NS_CORE}}}mesh")
@@ -128,6 +134,7 @@ def read_3mf(path):
             tris = list(mesh.find(f"{{{NS_CORE}}}triangles"))
             m = Model(verts, [[int(t.get(k)) for k in ("v1", "v2", "v3")] for t in tris])
             m.names = [obj.get("name") or ""]
+            m.part_ranges = [(obj.get("name") or "", 0, len(tris))]
             m.part_colours = {}
             for i, t in enumerate(tris):
                 pid = t.get("pid") or obj.get("pid")
@@ -137,6 +144,10 @@ def read_3mf(path):
                 p = [p[0] if q is None else q for q in p]
                 if pid in colors:
                     c = colors[pid][int(p[0])]
+                    m.face_rgb[i] = tuple(int(c[k:k + 2], 16) for k in (1, 3, 5))
+                    m.part_colours.setdefault(oid, set()).add(hex_rgb(m.face_rgb[i]))
+                elif pid in bases:
+                    c = bases[pid][int(p[0])]
                     m.face_rgb[i] = tuple(int(c[k:k + 2], 16) for k in (1, 3, 5))
                     m.part_colours.setdefault(oid, set()).add(hex_rgb(m.face_rgb[i]))
                 elif pid in texgroups:
@@ -156,8 +167,13 @@ def read_3mf(path):
         return model
 
     out = Model(np.zeros((0, 3)), np.zeros((0, 3)))
+    items = []
     for item in doc(root_part).find(f"{{{NS_CORE}}}build"):
-        out.append(build_object(item.get(f"{{{NS_PROD}}}path") or root_part, item.get("objectid"), _matrix(item.get("transform"))))
+        item_part = item.get(f"{{{NS_PROD}}}path") or root_part
+        comps = resources(item_part)[3][item.get("objectid")].find(f"{{{NS_CORE}}}components")
+        items.append({"components": 0 if comps is None else len(list(comps))})
+        out.append(build_object(item_part, item.get("objectid"), _matrix(item.get("transform"))))
+    out.structure = {"items": items}
     bambu = None
     if "Metadata/model_settings.config" in zf.namelist():
         bambu = bambu_settings(zf)
@@ -187,6 +203,7 @@ def read_trimesh(path):
     for name, g in geoms:
         m = Model(g.vertices, g.faces)
         m.names = [name]
+        m.part_ranges = [(name, 0, len(g.faces))]
         vis = g.visual
         mat = getattr(vis, "material", None)
         img = getattr(mat, "image", None)
@@ -256,6 +273,57 @@ def colour_at(m, p):
     return best
 
 
+def signed_volume(vertices, faces):
+    t = vertices[faces]
+    return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+
+
+def part_facts(m, name, a, b):
+    """One leaf part (3MF object, OBJ object/group): size, outwardness, colour source."""
+    faces = m.faces[a:b]
+    used = np.unique(faces)
+    w = trimesh.Trimesh(m.vertices, faces, process=True)
+    colours = sorted({hex_rgb(m.face_rgb[i]) for i in range(a, b) if m.face_rgb[i] is not None})
+    textured = any(m.face_image[i] is not None for i in range(a, b))
+    by_axis = {}
+    for i in range(a, b):
+        tri = m.vertices[m.faces[i]]
+        n = np.cross(tri[1] - tri[0], tri[2] - tri[0])
+        if np.linalg.norm(n) < 1e-12:
+            continue
+        n = n / np.linalg.norm(n)
+        k = int(np.argmax(np.abs(n)))
+        col = face_colour(m, i)
+        if col is not None:
+            by_axis.setdefault(("+" if n[k] > 0 else "-") + "xyz"[k], set()).add(hex_rgb(col))
+    return {
+        "name": name,
+        "facets": int(b - a),
+        "min": m.vertices[used].min(axis=0).tolist() if len(used) else None,
+        "max": m.vertices[used].max(axis=0).tolist() if len(used) else None,
+        "signedVolume": signed_volume(m.vertices, faces),
+        "watertight": bool(w.is_watertight),
+        "volume": float(w.volume) if w.is_watertight else None,
+        "colours": colours,
+        "textured": textured,
+        "faceColours": {k: sorted(v) for k, v in sorted(by_axis.items())},
+    }
+
+
+def body_facts(welded):
+    """Connected shells of the whole welded file (an STL soup has no parts): how many face inward."""
+    bodies = welded.split(only_watertight=False)
+    closed = [b for b in bodies if b.is_watertight]
+    biggest = sorted(closed, key=lambda b: -abs(b.volume))[:3]
+    return {
+        "count": len(bodies),
+        "closed": len(closed),
+        "inward": sum(1 for b in closed if b.volume < 0),
+        "largest": [{"facets": int(len(b.faces)), "volume": float(b.volume) if b.is_watertight else None,
+                     "min": b.bounds[0].tolist(), "max": b.bounds[1].tolist()} for b in biggest],
+    }
+
+
 def facts(job):
     fmt = job["format"]
     bambu = None
@@ -291,9 +359,13 @@ def facts(job):
         "windingConsistent": bool(welded.is_winding_consistent),
         "volume": float(welded.volume) if welded.is_watertight else None,
         "faceColours": {k: sorted(v) for k, v in sorted(by_axis.items())},
+        "degenerate": int((trimesh.triangles.area(m.vertices[m.faces]) < 1e-12).sum()) if len(m.faces) else 0,
         "names": m.names,
         "bambu": bambu,
     }
+    out["structure"] = m.structure
+    out["parts"] = [part_facts(m, name, a, b) for name, a, b in m.part_ranges] if m.part_ranges else [part_facts(m, "", 0, len(m.faces))]
+    out["bodies"] = body_facts(welded)
     unique = np.unique(np.round(m.vertices - lo, 2), axis=0)
     if len(unique) <= 16:
         out["points"] = unique.tolist()

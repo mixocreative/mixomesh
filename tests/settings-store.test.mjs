@@ -265,7 +265,7 @@ test('bg-controls: factory carries darkIntensity + lightIntensity at 1.0', () =>
 test('1.3: print scope — per-project and per-user field sets are disjoint and match Decision 15', async () => {
   const { PRINT_PROJECT_FIELDS, PRINT_USER_FIELDS } = await import('../src/core/SettingsStore.js');
   assert.deepEqual([...PRINT_PROJECT_FIELDS].sort(), [
-    'bedDimensions', 'exportFormat', 'exportTargets', 'individually', 'objAxis', 'objBakeSolidTextures',
+    'bedDimensions', 'exportFormat', 'exportTargets', 'includeSupports', 'individually', 'objAxis', 'objBakeSolidTextures',
     'referenceObjectId', 'splitByMaterial', 'targetPrinterId', 'threeMFFlavour',
   ]);
   assert.deepEqual([...PRINT_USER_FIELDS].sort(), ['repairOnImport', 'strictExport']);

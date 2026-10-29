@@ -530,6 +530,47 @@ await test('single texture material retains UV seams and JPEG content type', asy
   }
 });
 
+// ── P4.2 supports ───────────────────────────────────────
+function supportEntry(id) {
+  const mesh = makeMesh(`${id} supports`);
+  mesh.material.diffuseColor = new BABYLON.Color3(0x8F / 255, 0xA3 / 255, 0xB8 / 255);
+  return { meshId: null, logicalId: id, logicalName: id, name: `${id} supports`, mesh, isSupport: true };
+}
+
+await test('supports (P4.2): solid <object> with basematerials, model + supports under ONE <components> parent', () => {
+  const u = { ...unit(makeMesh('Body'), 'body'), supports: [supportEntry('body')] };
+  const model = Writer.buildColorGroupEntries([u], {}).find(e => e.path === '3D/3dmodel.model').data;
+  const base = model.match(/<basematerials id="(\d+)"><base name="Supports" displaycolor="#8FA3B8FF"\/><\/basematerials>/);
+  assert.ok(base, 'support base material missing');
+  const sup = model.match(new RegExp(`<object id="(\\d+)" type="model" name="body supports" pid="${base[1]}" pindex="0">`));
+  const body = model.match(/<object id="(\d+)" type="model" name="body" pid="1" pindex="0">/);
+  assert.ok(sup && body, 'model and support objects');
+  const parent = model.match(/<object id="(\d+)" type="model" name="body"><components>(.*?)<\/components>/);
+  assert.ok(parent, 'components parent');
+  assert.equal(parent[2], `<component objectid="${body[1]}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/><component objectid="${sup[1]}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`);
+  assert.match(model, new RegExp(`<build><item objectid="${parent[1]}" `));
+  assert.doesNotMatch(model, /<m:color color="#8FA3B8FF"\/>/, 'the support colour is never a model colorgroup entry');
+});
+
+await test('supports (P4.2): never inside the textured <object>; texture group only on the model', async () => {
+  const u = { ...unit(makeMesh('Body', { textured: true }), 'body'), supports: [supportEntry('body')] };
+  const model = (await Writer.buildMaterialsExtEntries([u], {})).find(e => e.path === '3D/3dmodel.model').data;
+  const tex = model.match(/<m:texture2dgroup id="(\d+)"/)[1];
+  const base = model.match(/<basematerials id="(\d+)">/)[1];
+  assert.match(model, new RegExp(`name="body" pid="${tex}" pindex="0">`));
+  assert.match(model, new RegExp(`name="body supports" pid="${base}" pindex="0"><mesh><vertices>(<vertex[^>]*/>)+</vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles>`));
+  assert.match(model, /name="body"><components>/);
+});
+
+await test('supports only (P4.2): the support object is the build item, no model object', () => {
+  const u = { logicalId: 'body', name: 'body', meshes: [], supports: [supportEntry('body')] };
+  const model = Writer.buildColorGroupEntries([u], {}).find(e => e.path === '3D/3dmodel.model').data;
+  const sup = model.match(/<object id="(\d+)" type="model" name="body supports" pid="\d+" pindex="0">/);
+  assert.ok(sup);
+  assert.equal((model.match(/<object /g) ?? []).length, 1);
+  assert.match(model, new RegExp(`<build><item objectid="${sup[1]}" `));
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

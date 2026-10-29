@@ -5,8 +5,10 @@
 //
 //   a1 generate        a2 Drag over (Select / Unselect strokes, repeatable)   a3 Delete key   a4 Undo
 //   a5 Drag over from Bottom view
-//   c  zone paint: the supports in the zone leave the build; drawn == what an export would read
-//   d  Delete after the zone: the cached build (the export input) equals the drawn mesh
+//   c  zone paint: the supports in the zone leave the build; the REAL export (P4.2: supports-only STL
+//      through the export pipeline, engine export build) carries exactly the drawn contacts
+//   d  Delete after the zone: the cached build equals the drawn mesh, and the real export again
+//      carries exactly the drawn contacts (the deleted ones gone)
 //   e  remove then add at one spot keeps the manual support; Undo / Redo walk both steps
 //   f1-f4 per-support settings: customise the selection, default change leaves them, Reset, Undo
 //   g  Select -> Unselect in the middle of one stroke == the steps one after the other (CPU throttled)
@@ -44,6 +46,19 @@ const send = (event) => w(`send(${J(event)})`);
 const shot = (name) => app.shot(OUT, name);
 const stats = () => w('stats()');
 const verdict = () => run(`window.__w.m.ui.supportUi.get().verdicts[${J(id)}] ?? null`);
+/**
+ * The real export (P4.2): supports only, STL, through PrintManager.collectExportFiles (the save
+ * path's writers); returns the facet count read from the file and the contacts its build carried.
+ */
+const realExport = () => run(`(async () => {
+  const { PrintManager } = await import('/src/core/PrintManager.js');
+  const r = await PrintManager.collectExportFiles(['stl'], { acknowledgeWarnings: true, includeSupports: 'supportsOnly' });
+  if (r.blocked) return { blocked: r.code, issues: r.readinessIssues.map(i => i.code) };
+  const bytes = r.files[0].bytes;
+  const last = window.__mxSupportLive.exportStats.last[window.__walkId];
+  return { facets: new DataView(bytes.buffer, bytes.byteOffset).getUint32(80, true), contactIds: last?.contactIds ?? [], tris: last?.tris ?? -1 };
+})()`);
+const sameSet = (a, b) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
 /** A fresh torus, Support Mode open, Bottom view (supports hang in front of the model there). */
 async function fresh({ generate = true } = {}) {
@@ -151,6 +166,11 @@ try {
     zoned.stamps > beforeStamps && removedByZone.length > 0 && dZone.contactIds.length === dBefore.contactIds.length - removedByZone.length && dZone.tris < dBefore.tris,
     `stamps ${beforeStamps} -> ${zoned.stamps}, tips drawn ${dBefore.contactIds.length} -> ${dZone.contactIds.length}, triangles ${dBefore.tris} -> ${dZone.tris}`);
   check('c the screen and the cache agree after the zone', dZone.tris === dZone.cachedTris && dZone.revisionMatches, `drawn ${dZone.tris}, cached ${dZone.cachedTris}`);
+  await run(`window.__walkId = ${J(id)}; true`);
+  const xZone = await realExport();
+  check('c the real export carries exactly the drawn contacts (zone supports gone), file = export build',
+    !xZone.blocked && sameSet(xZone.contactIds, dZone.contactIds) && removedByZone.every((cid) => !xZone.contactIds.includes(cid)) && xZone.facets === xZone.tris,
+    `drawn ${dZone.contactIds.length}, exported ${xZone.contactIds?.length}, file facets ${xZone.facets} / build ${xZone.tris}, drawn triangles ${dZone.tris} ${xZone.blocked ? JSON.stringify(xZone) : ''}`);
   await send({ type: 'exit' });
   await send({ type: 'enterEdit' });
   await dragMode('select');
@@ -162,6 +182,10 @@ try {
   check('d export input after zone + Delete matches the build on screen',
     forDelete.length > 0 && dDel.tris === dDel.cachedTris && dDel.tris === dDel.builtTris && forDelete.every((cid) => !dDel.contactIds.includes(cid)),
     `drawn ${dDel.tris}, cached ${dDel.cachedTris}, built ${dDel.builtTris}, deleted ${forDelete.length}`);
+  const xDel = await realExport();
+  check('d the real export after zone + Delete carries exactly the drawn contacts, file = export build',
+    !xDel.blocked && sameSet(xDel.contactIds, dDel.contactIds) && forDelete.every((cid) => !xDel.contactIds.includes(cid)) && xDel.facets === xDel.tris,
+    `drawn ${dDel.contactIds.length}, exported ${xDel.contactIds?.length}, file facets ${xDel.facets} / build ${xDel.tris}, drawn triangles ${dDel.tris} ${xDel.blocked ? JSON.stringify(xDel) : ''}`);
   await shot('d-zone-delete.png');
   await app.key('z', { ctrl: true });
   await settle();

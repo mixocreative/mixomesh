@@ -172,17 +172,28 @@ export async function runApiSmoke({ bin, label = 'api' } = {}) {
     // second process: --job forwarded to the running app
     const job = join(root, 'job.json');
     const res = join(root, 'r.json');
-    writeFileSync(job, JSON.stringify({ apiVersion: 1, steps: [{ method: 'app.info' }, { method: 'scene.list' }] }));
+    // P4.2: export.run options.includeSupports rides through --job -> pipe -> prepare -> renderer
+    // (no supports in this scene: 'none' exports the model; an unknown value is rejected by the API).
+    const jobOut = join(root, 'job-out');
+    mkdirSync(jobOut, { recursive: true });
+    writeFileSync(job, JSON.stringify({ apiVersion: 1, stopOnError: false, steps: [
+      { method: 'app.info' }, { method: 'scene.list' },
+      { method: 'export.run', params: { formats: ['stl'], outDir: jobOut, overwrite: true, options: { acknowledgeWarnings: true, includeSupports: 'none' } } },
+      { method: 'export.run', params: { formats: ['stl'], outDir: jobOut, overwrite: true, options: { includeSupports: 'everything' } } },
+    ] }));
     const tj = Date.now();
     const jobChild = spawn(bin, [...electronArgs, '--job', job, '--result', res], { env, stdio: 'ignore', shell: isWin });
     const jobCode = await new Promise(r => {
-      const t = setTimeout(() => { jobChild.kill(); r('timeout'); }, 20000);
+      const t = setTimeout(() => { jobChild.kill(); r('timeout'); }, 60000);
       jobChild.on('exit', code => { clearTimeout(t); r(code); });
     });
     let rj = null;
     try { rj = JSON.parse(readFileSync(res, 'utf8')); } catch { /* below */ }
     const listed = rj?.steps?.[1]?.result?.objects?.length;
-    step(`--job forwarded (exit ${jobCode}, ${Date.now() - tj} ms)`, jobCode === 0 && rj?.ok === true && listed === 2, `objects=${listed} ${JSON.stringify(rj).slice(0, 300)}`);
+    step(`--job forwarded (exit ${jobCode}, ${Date.now() - tj} ms)`, rj?.steps?.[0]?.ok === true && listed === 2, `objects=${listed} ${JSON.stringify(rj).slice(0, 300)}`);
+    const jobFiles = existsSync(jobOut) ? readdirSync(jobOut) : [];
+    step('--job export.run with options.includeSupports', rj?.steps?.[2]?.ok === true && jobFiles.some(f => /\.stl$/i.test(f)), `${JSON.stringify(rj?.steps?.[2]).slice(0, 300)} files=${jobFiles.join(',')}`);
+    step('--job export.run rejects an unknown includeSupports', rj?.steps?.[3]?.ok === false && rj?.steps?.[3]?.error?.code === 'E_INVALID_PARAMS' && jobCode === 2, `exit ${jobCode} ${JSON.stringify(rj?.steps?.[3]).slice(0, 300)}`);
 
     // clean shutdown: graceful close (no /F) so will-quit removes the session file
     c.sock.destroy();

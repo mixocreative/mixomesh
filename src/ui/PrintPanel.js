@@ -67,6 +67,7 @@ export function init() {
     EVENTS.REFINEMENT_FAILED,
     EVENTS.REFINEMENT_STALE,
     EVENTS.REFINEMENT_CANCELLED,
+    EVENTS.SUPPORTS_CHANGED,      // P4.2: Export ▸ Supports row + the stale-supports gate
   ];
   for (const ev of events) subscribe(ev, _render);
   // The Validation tab's last outcome line describes the scene it ran on —

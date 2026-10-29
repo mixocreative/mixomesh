@@ -1459,5 +1459,15 @@
   "supportPanel.verdict.blocked": "一部のサポートがモデルと交差しています",
   "supportPanel.verdict.inconclusive": "クリアランスチェックを完了できませんでした",
   "supportPanel.verdict.dropped": "{n, plural, other{# 個のサポートが除外されました}}",
-  "supportPanel.verdict.islands": "{n, plural, other{# 個のアイランドが未サポートです}}"
+  "supportPanel.verdict.islands": "{n, plural, other{# 個のアイランドが未サポートです}}",
+  "print.includeSupports": "サポート",
+  "print.includeSupports.none": "モデルのみ",
+  "print.includeSupports.printable": "モデル + サポート",
+  "print.includeSupports.supportsOnly": "サポートのみ",
+  "print.includeSupports.help": "サポートは印刷サイズ（ミリメートル単位）の個別のソリッドパーツとして書き出されます。",
+  "print.issue.supports-stale": "{n} 個のオブジェクトのサポートが最新ではありません",
+  "print.issueAction.supports-stale": "サポートモードを開いてサポートを再構築するか、モデルのみを書き出してください。",
+  "print.issue.supports-missing": "書き出すサポートがありません",
+  "print.issueAction.supports-missing": "サポートモードでサポートを生成するか、モデルを書き出してください。",
+  "progress.supports": "書き出し用のサポートを生成中…"
 }

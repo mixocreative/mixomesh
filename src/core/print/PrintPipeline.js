@@ -22,7 +22,7 @@ import { repairGroup, diagnoseGroup } from '../repair/GroupRepair.js';
 import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportTargetsFromState, objectRatio } from '../scale/ScaleMath.js';
-import { buildExportContext, collectPrintUnits, getExportReference, resolveExportUnits } from './ExportContext.js';
+import { buildExportContext, collectPrintUnits, getExportReference, resolveExportUnits, hasBuiltSupports, resolveIncludeSupports } from './ExportContext.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
@@ -36,6 +36,7 @@ import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { clampedUVsLeaveUnitSquare } from './UvTransform.js';
 import { getTextureDimensions } from './ExportTextures.js';
+import { frontFaceIsClockwise } from './PrintSpace.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { initCsg2 } from '../vendorUrl.js';
 import { whileBusy } from '../BusyRegistry.js';
@@ -70,16 +71,30 @@ async function _ensureCSG2() {
  */
 function _csgRebake(mesh) {
   const B = window.BABYLON;
+  // CSG2 reads the index order raw (it knows no side orientation), so it gets
+  // Babylon's native counter-clockwise order: a glTF clone (ClockWise flag,
+  // e.g. a closed part the repair step left alone) is re-indexed first. Same
+  // triangles and outward side, only the flag moves. Without it, a closed
+  // glTF solid came back inside-out (trimesh volume -8000 on a 20 mm cube).
+  if (frontFaceIsClockwise(mesh)) {
+    const idx = mesh.getIndices() ?? [];
+    const swapped = new Uint32Array(idx.length);
+    for (let i = 0; i + 2 < idx.length; i += 3) { swapped[i] = idx[i]; swapped[i + 1] = idx[i + 2]; swapped[i + 2] = idx[i + 1]; }
+    mesh.setIndices(swapped);
+    mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
+  }
   const csg = B.CSG2.FromMesh(mesh);
-  const baked = csg.toMesh(`${mesh.name}__csg`, mesh.getScene());
-  const vd = B.VertexData.ExtractFromMesh(baked);
+  // toVertexData, not toMesh: CSG2.toMesh re-centres the result on the origin
+  // (centerMesh defaults to true), which moved every re-baked part off its
+  // world position (a 20 mm cube resting on the bed came out at z -10..10,
+  // and its supports no longer met it; P4.2).
+  const vd = csg.toVertexData();
   vd.applyToMesh(mesh);
   // CSG2.toMesh emits geometry in Babylon's NATIVE winding (CounterClockWise
   // front). A glTF-imported clone still carries the loader's ClockWise flag,
   // which would make PrintSpace.printIndices reverse the fresh winding and
   // ship the part inside-out (found 2026-09-17 on the STL path via trimesh).
   mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
-  baked.dispose();
   csg.dispose?.();
 }
 
@@ -303,9 +318,9 @@ function _groupCloneEntries(entries) {
   for (const entry of entries) {
     const id = entry.logicalId ?? entry.meshId;
     if (!byId.has(id)) {
-      byId.set(id, { logicalId: id, name: entry.logicalName ?? entry.name, meshes: [] });
+      byId.set(id, { logicalId: id, name: entry.logicalName ?? entry.name, meshes: [], supports: [] });
     }
-    byId.get(id).meshes.push(entry);
+    byId.get(id)[entry.isSupport ? 'supports' : 'meshes'].push(entry);
   }
   return [...byId.values()];
 }
@@ -461,7 +476,24 @@ export function getPrintReadiness(options = {}) {
   return buildReadiness({
     parts, targets, bedDimensions: state.print.bedDimensions, reference,
     profile, strictExport: !!state.print?.strictExport, representationIssues,
+    supports: units.length ? supportReadiness(units, options.includeSupports ?? state.print?.includeSupports) : null,
   });
+}
+
+/**
+ * P4.2 support facts of an export: the effective `includeSupports`, the objects whose supports are
+ * stale (they block an export that carries supports) and whether a supports-only export has none.
+ * @param {Array} units  collectPrintUnits result
+ * @param {string|null|undefined} requested
+ */
+export function supportReadiness(units, requested) {
+  const built = units.filter(unit => hasBuiltSupports(unit.obj));
+  const include = resolveIncludeSupports(requested, built.length > 0);
+  return {
+    include,
+    stale: include === 'none' ? [] : built.filter(unit => unit.obj.supports.stale).map(unit => unit.logicalId),
+    missing: include === 'supportsOnly' && built.length === 0,
+  };
 }
 
 // Language-neutral label for non-ratio print sizes ("×2", "120 mm"); ratio
@@ -519,10 +551,20 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
   // two stay separate so callers can't accidentally override a pref by
   // spreading their own options bag.
   const ctx = buildExportContext({ state, units, target, csgReady, repairReady, options, derivedMeshesFor: options.derivedMeshesFor });
-  const printMeshes = _flattenPrintUnits(ctx.units);
+  // P4.2: a supports-only export clones no model part (the model still anchors pivot and ratio).
+  const supportsOnly = ctx.includeSupports === 'supportsOnly';
+  if (supportsOnly && !ctx.units.some(unit => hasBuiltSupports(unit.obj))) {
+    throw Object.assign(new Error('No supports to export: build supports in Support Mode first.'), { code: 'EXPORT_NO_SUPPORTS' });
+  }
+  const printMeshes = supportsOnly ? [] : _flattenPrintUnits(ctx.units);
 
   const clones = [];
-  const dispose = () => { for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } } };
+  const supportClones = [];
+  const dispose = () => {
+    for (const e of clones) { try { e.mesh.dispose?.(); } catch { /* */ } }
+    // Support clones own their material (made for this export); model clones share the live one.
+    for (const e of supportClones) { try { e.mesh.dispose?.(false, true); } catch { /* */ } }
+  };
 
   try {
     const N = printMeshes.length;
@@ -615,8 +657,15 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
       }
       progress(0.40 + 0.10 * ((i + 1) / N), t('progress.finishing', { i: i + 1, n: N }));
     }
-    ctx.meshes.push(...clones);
-    ctx.cloneGroups.push(..._groupCloneEntries(clones));
+    if (ctx.includeSupports !== 'none') {
+      progress(0.42, t('progress.supports'));
+      await _addSupportClones(ctx, supportClones);
+      if (supportsOnly && !supportClones.length) {
+        throw Object.assign(new Error('No supports to export: every support was removed.'), { code: 'EXPORT_NO_SUPPORTS' });
+      }
+    }
+    ctx.meshes.push(...clones, ...supportClones);
+    ctx.cloneGroups.push(..._groupCloneEntries([...clones, ...supportClones]));
 
     // Fail closed (Decision 18): strictExport blocks on a CONFIRMED
     // not-watertight clone AND on any UNKNOWN verdict (engine unavailable,
@@ -698,6 +747,47 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     throw err;
   } finally {
     dispose();
+  }
+}
+
+// ── supports (P4.2) ──────────────────────────────────────
+
+/** Export colour of support structures (the drawn pillar colour). */
+const SUPPORT_EXPORT_RGB = [0x8F / 255, 0xA3 / 255, 0xB8 / 255];
+
+/**
+ * One export clone per object with built supports: the export-mode build (never the drawn
+ * preview) at this target's size, as a temporary Babylon mesh in world axes (support frame to
+ * Babylon through frame.ts), then flattenPhysical (origin follows the ratio, vertices stay
+ * mm-physical, BU to mm); from there the same PrintSpace seam as the model (axis, winding). A
+ * separate shell: never welded, repaired, re-baked or validated with the model. Stale supports
+ * throw EXPORT_SUPPORTS_STALE (buildSupportsForExport).
+ */
+async function _addSupportClones(ctx, out) {
+  const { buildSupportsForExport } = await import('../../supports/live/liveGeneration');
+  const { tagSupportLayer } = await import('../../supports/layers/supportLayerTag.js');
+  for (const unit of ctx.units) {
+    if (!hasBuiltSupports(unit.obj)) continue;
+    const built = await buildSupportsForExport(unit.logicalId, ctx.ratioFactor);
+    if (!built) continue;
+    const scene = unit.parts[0]?.mesh?.getScene?.();
+    const name = `${unit.name ?? unit.logicalId} supports`;
+    const mesh = new BABYLON.Mesh(`${name}__export`, scene);
+    out.push({ meshId: null, logicalId: unit.logicalId, mesh, name, logicalName: unit.name, isSupport: true });
+    tagSupportLayer(mesh, 'export', unit.logicalId);   // D20: never content, never drawn
+    mesh.setEnabled(false);
+    const data = new BABYLON.VertexData();
+    data.positions = built.positions;
+    data.indices = built.indices;
+    data.applyToMesh(mesh, false);
+    // Engine triangles are outward counter-clockwise, drawn with Babylon's default front face.
+    mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
+    mesh.position.set(built.origin[0], built.origin[1], built.origin[2]);
+    const mat = new BABYLON.StandardMaterial('supports', scene);
+    mat.diffuseColor = new BABYLON.Color3(...SUPPORT_EXPORT_RGB);
+    mesh.material = mat;
+    PREP_STEPS.flattenPhysical(mesh, ctx);
+    PREP_STEPS.createNormals(mesh);
   }
 }
 

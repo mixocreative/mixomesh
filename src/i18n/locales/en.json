@@ -1459,5 +1459,15 @@
   "supportPanel.verdict.blocked": "Some supports cross the model",
   "supportPanel.verdict.inconclusive": "The clearance check could not finish",
   "supportPanel.verdict.dropped": "{n, plural, one{1 support left out} other{# supports left out}}",
-  "supportPanel.verdict.islands": "{n, plural, one{1 island unsupported} other{# islands unsupported}}"
+  "supportPanel.verdict.islands": "{n, plural, one{1 island unsupported} other{# islands unsupported}}",
+  "print.includeSupports": "Supports",
+  "print.includeSupports.none": "Model only",
+  "print.includeSupports.printable": "Model + supports",
+  "print.includeSupports.supportsOnly": "Supports only",
+  "print.includeSupports.help": "Supports are written as separate solid parts, at the print size in millimetres.",
+  "print.issue.supports-stale": "{n} object(s) have out-of-date supports",
+  "print.issueAction.supports-stale": "Open Support Mode to rebuild the supports, or export the model only.",
+  "print.issue.supports-missing": "No supports to export",
+  "print.issueAction.supports-missing": "Generate supports in Support Mode, or export the model.",
+  "progress.supports": "Building supports for export…"
 }

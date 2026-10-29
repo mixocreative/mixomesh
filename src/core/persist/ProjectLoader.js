@@ -307,6 +307,8 @@ function _printWithoutLegacyScale(loadedPrint = {}) {
     if (!(f in rest)) rest[f] = null;
   }
   if (!('individually' in rest)) rest.individually = false;
+  // P4.2: absent = automatic (supports exported when an object has them).
+  if (!('includeSupports' in rest)) rest.includeSupports = null;
   return rest;
 }
 

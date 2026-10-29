@@ -45,6 +45,31 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg, tryRepair
       mesh.refreshBoundingInfo?.();
     },
 
+    /**
+     * flattenWorld for geometry that is ALREADY at the export size: support structures (P4.2),
+     * which are mm-physical and built at the target ratio, never scaled. Only the mesh's origin
+     * follows the pivot-anchored ratio scaling (so the supports stay under their scaled model);
+     * the vertices keep their size, then everything goes BU→mm. The mesh carries a translation
+     * only (no rotation / scale / parent): the build is in world axes.
+     */
+    flattenPhysical(mesh, ctx) {
+      if (!ctx?.pivot)             throw new Error('PrintPrep.flattenPhysical: ctx.pivot required');
+      if (!(ctx.ratioFactor > 0))  throw new Error('PrintPrep.flattenPhysical: ctx.ratioFactor must be positive');
+      if (!(ctx.unitFactor > 0))   throw new Error('PrintPrep.flattenPhysical: ctx.unitFactor must be positive');
+      mesh.computeWorldMatrix?.(true);
+      const W = mesh.getWorldMatrix?.();
+      if (!W) throw new Error(`PrintPrep.flattenPhysical: mesh "${mesh?.name ?? '?'}" has no world matrix`);
+      const { pivot: p, ratioFactor: r, unitFactor: u } = ctx;
+      const o = W.getTranslation();
+      const M = W
+        .multiply(BABYLON.Matrix.Translation(-o.x, -o.y, -o.z))
+        .multiply(BABYLON.Matrix.Translation(p.x + r * (o.x - p.x), p.y + r * (o.y - p.y), p.z + r * (o.z - p.z)))
+        .multiply(BABYLON.Matrix.Scaling(u, u, u));
+      mesh.bakeTransformIntoVertices?.(M);
+      mesh.position?.set?.(0, 0, 0);
+      mesh.refreshBoundingInfo?.();
+    },
+
     weld(mesh)               { weld(mesh); },
     weldSolidOnly(mesh)      { if (isSolidColor(mesh)) weld(mesh); },
     // Watertight repair on the CLONE only. A clone the engine reports as
@@ -54,7 +79,20 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg, tryRepair
     // vertex). Never throws: engine failures and still-not-watertight results
     // are recorded on ctx by tryRepair, not surfaced as a prep-step exception.
     repair(mesh, ctx)        { return tryRepair(mesh, ctx); },
-    optimizeIndices(mesh)    { mesh.optimizeIndices?.(); },
+    // Babylon's optimizeIndices finishes ASYNCHRONOUSLY (AsyncLoop) and then
+    // writes the index list it read at the start. Fire-and-forget let that
+    // late write land on the CSG re-bake's fresh geometry: every closed solid
+    // part of an STL / 3MF export shipped with its triangles joining the wrong
+    // corners (a 20 mm cube read back as 1333 mm^3; found with trimesh, P4.2).
+    // Awaited so the next step sees the finished mesh. Solid colour only: it
+    // merges vertices by POSITION alone, so on a textured part it would fold
+    // every UV seam onto one side (the weld step already merges what shares
+    // both position and UV there).
+    optimizeIndices(mesh) {
+      if (typeof mesh.optimizeIndices !== 'function' || !isSolidColor(mesh)) return undefined;
+      if (!mesh.getIndices?.()?.length || !mesh.getVerticesData?.('position')?.length) return undefined;
+      return new Promise(resolve => { mesh.optimizeIndices(() => resolve()); });
+    },
     createNormals(mesh)      { mesh.createNormals?.(true); },
     // Returned (not fire-and-forget): tryCsg re-diagnoses the re-baked clone
     // and updates ctx.repairReport, so the strict gate must not run before it

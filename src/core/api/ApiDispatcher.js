@@ -33,6 +33,8 @@ export const REQUEST_ID_MAX_REMEMBERED = 256;
 const IMMEDIATE = new Set(['app.info', 'app.capabilities', 'app.ping', 'events.subscribe']);
 const COST_NUMBER_KEYS = ['pricePerGram', 'supportPricePerGram', 'supportPercent', 'setupFee'];
 const EXPORT_OPTION_KEYS = ['acknowledgeWarnings', 'individually'];
+// P4.2: what the export carries of the supports (ExportContext INCLUDE_SUPPORTS; absent = automatic).
+const EXPORT_INCLUDE_SUPPORTS = ['none', 'printable', 'supportsOnly'];
 
 const isRef = v => !!v && typeof v === 'object' && !Array.isArray(v)
   && 'ref' in v && v.ref != null && typeof v.name === 'string' && v.name !== '';
@@ -477,6 +479,12 @@ export function createDispatcher(deps) {
       if (bad) throw apiError('E_INVALID_PARAMS', `export.run: unknown format "${bad.slice(0, 32)}" (use ${known.join('|')})`, { field: 'formats' });
       const opt = p.options ?? {};
       for (const k of Object.keys(opt)) {
+        if (k === 'includeSupports') {
+          if (!EXPORT_INCLUDE_SUPPORTS.includes(opt[k])) {
+            throw apiError('E_INVALID_PARAMS', `export.run: options.includeSupports must be one of ${EXPORT_INCLUDE_SUPPORTS.join('|')}`, { field: 'options.includeSupports' });
+          }
+          continue;
+        }
         if (!EXPORT_OPTION_KEYS.includes(k) || typeof opt[k] !== 'boolean') {
           throw apiError('E_INVALID_PARAMS', `export.run: options."${k}" is not a supported boolean option (${EXPORT_OPTION_KEYS.join('|')})`, { field: `options.${k}` });
         }

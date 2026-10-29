@@ -49,3 +49,30 @@ export function contactOfTriangle(components: readonly { contactId?: string; sta
   return undefined;
 }
 
+
+/**
+ * The job inputs of an export at another print size (plan P4.2 ratio rule). Supports are
+ * mm-physical: the model and every contact position scale by `scale` about the support-frame origin
+ * (the object's box centre), the contacts keep their ids (same contacts, rescaled points), and the
+ * shape settings, overrides and lift stay in mm, so the engine builds tips of the same size on the
+ * larger or smaller model. Zone stamps scale with the surface they were painted on.
+ */
+export function scaledJobInputs(model: Pick<LocalModel, 'local' | 'center' | 'minY'>, inputs: ContactInputs, scale: number): { model: Pick<LocalModel, 'local' | 'center' | 'minY'>; inputs: ContactInputs } {
+  if (!(scale > 0)) throw new Error('scaledJobInputs: scale must be positive');
+  const s3 = (p: readonly number[]): [number, number, number] => [p[0]! * scale, p[1]! * scale, p[2]! * scale];
+  const positions = new Float32Array(model.local.positions.length);
+  for (let i = 0; i < positions.length; i++) positions[i] = model.local.positions[i]! * scale;
+  return {
+    model: {
+      local: { positions, indices: model.local.indices },
+      center: [...model.center] as [number, number, number],
+      minY: model.center[1] + (model.minY - model.center[1]) * scale,
+    },
+    inputs: {
+      ...inputs,
+      points: inputs.points.map((p) => ({ ...p, position: s3(p.position) })),
+      manual: inputs.manual.map((p) => ({ ...p, position: s3(p.position) })),
+      zones: inputs.zones.map((z) => ({ ...z, center: s3(z.center), radius: z.radius * scale })),
+    },
+  };
+}

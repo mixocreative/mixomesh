@@ -37,6 +37,31 @@ if (!BABYLON) throw new Error('Babylon.js failed to load');
 /** Babylon scene units (metres) → millimetres. Defined once. */
 export const BU_TO_MM = 1000;
 
+/** What an export carries of the support structures (P4.2). */
+export const INCLUDE_SUPPORTS = Object.freeze(['none', 'printable', 'supportsOnly']);
+
+/** Whether a logical object's lead carries BUILT supports (supports/model.ts `isBuilt`, inlined: no TS import here). */
+export function hasBuiltSupports(obj) {
+  const s = obj?.supports;
+  return !!s && s.sourceHash != null && s.pose != null;
+}
+
+/**
+ * The effective `includeSupports` of an export: the caller's choice, else the project's
+ * (`state.print.includeSupports`), else automatic — 'printable' when any exported object has
+ * built supports, 'none' otherwise. 'printable' without any supports is just the model; an explicit
+ * 'supportsOnly' stays (the pipeline refuses it when there are none rather than shipping the model).
+ * @param {string|null|undefined} requested
+ * @param {boolean} anySupports
+ * @returns {'none'|'printable'|'supportsOnly'}
+ */
+export function resolveIncludeSupports(requested, anySupports) {
+  if (requested === 'supportsOnly') return 'supportsOnly';
+  if (requested === 'none') return 'none';
+  if (requested === 'printable') return anySupports ? 'printable' : 'none';
+  return anySupports ? 'printable' : 'none';
+}
+
 /** Resolve the selected print mesh for every logical unit without mutating source units. */
 export function resolveExportUnits(units, derivedMeshesFor = getDerivedMeshes) {
   const issues = [];
@@ -88,6 +113,7 @@ function _capturePrefs(state) {
     threeMFFlavour: eff.threeMFFlavour,
     strictExport: !!state.print?.strictExport,
     individually: !!state.print?.individually,
+    includeSupports: INCLUDE_SUPPORTS.includes(state.print?.includeSupports) ? state.print.includeSupports : null,
   });
 }
 
@@ -111,6 +137,8 @@ function _capturePrefs(state) {
  * @property {number} factor          ratioFactor * unitFactor (× to convert BU dimension → mm at target).
  * @property {string} projectName     state.project.name || 'Untitled'.
  * @property {boolean} individually   Per-part output.
+ * @property {'none'|'printable'|'supportsOnly'} includeSupports  Effective support output
+ *                                    (resolveIncludeSupports of options, then prefs, then auto).
  * @property {boolean} csgReady       Mutated by pipeline once CSG2 init resolves.
  * @property {string[]} csgSkipped    Mutated by pipeline.
  * @property {boolean} repairReady    Mutated by pipeline once the repair engine init resolves
@@ -137,7 +165,7 @@ function _capturePrefs(state) {
  * @property {Array} cloneGroups      Mutated by pipeline (per-logical-unit groupings).
  * @property {{objBakeSolidTextures:boolean, exportFormat:'obj'|'3mf'|'stl'|'ply'|'wrl',
  *   splitByMaterial:boolean, objAxis:'y-up'|'z-up', threeMFFlavour:'core'|'bambu'|'prusa',
- *   strictExport:boolean, individually:boolean}} prefs
+ *   strictExport:boolean, individually:boolean, includeSupports:'none'|'printable'|'supportsOnly'|null}} prefs
  *                                    Snapshotted state.print prefs (frozen); profile-driven
  *                                    fields are effective values (user override, else profile).
  */
@@ -194,6 +222,9 @@ export function buildExportContext({ state, units, target = null, options = {}, 
   const p = _referencePivot(referenceUnit);
   const pivot = Object.freeze({ x: p.x, y: p.y, z: p.z });
   const frozenOptions = Object.freeze({ ...options });
+  const prefs = _capturePrefs(state);
+  const includeSupports = resolveIncludeSupports(options.includeSupports ?? prefs.includeSupports,
+    units.some(unit => hasBuiltSupports(unit.obj)));
   return Object.freeze({
     state,
     options: frozenOptions,
@@ -209,6 +240,7 @@ export function buildExportContext({ state, units, target = null, options = {}, 
     factor: ratioFactor * BU_TO_MM,
     projectName: state.project?.name || 'Untitled',
     individually: !!options.individually,
+    includeSupports,
     csgReady: !!csgReady,
     csgSkipped: [],
     repairReady: !!repairReady,
@@ -216,7 +248,7 @@ export function buildExportContext({ state, units, target = null, options = {}, 
     repairReport: [],
     meshes: [],
     cloneGroups: [],
-    prefs: _capturePrefs(state),
+    prefs,
   });
 }
 

@@ -18,7 +18,7 @@ import { SILENT } from './support.js';
 /** The print-settings keys these commands may write (per-project, Decision 15). */
 export const PRINT_SETTING_KEYS = Object.freeze([
   'targetPrinterId', 'bedDimensions', 'exportFormat', 'splitByMaterial', 'objAxis', 'threeMFFlavour',
-  'objBakeSolidTextures', 'individually', 'referenceObjectId',
+  'objBakeSolidTextures', 'individually', 'referenceObjectId', 'includeSupports',
 ]);
 
 function _clonePatchValue(v) {

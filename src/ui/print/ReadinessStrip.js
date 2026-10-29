@@ -63,6 +63,8 @@ export function issueActionLabel(issue) {
     case 'thin-feature': return t('print.issueAction.thin-feature');
     case 'watertight-required': return t('print.issueAction.watertight-required');
     case 'refinement-unavailable': return t('print.issueAction.refinement-unavailable');
+    case 'supports-stale': return t('print.issueAction.supports-stale');
+    case 'supports-missing': return t('print.issueAction.supports-missing');
     default: return '';
   }
 }

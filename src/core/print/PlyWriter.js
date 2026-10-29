@@ -316,7 +316,7 @@ export async function serializePLY(ctx) {
   if (ctx.individually) {
     const entries = [];
     for (const unit of ctx.cloneGroups) {
-      entries.push({ path: `${perMeshBaseName(ctx, unit.name)}.ply`, data: encodeBinaryPLY(unit.meshes, images) });
+      entries.push({ path: `${perMeshBaseName(ctx, unit.name)}.ply`, data: encodeBinaryPLY([...unit.meshes, ...(unit.supports ?? [])], images) });
     }
     return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
   }

@@ -139,14 +139,50 @@ export async function buildMaterialsExtEntries(meshList, options = {}) {
 function _normaliseUnits(list) {
   return (list ?? []).map(entry => {
     if (Array.isArray(entry?.meshes)) {
-      return { logicalId: entry.logicalId ?? entry.meshes[0]?.logicalId ?? entry.meshes[0]?.meshId, name: entry.name, meshes: entry.meshes };
+      const supports = Array.isArray(entry.supports) ? entry.supports : [];
+      return { logicalId: entry.logicalId ?? entry.meshes[0]?.logicalId ?? entry.meshes[0]?.meshId ?? supports[0]?.logicalId, name: entry.name, meshes: entry.meshes, supports };
     }
-    return { logicalId: entry?.logicalId ?? entry?.meshId, name: entry?.name, meshes: [entry] };
-  }).filter(unit => unit.meshes.length);
+    return { logicalId: entry?.logicalId ?? entry?.meshId, name: entry?.name, meshes: [entry], supports: [] };
+  }).filter(unit => unit.meshes.length || unit.supports.length);
 }
 
 function _flattenEntries(list) {
   return _normaliseUnits(list).flatMap(unit => unit.meshes);
+}
+
+/** Support entries of every unit (P4.2): solid `<object>`s of their own, never model parts. */
+function _supportEntries(units) {
+  return units.flatMap(unit => unit.supports ?? []);
+}
+
+/**
+ * Core `<basematerials>` for support objects (P4.2): one `<base>` per distinct support colour.
+ * @returns {{xml:string, indexByHex:Map<string,number>}}
+ */
+function _supportBaseMaterials(supportEntries, id, hexOf) {
+  const indexByHex = new Map();
+  const bases = [];
+  for (const { mesh } of supportEntries) {
+    const hex = hexOf(mesh);
+    if (indexByHex.has(hex)) continue;
+    indexByHex.set(hex, bases.length);
+    bases.push(`<base name="Supports" displaycolor="${hex}"/>`);
+  }
+  return { xml: bases.length ? `<basematerials id="${id}">${bases.join('')}</basematerials>` : '', indexByHex };
+}
+
+/** One support entry's solid `<object>` body: plain triangles, the object's pid = the support base material. */
+function _supportMeshXml(entry, converted, cx, cy, cz, baseId, indexByHex, hexOf) {
+  const pos = converted.get(entry.mesh);
+  const idx = printIndices(entry.mesh);   // outward in 3MF's right-handed space
+  if (!pos || idx.length === 0) return null;
+  let vertices = '';
+  let triangles = '';
+  for (let i = 0; i < pos.length; i += 3) {
+    vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
+  }
+  for (let i = 0; i < idx.length; i += 3) triangles += `<triangle v1="${idx[i]}" v2="${idx[i + 1]}" v3="${idx[i + 2]}"/>`;
+  return { vertices, triangles, objectAttrs: ` pid="${baseId}" pindex="${indexByHex.get(hexOf(entry.mesh)) ?? 0}"` };
 }
 
 // Entries tagged with their unit (logical object) name so texture parts are
@@ -222,7 +258,8 @@ function _meshObjectXml(objId, nameAttr, built) {
  * material, and receives `{objectId, name, parts:[{objectId, name, mesh}]}`.
  * @returns {number} next free object id
  */
-function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId, record = null }) {
+function _emitUnitObjects({ unit, buildMesh, buildSupport = null, split, objs, meshObjectIds, objId, record = null }) {
+  if (unit.supports?.length && buildSupport) return _emitSupportedUnit({ unit, buildMesh, buildSupport, split, objs, meshObjectIds, objId, record });
   if (split && (unit.meshes.length > 1 || record)) {
     const parts = [];
     unit.meshes.forEach((entry, k) => {
@@ -244,6 +281,46 @@ function _emitUnitObjects({ unit, buildMesh, split, objs, meshObjectIds, objId, 
   if (!built) return objId + 1;
   objs.push(_meshObjectXml(objId, '', built));
   meshObjectIds.set(unit, objId);
+  return objId + 1;
+}
+
+/**
+ * A unit with supports (P4.2): the model as it would be written alone (one merged `<object>`, or
+ * one per material part when split) plus one SOLID support `<object>` per support entry, all under
+ * the unit's `<components>` parent, so a slicer reads one object whose parts are the model and its
+ * supports. The support object never shares an `<object>` (or a texture group) with the model.
+ * Supports only (no model meshes): the support object itself stands for the unit.
+ */
+function _emitSupportedUnit({ unit, buildMesh, buildSupport, split, objs, meshObjectIds, objId, record }) {
+  const parts = [];
+  if (unit.meshes.length) {
+    const groups = split && (unit.meshes.length > 1 || record)
+      ? unit.meshes.map((entry, k) => ({ meshes: [entry], name: entry.name ?? entry.mesh?.name ?? `${unit.name ?? 'part'} ${k + 1}`, mesh: entry.mesh }))
+      : [{ meshes: unit.meshes, name: unit.name ?? unit.meshes[0]?.name ?? 'part', mesh: unit.meshes[0]?.mesh }];
+    for (const g of groups) {
+      const built = buildMesh({ ...unit, meshes: g.meshes });
+      if (!built) continue;
+      objs.push(_meshObjectXml(objId, ` name="${_xmlAttr(g.name)}"`, built));
+      parts.push({ objectId: objId++, name: g.name, mesh: g.mesh });
+    }
+  }
+  for (const entry of unit.supports) {
+    const built = buildSupport(entry);
+    if (!built) continue;
+    const name = entry.name ?? `${unit.name ?? 'part'} supports`;
+    objs.push(_meshObjectXml(objId, ` name="${_xmlAttr(name)}"`, built));
+    parts.push({ objectId: objId++, name, mesh: entry.mesh });
+  }
+  if (!parts.length) return objId + 1;
+  if (!unit.meshes.length && parts.length === 1 && !record) {
+    meshObjectIds.set(unit, parts[0].objectId);
+    return objId;
+  }
+  const components = parts
+    .map(p => `<component objectid="${p.objectId}" transform="${THREEMF_IDENTITY}"/>`).join('');
+  objs.push(`<object id="${objId}" type="model" name="${_xmlAttr(unit.name ?? '')}"><components>${components}</components></object>`);
+  meshObjectIds.set(unit, objId);
+  record?.({ objectId: objId, name: unit.name ?? parts[0].name, parts });
   return objId + 1;
 }
 
@@ -371,19 +448,23 @@ function _buildColorGroupModel(list, options = {}, bambuObjects = []) {
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
   }
 
-  const { converted, cx, cy, cz } = _convertVertices(flat);
+  const supportList = _supportEntries(units);
+  const { converted, cx, cy, cz } = _convertVertices([...flat, ...supportList]);
 
   const objs = [];
   const items = [];
   const meshObjectIds = new Map();
   let objId = 2;                                  // id 1 = colorgroup
+  const baseId = supportList.length ? objId++ : null;   // P4.2 support base materials
+  const base = _supportBaseMaterials(supportList, baseId, hexOf);
+  const buildSupport = entry => _supportMeshXml(entry, converted, cx, cy, cz, baseId, base.indexByHex, hexOf);
   const buildMesh = u => _buildUnitColorMeshXml(u, converted, cx, cy, cz, colorIndex, hexOf);
   const record = _bambuRecorder(options, bambuObjects, mesh => {
     const hex = hexOf(mesh);
     return { key: hex, colour: hex };
   });
   for (const unit of units) {
-    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
+    objId = _emitUnitObjects({ unit, buildMesh, buildSupport, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
   }
   // Bambu: flat build (one object level) — group hierarchy is not emitted.
   _appendComponentHierarchy({ objs, items, units, state: record ? null : options.state, meshObjectIds, nextObjectId: objId });
@@ -391,7 +472,7 @@ function _buildColorGroupModel(list, options = {}, bambuObjects = []) {
   const colorXml = colors.map(c => `<m:color color="${c}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-${_metadataXml(options.metadata)}<resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${objs.join('')}</resources>
+${_metadataXml(options.metadata)}<resources><m:colorgroup id="1">${colorXml}</m:colorgroup>${base.xml}${objs.join('')}</resources>
 <build>${items.join('')}</build>
   </model>`;
 }
@@ -497,9 +578,12 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = 
     if (!colorIndex.has(hex)) { colorIndex.set(hex, colors.length); colors.push(hex); }
   }
   const colorGroupId = colors.length ? nextId++ : null;
+  const supportList = _supportEntries(units);
+  const baseId = supportList.length ? nextId++ : null;   // P4.2 support base materials
+  const base = _supportBaseMaterials(supportList, baseId, hexOf);
 
   // Pass 2: rotate vertices into 3MF space and find union bounds.
-  const { converted, cx, cy, cz } = _convertVertices(flat);
+  const { converted, cx, cy, cz } = _convertVertices([...flat, ...supportList]);
 
   // Resources — texture2d. Tile style says what the viewport does with UVs
   // outside [0,1] (Materials ext ch.6, default wrap).
@@ -542,18 +626,19 @@ function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = 
     u, converted, cx, cy, cz,
     tex2dGroupIdByMesh, colorGroupId, colorIndex, hexOf
   );
+  const buildSupport = entry => _supportMeshXml(entry, converted, cx, cy, cz, baseId, base.indexByHex, hexOf);
   const record = _bambuRecorder(options, bambuObjects, mesh => {
     const hex = hexOf(mesh);
     return { key: pathByMesh.has(mesh) ? `tex:${pathByMesh.get(mesh)}` : hex, colour: hex };
   });
   for (const unit of units) {
-    objId = _emitUnitObjects({ unit, buildMesh, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
+    objId = _emitUnitObjects({ unit, buildMesh, buildSupport, split: !!options.splitByMaterial || !!record, objs, meshObjectIds, objId, record });
   }
   _appendComponentHierarchy({ objs, items, units, state: record ? null : options.state, meshObjectIds, nextObjectId: objId });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
-${_metadataXml(options.metadata)}<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${objs.join('')}</resources>
+${_metadataXml(options.metadata)}<resources>${tex2dXml}${tex2dGroupXmls.join('')}${colorXml}${base.xml}${objs.join('')}</resources>
 <build>${items.join('')}</build>
 </model>`;
 }

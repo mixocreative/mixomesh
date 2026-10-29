@@ -4,7 +4,7 @@ import { landedStatus, regeneratedStatus } from '@mixo-geocore/editing/regenerat
 import { recheckStatus } from '@mixo-geocore/editing/check';
 import { t } from '../../i18n/index.js';
 import { emptySupports, placementSignature } from '../model';
-import { buildJob, contactOfTriangle, needsPlacement, placementChanged } from './jobInputs';
+import { buildJob, contactOfTriangle, needsPlacement, placementChanged, scaledJobInputs } from './jobInputs';
 import { STATUS_KEYS, statusText } from './statusText';
 
 describe('needsPlacement', () => {
@@ -67,5 +67,32 @@ describe('contactOfTriangle', () => {
     expect(contactOfTriangle(components, 1)).toBe('a');
     expect(contactOfTriangle(components, 2)).toBeUndefined();
     expect(contactOfTriangle(components, 4)).toBe('b');
+  });
+});
+
+describe('scaledJobInputs (P4.2 ratio rule)', () => {
+  const model = { local: { positions: new Float32Array([-1, -2, 0, 1, 2, 0, 0, 0, 3]), indices: new Uint32Array([0, 1, 2]) }, center: [10, 20, 30] as [number, number, number], minY: 18 };
+  const point = { id: 'auto-1', regionId: 0, position: [1, -2, 0] as [number, number, number], normal: [0, -1, 0] as [number, number, number], source: 'auto' as never };
+  const inputs = {
+    points: [point], manual: [{ ...point, id: 'm-1', position: [0, -2, 1] as [number, number, number] }], deleted: ['auto-9'],
+    zones: [{ kind: 'paint' as const, center: [1, -2, 0] as [number, number, number], radius: 2, normal: [0, -1, 0] as [number, number, number] }],
+    contactSettings: { 'auto-1': { pointDiameter: 0.5 } },
+  };
+  it('scales the model and the contact positions about the support-frame origin, keeps ids, normals and mm settings', () => {
+    const out = scaledJobInputs(model, inputs, 2);
+    expect([...out.model.local.positions]).toEqual([-2, -4, 0, 2, 4, 0, 0, 0, 6]);
+    expect(out.model.center).toEqual([10, 20, 30]);
+    expect(out.model.minY).toBe(16);
+    expect(out.inputs.points[0]).toEqual({ ...point, position: [2, -4, 0] });
+    expect(out.inputs.manual[0]!.position).toEqual([0, -4, 2]);
+    expect(out.inputs.zones[0]).toEqual({ ...inputs.zones[0], center: [2, -4, 0], radius: 4 });
+    expect(out.inputs.deleted).toEqual(['auto-9']);
+    expect(out.inputs.contactSettings).toEqual({ 'auto-1': { pointDiameter: 0.5 } });
+    expect([...model.local.positions]).toEqual([-1, -2, 0, 1, 2, 0, 0, 0, 3]);
+  });
+  it('the plate stays liftHeight under the scaled model (lift is mm, never scaled)', () => {
+    const record = { ...emptySupports(), settings: { ...emptySupports().settings, liftHeight: 5 } };
+    const out = scaledJobInputs(model, inputs, 3);
+    expect(buildJob(out.model, record, out.inputs).plate).toBe(20 + (18 - 20) * 3 - 5);
   });
 });

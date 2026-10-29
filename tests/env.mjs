@@ -134,7 +134,7 @@ const real = {
   // CSG2 present by default so the STL re-bake path is exercised. Tests that
   // need the "CSG2 unavailable" branch null these out + restore.
   CSG2: {
-    FromMesh: (m) => { calls.csgFrom.push(m.name); return { toMesh: () => ({ dispose() {} }), dispose() {} }; },
+    FromMesh: (m) => { calls.csgFrom.push(m.name); return { toMesh: () => ({ dispose() {} }), toVertexData: () => ({ applyToMesh: () => { calls.vdApply.push(true); } }), dispose() {} }; },
   },
   InitializeCSG2Async: async () => {},
   VertexData: { ExtractFromMesh: () => ({ applyToMesh: () => { calls.vdApply.push(true); } }) },

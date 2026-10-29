@@ -55,6 +55,16 @@ const CAT_NAME = '猫　モデル';
 // Printer frame: v0 (0,0,0) v1 (10,0,0) v2 (0,0,20) v3 (0,-30,0); relative to
 // the bounding-box minimum (0,-30,0): (0,30,0) (10,30,0) (0,30,20) (0,0,0).
 //
+// Supports (P4.2): support-plain-cube.glb (tests/fixtures/support-cubes.mjs) is a closed 20 mm
+// cube, 96 facets, 8000 mm^3, one solid colour; midtone-cube.glb (make-midtone-cube.mjs) a
+// closed 20 mm textured cube, 12 facets, 8000 mm^3, glTF +Y face colour (128,128,64) — the
+// printer frame's +z. Supports are generated in the app (Support Mode, preset MIDDLE: lift
+// 5 mm under the model's lowest point) and exported 'printable' or 'supportsOnly'. Expected:
+// model and supports separate parts / shells, both outward (positive signed volume, no closed
+// shell inward), the supports one solid colour (never textured) standing under the model
+// (they end at its bottom, start the lift below it, and share its footprint), the model as it
+// exports alone (facets, volume, texture kept).
+//
 // cat-model-3mat.obj (+ .mtl), imported as "猫　モデル.obj": a closed Y-up box
 // 10 x 20 x 30 mm, 12 triangles, 6000 mm^3. OBJ top (+Y) red, +X green, the
 // rest blue; in the printer frame +Z red, +X green, size 10 x 30 x 20.
@@ -67,6 +77,8 @@ const TRUTH = {
     facets: 4, watertight: true, volume: 1000, size: [10, 30, 20],
     points: [[0, 30, 0], [10, 30, 0], [0, 30, 20], [0, 0, 0]],
   },
+  supcube: { facets: 96, volume: 8000, size: [20, 20, 20], lift: 5 },
+  supmid: { facets: 12, volume: 8000, size: [20, 20, 20], lift: 5, textured: true, top: '#808040' },
   cat: {
     facets: 12, watertight: true, volume: 6000, size: [10, 30, 20],
     faceColours: { '+z': [RED], '+x': [GREEN], '-x': [BLUE], '+y': [BLUE], '-y': [BLUE], '-z': [BLUE] },
@@ -81,7 +93,33 @@ const MODELS = [
     formats: ['3mf', 'obj', 'stl', 'ply', 'wrl'] },
   { key: 'cat', variant: 'bambu', fixture: 'cat-model-3mat.obj', siblings: ['cat-model-3mat.mtl'], loadAs: `${CAT_NAME}.obj`,
     flavour: 'bambu', formats: ['3mf'] },
+  { key: 'supcube', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'] },
+  { key: 'supcube', variant: 'only', fixture: 'support-plain-cube.glb', supports: 'supportsOnly', formats: ['3mf', 'stl'] },
+  { key: 'supmid', fixture: 'midtone-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'] },
 ];
+
+/** Support Mode generation in the page (the panel's Generate), then Support Mode closed again. */
+const GENERATE_SUPPORTS = `
+  const sel = await import('/src/core/Selection.js');
+  const sm = await import('/src/supports/SupportMode.ts');
+  const store = await import('/src/supports/store.ts');
+  const cache = await import('/src/supports/supportCache.ts');
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 300 && !window.__mxSupportLive; i++) await sleep(100);
+  const id = ids[0];
+  sel.Selection.set([id], id);
+  sm.supportMode.enter();
+  await sleep(300);
+  window.__mxSupportLive.generate([id]);
+  let built = false;
+  for (let i = 0; i < 1800 && !built; i++) {
+    await sleep(100);
+    const r = store.readSupports(id);
+    built = !!r && !!cache.cachedSupportMesh(id, r.revision) && !window.__mxSupportLive.busy(id);
+  }
+  sm.supportMode.exit();
+  if (!built) return { error: 'supports were not generated' };
+`;
 
 // What each format can carry. PLY bakes the texture per vertex, and at the
 // quad's corners a repeating texture blends all four quadrants (c04 checks
@@ -163,6 +201,80 @@ function checksFor(model, format, facts, prusa) {
   return checks;
 }
 
+const SUPPORT_HEX = '#8FA3B8';
+const isSupportPart = (p) => /supports/i.test(p.name ?? '');
+
+/**
+ * Support rows (P4.2). Parts are read per 3MF leaf object / OBJ object; an STL is one soup, so
+ * there the shells (connected components) stand in for parts: the model is the shell of the
+ * model's facet count.
+ */
+function supportChecksFor(model, format, facts, prusa) {
+  const truth = TRUTH[model.key];
+  const only = model.supports === 'supportsOnly';
+  const checks = [];
+  const add = (name, expect, actual, ok) => checks.push({ id: `${labelOf(model)}.${format}.${name}`, expect, actual, ok });
+  const box = (p) => p && { min: p.min.map(v => +v.toFixed(3)), max: p.max.map(v => +v.toFixed(3)) };
+  let modelPart, supportParts;
+  if (format === 'stl') {
+    const shell = facts.bodies.largest.find(b => b.facets === truth.facets && b.volume != null && near(b.volume, truth.volume, truth.volume * 1e-4));
+    modelPart = shell ? { ...shell, signedVolume: shell.volume, watertight: true } : null;
+    add('model.shell', only ? 'no model shell' : `a closed ${truth.volume} mm^3 shell of ${truth.facets} facets`, facts.bodies.largest, only ? !shell : !!shell);
+    add('shells.outward', 'no closed shell inward', { shells: facts.bodies.count, closed: facts.bodies.closed, inward: facts.bodies.inward }, facts.bodies.inward === 0 && facts.bodies.count >= (only ? 1 : 2));
+    // Everything that is not the model shell is support.
+    const all = facts.parts[0];
+    supportParts = [{ ...all, facets: all.facets - (shell ? truth.facets : 0) }];
+    if (shell) {
+      const z = shell.min[2];
+      add('supports.under', `facets below the model bottom (z ${z.toFixed(3)}), down to ${truth.lift} mm under it`, box(all),
+        near(all.min[2], z - truth.lift, 0.05) && all.facets > truth.facets);
+    }
+  } else {
+    modelPart = facts.parts.find(p => !isSupportPart(p)) ?? null;
+    supportParts = facts.parts.filter(isSupportPart);
+    add('parts.separate', only ? 'support part(s) only' : 'one model part and one support part',
+      facts.parts.map(p => ({ name: p.name, facets: p.facets })),
+      supportParts.length === 1 && (only ? facts.parts.length === 1 : facts.parts.length === 2 && !!modelPart));
+    if (format === '3mf') {
+      const items = facts.structure?.items ?? [];
+      add('build.oneObject', only ? 'one build item (the supports)' : 'one build item whose <components> are model + supports',
+        items, items.length === 1 && (only ? true : items[0].components === 2));
+    }
+    const sup = supportParts[0];
+    if (sup) {
+      add('supports.solid', `one solid colour ${SUPPORT_HEX}, no texture`, { colours: sup.colours, textured: sup.textured },
+        !sup.textured && sup.colours.length === 1 && sup.colours[0] === SUPPORT_HEX);
+      add('supports.outward', 'positive signed volume', sup.signedVolume, sup.signedVolume > 0);
+      if (modelPart) {
+        const z = modelPart.min[2];
+        add('supports.under', `ending at the model bottom (z ${z.toFixed(3)}), starting ${truth.lift} mm under it, inside its footprint`, box(sup),
+          near(sup.min[2], z - truth.lift, 0.05) && sup.max[2] <= z + 0.5 && sup.max[2] >= z - 0.5
+          && [0, 1].every(k => near((sup.min[k] + sup.max[k]) / 2, (modelPart.min[k] + modelPart.max[k]) / 2, 0.5)));
+      }
+    }
+  }
+  if (!only) {
+    add('model.facets', truth.facets, modelPart?.facets, modelPart?.facets === truth.facets);
+    add('model.outward', `closed, ${truth.volume} mm^3`, { watertight: modelPart?.watertight, volume: modelPart?.volume ?? modelPart?.signedVolume },
+      !!modelPart?.watertight && near(modelPart.volume ?? modelPart.signedVolume, truth.volume, truth.volume * 1e-4));
+    if (modelPart?.min) {
+      const size = modelPart.max.map((v, i) => v - modelPart.min[i]);
+      add('model.size', truth.size, size.map(v => +v.toFixed(3)), truth.size.every((v, i) => near(size[i], v, 0.01)));
+    }
+    if (truth.textured && format !== 'stl') {
+      add('model.texture', `textured, +z face ${truth.top}`, { textured: modelPart?.textured, top: modelPart?.faceColours?.['+z'] },
+        !!modelPart?.textured && JSON.stringify(modelPart.faceColours?.['+z']) === JSON.stringify([truth.top]));
+    }
+  }
+  if (prusa) {
+    // The slicer drops zero-area facets on read (support meshes carry a few where thin parts meet).
+    add('prusa.facets', `${facts.facets} less ${facts.degenerate} zero-area`, prusa.facets,
+      prusa.facets === facts.facets || prusa.facets === facts.facets - facts.degenerate);
+    if (format === '3mf') add('prusa.parts', only ? '1 part' : '2 parts (model, supports)', prusa.blocks, prusa.blocks === (only ? 1 : 2));
+  }
+  return checks;
+}
+
 // ── consumers ──────────────────────────────────────────────────────────────
 
 function probeConsumers() {
@@ -195,6 +307,7 @@ function prusaInfo(path) {
     size: hi.map((v, i) => v - lo[i]),
     manifold: blocks.every(b => b.manifold === 'yes') ? 'yes' : 'no',
     volume: num('volume').reduce((a, b) => a + b, 0),
+    blocks: blocks.length,
   };
 }
 
@@ -215,8 +328,9 @@ async function exportAll(app, outDir) {
         st.setState(s => ({ ...s, print: { ...s.print, threeMFFlavour: ${JSON.stringify(model.flavour ?? 'core')} } }), { silent: true });
         const get = async (f) => new File([await (await fetch('/tests/fixtures/' + f)).blob()], f);
         const siblingFiles = await Promise.all(${JSON.stringify(model.siblings ?? [])}.map(get));
-        await AssetLoader.loadFromBlob(await get(${JSON.stringify(model.fixture)}), ${JSON.stringify(model.loadAs ?? model.fixture)}, undefined, { siblingFiles });
-        const r = await PrintManager.collectExportFiles(${JSON.stringify(model.formats)}, { acknowledgeWarnings: true });
+        const ids = await AssetLoader.loadFromBlob(await get(${JSON.stringify(model.fixture)}), ${JSON.stringify(model.loadAs ?? model.fixture)}, undefined, { siblingFiles });
+        ${model.supports ? GENERATE_SUPPORTS : ''}
+        const r = await PrintManager.collectExportFiles(${JSON.stringify(model.formats)}, { acknowledgeWarnings: true${model.supports ? `, includeSupports: ${JSON.stringify(model.supports)}` : ''} });
         if (r.blocked) return { error: 'export blocked: ' + r.code + ' ' + JSON.stringify(r.readinessIssues) };
         const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
         return { files: r.files.map(f => ({ name: f.name, b64: b64(f.bytes) })) };
@@ -313,7 +427,7 @@ async function main() {
         results.push({ id: `${labelOf(f.model)}.${f.format}.read`, expect: 'readable', actual: fact.error, ok: false });
         continue;
       }
-      results.push(...checksFor(f.model, f.format, fact, prusa));
+      results.push(...(f.model.supports ? supportChecksFor(f.model, f.format, fact, prusa) : checksFor(f.model, f.format, fact, prusa)));
     }
 
     const { failed, known, passed } = report(results);

@@ -377,6 +377,17 @@ test('export.run: bytes returned unchanged from collectExportFiles; format + opt
   assert.equal(await code(d.dispatch('export.run', { formats: ['stl'], outDir: '/abs/dir' })), 'E_PATH_REJECTED');
 });
 
+test('export.run: options.includeSupports (P4.2) passes through as given; anything else is rejected', async () => {
+  const { d, log } = setup({ bytes: new Uint8Array([1]) });
+  for (const v of ['none', 'printable', 'supportsOnly']) {
+    await d.dispatch('export.run', { formats: ['stl'], outDir: ref('o'), options: { includeSupports: v } });
+    assert.ok(log.includes(`export:stl:{"includeSupports":"${v}","selectedOnly":false}`), v);
+  }
+  for (const bad of ['all', true, 1, null]) {
+    assert.equal(await code(d.dispatch('export.run', { formats: ['stl'], outDir: ref('o'), options: { includeSupports: bad } })), 'E_INVALID_PARAMS', String(bad));
+  }
+});
+
 test('export.run: gate blocked -> E_EXPORT_GATE with issues, nothing returned', async () => {
   const { d } = setup({ exportResult: { blocked: true, code: 'EXPORT_BLOCKED', readinessIssues: [{ code: 'geometry-error' }] } });
   const e = await d.dispatch('export.run', { formats: ['stl'], outDir: ref('o') }).catch(x => x);

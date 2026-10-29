@@ -35,9 +35,13 @@ function partIds(parts, predicate) {
  */
 export function buildReadiness({
   parts = [], targets = [], bedDimensions, reference = null,
-  profile = null, strictExport = false, representationIssues = [],
+  profile = null, strictExport = false, representationIssues = [], supports = null,
 } = {}) {
   const issues = [...representationIssues];
+  // P4.2: an export that carries supports needs them to fit their object (stale = rebuilt in
+  // Support Mode first), and a supports-only export needs some to export.
+  if (supports?.stale?.length) issues.push(issue('supports-stale', 'error', supports.stale));
+  if (supports?.missing) issues.push(issue('supports-missing', 'error', []));
   if (!parts.length) {
     issues.push(issue('no-print-parts', 'error', []));
   } else {

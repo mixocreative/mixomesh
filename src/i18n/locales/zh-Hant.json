@@ -1459,5 +1459,15 @@
   "supportPanel.verdict.blocked": "部分支撐貫穿模型",
   "supportPanel.verdict.inconclusive": "無法完成避讓檢查",
   "supportPanel.verdict.dropped": "{n, plural, other{已省略 # 個支撐}}",
-  "supportPanel.verdict.islands": "{n, plural, other{# 個孤島缺乏支撐}}"
+  "supportPanel.verdict.islands": "{n, plural, other{# 個孤島缺乏支撐}}",
+  "print.includeSupports": "支撐",
+  "print.includeSupports.none": "僅模型",
+  "print.includeSupports.printable": "模型 + 支撐",
+  "print.includeSupports.supportsOnly": "僅支撐",
+  "print.includeSupports.help": "支撐會以列印尺寸（公釐）匯出為獨立的實體零件。",
+  "print.issue.supports-stale": "{n} 個物件的支撐已過期",
+  "print.issueAction.supports-stale": "請開啟支撐模式以重建支撐，或僅匯出模型。",
+  "print.issue.supports-missing": "沒有可匯出的支撐",
+  "print.issueAction.supports-missing": "請在支撐模式中產生支撐，或匯出模型。",
+  "progress.supports": "正在建立匯出用的支撐…"
 }

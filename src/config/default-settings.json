@@ -47,6 +47,7 @@
     "threeMFFlavour": null,
     "objBakeSolidTextures": false,
     "individually": false,
+    "includeSupports": null,
     "strictExport": false,
     "repairOnImport": false
   },

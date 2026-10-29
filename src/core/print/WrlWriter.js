@@ -136,7 +136,7 @@ export async function serializeWRL(ctx) {
   const base = exportBaseName(ctx);
   if (ctx.individually) {
     const entries = ctx.cloneGroups.map(unit => ({
-      path: `${perMeshBaseName(ctx, unit.name)}.wrl`, data: encodeVRML(unit.meshes, urlByMesh),
+      path: `${perMeshBaseName(ctx, unit.name)}.wrl`, data: encodeVRML([...unit.meshes, ...(unit.supports ?? [])], urlByMesh),
     }));
     return { kind: 'zip', mime: 'application/zip', filename: `${base}.zip`, entries: [...entries, ...textureEntries] };
   }
