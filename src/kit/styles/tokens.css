@@ -1,0 +1,62 @@
+/* Mixo app style — tokens. Paper, warm grey ink, hairlines, kraft, one red. Flat. Dense.
+   Source: mixosupports/src/styles.css palette at the Dense density (22px rows, 11.5px text).
+   Drop in as-is for a new app, or scope under :root[data-ui-style="new"] to sit beside an
+   existing look (see SKILL.md "Adding to an existing app"). */
+:root {
+  /* Surfaces: three visible steps only. */
+  --paper:   #f4f2ed;   /* app + panel background */
+  --surface: #fbfaf7;   /* raised: buttons, segmented trough, popovers */
+  --sunken:  #ebe8e1;   /* hover, selected row */
+  --viewport-bg: #e9e6df;
+
+  /* Lines */
+  --line:        #dcd7cd;
+  --line-strong: #c4bdb0;
+
+  /* Ink */
+  --ink:   #3b3631;     /* text, pressed/checked fill */
+  --muted: #8a847a;     /* captions, units, disabled */
+  --kraft: #b59f78;     /* rare warm detail (badges, drop zones) */
+
+  /* The one accent */
+  --red:       #7f0019;
+  --red-hover: #96102b;
+
+  /* Status: text/icon colour on paper; banners use a ~10% tint of the same hue. */
+  --danger:  #b3261e;
+  --warning: #b07a12;
+  --success: #4a6b3a;
+  --info:    #3b4a5c;
+
+  /* Type */
+  --font-sans: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  --font-sans-tw: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', 'Zen Kaku Gothic New', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --fs-xs: 10.5px;      /* tiny captions, badges */
+  --fs-sm: 11px;        /* captions, units, status bar */
+  --fs-md: 11.5px;      /* body, controls */
+  --fs-lg: 13px;        /* panel titles, brand */
+  --fs-xl: 15px;        /* modal titles */
+
+  /* Density: Dense */
+  --row:     22px;      /* control + list row height */
+  --header-h: 32px;
+  --footer-h: 22px;
+  --pad:      8px;      /* panel padding */
+  --gap:      4px;      /* between rows */
+  --section:  6px;      /* above/below a section rule */
+  --panel-left:  220px;
+  --panel-right: 240px;
+
+  --radius: 2px;
+  --dur: .15s;
+
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Traditional Chinese: Taiwan glyph forms; the Japanese face would draw kanji forms. */
+:root:lang(zh-Hant), [lang="zh-Hant"] { font-family: var(--font-sans-tw); }

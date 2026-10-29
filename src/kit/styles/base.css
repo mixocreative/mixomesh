@@ -1,0 +1,115 @@
+/* Mixo app style — base components at Dense density. Needs tokens.css first.
+   Rules: flat (no box-shadow outside a 3D-viewport glass HUD), hairlines not boxes,
+   red = primary action / progress / focus underline / current-item marker only,
+   ink = pressed, checked, active tab/segment. */
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); }
+button, input, select { font: inherit; color: inherit; }
+
+/* Buttons */
+button {
+  height: var(--row);
+  padding: 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--fs-md);
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: background-color var(--dur), border-color var(--dur);
+}
+button:hover:not(:disabled) { border-color: var(--line-strong); background: #fff; }
+button:disabled { color: var(--muted); opacity: .55; cursor: not-allowed; }
+:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+.primary { height: calc(var(--row) + 2px); background: var(--red); border-color: var(--red); color: #fff; font-weight: 500; }
+.primary:hover:not(:disabled) { background: var(--red-hover); border-color: var(--red-hover); }
+.danger { color: var(--danger); border-color: var(--danger); background: transparent; } /* never a red fill */
+button.active, button[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+
+/* Segmented control: ink marks the chosen option, not red. */
+.segmented { display: flex; height: var(--row); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.segmented button { flex: 1; height: 100%; margin: 0; padding: 0 4px; border: 0; border-radius: 0; background: transparent; white-space: nowrap; }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button:hover:not(:disabled) { background: var(--sunken); }
+.segmented button[aria-pressed='true'], .segmented button.active { background: var(--ink); color: var(--paper); }
+
+/* Header / status bar */
+header {
+  height: var(--header-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+header h1 { margin: 0; font-size: var(--fs-lg); font-weight: 500; letter-spacing: .08em; }
+footer {
+  height: var(--footer-h);
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 var(--pad);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Panels and sections */
+.panel { padding: var(--pad); overflow: auto; background: var(--paper); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.panel section { padding: var(--section) 0; border-top: 1px solid var(--line); }
+.panel section:first-of-type { border-top: 0; padding-top: 0; }
+/* Group heading: must never read like body text. Ink on a sunken band, bold, tracked. */
+.panel h3 {
+  display: flex; align-items: center; gap: 6px; min-height: calc(var(--row) + 2px); margin: 0 0 var(--gap); padding: 0 6px;
+  background: var(--sunken); border-radius: var(--radius);
+  font-size: var(--fs-md); font-weight: 700; color: var(--ink); letter-spacing: .06em;
+}
+.panel h3 .count { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Field rows: label left, value right, underline numbers. */
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--row); font-size: var(--fs-md); }
+.field-row > span:first-child { flex: 1 0 auto; white-space: nowrap; }
+.number { display: flex; align-items: center; gap: 4px; }
+.number input {
+  width: 58px; height: calc(var(--row) - 4px); padding: 0 4px;
+  border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0; background: transparent;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.number input:hover { border-bottom-color: var(--ink); }
+.number input:focus-visible { outline: 0; border-bottom-color: var(--red); }
+.number small { width: 16px; color: var(--muted); font-size: var(--fs-sm); }
+.check { display: flex; gap: 8px; align-items: center; min-height: var(--row); cursor: pointer; }
+.check input { accent-color: var(--ink); width: 12px; height: 12px; margin: 0; }
+
+/* Collapsible group: the heading band plus a chevron (right = closed, down = open).
+   Never a faint +/− at the far end: users miss it. */
+details { margin-top: var(--section); }
+summary {
+  display: flex; align-items: center; gap: 6px; min-height: calc(var(--row) + 2px); padding: 0 6px;
+  background: var(--sunken); border-radius: var(--radius);
+  font-size: var(--fs-md); font-weight: 700; color: var(--ink); letter-spacing: .06em;
+  cursor: pointer; list-style: none; user-select: none;
+}
+summary:hover { background: var(--line); }
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: ''; flex: none; width: 5px; height: 5px; margin: 0 2px 0 1px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg); transition: transform var(--dur);
+}
+details[open] > summary::before { transform: rotate(45deg); }
+details[open] > summary { margin-bottom: var(--gap); }
+
+/* Lists: selected = sunken, current item = red marker. */
+.list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.list li { display: flex; align-items: center; gap: 8px; height: calc(var(--row) + 4px); padding: 0 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.list li:hover, .list li.selected { background: var(--sunken); }
+.list li .badge { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--line-strong); border-radius: var(--radius); font-size: var(--fs-sm); }
+.list li.current .badge { background: var(--red); border-color: var(--red); color: #fff; }
+.list li small { margin-left: auto; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+
+/* Progress */
+.progress-track { height: 2px; background: var(--line); overflow: hidden; }
+.progress-fill { height: 100%; background: var(--red); transition: width .25s ease-out; }
+
+kbd { font: inherit; font-size: var(--fs-xs); padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--sunken); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

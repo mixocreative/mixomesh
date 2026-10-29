@@ -1,0 +1,16 @@
+/* Kit additions on top of kit.scoped.css (generated from mixo-app-style). All under .mx-kit;
+   values are tokens only. */
+@import './kit.scoped.css';
+
+.mx-kit button.mx-icon { width: var(--row); padding: 0; display: inline-grid; place-items: center; }
+.mx-kit .mx-scrub { cursor: ew-resize; user-select: none; touch-action: none; }
+.mx-kit .mx-scrub.scrubbing { color: var(--red); }
+.mx-kit .mx-select { height: var(--row); min-width: 110px; padding: 0 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-size: var(--fs-md); }
+.mx-kit .mx-select:hover:not(:disabled) { border-color: var(--line-strong); }
+.mx-kit .mx-select:disabled { color: var(--muted); opacity: .55; }
+.mx-kit .mx-color { width: 28px; height: calc(var(--row) - 4px); padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); background: transparent; cursor: pointer; }
+.mx-kit .mx-color:disabled { opacity: .55; cursor: not-allowed; }
+.mx-kit .mx-hex { width: auto; min-width: 52px; font-variant-numeric: tabular-nums; }
+.mx-kit .mx-range input[type='range'] { flex: 1; min-width: 60px; height: var(--row); margin: 0 4px; accent-color: var(--ink); }
+.mx-kit .number input:disabled, .mx-kit .check input:disabled + span { color: var(--muted); opacity: .55; }
+.mx-kit .check:has(input:disabled) { cursor: not-allowed; }
