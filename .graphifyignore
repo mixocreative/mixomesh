@@ -1,0 +1,10 @@
+# Keep the code graph to code this project writes. Vendored engines are
+# minified or generated (one-letter symbols) and crowd real nodes out of
+# query results; read public/vendor/NOTICE.md for what they are.
+public/vendor/
+tests/fixtures/
+graphify-out/
+.audit/
+.tmp/
+dist/
+installers/

@@ -27,5 +27,10 @@ mixomesh uses `node --test`, so convert or add a runner: decide in the spec).
 
 - mixosupports `pkg-browser` is git-ignored and can be older than its last engine commit: run
   `npm run wasm:build` there before `vendor:geometry` (the script refuses a stale or dirty build).
-- Use graphify (`graphify query`) in both repos before reading source; both have `graphify-out/`.
+- Use graphify before reading source. For port questions query the cross-repo graph:
+  `graphify query "<q>" --graph graphify-out/port-graph.json` (mixomesh + mixosupports; `.ts`/`.rs` nodes
+  are mixosupports). Refresh it after either repo changes:
+  `graphify update S:\ai\mixosupports; graphify merge-graphs graphify-out/graph.json S:\ai\mixosupports\graphify-out\graph.json --out graphify-out/port-graph.json`.
+  mixomesh's own graph refreshes itself on commit (graphify git hooks); `.graphifyignore` keeps vendored
+  minified code out.
 - Paused run 2 leftovers (L2-03 etc.) are separate: `docs/handoff/2026-10-22-autonomous-run-2.md`.
