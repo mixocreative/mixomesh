@@ -3,7 +3,7 @@
 // base './' (the GitHub Pages shape) and the built app in Electron over file://. Each mode loads
 // the cube-overhang fixture by dropping it on the viewport, runs the generation path through
 // window.__mxSupportEngineProbe (a lazy hook present in the production build, see src/app/main.ts),
-// and asserts engine_version 10, 70 tips (62 before P5.14), no console errors / exceptions and no CSP violations.
+// and asserts engine_version 11, 70 tips (62 before P5.14), no console errors / exceptions and no CSP violations.
 //
 //   node tests/browser-support-engine-smoke.mjs              vite dev server + headless Chrome
 //   node tests/browser-support-engine-smoke.mjs --preview    production build (npm run build first)
@@ -23,7 +23,7 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const MODE = process.argv.includes('--electron') ? 'electron' : process.argv.includes('--preview') ? 'preview' : 'dev';
 const FILE = join(ROOT, 'tests/fixtures/support-cube-overhang.glb');
 const GOLDEN = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/support-golden-cube-overhang.json'), 'utf8'));
-const EXPECTED_ENGINE = 10;
+const EXPECTED_ENGINE = 11;
 let finished = false;
 
 const BOOTED = `document.readyState === 'complete' && document.querySelector('#boot-status') === null
