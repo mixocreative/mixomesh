@@ -440,6 +440,13 @@ on PE.5.
   runs in import coordinates, so float noise tips close calls. Fix: score tilts in the model's own frame (from the trim
   plane / denture bottom plane) with quantised keys (core/proximity), test: ≥ 8 random rotations of real scans → identical
   angle and tips (both aligner and denture). After the denture rules land.
+- **PD.14** `[mixodental]` Review layers, same for aligners and dentures (owner 2026-10-30), after the denture rules:
+  (1) Support area painted (aligner: trim band policy area; denture: centre-of-box line-of-sight area + bottom edges) — ON;
+  (2) lowest island / overhang points OUTSIDE the allowed area painted as risks — ON; (3) when <name>-sup.contacts.json
+  exists: the owner's support area (faces ≤ 2 mm from the owner's contacts) vs ours (≤ 2 mm from our tips) painted as
+  both / owner-only / ours-only, plus coverage % and extra % in the facts panel — ON. Colours from tokens.css (PD.12:
+  area red, outside low points orange, comparison three distinct tokens). Batch viewer and the app's Debug section use
+  the same layer data module. Haiku builds; done when screenshots of case-001 and the three dentures show all layers.
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
