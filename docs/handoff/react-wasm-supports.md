@@ -12,6 +12,8 @@ commit bb55c8e). Only the main session writes this file (D3).
 
 ## Baselines
 
+P0.3b (de9726a), cpuFrameMs mean/p95 ms, median of 5: pillow-1M orbit 0.9/1.2 gizmo 1.0/1.3; pillow-5M orbit 0.9/1.1 gizmo 0.9/1.2; textured-2M (4096²) orbit 1.0/1.3 gizmo 1.0/1.3; reactCommitMs 0 (no roots yet). Reproduce: `node scripts/heavy-mesh/generate.mjs --sizes 1 --3mf 0 --ascii 0 --glb 2` then `node scripts/heavy-mesh/measure.mjs --files pillow-1M.stl,pillow-5M.stl,pillow-textured-2M.glb --runs 5`.
+
 P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbit and gizmo drag) = "holds 60 fps". Real gate metric (CPU frame ms) comes with P0.6. Reproduce: `node scripts/heavy-mesh/generate.mjs --sizes 1,5 --3mf 0 --ascii 0` then `node scripts/heavy-mesh/measure.mjs --files pillow-1M.stl,pillow-5M.stl --runs 5`.
 
 ## Tasks
@@ -24,7 +26,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P0.3 | done (partial) | f2a283b | gizmoDragFrameMs added; median of 5: pillow-1M orbit 16.7/17.1, gizmo 16.7/17.2; pillow-5M orbit 16.7/17.0, gizmo 16.7/17.2 (mean/p95 ms). All at the 60 Hz vsync cap: cannot show a 5% regression. No textured fixture (generate.mjs has none). P0.6 adds CPU frame time (Babylon EngineInstrumentation frameTimeCounter) + React commit time as the gate, and a 4096² textured fixture. |
 | P0.4a | done | f7fa058..a4a506a | 8 kit fields, 29 vitest, gallery kit.html (dev only, not in build), screenshot .tmp/kit-gallery.png checked by main (mixo-app-style correct); CSS = unchanged copies of mixo-app-style bbf53ee scoped under .mx-kit by generated kit.scoped.css (freshness test). Repo typecheck + lint clean after P1.1+P0.4a. |
 | P0.4b | done | 9a09573 | Section (tri-state, header buttons stopPropagation), FieldRow, Modal (trap/Esc/focus return), Toast(+Provider/Host), ProgressRow, KeyCaps, Notice; 57 vitest; screenshot .tmp/kit-gallery-containers.png checked by main. Agent used Playwright from another project (scratch script only): later agents use scripts/ui-screenshot.mjs. |
-| P0.3b | todo | | CPU frame ms + React commit ms gate, 4096² textured fixture |
+| P0.3b | done | de9726a | cpuFrameMs (begin→end frame) + reactCommitMs (dev-only Profiler in mountPanel, checked DEV-gated). Gate = mean +max(0.1 ms,10%), median of 5. 4096² textured 2M GLB fixture added. |
 | P0.5 | todo | | |
 | P0.6 | todo | | |
 | P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geocore/host in PE.2. |

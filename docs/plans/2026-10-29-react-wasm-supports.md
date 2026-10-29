@@ -195,8 +195,7 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
 - **P0.6** First panels in React: StatsHud and TransformSheet (live transform values), kit only;
   remove the "original" style option and its CSS (`style-new.css` rules become the only style).
   *Depends: P0.2, P0.3b, P0.4a, P0.4b.* **Done when** their existing tests/smokes pass, the React
-  profiler records zero commits of unrelated panels during a gizmo drag, `cpuFrameMs` p95 is
-  within 5% of the P0.3b baseline on all three fixtures (median of 5), and `reactCommitMs` during
+  profiler records zero commits of unrelated panels during a gizmo drag, `cpuFrameMs` mean (median of 5) rises by at most max(0.1 ms, 10%) over the P0.3b baseline on all three fixtures (P0.3b: timer resolution 0.1 ms makes p95 jump 8-15%), and `reactCommitMs` during
   the drag is reported. **Owner checkpoint 1** (kit look, perf).
 - **P0.5** `docs/ui.md`: the three layers, how to add a panel, how to add a kit control, D13–D17
   with one example each. *Depends: P0.6.* **Done when** the examples match the P0.6 code.
@@ -419,8 +418,7 @@ Today: `src/core/scene/PivotSession.js` — Babylon `GizmoManager`, one exclusiv
 (translate / rotate / scale), snap via `SnapUnits.js`, undo committed in `_onGizmoDragEnd`.
 - **P6.1** Plane handles: `positionGizmo.planarGizmoEnabled = true` (XY, YZ, XZ); a plane drag
   changes only its two axes; one undo step per drag on every handle. *Depends: P0.3b.* **Done when**
-  smoke: a plane drag changes exactly two axes and undoes in one step; `cpuFrameMs` during the drag
-  within 5% of baseline.
+  smoke: a plane drag changes exactly two axes and undoes in one step; `cpuFrameMs` mean during the drag within max(0.1 ms, 10%) of baseline.
 - **P6.2** Verify orbit stays off during every handle drag (Babylon `PointerDragBehavior`
   detaches camera controls) and add a pointercancel/blur guard if a drag can leak; gizmo colours
   (axes, hover, active) from mixo-app-style tokens; screen-constant size confirmed; gizmo hidden in
