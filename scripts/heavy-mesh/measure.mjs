@@ -1,7 +1,7 @@
 // Heavy-mesh perf harness (docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md).
 //
 //   node scripts/heavy-mesh/measure.mjs [--dir DIR] [--files a.stl,b.3mf] [--gl d3d11|swiftshader]
-//                                       [--budget N] [--out results.json]
+//                                       [--budget N] [--out results.json] [--runs N] [--uncap 1]
 //
 // Starts Vite + headless Chrome (real GPU through ANGLE/D3D11 by default),
 // fetches each fixture same-origin from .tmp/heavy-mesh (the app CSP blocks
@@ -14,9 +14,13 @@
 //   peakRendererMB / peakGpuMB  peak private bytes of the page's renderer / the GPU process
 //   heapMB        JS heap after import (performance.memory)
 //   pickColdMs / pickWarmMs  one SceneManager.pickMeshIdAt at the canvas centre
-//   orbitFrameMs  mean frame interval while the camera orbits for ~2 s
+//   orbitFrameMs / orbitP95Ms  mean / p95 frame interval while the camera orbits for ~2 s
+//   gizmoDragFrameMs / gizmoDragP95Ms  mean / p95 frame interval during a ~3 s real-pointer drag
+//                 on the translate gizmo's X handle (CDP Input.dispatchMouseEvent);
+//                 gizmoPosBefore/After (mm) + gizmoMovedMM prove the drag moved the object
 //   afterDeleteMB renderer private bytes after deleting the object and trimming history
-// Every process it starts is killed in `finally`.
+// --runs N repeats each fixture N times (fresh page each) and prints the median of every
+// numeric metric. Every process it starts is killed in `finally`.
 
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -138,11 +142,45 @@ const INTERACT_IN_PAGE = `(async () => {
     requestAnimationFrame(step);
   });
   frames.shift();
+  const sorted = [...frames].sort((a, b) => a - b);
   return {
+    orbitP95Ms: +(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0).toFixed(1),
     picked: !!coldId && coldId === warmId,
     pickColdMs: Math.round(pickColdMs), pickWarmMs: Math.round(pickWarmMs), pickIndexWaitMs,
-    orbitFrameMs: Math.round(frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length)),
+    orbitFrameMs: +(frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length)).toFixed(1),
   };
+})()`;
+
+
+/** Select the loaded object, show the translate gizmo, return the screen point of the X handle. */
+const GIZMO_PREP_IN_PAGE = `(async () => {
+  const sm = await import('/src/core/SceneManager.js');
+  const sel = await import('/src/core/Selection.js');
+  const st = await import('/src/core/StateManager.js');
+  const B = window.BABYLON;
+  const scene = sm.SceneManager.getScene();
+  const id = Object.keys(st.getState().scene.objects)[0];
+  sel.set([id], id);
+  sm.SceneManager.setGizmoMode('translate');
+  sm.SceneManager.frameAll?.();
+  await new Promise(r => setTimeout(r, 600));
+  const engine = scene.getEngine();
+  const canvas = engine.getRenderingCanvas();
+  const rect = canvas.getBoundingClientRect();
+  const cam = scene.activeCamera;
+  const vp = cam.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
+  const toScreen = v => {
+    const p = B.Vector3.Project(v, B.Matrix.Identity(), scene.getTransformMatrix(), vp);
+    return { x: rect.left + p.x * rect.width / engine.getRenderWidth(), y: rect.top + p.y * rect.height / engine.getRenderHeight() };
+  };
+  const pivot = scene.getTransformNodeByName('selectionPivot');
+  if (!pivot) return { err: 'no selectionPivot (gizmo not attached)' };
+  const o = pivot.getAbsolutePosition();
+  const s0 = toScreen(o), s1 = toScreen(o.add(new B.Vector3(10, 0, 0)));
+  const len = Math.hypot(s1.x - s0.x, s1.y - s0.y) || 1;
+  const obj = scene.meshes.find(m => m.metadata?.meshId === id);
+  window.__objPos = () => { obj.computeWorldMatrix(true); return obj.getAbsolutePosition().asArray().map(n => +(n * 1000).toFixed(3)); };   // BU -> mm (BU_TO_MM = 1000)
+  return { id, origin: s0, dx: (s1.x - s0.x) / len, dy: (s1.y - s0.y) / len, pos: window.__objPos() };
 })()`;
 
 const DELETE_IN_PAGE = `(async () => {
@@ -157,12 +195,88 @@ const DELETE_IN_PAGE = `(async () => {
   return { stillRegistered: ids.filter(id => !!al.AssetLoader.getBabylonMesh?.(id)).length };
 })()`;
 
+/** Real pointer drag (CDP mouse events) on the translate gizmo's X handle; frame intervals recorded in page. */
+async function gizmoDrag(cdp) {
+  const prep = await evaluate(cdp, GIZMO_PREP_IN_PAGE);
+  const mouse = (type, x, y) => cdp.send('Input.dispatchMouseEvent', {
+    type, x: Math.round(x), y: Math.round(y), button: 'left',
+    buttons: type === 'mouseReleased' ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1,
+  });
+  if (prep.err) throw new Error(prep.err);
+  if (process.env.HEAVY_DEBUG) console.error(JSON.stringify(prep));
+  const found = await findXHandle(cdp, prep, mouse);
+  if (!found) throw new Error('no gizmo handle found');
+  const handle = { x: found.x, y: found.y, dx: prep.dx, dy: prep.dy };
+  const posBefore = await evaluate(cdp, 'window.__objPos()');
+  await evaluate(cdp, `(() => { window.__fr = []; let last = performance.now(); window.__frRun = true;
+    const step = () => { const n = performance.now(); window.__fr.push(n - last); last = n; if (window.__frRun) requestAnimationFrame(step); };
+    requestAnimationFrame(step); })()`);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(handle.x), y: Math.round(handle.y) });
+  await sleep(150);
+  await mouse('mousePressed', handle.x, handle.y);
+  const t0 = Date.now();
+  const DURATION = 3000, TRAVEL = 120;   // px along the handle's screen direction
+  while (Date.now() - t0 < DURATION) {
+    const k = (Date.now() - t0) / DURATION;
+    await mouse('mouseMoved', handle.x + handle.dx * TRAVEL * k, handle.y + handle.dy * TRAVEL * k);
+    await sleep(8);
+  }
+  await mouse('mouseMoved', handle.x + handle.dx * TRAVEL, handle.y + handle.dy * TRAVEL);
+  await mouse('mouseReleased', handle.x + handle.dx * TRAVEL, handle.y + handle.dy * TRAVEL);
+  const out = await evaluate(cdp, `(() => { window.__frRun = false; const f = window.__fr.slice(1).sort((a, b) => a - b);
+    return { frames: f, pos: window.__objPos() }; })()`);
+  const f = out.frames;
+  return {
+    gizmoDragFrameMs: +(f.reduce((a, b) => a + b, 0) / Math.max(1, f.length)).toFixed(1),
+    gizmoDragP95Ms: +(f[Math.min(f.length - 1, Math.floor(f.length * 0.95))] ?? 0).toFixed(1),
+    gizmoPosBefore: posBefore, gizmoPosAfter: out.pos,
+    gizmoMovedMM: +Math.hypot(...out.pos.map((v, i) => v - posBefore[i])).toFixed(3),
+  };
+}
+
+/** Find the X handle: press at increasing radii along the +X screen direction until a small drag moves the object. */
+async function findXHandle(cdp, prep, mouse) {
+  for (let r = 24; r <= 160; r += 8) {
+    const x = prep.origin.x + prep.dx * r, y = prep.origin.y + prep.dy * r;
+    const before = await evaluate(cdp, 'window.__objPos()');
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x), y: Math.round(y) });
+    await sleep(60);
+    await mouse('mousePressed', x, y);
+    for (let k = 1; k <= 4; k++) { await mouse('mouseMoved', x + prep.dx * 6 * k, y + prep.dy * 6 * k); await sleep(20); }
+    await mouse('mouseReleased', x + prep.dx * 24, y + prep.dy * 24);
+    await sleep(120);
+    const after = await evaluate(cdp, 'window.__objPos()');
+    if (after.some((v, i) => v !== before[i])) return { x: x + prep.dx * 24, y: y + prep.dy * 24, r };
+  }
+  return null;
+}
+
+const median = xs => {
+  const v = xs.filter(Number.isFinite).sort((a, b) => a - b);
+  return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null;
+};
+
+/** Per fixture: median of every numeric metric across runs. */
+function summarize(rows) {
+  const byFile = new Map();
+  for (const r of rows) byFile.set(r.file, [...(byFile.get(r.file) ?? []), r]);
+  return [...byFile].map(([file, rs]) => {
+    const out = { file, n: rs.length };
+    for (const k of Object.keys(rs[0])) {
+      if (typeof rs[0][k] === 'number') { const m = median(rs.map(r => r[k])); out[k] = m === null ? null : +m.toFixed(1); }
+    }
+    return out;
+  });
+}
+
 async function main() {
   const dir = resolve(arg('dir', process.env.HEAVY_MESH_DIR ?? join(ROOT, '.tmp/heavy-mesh')));
   const files = String(arg('files', 'pillow-2M.stl,pillow-5M.stl,pillow-10M.stl,pillow-10M.3mf')).split(',').filter(Boolean);
   const gl = arg('gl', 'd3d11');
   const budget = Number(arg('budget', '0')) || 0;
   const outPath = arg('out', null);
+  const uncap = arg('uncap', '0') === '1';   // lift the 60 Hz vsync cap so frame cost is visible
+  const runs = Math.max(1, Number(arg('runs', '1')) || 1);
   const browserPath = findBrowser();
   if (!browserPath) throw new Error('Chrome/Edge not found');
   if (!existsSync(VITE_BIN)) throw new Error('Vite not installed');
@@ -182,7 +296,7 @@ async function main() {
     : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'];
   const browser = spawn(browserPath, [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', ...glFlags,
-    '--enable-precise-memory-info', '--window-size=1600,950', '--no-first-run',
+    '--enable-precise-memory-info', ...(uncap ? ['--disable-frame-rate-limit', '--disable-gpu-vsync'] : []), '--window-size=1600,950', '--no-first-run',
     '--no-default-browser-check', '--disable-background-networking',
     `--remote-debugging-port=${debugPort}`, `--user-data-dir=${userDataDir}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -190,12 +304,13 @@ async function main() {
   browser.stderr.on('data', c => browserStderr.push(String(c)));
   let sampler = null;
   const results = [];
+  const missing = new Set();
   try {
     await waitForHttp(`http://127.0.0.1:${appPort}/index.html`, 30000, viteOutput);
     const browserWs = await waitForBrowserWs(debugPort, browserStderr);
     const browserCdp = await Cdp.connect(browserWs);
-    for (const file of files) {
-      if (!existsSync(join(dir, file))) { console.error(`skip ${file} (missing)`); continue; }
+    for (const file of files.flatMap(f => Array(runs).fill(f))) {
+      if (!existsSync(join(dir, file))) { if (!missing.has(file)) console.error(`skip ${file} (missing)`); missing.add(file); continue; }
       const target = await openTarget(debugPort, `http://127.0.0.1:${appPort}/index.html?heavy=1`);
       const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
       await cdp.send('Runtime.enable');
@@ -218,6 +333,7 @@ async function main() {
       let afterDeleteMB = null;
       if (!run.err) {
         try { interact = await evaluate(cdp, INTERACT_IN_PAGE); } catch (e) { interact = { interactErr: String(e.message) }; }
+        try { Object.assign(interact, await gizmoDrag(cdp)); } catch (e) { interact.gizmoErr = String(e.message); }
         try {
           const del = await evaluate(cdp, DELETE_IN_PAGE);
           await sleep(1500);
@@ -240,7 +356,15 @@ async function main() {
     await stopProcess(vite);
     removeTempDir(userDataDir);
   }
-  if (outPath) writeFileSync(outPath, JSON.stringify({ when: new Date().toISOString(), gl, budget, results }, null, 2));
+  const summary = summarize(results);
+  if (runs > 1 || summary.length) {
+    console.log(`
+median of ${runs} run(s), gl=${gl}:`);
+    for (const r of summary) {
+      console.log(`${r.file}  n=${r.n}  orbitFrameMs mean/p95 ${r.orbitFrameMs}/${r.orbitP95Ms}  gizmoDragFrameMs mean/p95 ${r.gizmoDragFrameMs}/${r.gizmoDragP95Ms}  gizmoMovedMM ${r.gizmoMovedMM}`);
+    }
+  }
+  if (outPath) writeFileSync(outPath, JSON.stringify({ when: new Date().toISOString(), gl, budget, runs, results, median: summary }, null, 2));
 }
 
 try {
