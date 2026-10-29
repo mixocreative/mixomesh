@@ -123,6 +123,15 @@ Architecture rules:
   caches as soon as a step ends, process large models in chunks or across workers rather than one giant buffer, and
   never hold two full copies of a large mesh when one will do. Tasks that touch heavy data report peak memory (JS heap
   + WASM + process) on the large fixtures next to time; a change that raises peak memory needs a stated reason.
+- D25. Real-scan regression gate (2026-10-29: engine 10's 1 µm snap collapsed sub-micron edges and rejected valid
+  customer scans; the owner found it, the gates did not). Every engine change (any mixo-geocore commit that changes
+  geometry-core, geometry-wasm or host behaviour) runs ALL locally available real scans — mixoDental
+  `dentalwork/fixtures/case-*/*.stl`, its `docs/dental-reference/` aligner, and mixomesh `tests/fixtures/real-scans/`
+  — through both apps' pipelines (mixoDental batch review incl. run-batch-review.bat; mixomesh support generation)
+  on the old and the new engine, and compares accepted/rejected, verdict, tip counts and timing. Any rejection of a
+  scan the old engine accepted, or an unexplained count change, blocks the change. Scans stay local and git-ignored
+  (customer data: read in place, never committed or named in commits); a run without them is reported as NOT DONE,
+  never as passed. Coordinate quantisation must never change mesh topology (explicit test with sub-micron edges).
 
 ---
 
