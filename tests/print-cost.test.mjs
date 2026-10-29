@@ -18,8 +18,10 @@ import { installEnv } from './env.mjs';
 installEnv();
 
 const { StateManager } = await import('../src/core/StateManager.js');
-const { unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap } =
+const { unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap, supportVolumesMM3 } =
   await import('../src/core/print/PrintCost.js');
+const { setSupportMeshLookup } = await import('../src/core/scene/SupportMeshSource.js');
+const { countSceneSupportTriangles } = await import('../src/core/scene/TriangleCount.js');
 const { setCapabilities } = await import('../src/core/storage/capabilities.js');
 
 // M9: the cost gate is a UI-responsiveness cap that tracks the HUD triangle
@@ -289,9 +291,116 @@ await test('M9: quote above costTriangleCap() short-circuits before any volume c
     { densityGcm3: 1.1 });
   assert.deepEqual(q, {
     volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
-    supportCost: null, setupFee: 0, total: null, currency: 'USD', approximate: true, overlaps: 0,
+    supportCost: null, supportVolumeCM3: null, supportTriangles: 0,
+    setupFee: 0, total: null, currency: 'USD', approximate: true, overlaps: 0,
     reasons: ['tooBig'],
   });
+});
+
+// ── P4.3: supports in the quote and the triangle budget ─────────────────────
+// Axis-aligned box as an outward-wound triangle list (12 triangles), w×h×d.
+function boxSpec(w, h, d) {
+  const pos = [0, 0, 0, w, 0, 0, w, h, 0, 0, h, 0, 0, 0, d, w, 0, d, w, h, d, 0, h, d];
+  const idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 6, 2, 3, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5];
+  return { pos, idx };
+}
+const CUBE = boxSpec(10, 10, 10);       // 1000 mm³ = 1.0 cm³
+const SUPPORT_BOX = boxSpec(4, 5, 2);   // 40 mm³ = 0.04 cm³ (engine mm = mm-physical)
+const SUPPORT_TRIS = SUPPORT_BOX.idx.length / 3;
+
+// Stand-in for the support cache: object id → { revision, mesh }.
+function lookupFor(entries) {
+  return (id, revision) => {
+    const hit = entries[id];
+    return hit && hit.revision === revision ? hit.mesh : undefined;
+  };
+}
+const supportMesh = { positions: new Float32Array(SUPPORT_BOX.pos), indices: Uint32Array.from(SUPPORT_BOX.idx) };
+const builtSupports = (extra = {}) => ({ supports: { sourceHash: 'h', pose: {}, revision: 3, stale: false, ...extra } });
+
+/** A cube unit with built supports, exported under `includeSupports`. */
+function cubeWithSupports({ includeSupports = 'printable', obj = builtSupports(), ratio = null } = {}) {
+  const ctx = ctxWith([{ id: 'a', mesh: fakeMesh(CUBE) }], { target: ratio });
+  ctx.units[0].obj = obj;
+  ctx.includeSupports = includeSupports;
+  return ctx;
+}
+const MATERIAL = { densityGcm3: 1.1, supportDensityGcm3: 1.0 };
+const SETTINGS = { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0, currency: 'USD' };
+const fresh = () => setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
+
+await test('P4.3 (a): cost total = model + measured support volume x price (cube + known supports)', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  fresh();
+  const q = quote(cubeWithSupports(), SETTINGS, MATERIAL);
+  assert.ok(Math.abs(q.supportVolumeCM3 - 0.04) < 1e-9, `support volume 0.04 cm³, got ${q.supportVolumeCM3}`);
+  assert.equal(q.supportTriangles, SUPPORT_TRIS);
+  // Model 1.0 cm³ × 1.1 g/cm³ × 0.5 = 0.55; supports 0.04 cm³ × 1.0 g/cm³ × 0.5 (price falls back to the model's) = 0.02.
+  assert.ok(Math.abs(q.materialCost - 0.55) < 1e-9, `model cost 0.55, got ${q.materialCost}`);
+  assert.ok(Math.abs(q.supportCost - 0.02) < 1e-9, `support cost 0.02, got ${q.supportCost}`);
+  assert.ok(Math.abs(q.total - 0.57) < 1e-9, `total 0.57, got ${q.total}`);
+  assert.ok(!q.reasons.some(r => /support/.test(r)), `fresh supports carry no reason, got ${q.reasons.join(',')}`);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (a2): a measured support volume replaces the support-% estimate (no double count)', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  fresh();
+  const q = quote(cubeWithSupports(), { ...SETTINGS, supportPercent: 50 }, MATERIAL);
+  assert.ok(Math.abs(q.supportCost - 0.02) < 1e-9, `supports measured, so 50% is ignored; got ${q.supportCost}`);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (a3): a ratio other than as shown is flagged approximate (supports are sized as shown)', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  fresh();
+  const q = quote(cubeWithSupports({ ratio: 2 }), SETTINGS, MATERIAL);
+  assert.ok(q.reasons.includes('supportsAsShown'), `got ${q.reasons.join(',')}`);
+  assert.equal(q.approximate, true);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (b): includeSupports = none leaves supports out (no Supports line, model-only total)', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  fresh();
+  const ctx = cubeWithSupports({ includeSupports: 'none' });
+  assert.equal(supportVolumesMM3(ctx).size, 0);
+  const q = quote(ctx, SETTINGS, MATERIAL);
+  assert.equal(q.supportVolumeCM3, null, 'no Supports line when none is exported');
+  assert.ok(Math.abs(q.total - 0.55) < 1e-9, `total is the model only, 0.55; got ${q.total}`);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (b2): a STALE support is excluded and flagged, never quoted', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  fresh();
+  const q = quote(cubeWithSupports({ obj: builtSupports({ stale: true }) }), SETTINGS, MATERIAL);
+  assert.equal(q.supportVolumeCM3, null);
+  assert.equal(q.supportTriangles, 0);
+  assert.ok(Math.abs(q.total - 0.55) < 1e-9, `total is the model only, 0.55; got ${q.total}`);
+  assert.ok(q.reasons.includes('supportsStale:1'), `got ${q.reasons.join(',')}`);
+  assert.equal(q.approximate, true);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (b3): a mesh cached for another revision (or none) is treated as stale', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 2, mesh: supportMesh } }));
+  fresh();
+  const q = quote(cubeWithSupports(), SETTINGS, MATERIAL);
+  assert.equal(q.supportVolumeCM3, null, 'record at revision 3, mesh cached at 2: not quoted');
+  assert.ok(q.reasons.includes('supportsStale:1'), `got ${q.reasons.join(',')}`);
+  setSupportMeshLookup(() => undefined);
+});
+
+await test('P4.3 (c): support triangles are counted apart from the model, fresh objects only', () => {
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh }, b: { revision: 1, mesh: supportMesh } }));
+  const objects = {
+    a: { supports: { revision: 3, stale: false } },
+    b: { supports: { revision: 1, stale: true } },
+    c: {},
+  };
+  assert.equal(countSceneSupportTriangles(objects), SUPPORT_TRIS, 'only the fresh support mesh counts');
+  setSupportMeshLookup(() => undefined);
 });
 
 console.log('\n' + out.join('\n'));

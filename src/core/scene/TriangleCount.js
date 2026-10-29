@@ -14,6 +14,7 @@ import { getState } from '../StateManager.js';
 import { canonicalObjectId } from '../LogicalObjects.js';
 import { revisionOf } from '../geometry/GeometryStore.js';
 import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
+import { supportMeshFor } from './SupportMeshSource.js';
 
 // RefinementController sits above this module in the import graph (it reaches
 // MeshValidator, which reaches back here through AssetLoader), so a static
@@ -101,6 +102,23 @@ export function displayedCounts(meshes, opts) {
  */
 export function countSceneTriangles(objects = getState().scene?.objects ?? {}, opts = {}) {
   return displayedCounts(sceneObjectMeshes(objects), { ...opts, objects }).tris;
+}
+
+/**
+ * Support triangles of the scene, kept APART from the model total (D20: support meshes never count
+ * as content). Only fresh support meshes count: a stale object or a mesh not built for its current
+ * revision contributes nothing, the same rule the print cost uses.
+ * @param {Record<string, any>} [objects]
+ */
+export function countSceneSupportTriangles(objects = getState().scene?.objects ?? {}) {
+  let tris = 0;
+  for (const id of Object.keys(objects)) {
+    const s = objects[id]?.supports;
+    if (!s || s.stale || s.revision == null) continue;
+    const mesh = supportMeshFor(id, s.revision);
+    if (mesh?.indices?.length) tris += mesh.indices.length / 3;
+  }
+  return tris;
 }
 
 /**

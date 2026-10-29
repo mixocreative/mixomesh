@@ -20,6 +20,8 @@ import { withRestTransform } from '../scene/ImportBounce.js';
 import { positionsToPrintSpace, printIndices, signedVolume, toPrintSpace } from './PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from '../repair/MeshRepair.js';
 import { caps } from '../storage/capabilities.js';
+import { supportMeshFor } from '../scene/SupportMeshSource.js';
+import { hasBuiltSupports } from './ExportContext.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -148,6 +150,33 @@ export function unitBoxVolumesMM3(ctx) {
   });
 }
 
+/**
+ * Support volume per object that an export of this ctx would write (P4.3). Only objects whose
+ * `includeSupports` is `printable` or `supportsOnly` count; `none` yields an empty map. A built
+ * object whose supports are stale, or whose cached mesh is missing for its current revision, is
+ * reported `stale: true` with zero volume: it is left out of the quote, never quoted from a guess.
+ * The support mesh is in engine mm (mm-physical: supports are never scaled with the model), so its
+ * volume goes through the same signed-volume path as the model, without the ratio or pivot maths.
+ *
+ * @param {import('./ExportContext.js').ExportContext} ctx
+ * @returns {Map<string, {volumeMM3:number, triangles:number, stale:boolean}>}
+ */
+export function supportVolumesMM3(ctx) {
+  const out = new Map();
+  if (ctx?.includeSupports !== 'printable' && ctx?.includeSupports !== 'supportsOnly') return out;
+  for (const unit of ctx.units ?? []) {
+    if (!hasBuiltSupports(unit.obj)) continue;
+    const mesh = unit.obj.supports.stale ? null : supportMeshFor(unit.logicalId, unit.obj.supports.revision);
+    if (!mesh?.indices?.length) {
+      out.set(unit.logicalId, { volumeMM3: 0, triangles: 0, stale: true });
+      continue;
+    }
+    const vol = signedVolume(positionsToPrintSpace(mesh.positions), mesh.indices);
+    out.set(unit.logicalId, { volumeMM3: Math.abs(vol), triangles: mesh.indices.length / 3, stale: false });
+  }
+  return out;
+}
+
 function _unitVolumesMM3Now(ctx) {
   const out = new Map();
   for (const unit of ctx.units ?? []) {
@@ -259,7 +288,7 @@ function _overlappingPairsNow(ctx) {
  * @param {import('./ExportContext.js').ExportContext} ctx
  * @param {{pricePerGram?:number, supportPricePerGram?:number, supportPercent?:number, setupFee?:number, currency?:string, volumeMode?:'mesh'|'bbox'}} s
  * @param {{densityGcm3?:number, pricePerGram?:number, supportDensityGcm3?:number, supportPricePerGram?:number, defaultSupportPercent?:number}|null} material
- * @param {{vols?:Map, volsBox?:Map, pairs?:Array}|null} [geometry] pre-computed geometry for this ctx (`volsBox` = unitBoxVolumesMM3, read in 'bbox' mode)
+ * @param {{vols?:Map, volsBox?:Map, pairs?:Array, supports?:Map}|null} [geometry] pre-computed geometry for this ctx (`volsBox` = unitBoxVolumesMM3, read in 'bbox' mode; `supports` = supportVolumesMM3)
  */
 export function quote(ctx, s, material, geometry = null) {
   const currency = s?.currency || 'USD';
@@ -270,7 +299,8 @@ export function quote(ctx, s, material, geometry = null) {
   if (totalTriangles(ctx) > costTriangleCap()) {
     return {
       volumeCM3: null, grams: null, materialCost: null, supportGrams: null,
-      supportCost: null, setupFee: 0, total: null, currency, approximate: true, overlaps: 0,
+      supportCost: null, supportVolumeCM3: null, supportTriangles: 0,
+      setupFee: 0, total: null, currency, approximate: true, overlaps: 0,
       reasons: ['tooBig'],
     };
   }
@@ -278,6 +308,7 @@ export function quote(ctx, s, material, geometry = null) {
   const boxMode = s?.volumeMode === 'bbox';
   const vols = boxMode ? (geometry?.volsBox ?? unitBoxVolumesMM3(ctx)) : (geometry?.vols ?? unitVolumesMM3(ctx));
   const pairs = geometry?.pairs ?? overlappingPairs(ctx);
+  const supports = geometry?.supports ?? supportVolumesMM3(ctx);
   const volumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
 
   const density = material?.densityGcm3 || null;
@@ -286,8 +317,19 @@ export function quote(ctx, s, material, geometry = null) {
   const sPrice = s?.supportPricePerGram || material?.supportPricePerGram || price;
   const pct = s?.supportPercent || material?.defaultSupportPercent || 0;
 
+  // P4.3: fresh support meshes that the export writes replace the support-%
+  // estimate with their measured volume. Stale ones are left out (and flagged).
+  const supportList = [...supports.values()];
+  const counted = supportList.filter(v => !v.stale);
+  const supportsStale = supportList.length - counted.length;
+  const actualSupports = counted.length > 0;
+  const supportVolumeCM3 = actualSupports ? counted.reduce((a, v) => a + v.volumeMM3, 0) / 1000 : null;
+  const supportTriangles = counted.reduce((a, v) => a + v.triangles, 0);
+
   const grams = density ? volumeCM3 * density : null;
-  const supportGrams = grams != null && sDensity ? volumeCM3 * (pct / 100) * sDensity : null;
+  const supportGrams = actualSupports
+    ? (sDensity ? supportVolumeCM3 * sDensity : null)
+    : (grams != null && sDensity ? volumeCM3 * (pct / 100) * sDensity : null);
 
   const reasons = [];
   const open = [...vols.values()].filter(v => !v.watertight).length;
@@ -298,6 +340,9 @@ export function quote(ctx, s, material, geometry = null) {
   if (open) reasons.push(`notWatertight:${open}`);
   if (unchecked) reasons.push(`notValidated:${unchecked}`);
   if (pairs.length) reasons.push(`overlap:${pairs.length}`);
+  if (supportsStale) reasons.push(`supportsStale:${supportsStale}`);
+  // Supports are sized as shown; a print at another ratio regenerates them, so the measured volume is not that size's volume.
+  if (actualSupports && Math.abs((ctx.ratioFactor ?? 1) - 1) > 1e-9) reasons.push('supportsAsShown');
   if (!density) reasons.push('noDensity');
   if (!price) reasons.push('noPrice');
 
@@ -315,6 +360,8 @@ export function quote(ctx, s, material, geometry = null) {
     materialCost,
     supportGrams,
     supportCost,
+    supportVolumeCM3,
+    supportTriangles,
     setupFee,
     total,
     currency,

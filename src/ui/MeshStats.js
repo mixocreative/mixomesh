@@ -26,7 +26,7 @@ import { subscribe, getState } from '../core/StateManager.js';
 import { SceneManager } from '../core/SceneManager.js';
 import { StatusBar } from './StatusBar.js';
 import { getBabylonMesh } from '../core/AssetLoader.js';
-import { countSceneTriangles, countContainerTriangles, formatTriCount, displayedCounts }
+import { countSceneTriangles, countSceneSupportTriangles, countContainerTriangles, formatTriCount, displayedCounts }
   from '../core/scene/TriangleCount.js';
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
@@ -68,9 +68,12 @@ const GEOMETRY_EVENTS = [
   EVENTS.REFINEMENT_CHANGED,
   EVENTS.REFINEMENT_CANCELLED,
   EVENTS.REFINEMENT_STALE,
+  // P4.3: support faces are shown beside the model count (their cache changes with the record).
+  EVENTS.SUPPORTS_CHANGED,
 ];
 
 let _cachedSceneTris = 0;
+let _cachedSupportTris = 0;   // P4.3: support faces, shown beside (never inside) the model count
 let _recomputeScheduled = false;
 
 export function init() {
@@ -126,6 +129,7 @@ function _recomputeSceneTris() {
   // spy on `MeshStats.countSceneTriangles` and observe exactly how many real
   // walks happen.
   _cachedSceneTris = MeshStats.countSceneTriangles();
+  _cachedSupportTris = countSceneSupportTriangles();
   const budget = caps.triangleBudget || 0;
   Hover.setBudgetExceeded(budget > 0 && _cachedSceneTris / budget >= WARN_RATIO);
 }
@@ -150,6 +154,7 @@ function _render() {
   const hudClass = ratio >= DANGER_RATIO ? 'hud-danger' : ratio >= WARN_RATIO ? 'hud-warn' : '';
 
   let text = `${t('hud.tris')} ${formatTriCount(_cachedSceneTris)} / ${formatTriCount(budget)}`;
+  if (_cachedSupportTris > 0) text += ` · ${t('hud.supportTris')} ${formatTriCount(_cachedSupportTris)}`;
   let action = null;
 
   const sel = getState().selection?.selectedIds ?? [];
@@ -184,4 +189,4 @@ function _render() {
   StatusBar.setCenter(text, { className: hudClass, title: t('hud.triangleBudget'), action });
 }
 
-export const MeshStats = { init, countSceneTriangles, countContainerTriangles, formatTriCount };
+export const MeshStats = { init, countSceneTriangles, countSceneSupportTriangles, countContainerTriangles, formatTriCount };

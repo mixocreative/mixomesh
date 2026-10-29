@@ -16,7 +16,7 @@
 import { getState, setState } from '../../core/StateManager.js';
 import { SettingsStore } from '../../core/SettingsStore.js';
 import { PrintManager } from '../../core/PrintManager.js';
-import { quote, unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
+import { quote, unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, supportVolumesMM3, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
 import { t } from '../../i18n/index.js';
 import { escapeHtml, escapeAttr } from '../renderSafe.js';
 import { icon } from '../../core/Icons.js';
@@ -78,6 +78,9 @@ function _reasonText(reason) {
   if (nv) return t('print.cost.reasonNotValidated', { n: Number(nv[1]) });
   const ov = /^overlap:(\d+)$/.exec(reason);
   if (ov) return t('print.cost.reasonOverlap', { n: Number(ov[1]) });
+  const ss = /^supportsStale:(\d+)$/.exec(reason);
+  if (ss) return t('print.cost.reasonSupportsStale', { n: Number(ss[1]) });
+  if (reason === 'supportsAsShown') return t('print.cost.reasonSupportsAsShown');
   if (reason === 'noPrice') return t('print.cost.reasonNoPrice');
   if (reason === 'noDensity') return t('print.cost.reasonNoDensity');
   if (reason === 'tooBig') return t('print.cost.reasonTooBig');
@@ -313,7 +316,7 @@ function _invalidateGeometryCache() {
 function _geometryFor(ctx) {
   if (_geomCacheCtx === ctx && _geomCache) return _geomCache;
   _geomCacheCtx = ctx;
-  _geomCache = { vols: unitVolumesMM3(ctx), volsBox: unitBoxVolumesMM3(ctx), pairs: overlappingPairs(ctx) };
+  _geomCache = { vols: unitVolumesMM3(ctx), volsBox: unitBoxVolumesMM3(ctx), pairs: overlappingPairs(ctx), supports: supportVolumesMM3(ctx) };
   return _geomCache;
 }
 
@@ -413,8 +416,14 @@ function _renderResult(container, state, override = null) {
     : t('print.cost.weightValue', { grams: fmt(q.grams, 1), support: fmt(q.supportGrams ?? 0, 1) }));
   html += row('material', 'print.cost.rowMaterial', q.materialCost == null ? '\u2014'
     : t('print.cost.materialValue', { cost: money(q.materialCost), price: fmt(priceUsed, 2), currency }));
-  html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
-    : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));
+  // P4.3: measured support volume (fresh supports the export writes) is its own line; the support-%
+  // estimate stays for objects without measured supports.
+  if (q.supportVolumeCM3 != null) {
+    html += row('supports', 'print.cost.rowSupports', `${fmt(q.supportVolumeCM3, 2)} cm\u00b3 \u00b7 ${q.supportCost == null ? '\u2014' : money(q.supportCost)}`);
+  } else {
+    html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
+      : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));
+  }
   if (q.setupFee) html += row('setup', 'print.cost.rowSetup', money(q.setupFee));
   html += row('total', 'print.cost.rowTotal', q.total == null ? '\u2014' : money(q.total), 'pp-cost-total-row');
   // Packaging (owner ask 2026-09-18): the combined bounding box of every

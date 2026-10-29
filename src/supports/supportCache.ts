@@ -7,6 +7,7 @@
  */
 import type { SupportPoint } from '@mixo-geocore/host/core/analysis/types';
 import type { GeneratedSupportMesh } from '@mixo-geocore/host/core/supports/mesh';
+import { setSupportMeshLookup } from '../core/scene/SupportMeshSource.js';
 
 const meshes = new Map<string, { revision: number; mesh: GeneratedSupportMesh }>();
 const placements = new Map<string, readonly SupportPoint[]>();
@@ -44,3 +45,6 @@ export function forgetSupportCaches(objectId?: string): void {
   meshes.delete(objectId);
   placements.delete(objectId);
 }
+
+// Let the JS side (print cost, triangle budget) read these meshes without importing TypeScript.
+setSupportMeshLookup(cachedSupportMesh);
