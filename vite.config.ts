@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve, join, relative, sep } from 'node:path';
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -37,7 +37,8 @@ function reactRefreshCsp(): Plugin {
 /**
  * PW.2: stamp dist/sw.js with the build's app-shell file list and a cache id
  * derived from it (names + sizes; Vite's hashed asset names change with content).
- * Skips sourcemaps, ./vendor/* (runtime-cached on first use) and sw.js itself.
+ * Skips sourcemaps, ./vendor/* (runtime-cached on first use; the engine subset goes to VENDOR for
+ * the idle prefetch, PW.2b) and sw.js itself.
  * apply:'build' only; public/sw.js in dev keeps its placeholders (never registered).
  */
 function serviceWorkerVersion(): Plugin {
@@ -58,16 +59,25 @@ function serviceWorkerVersion(): Plugin {
       handler() {
         const swPath = join(outDir, 'sw.js');
         if (!existsSync(swPath)) return;
-        const files = walk(outDir)
-          .map((f) => relative(outDir, f).split(sep).join('/'))
+        const all = walk(outDir).map((f) => relative(outDir, f).split(sep).join('/'));
+        const files = all
           .filter((f) => f !== 'sw.js' && f !== 'index.html' && !f.endsWith('.map') && !f.startsWith('vendor/')
             && !/^THIRD_PARTY|^NOTICES|\.txt$/i.test(f))
           .sort();
-        const id = createHash('sha256').update(files.join('\n')).update(readFileSync(join(outDir, 'index.html'))).update(readFileSync(swPath)).digest('hex').slice(0, 12);
+        // PW.2b: engines the SW prefetches when idle. Licence/notice/type/provenance files are not engines.
+        const vendor = all
+          .filter((f) => f.startsWith('vendor/') && !/\.d\.ts$|(^|\/)(LICENSE[^/]*|NOTICE\.md|SOURCE\.json)$/i.test(f))
+          .sort();
+        const vendorSizes = vendor.map((f) => statSync(join(outDir, f)).size);
+        // Vendor files are cache-first under the same cache name, so their identity must version it too.
+        const id = createHash('sha256').update(files.join('\n')).update(vendor.map((f, i) => `${f}:${vendorSizes[i]}`).join('\n'))
+          .update(readFileSync(join(outDir, 'index.html'))).update(readFileSync(swPath)).digest('hex').slice(0, 12);
         const list = JSON.stringify(files.map((f) => `./${f}`), null, 2);
+        const vendorList = JSON.stringify(vendor.map((f) => `./${f}`), null, 2);
         const src = readFileSync(swPath, 'utf8')
           .replace('__BUILD_ID__', id)
-          .replace('/*__BUILD_ASSETS__*/ []', list);
+          .replace('/*__BUILD_ASSETS__*/ []', list)
+          .replace('/*__VENDOR_FILES__*/ []', vendorList);
         writeFileSync(swPath, src);
       },
     },

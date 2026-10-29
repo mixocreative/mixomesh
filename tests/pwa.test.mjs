@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { shouldRegisterServiceWorker } from '../src/app/pwa.js';
+import { shouldPrefetchVendor, shouldRegisterServiceWorker } from '../src/app/pwa.js';
 import { batchFromLaunchFiles } from '../src/core/LaunchRequests.js';
 
 const root = new URL('../', import.meta.url);
@@ -44,6 +44,8 @@ test('sw.js parses; shell is stamped per build, vendor wasm is runtime-cached', 
   assert.match(src, /\/\*__BUILD_ASSETS__\*\/ \[\]/);
   assert.doesNotMatch(src.match(/const PRECACHE = [^;]*;/)[0], /vendor/); // runtime-cached
   assert.match(src, /SKIP_WAITING/);
+  assert.match(src, /\/\*__VENDOR_FILES__\*\/ \[\]/);   // PW.2b: stamped engine list
+  assert.match(src, /'prefetch-vendor'/);               // PW.2b: page-triggered warm-up
   assert.doesNotMatch(src.match(/addEventListener\('install'[\s\S]*?\n\}\);/)[0], /skipWaiting/); // a new worker WAITS for the update toast
   assert.match(src, /caches\.delete/);
 });
@@ -60,6 +62,16 @@ test('launchQueue handles become a launch batch (.mixo = project, rest = import)
   assert.deepEqual(batch.items.map(i => [i.kind, i.name]), [['import', 'a.STL'], ['project', 'p.mixo']]);
   assert.equal(batchFromLaunchFiles([]), null);
   assert.equal(batchFromLaunchFiles(undefined), null);
+});
+
+test('vendor prefetch predicate: hosted prod only, and never on data-saver', () => {
+  const base = { protocol: 'https:', isElectron: false, isProd: true, hasServiceWorker: true, saveData: false };
+  assert.equal(shouldPrefetchVendor(base), true);
+  assert.equal(shouldPrefetchVendor({ ...base, saveData: true }), false);
+  assert.equal(shouldPrefetchVendor({ ...base, protocol: 'file:' }), false);
+  assert.equal(shouldPrefetchVendor({ ...base, isElectron: true }), false);
+  assert.equal(shouldPrefetchVendor({ ...base, isProd: false }), false);
+  assert.equal(shouldPrefetchVendor(), false);
 });
 
 test('registration predicate: hosted prod only, never Electron/file/dev', () => {

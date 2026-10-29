@@ -2,7 +2,7 @@
 //   manifest valid + linked, service worker registered AND controlling, the page reloads and
 //   boots with the server gone (offline), and a file handed to a simulated launchQueue opens.
 //   Run `npm run build` first (the npm script does).
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -27,6 +27,16 @@ const STL = [
 
 async function main() {
   assert(existsSync(join(ROOT, 'dist/index.html')), 'dist/ missing: run npm run build first');
+  // PW.2b: the engine list the build stamped into sw.js (vite.config.ts serviceWorkerVersion).
+  const VENDOR = JSON.parse(readFileSync(join(ROOT, 'dist/sw.js'), 'utf8').match(/const VENDOR = (\[[\s\S]*?\]);/)[1]);
+  assert(VENDOR.length >= 8, `vendor engine list too short: ${VENDOR.length}`);
+  for (const f of VENDOR) {
+    assert(existsSync(join(ROOT, 'dist', f.slice(2))), `vendor file missing from dist: ${f}`);
+    assert(!/NOTICE\.md|LICENSE|\.d\.ts$|SOURCE\.json$/.test(f), `non-engine file listed for prefetch: ${f}`);
+  }
+  for (const dir of ['meshfix', 'manifold-3d', 'draco', 'mixo-geocore']) {
+    assert(VENDOR.some(f => f.startsWith(`./vendor/${dir}/`)), `no ${dir} engine in prefetch list`);
+  }
   const browserPath = findBrowser();
   assert(browserPath, 'Chrome/Edge executable not found.');
   const appPort = await freePort();
@@ -107,6 +117,18 @@ async function main() {
     assert(/^mixomesh-[0-9a-f]{12}$/.test(cacheInfo.name), `versioned cache name: ${cacheInfo.name}`);
     console.log(`service worker ok (${cacheInfo.name}, ${cacheInfo.count} entries)`);
 
+    // 2b. Idle vendor prefetch (PW.2b): every engine lands in the SAME versioned cache, unasked.
+    const wantVendor = VENDOR.map(f => new URL(f, url).pathname);
+    let missingVendor = wantVendor;
+    await waitFor(async () => {
+      missingVendor = await evaluate(cdp, `(async () => {
+        const have = new Set((await (await caches.open(${JSON.stringify(cacheInfo.name)})).keys()).map(r => new URL(r.url).pathname));
+        return ${JSON.stringify(wantVendor)}.filter(p => !have.has(p));
+      })()`);
+      return missingVendor.length === 0;
+    }, 120000, 'vendor prefetch');
+    console.log(`vendor prefetch ok (${VENDOR.length} engine files)`);
+
     // 3. Offline reload: stop the server, reload, the app boots from the cache.
     await stopProcess(preview);
     previewStopped = true;
@@ -122,6 +144,18 @@ async function main() {
     }
     assert(await evaluate(cdp, '!!navigator.serviceWorker.controller'), 'offline page not SW-controlled');
     console.log('offline reload ok');
+
+    // 3b. Engines were prefetched, so with the server dead each one is still served (from cache).
+    const offlineVendor = await evaluate(cdp, `(async () => {
+      const bad = [];
+      for (const f of ${JSON.stringify(VENDOR)}) {
+        const status = await fetch(new URL(f, document.baseURI)).then(r => r.status, e => 'ERR ' + e.message);
+        if (status !== 200) bad.push(f + ' ' + status);
+      }
+      return bad;
+    })()`);
+    assert(offlineVendor.length === 0, `vendor engines not served offline: ${offlineVendor.join(' | ')}`);
+    console.log(`offline vendor ok (${VENDOR.length} engine files from cache)`);
 
     // 4. launchQueue: a real OPFS file handle (the kind the OS hands over) opens like a drop.
     try {
