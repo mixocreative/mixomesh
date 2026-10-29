@@ -309,6 +309,14 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   notes; rebuild its graph and the port graph. *Depends: PE.5.* **Done when** grep finds
   "mixoDental" only in history notes, mixoDental's tests, walks and build pass under the
   new name, and both other repos' gates are green.
+- **PE.7** `[geocore]` Readability (owner 2026-10-29): folders/files named by what they do (generic geometry out of
+  `dental/` into neutral modules), one concept per file, a README per folder + top-level architecture map and
+  "where do I look for X" table, `///` / TSDoc on every public item, inline comments on non-obvious algorithm
+  steps. No behaviour change: wasm ABI and package entry points unchanged (engine 11), goldens byte-identical,
+  both apps only re-vendor. Then an egm-comprehension (naive reader) review confirms a newcomer can navigate it.
+- **PD.2** `[mixodental]` Batch folder review broken by PE.5/PE.5b (run-batch-review.bat checked the deleted Rust
+  build; batch.ts imported a moved dental module and hung): fix all stale imports in dentalwork/** and scripts/**,
+  exit non-zero on error, add an end-to-end test on the reference aligner so it cannot silently break again.
 Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geocore, bumps
 `engine_version`, and is re-vendored into both apps in the same task (D11); they therefore depend
 on PE.5.
