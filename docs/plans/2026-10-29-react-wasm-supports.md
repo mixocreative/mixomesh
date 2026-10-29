@@ -552,6 +552,10 @@ Rule D18; inventory section 3.
 - **P8.2** Wire functions the engine already has (section 3 "Engine has") where P8.1 shows ≥1.1x.
   *Depends: P8.1.* **Done when** parity tests (P8.4) green for each switched path.
 - **P8.3** `[geocore]` + both apps. New Rust in `geometry-core/src/generic/mesh/` (one module per
+  FIRST item (owner 2026-10-29): the subdivision / refinement tool `src/core/refinement/Topology.js` (`refineTopology`:
+  weld + adjacency + subdivision, output ×4 per level) moves to mixo-geocore as a shared tool. Done when its output equals
+  the JS version (positions within 1e-6 mm, identical topology, UVs and colours preserved exactly incl. seams), it is
+  ≥ 1.1x faster and uses less peak memory on the 1M fixture at levels 1 and 2, and the refinement UI/undo is unchanged.
   op, Rust tests) for Tier A modules with no engine function, then Tier B loops, batched into one
   engine version bump per batch; host decoders; re-vendor. Export writers keep JS containers (zip,
   XML, text); only per-vertex / per-triangle loops move. *Depends: P8.1, PE.5.* **Done when** each
