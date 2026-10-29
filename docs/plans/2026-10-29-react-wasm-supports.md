@@ -379,6 +379,20 @@ on PE.5.
   *Depends: PD.5 (shares dental orientation/region code).* **Done when** the owner's denture scans in
   case-denture build in batch review (owner reviews in the viewer), the example's tip regions match its -sup
   (leg ends + bars, ±), aligner results unchanged, tests green; compare to the -sup files (owner-authorised).
+- **P5.15** `[geocore]` + both apps. OVERLAP RULE (owner 2026-10-30, default everywhere, generic and dental):
+  overlapped areas — between meshes of one object or between objects — never get supports. (1) No tip on a surface
+  that lies inside another closed mesh/object or within 0.05 mm of another mesh (touching). (2) Every other mesh /
+  object is an OBSTACLE: no support may pass through it (engine clearance check gets the obstacles). (3) A mesh fully
+  inside another gets no supports. Today (verified in code): separate objects are invisible to each other's supports
+  (supports can cross them); overlapping/nested meshes of one object get tips on buried faces that the clearance
+  check then drops (wasted contacts, "blocked"). Implement in geocore (overlap classification + obstacle input),
+  mixomesh passes overlapping scene objects as obstacles and warns on object overlaps. Tests: two cubes pushed
+  together (as two objects and as one two-mesh object), a nested mesh, two apart meshes (unchanged) — no tip inside
+  an overlap, no support inside another mesh. *Depends: PD.6.*
+- **PD.7** `[geocore]` + `[mixodental]` Dental multi-mesh (owner 2026-10-30): when a dental file has several meshes, the
+  LARGEST (by volume; by surface area if not closed) is the main part and gets the dental profile (orientation,
+  angle, area, tips); the smaller meshes get normal GENERIC supports on their non-overlapped faces only (P5.15),
+  in the main part's pose, never passing through the main part. *Depends: P5.15.*
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
