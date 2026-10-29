@@ -23,12 +23,13 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P0.2 | done | 48df345 | mountPanel/useStore/useCommand/useT + error boundary; 5 vitest (selective re-render, one history step, batch = one undo, unmount leak-free, boundary reports). |
 | P0.3 | done (partial) | f2a283b | gizmoDragFrameMs added; median of 5: pillow-1M orbit 16.7/17.1, gizmo 16.7/17.2; pillow-5M orbit 16.7/17.0, gizmo 16.7/17.2 (mean/p95 ms). All at the 60 Hz vsync cap: cannot show a 5% regression. No textured fixture (generate.mjs has none). P0.6 adds CPU frame time (Babylon EngineInstrumentation frameTimeCounter) + React commit time as the gate, and a 4096² textured fixture. |
 | P0.4a | done | f7fa058..a4a506a | 8 kit fields, 29 vitest, gallery kit.html (dev only, not in build), screenshot .tmp/kit-gallery.png checked by main (mixo-app-style correct); CSS = unchanged copies of mixo-app-style bbf53ee scoped under .mx-kit by generated kit.scoped.css (freshness test). Repo typecheck + lint clean after P1.1+P0.4a. |
-| P0.4b | todo | | |
+| P0.4b | done | 9a09573 | Section (tri-state, header buttons stopPropagation), FieldRow, Modal (trap/Esc/focus return), Toast(+Provider/Host), ProgressRow, KeyCaps, Notice; 57 vitest; screenshot .tmp/kit-gallery-containers.png checked by main. Agent used Playwright from another project (scratch script only): later agents use scripts/ui-screenshot.mjs. |
+| P0.3b | todo | | CPU frame ms + React commit ms gate, 4096² textured fixture |
 | P0.5 | todo | | |
 | P0.6 | todo | | |
-| P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geometry/host in PE.2. |
-| P1.2 | todo | | |
-| PE.1 | todo | | owner: private repo mixocreative/mixo-geometry |
+| P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geocore/host in PE.2. |
+| P1.2 | retired → PE.2 | | tests + goldens run in mixo-geocore |
+| PE.1 | todo | | owner: private repo mixocreative/mixo-geocore |
 | PE.2 | todo | | |
 | PE.3 | todo | | |
 | PE.4 | todo | | |
