@@ -32,8 +32,15 @@ function reactRefreshCsp(): Plugin {
   };
 }
 
+/** Vendored mixo-geocore packages (vendor/mixo-geocore, written by scripts/vendor-geometry.mjs). */
+export const GEOCORE_ALIAS = {
+  '@mixo-geocore/host': resolve(PROJECT_ROOT, 'vendor/mixo-geocore/host'),
+  '@mixo-geocore/editing': resolve(PROJECT_ROOT, 'vendor/mixo-geocore/editing'),
+};
+
 export default defineConfig({
   plugins: [react(), reactRefreshCsp()],
+  resolve: { alias: GEOCORE_ALIAS },
   root: PROJECT_ROOT,
   appType: 'spa',
   // Relative base so the built app runs from ANY location without edits:

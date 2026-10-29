@@ -1286,5 +1286,9 @@
   "properties.enterNumber": "Not applied: enter a number.",
   "properties.mustBePositive": "Not applied: the value must be greater than 0. To flip an object, use Mirror.",
   "properties.sizeTooLarge": "Not applied: the object would be longer than {max} m on its longest side.",
-  "properties.ratioInvalid": "Not applied: enter a scale such as 1:10 or 1:35, with both numbers greater than 0."
+  "properties.ratioInvalid": "Not applied: enter a scale such as 1:10 or 1:35, with both numbers greater than 0.",
+  "supports.progress.writingStl": "Writing STL…",
+  "supports.progress.samplingNormals": "Sampling surface normals…",
+  "supports.progress.findingOverhangs": "Finding overhangs…",
+  "supports.progress.done": "Done"
 }

@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import {
   HOST_GEOMETRY_VERSION, GeometryVersionMismatch, assertGeometryVersion,
-} from '../src/support-engine/geometryVersion.js';
+} from '../vendor/mixo-geocore/host/geometryVersion.js';
 import { loadGeometryEngine, GEOMETRY_VENDOR_DIR, GEOMETRY_GLUE, GEOMETRY_WASM } from '../src/support-engine/loadGeometry.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));

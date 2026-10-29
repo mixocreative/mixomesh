@@ -1286,5 +1286,9 @@
   "properties.enterNumber": "未套用：請輸入數字。",
   "properties.mustBePositive": "未套用：數值必須大於 0。要翻轉物件，請使用鏡像。",
   "properties.sizeTooLarge": "未套用：物件最長邊將超過 {max} 公尺。",
-  "properties.ratioInvalid": "未套用：請輸入如 1:10 或 1:35 的比例，兩個數字都必須大於 0。"
+  "properties.ratioInvalid": "未套用：請輸入如 1:10 或 1:35 的比例，兩個數字都必須大於 0。",
+  "supports.progress.writingStl": "寫入 STL…",
+  "supports.progress.samplingNormals": "表面法線取樣中…",
+  "supports.progress.findingOverhangs": "尋找懸空區域…",
+  "supports.progress.done": "完成"
 }

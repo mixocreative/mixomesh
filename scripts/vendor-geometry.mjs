@@ -6,25 +6,27 @@
 // mixosupports checkout, records where it came from in SOURCE.json (commit,
 // engine version, SHA-256 per file) and writes VERSION. The runtime refuses an
 // engine whose engine_version() differs from HOST_GEOMETRY_VERSION
-// (src/support-engine/geometryVersion.js); bump both together on upgrade.
+// (vendor/mixo-geocore/host/geometryVersion.js); bump both together on upgrade.
 //
 //   node scripts/vendor-geometry.mjs [--from <mixosupports dir>]   copy, record, verify
+//   node scripts/vendor-geometry.mjs --from <mixo-geocore dir> --packages-only   copy only vendor/mixo-geocore/{host,editing}
 //   node scripts/vendor-geometry.mjs --check                       verify the committed files (no source repo)
 //
 // Rebuild the engine in mixosupports first (`npm run wasm:build` there): its
 // pkg-browser is git-ignored and can be older than its last engine commit.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { HOST_GEOMETRY_VERSION } from '../src/support-engine/geometryVersion.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT_DIR = join(ROOT, 'public', 'vendor', 'mixo-geometry');
 const PKG = join('crates', 'geometry-wasm', 'pkg-browser');
 const ENGINE_SRC = join('crates', 'geometry-core', 'src');
+const PACKAGES = ['host', 'editing'];
+const PACKAGES_OUT = join(ROOT, 'vendor', 'mixo-geocore');
 const FILES = ['mixo_geometry_wasm.js', 'mixo_geometry_wasm_bg.wasm', 'mixo_geometry_wasm.d.ts'];
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -46,6 +48,27 @@ async function engineVersion(dir) {
   return glue.engine_version();
 }
 
+/** Package sources worth vendoring: no tests, no test fixtures. */
+const isVendored = name => /\.(ts|js)$/.test(name) && !/\.test\.ts$/.test(name) && name !== 'uiFixture.ts';
+
+function copyTree(from, to) {
+  mkdirSync(to, { recursive: true });
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    if (entry.isDirectory()) copyTree(join(from, entry.name), join(to, entry.name));
+    else if (isVendored(entry.name)) writeFileSync(join(to, entry.name), asBuilt(entry.name, readFileSync(join(from, entry.name))));
+  }
+}
+
+/** vendor/mixo-geocore/{host,editing} from a committed checkout (PE.4 adds release pinning), LF line endings. */
+function copyPackages(source) {
+  if (git(source, 'status', '--porcelain', '--', ...PACKAGES) !== '') throw new Error(`${source}/host or editing has uncommitted changes: vendor from a committed checkout only`);
+  for (const name of PACKAGES) {
+    rmSync(join(PACKAGES_OUT, name), { recursive: true, force: true });
+    copyTree(join(source, name), join(PACKAGES_OUT, name));
+  }
+  console.log(`vendored host/ and editing/ from ${git(source, 'rev-parse', '--short', 'HEAD')} into vendor/mixo-geocore`);
+}
+
 function copyFrom(source) {
   const pkg = join(source, PKG);
   for (const name of FILES) {
@@ -63,6 +86,10 @@ function copyFrom(source) {
 }
 
 async function main() {
+  if (process.argv.includes('--packages-only')) {
+    copyPackages(resolve(argValue('--from') ?? join(ROOT, '..', 'mixo-geocore')));
+    return;
+  }
   const checkOnly = process.argv.includes('--check');
   const sourceFile = join(OUT_DIR, 'SOURCE.json');
   let source;
@@ -72,12 +99,15 @@ async function main() {
   } else {
     const from = resolve(argValue('--from') ?? join(ROOT, '..', 'mixosupports'));
     source = { repo: 'mixocreative/mixosupports', ...copyFrom(from) };
+    if (existsSync(join(from, PACKAGES[0]))) copyPackages(from);
   }
 
+  // Imported late: --packages-only creates this file on a fresh checkout.
+  const { HOST_GEOMETRY_VERSION } = await import(pathToFileURL(join(PACKAGES_OUT, 'host', 'geometryVersion.js')).href);
   const version = await engineVersion(OUT_DIR);
   if (version !== HOST_GEOMETRY_VERSION) {
     throw new Error(`vendored engine_version() is ${version}, host expects ${HOST_GEOMETRY_VERSION}: `
-      + 'port the ABI change, then bump HOST_GEOMETRY_VERSION in src/support-engine/geometryVersion.js');
+      + 'port the ABI change, then bump HOST_GEOMETRY_VERSION in vendor/mixo-geocore/host/geometryVersion.js');
   }
 
   const hashes = Object.fromEntries(FILES.map(name => [name, sha256(asBuilt(name, readFileSync(join(OUT_DIR, name))))]));

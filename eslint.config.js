@@ -14,7 +14,7 @@ export default [
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }]
     }
   },
-  { ignores: ['dist/', 'node_modules/', 'public/', '.tmp/', '.audit/', '.npm-cache/'] },
+  { ignores: ['dist/', 'node_modules/', 'public/', 'vendor/', '.tmp/', '.audit/', '.npm-cache/'] },
   {
     files: ['src/**/*.js', 'tests/**/*.mjs', 'scripts/**/*.mjs', 'eslint.config.js'],
     languageOptions: {

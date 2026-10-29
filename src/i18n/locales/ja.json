@@ -1286,5 +1286,9 @@
   "properties.enterNumber": "適用されませんでした：数値を入力してください。",
   "properties.mustBePositive": "適用されませんでした：0 より大きい値を入力してください。反転するにはミラーを使います。",
   "properties.sizeTooLarge": "適用されませんでした：オブジェクトの最長辺が {max} m を超えます。",
-  "properties.ratioInvalid": "適用されませんでした：1:10 や 1:35 のように、両方とも 0 より大きい数で縮尺を入力してください。"
+  "properties.ratioInvalid": "適用されませんでした：1:10 や 1:35 のように、両方とも 0 より大きい数で縮尺を入力してください。",
+  "supports.progress.writingStl": "STL書き出し中…",
+  "supports.progress.samplingNormals": "表面法線のサンプリング中…",
+  "supports.progress.findingOverhangs": "オーバーハング検出中…",
+  "supports.progress.done": "完了"
 }

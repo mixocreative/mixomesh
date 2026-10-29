@@ -83,4 +83,4 @@ WebAssembly. The only URL in the wrapper is the attribution header.
 The support-generation engine (docs/support-generation-port.md). Reused as
 built: never edit it here. `src/support-engine/loadGeometry.js` loads it and
 refuses an `engine_version()` other than `HOST_GEOMETRY_VERSION`
-(`src/support-engine/geometryVersion.js`); an ABI upgrade bumps both.
+(`vendor/mixo-geocore/host/geometryVersion.js`); an ABI upgrade bumps both.
