@@ -418,6 +418,22 @@ on PE.5.
   chosen angle), Free transform, then Prev | Next as one full-width row at the bottom. Big tilt number with ° at the
   top left under the Step 1 badge. Free transform: confirm prompt ("you will orient it yourself") → rotation-only
   gizmo; edit bar shows only Auto orient + Prev|Next; big number hidden; Auto orient RESTORES the stored automatic pose and exits Free transform (owner answer: no re-run); the gizmo shows only in Free transform mode. Modular (D26) + designer-friendly (icons as assets, styles in CSS).
+- **PD.12** `[mixodental]` Visual language + live paint (owner 2026-10-30), after PD.11:
+  - Colours defined ONCE in CSS (src/ui/styles/tokens.css, named variables, e.g. --paint-support-area red,
+    --paint-low-outside orange, --support-tip yellow, --support-body, plus layer colours); the 3D views read them at
+    start-up and apply them to materials; the batch-review viewer loads the same tokens.css (no own colour list).
+    Replaces PD.1's vermilion/blue: support-area paint = red, low points outside the allowed area = orange, everywhere.
+  - Step 1 live paint: allowed-area mask computed once when Step 1 opens (worker); faces of that area facing down at the
+    current pose painted red on the GPU every frame (shader: normal · down with the pose uniform), low points outside the
+    area orange; engine results (tips, unsupported low points, safety) recomputed 1 s after the user STOPS moving
+    (restart timer on each movement; stale results dropped).
+  - Support-points step: tips drawn as YELLOW CONES. All supports (tips, pillars, braces, raft) share one "plastic"
+    material (soft sheen, moderate roughness, resin-like) in the app and the viewer.
+  - Every step's edit bar has the same layout: main action top, step controls middle, Back | Next full-width row
+    bottom, same narrow width on the right.
+  Modular (D26), designer-editable (CSS tokens, icons as assets). Sonnet writes the guide after PD.11 batch C; haiku
+  builds. Done when screenshots of every step + the viewer show the colours from tokens.css, and changing one token
+  changes it everywhere (test).
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
