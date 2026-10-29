@@ -411,6 +411,15 @@ on PE.5.
   both the batch GLB and the app (no duplicated drawing logic). *Depends: the evidence-overlay pose fix.* **Done
   when** the layers toggle in the app on case-001 + one case-aligner scan, sit on the model in every view (same
   numeric check as the overlay fix), and the section starts collapsed.
+- **PD.11** `[mixodental]` Step 1 (orientation) UI, owner spec 2026-10-30: viewport shows only model + debug layers
+  (no supports, no raft, adding supports disabled); bottom-right view buttons hidden in Step 1; Exit = arrow icon at
+  the top right of the nav bar; language = one dropdown; no Hide-models button in the nav bar; edit bar on the right,
+  as narrow as possible. Edit bar rows top→bottom: Auto orient (primary/highlighted, new orientation icon as SVG
+  asset), tilt range (stable band), a dial (tilt live; full scanned range, stable band highlighted, starts at the
+  chosen angle), Free transform, then Prev | Next as one full-width row at the bottom. Big tilt number with ° at the
+  top left under the Step 1 badge. Free transform: confirm prompt ("you will orient it yourself") → rotation-only
+  gizmo; edit bar shows only Auto orient + Prev|Next; big number hidden; Auto orient returns to the normal layout and
+  re-runs auto orientation. Modular (D26) + designer-friendly (icons as assets, styles in CSS).
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
