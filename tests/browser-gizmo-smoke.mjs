@@ -1,3 +1,4 @@
+// P6.3 adds: two identical Ctrl-snapped plane / axis drags after a leftover drag land the same, on the 5 mm grid.
 // P6.2 adds: Ctrl held before / after / between the press, blur + pointercancel guard, colours, constant size, hidden in Support Mode (.tmp/p62).
 // P6.1: move-gizmo plane handles. Real CDP pointer drags on each plane square
 // (XY / YZ / XZ) must change only that plane's two axes, undo in ONE step, and
@@ -196,6 +197,60 @@ async function main() {
     await snapped('before');
     await snapped('after');
     await snapped('between');
+
+    // P6.3: a snapped drag must not inherit the leftover of the drag before it. Babylon keeps
+    // its snap remainder in a closure, so a 4 mm drag would leave 4 mm for the next 7 mm drag
+    // (lands 10 instead of 5). Pixel vectors are calibrated from one free (Ctrl-up) drag.
+    {
+      const dragVec = async (from, vx, vy, ctrl) => {
+        const p0 = await pos();
+        mods = ctrl ? 2 : 0;
+        if (ctrl) await key('keyDown');
+        await hoverAt(from.x, from.y, mods);
+        await mouse('mousePressed', from.x, from.y);
+        await sleep(100);
+        for (let i = 1; i <= 12; i++) { await mouse('mouseMoved', from.x + vx * i / 12, from.y + vy * i / 12); await sleep(30); }
+        await mouse('mouseReleased', from.x + vx, from.y + vy);
+        if (ctrl) await key('keyUp');
+        mods = 0;
+        await sleep(250);
+        return dist(await pos(), p0);
+      };
+      const off = v => Math.abs(v / 5 - Math.round(v / 5)) * 5;
+      // Runs the warm-up (4 mm) then two identical 7 mm snapped drags; returns the two deltas.
+      const seq = async (kind) => {
+        const g0 = await evaluate(cdp, GEOM);
+        const handle = kind === 'plane' ? g0.y : g0.xArrow;
+        const dir = kind === 'plane'
+          ? [g0.to.y.x - handle.x, g0.to.y.y - handle.y]
+          : [g0.xArrow.x - g0.o.x, g0.xArrow.y - g0.o.y];
+        const v1 = dir;
+        const cal = await dragVec(handle, v1[0], v1[1], false);
+        await undo(); await sleep(300);
+        const axes = kind === 'plane' ? [0, 2] : [0];
+        const mean = axes.reduce((t, a) => t + Math.abs(cal[a]), 0) / axes.length;
+        assert.ok(mean > 1, `${kind}: calibration drag moved (${cal})`);
+        // Pixel vectors whose free delta is ~7 mm (fresh snap -> 5) and ~4 mm (leaves a 4 mm remainder).
+        const warm = [v1[0] * 4 / mean, v1[1] * 4 / mean];
+        const full = [v1[0] * 7 / mean, v1[1] * 7 / mean];
+        const hw = (await evaluate(cdp, GEOM))[kind === 'plane' ? 'y' : 'xArrow'];
+        await dragVec(hw, warm[0], warm[1], true); await undo(); await sleep(300);
+        const hb = (await evaluate(cdp, GEOM))[kind === 'plane' ? 'y' : 'xArrow'];
+        const b = await dragVec(hb, full[0], full[1], true); await undo(); await sleep(300);
+        const hc = (await evaluate(cdp, GEOM))[kind === 'plane' ? 'y' : 'xArrow'];
+        const c = await dragVec(hc, full[0], full[1], true); await undo(); await sleep(300);
+        return { b, c, axes };
+      };
+      for (const kind of ['plane', 'axis']) {
+        const { b, c, axes } = await seq(kind);
+        for (const a of axes) {
+          assert.ok(Math.abs(b[a]) >= 4.99, `${kind} snapped drag moved (axis ${a} d=${b[a].toFixed(3)})`);
+          assert.ok(off(b[a]) < 0.01 && off(c[a]) < 0.01, `${kind} snapped drags on the 5 mm grid (b=${b[a].toFixed(3)} c=${c[a].toFixed(3)})`);
+          assert.ok(Math.abs(b[a] - c[a]) < 0.01, `${kind}: two identical snapped drags land the same (${b[a].toFixed(3)} vs ${c[a].toFixed(3)} mm)`);
+        }
+        results.push(`${kind} snapped drags after a leftover drag: ${axes.map(a => b[a].toFixed(2)).join(',')} mm then ${axes.map(a => c[a].toFixed(2)).join(',')} mm`);
+      }
+    }
 
     // ---- P6.2 ---------------------------------------------------------------
     mkdirSync(join(ROOT, '.tmp/p62'), { recursive: true });

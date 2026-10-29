@@ -82,6 +82,60 @@ function _wireGizmoObservers() {
     sub.onDragEndObservable?.add(_onGizmoDragEnd);
     sub._mixomeshWired = true;
   }
+  _wireTranslateSnap(_gizmos.gizmos.positionGizmo);
+}
+
+// ── Translate Ctrl-snap (P6.3) ───────────────────────────
+// Babylon's snapDistance path keeps its remainder in a closure that no API can
+// reset (planeDragGizmo / axisDragGizmo `currentSnapDragDistance`), so a snapped
+// drag starts with the leftover of the drag before it. Translate snapping
+// therefore runs here instead: Babylon's snapDistance stays 0 (free drag) and,
+// after each of its moves, the pivot is put at origin + snap(this drag's total
+// travel). Nothing carries over between drags.
+const TRANSLATE_HANDLES = [
+  ['xGizmo', true], ['yGizmo', true], ['zGizmo', true],          // axis arrows
+  ['xPlaneGizmo', false], ['yPlaneGizmo', false], ['zPlaneGizmo', false], // plane squares
+];
+let _snapStep = 0;     // translate step in BU, 0 = off
+let _snapDrag = null;  // { origin: Vector3, travel: Vector3, axis: boolean } for the live drag
+
+function _wireTranslateSnap(pg) {
+  if (!pg || pg._mixomeshSnapWired) return;
+  pg._mixomeshSnapWired = true;
+  for (const [name, isAxis] of TRANSLATE_HANDLES) {
+    const db = pg[name]?.dragBehavior;
+    if (!db) continue;
+    db.onDragStartObservable.add(() => {
+      _snapDrag = _pivotNode ? { origin: _pivotNode.position.clone(), travel: BABYLON.Vector3.Zero(), axis: isAxis } : null;
+    });
+    db.onDragObservable.add(_snapTranslateDrag);
+  }
+}
+
+// Babylon's own snap rounds toward zero per step (floor on |x|), so do the same.
+function _snapToStep(v, s) {
+  return Math.sign(v) * Math.floor(Math.abs(v) / s) * s;
+}
+
+function _snapTranslateDrag(e) {
+  const d = _snapDrag;
+  if (!d || !_snapStep || !e?.delta || !_pivotNode) return;
+  d.travel.addInPlace(e.delta);
+  const t = d.travel, s = _snapStep;
+  let snapped;
+  if (d.axis) {
+    // Axis arrow: travel is along the arrow, so snap its length.
+    const len = t.length();
+    snapped = len > 0 ? t.scale((Math.floor(len / s) * s) / len) : BABYLON.Vector3.Zero();
+  } else {
+    // Plane square: snap each world axis, as Babylon's plane gizmo does.
+    snapped = new BABYLON.Vector3(_snapToStep(t.x, s), _snapToStep(t.y, s), _snapToStep(t.z, s));
+  }
+  const corr = d.origin.add(snapped).subtract(_pivotNode.position);
+  if (corr.lengthSquared() > 1e-24) {
+    _pivotNode.position.addInPlace(corr);
+    _pivotNode.computeWorldMatrix(true);
+  }
 }
 
 // Babylon centres each plane square on the pivot, hidden under the arrow bases
@@ -216,7 +270,9 @@ function _applyGizmoSnap() {
   const g = _gizmos?.gizmos;
   if (!g) return;
   const d = gizmoSnapDistances(getState().gizmo?.snap, _gizmoSnapOn);
-  if (g.positionGizmo) g.positionGizmo.snapDistance = d.translate;
+  // Translate snap runs in _snapTranslateDrag (P6.3), so Babylon's position snap stays off.
+  _snapStep = d.translate;
+  if (g.positionGizmo) g.positionGizmo.snapDistance = 0;
   if (g.rotationGizmo) g.rotationGizmo.snapDistance = d.rotate;
   if (g.scaleGizmo)    g.scaleGizmo.snapDistance    = d.scale;
 }
@@ -553,6 +609,7 @@ function _onGizmoDragStart() {
 }
 
 function _onGizmoDragEnd() {
+  _snapDrag = null;
   if (!_dragSnapshot) return;
   const prev = _dragSnapshot;
   const next = _snapshotAbsolute(_selectedMeshes);
