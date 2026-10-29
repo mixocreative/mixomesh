@@ -568,8 +568,12 @@ Rule D18; inventory section 3.
   consistency"). Move the geometry half of export into mixo-geocore so mixomesh and mixoDental produce identical
   meshes: weld by position, shared vertex lists with per-triangle colour and per-corner UV indices, winding /
   orientation in the print frame, signed volume + watertight checks, binary STL encoding, 3MF mesh-section and OBJ
-  v/vt/f encoding of the vertex/index data. Apps keep the containers (3MF zip + XML structure, OBJ/MTL text,
-  texture images read from frozen source bytes per D9, naming). D18 exception: these functions move for
+  v/vt/f encoding of the vertex/index data. Containers (owner 2026-10-29, modularise for consistency and speed): a shared
+  TypeScript package `formats/` in mixo-geocore assembles 3MF (content types, rels, model XML, build items, components,
+  basematerials / colour groups / texture groups, thumbnail), OBJ + MTL and STL for both apps, calling the WASM encoder for
+  the mesh data; the 3MF zip uses the browser's native `CompressionStream` (streamed, replaces JSZip on the export path)
+  rather than a WASM deflate. Apps pass options only (textures from frozen source bytes per D9, printer 3MF flavour,
+  supports as separate objects, naming). Measured on the 1M and textured fixtures: time and peak memory vs today. D18 exception: these functions move for
   consistency as long as they are not slower end to end (≥ 1.0x), not the 1.1x rule. *Depends: P4.4 (its
   consumer checks are the spec), PE.5b.* **Done when** mixomesh `test:consumers` passes unchanged (0 KNOWN), the
   same consumer harness (or its geocore port) passes for mixoDental's exports, mixoDental's dental exports are
