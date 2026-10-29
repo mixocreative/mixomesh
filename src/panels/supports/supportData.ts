@@ -102,4 +102,11 @@ export function commitDelete(objectId: string, ids: readonly string[]): void {
   commitSupportEdits([new DeleteSupportsCommand(objectId, ids)]);
 }
 
+/** Delete the selected supports that are on show; returns how many (0 = nothing happened). */
+export function deleteSelectedSupports(objectId: string, selection: ReadonlySet<string>): number {
+  const ids = liveContactIds(objectId, readSupports(objectId)).filter((id) => selection.has(id));
+  if (ids.length > 0) commitDelete(objectId, ids);
+  return ids.length;
+}
+
 export { isBuilt };

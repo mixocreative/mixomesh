@@ -38,7 +38,7 @@ import { supportUi, type PanelProblem } from '../../panels/supports/supportUi';
 import { supportMode } from '../SupportMode';
 import { emptySupports, isBuilt, readStamps, type ObjectSupports } from '../model';
 import { readSupports, supportsOwner } from '../store';
-import { cachePlacement, cacheSupportMesh, cachedPlacement } from '../supportCache';
+import { cachePlacement, cacheSupportMesh, cachedPlacement, dropSupportMesh } from '../supportCache';
 import { objectModelStaged, type ObjectModel } from '../objectModel';
 import { createSceneSource } from '../sceneSource';
 import { scenePose } from '../sceneSource';
@@ -69,6 +69,20 @@ export interface LiveStats {
 }
 
 export const liveStats: LiveStats = { started: 0, rendered: 0, dropped: 0, placements: 0, respawns: 0, last: undefined, steps: {} };
+
+/**
+ * Test hook (inert unless a test sets `slowMs`): holds every job for that long before it starts, ended
+ * early when its worker is respawned, so the 20 s respawn can be exercised without a 20 s model.
+ */
+export const testHooks = { slowMs: 0 };
+const respawnWaiters = new Map<string, () => void>();
+function slowJob(id: string): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); respawnWaiters.delete(id); resolve(); };
+    const timer = setTimeout(done, testHooks.slowMs);
+    respawnWaiters.set(id, done);
+  });
+}
 
 const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -187,6 +201,7 @@ let selfWrites = 0;
 
 async function runJob(id: string, job: JobRequest): Promise<void> {
   liveStats.started++;
+  if (testHooks.slowMs > 0) { await slowJob(id); if (!job.current()) { liveStats.dropped++; return; } }
   const om = await objectModelStaged(id, yieldToMain);
   if (!om) return;
   await ensureEngine();
@@ -223,7 +238,19 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   const tb = performance.now();
   const built = await mesher().build(id, buildJob(om.model, record, inputs), { key: 'Support building' });
   ms.build = Math.round(performance.now() - tb);
-  if (!built || !job.current()) { liveStats.dropped++; return; }
+  if (!job.current()) { liveStats.dropped++; return; }
+  if (!built) {
+    // The engine built nothing (every support is removed): none stays drawn, the old verdict goes,
+    // and the check still lists what the model leaves uncovered.
+    layers.removeSupports(id);
+    dropSupportMesh(id);
+    verdicts.delete(id);
+    const bare = await checkProblems(id, om, record, inputs, undefined);
+    if (!job.current() || !bare) return;
+    problemsByObject.set(id, bare);
+    publishProblems();
+    return;
+  }
 
   // Draw. Revision of the record the mesh was built from.
   cacheSupportMesh(id, record.revision, built);
@@ -248,9 +275,9 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   fixSpotChecked(id, problems);
 }
 
-async function checkProblems(id: string, om: ObjectModel, record: ObjectSupports, inputs: ContactInputs, built: GeneratedSupportMesh): Promise<PanelProblem[] | undefined> {
+async function checkProblems(id: string, om: ObjectModel, record: ObjectSupports, inputs: ContactInputs, built: GeneratedSupportMesh | undefined): Promise<PanelProblem[] | undefined> {
   const all = jobContacts(inputs);
-  const dropped = new Set(built.dropped);
+  const dropped = new Set(built?.dropped ?? []);
   const live = all.filter((c) => !dropped.has(c.id));
   const checked = await analyse(`${id}|check`, {
     kind: 'check',
@@ -260,7 +287,7 @@ async function checkProblems(id: string, om: ObjectModel, record: ObjectSupports
   const zones = readStamps(record.stamps);
   const found: SupportProblem[] = [
     ...checked.problems,
-    ...islandProblems(built.islands, om.model.local.positions),
+    ...islandProblems(built?.islands, om.model.local.positions),
     ...omittedProblems(all, built),
   ];
   return found.map((p) => ({ ...p, unitId: id, inZone: p.kind === 'island' || p.kind === 'overhang' ? problemInZone(zones, p.position, [0, -1, 0]) : false }));
@@ -275,6 +302,7 @@ const scheduler = new JobScheduler({
   }),
   respawn: (id) => {
     liveStats.respawns++;
+    respawnWaiters.get(id)?.();
     mesher().cancel(id);
     analysisAborts.get(id)?.abort(REPLACED);
     analysisAborts.get(`${id}|check`)?.abort(REPLACED);
@@ -309,7 +337,8 @@ export function liftObject(id: string, liftMm?: number): boolean {
 
 // ── wiring ──
 
-function generate(ids: readonly string[]): void {
+/** Generate / Regenerate: lift to the bed, then a job with a fresh placement. Also the first build when a hand-added support comes before any Generate. */
+export function generate(ids: readonly string[]): void {
   for (const raw of ids) {
     const id = supportsOwner(raw);
     liftObject(id);
@@ -348,6 +377,8 @@ function onModeChanged(info: { active: boolean; objectIds: readonly string[] }):
     supportUi.set({ job: { running: false }, problems: [], problemsStale: false, verdicts: {} });
     return;
   }
+  // Picking (Add, Select, the ghost tip) runs on the engine session, so the engine loads on entry, not at the first Generate.
+  void ensureEngine().catch((error) => console.error('support engine failed to load', error));
   for (const id of info.objectIds) {
     const record = readSupports(id);
     if (!record || !isBuilt(record)) continue;
@@ -365,5 +396,5 @@ export function installLiveGeneration(): void {
   subscribe(EVENTS.SUPPORTS_CHANGED, onSupportsChanged);
   supportMode.onChange(onModeChanged);
   if (supportMode.isActive()) onModeChanged({ active: true, objectIds: supportMode.getObjectIds() });
-  (window as any).__mxSupportLive = { stats: liveStats, request: requestJob, cancel: cancelJob, busy: isJobBusy, lift: liftObject };
+  (window as any).__mxSupportLive = { stats: liveStats, request: requestJob, cancel: cancelJob, busy: isJobBusy, lift: liftObject, generate, test: testHooks };
 }

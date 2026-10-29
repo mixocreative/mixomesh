@@ -27,13 +27,14 @@ import { AddSupportCommand, DeleteSupportsCommand, StampStrokeCommand, commitSup
 import { anchorOffset, babylonToSupport } from '../BabylonViewportPort';
 import { normalToEngine, type Vec3 } from '../frame';
 import { leadPosition, objectModel, type ObjectModel } from '../objectModel';
-import { readStamps } from '../model';
+import { emptySupports, isBuilt, readStamps } from '../model';
 import { readSupports } from '../store';
 import { cachedPlacement } from '../supportCache';
 import { appSupportLayers, type SupportLayers } from '../layers/index';
 import { notify } from './notices';
 import { contactOfTriangle, liveContacts } from './jobInputs';
 import { fixSpotAdded } from './fixSpot';
+import { generate } from './liveGeneration';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Babylon / engine session are untyped here */
 
@@ -151,8 +152,7 @@ class Interaction {
     if (!down || !id || s.mode !== 'edit' || s.heavy !== undefined) return;
     const at = this.local(e);
     const travel = Math.hypot(at[0] - down.x, at[1] - down.y);
-    const hit = this.hitAt(at, id);
-    const action = pickAction({
+    const decide = (hit: Hit | undefined) => pickAction({
       hit: hit?.kind === 'support' ? 'support' : 'model',
       button: down.button === 2 ? 'right' : 'left',
       ctrl: down.ctrl,
@@ -165,6 +165,13 @@ class Interaction {
       active: true,
       contact: hit?.contactId !== undefined,
     });
+    let hit = this.hitAt(at, id);
+    let action = decide(hit);
+    // A click a support (the raft seen from below, a pillar) does not take passes through to the model behind it.
+    if (action.type === 'pass' && hit?.kind === 'support') {
+      const behind = this.hitAt(at, id, 'model');
+      if (behind) { hit = behind; action = decide(hit); }
+    }
     if (down.button !== 0 && down.button !== 2) return;
     if (!hit && action.type !== 'miss') return;
     this.apply(action.type, id, hit, s.addAction === 'remove' || down.ctrl || down.button === 2);
@@ -174,14 +181,16 @@ class Interaction {
 
   private apply(type: string, id: string, hit: Hit | undefined, removing: boolean): void {
     const om = objectModel(id);
-    const record = readSupports(id);
-    if (!om || !record) return;
+    const record = readSupports(id) ?? emptySupports();
+    if (!om) return;
     const local = hit ? this.toSupport(om, id, hit.pick) : undefined;
     switch (type) {
       case 'add': {
         if (!local) return;
         const command = new AddSupportCommand(id, { point: local.point, normal: local.normal, worldNormal: local.normal, candidates: cachedPlacement(id) ?? [], minFromUpDeg: 10 });
         commitSupportEdits([command]);
+        // A hand-added support before the first Generate: the object has no build yet, so this Add starts it.
+        if (!isBuilt(readSupports(id))) generate([id]);
         if (command.plan?.status === 'faces-up') notify({ message: t('supportLive.facesUp') });
         fixSpotAdded(id, command.plan?.contact.position as Vec3 | undefined);
         break;
@@ -315,8 +324,10 @@ class Interaction {
     }
     const record = readSupports(id);
     layers.setBrush(s.mode === 'edit' && selectsTips(s) && s.selectStyle === 'brush' ? s.brushRadius : undefined);
-    const hit = this.hitAt(this.pointer, id);
+    let hit = this.hitAt(this.pointer, id);
     const adding = s.mode === 'edit' && s.tool === 'add' && s.addAction === 'add';
+    // Adding passes a click through a support to the model behind it, so the ghost tip follows the model.
+    if (adding && hit?.kind === 'support') hit = this.hitAt(this.pointer, id, 'model') ?? hit;
     const removing = s.mode === 'edit' && s.tool === 'add' && s.addAction === 'remove';
     if (s.mode === 'zones') {
       layers.setGhostTip(undefined);

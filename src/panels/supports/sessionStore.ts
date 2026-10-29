@@ -65,16 +65,19 @@ export interface SessionBindDeps {
   store?: SessionStore;
   /** The object the session belongs to (the panel's target, default the first of the mode). */
   target?(ids: readonly string[]): string | undefined;
+  /** Delete key: remove the selected supports (the panel's Delete button does the same). */
+  deleteSelection?(): void;
 }
 
 /** Wire the session to the mode controller. Returns the unbind call. */
-export function bindSupportSession({ mode, input, store = supportSession, target = (ids) => ids[0] }: SessionBindDeps): () => void {
+export function bindSupportSession({ mode, input, store = supportSession, target = (ids) => ids[0], deleteSelection }: SessionBindDeps): () => void {
   const offs: Array<() => void> = [];
   const keys: Array<[string, () => void]> = [
     [TOOL_KEYS.add, () => chooseTool(store, 'add')],
     [TOOL_KEYS.select, () => chooseTool(store, 'select')],
     [TOOL_KEYS.paint, () => chooseZoneKind(store, 'paint')],
     [TOOL_KEYS.erase, () => chooseZoneKind(store, 'erase')],
+    ['Delete', () => deleteSelection?.()],
   ];
 
   // Esc stage 1: the selected supports.

@@ -20,6 +20,11 @@ export function cacheSupportMesh(objectId: string, revision: number, mesh: Gener
   meshes.set(objectId, { revision, mesh });
 }
 
+/** Forget the support mesh of one object (nothing is built for it now), keeping its placement. */
+export function dropSupportMesh(objectId: string): void {
+  meshes.delete(objectId);
+}
+
 export function cachedPlacement(objectId: string): readonly SupportPoint[] | undefined {
   return placements.get(objectId);
 }

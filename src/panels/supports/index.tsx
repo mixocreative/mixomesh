@@ -9,6 +9,10 @@ import { supportMode } from '../../supports/SupportMode';
 import { SupportsRoot } from './SupportsPanel';
 import { bindSupportSession } from './sessionStore';
 import { supportUi } from './supportUi';
+import { deleteSelectedSupports } from './supportData';
+import { supportSession } from './sessionStore';
+import { notify } from '../../supports/live/notices';
+import { undo } from '../../core/HistoryManager.js';
 
 let started = false;
 
@@ -28,6 +32,14 @@ export function init(): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy JS module
     input: InputManager as any,
     target: (ids) => (supportUi.get().targetId && ids.includes(supportUi.get().targetId!) ? supportUi.get().targetId : ids[0]),
+    deleteSelection: () => {
+      const id = supportSession.get().activeUnitId;
+      const n = id ? deleteSelectedSupports(id, supportSession.get().selection) : 0;
+      if (n > 0) {
+        supportSession.send({ type: 'clearSelection' });
+        notify({ message: t('supportPanel.toast.deleted', { n }), action: { label: t('supportPanel.undo'), onClick: () => undo() } });
+      }
+    },
   });
   supportMode.onChange((info) => { if (!info.active) supportUi.reset(); });
 }

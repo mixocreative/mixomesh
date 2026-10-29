@@ -6,7 +6,7 @@ import '../../core/HistoryManager.js';   // load order of the legacy core (as Su
 import { createSupportMode, type SupportModeDeps } from '../../supports/SupportMode';
 import { bindSupportSession, createSessionStore, TOOL_KEYS } from './sessionStore';
 
-function harness() {
+function harness(deleteSelection?: () => void) {
   const handlers = new Map<string, () => void>();
   const objects = { a: { id: 'a', name: 'A', visible: true, logicalObjectId: 'a' } };
   let selection = { ids: ['a'], activeId: 'a' as string | null };
@@ -31,7 +31,7 @@ function harness() {
   };
   const mode = createSupportMode(deps);
   const store = createSessionStore();
-  const unbind = bindSupportSession({ mode, input: deps.input, store });
+  const unbind = bindSupportSession({ mode, input: deps.input, store, ...(deleteSelection ? { deleteSelection } : {}) });
   return { mode, store, handlers, unbind };
 }
 
@@ -61,6 +61,17 @@ describe('bindSupportSession', () => {
     expect(h.store.get()).toMatchObject({ mode: 'edit', tool: 'add' });
     h.mode.exit();
     for (const key of Object.values(TOOL_KEYS)) expect(h.handlers.has(`${key}::supports`)).toBe(false);
+  });
+
+  it('Delete runs the delete-selection hook in the mode context only', () => {
+    const calls: string[] = [];
+    const h = harness(() => calls.push('delete'));
+    expect(h.handlers.has('Delete::supports')).toBe(false);
+    h.mode.enter();
+    h.handlers.get('Delete::supports')!();
+    expect(calls).toEqual(['delete']);
+    h.mode.exit();
+    expect(h.handlers.has('Delete::supports')).toBe(false);
   });
 
   it('Esc: the support selection first, then the active tool, then it leaves the mode', () => {
