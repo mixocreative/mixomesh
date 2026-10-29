@@ -5,7 +5,7 @@ import '../styles/kit.css';
 import './gallery.css';
 import { useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Button, Check, ColorField, FieldRow, KeyCaps, Modal, Notice, NumberField, ProgressRow, RangeField, Section, Segmented, Select, Toast, ToastProvider, Toggle, useToasts } from '../index';
+import { Button, Check, ColorField, FieldRow, KeyCaps, Modal, Notice, NumberField, ProgressRow, RangeField, Section, Segmented, Select, TextField, Toast, ToastProvider, Toggle, useToasts } from '../index';
 
 type Row = readonly [name: string, type: string, note: string];
 
@@ -51,6 +51,7 @@ function Gallery() {
   const [mul, setMul] = useState(1.5);
   const [rng, setRng] = useState(2.5);
   const [col, setCol] = useState('#7f0019');
+  const [txt, setTxt] = useState('CUBE-1');
   return (
     <div className="mx-kit gallery"><ToastProvider>
       <h1>MIXOMESH UI kit</h1>
@@ -134,6 +135,15 @@ function Gallery() {
         <State name="default"><ColorField label="Tint" value={col} onCommit={setCol} /></State>
         <State name="focus" cls="g-focus"><ColorField label="Tint" value="#1d3461" onCommit={noop} /></State>
         <State name="disabled"><ColorField label="Tint" value="#1d3461" disabled onCommit={noop} /></State>
+      </>} />
+
+      <Comp title="TextField" props={[
+        ['label', 'string', ''], ['value', 'string', ''], ['filter', '(text: string) => string', 'maps every keystroke (uppercase, drop characters)'],
+        ['rejectedHint', 'string', 'shown while the last edit lost characters to the filter'], ['onCommit', '(value: string) => void', 'Enter or blur; Esc reverts'], ['...input attrs', '', 'disabled, maxLength'],
+      ]} states={<>
+        <State name="default"><TextField label="Text" value={txt} filter={(s) => s.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8)} rejectedHint="A-Z, 0-9 and - only" onCommit={setTxt} /></State>
+        <State name="focus" cls="g-focus"><TextField label="Text" value="CUBE-1" onCommit={noop} /></State>
+        <State name="disabled"><TextField label="Text" value="CUBE-1" disabled onCommit={noop} /></State>
       </>} />
 
       <Comp title="Section" log={`controlled collapsed: ${String(secA)}   ${secLog}`} props={[

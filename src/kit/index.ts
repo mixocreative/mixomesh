@@ -6,6 +6,7 @@ export { Select, type SelectProps, type SelectOption } from './Select';
 export { NumberField, type NumberFieldProps } from './NumberField';
 export { RangeField, type RangeFieldProps } from './RangeField';
 export { ColorField, type ColorFieldProps } from './ColorField';
+export { TextField, type TextFieldProps } from './TextField';
 export { parseNumber, clampNumber, formatNumber, type NumberUnit } from './numberParse';
 export { Section, type SectionProps } from './Section';
 export { FieldRow, type FieldRowProps } from './FieldRow';
