@@ -41,6 +41,8 @@ export interface SpikeOptions {
 }
 
 export interface SpikeResult {
+  /** engine_version() reported by the WASM engine loaded in the main thread (the worker's is asserted on load). */
+  engineVersion: number;
   objectId: string;
   parts: number;
   sourceVertices: number;
@@ -133,7 +135,7 @@ export async function runSupportSpike(options: SpikeOptions = {}): Promise<Spike
   if (!parts.length) throw new Error(`support spike: ${objectId} has no geometry`);
 
   configureGeometry(geometryGlueUrl(document.baseURI));
-  await geometryReady();
+  const engine = await geometryReady();
   const settings = { ...presetSettings(options.preset ?? 'MIDDLE'), ...options.settings };
   const engineModel = partsToEngine(parts);
   const model = toLocal(engineModel.mesh);
@@ -147,6 +149,7 @@ export async function runSupportSpike(options: SpikeOptions = {}): Promise<Spike
   lastBuild.set(objectId, world);
   draw(objectId, world);
   return {
+    engineVersion: engine.engine_version(),
     objectId,
     parts: parts.length,
     sourceVertices: engineModel.sourceVertices,

@@ -166,6 +166,19 @@ async function bootstrap() {
   safeAsync(() => ApiBridge.init());
   // Support generation spike (plan P2.1): dev-only console trigger `window.__mxSupportSpike()`, no UI.
   if (import.meta.env.DEV) safeAsync(() => import('../supports/spike').then(m => m.installSupportSpike()));
+  // Test hook present in the production build too (P2.2: the engine + worker must be proven in the
+  // build and under file://). Inert: a lazy stub that loads nothing until a test calls it, and it
+  // only runs the same spike path (selects the first object when none is selected).
+  (window as unknown as Record<string, unknown>).__mxSupportEngineProbe = async () => {
+    const [{ runSupportSpike }, { Selection }, { getState }] = await Promise.all([
+      import('../supports/spike'), import('../core/Selection.js'), import('../core/StateManager.js'),
+    ]);
+    if (!Selection.getActiveId() && !Selection.getSelectedIds()[0]) {
+      const first = Object.keys(getState().scene.objects)[0];
+      if (first) Selection.set([first], first);
+    }
+    return runSupportSpike({ preset: 'LIGHT' });
+  };
 }
 
 function wireCloseFlow() {

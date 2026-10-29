@@ -26,6 +26,8 @@ export interface LocalModel {
   minY: number;
 }
 
+const LOCAL_SNAP = 1000;
+
 export function toLocal(world: TriangleMesh): LocalModel {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
@@ -39,7 +41,10 @@ export function toLocal(world: TriangleMesh): LocalModel {
   }
   const center: Vec3 = [(min[0]! + max[0]!) / 2, (min[1]! + max[1]!) / 2, (min[2]! + max[2]!) / 2];
   const positions = new Float32Array(p.length);
-  for (let i = 0; i < p.length; i++) positions[i] = p[i]! - center[i % 3]!;
+  // Snap to 1 um: world coordinates carry float32 noise that scales with where the model sits (a drop
+  // position, the window size), and the placement heuristic flips sample points on 1e-4 mm of it
+  // (cube-overhang gave 62 or 54 tips). Local coordinates are then a function of the shape only.
+  for (let i = 0; i < p.length; i++) positions[i] = Math.round((p[i]! - center[i % 3]!) * LOCAL_SNAP) / LOCAL_SNAP;
   return { local: { positions, indices: world.indices }, center, minY: min[1]! };
 }
 
