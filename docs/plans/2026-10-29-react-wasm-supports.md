@@ -36,6 +36,8 @@ Handoff and workflow:
   commits in each.
 - D2. One editing agent at a time, except pairs marked ∥ in section 4 (file-disjoint). Read-only
   reviewers may run any time.
+- D3b. Agents never kill processes by image name (`taskkill /IM chrome.exe` closed the owner's browser on 2026-10-29); stop only
+  PIDs the agent started itself, and never touch the owner's editors, browsers, Codex/Claude sessions or Ollama.
 - D3. Each task ends with its repo's gates green (mixomesh: tests, `npm run lint`,
   `npm run typecheck`; mixo-geocore: `cargo test`, wasm build, vitest; mixoDental: its `npm test`)
   and one commit (message ends with the session attribution lines). The agent reports back: commit,
@@ -432,6 +434,9 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
 *Depends: P3.6 unless stated.* Each **done when** its golden/walk is green and the ledger row names it.
 - **P5.1** Tree / Auto tree / safe distance — golden `tree`.
 - **P5.2** Cross-braces with pruning — Rust brace tests + a crossing-model walk.
+  Engine change first (found in P3.5): the generic policy hard-codes its repair budget (0 = report only) and the generic
+  result carries no brace-pruned flag; geocore must take the budget from the host (mixomesh uses 3) and report pruning (fallback
+  code 3 `brace-pruned`) for generic jobs, then re-vendor both apps (D11).
 - **P5.3** Raft (outline, flared wall, drainage gaps).
 - **P5.4** Label (8 chars A–Z 0–9 -, raft corner pad).
 - **P5.5** Roof (`ROOF_DEFAULTS`) — golden `roof`.
