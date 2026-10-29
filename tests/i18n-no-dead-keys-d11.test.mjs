@@ -22,7 +22,7 @@ function walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) { if (!p.endsWith(`${sep}locales`)) walk(p); }
-    else if (/\.(js|mjs|cjs|html)$/.test(name)) files.push(p);
+    else if (/\.(js|mjs|cjs|ts|tsx|html)$/.test(name)) files.push(p);
   }
 }
 walk(join(root, 'src'));

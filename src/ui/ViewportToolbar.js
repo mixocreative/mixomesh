@@ -7,7 +7,7 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { CursorPanel } from './CursorPanel.js';
-import { TransformSheet } from './TransformSheet.js';
+import { TransformSheet } from '../panels/TransformSheet/TransformSheet.tsx';
 
 /**
  * Floating Fusion 360-style toolbar anchored bottom-centre of the viewport.

@@ -13,7 +13,6 @@ import { subscribe, dispatch, getState, setState } from '../core/StateManager.js
 import { InputManager } from '../core/InputManager.js';
 import { icon } from '../core/Icons.js';
 import { t, applyTranslations } from '../i18n/index.js';
-import { getStyle } from '../core/UiStyle.js';
 
 const STORAGE_KEY = 'mixomesh_ui_workspace';
 // v2: panelCollapsed went tri-state (absent = defer to workspace default).
@@ -40,13 +39,12 @@ export const WORKSPACE_DEFAULTS = {
 };
 
 /**
- * Defaults for one workspace in one interface style. New (dense) narrows the
- * side panels: outliner at most 220px, right panel 40px narrower (properties rows need
+ * Defaults for one workspace in the (dense) mixo-app-style: outliner at most
+ * 220px, right panel 40px narrower than the table (properties rows need
  * ~260px for three XYZ fields). Pure.
  */
-export function workspaceDefaults(workspace, style) {
+export function workspaceDefaults(workspace) {
   const def = WORKSPACE_DEFAULTS[workspace] ?? WORKSPACE_DEFAULTS.layout;
-  if (style !== 'new') return def;
   return { ...def, outlinerWidth: Math.min(def.outlinerWidth, 220), rightWidth: def.rightWidth - 40 };
 }
 
@@ -84,7 +82,6 @@ export function parseStored(raw) {
     return {
       workspace: WORKSPACES.includes(data.workspace) ? data.workspace : 'layout',
       panelCollapsed,
-      widths: (data.widths && typeof data.widths === 'object') ? data.widths : {},
       widthsNew: (data.widthsNew && typeof data.widthsNew === 'object') ? data.widthsNew : {},
     };
   } catch {
@@ -92,10 +89,10 @@ export function parseStored(raw) {
   }
 }
 
-// Remembered panel sizes, kept per interface style so Dense widths never
-// leak into Original: style → workspace → { outlinerWidth, rightWidth, assetHeight }.
-const _widthsByStyle = { original: {}, new: {} };
-const _widths = () => _widthsByStyle[getStyle()];
+// Remembered panel sizes: workspace → { outlinerWidth, rightWidth, assetHeight }.
+// Persisted under the legacy key `widthsNew` (the dense widths of the old style switch).
+let _widthsMap = {};
+const _widths = () => _widthsMap;
 const _scroll = {};   // workspace → { [rp-body id]: scrollTop } — session-only
 let _pillEl = null;
 // The user's own workspace + overrides, as last shown. Not project state: a
@@ -111,8 +108,7 @@ export function init() {
     ? parseStored(localStorage.getItem(STORAGE_KEY))
     : null;
   if (stored) {
-    _widthsByStyle.original = stored.widths;
-    _widthsByStyle.new = stored.widthsNew;
+    _widthsMap = stored.widthsNew;
     setState(s => ({
       ...s,
       ui: { ...s.ui, workspace: stored.workspace, panelCollapsed: stored.panelCollapsed },
@@ -126,7 +122,6 @@ export function init() {
   subscribe(EVENTS.LOCALE_CHANGED, () => _retranslate(_pillEl));
   subscribe(EVENTS.PROJECT_LOADED, _restoreMine);
   subscribe(EVENTS.PROJECT_NEW, _restoreMine);
-  subscribe(EVENTS.UI_STYLE_CHANGED, _applyDom);
 
   InputManager.register('Ctrl+Shift+!', 'global', () => setWorkspace('layout'));
   InputManager.register('Ctrl+Shift+@', 'global', () => setWorkspace('shade'));
@@ -194,7 +189,7 @@ export function maxViewport() {
 
 function _applyDom() {
   const { workspace, panelCollapsed } = getState().ui;
-  const def = workspaceDefaults(workspace, getStyle());
+  const def = workspaceDefaults(workspace);
   const app = document.getElementById('app');
   const rpEl = document.getElementById('right-panel');
   const apEl = document.getElementById('asset-panel');
@@ -253,7 +248,7 @@ function _captureWidths(workspace) {
   };
   // Don't memorise collapsed strips as "the width" — keep prior/default.
   const prev = _widths()[workspace] ?? {};
-  const def = workspaceDefaults(workspace, getStyle());
+  const def = workspaceDefaults(workspace);
   _widths()[workspace] = {
     outlinerWidth: cur.outlinerWidth > 60 ? cur.outlinerWidth : (prev.outlinerWidth ?? def.outlinerWidth),
     rightWidth:    cur.rightWidth    > 60 ? cur.rightWidth    : (prev.rightWidth    ?? def.rightWidth),
@@ -280,7 +275,7 @@ function _persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       v: STORAGE_VERSION, workspace, panelCollapsed,
-      widths: _widthsByStyle.original, widthsNew: _widthsByStyle.new,
+      widthsNew: _widthsMap,
     }));
   } catch { /* quota/privacy mode — preference loss only */ }
 }

@@ -89,7 +89,6 @@ export const EVENTS = {
 
   // i18n
   LOCALE_CHANGED:          'i18n:localeChanged',
-  UI_STYLE_CHANGED:        'ui:styleChanged',
   GEOMETRY_CHANGED:        'geometry:changed',
 
   // UI

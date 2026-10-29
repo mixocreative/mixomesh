@@ -17,7 +17,7 @@ import { tr } from './lib/tr.js';
 import { ScenePanel } from './ScenePanel.js';
 import { ScopeBreadcrumb } from './ScopeBreadcrumb.js';
 import { SettingsStore } from '../core/SettingsStore.js';
-import { StatsHud } from './StatsHud.js';
+import { StatsHud } from '../panels/StatsHud/StatsHud.tsx';
 
 let _root = null;
 

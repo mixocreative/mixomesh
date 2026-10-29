@@ -65,14 +65,14 @@ await test('parseStored: valid blob round-trips, garbage/wrong-version → null'
   const good = parseStored(JSON.stringify({
     v: 2, workspace: 'shade',
     panelCollapsed: { right: true, bottom: false },
-    widths: { shade: { outlinerWidth: 200 } },
+    widthsNew: { shade: { outlinerWidth: 200 } },
   }));
   assert.equal(good.workspace, 'shade');
   // Tri-state survives parsing: only EXPLICIT overrides come back; the
   // absent side stays absent (defers to workspace default), never coerced
   // to a force-show false.
   assert.deepEqual(good.panelCollapsed, { right: true, bottom: false });
-  assert.equal(good.widths.shade.outlinerWidth, 200);
+  assert.equal(good.widthsNew.shade.outlinerWidth, 200);
 
   // v1 migration: every side was written as a concrete boolean ("false" was
   // v1's no-override) — only true (force-hide) survives.
@@ -91,27 +91,25 @@ await test('parseStored: valid blob round-trips, garbage/wrong-version → null'
     'unknown workspace falls back to layout');
 });
 
-await test('workspaceDefaults: Original keeps the table, New is dense', () => {
-  assert.deepEqual(workspaceDefaults('layout', 'original'), WORKSPACE_DEFAULTS.layout);
-  const dense = workspaceDefaults('layout', 'new');
+await test('workspaceDefaults: dense widths', () => {
+  const dense = workspaceDefaults('layout');
   assert.equal(dense.outlinerWidth, 220);
   assert.equal(dense.rightWidth, 260);
   assert.equal(dense.assetHeight, 220);
-  assert.equal(workspaceDefaults('shade', 'new').rightWidth, 300);
-  assert.equal(workspaceDefaults('shade', 'new').outlinerWidth, 220);
-  assert.equal(workspaceDefaults('bogus', 'new').rightWidth, 260, 'unknown workspace → layout');
+  assert.equal(workspaceDefaults('shade').rightWidth, 300);
+  assert.equal(workspaceDefaults('shade').outlinerWidth, 220);
+  assert.equal(workspaceDefaults('bogus').rightWidth, 260, 'unknown workspace → layout');
 });
 
-await test('parseStored: New-style widths are kept apart from Original ones', () => {
+await test('parseStored: legacy original-style widths are dropped; stored widths survive', () => {
   const both = parseStored(JSON.stringify({
     v: 2, workspace: 'layout', panelCollapsed: {},
     widths: { layout: { rightWidth: 310 } },
     widthsNew: { layout: { rightWidth: 230 } },
   }));
-  assert.equal(both.widths.layout.rightWidth, 310);
+  assert.equal(both.widths, undefined);
   assert.equal(both.widthsNew.layout.rightWidth, 230);
-  assert.deepEqual(parseStored(JSON.stringify({ v: 2, workspace: 'layout' })).widthsNew, {},
-    'older blobs have no New widths');
+  assert.deepEqual(parseStored(JSON.stringify({ v: 2, workspace: 'layout' })).widthsNew, {});
 });
 
 await test('.mixo documents never carry workspace layout (13b per-user rule)', async () => {

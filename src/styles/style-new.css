@@ -1,16 +1,15 @@
 /* New interface style — mixo-app-style (github.com/mixocreative/mixo-app-style),
-   Dense density. Loaded LAST. Every rule is scoped to
-   :root:not([data-ui-style="original"]) so New is the default and Original
-   (data-ui-style="original") renders exactly the earlier sheets.
+   Dense density. Loaded LAST and the only style. Every rule is prefixed
+   :root:root (specificity above the base sheets).
    Values come from the skill's tokens.css; change them there first. */
 
 /* Zen Kaku Gothic New, bundled (SIL OFL 1.1). Declaring @font-face is inert
-   in Original: nothing there names this family. */
+   unless a rule names this family. */
 @import '@fontsource/zen-kaku-gothic-new/400.css';
 @import '@fontsource/zen-kaku-gothic-new/500.css';
 
 /* ── 1. Tokens: mixomesh names → mixo-app-style values ─────────────── */
-:root:not([data-ui-style="original"]) {
+:root:root {
   /* Surfaces: three visible steps (paper / surface / sunken). */
   --bg-0: #f4f2ed;
   --bg-1: #f4f2ed;
@@ -69,28 +68,28 @@
   /* Panel widths: Workspace.js workspaceDefaults() (inline on #app). */
 }
 /* Traditional Chinese keeps Taiwan glyph forms. */
-:root:not([data-ui-style="original"]):lang(zh-Hant) {
+:root:root:lang(zh-Hant) {
   --font-sans: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', 'Zen Kaku Gothic New', system-ui, sans-serif;
 }
-:root:not([data-ui-style="original"]) body { font-size: var(--fs-md); }
+:root:root body { font-size: var(--fs-md); }
 
 /* ── 2. Frame: dense header and status bar ─────────────────────────── */
 /* Same breakpoints as responsive.css / viewer.css: four tracks on desktop. */
 @media (min-width: 1280px) {
-  :root:not([data-ui-style="original"]) #app {
+  :root:root #app {
     grid-template-rows: 32px 1fr var(--asset-panel-height, 220px) 22px;
   }
 }
 /* 768–1279px: three tracks. Phones (≤767px) keep viewer.css's own grid. */
 @media (min-width: 768px) and (max-width: 1279px) {
-  :root:not([data-ui-style="original"]) #app { grid-template-rows: auto 1fr 22px; }
+  :root:root #app { grid-template-rows: auto 1fr 22px; }
 }
-:root:not([data-ui-style="original"]) #header { padding: 0 8px; gap: 6px; }
-:root:not([data-ui-style="original"]) #status-bar { padding: 0 8px; }
-:root:not([data-ui-style="original"]) .rp-section-header { padding: 4px 8px; }
+:root:root #header { padding: 0 8px; gap: 6px; }
+:root:root #status-bar { padding: 0 8px; }
+:root:root .rp-section-header { padding: 4px 8px; }
 
 /* ── 3. Flat: floating surfaces lose their shadow, keep an edge ────── */
-:root:not([data-ui-style="original"]) :is(
+:root:root :is(
   .ac-menu, .context-menu, .modal-shell, .ob-bubble, .pp-cost-pop, .po-panel,
   .pm-recent-list, .pm-help-menu, .pp-menu, .vm-list, .vm-sheet,
   .slice-tool-panel, .toast
@@ -98,43 +97,43 @@
   box-shadow: none;
   border: 1px solid var(--border-strong);
 }
-:root:not([data-ui-style="original"]) .pp-toggle-dot,
-:root:not([data-ui-style="original"]) .pp-toggle.pp-toggle-on .pp-toggle-dot { box-shadow: none; }
+:root:root .pp-toggle-dot,
+:root:root .pp-toggle.pp-toggle-on .pp-toggle-dot { box-shadow: none; }
 
 /* ── 4. Ink states: active tab / segment / pressed ─────────────────── */
-:root:not([data-ui-style="original"]) .ws-switcher { border-radius: 2px; padding: 0; background: var(--bg-3); border: 1px solid var(--border); }
-:root:not([data-ui-style="original"]) .ws-btn { border-radius: 0; padding: 2px 10px; }
-:root:not([data-ui-style="original"]) .ws-btn.active,
-:root:not([data-ui-style="original"]) .pp-tab.active,
-:root:not([data-ui-style="original"]) .pp-seg-btn[aria-checked="true"] {
+:root:root .ws-switcher { border-radius: 2px; padding: 0; background: var(--bg-3); border: 1px solid var(--border); }
+:root:root .ws-btn { border-radius: 0; padding: 2px 10px; }
+:root:root .ws-btn.active,
+:root:root .pp-tab.active,
+:root:root .pp-seg-btn[aria-checked="true"] {
   background: var(--text-0);
   color: var(--bg-0);
   box-shadow: none;
   border-color: var(--text-0);
 }
-:root:not([data-ui-style="original"]) .pp-tab.active .sec-icon { color: var(--bg-0); }
-:root:not([data-ui-style="original"]) .pp-icon-btn[aria-expanded="true"],
-:root:not([data-ui-style="original"]) .cm-item[aria-expanded="true"] {
+:root:root .pp-tab.active .sec-icon { color: var(--bg-0); }
+:root:root .pp-icon-btn[aria-expanded="true"],
+:root:root .cm-item[aria-expanded="true"] {
   background: var(--text-0);
   color: var(--bg-0);
 }
 
 /* ── 5. Rows: selected = sunken, no colour; current item = red edge ── */
-:root:not([data-ui-style="original"]) .ol-row.ol-selected,
-:root:not([data-ui-style="original"]) .sp-row-selected,
-:root:not([data-ui-style="original"]) .sm-row.is-focus,
-:root:not([data-ui-style="original"]) .vm-item-on {
+:root:root .ol-row.ol-selected,
+:root:root .sp-row-selected,
+:root:root .sm-row.is-focus,
+:root:root .vm-item-on {
   background: var(--active-bg);
   box-shadow: none;
 }
-:root:not([data-ui-style="original"]) .ol-row.ol-selected.ol-active {
+:root:root .ol-row.ol-selected.ol-active {
   background: var(--active-bg);
   box-shadow: inset 2px 0 0 0 var(--red);
 }
-:root:not([data-ui-style="original"]) .tp-card-current { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+:root:root .tp-card-current { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
 
 /* ── 6. Red: the one primary action, and progress ──────────────────── */
-:root:not([data-ui-style="original"]) :is(
+:root:root :is(
   .btn-primary, .pp-primary-btn, .pm-btn-primary, .modal-btn-primary,
   .pp-body .pp-btn.pp-btn-primary:not(:disabled)
 ) {
@@ -142,7 +141,7 @@
   border-color: var(--red);
   color: #fff;
 }
-:root:not([data-ui-style="original"]) :is(
+:root:root :is(
   .btn-primary, .pp-primary-btn, .pm-btn-primary, .modal-btn-primary,
   .pp-body .pp-btn.pp-btn-primary
 ):hover:not(:disabled) {
@@ -150,25 +149,25 @@
   border-color: var(--red-hover);
   color: #fff;
 }
-:root:not([data-ui-style="original"]) .pp-apply-btn:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
-:root:not([data-ui-style="original"]) .po-bar { background: var(--red); }
-:root:not([data-ui-style="original"]) .po-track,
-:root:not([data-ui-style="original"]) .po-bar { border-radius: 0; }
+:root:root .pp-apply-btn:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
+:root:root .po-bar { background: var(--red); }
+:root:root .po-track,
+:root:root .po-bar { border-radius: 0; }
 /* Statistics HUD: viewport glass kept; Mixo font, density and ink. */
-:root:not([data-ui-style="original"]) .stats-hud { font-size: 11.5px; color: var(--text-0); border-radius: 2px; text-shadow: none; }
-:root:not([data-ui-style="original"]) .stats-hud .sh-changed { color: var(--text-0); }
+:root:root .stats-hud { font-size: 11.5px; color: var(--text-0); border-radius: 2px; text-shadow: none; }
+:root:root .stats-hud .sh-changed { color: var(--text-0); }
 /* Job activity panel: hairline, 2px radius, the fill is the only red. */
-:root:not([data-ui-style="original"]) .job-activity { border-color: var(--border); border-radius: 2px; }
-:root:not([data-ui-style="original"]) .ja-fill { background: var(--red); }
-:root:not([data-ui-style="original"]) .ja-track { height: 2px; }
-:root:not([data-ui-style="original"]) :is(.ja-cancel, .ja-dismiss) { border-radius: 2px; }
+:root:root .job-activity { border-color: var(--border); border-radius: 2px; }
+:root:root .ja-fill { background: var(--red); }
+:root:root .ja-track { height: 2px; }
+:root:root :is(.ja-cancel, .ja-dismiss) { border-radius: 2px; }
 
 /* Destructive stays an outline; hover tints, never fills. */
-:root:not([data-ui-style="original"]) .modal-btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+:root:root .modal-btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* ── 7. Dense properties: hairline sections, narrow label column ───── */
-:root:not([data-ui-style="original"]) .pp-body { padding: 4px 8px; }
-:root:not([data-ui-style="original"]) .pp-section {
+:root:root .pp-body { padding: 4px 8px; }
+:root:root .pp-section {
   background: transparent;
   border: 0;
   border-top: 1px solid var(--border);
@@ -176,25 +175,25 @@
   padding: 6px 0;
   margin-bottom: 0;
 }
-:root:not([data-ui-style="original"]) .pp-section:first-child { border-top: 0; padding-top: 0; }
-:root:not([data-ui-style="original"]) :is(.pp-row, .pp-ratio-row, .pp-source-row, .sp-uv-cell) {
+:root:root .pp-section:first-child { border-top: 0; padding-top: 0; }
+:root:root :is(.pp-row, .pp-ratio-row, .pp-source-row, .sp-uv-cell) {
   grid-template-columns: 64px minmax(0, 1fr);
 }
-:root:not([data-ui-style="original"]) .pp-grid3 {
+:root:root .pp-grid3 {
   grid-template-columns: 64px repeat(3, minmax(0, 1fr));
   gap: 3px;
 }
-:root:not([data-ui-style="original"]) :is(.pp-body, .sp-body) :is(input[type="text"], input[type="number"], select) {
+:root:root :is(.pp-body, .sp-body) :is(input[type="text"], input[type="number"], select) {
   padding: 1px 3px;
 }
 
 /* ── 8. Narrow panels: one-line footers ────────────────────────────── */
-:root:not([data-ui-style="original"]) .ol-footer { padding: 3px 8px; gap: 6px; }
-:root:not([data-ui-style="original"]) .ol-footer > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+:root:root .ol-footer { padding: 3px 8px; gap: 6px; }
+:root:root .ol-footer > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 /* ── 9. Touch: Dense never shrinks tap targets (mirrors responsive.css) ── */
 @media (pointer: coarse) {
-  :root:not([data-ui-style="original"]) { --ctl-h: 44px; }
-  :root:not([data-ui-style="original"]) .rp-section-header { padding-block: var(--sp-4); }
-  :root:not([data-ui-style="original"]) .ws-btn { padding-inline: var(--sp-6); }
+  :root:root { --ctl-h: 44px; }
+  :root:root .rp-section-header { padding-block: var(--sp-4); }
+  :root:root .ws-btn { padding-inline: var(--sp-6); }
 }

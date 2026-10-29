@@ -17,7 +17,7 @@ import { Modal } from '../ui/Modal.js';
 import { ImportError } from '../ui/ImportError.js';
 import { ViewportToolbar } from '../ui/ViewportToolbar.js';
 import { ViewportToggles } from '../ui/ViewportToggles.js';
-import { StatsHud } from '../ui/StatsHud.js';
+import { StatsHud } from '../panels/StatsHud/StatsHud.tsx';
 import { MeshStats } from '../ui/MeshStats.js';
 import { NavCube } from '../ui/NavCube.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';

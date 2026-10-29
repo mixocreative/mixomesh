@@ -1,4 +1,5 @@
-// Viewport statistics: pure count/format/diff logic + live update after a Subdivide-style change.
+// Viewport statistics: pure count/format/diff logic. The HUD component is tested in
+// src/panels/StatsHud/StatsHud.test.tsx.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installEnv } from './env.mjs';
@@ -7,24 +8,6 @@ installEnv();
 const BABYLON = { ...await import('@babylonjs/core') };
 globalThis.window.BABYLON = { ...globalThis.window.BABYLON, ...BABYLON };
 globalThis.queueMicrotask ??= (fn) => Promise.resolve().then(fn);
-
-// Minimal DOM for the HUD: #viewport plus the HUD's own children.
-function fakeEl() {
-  const children = new Map();
-  const el = {
-    hidden: false, id: '', className: '', textContent: '', title: '', attrs: {},
-    classes: new Set(),
-    classList: { toggle(c, on) { if (on) el.classes.add(c); else el.classes.delete(c); } },
-    setAttribute(k, v) { el.attrs[k] = v; },
-    addEventListener() {},
-    appendChild(child) { el.__hud = child; },
-    set innerHTML(_) { for (const c of ['.sh-scope', '.sh-tris', '.sh-verts', '.sh-hide']) children.set(c, fakeEl()); },
-    querySelector(sel) { return children.get(sel) ?? null; },
-  };
-  return el;
-}
-const viewport = fakeEl();
-globalThis.document = { ...globalThis.document, createElement: () => fakeEl(), getElementById: (id) => (id === 'viewport' ? viewport : null), addEventListener() {} };
 
 const Stats = await import('../src/core/scene/SceneStats.js');
 const Count = await import('../src/core/scene/TriangleCount.js');
@@ -86,42 +69,4 @@ test('view text: selection vs scene labels, arrows only on changed counts', () =
   assert.deepEqual(v.changed, { tris: true, verts: false });
   const s = Stats.statsView({ selected: 0, total: 5, tris: 1234567, verts: 617890, locale: 'en', t: tt });
   assert.equal(s.label, 'Scene · Objects 5 · Faces 1,234,567 · Vertices 617,890');
-});
-
-test('HUD updates after a Subdivide-style geometry change on the selection, then settles', async () => {
-  const { StateManager, setState } = await import('../src/core/StateManager.js');
-  const Registry = await import('../src/core/assets/MeshRegistry.js');
-  const HUD = await import('../src/ui/StatsHud.js');
-  StateManager.replaceState(StateManager.freshState());
-  const mesh = grid(10, 'sub');
-  mesh.metadata = { meshId: 'mesh_sub' };
-  Registry.registerMesh('mesh_sub', mesh);
-  setState(s => ({
-    ...s,
-    scene: { ...s.scene, objects: { mesh_sub: { id: 'mesh_sub', name: 'sub', visible: true } } },
-    selection: { ...s.selection, selectedIds: ['mesh_sub'], activeId: 'mesh_sub' },
-  }), { silent: true });
-  let now = 10_000;
-  HUD.setClock(() => now);
-  HUD.init();
-  const tris = () => viewport.__hud?.querySelector('.sh-tris')?.textContent;
-  // The HUD root is the first element appended to #viewport.
-  assert.match(HUD.snapshot().kind, /selection/);
-  HUD.refresh(false);
-  const before = HUD.snapshot();
-  assert.equal(before.tris, 200);
-  // "Subdivide": 4x the triangles, in place, with a revision bump (GEOMETRY_CHANGED).
-  const sub = BABYLON.MeshBuilder.CreateGround('tmp', { width: 1, height: 1, subdivisions: 20 }, scene);
-  mesh.setVerticesData('position', sub.getVerticesData('position'));
-  mesh.setIndices(sub.getIndices());
-  sub.dispose();
-  bump('mesh_sub');
-  await new Promise(r => setTimeout(r, 0));
-  const after = HUD.snapshot();
-  assert.equal(after.tris, 800);
-  assert.equal(tris(), 'Faces 200 → 800', 'before → after while highlighted');
-  now += 3100;
-  HUD.refresh(false);
-  assert.equal(tris(), 'Faces 800', 'settles to the new value');
-  HUD.setClock(null);
 });

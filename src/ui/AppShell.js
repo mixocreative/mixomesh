@@ -1,6 +1,5 @@
 import { icon } from '../core/Icons.js';
 import { LocaleSwitcher } from './LocaleSwitcher.js';
-import { UiStyleSwitcher } from './UiStyleSwitcher.js';
 import { subscribe } from '../core/StateManager.js';
 import { EVENTS } from '../core/events.js';
 
@@ -14,13 +13,7 @@ export function init() {
   _wireOuterPanels();
   const host = document.getElementById('locale-switcher-host');
   LocaleSwitcher.mount(host);
-  const styleHost = document.getElementById('ui-style-switcher-host');
-  UiStyleSwitcher.mount(styleHost);
-  subscribe(EVENTS.LOCALE_CHANGED, () => {
-    LocaleSwitcher.refresh(host);
-    UiStyleSwitcher.refresh(styleHost);
-  });
-  subscribe(EVENTS.UI_STYLE_CHANGED, () => UiStyleSwitcher.refresh(styleHost));
+  subscribe(EVENTS.LOCALE_CHANGED, () => LocaleSwitcher.refresh(host));
   clearBootStatus();
 }
 

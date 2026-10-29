@@ -10,7 +10,6 @@ globalThis.queueMicrotask ??= (fn) => Promise.resolve().then(fn);
 const { StateManager, setState } = await import('../src/core/StateManager.js');
 const Registry = await import('../src/core/assets/MeshRegistry.js');
 const { countSceneTriangles } = await import('../src/core/scene/TriangleCount.js');
-const HUD = await import('../src/ui/StatsHud.js');
 
 const mesh = (meshId, tris) => ({
   metadata: { meshId }, geometry: {}, isVisible: true,
@@ -31,7 +30,6 @@ test('a deleted object stops counting toward the budget, like the Stats HUD', ()
   heavy.setEnabled(false);   // DeleteCommand: soft-disable for undo, object leaves the scene
   setState(s => { const { mesh_heavy: _gone, ...objects } = s.scene.objects; return { ...s, scene: { ...s.scene, objects } }; }, { silent: true });
   assert.equal(countSceneTriangles(), 8);
-  assert.equal(HUD.snapshot().tris, countSceneTriangles(), 'status bar / budget and HUD agree');
 });
 
 test('refined geometry the viewport shows counts toward the budget', () => {

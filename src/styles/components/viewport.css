@@ -545,19 +545,12 @@ body.touch-input .vt-btn { min-width: 44px; height: 44px; }
 .ts-hint { flex: 1; font-size: 11px; opacity: 0.75; }
 .ts-row { display: flex; align-items: center; gap: var(--sp-2); }
 .ts-row > b { width: 52px; flex: none; font-weight: 600; }
-.ts-cell { display: flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
-.ts-cell.ts-wide { flex: 2; }
-.ts-cell input {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  padding: 0 var(--sp-2);
-  font-size: 16px;               /* >=16px stops iOS zooming on focus */
-  text-align: right;
-}
-.ts-cell em { font-style: normal; font-size: 11px; opacity: 0.7; }
+.ts-row .field-row { flex: 1; min-width: 0; gap: 4px; }
+.ts-row .number { flex: 1; min-width: 0; }
+.ts-row .number input { width: 100%; min-width: 0; height: 40px; font-size: 16px; /* >=16px stops iOS zooming on focus */ text-align: right; }
+.ts-head .ts-close { margin-left: auto; }
 .ts-actions { display: flex; justify-content: flex-end; }
-.ts-apply { min-height: 44px; min-width: 96px; }
+.transform-sheet .ts-apply { min-height: 44px; min-width: 96px; }
 
 /* Toolbar selects size to their label: the shared .pp-preset-select is
    width:100%, which in this flex row shrank them to a stub ("Fre", blank
@@ -597,7 +590,8 @@ body.touch-input .vt-btn { min-width: 44px; height: 44px; }
 .stats-hud[hidden] { display: none; }
 .stats-hud .sh-sep { color: var(--hud-text-dim); }
 .stats-hud .sh-changed { font-weight: 700; }
-.stats-hud .sh-hide {
+.stats-hud .sh-hide,
+.stats-hud .sh-hide.mx-icon {
   pointer-events: auto;
   margin-left: 2px;
   width: 18px;

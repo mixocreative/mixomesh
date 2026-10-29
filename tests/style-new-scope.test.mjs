@@ -1,10 +1,10 @@
-// Original must render exactly as before: every rule in style-new.css has to
-// be scoped to the New style, or it leaks into data-ui-style="original".
+// style-new.css is the only style: every rule keeps the :root:root prefix so it
+// outranks the base sheets it overrides.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 
-const SCOPE = ':root:not([data-ui-style="original"])';
+const SCOPE = ':root:root';
 
 // Split a selector list on commas outside parentheses (:is(a, b) stays whole).
 function splitTopLevel(list) {
@@ -33,7 +33,7 @@ export function unscopedSelectors(css) {
   return bad;
 }
 
-test('every style-new.css selector is scoped to the New style', () => {
+test('every style-new.css selector carries the :root:root prefix', () => {
   const css = readFileSync(new URL('../src/styles/style-new.css', import.meta.url), 'utf8');
   assert.deepEqual(unscopedSelectors(css), []);
 });

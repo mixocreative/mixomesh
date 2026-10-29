@@ -1,7 +1,7 @@
 // One-off UI screenshot: boots the app in headless Chrome (same plumbing as
 // tests/browser-smoke.mjs), imports the textured fixture so panels have
 // content, selects the mesh, and captures PNGs of the three workspaces.
-// Usage: node scripts/ui-screenshot.mjs [outDir]
+// Usage: node scripts/ui-screenshot.mjs [outDir]   (OPEN_SHEET=1 also opens the Transform sheet)
 //
 // Responsive captures (overhaul 8.3 / 8.6): SIZES="1366x1024,1024x768,390x844"
 // (add a `t` suffix, e.g. 1024x768t, to emulate a coarse touch pointer). Each
@@ -54,7 +54,7 @@ async function main() {
   try {
     await waitForHttp(`http://127.0.0.1:${appPort}/index.html`, 20000, viteOutput);
     await waitForWs(debugPort);
-    // LOCALE=ja|zh-Hant picks the UI language; UI_STYLE=original|new the interface style.
+    // LOCALE=ja|zh-Hant picks the UI language; there is a single interface style.
     const query = process.env.LOCALE ? `?locale=${encodeURIComponent(process.env.LOCALE)}` : '';
     const target = await openTarget(debugPort, `http://127.0.0.1:${appPort}/index.html${query}`);
     const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
@@ -73,15 +73,9 @@ async function main() {
 
     // The first-run tour overlays every shot; mark it seen and close it.
     await evaluate(cdp, `(() => { try { localStorage.setItem('mx-onboard-v1', '1'); } catch { /* */ } document.querySelector('.ob-skip')?.click(); })()`);
-    if (process.env.UI_STYLE) {
-      // Through the app's own setter so listeners (workspace widths) re-apply.
-      await evaluate(cdp, `import('/src/core/UiStyle.js').then(m => m.setStyle(${JSON.stringify(process.env.UI_STYLE)}))`);
-      await new Promise(r => setTimeout(r, 300));
-    }
     if (process.env.PROBE) {
       await new Promise(r => setTimeout(r, 1500));
       console.log('PROBE', await evaluate(cdp, `JSON.stringify({
-        style: document.documentElement.dataset.uiStyle,
         font: getComputedStyle(document.body).fontFamily,
         zen: document.fonts.check('12px "Zen Kaku Gothic New"'),
         olVar: getComputedStyle(document.documentElement).getPropertyValue('--outliner-width'),
@@ -146,6 +140,11 @@ async function main() {
     await sleep(800);   // settle: auto-frame animation + thumbnail
     await evaluate(cdp, `document.querySelector('.ob-skip')?.click()`);
 
+    if (process.env.OPEN_SHEET) {
+      // Show the React Transform sheet (normally touch-only) next to the Stats HUD.
+      await evaluate(cdp, `import('/src/panels/TransformSheet/TransformSheet.tsx').then(m => m.TransformSheet.open())`);
+      await sleep(400);
+    }
     if (process.env.PROBE) {
       const probe = await evaluate(cdp, `(() => {
         const secs = [...document.querySelectorAll('#rp-properties-body .pp-section')];
