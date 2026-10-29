@@ -312,9 +312,9 @@ export class GeometrySession {
     /**
      * The generic policy of a unit as a `PolicyHandle` for `generate`: its contacts (automatic
      * minus deleted and zoned, plus manual; unit-local), every face of `model` permitted, the
-     * structures the settings ask for, report-only repair. Arguments as `generic_policy_contacts`.
+     * structures the settings ask for, and `repair_budget` safety-repair trials (0: report only). Arguments as `generic_policy_contacts`.
      */
-    generic_policy(model: number, settings: Float64Array, auto_ids: string[], auto_positions: Float64Array, auto_normals: Float64Array, auto_sources: Uint8Array, manual_ids: string[], manual_positions: Float64Array, manual_normals: Float64Array, manual_sources: Uint8Array, deleted: string[], zones: Float64Array): PolicyHandle;
+    generic_policy(model: number, settings: Float64Array, auto_ids: string[], auto_positions: Float64Array, auto_normals: Float64Array, auto_sources: Uint8Array, manual_ids: string[], manual_positions: Float64Array, manual_normals: Float64Array, manual_sources: Uint8Array, deleted: string[], zones: Float64Array, repair_budget: number): PolicyHandle;
     load_mesh(positions: Float32Array, indices: Uint32Array): number;
     /**
      * `load_mesh` with a pick index built elsewhere (`build_pick_index`, in a worker): used as is,
@@ -732,7 +732,7 @@ export interface InitOutput {
     readonly geometrysession_diagnose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number, number];
     readonly geometrysession_generate: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number) => [number, number, number];
     readonly geometrysession_generic_place: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly geometrysession_generic_policy: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => [number, number, number];
+    readonly geometrysession_generic_policy: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number, number];
     readonly geometrysession_load_mesh: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly geometrysession_load_mesh_indexed: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number];
     readonly geometrysession_load_placed: (a: number, b: number, c: number, d: number) => [number, number, number];

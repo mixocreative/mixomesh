@@ -124,5 +124,7 @@ export interface GeneratedSupportMesh extends TriangleMesh {
   /** Dental jobs: final built contacts on each dental rim; absent when the detector could not certify a contour. */
   dentalRimCoverage?: DentalRimCoverage;
   /** Dental jobs: requested dental structures omitted because their built geometry crossed the model. */
+  /** Generic jobs: the structure fallbacks the repair applied (`brace-pruned`: only crossing brace segments were left out); absent when none. */
+  fallbacks?: Array<'tree' | 'brace' | 'brace-pruned'>;
   dentalStructureFallback?: Array<'tree' | 'brace' | 'brace-pruned'>;
 }

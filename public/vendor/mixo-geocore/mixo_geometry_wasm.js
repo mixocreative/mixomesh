@@ -1250,7 +1250,7 @@ export class GeometrySession {
     /**
      * The generic policy of a unit as a `PolicyHandle` for `generate`: its contacts (automatic
      * minus deleted and zoned, plus manual; unit-local), every face of `model` permitted, the
-     * structures the settings ask for, report-only repair. Arguments as `generic_policy_contacts`.
+     * structures the settings ask for, and `repair_budget` safety-repair trials (0: report only). Arguments as `generic_policy_contacts`.
      * @param {number} model
      * @param {Float64Array} settings
      * @param {string[]} auto_ids
@@ -1263,9 +1263,10 @@ export class GeometrySession {
      * @param {Uint8Array} manual_sources
      * @param {string[]} deleted
      * @param {Float64Array} zones
+     * @param {number} repair_budget
      * @returns {PolicyHandle}
      */
-    generic_policy(model, settings, auto_ids, auto_positions, auto_normals, auto_sources, manual_ids, manual_positions, manual_normals, manual_sources, deleted, zones) {
+    generic_policy(model, settings, auto_ids, auto_positions, auto_normals, auto_sources, manual_ids, manual_positions, manual_normals, manual_sources, deleted, zones, repair_budget) {
         const ptr0 = passArrayF64ToWasm0(settings, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArrayJsValueToWasm0(auto_ids, wasm.__wbindgen_malloc);
@@ -1288,7 +1289,7 @@ export class GeometrySession {
         const len9 = WASM_VECTOR_LEN;
         const ptr10 = passArrayF64ToWasm0(zones, wasm.__wbindgen_malloc);
         const len10 = WASM_VECTOR_LEN;
-        const ret = wasm.geometrysession_generic_policy(this.__wbg_ptr, model, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9, ptr10, len10);
+        const ret = wasm.geometrysession_generic_policy(this.__wbg_ptr, model, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9, ptr10, len10, repair_budget);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }

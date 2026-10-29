@@ -43,13 +43,14 @@ export function runSupportJob(job: SupportJob, onProgress?: ProgressCallback, re
   const zones = job.contacts.zones.map((stamp) => ({ ...stamp, center: transformPoint(frame, stamp.center), normal: transformDirection(frame, stamp.normal) }));
   const dental = job.dental;
   // Dental: the aligner's Step 3 switches decide Tree and Brace and Roof/Cage stay off, in Rust.
-  const policy = dental ? dentalPolicy(dental, frame, job.contacts.manual) : genericPolicy(job.contacts, job.settings);
+  const policy = dental ? dentalPolicy(dental, frame, job.contacts.manual) : genericPolicy(job.contacts, job.settings, job.repairBudget ?? 0);
   const out = generateSupports(contacts, job.settings, policy, {
     mode: job.mode, model: job.mesh, frame, plateY: job.plate ?? 0, labelText: job.labelText, zones, timeoutMs: GENERATE_TIMEOUT_MS, revision, ...(site ? { site } : {}),
     ...(onProgress ? { onProgress } : {}),
   });
   const mesh = out.mesh;
   if (dental && out.fallback.length > 0) mesh.dentalStructureFallback = out.fallback;
+  if (!dental && out.fallback.length > 0) mesh.fallbacks = out.fallback;
   if (dental?.kind === 'two-contour' && out.rings.length === 2) {
     const [outer, opening] = out.rings as [typeof out.rings[number], typeof out.rings[number]];
     mesh.dentalRimCoverage = { outer, opening, needsReview: outer.needsReview || opening.needsReview };

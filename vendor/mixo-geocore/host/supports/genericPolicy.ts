@@ -37,15 +37,15 @@ function packPoints(points: readonly SupportPoint[]) {
 
 /**
  * The generic policy of a unit for `generate`, made in Rust (`GeometrySession.generic_policy`) from
- * the same edits: its contacts, every face permitted, the structures the settings ask for, report-only
- * repair.
+ * the same edits: its contacts, every face permitted, the structures the settings ask for, and
+ * `repairBudget` safety-repair trials (default 0: report only; brace pruning needs a budget).
  */
-export function genericPolicy(inputs: ContactInputs, settings: Readonly<LiveSupportSettings>): MakePolicy {
+export function genericPolicy(inputs: ContactInputs, settings: Readonly<LiveSupportSettings>, repairBudget = 0): MakePolicy {
   const auto = packPoints(inputs.points);
   const manual = packPoints(inputs.manual);
   return (session, model) => session.generic_policy(model, packSettings(settings),
     auto.ids, auto.positions, auto.normals, auto.sources, manual.ids, manual.positions, manual.normals, manual.sources,
-    [...inputs.deleted], packZones(inputs.zones));
+    [...inputs.deleted], packZones(inputs.zones), repairBudget);
 }
 
 /**

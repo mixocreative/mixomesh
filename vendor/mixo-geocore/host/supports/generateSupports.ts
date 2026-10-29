@@ -41,7 +41,7 @@ export interface PolicySession extends SupportSession {
   generic_policy(model: number, settings: Float64Array,
     autoIds: string[], autoPositions: Float64Array, autoNormals: Float64Array, autoSources: Uint8Array,
     manualIds: string[], manualPositions: Float64Array, manualNormals: Float64Array, manualSources: Uint8Array,
-    deleted: string[], zones: Float64Array): PolicyHandle;
+    deleted: string[], zones: Float64Array, repairBudget: number): PolicyHandle;
 }
 
 /** Makes the unit's policy in `session`; `model` is the unit-local mesh handle. The caller frees the handle. */

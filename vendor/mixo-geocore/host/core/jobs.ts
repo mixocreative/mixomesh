@@ -47,6 +47,8 @@ export interface SupportJob {
   mode: 'preview' | 'export';
   /** Dental (host/dental): the accepted policy also constrains secondary model landings during mesh construction. */
   dental?: DentalPolicy;
+  /** Generic jobs: safety-repair trials the build may spend (brace pruning...). Absent or 0: report only. */
+  repairBudget?: number;
 }
 
 /** Automatic placement on the model turned by `orientation` (its position is ignored). */
