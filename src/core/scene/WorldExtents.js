@@ -10,6 +10,7 @@
 // part. Translation is added after, so moving an object never re-walks it.
 
 import { revisionOf } from '../geometry/GeometryStore.js';
+import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
 
 const _cache = new WeakMap();   // mesh → { key, lo, hi } in world axes, without translation
 
@@ -38,7 +39,7 @@ function _linearExtents(positions, m) {
  * @returns {{min:{x:number,y:number,z:number}, max:{x:number,y:number,z:number}}|null}
  */
 export function worldExtentsOf(mesh) {
-  if (!(mesh?.getTotalVertices?.() > 0)) return null;
+  if (!(mesh?.getTotalVertices?.() > 0) || isSupportLayerMesh(mesh)) return null;   // D20
   const m = mesh.computeWorldMatrix(true).m;
   const key = _key(mesh, m);
   let hit = _cache.get(mesh);

@@ -8,6 +8,7 @@ import { REPAIR_TRIANGLE_CAP } from './repair/MeshRepair.js';
 import { engineDiagnose } from './repair/Diagnose.js';
 import { weldArrays } from './repair/Weld.js';
 import { withRestTransform } from './scene/ImportBounce.js';
+import { isSupportLayerMesh } from '../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -488,6 +489,7 @@ export function init() {
  * @returns {Promise<ValidationResult[]>}
  */
 export async function validateMesh(mesh) {
+  if (isSupportLayerMesh(mesh)) return [];   // D20: support layers are never validated
   dispatch(EVENTS.VALIDATION_STARTED, { meshName: mesh.name });
 
   const results = [];

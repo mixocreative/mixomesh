@@ -15,6 +15,7 @@ import {
   OUTLINE_RADIUS_PX,
   OUTLINE_INTENSITY,
 } from './SceneConstants.js';
+import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 
@@ -269,7 +270,7 @@ function _setMaskMeshes(entries) {
 
   // Apply per-mesh override based on kind ('active' vs 'selected').
   for (const { mesh, kind } of entries) {
-    if (!(mesh instanceof BABYLON.Mesh)) continue;
+    if (!(mesh instanceof BABYLON.Mesh) || isSupportLayerMesh(mesh)) continue;   // D20
     const mat = kind === 'active' ? _selMaskMatActive
       : kind === 'hover' ? _selMaskMatHover
       : _selMaskMatSelected;

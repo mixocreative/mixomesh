@@ -13,6 +13,7 @@ import { getBabylonMesh } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
 import { canonicalObjectId } from '../LogicalObjects.js';
 import { revisionOf } from '../geometry/GeometryStore.js';
+import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
 
 // RefinementController sits above this module in the import graph (it reaches
 // MeshValidator, which reaches back here through AssetLoader), so a static
@@ -30,7 +31,7 @@ const _cache = new WeakMap();   // mesh → { rev, indices, vertices, tris, vert
  * @returns {{ tris: number, verts: number }}
  */
 export function meshCounts(mesh) {
-  if (!mesh || mesh.isDisposed?.() || !mesh.geometry) return { tris: 0, verts: 0 };
+  if (!mesh || mesh.isDisposed?.() || !mesh.geometry || isSupportLayerMesh(mesh)) return { tris: 0, verts: 0 };   // D20
   const rev = revisionOf(mesh);
   const indices = mesh.getTotalIndices?.() ?? 0;
   const vertices = mesh.getTotalVertices?.() ?? 0;

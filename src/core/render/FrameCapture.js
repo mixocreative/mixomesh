@@ -22,6 +22,7 @@ import { clampDimension } from './RenderMath.js';
 import { withRenderLock } from './RenderLock.js';
 import { settleImportBounce } from '../scene/ImportBounce.js';
 import { normalizeListingOptions, withSuppressed } from './ListingShot.js';
+import { hideSupportLayers, seeIsolatedObjects } from '../../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 
@@ -194,7 +195,13 @@ export function hideFurniture() {
   // cut still renders, but the striped overlay must not pollute exports.
   const sectionVizWas = SceneManager.isSectionVizVisible?.();
   if (sectionVizWas) SceneManager.setSectionVizVisible(false);
+  // D20: support layers never reach a PNG / video frame (P4.2 exports supports on their own path).
+  const restoreSupports = hideSupportLayers();
+  // Output ignores Support Mode isolation: every object renders as if the mode were off.
+  const restoreIsolated = seeIsolatedObjects(SceneManager.getScene());
   return () => {
+    restoreIsolated();
+    restoreSupports();
     for (const name of hidden) SceneManager.setOverlay(name, true);
     if (cursorWasVisible) SceneManager.setCursorVisible(true);
     if (sectionVizWas) SceneManager.setSectionVizVisible(true);

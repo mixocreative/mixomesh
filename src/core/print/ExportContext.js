@@ -29,6 +29,7 @@ import { AssetLoader } from '../AssetLoader.js';
 import { getState } from '../StateManager.js';
 import { effectivePrintSettings } from './PrintProfileSettings.js';
 import { getDerivedMeshes } from '../refinement/RefinementController.js';
+import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
@@ -248,7 +249,7 @@ export function collectPrintUnits(state, selectedOnly) {
       const obj = objects[meshId];
       if (!obj || obj.isGhost || !obj.isPrintPart) continue;
       const mesh = AssetLoader.getBabylonMesh(meshId);
-      if (!mesh) continue;
+      if (!mesh || isSupportLayerMesh(mesh)) continue;   // D20 (the support export of P4.2 has its own path)
       if (!mesh.getTotalVertices?.() || mesh.getTotalVertices() === 0) continue;
       parts.push({ meshId, mesh, obj });
     }

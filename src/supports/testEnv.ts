@@ -11,5 +11,9 @@ const stub = (): unknown => new Proxy(function () {}, {
 g.window ??= globalThis;
 g.location ??= { hostname: 'localhost', href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:', search: '', hash: '' };
 g.BABYLON ??= stub();
+// A real Babylon NullEngine (layers tests) registers and removes window listeners on dispose.
+const w = g.window as { addEventListener?: unknown; removeEventListener?: unknown };
+w.addEventListener ??= () => {};
+w.removeEventListener ??= () => {};
 
 export {};

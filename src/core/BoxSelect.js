@@ -16,6 +16,7 @@
 import { Selection } from './Selection.js';
 import { getState } from './StateManager.js';
 import { selectableAtDepth } from './LogicalObjects.js';
+import { isSupportLayerMesh } from '../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 
@@ -31,6 +32,7 @@ export function normRect({ sx, sy, ex, ey }) {
 
 /** Walk the parent chain for a registered meshId (mirrors SceneManager pick). */
 function _contentMeshId(mesh) {
+  if (isSupportLayerMesh(mesh)) return null;   // D20
   let node = mesh;
   while (node) {
     const id = node.metadata?.meshId;

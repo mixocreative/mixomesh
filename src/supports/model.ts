@@ -14,6 +14,13 @@
  * object's supports): `settings.preset` is the preset name (LIGHT / MIDDLE / HEAVY / CUSTOM) and
  * `settings.liftHeight` the lift in mm (P3 lift decision). They are read through `presetName` and
  * `liftMm`, not copied into fields of their own that could drift.
+ *
+ * Multi-part logical objects (P3.3): the support frame belongs to the whole logical object and the
+ * drawn supports follow the LEAD's translation only (layers/index.ts, BabylonViewportPort anchor).
+ * This assumes the parts stay fixed relative to the lead. It holds by construction: `sourceHash` is
+ * taken over the parts in the lead's local frame (sceneSource `leadLocalParts`), so a part moved,
+ * rotated or scaled on its own changes the hash and the supports go stale ('geometry') instead of
+ * silently drifting from that part.
  */
 import type { SupportPoint } from '@mixo-geocore/host/core/analysis/types';
 import type { ZoneStamp } from '@mixo-geocore/host/core/supports/zones';

@@ -31,6 +31,7 @@ import { countSceneTriangles, countContainerTriangles, formatTriCount, displayed
 import { caps } from '../core/storage/capabilities.js';
 import { t } from '../i18n/index.js';
 import { canonicalObjectId, logicalObjectPartIds, isGroupId } from '../core/LogicalObjects.js';
+import { isSupportLayerMesh } from '../supports/layers/supportLayerTag.js';
 import { Hover } from '../core/Hover.js';
 import { repairWithOverlay } from './RepairFeedback.js';
 import { worldSizeOf } from '../core/scene/WorldExtents.js';
@@ -105,7 +106,7 @@ function _selectionMeshes(sel) {
       if (m) out.add(m);
     }
   }
-  return [...out];
+  return [...out].filter(m => !isSupportLayerMesh(m));   // D20
 }
 
 // M5: the counting itself lives in src/core/scene/TriangleCount.js so a core

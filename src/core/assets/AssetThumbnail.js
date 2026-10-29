@@ -8,6 +8,7 @@ import { SceneManager } from '../SceneManager.js';
 import { getContainer } from './MeshRegistry.js';
 import { withRenderLock } from '../render/RenderLock.js';
 import { renderPng } from '../render/FrameCapture.js';
+import { isSupportLayerMesh } from '../../supports/layers/supportLayerTag.js';
 
 const BABYLON = window.BABYLON;
 
@@ -84,6 +85,7 @@ async function _renderThumbnail(meshes) {
   // screenshot. The thumb camera's layerMask is THUMB_LAYER alone, so it sees
   // only these meshes; the default main-camera mask still matches their other bits.
   const prevMasks = new Map();
+  for (const m of visibleSet) if (isSupportLayerMesh(m)) visibleSet.delete(m);   // D20
   for (const m of visibleSet) { prevMasks.set(m, m.layerMask); m.layerMask = m.layerMask | THUMB_LAYER; }
 
   let dataUrl;
