@@ -83,9 +83,25 @@ function _wireGizmoObservers() {
   }
 }
 
+// Babylon centres each plane square on the pivot, hidden under the arrow bases
+// and overlapping the other two. Slide each into its own plane corner (local
+// to the gizmo root, so it follows screen-constant scale and world/local space).
+const PLANE_HANDLE_OFFSET = 0.05;
+function _enablePlaneHandles(pos) {
+  if (!pos) return;
+  pos.planarGizmoEnabled = true;
+  const o = PLANE_HANDLE_OFFSET;
+  const layout = [[pos.xPlaneGizmo, [0, o, o]], [pos.yPlaneGizmo, [o, 0, o]], [pos.zPlaneGizmo, [o, o, 0]]];
+  for (const [g, [x, y, z]] of layout) g?._gizmoMesh?.position.set(x, y, z);
+}
+
 function _enabledGizmoChanged() {
   // Babylon recreates the sub-gizmos when modes toggle. Re-attach observers.
   _wireGizmoObservers();
+  // P6.1: XY / YZ / XZ plane squares on the move gizmo. Their drags feed the
+  // same positionGizmo drag observables, so one drag = one undo step; snap
+  // (snapDistance) and space (updateGizmoRotationToMatchAttachedMesh) apply too.
+  _enablePlaneHandles(_gizmos.gizmos.positionGizmo);
   _applyGizmoSnap();
   _applyGizmoScale();
 }
@@ -412,6 +428,11 @@ export function suspendGizmo() {
     done = true;
     if (!_viewOnly && _pivotNode) _gizmos?.attachToMesh(_pivotNode);
   };
+}
+
+/** The Babylon GizmoManager (handle geometry lookup for browser smokes). */
+export function getGizmoManager() {
+  return _gizmos;
 }
 
 /** The live pivot TransformNode (null when nothing is attached). */
