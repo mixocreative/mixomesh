@@ -175,4 +175,50 @@ describe('SupportPanel', () => {
       expect(screen.queryByLabelText('Text')).toBeNull();
     });
   });
+
+  describe('Roof / cage (plan P5.5-P5.6)', () => {
+    const mode = (name: string) => fireEvent.click(within(screen.getByRole('group', { name: 'Structure' })).getByRole('button', { name }));
+    it('Off shows no roof or cage fields; Roof and Cage are one mode at a time', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      expect(record().settings.roofMode).toBe('OFF');
+      for (const label of ['Gap above model', 'Ring spacing', 'Column count']) expect(screen.queryByLabelText(label)).toBeNull();
+      mode('Roof');
+      expect(record().settings.roofMode).toBe('ROOF');
+      for (const label of ['Gap above model', 'Column count', 'Column diameter', 'Cross bar diameter', 'Roof braces', 'Roof brace diameter', 'Roof brace angle', 'Roof thickness']) {
+        expect(screen.getByLabelText(label)).toBeTruthy();
+      }
+      expect(screen.getByLabelText('Solid roof')).toBeTruthy();
+      expect(screen.queryByLabelText('Ring spacing')).toBeNull();
+      mode('Cage');
+      expect(record().settings.roofMode).toBe('CAGE');
+      for (const label of ['Gap to model', 'Height above model', 'Ring spacing', 'Ring diameter', 'Column count']) expect(screen.getByLabelText(label)).toBeTruthy();
+      expect(screen.queryByLabelText('Gap above model')).toBeNull();
+      expect(screen.queryByLabelText('Solid roof')).toBeNull();
+      mode('Off');
+      expect(screen.queryByLabelText('Column count')).toBeNull();
+    });
+    it('Roof values are clamped by the limits and an edit is one undo step; the mode seeds its defaults once', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      mode('Roof');
+      expect(record().settings).toMatchObject({ roofGap: 5, columnCount: 12, columnDiameter: 1.5, diagonalEnabled: true, braceAngle: 40, storeyFloorThickness: 1.5 });
+      commit('Gap above model', '500');
+      expect(record().settings.roofGap).toBe(100);
+      commit('Column count', '2.4');
+      expect(record().settings.columnCount).toBe(3);
+      commit('Roof brace angle', '120');
+      expect(record().settings.braceAngle).toBe(90);
+      fireEvent.click(screen.getByLabelText('Cross bars'));
+      expect(record().settings.diagonalEnabled).toBe(false);
+      expect(screen.queryByLabelText('Cross bar diameter')).toBeNull();
+      fireEvent.click(screen.getByLabelText('Solid roof'));
+      expect(record().settings.storeyEncloseCeiling).toBe(false);
+      act(() => undo());
+      expect(record().settings.storeyEncloseCeiling).toBe(true);
+      mode('Cage');
+      commit('Ring spacing', '1');
+      expect(record().settings.cagePitch).toBe(3);
+      mode('Roof');
+      expect(record().settings.roofGap).toBe(100); // not seeded a second time
+    });
+  });
 });

@@ -8,9 +8,12 @@
 //   t2 Brace: angle / spacing / min height / distance limit; on a model with a wall between two plates the
 //      pruning drops only the braces that cross it, the brace-pruned notice shows in the problem list and
 //      the verdict line, and the other braces stay (repair budget 3)
-//   The engine goldens (cube-overhang tree: 62 contacts, 7 trunks, 28 branches) are asserted by
-//   src/supports/features.test.ts on the same job path.
-//   screenshots: .tmp/p5a/
+//   t5 Roof / t6 Cage (P5.5-P5.6) on a 20 mm cube: the Off / Roof / Cage mode (one at a time), the fields of
+//      each, clamps, the drawn parts (columns, cross bars, roof slab + roof braces / cage rings) and the export
+//      containing them (facets = drawn build); back to Off removes them from both
+//   The engine goldens (cube-overhang tree: 62 contacts, 7 trunks, 28 branches; roof: 12 columns, 72 cross
+//   bars, 1 roof, 15 roof braces) are asserted by src/supports/features.test.ts on the same job path.
+//   screenshots: .tmp/p5a/ (t1-t4), .tmp/p5b/ (t5-t6)
 //
 //   node tests/browser-supports-features.mjs [--swiftshader]
 
@@ -19,6 +22,7 @@ import { join } from 'node:path';
 import { bootSupportApp, writeTorus, ROOT, sleep, waitFor } from './support-browser-kit.mjs';
 
 const OUT = join(ROOT, '.tmp/p5a');
+const OUT_B = join(ROOT, '.tmp/p5b');
 const SWIFT = process.argv.includes('--swiftshader');
 const failures = [];
 const check = (name, ok, detail = '') => {
@@ -233,6 +237,79 @@ try {
   const noBrace = await parts();
   const vn = await verdict();
   check('t2 Cross-braces off removes them and the notice', !('brace' in noBrace.parts) && !(vn?.fallbacks ?? []).includes('brace-pruned') && !(await hasField('Brace angle')), JSON.stringify(noBrace.parts));
+
+  // ───────── t5 Roof / t6 Cage on a 20 mm cube ─────────
+  const cubeUrl = '/tests/fixtures/support-plain-cube.glb';
+  const mode = async (name) => {
+    const before = await stamp();
+    const ok = await run(`(() => { const g = document.querySelector('[role=group][aria-label="Structure"]');
+      const b = g && [...g.querySelectorAll('button')].find(x => x.textContent.trim() === ${J(name)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
+    if (ok) { await waitFor(async () => (await stamp()) > before, 90000, `rebuild after mode ${name}`); await settle(); }
+    return ok;
+  };
+  const checkbox = async (label) => {
+    const before = await stamp();
+    const ok = await run(`(() => { const l = [...document.querySelectorAll('label.check')].find(x => x.textContent.trim() === ${J(label)}); const i = l?.querySelector('input'); if (!i || i.disabled) return false; i.click(); return true; })()`);
+    if (ok) { await waitFor(async () => (await stamp()) > before, 90000, `rebuild after ${label}`); await settle(); }
+    return ok;
+  };
+  const hasCheck = (label) => run(`[...document.querySelectorAll('label.check')].some(x => x.textContent.trim() === ${J(label)})`);
+  const wide = async (name) => {
+    await app.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1500, deviceScaleFactor: 1, mobile: false });
+    await sleep(800);
+    await app.pressButton('Fit view'); await sleep(900);
+    // Zoom out so the whole roof / cage shows around the model.
+    for (let i = 0; i < 6; i++) { await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 780, y: 640, deltaX: 0, deltaY: 120 }); await sleep(120); }
+    await sleep(600);
+    await app.shot(OUT_B, name);
+    await app.cdp.send('Emulation.clearDeviceMetricsOverride');
+    await sleep(400);
+  };
+  await fresh(cubeUrl, 'cube.glb');
+  const plain = await parts();
+  check('t5 Roof / cage is Off by default: no columns, roof or rings, no roof fields', !('column' in plain.parts) && !('roof' in plain.parts) && !('cage-ring' in plain.parts) && !(await hasField('Column count')), JSON.stringify(plain.parts));
+  check('t5 Roof mode button works', (await mode('Roof')) && (await rec()).settings.roofMode === 'ROOF');
+  const roof = await parts();
+  check('t5 Roof builds columns, cross bars, the roof slab and roof braces', roof.parts.column > 0 && roof.parts['cross-bar'] > 0 && roof.parts.roof > 0 && roof.parts['roof-brace'] > 0 && !('cage-ring' in roof.parts), JSON.stringify(roof.parts));
+  check('t5 Roof fields are there and the cage fields are not', (await hasField('Gap above model')) && (await hasField('Column count')) && (await hasField('Roof thickness')) && !(await hasField('Ring spacing')));
+  const roofExport = await exportFacets();
+  check('t5 the export contains the roof structure as part of the support object (facets = drawn build)', roofExport.facets === roof.total && roof.total > plain.total, `export ${roofExport.facets}, drawn ${roof.total}, without ${plain.total}`);
+  await setField('Gap above model', '500');
+  check('t5 roof gap is clamped to 100', (await rec()).settings.roofGap === 100, String((await rec()).settings.roofGap));
+  await setField('Gap above model', '8');
+  await setField('Column count', '8');
+  await setField('Column diameter', '2');
+  const r5 = (await rec()).settings;
+  check('t5 values reach the record', r5.roofGap === 8 && r5.columnCount === 8 && r5.columnDiameter === 2, J({ g: r5.roofGap, n: r5.columnCount, d: r5.columnDiameter }));
+  const roof8 = await parts();
+  check('t5 changing them rebuilds (8 columns)', roof8.sig.column !== roof.sig.column && roof8.parts.column < roof.parts.column, `${roof.parts.column} -> ${roof8.parts.column} column tris`);
+  check('t5 Cross bars off removes them', (await checkbox('Cross bars')) && !('cross-bar' in (await parts()).parts) && !(await hasField('Cross bar diameter')));
+  await checkbox('Cross bars');
+  check('t5 Solid roof off drops the slab and keeps the braces', (await checkbox('Solid roof')) && !('roof' in (await parts()).parts) && ('roof-brace' in (await parts()).parts));
+  await checkbox('Solid roof');
+  await wide('roof-cube.png');
+
+  check('t6 Cage mode replaces the roof (one mode at a time)', (await mode('Cage')) && (await rec()).settings.roofMode === 'CAGE');
+  const cage = await parts();
+  check('t6 Cage builds columns and rings, no roof slab or roof braces', cage.parts.column > 0 && cage.parts['cage-ring'] > 0 && !('roof' in cage.parts) && !('roof-brace' in cage.parts), JSON.stringify(cage.parts));
+  check('t6 Cage fields are there and the roof fields are not', (await hasField('Ring spacing')) && (await hasField('Gap to model')) && (await hasField('Height above model')) && !(await hasField('Gap above model')) && !(await hasField('Roof thickness')) && !(await hasCheck('Solid roof')));
+  const cageExport = await exportFacets();
+  check('t6 the export contains the cage (facets = drawn build)', cageExport.facets === cage.total, `export ${cageExport.facets}, drawn ${cage.total}`);
+  await setField('Ring spacing', '1');
+  check('t6 ring spacing is clamped to 3', (await rec()).settings.cagePitch === 3, String((await rec()).settings.cagePitch));
+  await setField('Ring spacing', '5');
+  const tight = await parts();
+  check('t6 a smaller pitch draws more rings', tight.parts['cage-ring'] > cage.parts['cage-ring'], `${cage.parts['cage-ring']} -> ${tight.parts['cage-ring']} ring tris`);
+  await setField('Gap to model', '8');
+  await setField('Height above model', '12');
+  const r6 = (await rec()).settings;
+  check('t6 side and top gaps reach the record', r6.cageSideGap === 8 && r6.cageTopGap === 12, J({ s: r6.cageSideGap, t: r6.cageTopGap }));
+  const v6 = await verdict();
+  check('t6 the engine finds no support crossing the model', v6?.status === 'clear', J(v6));
+  await wide('cage-cube.png');
+  const offBuild = (await mode('Off')) ? await parts() : null;
+  check('t6 Off removes the cage from the build and the export', !!offBuild && !('cage-ring' in offBuild.parts) && !('column' in offBuild.parts) && (await exportFacets()).facets === offBuild.total && !(await hasField('Column count')));
+  check('t6 back to Roof keeps the roof gap (the shared column values were seeded by the first Cage pick)', (await mode('Roof')) && (await rec()).settings.roofGap === 8 && (await rec()).settings.columnCount === 12);
 
   const issues = app.problems.filter((p) => !/Download the React DevTools/.test(p));
   check('no console errors or exceptions', issues.length === 0, issues.slice(0, 3).join(' | '));

@@ -116,6 +116,11 @@ const MODELS = [
   // P5: every structure feature on at once (Auto tree + cross-braces + raft + embossed label MIXO-1).
   { key: 'supcube', variant: 'full', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'],
     supportSettings: { scatterAutoTree: true, trussEnabled: true, raftEnabled: true, labelEnabled: true, labelText: 'MIXO-1' } },
+  // P5.5 / P5.6: the roof and the cage are part of the support object (columns, bars, slab / rings).
+  { key: 'supcube', variant: 'roof', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'],
+    supportSettings: { roofMode: 'ROOF' } },
+  { key: 'supcube', variant: 'cage', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'],
+    supportSettings: { roofMode: 'CAGE' } },
 ];
 
 /** Support Mode generation in the page (the panel's Generate), then Support Mode closed again. */
@@ -268,10 +273,12 @@ function supportChecksFor(model, format, facts, prusa) {
       add('supports.outward', 'positive signed volume', sup.signedVolume, sup.signedVolume > 0);
       if (modelPart) {
         const z = modelPart.min[2];
+        // A roof or cage (P5.5-P5.6) stands on the raft and rises above the model, so the supports end over its top instead.
+        const structure = ['ROOF', 'CAGE'].includes(model.supportSettings?.roofMode);
         // The raft flares past the model and carries the label pad on one corner (P5), so the supports' footprint
         // covers the model's footprint rather than matching its centre.
-        add('supports.under', `ending at the model bottom (z ${z.toFixed(3)}), starting ${truth.lift} mm under it, under the whole model footprint`, box(sup),
-          near(sup.min[2], z - truth.lift, 0.05) && sup.max[2] <= z + 0.5 && sup.max[2] >= z - 0.5
+        add('supports.under', `ending at the model bottom (z ${z.toFixed(3)}), starting ${truth.lift} mm under it, under the whole model footprint${structure ? ' and a roof / cage above it' : ''}`, box(sup),
+          near(sup.min[2], z - truth.lift, 0.05) && (structure ? sup.max[2] > modelPart.max[2] : sup.max[2] <= z + 0.5 && sup.max[2] >= z - 0.5)
           && [0, 1].every(k => sup.min[k] <= modelPart.min[k] + 0.05 && sup.max[k] >= modelPart.max[k] - 0.05));
       }
     }

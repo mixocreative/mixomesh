@@ -6,8 +6,8 @@
  * Select customised; every other field stays object-wide.
  */
 import { useState, type ReactNode } from 'react';
-import { settingLimits, type LiveSupportSettings, type PresetName, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
-import { Button, NumberField, Section, Segmented, TextField, Toggle, useToasts } from '../../kit/index.ts';
+import { settingLimits, type LiveSupportSettings, type PresetName, type RoofMode, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
+import { Button, Check, NumberField, Section, Segmented, TextField, Toggle, useToasts } from '../../kit/index.ts';
 import { useStore, useT } from '../../react/index.ts';
 import { EVENTS } from '../../core/events.js';
 import { labelTextFor, sanitizeLabel } from '../../supports/label';
@@ -23,13 +23,17 @@ type When = (s: LiveSupportSettings) => boolean;
 
 type ToggleKey = 'scatterAutoTree' | 'trussEnabled' | 'raftEnabled' | 'labelEnabled';
 
-interface NumberDef { kind: 'number'; key: NumberKey; label: string; unit: 'mm' | 'deg' | '%'; step: number; when?: When }
+interface NumberDef { kind: 'number'; key: NumberKey; label: string; unit?: 'mm' | 'deg' | '%'; step: number; when?: When }
 interface ChoiceDef { kind: 'choice'; key: ChoiceKey; label: string; options: readonly { value: string; label: string }[] }
 /** A feature switch (D12: a feature is a toggle button). */
 interface ToggleDef { kind: 'toggle'; key: ToggleKey; label: string; hint: string }
 /** The raft label text (A-Z 0-9 -, 8 characters). */
 interface TextDef { kind: 'text'; key: 'labelText'; label: string; when?: When }
-type FieldDef = NumberDef | ChoiceDef | ToggleDef | TextDef;
+/** A sub-option of the roof / cage (D12: a sub-option is a checkbox). */
+interface CheckDef { kind: 'check'; key: 'diagonalEnabled' | 'storeyEncloseCeiling'; label: string; hint: string; when?: When }
+/** Off / Roof / Cage: one mode at a time (the engine's single `roofMode`). */
+interface ModeDef { kind: 'roofMode'; label: string }
+type FieldDef = NumberDef | ChoiceDef | ToggleDef | TextDef | CheckDef | ModeDef;
 
 const mm = (key: NumberKey, label: string, step: number, when?: When): NumberDef => ({ kind: 'number', key, label, unit: 'mm', step, ...(when ? { when } : {}) });
 const sphere: When = (s) => s.contactShape === 'SPHERE';
@@ -38,6 +42,10 @@ const treeOn: When = (s) => s.scatterAutoTree;
 const braceOn: When = (s) => s.trussEnabled;
 const raftOn: When = (s) => s.raftEnabled;
 const labelOn: When = (s) => s.labelEnabled;
+const roofOn: When = (s) => s.roofMode === 'ROOF';
+const cageOn: When = (s) => s.roofMode === 'CAGE';
+const structureOn: When = (s) => s.roofMode !== 'OFF';
+const int = (key: NumberKey, label: string, when?: When): NumberDef => ({ kind: 'number', key, label, step: 1, ...(when ? { when } : {}) });
 
 /** Groups in panel order. Labels are locale keys. */
 export const GROUPS: readonly { id: string; title: string; fields: readonly FieldDef[] }[] = [
@@ -100,6 +108,26 @@ export const GROUPS: readonly { id: string; title: string; fields: readonly Fiel
       mm('labelHeight', 'supportPanel.labelHeight', 0.1, labelOn),
     ],
   },
+  {
+    // Roof and Cage are one engine mode (`roofMode`): never both. The columns are shared, so they sit under the mode.
+    id: 'roof', title: 'supportPanel.group.roof', fields: [
+      { kind: 'roofMode', label: 'supportPanel.roofMode' },
+      mm('roofGap', 'supportPanel.roofGap', 0.5, roofOn),
+      mm('cageSideGap', 'supportPanel.cageSideGap', 0.5, cageOn),
+      mm('cageTopGap', 'supportPanel.cageTopGap', 0.5, cageOn),
+      mm('cagePitch', 'supportPanel.cagePitch', 0.5, cageOn),
+      mm('cageRingDiameter', 'supportPanel.cageRingDiameter', 0.1, cageOn),
+      int('columnCount', 'supportPanel.columnCount', structureOn),
+      mm('columnDiameter', 'supportPanel.columnDiameter', 0.1, structureOn),
+      { kind: 'check', key: 'diagonalEnabled', label: 'supportPanel.crossBars', hint: 'supportPanel.crossBarsHint', when: structureOn },
+      mm('diagonalDiameter', 'supportPanel.crossBarDiameter', 0.1, (s) => structureOn(s) && s.diagonalEnabled),
+      int('braceConcentric', 'supportPanel.roofBraces', roofOn),
+      mm('braceThickness', 'supportPanel.roofBraceDiameter', 0.1, roofOn),
+      deg('braceAngle', 'supportPanel.roofBraceAngle', 1, roofOn),
+      mm('storeyFloorThickness', 'supportPanel.roofThickness', 0.1, roofOn),
+      { kind: 'check', key: 'storeyEncloseCeiling', label: 'supportPanel.solidRoof', hint: 'supportPanel.solidRoofHint', when: roofOn },
+    ],
+  },
 ];
 
 /** A kit Section that keeps its own open / closed state. */
@@ -108,12 +136,13 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   return <Section title={title} collapsed={collapsed} onCollapsedChange={setCollapsed}>{children}</Section>;
 }
 
+const ROOF_MODES: readonly RoofMode[] = ['OFF', 'ROOF', 'CAGE'];
 const PRESETS: readonly PresetName[] = ['LIGHT', 'MIDDLE', 'HEAVY'];
 const CHOICES = { contactShape: ['NONE', 'SPHERE'], tipSection: ['ROUND', 'SQUARE', 'CROSS'] } as const;
 
 /** A field with a rule shows when the rule holds for the settings, or for any value a mixed choice could take. */
 function shown(field: FieldDef, scope: ShapeScope): boolean {
-  if (field.kind === 'text') return field.when?.(scope.settings) ?? true;
+  if (field.kind === 'text' || field.kind === 'check') return field.when?.(scope.settings) ?? true;
   if (field.kind !== 'number' || !field.when) return true;
   let variants: LiveSupportSettings[] = [scope.settings];
   for (const key of ['contactShape', 'tipSection'] as const) {
@@ -148,6 +177,24 @@ export function SupportPanel({ objectId }: { objectId: string | undefined }) {
             onChange={(on) => edit(field.key, on)}>
             {tt(settings[field.key] ? 'supportPanel.on' : 'supportPanel.off')}
           </Toggle>
+        </div>
+      );
+    }
+    if (field.kind === 'roofMode') {
+      return (
+        <div key="roofMode" className="field-row">
+          <label>{tt(field.label)}</label>
+          <Segmented<string> label={tt(field.label)} value={settings.roofMode} disabled={disabled}
+            options={ROOF_MODES.map((m) => ({ value: m, label: tt(`supportPanel.roof.${m}`), title: tt(`supportPanel.roofHint.${m}`) }))}
+            onChange={(v) => edit('roofMode', v as RoofMode)} />
+        </div>
+      );
+    }
+    if (field.kind === 'check') {
+      return (
+        <div key={field.key} className="field-row">
+          <Check checked={settings[field.key]} disabled={disabled} title={tt(field.hint)} label={tt(field.label)}
+            onChange={(on) => edit(field.key, on)} />
         </div>
       );
     }

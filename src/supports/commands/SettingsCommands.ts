@@ -4,7 +4,7 @@
  * the current settings (`applyPreset`). A lift change is a settings change; the caller batches it
  * with `LiftForSupportsCommand` (P3 lift decision).
  */
-import { applyPreset, updateSetting, type LiveSupportSettings, type PresetName, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
+import { applyPreset, setRoofMode, updateSetting, type LiveSupportSettings, type PresetName, type RoofMode, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
 import { t } from '../../i18n/index.js';
 import type { ObjectSupports } from '../model';
 import { SupportEditCommand } from './SupportEditCommand';
@@ -21,7 +21,10 @@ export class ChangeSettingsCommand extends SupportEditCommand {
 
   protected transition(prev: ObjectSupports): ObjectSupports {
     let settings = prev.settings;
-    for (const key of Object.keys(this.patch) as SettingKey[]) settings = updateSetting(settings, key, this.patch[key] as never);
+    for (const key of Object.keys(this.patch) as SettingKey[]) {
+      // Roof / Cage seed their own defaults the first time a mode is picked (`setRoofMode`), then keep the user's values.
+      settings = key === 'roofMode' ? setRoofMode(settings, this.patch.roofMode as RoofMode) : updateSetting(settings, key, this.patch[key] as never);
+    }
     return { ...prev, settings };
   }
 }

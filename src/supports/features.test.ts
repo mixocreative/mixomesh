@@ -7,13 +7,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { configureGeometry, geometryReady } from '@mixo-geocore/host/workers/geometryClient';
 import { placeGeneric } from '@mixo-geocore/host/supports/genericPlacement';
 import { runSupportJob } from '@mixo-geocore/host/supports/jobRunner';
-import { defaultSupportSettings, presetValues, toPlacementSettings, updateSetting, type LiveSupportSettings, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
+import { defaultSupportSettings, presetValues, setRoofMode, toPlacementSettings, updateSetting, type LiveSupportSettings, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
 import type { TriangleMesh } from '@mixo-geocore/host/core/analysis/types';
 import { emptySupports } from './model';
 import { buildJob, REPAIR_BUDGET } from './live/jobInputs';
 import { tipCount, toLocal } from './supportJob';
 import golden from '../../tests/fixtures/support-golden-cube-overhang.json';
-import { cubeOverhang } from '../../tests/fixtures/support-cubes.mjs';
+import { cubeOverhang, seamCube } from '../../tests/fixtures/support-cubes.mjs';
 
 const VENDOR = fileURLToPath(new URL('../../public/vendor/mixo-geocore/', import.meta.url));
 
@@ -40,7 +40,7 @@ function build(mesh: TriangleMesh, settings: LiveSupportSettings, name = 'Test p
   const record = { ...emptySupports(settings), settings };
   const inputs = { points: placement.points, manual: [], deleted: placement.points.filter((p) => !keep(p.position)).map((p) => p.id), zones: [], contactSettings: {} };
   const job = { ...buildJob(model, record, inputs, name), repairBudget: budget };
-  return { placement, job, built: runSupportJob(job, undefined, 1) };
+  return { placement, job, model, built: runSupportJob(job, undefined, 1) };
 }
 
 /** Two floating plates either side of a wall that stands on the bed: braces between their pillars cross the wall. */
@@ -149,5 +149,111 @@ describe('P5.4 label', () => {
     expect(build(cubeOverhang(), set(base(), { labelEnabled: false })).built.parts).not.toContain('label');
     const tri = (text: string) => sig(build(cubeOverhang(), set(base(), { labelText: text })).built);
     expect(tri('AB')).not.toBe(tri('W-W-W-W'));
+  });
+});
+
+const perPartOf = (b: ReturnType<typeof build>['built']) => b.components.reduce<Record<string, number>>((a, c) => ((a[c.part] = (a[c.part] ?? 0) + 1), a), {});
+
+describe('P5.5 roof (golden cube-overhang roof variant)', () => {
+  const roofBase = () => set(setRoofMode(base(), 'ROOF'), { labelText: 'A' }); // the golden's label text
+  it('roof on, the golden policy: placement, triangle count and part counts as the golden', () => {
+    const { placement, built } = build(cubeOverhang(), roofBase(), 'Cube', undefined, 0);
+    expect(placement.points.length).toBe(golden.placementPoints);
+    // mixo-geocore goldens/__snapshots__/cube-overhang.roof.json: 24852 triangles; per part neck 70, pillar 140,
+    // foot 70, brace 28, raft 65, label 2, column 12, cross-bar 72, roof 1, roof-brace 15.
+    expect(Math.abs(built.indices.length / 3 - 24852)).toBeLessThan(24852 * 0.01); // the 1 um snap of toLocal moves a few facets
+    expect(perPartOf(built)).toEqual({ neck: 70, pillar: 140, foot: 70, brace: 28, raft: 65, label: 2, column: 12, 'cross-bar': 72, roof: 1, 'roof-brace': 15 });
+    expect([...built.parts].sort()).toEqual(['brace', 'column', 'cross-bar', 'foot', 'label', 'neck', 'pillar', 'raft', 'roof', 'roof-brace']);
+    expect(built.verdict?.status).toBe('clear');
+  });
+  it('roof off: none of its parts; the roof is part of the one support mesh (what the export writes)', () => {
+    const off = build(cubeOverhang(), base()).built;
+    for (const part of ['column', 'cross-bar', 'roof', 'roof-brace', 'cage-ring']) expect(off.parts).not.toContain(part);
+    const { built: on, model } = build(cubeOverhang(), roofBase());
+    expect(on.indices.length).toBeGreaterThan(off.indices.length);
+    // The roof slab lies above the model top (lift + 10 mm + roof gap), the columns reach it.
+    const topOf = (part: string) => {
+      let top = -Infinity;
+      for (const c of on.components) if (c.part === part) for (let i = c.start; i < c.start + c.count; i++) top = Math.max(top, on.positions[on.indices[i]! * 3 + 1]! + model.center[1]);
+      return top;
+    };
+    const expected = 5 + 10 + roofBase().roofGap - 0.01; // lift + model height + roof gap (the slab adds its thickness)
+    expect(topOf('roof')).toBeGreaterThan(expected);
+    expect(topOf('column')).toBeGreaterThanOrEqual(expected);
+  });
+  it('every roof setting reaches the engine (the mesh changes)', () => {
+    const run = (patch: Partial<Record<SettingKey, unknown>>, from = roofBase()) => sig(build(cubeOverhang(), set(from, patch)).built);
+    const a = run({});
+    for (const patch of [{ roofGap: 9 }, { columnCount: 8 }, { columnDiameter: 3 }, { diagonalEnabled: false }, { diagonalDiameter: 2 }, { braceConcentric: 1 }, { braceThickness: 2 },
+      { storeyFloorThickness: 3 }, { storeyEncloseCeiling: false }]) {
+      expect(run(patch), JSON.stringify(patch)).not.toBe(a);
+    }
+    // The brace slope is limited by the roof gap (the engine keeps the braces inside the gap), so it shows with a tall gap.
+    const tall = set(roofBase(), { roofGap: 40 });
+    expect(run({ braceAngle: 15 }, tall)).not.toBe(run({ braceAngle: 40 }, tall));
+  });
+});
+
+describe('P5.6 cage (no golden: deterministic counts and bounds on a 20 mm cube)', () => {
+  const cube = () => seamCube({ split: false });
+  const cageBase = () => setRoofMode(base(), 'CAGE');
+  /** Highest vertex y of every cage ring, sorted; and how far the ring vertices stand outside the cube's footprint. */
+  function rings(b: ReturnType<typeof build>['built'], centreY: number) {
+    const levels: number[] = [];
+    let nearest = Infinity;
+    for (const c of b.components) {
+      if (c.part !== 'cage-ring') continue;
+      let top = -Infinity;
+      for (let i = c.start; i < c.start + c.count; i++) {
+        const v = b.indices[i]! * 3;
+        top = Math.max(top, b.positions[v + 1]! + centreY);
+        nearest = Math.min(nearest, Math.hypot(Math.max(Math.abs(b.positions[v]!) - 10, 0), Math.max(Math.abs(b.positions[v + 2]!) - 10, 0)));
+      }
+      levels.push(top);
+    }
+    return { levels: levels.sort((x, y) => x - y), nearest };
+  }
+  it('rings = ceil((model top + top gap) / pitch), one per pitch, columns around the raft, clear of the model', () => {
+    const s = cageBase();
+    expect(s).toMatchObject({ cagePitch: 10, cageTopGap: 5, cageSideGap: 4, columnCount: 12 });
+    const { built, model } = build(cube(), s, 'Cube');
+    const top = s.liftHeight + 20;
+    const per = perPartOf(built);
+    expect(per['cage-ring']).toBe(Math.ceil((top + s.cageTopGap) / s.cagePitch));
+    expect(per.column).toBe(12);
+    expect(built.parts).not.toContain('roof');
+    expect(built.parts).not.toContain('roof-brace');
+    const { levels, nearest } = rings(built, model.center[1]);
+    // Ring k sits at k * pitch (plus its radius at the top of the tube); the top ring is at least the top gap above the model.
+    levels.forEach((y, k) => expect(y).toBeCloseTo((k + 1) * s.cagePitch + s.cageRingDiameter / 2, 1));
+    expect(levels.at(-1)! - s.cageRingDiameter / 2).toBeGreaterThanOrEqual(top + s.cageTopGap - 0.01);
+    // The cage stands at least the side gap outside the model outline.
+    expect(nearest).toBeGreaterThanOrEqual(s.cageSideGap);
+    // The engine's own body-clearance verdict: nothing of the support mesh crosses the model.
+    expect(built.verdict?.status).toBe('clear');
+  });
+  it('pitch, top gap and side gap change the ring count and distances; still clear', () => {
+    const s = cageBase();
+    const ringsFor = (patch: Partial<Record<SettingKey, unknown>>) => { const { built: b, model } = build(cube(), set(s, patch), 'Cube'); return { n: perPartOf(b)['cage-ring'], r: rings(b, model.center[1]), v: b.verdict?.status }; };
+    expect(ringsFor({ cagePitch: 7 }).n).toBe(Math.ceil(30 / 7));
+    expect(ringsFor({ cageTopGap: 20 }).n).toBe(Math.ceil(45 / 10));
+    const wide = ringsFor({ cageSideGap: 9 });
+    expect(wide.r.nearest).toBeGreaterThanOrEqual(9);
+    expect(wide.v).toBe('clear');
+    const b8 = build(cube(), set(s, { columnCount: 8, diagonalEnabled: false }), 'Cube').built;
+    expect(perPartOf(b8).column).toBe(8);
+    expect(b8.parts).not.toContain('cross-bar');
+  });
+  it('Roof and Cage are one mode: picking one drops the other, and each keeps its own values', () => {
+    const roof = updateSetting(setRoofMode(base(), 'ROOF'), 'roofGap', 12);
+    const cage = setRoofMode(roof, 'CAGE');
+    expect(cage.roofMode).toBe('CAGE');
+    expect(cage).toMatchObject({ columnDiameter: 1.2, roofGap: 12 }); // the cage seeds its column diameter, the roof gap stays
+    const parts = build(cube(), cage, 'Cube').built.parts;
+    expect(parts).toContain('cage-ring');
+    expect(parts).not.toContain('roof');
+    const back = setRoofMode(updateSetting(cage, 'columnDiameter', 2), 'ROOF');
+    expect(back).toMatchObject({ roofMode: 'ROOF', roofGap: 12, columnDiameter: 2 }); // not re-seeded
+    expect(build(cube(), setRoofMode(back, 'OFF'), 'Cube').built.parts).not.toContain('column');
   });
 });
