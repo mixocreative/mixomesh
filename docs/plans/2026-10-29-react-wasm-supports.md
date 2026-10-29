@@ -473,7 +473,10 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
   face it lands; never drop a sample because one facet is thin; (2) segment faces into near-planar
   patches (normal tolerance) and detect ridges / hard edges between patches by patch mean normals,
   so a turn spread over many facets counts once; anchors and `hard_edges` share it, so dental and
-  generic gain it together. (3) Placement must be stable under sub-micron input noise: P2.2 measured 54 vs 62 tips
+  generic gain it together. A gradual edge = a turn of at least the ridge / hard-edge angle completed within a surface
+  distance W (max bevel width, default ~2.5 mm, a setting); smooth large-radius curvature (domes, blobs, wide fillets) is
+  not an edge. Tests: 1/2 mm bevels detected; 10 mm-radius fillet, sphere and 0.02 mm jitter on a flat region not detected.
+  (3) Placement must be stable under sub-micron input noise: P2.2 measured 54 vs 62 tips
   for the same cube when world coordinates carried ~1e-4 mm float32 noise (mixomesh now snaps its input to 1 µm in
   `supportJob.ts toLocal`; the engine should quantise internally so every app is safe). *Depends: PE.5b (starts right after it; it does not need P5.11).*
   **Done when** the probe shows ≥ 80% of the sharp box's edge points along the bevelled boxes'
