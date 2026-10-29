@@ -28,4 +28,12 @@ import('./boot.ts').catch(err => {
 });
 
 // Offline/install support (task 8.7): hosted https build only, see pwa.js.
-registerServiceWorker();
+// A waiting worker (PW.2) surfaces as a clickable kit Toast; the UI modules load lazily so a
+// blocked toast never delays boot.
+registerServiceWorker({
+  onUpdate: (apply) => {
+    Promise.all([import('../ui/Toast.js'), import('../i18n/index.js')])
+      .then(([{ Toast }, { t }]) => Toast.show(t('pwa.updateAvailable'), 'info', 0, { onClick: apply }))
+      .catch(err => console.warn('MIXOMESH update notice failed:', err));
+  },
+});

@@ -151,6 +151,32 @@ async function init() {
     lane: externalLane,
   });
   await _runner.init();
+  _wireLaunchQueue(_runner);
 }
 
-export const LaunchRequests = { init, createLaunchRunner };
+/**
+ * Installed web app (PW.2): files opened through the OS file association arrive on
+ * `window.launchQueue` as FileSystemFileHandles. They become a normal batch (handles are
+ * the web adapter's refs, `storage.readFile(handle)` = `handle.getFile()`), so they take
+ * the same lane, busy-wait, dirty-confirm and error toast as desktop launch args.
+ */
+function _wireLaunchQueue(runner) {
+  const queue = globalThis.launchQueue;
+  if (!queue || typeof queue.setConsumer !== 'function' || globalThis.electronAPI) return;
+  queue.setConsumer(params => {
+    const batch = batchFromLaunchFiles(params?.files);
+    if (batch) runner.handle(batch);
+  });
+}
+
+/** @returns {{items:Array<{kind:string, ref:any, name:string}>, library:null, errors:[]}|null} */
+export function batchFromLaunchFiles(files) {
+  const items = (files ?? []).filter(h => h && h.kind === 'file').map(h => ({
+    kind: /\.mixo$/i.test(h.name ?? '') ? 'project' : 'import',
+    ref: h,
+    name: String(h.name ?? ''),
+  }));
+  return items.length ? { items, library: null, errors: [] } : null;
+}
+
+export const LaunchRequests = { init, createLaunchRunner, batchFromLaunchFiles };

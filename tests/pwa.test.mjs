@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import { shouldRegisterServiceWorker } from '../src/app/pwa.js';
+import { batchFromLaunchFiles } from '../src/core/LaunchRequests.js';
 
 const root = new URL('../', import.meta.url);
 const read = p => readFileSync(new URL(p, root), 'utf8');
@@ -30,7 +31,7 @@ test('index.html links manifest, touch icon and standalone meta', () => {
   assert.ok(existsSync(new URL('public/icons/apple-touch-icon.png', root)));
 });
 
-test('sw.js parses and precaches vendor + env files that exist', () => {
+test('sw.js parses; shell is stamped per build, vendor wasm is runtime-cached', () => {
   const src = read('public/sw.js');
   const listeners = {};
   const ctx = {
@@ -38,17 +39,27 @@ test('sw.js parses and precaches vendor + env files that exist', () => {
     caches: {}, fetch() {}, URL,
   };
   vm.runInNewContext(src, ctx); // parses + registers handlers without throwing
-  assert.deepEqual(Object.keys(listeners).sort(), ['activate', 'fetch', 'install']);
-  const list = /const PRECACHE = \[([\s\S]*?)\];/.exec(src)[1].match(/'([^']+)'/g).map(s => s.slice(1, -1));
-  for (const need of ['./vendor/manifold-3d/manifold.wasm', './vendor/meshfix/mesh-fix-core.wasm',
-    './vendor/meshfix/mesh-fix-lib.js', './env/studio.env', './env/neutral.env', './env/outdoor.env']) {
-    assert.ok(list.includes(need), need);
-  }
-  for (const u of list.filter(u => u !== './')) {
-    assert.ok(existsSync(new URL(`public/${u.slice(2)}`, root)), `precache file missing: ${u}`);
-  }
-  assert.match(src, /CACHE_VERSION/);
+  assert.deepEqual(Object.keys(listeners).sort(), ['activate', 'fetch', 'install', 'message']);
+  assert.match(src, /__BUILD_ID__/);          // stamped by vite.config.ts serviceWorkerVersion()
+  assert.match(src, /\/\*__BUILD_ASSETS__\*\/ \[\]/);
+  assert.doesNotMatch(src.match(/const PRECACHE = [^;]*;/)[0], /vendor/); // runtime-cached
+  assert.match(src, /SKIP_WAITING/);
+  assert.doesNotMatch(src.match(/addEventListener\('install'[\s\S]*?\n\}\);/)[0], /skipWaiting/); // a new worker WAITS for the update toast
   assert.match(src, /caches\.delete/);
+});
+
+test('manifest declares file handlers for every importable type', () => {
+  const m = JSON.parse(read('public/manifest.webmanifest'));
+  const exts = Object.values(m.file_handlers[0].accept).flat();
+  for (const e of ['.stl', '.3mf', '.obj', '.glb', '.gltf', '.mixo']) assert.ok(exts.includes(e), e);
+});
+
+test('launchQueue handles become a launch batch (.mixo = project, rest = import)', () => {
+  const h = name => ({ kind: 'file', name });
+  const batch = batchFromLaunchFiles([h('a.STL'), h('p.mixo'), { kind: 'directory', name: 'd' }]);
+  assert.deepEqual(batch.items.map(i => [i.kind, i.name]), [['import', 'a.STL'], ['project', 'p.mixo']]);
+  assert.equal(batchFromLaunchFiles([]), null);
+  assert.equal(batchFromLaunchFiles(undefined), null);
 });
 
 test('registration predicate: hosted prod only, never Electron/file/dev', () => {

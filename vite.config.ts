@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'node:path';
+import { resolve, join, relative, sep } from 'node:path';
+import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -32,6 +33,47 @@ function reactRefreshCsp(): Plugin {
   };
 }
 
+
+/**
+ * PW.2: stamp dist/sw.js with the build's app-shell file list and a cache id
+ * derived from it (names + sizes; Vite's hashed asset names change with content).
+ * Skips sourcemaps, ./vendor/* (runtime-cached on first use) and sw.js itself.
+ * apply:'build' only; public/sw.js in dev keeps its placeholders (never registered).
+ */
+function serviceWorkerVersion(): Plugin {
+  let outDir = 'dist';
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full, out); else out.push(full);
+    }
+    return out;
+  };
+  return {
+    name: 'mixo-sw-version',
+    apply: 'build',
+    configResolved(cfg) { outDir = resolve(cfg.root, cfg.build.outDir); },
+    closeBundle: {
+      order: 'post',
+      handler() {
+        const swPath = join(outDir, 'sw.js');
+        if (!existsSync(swPath)) return;
+        const files = walk(outDir)
+          .map((f) => relative(outDir, f).split(sep).join('/'))
+          .filter((f) => f !== 'sw.js' && f !== 'index.html' && !f.endsWith('.map') && !f.startsWith('vendor/')
+            && !/^THIRD_PARTY|^NOTICES|\.txt$/i.test(f))
+          .sort();
+        const id = createHash('sha256').update(files.join('\n')).update(readFileSync(join(outDir, 'index.html'))).update(readFileSync(swPath)).digest('hex').slice(0, 12);
+        const list = JSON.stringify(files.map((f) => `./${f}`), null, 2);
+        const src = readFileSync(swPath, 'utf8')
+          .replace('__BUILD_ID__', id)
+          .replace('/*__BUILD_ASSETS__*/ []', list);
+        writeFileSync(swPath, src);
+      },
+    },
+  };
+}
+
 /** Vendored mixo-geocore packages (vendor/mixo-geocore, written by scripts/vendor-geometry.mjs). */
 export const GEOCORE_ALIAS = {
   '@mixo-geocore/host': resolve(PROJECT_ROOT, 'vendor/mixo-geocore/host'),
@@ -39,7 +81,7 @@ export const GEOCORE_ALIAS = {
 };
 
 export default defineConfig({
-  plugins: [react(), reactRefreshCsp()],
+  plugins: [react(), reactRefreshCsp(), serviceWorkerVersion()],
   resolve: { alias: GEOCORE_ALIAS },
   root: PROJECT_ROOT,
   appType: 'spa',

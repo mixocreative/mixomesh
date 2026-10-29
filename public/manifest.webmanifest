@@ -10,9 +10,54 @@
   "background_color": "#efe7d8",
   "theme_color": "#efe7d8",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "model/stl": [
+          ".stl"
+        ],
+        "model/3mf": [
+          ".3mf"
+        ],
+        "model/obj": [
+          ".obj"
+        ],
+        "model/gltf-binary": [
+          ".glb"
+        ],
+        "model/gltf+json": [
+          ".gltf"
+        ],
+        "application/x-mixomesh-project": [
+          ".mixo"
+        ]
+      }
+    }
   ]
 }

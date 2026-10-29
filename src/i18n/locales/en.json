@@ -1290,5 +1290,6 @@
   "supports.progress.writingStl": "Writing STL…",
   "supports.progress.samplingNormals": "Sampling surface normals…",
   "supports.progress.findingOverhangs": "Finding overhangs…",
-  "supports.progress.done": "Done"
+  "supports.progress.done": "Done",
+  "pwa.updateAvailable": "Update available — Reload"
 }

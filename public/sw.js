@@ -1,40 +1,34 @@
-// MIXOMESH service worker (task 8.7). Hosted web build only (see src/app/pwa.js).
+// MIXOMESH service worker (tasks 8.7, PW.2). Hosted web build only (see src/app/pwa.js).
 // Strategy:
-//  - index.html / navigations: network-first, cached copy when offline.
-//  - everything else same-origin GET (hashed ./assets/*, vendored WASM, HDRI
-//    env, icons, manifest): cache-first, filled on first use. Hashed build
-//    names are immutable, so cache-first is safe; vendor/env change only with
-//    a CACHE_VERSION bump.
-// Bump CACHE_VERSION whenever vendored files change; old caches are deleted.
+//  - app shell (index.html, hashed ./assets/*, fonts, icons, env, manifest): PRECACHED at
+//    install. vite.config.ts (serviceWorkerVersion) rewrites BUILD_ID and BUILD_ASSETS at build time, so the
+//    cache name changes whenever the shipped file list changes (hashed names make that every
+//    content change) and the previous cache is deleted on activate.
+//  - navigations: network-first, cached shell when offline.
+//  - ./vendor/* (large WASM) and everything else same-origin GET: cache-first, filled on first use.
+//  - cross-origin requests are never touched.
+//  - a new worker WAITS; the page asks it to take over (SKIP_WAITING) from the update toast.
 
-const CACHE_VERSION = 'v2';
-const CACHE = `mixomesh-${CACHE_VERSION}`;
+const BUILD_ID = '__BUILD_ID__';
+const BUILD_ASSETS = /*__BUILD_ASSETS__*/ [];
+const CACHE = `mixomesh-${BUILD_ID}`;
 
-const PRECACHE = [
-  './',
-  './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/apple-touch-icon.png',
-  './vendor/manifold-3d/manifold.js',
-  './vendor/manifold-3d/manifold.wasm',
-  './vendor/draco/draco_wasm_wrapper_gltf.js',
-  './vendor/draco/draco_decoder_gltf.wasm',
-  './vendor/meshfix/mesh-fix-core.js',
-  './vendor/meshfix/mesh-fix-core.wasm',
-  './vendor/meshfix/mesh-fix-lib.js',
-  './env/neutral.env',
-  './env/outdoor.env',
-  './env/studio.env',
-];
+// Precache entries are added without an Origin header; module scripts request WITH one, so a
+// server's `Vary: Origin` (vite preview, CORS middleware) would otherwise miss every hit.
+const MATCH = { ignoreVary: true };
+
+const PRECACHE = ['./', './manifest.webmanifest', ...BUILD_ASSETS];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE)
       // Tolerate a missing optional file: one 404 must not block install.
-      .then(cache => Promise.allSettled(PRECACHE.map(url => cache.add(url))))
-      .then(() => self.skipWaiting()),
+      .then(cache => Promise.allSettled(PRECACHE.map(url => cache.add(url)))),
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
@@ -54,7 +48,7 @@ async function networkFirst(request) {
     if (response.ok) cache.put(request, response.clone());
     return response;
   } catch (err) {
-    const hit = (await cache.match(request)) || (await cache.match('./'));
+    const hit = (await cache.match(request, MATCH)) || (await cache.match('./', MATCH));
     if (hit) return hit;
     throw err;
   }
@@ -62,7 +56,7 @@ async function networkFirst(request) {
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE);
-  const hit = await cache.match(request);
+  const hit = await cache.match(request, MATCH);
   if (hit) return hit;
   const response = await fetch(request);
   if (response.ok && response.status === 200) cache.put(request, response.clone());

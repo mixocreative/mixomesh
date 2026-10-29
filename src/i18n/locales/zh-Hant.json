@@ -1290,5 +1290,6 @@
   "supports.progress.writingStl": "寫入 STL…",
   "supports.progress.samplingNormals": "表面法線取樣中…",
   "supports.progress.findingOverhangs": "尋找懸空區域…",
-  "supports.progress.done": "完成"
+  "supports.progress.done": "完成",
+  "pwa.updateAvailable": "有可用的更新 — 重新載入"
 }

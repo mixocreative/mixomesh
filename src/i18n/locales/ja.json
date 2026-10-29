@@ -1290,5 +1290,6 @@
   "supports.progress.writingStl": "STL書き出し中…",
   "supports.progress.samplingNormals": "表面法線のサンプリング中…",
   "supports.progress.findingOverhangs": "オーバーハング検出中…",
-  "supports.progress.done": "完了"
+  "supports.progress.done": "完了",
+  "pwa.updateAvailable": "アップデートがあります — 再読み込み"
 }
