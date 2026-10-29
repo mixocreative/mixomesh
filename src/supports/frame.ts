@@ -13,7 +13,7 @@
  * directions, is: swap indices 1<->2 of every triangle when the Babylon side is clockwise-front,
  * keep them when it is counter-clockwise-front. Engine meshes are counter-clockwise-outward in a
  * right-handed frame (positive signed volume). Verified empirically, not by this reasoning
- * (tests/browser-support-spike.mjs: signed volumes + trimesh + cull on/off screenshots).
+ * (`SPIKE=supports node scripts/ui-screenshot.mjs .tmp/p21`: signed volumes, trimesh, cull on/off).
  *
  * Also the geometry-only weld: mixomesh splits textured meshes at UV / colour seams, and the engine
  * keys edges by vertex index, so the copy sent to the engine is welded by position (UVs dropped).
