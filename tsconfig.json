@@ -18,7 +18,7 @@
     "paths": {
       "@mixo-geocore/host/*": ["./vendor/mixo-geocore/host/*"],
       "@mixo-geocore/editing/*": ["./vendor/mixo-geocore/editing/*"],
-      "@mixo-geocore/engine": ["./public/vendor/mixo-geometry/mixo_geometry_wasm.js"]
+      "@mixo-geocore/engine": ["./public/vendor/mixo-geocore/mixo_geometry_wasm.js"]
     },
     "noUnusedLocals": true,
     "noUnusedParameters": true,

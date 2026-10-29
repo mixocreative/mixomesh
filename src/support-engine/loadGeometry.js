@@ -1,12 +1,12 @@
 // App glue for the shared engine (mixo-geocore). The version-checked loader and the engine file
 // names live in the vendored host package; this file only knows where mixomesh serves the engine
-// from (public/vendor/mixo-geometry/, see scripts/vendor-geometry.mjs) and how a worker is told.
+// from (public/vendor/mixo-geocore/, see scripts/vendor-geometry.mjs) and how a worker is told.
 // Relative import (not the @mixo-geocore alias) so plain `node --test` files can load it too.
 export { loadGeometryEngine, GEOMETRY_GLUE, GEOMETRY_WASM } from '../../vendor/mixo-geocore/host/loadGeometry.js';
 import { GEOMETRY_GLUE } from '../../vendor/mixo-geocore/host/loadGeometry.js';
 
 /** Directory under public/ holding the engine glue and wasm. */
-export const GEOMETRY_VENDOR_DIR = 'vendor/mixo-geometry';
+export const GEOMETRY_VENDOR_DIR = 'vendor/mixo-geocore';
 
 /** Query parameter that carries the engine glue URL to a worker (a worker has no document.baseURI). */
 export const GEOMETRY_GLUE_PARAM = 'glue';

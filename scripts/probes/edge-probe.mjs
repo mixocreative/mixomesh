@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const dir = new URL('../../public/vendor/mixo-geometry/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const dir = new URL('../../public/vendor/mixo-geocore/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const glue = await import(pathToFileURL(dir + 'mixo_geometry_wasm.js').href);
 glue.initSync({ module: readFileSync(dir + 'mixo_geometry_wasm_bg.wasm') });
 const SOURCES = ['interior', 'boundary', 'ridge', 'island'];

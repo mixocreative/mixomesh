@@ -1,0 +1,3 @@
+graphify-out/graph.json merge=graphify
+vendor/mixo-geocore/** linguist-generated
+public/vendor/mixo-geocore/** linguist-generated

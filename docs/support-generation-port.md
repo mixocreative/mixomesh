@@ -129,7 +129,7 @@ The port has three layers. Each has its own rule.
 
 | Layer | What | How it moves | Proof it works |
 |---|---|---|---|
-| Engine | `crates/geometry-wasm/pkg-browser` (wasm + JS glue) | **Reused as built.** Copy into `vendor/mixo-geometry/` with a `VERSION` file holding `engine_version()`; never edit it in mixomesh. Upgrade by re-copying from a mixosupports commit and bumping `VERSION`. | Load check refuses a mismatch; generic goldens (section 7) give the same counts. |
+| Engine | `crates/geometry-wasm/pkg-browser` (wasm + JS glue) | **Reused as built.** Copy into `vendor/mixo-geocore/` with a `VERSION` file holding `engine_version()`; never edit it in mixomesh. Upgrade by re-copying from a mixosupports commit and bumping `VERSION`. | Load check refuses a mismatch; generic goldens (section 7) give the same counts. |
 | Logic | `src/editing/*.ts` (framework-free: session reducer, commands, keys, pick, stroke, strokeQueue, selection, removal, regenerate, shapeEdit, screenBrush, surfaceBrush, brushScheduler, locks, status), the settings layout and packer (`src/core/supports/settings.ts`, `src/supports/supportBuildWasm.ts`), the result decoder (`src/supports/generateSupports.ts`), contact edits (`src/supports/contactEdits.ts`), the worker protocol (`src/workers/meshProtocol.ts`, `meshWorker.ts`, `meshClient.ts`, `buildSessions.ts`) | **Ported as code, once.** Transpile TypeScript to plain ES modules with `esbuild` (types stripped, no bundling) into `src/support-engine/`; keep the file names. Drop the `dental` mode, `dental.*` commands and keys, and every import from `src/dental/`. After the copy, mixomesh owns the files: no sync back. | Their `*.test.ts` run in mixomesh (vitest runs on JS too) with the dental cases removed. |
 | UI | React components and three.js layers | **Rebuilt** in mixomesh's own stack (Babylon, plain JS, mixo-app-style `tokens.css`/`base.css`). Nothing is copied. The behaviour contract below is the spec; the React files are for reading only. | The generic walk scenarios (section 7) re-written against mixomesh. |
 
@@ -145,7 +145,7 @@ The port has three layers. Each has its own rule.
 
 **Order** (each step is specified and reviewed before building):
 - A0. Licence: decided (owner, 2026-10-29, mixosupports D23): no licence issue assumed; the code is treated as re-implemented. No audit blocks the port.
-- A1. Vendor `pkg-browser` and add the load-time version check. **Done 2026-10-29**: `public/vendor/mixo-geometry/` (VERSION, SOURCE.json), `scripts/vendor-geometry.mjs` (`--check`), `src/support-engine/geometryVersion.js` + `loadGeometry.js`, `tests/geometry-engine.test.mjs`. Browser and Electron loading are proven in A3.
+- A1. Vendor `pkg-browser` and add the load-time version check. **Done 2026-10-29**: `public/vendor/mixo-geocore/` (VERSION, SOURCE.json), `scripts/vendor-geometry.mjs` (`--check`), `src/support-engine/geometryVersion.js` + `loadGeometry.js`, `tests/geometry-engine.test.mjs`. Browser and Electron loading are proven in A3.
 - A2. Port the logic layer (esbuild once) and its tests.
 - A3. Spike: one selected mesh, generate in a worker, show tips in Babylon (decide right-handed scene per section 6), one golden matches.
 - A4. Rebuild the support-area and edit UI against the contract.

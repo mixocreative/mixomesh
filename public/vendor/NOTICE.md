@@ -70,15 +70,16 @@ receive the `.wasm` bytes from the page. The asm.js fallback
 (`draco_decoder_gltf.js`) is not shipped: the app already requires
 WebAssembly. The only URL in the wrapper is the attribution header.
 
-## `mixo-geometry/` — mixo geometry engine (first-party)
+## `mixo-geocore/` — mixo-geocore engine and packages (first-party)
 
 | | |
 |---|---|
-| Upstream | `mixocreative/mixosupports`, `crates/geometry-wasm/pkg-browser` (Rust + wasm-bindgen, built there with `npm run wasm:build`) |
+| Upstream | `mixocreative/mixo-geocore` (private first-party repo): Rust + wasm-bindgen engine (`crates/geometry-wasm/pkg-browser`) and the TypeScript `host/` and `editing/` packages |
 | Licence | first-party code of this project's owner, not third-party; covered by `EULA.txt` |
-| Version | `VERSION` holds `engine_version()`; `SOURCE.json` holds the mixosupports commit and a SHA-256 per file |
-| Re-vendor / verify | `npm run vendor:geometry` (copies from `../mixosupports`, or `-- --from <dir>`) / `node scripts/vendor-geometry.mjs --check` |
-| Files | `mixo_geometry_wasm.js`, `mixo_geometry_wasm_bg.wasm`, `mixo_geometry_wasm.d.ts` (types, reading only), `VERSION`, `SOURCE.json` |
+| Release model | a GitHub release `v<N>` (N = `engine_version()`) with `mixo-geocore-v<N>-{pkg-browser,pkg-node,host,editing}.tgz` and `SHA256SUMS`; mixomesh vendors the tag |
+| Version | `VERSION` holds `engine_version()`; `SOURCE.json` holds the repo, tag or commit, and a SHA-256 per vendored file |
+| Re-vendor / verify | `npm run vendor:geometry -- --release v<N>` (gh download, SHA256SUMS checked) or `-- --from <mixo-geocore dir>` (fresh build, clean tree) / `node scripts/vendor-geometry.mjs --check` (offline, every file) |
+| Files | here: `mixo_geometry_wasm.js`, `mixo_geometry_wasm_bg.wasm`, `mixo_geometry_wasm.d.ts` (types, reading only), `VERSION`, `SOURCE.json`; the packages live in `vendor/mixo-geocore/{host,editing}` |
 
 The support-generation engine (docs/support-generation-port.md). Reused as
 built: never edit it here. `src/support-engine/loadGeometry.js` loads it and
