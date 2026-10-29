@@ -9,7 +9,7 @@ const { SCHEMA_VERSION } = await import('../src/core/persist/constants.js');
 
 const base = { platform: 'cults3d', accountId: 'a1', title: 'Dragon', status: 'draft' };
 
-test('schema version is 3.5', () => assert.equal(SCHEMA_VERSION, '3.5'));
+test('schema version is 3.6', () => assert.equal(SCHEMA_VERSION, '3.6'));
 
 test('normalizeListing fills defaults and coerces types', () => {
   const r = normalizeListing({ ...base, price: '4.5', tags: ['a', 3, '', 'b'], madeWithAi: 'yes', status: 'bogus', publishedAt: 'nope', fileNames: 'x' });
@@ -68,7 +68,7 @@ test('findListing by platform + account', () => {
 test('migrate 3.4 -> 3.5 adds listings [] and stamps version', () => {
   const doc = { version: '3.4', project: { name: 'P', id: 'x' } };
   const m = migrate(doc);
-  assert.equal(m.version, '3.5');
+  assert.equal(m.version, '3.6');
   assert.deepEqual(m.project.listings, []);
   assert.equal('listings' in doc.project, false, 'caller doc untouched');
   assert.deepEqual(migrate({ version: '3.4' }).project.listings, []);

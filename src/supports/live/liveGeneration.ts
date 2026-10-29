@@ -39,7 +39,7 @@ import { supportMode } from '../SupportMode';
 import { emptySupports, isBuilt, readStamps, type ObjectSupports } from '../model';
 import { readSupports, supportsOwner } from '../store';
 import { cachePlacement, cacheSupportMesh, cachedPlacement, dropSupportMesh } from '../supportCache';
-import { objectModelStaged, type ObjectModel } from '../objectModel';
+import { forgetObjectModel, objectModelStaged, type ObjectModel } from '../objectModel';
 import { createSceneSource } from '../sceneSource';
 import { scenePose } from '../sceneSource';
 import { appSupportLayers } from '../layers/index';
@@ -394,6 +394,10 @@ export function installLiveGeneration(): void {
   installed = true;
   supportUi.register({ generate, cancelJob });
   subscribe(EVENTS.SUPPORTS_CHANGED, onSupportsChanged);
+  // A project load / new reuses saved mesh ids with GeometryStore revisions back at 0, so the version key
+  // alone cannot tell the new geometry from the old: the cached support-frame model goes (P4.1).
+  subscribe(EVENTS.PROJECT_NEW, () => forgetObjectModel());
+  subscribe(EVENTS.PROJECT_LOADED, () => forgetObjectModel());
   supportMode.onChange(onModeChanged);
   if (supportMode.isActive()) onModeChanged({ active: true, objectIds: supportMode.getObjectIds() });
   (window as any).__mxSupportLive = { stats: liveStats, request: requestJob, cancel: cancelJob, busy: isJobBusy, lift: liftObject, generate, test: testHooks };

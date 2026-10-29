@@ -80,8 +80,10 @@ export interface StagedSceneSource extends SupportSceneSource {
   sourceHashStaged(objectId: string, between: () => Promise<void>): Promise<string | null>;
 }
 
+/** One cache for every source: the stale watch and live generation must never hold two different views of a hash (P4.1). */
+const hashes = new SourceHashCache();
+
 export function createSceneSource(): StagedSceneSource {
-  const hashes = new SourceHashCache();
   return {
     async sourceHashStaged(objectId, between) {
       const parts = liveParts(objectId);

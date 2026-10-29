@@ -637,7 +637,7 @@ await test('4.1: 3.3 doc loads → saves as 3.4 with source/displayName; 3.4 rou
   assert.equal(lib.displayName, 'a_ok.glb');
   AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
   const saved = await __test._buildDocument({ skipTextureImages: true });
-  assert.equal(saved.version, '3.5');
+  assert.equal(saved.version, '3.6');
   assert.equal(saved.project.id, 'pid-schema');
   assert.deepEqual(saved.assetLibrary[0].source, lib.source);
   assert.equal(saved.assetLibrary[0].displayName, 'a_ok.glb');
@@ -666,13 +666,47 @@ await test('PB.8: project.listings save -> load -> save is identical; old docs l
   assert.deepEqual(getState().project.listings, []);
 });
 
+await test('P4.1: object.supports saves, loads and re-saves identically; older docs load with none; damaged is dropped', async () => {
+  seedCurrentScene();
+  AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
+  const f64 = new Float64Array(3000 * 7).map((_, i) => i * 0.37);
+  const supports = {
+    settings: { preset: 'MIDDLE', liftHeight: 5 }, deleted: ['auto-1_2_3'],
+    manual: [{ id: 'man-1', position: [1, 2, 3], normal: [0, 1, 0] }],
+    overrides: { 'auto-4_5_6': { tipRadius: 0.3 } },
+    stamps: { kinds: 'pe'.repeat(1500), data: Buffer.from(f64.buffer).toString('base64') },
+    sourceHash: 'h1', pose: { rotation: [0, 0, 0, 1], scale: [1, 1, 1] }, placed: { a: 1 }, revision: 9, stale: null,
+  };
+  const doc = goodDoc('Sup');
+  doc.project.id = 'pid-sup';
+  doc.sceneObjects[0].supports = supports;
+  await __test._loadProject(doc);
+  assert.deepEqual(getState().scene.objects.o_ok.supports, supports);
+  const saved = await __test._buildDocument({ skipTextureImages: true });
+  assert.equal(saved.version, '3.6');
+  assert.deepEqual(saved.sceneObjects[0].supports, supports);
+  await __test._loadProject(JSON.parse(JSON.stringify(saved)));
+  const again = await __test._buildDocument({ skipTextureImages: true });
+  assert.deepEqual(_stableDoc(again), _stableDoc(saved));
+  const old = goodDoc('Old');
+  old.version = '3.5';
+  await __test._loadProject(old);
+  assert.equal('supports' in getState().scene.objects.o_ok, false);
+  const oldSaved = await __test._buildDocument({ skipTextureImages: true });
+  assert.equal(oldSaved.sceneObjects[0].supports, undefined);
+  const bad = goodDoc('Bad');
+  bad.sceneObjects[0].supports = { ...supports, deleted: 5 };
+  await __test._loadProject(bad);
+  assert.equal('supports' in getState().scene.objects.o_ok, false);
+});
+
 await test('4.1: newer-minor unknown top-level keys round-trip; a later older-doc load drops them', async () => {
   seedCurrentScene();
   AssetLoader.getAssetBytes = async () => GLB.buffer.slice(0);
-  await __test._loadProject({ ...goodDoc('Future'), version: '3.6', futureThing: { a: [1, 2] } });
+  await __test._loadProject({ ...goodDoc('Future'), version: '3.7', futureThing: { a: [1, 2] } });
   const saved = await __test._buildDocument({ skipTextureImages: true });
   assert.deepEqual(saved.futureThing, { a: [1, 2] }, 'unknown key written back');
-  assert.equal(saved.version, '3.5');
+  assert.equal(saved.version, '3.6');
   await __test._loadProject({ ...goodDoc('Plain'), futureThing: 'stale' });   // 3.3: noise, not preserved
   const plain = await __test._buildDocument({ skipTextureImages: true });
   assert.equal('futureThing' in plain, false);

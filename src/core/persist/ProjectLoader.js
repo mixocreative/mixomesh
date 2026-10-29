@@ -22,6 +22,7 @@ import { resolveAssetBlob, sourcesOf } from './AssetResolver.js';
 import { storage } from '../storage/StorageAdapter.js';
 import { clearDirty } from './DirtyTracker.js';
 import { SILENT, SCHEMA_VERSION } from './constants.js';
+import { restoreSupports } from './SupportsPersist.js';
 import { normalizeListings } from '../publish/Listings.js';
 import { mintProjectId } from './ProjectId.js';
 import { deleteAutosave } from './AutosaveKeys.js';
@@ -180,6 +181,9 @@ const MIGRATIONS = [
   { to: '3.4', up: _migrateTo34 },
   // 3.4 → 3.5: marketplace listings (PB.8) live under project.listings.
   { to: '3.5', up: _migrateTo35 },
+  // 3.5 → 3.6: `sceneObjects[].supports` (P4.1) is additive; files before 3.6 carry none and
+  // load with `supports` absent.
+  { to: '3.6', up: () => {} },
 ];
 
 function _migrateTo35(data) {
@@ -598,6 +602,7 @@ async function _loadProjectInner(doc, previousId) {
       ratioSource: ratioSourceOf(o, assetById[o.assetId]),
       ...(!replayFailed.has(o.id) && Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
       ...(o.sliceRecipe ? { sliceRecipe: JSON.parse(JSON.stringify(o.sliceRecipe)) } : {}),
+      ...(restoreSupports(o) ? { supports: restoreSupports(o) } : {}),
       _savedTransform: o.transform ?? null,
     };
   }

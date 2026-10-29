@@ -13,6 +13,7 @@ import { sha256Hex } from '../hash.js';
 import { reportError } from '../../ui/Status.js';
 import { t } from '../../i18n/index.js';
 import { SCHEMA_VERSION } from './constants.js';
+import { serialiseSupports } from './SupportsPersist.js';
 import { normalizeListings } from '../publish/Listings.js';
 import { ratioSourceOf } from '../commands/ScaleCommands.js';
 import { exportTargetsFromState, exportRatiosFromState } from '../scale/ScaleMath.js';
@@ -358,6 +359,8 @@ function _serialiseSceneObjects(scene) {
       // they replay on reload (M1) instead of vanishing.
       geometryFixes: Array.isArray(o.geometryFixes) && o.geometryFixes.length ? [...o.geometryFixes] : undefined,
       sliceRecipe: o.sliceRecipe ? JSON.parse(JSON.stringify(o.sliceRecipe)) : undefined,
+      // Support Mode work (3.6): every hand edit, settings, build stamp; caches are not saved.
+      supports: serialiseSupports(o),
       transform: mesh ? decompose(mesh) : (o._savedTransform ?? null),
     };
   });

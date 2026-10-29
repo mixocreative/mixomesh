@@ -114,7 +114,7 @@ export function sceneObject(id, assetId, over = {}) {
 }
 export function goodDoc(name = 'Loaded') {
   return {
-    version: '3.5', project: { name, id: `id-${name}` },
+    version: '3.6', project: { name, id: `id-${name}` },
     assetLibrary: [meshAsset('a_ok')],
     sceneObjects: [sceneObject('o_ok', 'a_ok')],
   };
