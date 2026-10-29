@@ -278,6 +278,18 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   its exports are byte-identical before and after the switch (export walks c, d and a dental
   export on its reference model: hash of the written STL/3MF compared; any change is a defect).
 
+- **PE.5b** `[geocore]` + `[mixodental]` Remove mixosupports' remaining duplicates (PE.5 found ~25
+  generic modules kept locally because PE.2 stripped dental fields). (1) `host/` gains the dental
+  ABI bindings (`DentalPolicy`, `dental_policy`, profile types/loading, dental job fields) — they are
+  engine contract, the dental algorithms already live in geocore's `dental` module; (2) `editing/`
+  gains extension points: a mode/tool registry and policy hooks so an app adds modes (mixoDental's
+  dental steps, paint/erase allowed area) without forking `session`, `commands`, `keys`, `gesture`,
+  `surfaceBrush`; (3) mixosupports deletes its local copies, imports the packages, keeps only
+  dental flow/UI, and wires its three.js `ViewportPort` into its components. *Depends: PE.5.*
+  **Done when** mixosupports holds no copy of a geocore module (a script diffs file lists and fails on
+  overlap), its tests, walks and build are green, its exports are byte-identical to the PE.5
+  baseline (two walk runs; PE.5 saw one pointer-timing flake in the drag-over scenario), and mixomesh
+  re-vendored to the new geocore commit is green.
 - **PE.6** `[mixodental]` Rename mixosupports → mixoDental (owner 2026-10-29; not distributed yet,
   so app identity may change freely). GitHub `mixocreative/mixosupports` → `mixocreative/mixodental`
   (`gh repo rename`, redirects stay); local folder `S:\ai\mixosupports` → `S:\ai\mixodental` (no
@@ -573,6 +585,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | PE.5 | sonnet | mixosupports switch + three.js ViewportPort + its walks |
 | PW.1 | sonnet (+ main for owner steps) | relay + web Publish path |
 | PW.2 | sonnet | manifest, SW, file handlers |
+| PE.5b | opus | dental host bindings + editing extension points, mixoDental drops duplicates |
 | PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
 | P2.1 | opus | handedness spike, weld, empirical proof |
 | P2.2 | haiku | loader smokes |
@@ -606,7 +619,7 @@ P0.1 → P0.2 → P0.3b → P0.6 → P0.5           P0.1 → P0.4a → P0.4b →
 P0.1 → P1.1 ─┐
 PE.1 ────────┴→ PE.2 → PE.4 → P2.1 → P2.2 → P3.1 → {P3.2 ∥ P3.3} → P3.4 → P3.5 → P3.6
                 PE.2 → PE.3                              P5.13 → P3.4
-                PE.4 → PE.5 → {PE.6, P5.14 (first, high priority), P5.10, P5.11, P8.3}
+                PE.4 → PE.5 → PE.5b → {PE.6, P5.14 (first, high priority), P5.10, P5.11, P8.3}
 P3.6 → P4.1 → P4.2 → P4.3        P3.6 → P5.1–P5.8, P5.10–P5.12 → P5.9
 P0.3b → P6.1 → P6.2 ← P3.2       P0.6 → P7.* (serial) → P7.last
 PE.4 → P8.1 → {P8.2, P8.3} + P8.4
