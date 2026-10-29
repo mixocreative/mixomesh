@@ -404,6 +404,13 @@ on PE.5.
   LARGEST BY VOLUME (owner 2026-10-30; surface area only as fallback for an open mesh) is the main part and gets the dental profile (orientation,
   angle, area, tips); the smaller meshes get normal GENERIC supports on their non-overlapped faces only (P5.15),
   in the main part's pose, never passing through the main part. *Depends: P5.15.*
+- **PD.8** `[mixodental]` Debug layers in the app UI (owner 2026-10-30): the batch viewer's evidence layers (trim
+  lines, U ends, bottom plane, back arrow, support area, diagnostic strips) also available in the interactive app as a
+  "Debug" section, COLLAPSED by default (state remembered per user), each layer a checkbox with its colour swatch,
+  every layer following the model's transform. Modular (D26): one shared evidence module builds the layer data for
+  both the batch GLB and the app (no duplicated drawing logic). *Depends: the evidence-overlay pose fix.* **Done
+  when** the layers toggle in the app on case-001 + one case-aligner scan, sit on the model in every view (same
+  numeric check as the overlay fix), and the section starts collapsed.
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
