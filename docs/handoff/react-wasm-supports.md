@@ -66,7 +66,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P5.11 | todo | | |
 | P5.12 | todo | | |
 | P5.13 | done | — | Checked 2026-10-29 by main: S:\ai\mixomesh\port\ does not exist and mixoDental has no port\ folder → nothing handed over; the generic UI is still live in mixoDental (read it there). |
-| P5.14 | todo | | bevel-robust edge detection (owner question) |
+| P5.14 | done (walk recheck open) | geocore 2dae014 + 6bf349a, mixoDental 5d205c5, mixomesh ddd35d9 | ENGINE 10. core/crease.rs shared by generic placement + dental hard edges: 1 µm snap + weld, geodesic inset (thin facets no longer drop samples), near-planar patches (10°) with max bevel width W (scatterMaxBevelWidth, default 2.5 mm, dental 2.0; 8th generic_place value, 7-value calls still work). Probe re-run by main on engine 10: bevel r1/r2 edge points 0→14 (sharp 19 incl. 5 remesh island points; edge supports equal), rounded V ridge 0→9, split == welded (39/9 and 32/9), noise identical. W tests: 1/2 mm bevels detected, 10 mm fillet not, spheres none, 0.02 mm jitter none. Goldens re-baselined with reasons: cube-overhang 62→70 (corner samples no longer dropped), knot 150→152, thin-slab points moved (snap reseeds), v-ridge +2 edge. Dental chains 110.19/56.10, dental exports byte-identical; 32 generic exports changed (intended). Open: mixoDental full walk on 6bf349a not completed (concurrent PD.1 edits reloaded the page) → rerun after PD.1; 3 updated walk counts not re-measured on final engine. |
 | P6.1 | todo | | |
 | P6.2 | todo | | |
 | P7.last | todo | | |
