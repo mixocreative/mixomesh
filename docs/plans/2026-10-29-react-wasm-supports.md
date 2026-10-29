@@ -132,6 +132,11 @@ Architecture rules:
   scan the old engine accepted, or an unexplained count change, blocks the change. Scans stay local and git-ignored
   (customer data: read in place, never committed or named in commits); a run without them is reported as NOT DONE,
   never as passed. Coordinate quantisation must never change mesh topology (explicit test with sub-micron edges).
+- D26. Every step is reasonably modularised (owner 2026-10-30): each new rule or algorithm lives in its own clearly
+  named module with one responsibility (e.g. overlap → `core/overlap.rs`; denture → `dental/denture/`; the owner's
+  orientation method → `dental/orient/` with trim plane, U ends, back direction, cross-check as separate units and
+  one small orchestrator); no growing of large existing functions; each unit has doc comments (inputs, units, frame)
+  and its own tests; folder README + the root "where do I look" table updated with every new module.
 
 ---
 
