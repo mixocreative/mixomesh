@@ -25,6 +25,7 @@ import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
+import { isCollapsed } from './VertexWeld.js';
 
 /** @typedef {import('./ExportContext.js').ExportContext} ExportContext */
 
@@ -32,10 +33,30 @@ const FALLBACK_RGB = { r: 0.8, g: 0.8, b: 0.8 };
 
 const _num = (v, digits) => String(+Number(v).toFixed(digits));
 
-/** VRML DEF names: ASCII letters/digits/_ only, must not start with a digit. */
+/**
+ * VRML DEF name (P4.4). VRML97 allows UTF-8 identifiers, but readers differ on
+ * them (U+3000 reads as a space in some, others drop non-ASCII), so the DEF
+ * stays ASCII and loses nothing: letters, digits and `_` stay, other ASCII
+ * becomes `_`, and every non-ASCII character becomes `_u` + its code point in
+ * hex (at least 4 digits), so distinct names keep distinct DEFs. The original
+ * name is kept as text where VRML allows it: the document's WorldInfo `info`
+ * list (`"<DEF> = <name>"`) and a comment line above each Shape.
+ */
 export function vrmlName(name) {
-  const t = String(name ?? '').replace(/[^A-Za-z0-9_]/g, '_') || 'part';
+  let t = '';
+  for (const ch of String(name ?? '')) {
+    const cp = ch.codePointAt(0);
+    if (/[A-Za-z0-9_]/.test(ch)) t += ch;
+    else if (cp < 0x80) t += '_';
+    else t += `_u${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+  }
+  if (!t) t = 'part';
   return /^[0-9]/.test(t) ? `_${t}` : t;
+}
+
+/** A VRML SFString: quotes and backslashes escaped, line breaks flattened. */
+function _vrmlString(text) {
+  return `"${String(text ?? '').replace(/[\\"]/g, c => `\\${c}`).replace(/[\r\n]+/g, ' ')}"`;
 }
 
 function _alpha01(mat) {
@@ -49,7 +70,7 @@ function _repeatFields({ u, v }) {
   return (u === 'clamp' ? ' repeatS FALSE' : '') + (v === 'clamp' ? ' repeatT FALSE' : '');
 }
 
-function _shape(mesh, texUrl, usedNames) {
+function _shape(mesh, texUrl, usedNames, names) {
   const raw = mesh.getVerticesData?.('position');
   const idx = printIndices(mesh);
   if (!raw || !idx.length) return '';
@@ -64,11 +85,28 @@ function _shape(mesh, texUrl, usedNames) {
   let def = vrmlName(mesh.name);
   for (let n = 2; usedNames.has(def); n++) def = `${vrmlName(mesh.name)}_${n}`;
   usedNames.add(def);
+  const original = String(mesh.name ?? '').replace(/[\r\n]+/g, ' ');
+  if (original && original !== def) names.push([def, original]);
 
+  // One coord per distinct written position, so a UV seam shares its point (a
+  // closed surface); texCoordIndex keeps each corner's own UV (L2-03).
   const points = [];
-  for (let i = 0; i < pos.length; i += 3) points.push(`${_num(pos[i], 5)} ${_num(pos[i + 1], 5)} ${_num(pos[i + 2], 5)}`);
+  const pointOf = new Map();
+  const vertexOf = new Int32Array(count);
+  for (let i = 0; i < pos.length; i += 3) {
+    const p = `${_num(pos[i], 5)} ${_num(pos[i + 1], 5)} ${_num(pos[i + 2], 5)}`;
+    let k = pointOf.get(p);
+    if (k === undefined) { k = points.length; pointOf.set(p, k); points.push(p); }
+    vertexOf[i / 3] = k;
+  }
   const faces = [];
-  for (let i = 0; i + 2 < idx.length; i += 3) faces.push(`${idx[i]} ${idx[i + 1]} ${idx[i + 2]} -1`);
+  const cornerFaces = [];
+  for (let i = 0; i + 2 < idx.length; i += 3) {
+    const a = vertexOf[idx[i]], b = vertexOf[idx[i + 1]], c = vertexOf[idx[i + 2]];
+    if (isCollapsed(a, b, c)) continue;
+    faces.push(`${a} ${b} ${c} -1`);
+    cornerFaces.push(`${idx[i]} ${idx[i + 1]} ${idx[i + 2]} -1`);
+  }
 
   const mat = mesh.material;
   const alpha = _alpha01(mat);
@@ -93,12 +131,13 @@ function _shape(mesh, texUrl, usedNames) {
   if (textured) {
     const tc = [];
     for (let i = 0; i < uvs.length; i += 2) tc.push(`${_num(uvs[i], 6)} ${_num(uvs[i + 1], 6)}`);
-    // vertex i ↔ UV i (seams survive: textured clones are never position-only welded)
+    // UV i is mesh vertex i's; texCoordIndex names each corner's mesh vertex.
     geometry += `      texCoord TextureCoordinate { point [\n        ${tc.join(',\n        ')}\n      ] }\n`
-      + `      texCoordIndex [\n        ${faces.join(',\n        ')}\n      ]\n`;
+      + `      texCoordIndex [\n        ${cornerFaces.join(',\n        ')}\n      ]\n`;
   }
   geometry += '    }';
-  return `DEF ${def} Shape {\n    appearance ${appearance}\n    geometry ${geometry}\n  }`;
+  const comment = original && original !== def ? `# ${original}\n  ` : '';
+  return `${comment}DEF ${def} Shape {\n    appearance ${appearance}\n    geometry ${geometry}\n  }`;
 }
 
 /**
@@ -109,9 +148,15 @@ function _shape(mesh, texUrl, usedNames) {
  */
 export function encodeVRML(meshEntries, urlByMesh = new Map()) {
   const used = new Set();
-  const shapes = meshEntries.map(({ mesh }) => _shape(mesh, urlByMesh.get(mesh) ?? null, used)).filter(Boolean);
+  const names = [];
+  const shapes = meshEntries.map(({ mesh }) => _shape(mesh, urlByMesh.get(mesh) ?? null, used, names)).filter(Boolean);
+  // Original names beside their ASCII DEFs (see vrmlName).
+  const info = names.length
+    ? `WorldInfo { info [ ${names.map(([def, name]) => _vrmlString(`${def} = ${name}`)).join(', ')} ] }\n`
+    : '';
   return '#VRML V2.0 utf8\n'
     + '# mixomesh export: units millimetres, right-handed, Z-up (printer frame)\n'
+    + info
     + `Group {\n  children [\n  ${shapes.join(',\n  ')}\n  ]\n}\n`;
 }
 

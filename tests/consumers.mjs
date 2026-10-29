@@ -25,7 +25,7 @@
 //
 //   node tests/consumers.mjs
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -49,6 +49,10 @@ const CAT_NAME = '猫　モデル';
 // max z) white, (min x, max z) blue. A flipped or mirrored texture or a
 // mirrored part moves those colours.
 //
+// The quad is a single-sided sheet: there is no solid to close, so export
+// repair leaves it as it is (open, 2 facets) and never folds it into a 0 mm^3
+// double-sided shell (P4.4).
+//
 // open-tetra.glb (make-open-tetra.mjs): v0 (0,0,0) v1 (10,0,0) v2 (0,20,0)
 // v3 (0,0,30), three faces, one hole. Export repairs by default, so the file
 // must be the closed right tetrahedron, 4 facets, (1/6)*10*20*30 = 1000 mm^3.
@@ -65,6 +69,13 @@ const CAT_NAME = '猫　モデル';
 // (they end at its bottom, start the lift below it, and share its footprint), the model as it
 // exports alone (facets, volume, texture kept).
 //
+// midtone-cube.glb alone (L2-03): every cube edge is a UV seam (24 vertices, four per face).
+// Each face samples its own 16 px cell of a 48x32 mid-tone image (make-midtone-cube.mjs
+// FACE_COLOURS, glTF +X,-X,+Y,-Y,+Z,-Z); in the printer frame glTF +X -> +x, -X -> -x,
+// +Y -> +z, -Y -> -z, +Z -> -y, -Z -> +y. Closed: the file must share each seam position
+// (rawWatertight: the 3MF's own vertex list, nothing merged by the reader) and keep each
+// corner's UV, so every face still reads its own colour.
+//
 // cat-model-3mat.obj (+ .mtl), imported as "猫　モデル.obj": a closed Y-up box
 // 10 x 20 x 30 mm, 12 triangles, 6000 mm^3. OBJ top (+Y) red, +X green, the
 // rest blue; in the printer frame +Z red, +X green, size 10 x 30 x 20.
@@ -79,8 +90,12 @@ const TRUTH = {
   },
   supcube: { facets: 96, volume: 8000, size: [20, 20, 20], lift: 5 },
   supmid: { facets: 12, volume: 8000, size: [20, 20, 20], lift: 5, textured: true, top: '#808040' },
+  mid: {
+    facets: 12, watertight: true, rawWatertight: true, volume: 8000, size: [20, 20, 20],
+    faceColours: { '+x': ['#C88671'], '-x': ['#5AA0C8'], '+z': ['#808040'], '-z': ['#3C5A28'], '-y': ['#B464AA'], '+y': ['#6E6E6E'] },
+  },
   cat: {
-    facets: 12, watertight: true, volume: 6000, size: [10, 30, 20],
+    facets: 12, rawWatertight: true, watertight: true, volume: 6000, size: [10, 30, 20], bambuParts: 3,
     faceColours: { '+z': [RED], '+x': [GREEN], '-x': [BLUE], '+y': [BLUE], '-y': [BLUE], '-z': [BLUE] },
     name: CAT_NAME,
   },
@@ -89,6 +104,8 @@ const TRUTH = {
 const MODELS = [
   { key: 'quad', fixture: 'quadrant-quad.glb', formats: ['3mf', 'obj', 'stl', 'ply', 'wrl'] },
   { key: 'tetra', fixture: 'open-tetra.glb', formats: ['3mf', 'stl'] },
+  { key: 'mid', fixture: 'midtone-cube.glb', formats: ['3mf', 'obj', 'stl', 'wrl'] },
+  { key: 'mid', variant: 'bambu', fixture: 'midtone-cube.glb', flavour: 'bambu', formats: ['3mf'] },
   { key: 'cat', fixture: 'cat-model-3mat.obj', siblings: ['cat-model-3mat.mtl'], loadAs: `${CAT_NAME}.obj`,
     formats: ['3mf', 'obj', 'stl', 'ply', 'wrl'] },
   { key: 'cat', variant: 'bambu', fixture: 'cat-model-3mat.obj', siblings: ['cat-model-3mat.mtl'], loadAs: `${CAT_NAME}.obj`,
@@ -125,24 +142,19 @@ const GENERATE_SUPPORTS = `
 // quad's corners a repeating texture blends all four quadrants (c04 checks
 // PLY texture sampling against the viewport instead). STL has no colour or names.
 const CARRIES = {
-  '3mf': { colour: true, corners: true, names: true },
+  '3mf': { colour: true, corners: true, names: true, ownVertices: true },
   obj: { colour: true, corners: true, names: true, up: 'y' },
   stl: {},
   ply: { colour: true },
   wrl: { colour: true, corners: true, names: true },
 };
 const PRUSA_READS = new Set(['3mf', 'stl', 'obj']);
+// The slicer's STL reader refuses any file under 84 + 4 x 50 bytes (fewer than
+// 4 facets, its "empty file"), so the 2-facet open quad is read by trimesh only.
+const PRUSA_MIN_STL_BYTES = 284;
+const prusaCanRead = (f) => PRUSA_READS.has(f.format) && !(f.format === 'stl' && statSync(f.path).size < PRUSA_MIN_STL_BYTES);
 
-const KNOWN = [
-  { match: /^quad\.\w+\.(facets|watertight)$|^quad\.\w+\.prusa\.(facets|manifold)$/,
-    why: 'export repair closes an open single-sided sheet into a 0 mm^3 double-sided shell (4 facets) that slicers report as manifold' },
-  { match: /^cat\.(3mf|obj)\.prusa\.manifold$/,
-    why: '3MF colour-group and OBJ write each colour as its own vertex set, so PrusaSlicer reads the closed box as 3 open parts (14 open edges)' },
-  { match: /^cat\.3mf\.name$/,
-    why: 'the core 3MF colour-group object carries no name attribute (the Bambu flavour does)' },
-  { match: /^cat\.wrl\.name$/,
-    why: 'VRML DEF names keep ASCII only, so 猫　モデル becomes "_______export"' },
-];
+const KNOWN = [];
 
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 const labelOf = (model) => `${model.key}${model.variant ? `-${model.variant}` : ''}`;
@@ -161,6 +173,8 @@ function checksFor(model, format, facts, prusa) {
     add('windingConsistent', true, facts.windingConsistent, facts.windingConsistent === true);
     add('volume', truth.volume, facts.volume, facts.volume != null && near(facts.volume, truth.volume, truth.volume * 1e-4));
   }
+  // Only a 3MF's vertex list is the file's own: OBJ readers split v by vt, a soup has none.
+  if (truth.rawWatertight && can.ownVertices && !(model.variant === 'bambu' && truth.bambuParts)) add('rawWatertight', true, facts.rawWatertight, facts.rawWatertight === true);
   if (truth.points) {
     const has = (p) => (facts.points ?? []).some(q => q.every((c, k) => near(c, p[k], 0.01)));
     add('points', truth.points, facts.points, (facts.points ?? []).length === truth.points.length && truth.points.every(has));
@@ -178,7 +192,7 @@ function checksFor(model, format, facts, prusa) {
     const want = format === 'obj' ? truth.name.replace(/\s/gu, '_') : truth.name;
     add('name', want, facts.names, facts.names.some(n => n.includes(want)));
   }
-  if (model.variant === 'bambu') {
+  if (model.variant === 'bambu' && truth.bambuParts) {
     const b = facts.bambu;
     const object = b?.objects?.[0];
     const parts = object?.parts ?? [];
@@ -186,14 +200,14 @@ function checksFor(model, format, facts, prusa) {
     const filamentOf = (p) => b.filament_colour[p.extruder - 1]?.toUpperCase();
     add('bambu.partFilament', 'each part on the filament of its own colour',
       parts.map(p => ({ name: p.name, extruder: p.extruder, filament: filamentOf(p), faces: p.colours })),
-      parts.length === 3 && parts.every(p => p.colours.length === 1 && filamentOf(p) === p.colours[0]));
+      parts.length === truth.bambuParts && parts.every(p => p.colours.length === 1 && filamentOf(p) === p.colours[0]));
   }
   if (prusa) {
     const prusaSize = can.up === 'y' ? [prusa.size[0], prusa.size[2], prusa.size[1]] : prusa.size;
     add('prusa.facets', truth.facets, prusa.facets, prusa.facets === truth.facets);
     add('prusa.size', truth.size, prusaSize.map(v => +v.toFixed(3)), truth.size.every((v, i) => near(prusaSize[i], v, 0.01)));
     // Bambu parts are open by design (one per filament); only the whole is closed.
-    if (model.variant !== 'bambu') {
+    if (model.variant !== 'bambu' || !truth.bambuParts) {
       add('prusa.manifold', truth.watertight ? 'yes' : 'no', prusa.manifold, prusa.manifold === (truth.watertight ? 'yes' : 'no'));
       if (truth.watertight) add('prusa.volume', truth.volume, prusa.volume, near(prusa.volume, truth.volume, truth.volume * 1e-3));
     }
@@ -420,8 +434,9 @@ async function main() {
     let skipped = 0;
     for (const [i, f] of files.entries()) {
       const fact = facts[i];
-      const prusa = consumers.prusa && PRUSA_READS.has(f.format) ? prusaInfo(f.path) : null;
-      if (!fact || (!prusa && PRUSA_READS.has(f.format))) skipped++;
+      const prusa = consumers.prusa && prusaCanRead(f) ? prusaInfo(f.path) : null;
+      if (PRUSA_READS.has(f.format) && !prusaCanRead(f)) console.log(`NOTE ${labelOf(f.model)}.${f.format}: under 4 facets, read by trimesh only (slicer STL minimum)`);
+      if (!fact || (!prusa && prusaCanRead(f))) skipped++;
       if (!fact) continue;
       if (fact.error) {
         results.push({ id: `${labelOf(f.model)}.${f.format}.read`, expect: 'readable', actual: fact.error, ok: false });

@@ -231,6 +231,11 @@ def read_wrl(path):
     m = Model(mm.vertex_matrix(), mm.face_matrix())
     text = Path(path).read_text(encoding="utf-8")
     m.names = re.findall(r"DEF (\S+) Shape", text)
+    # Names a DEF cannot hold verbatim are kept as WorldInfo info strings "<DEF> = <name>".
+    info = re.search(r"WorldInfo\s*\{\s*info\s*\[(.*?)\]\s*\}", text, re.S)
+    if info:
+        for entry in re.findall(r'"((?:[^"\\]|\\.)*)"', info.group(1)):
+            m.names.append(re.sub(r"\\(.)", r"\1", entry).split(" = ", 1)[-1])
     url = re.search(r'ImageTexture\s*\{\s*url\s*"([^"]+)"', text)
     if url and mm.has_wedge_tex_coord():
         img = Image.open(Path(path).parent / url.group(1))
@@ -356,6 +361,8 @@ def facts(job):
         "min": lo.tolist(),
         "max": hi.tolist(),
         "watertight": bool(welded.is_watertight),
+        # The file's own vertex list, nothing merged: closed only if the writer shares seam vertices.
+        "rawWatertight": bool(trimesh.Trimesh(m.vertices, m.faces, process=False).is_watertight),
         "windingConsistent": bool(welded.is_winding_consistent),
         "volume": float(welded.volume) if welded.is_watertight else None,
         "faceColours": {k: sorted(v) for k, v in sorted(by_axis.items())},

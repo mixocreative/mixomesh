@@ -196,7 +196,7 @@ await test('default Mimaki target + textured mesh → Materials Extension layout
   assert.match(model, /<m:tex2coord u="0\.3" v="0\.4"\/>/);
   assert.match(model, /<m:tex2coord u="0\.5" v="0\.6"\/>/);
   // Object pid points at the texture2dgroup, NOT a colorgroup.
-  assert.match(model, /<object id="3" type="model" pid="2" pindex="0">/);
+  assert.match(model, /<object id="3" type="model" pid="2" pindex="0"(?: name="[^"]*")?>/);
   // Triangle carries p1/p2/p3 mirroring v1/v2/v3 (writer/loader contract).
   // The fake mesh has no ClockWise flag (CounterClockWise default), so
   // PrintSpace.printIndices keeps the buffer order — p triple follows.
@@ -243,7 +243,7 @@ await test('solid-only 3MF uses colorgroup regardless of printer target', async 
   const model = files['3D/3dmodel.model'];
   assert.match(model, /<m:colorgroup id="1">/);
   assert.match(model, /<m:color color="#00FF00FF"\/>/);
-  assert.match(model, /<object id="2" type="model" pid="1" pindex="0">/);
+  assert.match(model, /<object id="2" type="model" pid="1" pindex="0"(?: name="[^"]*")?>/);
   assert.ok(!/<m:texture2d/.test(model), 'no texture2d resources');
 });
 
@@ -268,9 +268,9 @@ await test('Mimaki target + mixed (textured + solid) → both resources, distinc
   assert.match(model, /<m:texture2dgroup id="2" texid="1">/);
   assert.match(model, /<m:colorgroup id="3">/);
   // Textured object points at tex2dgroup id (no pindex).
-  assert.match(model, /<object id="4" type="model" pid="2" pindex="0">/);
+  assert.match(model, /<object id="4" type="model" pid="2" pindex="0"(?: name="[^"]*")?>/);
   // Solid object points at colorgroup id + pindex.
-  assert.match(model, /<object id="5" type="model" pid="3" pindex="0">/);
+  assert.match(model, /<object id="5" type="model" pid="3" pindex="0"(?: name="[^"]*")?>/);
 });
 
 // ── Round-trip integrity (writer contract) ───────────────

@@ -22,6 +22,7 @@ import { positionsToPrintSpace, printIndices, bufferZUpToYUp } from './PrintSpac
 import { getPrinterProfile, PRINTER_OBJ_AXES } from './PrinterProfiles.js';
 import { isFaceted } from '../scene/FlatShading.js';
 import { exportUVs } from './UvTransform.js';
+import { isCollapsed } from './VertexWeld.js';
 
 const DEFAULT_OBJ_AXIS = 'y-up';
 
@@ -111,7 +112,11 @@ export function resolveObjAxis(ctx) {
 
 /**
  * Encode meshes as ONE Wavefront OBJ text (positions in mm, flattened world).
- * One `o` block per mesh; `v`/`vt`/`vn` share each mesh's vertex indexing.
+ * One `o` block per mesh. `vt`/`vn` follow the mesh's vertex order; a `v` is
+ * written once per distinct position of a logical object (entry `logicalId`),
+ * so a UV seam or a material boundary inside one object shares its position
+ * and keeps a `vt` per corner: a closed surface to a slicer (L2-03, P4.4).
+ * Separate objects (and support structures) never share a `v`.
  * @param {Array<{mesh:object}>} meshEntries
  * @param {{axis?:'y-up'|'z-up', mtllib?:string, materialNames?:Map<object,string>}} [opts]
  *   `materialNames`: the whole export's material-token table (default: built from `meshEntries`).
@@ -122,8 +127,10 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null,
   const lines = [];
   if (mtllib != null) lines.push(`mtllib ${objToken(mtllib)}.mtl`);
   lines.push(`# mixomesh export: millimetres, right-handed, ${yUp ? 'Y-up' : 'Z-up'}`);
-  let vBase = 0, vtBase = 0;
-  meshEntries.forEach(({ mesh, isSupport, name: entryName }, j) => {
+  const vByObject = new Map();   // logical object → Map(v line → 1-based index)
+  let vCount = 0, vtBase = 0, vnBase = 0;
+  meshEntries.forEach((entry, j) => {
+    const { mesh, isSupport, name: entryName } = entry;
     const raw = mesh.getVerticesData?.('position');
     const idx = printIndices(mesh);
     if (!raw || !idx.length) return;
@@ -147,21 +154,35 @@ export function encodeOBJ(meshEntries, { axis = DEFAULT_OBJ_AXIS, mtllib = null,
     // P4.2: support structures are a group of their own (solid MTL material), never the model's.
     if (isSupport) lines.push(`g ${objToken(entryName || mesh.name || `supports${j}`)}`);
     if (mesh.material) lines.push(`usemtl ${materialNames.get(mesh.material)}`);
-    for (let i = 0; i < pos.length; i += 3) lines.push(`v ${pos[i]} ${pos[i + 1]} ${pos[i + 2]}`);
+    const objectKey = isSupport ? entry : (entry.logicalId ?? entry.meshId ?? entry);
+    if (!vByObject.has(objectKey)) vByObject.set(objectKey, new Map());
+    const vIndex = vByObject.get(objectKey);
+    const vertexOf = new Int32Array(count);
+    for (let i = 0; i < pos.length; i += 3) {
+      const line = `v ${pos[i]} ${pos[i + 1]} ${pos[i + 2]}`;
+      let v = vIndex.get(line);
+      if (v === undefined) {
+        v = ++vCount;
+        vIndex.set(line, v);
+        lines.push(line);
+      }
+      vertexOf[i / 3] = v;
+    }
     if (uv) for (let i = 0; i < uv.length; i += 2) lines.push(`vt ${uv[i]} ${uv[i + 1]}`);
     if (nrm) for (let i = 0; i < nrm.length; i += 3) lines.push(`vn ${nrm[i]} ${nrm[i + 1]} ${nrm[i + 2]}`);
     const corner = (i) => {
-      const v = vBase + i + 1;
-      if (uv && nrm) return `${v}/${vtBase + i + 1}/${v}`;
+      const v = vertexOf[i];
+      if (uv && nrm) return `${v}/${vtBase + i + 1}/${vnBase + i + 1}`;
       if (uv) return `${v}/${vtBase + i + 1}`;
-      if (nrm) return `${v}//${v}`;
+      if (nrm) return `${v}//${vnBase + i + 1}`;
       return `${v}`;
     };
     for (let t = 0; t + 2 < idx.length; t += 3) {
+      if (isCollapsed(vertexOf[idx[t]], vertexOf[idx[t + 1]], vertexOf[idx[t + 2]])) continue;
       lines.push(`f ${corner(idx[t])} ${corner(idx[t + 1])} ${corner(idx[t + 2])}`);
     }
-    vBase += count;
     if (uv) vtBase += count;
+    if (nrm) vnBase += count;
   });
   return `${lines.join('\n')}\n`;
 }

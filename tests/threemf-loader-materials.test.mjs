@@ -125,8 +125,9 @@ await test('writer→loader: colorgroup unit of two sibling meshes re-imports as
   assert.notEqual(m0.material, m1.material, 'one material per sub-mesh');
   assert.ok(m0.metadata.sourceGroupId && m0.metadata.sourceGroupId === m1.metadata.sourceGroupId,
     'siblings share a sourceGroupId so AssetRegistration groups them as one logical object');
-  assert.match(m0.name, /^Part_\d+__mat0$/);
-  assert.match(m1.name, /^Part_\d+__mat1$/);
+  // P4.4: the merged object carries the unit's name, so the parts read back under it.
+  assert.equal(m0.name, 'body__mat0');
+  assert.equal(m1.name, 'body__mat1');
   // Geometry survives: the red sibling sits 5 mm along Babylon X from green
   // (writer centres the build; toPrintSpace/fromPrintSpace negate X twice).
   const p0 = round(m0.getVerticesData('position'));

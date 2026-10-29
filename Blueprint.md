@@ -3143,6 +3143,15 @@ guessed:
   54-shell union came back as its largest shell, 17,252 → 6,426 triangles).
   Per shell the engine has nothing to choose between; a shell it returns
   empty keeps its original triangles.
+- **An open sheet is never folded into a fake solid** (P4.4,
+  `isFoldedSheet`): a single-sided surface has no inside, so closing it can
+  only lay its reverse on top of it, a 0 mm³ double-sided shell slicers read
+  as manifold. A shell whose repaired-and-capped result is closed (every edge,
+  by position, on an even number of triangles) yet encloses under 1e-6 of its
+  bounding diagonal cubed keeps its original triangles: it exports open, the
+  open-mesh warning names it, `strictExport` refuses it. A real thin solid
+  (0.01 mm plate over 50 mm, ~7e-5) still closes; CSG never re-bakes a part
+  into nothing (empty Manifold output keeps the clone, `csgSkipped`).
 - **Fresh WASM instance per repair call** (`createRepairEngine`): cheap, and
   removes the engine's own cross-call state from the equation.
 - **Leftover boundary loops are capped** (`CapLoops.capBoundaryLoops`, fan
@@ -4259,6 +4268,14 @@ ctx and reads no global state.
   - 3MF prep: `fallbackMaterial`, `flattenWorld`, `weldSolidOnly`,
     `optimizeIndices`, `csgSolidOnly`, `createNormals`; CSG required, but
     textured meshes keep UV seams.
+  - Writers share seam positions (P4.4 / L2-03, `VertexWeld.js`): 3MF writes
+    one `<vertex>` per distinct written position of an object (all its
+    material parts, never across objects or supports), `p1..p3` keep each
+    corner's own UV / colour index; OBJ one `v` per distinct position of a
+    logical object, `vt` / `vn` per corner; WRL one `coord` point per
+    position, `texCoordIndex` per corner. A UV seam or a colour boundary is
+    then a closed edge to a slicer; triangles welded onto < 3 vertices drop.
+    The merged 3MF object carries the unit's `name`.
   - PLY / WRL prep: `fallbackMaterial`, `flattenWorld`, `weld`, `repair`,
     `optimizeIndices`, `createNormals`; CSG not required (it would drop UVs /
     flatten vertex colour), same as OBJ.
@@ -4273,7 +4290,11 @@ ctx and reads no global state.
   `materialSrgbColor` + alpha. Combined → one merged `${base}.ply`;
   individually → zip (STL shape). No texture files shipped.
 - `WrlWriter.js` (task 1.6) — `serializeWRL(ctx)`. `#VRML V2.0 utf8`; one
-  `DEF <name> Shape` per clone, `IndexedFaceSet` (+ `texCoord`/`texCoordIndex`
+  `DEF <name> Shape` per clone (`vrmlName`: ASCII letters/digits/`_` kept,
+  other ASCII → `_`, each non-ASCII character → `_u` + hex code point, so
+  names stay distinct and every reader parses them; the original name is kept
+  in `WorldInfo { info [ "<DEF> = <name>" ] }` and a `#` comment above the
+  Shape, P4.4), `IndexedFaceSet` (+ `texCoord`/`texCoordIndex`
   when textured); textured → `ImageTexture { url "textures/<name>.png" }`,
   solid → `Material { diffuseColor transparency }`. Units mm in the PrintSpace
   Z-up frame (not VRML's nominal Y-up metres — stated in a header comment).

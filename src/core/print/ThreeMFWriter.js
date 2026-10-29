@@ -21,6 +21,7 @@ import { materialSrgbColor } from '../shaders/ColorSpace.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { applyBambuFlavour } from './ThreeMFBambu.js';
 import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
+import { createVertexWeld, isCollapsed } from './VertexWeld.js';
 
 const BABYLON = window.BABYLON;
 
@@ -279,7 +280,10 @@ function _emitUnitObjects({ unit, buildMesh, buildSupport = null, split, objs, m
   }
   const built = buildMesh(unit);
   if (!built) return objId + 1;
-  objs.push(_meshObjectXml(objId, '', built));
+  // P4.4: the merged object carries the unit's name like every other shape does
+  // (after its pid / pindex; attribute order carries no meaning in XML).
+  const nameAttr = unit.name ? ` name="${_xmlAttr(unit.name)}"` : '';
+  objs.push(_meshObjectXml(objId, '', { ...built, objectAttrs: built.objectAttrs + nameAttr }));
   meshObjectIds.set(unit, objId);
   return objId + 1;
 }
@@ -479,32 +483,38 @@ ${_metadataXml(options.metadata)}<resources><m:colorgroup id="1">${colorXml}</m:
 
 function _buildUnitColorMeshXml(unit, converted, cx, cy, cz, colorIndex, hexOf) {
   const single = unit.meshes.length === 1;
-  let vertices = '';
+  const weld = createVertexWeld();
   let triangles = '';
-  let vertexOffset = 0;
   let objectAttrs = '';
 
   for (const { mesh } of unit.meshes) {
     const pos = converted.get(mesh);
     const idx = printIndices(mesh);   // outward in 3MF's right-handed space
     if (!pos || idx.length === 0) continue;
-    for (let i = 0; i < pos.length; i += 3) {
-      vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
+    const vertexOf = _weldVertices(weld, pos, cx, cy, cz);
     const pidx = colorIndex.get(hexOf(mesh)) ?? 0;
     if (single) objectAttrs = ` pid="1" pindex="${pidx}"`;
     for (let i = 0; i < idx.length; i += 3) {
-      const a = idx[i] + vertexOffset;
-      const b = idx[i + 1] + vertexOffset;
-      const c = idx[i + 2] + vertexOffset;
+      const a = vertexOf[idx[i]], b = vertexOf[idx[i + 1]], c = vertexOf[idx[i + 2]];
+      if (isCollapsed(a, b, c)) continue;
       triangles += single
         ? `<triangle v1="${a}" v2="${b}" v3="${c}"/>`
         : `<triangle v1="${a}" v2="${b}" v3="${c}" pid="1" p1="${pidx}" p2="${pidx}" p3="${pidx}"/>`;
     }
-    vertexOffset += pos.length / 3;
   }
 
-  return triangles ? { vertices, triangles, objectAttrs } : null;
+  return triangles ? { vertices: weld.records.join(''), triangles, objectAttrs } : null;
+}
+
+// Each mesh vertex → its index in the unit's welded vertex list. One object
+// is welded across all its parts, so a seam between two materials of one
+// object is closed too; separate objects never share vertices.
+function _weldVertices(weld, pos, cx, cy, cz) {
+  const vertexOf = new Int32Array(pos.length / 3);
+  for (let i = 0; i < pos.length; i += 3) {
+    vertexOf[i / 3] = weld.add(`<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`);
+  }
+  return vertexOf;
 }
 
 // Pass: rotate every mesh's vertices into 3MF space and find the union
@@ -552,11 +562,12 @@ function _convertVertices(list) {
  *       <triangle v1=".." v2=".." v3=".." p1=".." p2=".." p3=".."/>
  *   </resources>
  *
- * The texture writer is the exact inverse of the loader's parse path. To
- * keep round-trip trivial we emit ONE <m:tex2coord> per vertex in
- * vertex-order, and every triangle's `p1/p2/p3` index simply re-states its
- * `v1/v2/v3` — vertex i ↔ UV i. Welding is skipped on textured meshes (see
- * PREP_STEPS.weldSolidOnly) so UV seams survive into this writer.
+ * Each mesh's texture2dgroup holds ONE <m:tex2coord> per mesh vertex, in
+ * vertex order, and a triangle's `p1/p2/p3` name its corners' mesh vertex
+ * indices. `v1/v2/v3` index the object's welded vertex list, so a UV seam
+ * (one position, two UVs) shares its position and keeps a UV per corner: a
+ * closed surface to a slicer (L2-03). The loader splits per (vertex, coord)
+ * corner, its exact inverse.
  */
 function _buildMaterialsExtModel(list, pathByMesh, options = {}, bambuObjects = []) {
   const units = _normaliseUnits(list);
@@ -645,18 +656,15 @@ ${_metadataXml(options.metadata)}<resources>${tex2dXml}${tex2dGroupXmls.join('')
 
 function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByMesh, colorGroupId, colorIndex, hexOf) {
   const single = unit.meshes.length === 1;
-  let vertices = '';
+  const weld = createVertexWeld();
   let triangles = '';
-  let vertexOffset = 0;
   let objectAttrs = '';
 
   for (const { mesh } of unit.meshes) {
     const pos = converted.get(mesh);
     const idx = printIndices(mesh);   // outward in 3MF's right-handed space
     if (!pos || idx.length === 0) continue;
-    for (let i = 0; i < pos.length; i += 3) {
-      vertices += `<vertex x="${+(pos[i] - cx).toFixed(5)}" y="${+(pos[i + 1] - cy).toFixed(5)}" z="${+(pos[i + 2] - cz).toFixed(5)}"/>`;
-    }
+    const vertexOf = _weldVertices(weld, pos, cx, cy, cz);
     const texGroupId = tex2dGroupIdByMesh.get(mesh);
     const solidPidx = colorIndex.get(hexOf(mesh)) ?? 0;
     if (single) {
@@ -669,9 +677,10 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
       const localA = idx[i];
       const localB = idx[i + 1];
       const localC = idx[i + 2];
-      const a = localA + vertexOffset;
-      const b = localB + vertexOffset;
-      const c = localC + vertexOffset;
+      const a = vertexOf[localA];
+      const b = vertexOf[localB];
+      const c = vertexOf[localC];
+      if (isCollapsed(a, b, c)) continue;
       if (single) {
         triangles += texGroupId
           ? `<triangle v1="${a}" v2="${b}" v3="${c}" p1="${localA}" p2="${localB}" p3="${localC}"/>`
@@ -684,10 +693,9 @@ function _buildUnitMaterialsMeshXml(unit, converted, cx, cy, cz, tex2dGroupIdByM
         triangles += `<triangle v1="${a}" v2="${b}" v3="${c}"/>`;
       }
     }
-    vertexOffset += pos.length / 3;
   }
 
-  return triangles ? { vertices, triangles, objectAttrs } : null;
+  return triangles ? { vertices: weld.records.join(''), triangles, objectAttrs } : null;
 }
 
 /** Per-part rels file. One Relationship per unique texture path. */

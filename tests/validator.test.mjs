@@ -370,8 +370,8 @@ await test('repairObject: a MULTI-PART object is repaired as ONE solid on its we
   // p2 owns one. Per-part repair would have capped BOTH parts' seams
   // (two closed shells with an internal wall); the union repair adds the
   // one missing face only.
-  const p1 = buildMesh([[0, 2, 1], [0, 1, 3]]); p1.metadata = { meshId: 'p1' };
-  const p2 = buildMesh([[0, 3, 2]]);            p2.metadata = { meshId: 'p2' };
+  const p1 = buildMesh([[0, 2, 1], [0, 1, 4]]); p1.metadata = { meshId: 'p1' };
+  const p2 = buildMesh([[0, 4, 2]]);            p2.metadata = { meshId: 'p2' };
   const meshes = { p1, p2 };
   AssetLoader.getBabylonMesh = (id) => meshes[id] ?? null;
   setState(s => ({
@@ -466,7 +466,7 @@ await test('repairObjects: sequential and tolerant — a failure on one object d
     },
   });
 
-  const OPEN_TETRA = [[0, 2, 1], [0, 1, 3], [0, 3, 2]];   // 3 of 4 faces (open)
+  const OPEN_TETRA = [[0, 2, 1], [0, 1, 4], [0, 4, 2]];   // 3 of 4 faces of a real (non-flat) tetra (open)
   const m1 = buildMesh(OPEN_TETRA);
   m1.metadata = { meshId: 'm1' };
   const m2 = buildMesh(OPEN_TETRA);

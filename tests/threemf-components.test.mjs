@@ -117,7 +117,7 @@ await test('solid 3MF export emits component objects for hierarchy instead of ro
 
   assert.match(model, /<components>/, 'component assembly missing');
   assert.match(model, /<object id="\d+" type="model" name="Robot"><components>/);
-  const meshObject = model.match(/<object id="(\d+)" type="model" pid="1" pindex="0">/);
+  const meshObject = model.match(/<object id="(\d+)" type="model" pid="1" pindex="0"(?: name="[^"]*")?>/);
   const groupObject = model.match(/<object id="(\d+)" type="model" name="Robot"><components>/);
   assert.ok(meshObject && groupObject, 'expected mesh object and group object');
   assert.match(model, new RegExp(`<component objectid="${meshObject[1]}" transform="1 0 0 0 1 0 0 0 1 0 0 0"\\/>`));
@@ -140,7 +140,7 @@ await test('nested 3MF components define children before parents that reference 
   const entries = Writer.buildColorGroupEntries([unit(mesh, 'body')], { state: stateForNestedHierarchy() });
   const model = entries.find(e => e.path === '3D/3dmodel.model').data;
 
-  const meshObject = model.match(/<object id="(\d+)" type="model" pid="1" pindex="0">/);
+  const meshObject = model.match(/<object id="(\d+)" type="model" pid="1" pindex="0"(?: name="[^"]*")?>/);
   const childObject = model.match(/<object id="(\d+)" type="model" name="Child"><components>/);
   const parentObject = model.match(/<object id="(\d+)" type="model" name="Parent"><components>/);
   assert.ok(meshObject && childObject && parentObject, 'expected mesh, child group, and parent group object resources');
@@ -209,7 +209,7 @@ await test('splitByMaterial OFF (default): multi-material object stays ONE merge
 await test('splitByMaterial ON: a single-material object keeps the plain one-object shape', () => {
   const model = Writer.buildColorGroupEntries([unit(makeMesh('Body'), 'body')], { splitByMaterial: true })
     .find(e => e.path === '3D/3dmodel.model').data;
-  assert.match(model, /<object id="2" type="model" pid="1" pindex="0"><mesh>/);
+  assert.match(model, /<object id="2" type="model" pid="1" pindex="0" name="[^"]*"><mesh>/);
   assert.ok(!/<components>/.test(model));
   assert.match(model, /<build><item objectid="2" /);
 });

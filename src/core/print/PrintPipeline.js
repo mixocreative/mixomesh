@@ -89,6 +89,13 @@ function _csgRebake(mesh) {
   // world position (a 20 mm cube resting on the bed came out at z -10..10,
   // and its supports no longer met it; P4.2).
   const vd = csg.toVertexData();
+  // Manifold accepts closed solids only; handed an open surface (an open
+  // sheet repair kept as-is, P4.4) it can come back EMPTY, which would ship a
+  // part with no facets. Leave the clone as it was (named in csgSkipped).
+  if (vd.indices != null && vd.indices.length === 0 && (mesh.getIndices()?.length ?? 0) > 0) {
+    csg.dispose?.();
+    throw new Error('CSG returned no geometry (the part is not a closed solid)');
+  }
   vd.applyToMesh(mesh);
   // CSG2.toMesh emits geometry in Babylon's NATIVE winding (CounterClockWise
   // front). A glTF-imported clone still carries the loader's ClockWise flag,

@@ -529,25 +529,20 @@ export function triangleComponents(vertexCount, T, V = null) {
  * @param {number[][]} V
  * @param {number[][]} T
  * @param {{name?:string, timeoutMs?:number, onProgress?:Function, engine?:object}} [opts]
- * @returns {Promise<{V:number[][], T:number[][], report:object, after:object, changed:boolean, components:number, keptOriginal:number}>}
+ * @returns {Promise<{V:number[][], T:number[][], report:object, after:object, changed:boolean, components:number, keptOriginal:number, capped:number, sheets:number}>}
+ *   `sheets`: open sheets kept as they were (see _repairShell).
  */
 export async function repairArraysByComponent(V, T, opts = {}) {
   const comps = triangleComponents(V.length, T, V);
   const lib = await ensureRepairEngine();   // diagnose only (read-only)
   if (comps.length <= 1) {
-    const one = await repairArrays(V, T, opts);
-    let capped = 0, oneV = one.V, oneT = one.T, changed = one.changed;
-    const report = { ...one.report };
-    if (one.after?.boundary > 0) {
-      const cap = capBoundaryLoops(oneV, oneT);
-      if (cap.capped > 0) { oneV = cap.V; oneT = cap.T; capped = cap.capped; changed = true; report.holesFilled = (report.holesFilled | 0) + cap.capped; }
-    }
-    const after = capped ? lib.diagnose(oneV, oneT) : one.after;
-    return { V: oneV, T: oneT, report, after, changed, components: comps.length, keptOriginal: 0, capped };
+    const one = await _repairShell(lib, V, T, opts);
+    const after = one.changed ? lib.diagnose(one.V, one.T) : lib.diagnose(V, T);
+    return { V: one.V, T: one.T, report: one.report, after, changed: one.changed, components: comps.length, keptOriginal: 0, capped: one.capped, sheets: one.sheet ? 1 : 0 };
   }
   const outV = [], outT = [];
   const report = { holesFilled: 0, nmFixed: 0, normalsFlipped: 0, merged: 0 };
-  let changed = false, keptOriginal = 0;
+  let changed = false, keptOriginal = 0, capped = 0, sheets = 0;
   for (let ci = 0; ci < comps.length; ci++) {
     const triIdx = comps[ci];
     // Local re-index of this component.
@@ -558,7 +553,7 @@ export async function repairArraysByComponent(V, T, opts = {}) {
     }
     let res = null;
     try {
-      res = await repairArrays(lv, lt, {
+      res = await _repairShell(lib, lv, lt, {
         ...opts,
         name: `${opts.name ?? 'mesh'} [shell ${ci + 1}/${comps.length}]`,
         onProgress: opts.onProgress ? (f) => opts.onProgress((ci + (typeof f === 'number' ? Math.min(1, Math.max(0, f > 1 ? f / 100 : f)) : 0)) / comps.length) : undefined,
@@ -576,20 +571,86 @@ export async function repairArraysByComponent(V, T, opts = {}) {
       const r = res.report ?? {};
       report.holesFilled += r.holesFilled | 0; report.nmFixed += r.nmFixed | 0;
       report.normalsFlipped += r.normalsFlipped | 0; report.merged += r.merged | 0;
+      capped += res.capped;
     }
+    if (res?.sheet) sheets++;
     const off = outV.length;
     for (const v of useV) outV.push(v);
     for (const t of useT) outT.push([t[0] + off, t[1] + off, t[2] + off]);
   }
-  // Whatever loops the engine declined (measured: large open undersides /
-  // rims, and stray 3-edge holes) are closed by a flat fan cap so the part
-  // is actually printable — a slicer would otherwise guess or refuse.
-  let capV = outV, capT = outT, capped = 0;
-  const pre = lib.diagnose(outV, outT);
-  if (pre.boundary > 0) {
-    const cap = capBoundaryLoops(outV, outT);
-    if (cap.capped > 0) { capV = cap.V; capT = cap.T; capped = cap.capped; changed = true; report.holesFilled += cap.capped; }
+  const after = lib.diagnose(outV, outT);
+  return { V: outV, T: outT, report, after, changed, components: comps.length, keptOriginal, capped, sheets };
+}
+
+/**
+ * One shell through the engine, then a flat fan cap over whatever loops the
+ * engine declined (measured: large open undersides / rims, and stray 3-edge
+ * holes), so the part is actually printable — a slicer would otherwise guess
+ * or refuse. Capped per shell, so a shell kept open below stays open.
+ *
+ * P4.4: an open single-sided SHEET (a quad, a scanned surface patch) has no
+ * inside. Closing it can only lay a reversed copy on top of it: a 0 mm^3
+ * double-sided shell that slicers report as manifold — a fake solid. Such a
+ * result is discarded and the sheet is kept as it was (open, so the export's
+ * open-mesh warning names it, and strictExport refuses it).
+ * @returns {Promise<{V:number[][], T:number[][], report:object, changed:boolean, capped:number, sheet:boolean}>}
+ */
+async function _repairShell(lib, V, T, opts) {
+  const one = await repairArrays(V, T, opts);   // a fresh engine instance per run (see createRepairEngine)
+  let oV = one.V, oT = one.T, changed = one.changed, capped = 0;
+  const report = { ...one.report };
+  if (!oT.length) return { V: oV, T: oT, report, changed, capped, sheet: false };
+  const before = changed ? lib.diagnose(oV, oT) : one.after;
+  if (before?.boundary > 0) {
+    const cap = capBoundaryLoops(oV, oT);
+    if (cap.capped > 0) { oV = cap.V; oT = cap.T; capped = cap.capped; changed = true; report.holesFilled = (report.holesFilled | 0) + cap.capped; }
   }
-  const after = lib.diagnose(capV, capT);
-  return { V: capV, T: capT, report, after, changed, components: comps.length, keptOriginal, capped };
+  if (changed && isFoldedSheet(oV, oT)) {
+    return { V, T, report: { holesFilled: 0, nmFixed: 0, normalsFlipped: 0, merged: 0 }, changed: false, capped: 0, sheet: true };
+  }
+  return { V: oV, T: oT, report, changed, capped, sheet: false };
+}
+
+// Enclosed volume below this fraction of the bounding diagonal cubed is
+// "none": a real thin solid (a 0.01 mm plate, 50 x 50 mm) sits near 7e-5, a
+// folded sheet at 0 up to float noise.
+const FOLDED_VOLUME_RATIO = 1e-6;
+
+/**
+ * True when a triangle list is CLOSED (every edge, by position, on an even
+ * number of triangles) yet encloses (almost) no volume for its size: an open sheet
+ * folded onto itself by a repair (each face doubled by its reverse), a fake
+ * solid. A result that is still open is not one (it reads as open anyway).
+ * Coordinates are taken relative to the box minimum, so float noise does not
+ * grow with distance from the origin.
+ * @param {number[][]} V
+ * @param {number[][]} T
+ */
+export function isFoldedSheet(V, T) {
+  if (!T.length) return false;
+  const key = V.map(v => posKey(v[0], v[1], v[2]));
+  const edges = new Map();
+  for (const t of T) for (let k = 0; k < 3; k++) {
+    const a = key[t[k]], b = key[t[(k + 1) % 3]];
+    const e = a < b ? `${a}|${b}` : `${b}|${a}`;
+    edges.set(e, (edges.get(e) ?? 0) + 1);
+  }
+  for (const n of edges.values()) if (n % 2) return false;   // a boundary edge: still open
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const t of T) for (const i of t) for (let k = 0; k < 3; k++) {
+    const c = V[i][k];
+    if (c < lo[k]) lo[k] = c;
+    if (c > hi[k]) hi[k] = c;
+  }
+  const diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  if (!(diag > 0)) return false;
+  let v6 = 0;
+  for (const [ia, ib, ic] of T) {
+    const a = V[ia], b = V[ib], c = V[ic];
+    const ax = a[0] - lo[0], ay = a[1] - lo[1], az = a[2] - lo[2];
+    const bx = b[0] - lo[0], by = b[1] - lo[1], bz = b[2] - lo[2];
+    const cx = c[0] - lo[0], cy = c[1] - lo[1], cz = c[2] - lo[2];
+    v6 += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return Math.abs(v6 / 6) <= FOLDED_VOLUME_RATIO * diag ** 3;
 }

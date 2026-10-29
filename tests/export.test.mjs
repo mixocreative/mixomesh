@@ -506,11 +506,16 @@ function openThenFixedEngine({ onRepair } = {}) {
   let repaired = false;
   return {
     diagnose: () => (repaired ? { ...DIAG_CLOSED } : { ...DIAG_OPEN }),
-    repairObject: async (V, T) => {
+    repairObject: async (V) => {
       repaired = true;
       onRepair?.();
-      // Appending a triangle makes the output "changed" → forces write-back.
-      return { V, T: [...T, [0, 1, 2]], report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 } };
+      // A changed output forces write-back. It closes into a real tetra (an
+      // apex over the fixture triangle): doubling the triangle instead would
+      // be a 0 mm^3 folded sheet, which repair discards (P4.4).
+      return {
+        V: [...V, [0, 0, 1]], T: [[0, 2, 1], [0, 1, 3], [1, 2, 3], [0, 3, 2]],
+        report: { holesFilled: 1, nmFixed: 0, normalsFlipped: 0, merged: 0 },
+      };
     },
   };
 }
@@ -904,7 +909,7 @@ await test('3MF: valid mesh → OPC package with model XML + colour, downloads',
   assert.match(model, /x="-0\.5"/, 'build centred on origin');
   assert.match(model, /<m:colorgroup id="1">/);
   assert.match(model, /<m:color color="#FF0000FF"\/>/);
-  assert.match(model, /<object id="2" type="model" pid="1" pindex="0">/);
+  assert.match(model, /<object id="2" type="model" pid="1" pindex="0" name="m1">/);
   assert.match(model, /<vertex /);
   // CounterClockWise-flagged (default) mesh: PrintSpace keeps the buffer
   // order — the reflection in toPrintSpace already makes it outward for the
