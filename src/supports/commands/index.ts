@@ -9,8 +9,9 @@ export { AddSupportCommand, type AddSupportInput } from './AddSupportCommand';
 export { DeleteSupportsCommand } from './DeleteSupportsCommand';
 export { StampStrokeCommand } from './StampStrokeCommand';
 export { SetOverrideCommand, ResetOverrideCommand } from './OverrideCommands';
-export { ChangeSettingsCommand, ApplyPresetCommand, type SettingsPatch } from './SettingsCommands';
+export { ChangeSettingsCommand, ApplyPresetCommand, SetSettingsCommand, type SettingsPatch } from './SettingsCommands';
 export { LiftForSupportsCommand, liftDelta, babylonLiftScene, type LiftScene, type WorldTransform } from './LiftForSupportsCommand';
+export { RemoveSupportsCommand } from './RemoveSupportsCommand';
 export { RegenerateRekeyCommand, type RegenerateInput } from './RegenerateRekeyCommand';
 
 interface Command { label: string; execute(): void; undo(): void }

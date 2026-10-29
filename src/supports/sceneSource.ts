@@ -10,9 +10,9 @@ import { logicalObjectPartIds } from '../core/LogicalObjects.js';
 import { extract, revisionOf } from '../core/geometry/GeometryStore.js';
 import { frontFaceIsClockwise } from '../core/print/PrintSpace.js';
 import { withRestTransform } from '../core/scene/ImportBounce.js';
-import type { BabylonPart } from './frame';
+import { partsToEngine, type BabylonPart } from './frame';
 import type { SupportPose } from './model';
-import { SourceHashCache } from './sourceHash';
+import { SourceHashCache, hashEngineMesh } from './sourceHash';
 import type { SupportSceneSource } from './stale';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Babylon is the untyped window global here */
@@ -75,9 +75,32 @@ function versionKey(objectId: string, parts: readonly { id: string }[]): string 
  * The scene source the app installs. The refinement level is part of the hash (refined print
  * geometry is another surface for the contacts), the parts are read only on a cache miss.
  */
-export function createSceneSource(): SupportSceneSource {
+/** `SupportSceneSource` plus the same hash in separate main-thread steps (`between` yields to the event loop). */
+export interface StagedSceneSource extends SupportSceneSource {
+  sourceHashStaged(objectId: string, between: () => Promise<void>): Promise<string | null>;
+}
+
+export function createSceneSource(): StagedSceneSource {
   const hashes = new SourceHashCache();
   return {
+    async sourceHashStaged(objectId, between) {
+      const parts = liveParts(objectId);
+      if (!parts.length) return null;
+      const level = refinementLevel(objectId);
+      const key = versionKey(objectId, parts);
+      let hash = hashes.peek(objectId, key);
+      if (hash === undefined) {
+        // The three costly steps of a big model (extract, weld, hash) each in a task of their own.
+        await between();
+        const local = leadLocalParts(objectId);
+        await between();
+        const engine = partsToEngine(local);
+        await between();
+        hash = hashEngineMesh(engine.mesh);
+        hashes.set(objectId, key, hash);
+      }
+      return level ? `${hash}-r${level}` : hash;
+    },
     pose: scenePose,
     sourceHash(objectId) {
       const parts = liveParts(objectId);

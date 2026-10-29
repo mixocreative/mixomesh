@@ -10,7 +10,8 @@ import { handlers, useSupportUi } from './supportUi';
 
 export function GenerateRow({ objectIds, objectId }: { objectIds: readonly string[]; objectId: string | undefined }) {
   const tt = useT();
-  const { job } = useSupportUi();
+  const { job, verdicts } = useSupportUi();
+  const verdict = objectId ? verdicts[objectId] : undefined;
   const record = useSupportsRecord(objectId);
   const built = isBuilt(record);
   const ready = typeof handlers.generate === 'function';
@@ -27,6 +28,19 @@ export function GenerateRow({ objectIds, objectId }: { objectIds: readonly strin
           {...(objectId && handlers.cancelJob ? { onCancel: () => handlers.cancelJob?.(objectId) } : {})} />
       )}
       {record?.stale && <p className="mx-hint" role="note">{tt('supportPanel.generate.stale')}</p>}
+      {verdict && !job.running && (
+        <p className="mx-hint sp-verdict" role="status" data-verdict={verdict.status}>
+          {tt(`supportPanel.verdict.${verdict.status}`)}
+          {verdict.dropped > 0 ? ` · ${tt('supportPanel.verdict.dropped', { n: verdict.dropped })}` : ''}
+          {verdict.islands > 0 ? ` · ${tt('supportPanel.verdict.islands', { n: verdict.islands })}` : ''}
+        </p>
+      )}
+      {built && (
+        <Button title={tt('supportPanel.removeAllHint')} disabled={!handlers.removeAll || job.running}
+          onClick={() => handlers.removeAll?.(objectIds)}>
+          {tt('supportPanel.removeAll')}
+        </Button>
+      )}
     </section>
   );
 }

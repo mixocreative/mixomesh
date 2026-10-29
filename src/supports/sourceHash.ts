@@ -52,6 +52,16 @@ export class SourceHashCache {
     return hash;
   }
 
+  /** The cached hash for this version key, if any. */
+  peek(objectId: string, versionKey: string): string | undefined {
+    const hit = this.entries.get(objectId);
+    return hit && hit.key === versionKey ? hit.hash : undefined;
+  }
+
+  set(objectId: string, versionKey: string, hash: string): void {
+    this.entries.set(objectId, { key: versionKey, hash });
+  }
+
   forget(objectId?: string): void {
     if (objectId === undefined) this.entries.clear();
     else this.entries.delete(objectId);

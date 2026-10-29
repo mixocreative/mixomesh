@@ -141,18 +141,24 @@ export function weldByPosition(mesh: TriangleMesh, cellMm = WELD_CELL_MM): { mes
   while (size < n * 2) size <<= 1;
   const table = new Int32Array(size).fill(-1);
   const remap = new Uint32Array(n);
-  const out: number[] = [];
-  const canon: number[] = [];
+  // Worst case sizes, trimmed at the end: typed arrays instead of number[] pushes (a 1M-triangle
+  // model is welded on the main thread, so this loop is on the UI's clock).
+  const out = new Float32Array(n * 3);
+  const canon = new Uint32Array(n);
+  let unique = 0;
   for (let i = 0; i < n; i++) {
     const x = q[i * 3]!, y = q[i * 3 + 1]!, z = q[i * 3 + 2]!;
     let h = (Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791)) & (size - 1);
     for (;;) {
       const slot = table[h]!;
       if (slot < 0) {
-        table[h] = canon.length;
-        remap[i] = canon.length;
-        canon.push(i);
-        out.push(x * cellMm, y * cellMm, z * cellMm);
+        table[h] = unique;
+        remap[i] = unique;
+        canon[unique] = i;
+        out[unique * 3] = x * cellMm;
+        out[unique * 3 + 1] = y * cellMm;
+        out[unique * 3 + 2] = z * cellMm;
+        unique++;
         break;
       }
       const c = canon[slot]!;
@@ -163,15 +169,17 @@ export function weldByPosition(mesh: TriangleMesh, cellMm = WELD_CELL_MM): { mes
       h = (h + 1) & (size - 1);
     }
   }
-  const kept: number[] = [];
-  const faces: number[] = [];
+  const kept = new Uint32Array(indices.length);
+  const faces = new Uint32Array(Math.floor(indices.length / 3));
+  let k = 0;
+  let f = 0;
   for (let t = 0; t + 2 < indices.length; t += 3) {
     const a = remap[indices[t]!]!, b = remap[indices[t + 1]!]!, c = remap[indices[t + 2]!]!;
     if (a === b || b === c || c === a) continue;
-    kept.push(a, b, c);
-    faces.push(t / 3);
+    kept[k++] = a; kept[k++] = b; kept[k++] = c;
+    faces[f++] = t / 3;
   }
-  return { mesh: { positions: new Float32Array(out), indices: new Uint32Array(kept) }, sourceFace: new Uint32Array(faces) };
+  return { mesh: { positions: out.slice(0, unique * 3), indices: kept.slice(0, k) }, sourceFace: faces.slice(0, f) };
 }
 
 /** An engine-frame mesh (mm) as Babylon world geometry (BU) for a mesh drawn with the given front face. */

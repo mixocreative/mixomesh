@@ -9,10 +9,10 @@ import { customisedAmong, shapePatch, shapeView, type ShapeView } from '@mixo-ge
 import { EVENTS } from '../../core/events.js';
 import { useStore } from '../../react/index.ts';
 import { emptySupports, isBuilt, type ObjectSupports } from '../../supports/model';
-import { supportsOwner } from '../../supports/store';
+import { readSupports, supportsOwner } from '../../supports/store';
 import { cachedPlacement } from '../../supports/supportCache';
 import {
-  ApplyPresetCommand, ChangeSettingsCommand, DeleteSupportsCommand, ResetOverrideCommand, SetOverrideCommand, commitSupportEdits,
+  ApplyPresetCommand, ChangeSettingsCommand, DeleteSupportsCommand, LiftForSupportsCommand, ResetOverrideCommand, SetOverrideCommand, commitSupportEdits,
 } from '../../supports/commands';
 
 /** The events that change `object.supports` (a write, an undo, a load). */
@@ -79,7 +79,14 @@ export function commitSetting<K extends SettingKey>(objectId: string, scope: Pic
     commitSupportEdits([new SetOverrideCommand(objectId, scope.selected, patch)]);
     return true;
   }
-  commitSupportEdits([new ChangeSettingsCommand(objectId, { [key]: value })]);
+  const change = new ChangeSettingsCommand(objectId, { [key]: value });
+  // Lift height moves the model: the lift and the settings change are one undo step (P3 lift decision).
+  if (key === 'liftHeight' && isBuilt(readSupports(objectId))) {
+    const lift = new LiftForSupportsCommand(objectId, value as number);
+    commitSupportEdits(lift.moves ? [change, lift] : [change], change.label);
+    return true;
+  }
+  commitSupportEdits([change]);
   return true;
 }
 

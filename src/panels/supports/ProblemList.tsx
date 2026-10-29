@@ -38,7 +38,7 @@ export function ProblemList({ unitName }: { unitName?: (unitId: string) => strin
             ...(p.kind === 'outside' ? [] : [{
               label: tt('supportPanel.problems.fix'),
               // Fix opens the Add tool with a click that adds (a Remove left on would take supports away).
-              onClick: () => { chooseTool(supportSession, 'add'); supportSession.send({ type: 'setAddAction', action: 'add' }); handlers.showProblem?.(p); },
+              onClick: () => { chooseTool(supportSession, 'add'); supportSession.send({ type: 'setAddAction', action: 'add' }); (handlers.fixProblem ?? handlers.showProblem)?.(p); },
             }]),
           ];
           return (

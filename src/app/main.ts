@@ -138,6 +138,7 @@ async function bootstrap() {
   CopyPaste.init();   // Ctrl+C / Ctrl+V with aspect chooser
   SupportModeUI.init(); // header "Supports" entry + Shift+S (Support Mode, P3.2)
   SupportPanels.init(); // Support Mode panels over the right panel (P3.4)
+  safeAsync(() => import('../supports/live').then(m => m.installLive())); // live support generation + gestures (P3.5)
   SettingsStore.init(); // autosave hooks on the Scene/Print panel bodies (now mounted)
   PanelSheets.init(); // < 1280 px: edge tabs + slide-over sheets (8.3)
   ViewerMode.init();  // < 768 px: read-only phone viewer (8.6)

@@ -100,6 +100,30 @@ export function objectModel(objectId: string): ObjectModel | undefined {
   return built;
 }
 
+/**
+ * `objectModel` with its costly steps (read the parts, weld, make object-local) each in a task of
+ * their own: `between` yields to the event loop. A cached model returns at once.
+ */
+export async function objectModelStaged(objectId: string, between: () => Promise<void>): Promise<ObjectModel | undefined> {
+  const version = modelVersion(objectId);
+  const hit = cache.get(objectId);
+  if (hit && hit.version === version) return hit;
+  await between();
+  const parts = worldParts(objectId);
+  if (!parts.length) {
+    cache.delete(objectId);
+    return undefined;
+  }
+  await between();
+  const engine = partsToEngine(parts);
+  await between();
+  const model = toLocal(engine.mesh);
+  const lead = withRestTransform(() => leadPosition(objectId)) ?? [0, 0, 0];
+  const built: ObjectModel = { objectId, version, engine, model, anchor: { center: model.center, lead }, parts: parts.length };
+  cache.set(objectId, built);
+  return built;
+}
+
 export function forgetObjectModel(objectId?: string): void {
   if (objectId === undefined) cache.clear();
   else cache.delete(objectId);

@@ -38,3 +38,17 @@ export class ApplyPresetCommand extends SupportEditCommand {
     return { ...prev, settings: applyPreset(this.preset, prev.settings) };
   }
 }
+
+/** Replace the whole settings object (Apply to all selected objects, plan P3.5). */
+export class SetSettingsCommand extends SupportEditCommand {
+  private readonly settings: LiveSupportSettings;
+
+  constructor(objectId: string, settings: LiveSupportSettings) {
+    super(objectId, t('history.supportSettings'));
+    this.settings = JSON.parse(JSON.stringify(settings)) as LiveSupportSettings;
+  }
+
+  protected transition(prev: ObjectSupports): ObjectSupports {
+    return { ...prev, settings: JSON.parse(JSON.stringify(this.settings)) as LiveSupportSettings };
+  }
+}

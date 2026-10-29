@@ -22,6 +22,15 @@ export interface JobInfo {
   stageKey?: string;
 }
 
+/** The engine's verdict on the latest build of an object (plan P3.5). */
+export interface VerdictInfo {
+  status: 'clear' | 'blocked' | 'inconclusive';
+  /** Automatic supports the build left out. */
+  dropped: number;
+  /** Islands no support carries to the plate. */
+  islands: number;
+}
+
 export interface SupportUiState {
   /** The object the panel edits (one of the mode's objects). */
   targetId: string | undefined;
@@ -29,6 +38,8 @@ export interface SupportUiState {
   problems: readonly PanelProblem[];
   /** A newer job runs: the findings are listed but greyed until its verdict lands. */
   problemsStale: boolean;
+  /** Verdict of the latest build per object id. */
+  verdicts: Readonly<Record<string, VerdictInfo>>;
   /** Bottom view is on (the camera looks up at the contacts; the grid and floor disc are hidden). */
   bottomView: boolean;
 }
@@ -39,12 +50,18 @@ export interface SupportUiHandlers {
   cancelJob?(objectId: string): void;
   /** Frame the camera on a finding (P3.5 owns the camera move). */
   showProblem?(problem: PanelProblem): void;
+  /** Fix: Show, then wait for a support at the spot and report whether it is covered. */
+  fixProblem?(problem: PanelProblem): void;
   /** Bottom view on / off (camera + grid), Fit view (frame the mode's objects). */
   setBottomView?(on: boolean): void;
   fitView?(): void;
+  /** Remove the supports of these objects (the models and hand edits stay) and offer to drop them to the bed. */
+  removeAll?(objectIds: readonly string[]): void;
+  /** Apply the settings of the object `from` to every other of `objectIds` (one undo step). */
+  applyToAll?(from: string, objectIds: readonly string[]): void;
 }
 
-const INITIAL: SupportUiState = { targetId: undefined, job: { running: false }, problems: [], problemsStale: false, bottomView: false };
+const INITIAL: SupportUiState = { targetId: undefined, job: { running: false }, problems: [], problemsStale: false, verdicts: {}, bottomView: false };
 
 let state: SupportUiState = INITIAL;
 const listeners = new Set<() => void>();
