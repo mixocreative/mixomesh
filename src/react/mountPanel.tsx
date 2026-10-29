@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
+import { Component, Profiler, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { reportError } from '../ui/Status.js';
 import { useT } from './useT.ts';
@@ -23,6 +23,17 @@ function Provider({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Dev-only perf hook (P0.3b): Profiler commit durations land in window.__mxReactCommits. */
+const devProfile = import.meta.env.DEV;
+if (devProfile && typeof window !== 'undefined') {
+  const w = window as unknown as { __mxReactRoots?: () => number };
+  w.__mxReactRoots = () => roots.size;
+}
+function onCommit(_id: string, _phase: string, actualDuration: number) {
+  const w = window as unknown as { __mxReactCommits?: number[] };
+  (w.__mxReactCommits ??= []).push(actualDuration);
+}
+
 const roots = new Map<string, { root: Root; el: HTMLElement }>();
 
 /** Mount a React panel into the element with id rootId. Idempotent per root; returns unmount(). */
@@ -34,10 +45,13 @@ export function mountPanel(rootId: string, element: ReactElement, reporter?: Rep
   if (existing) unmount(rootId);
   const root = createRoot(el);
   roots.set(rootId, { root, el });
-  root.render(
+  const tree = (
     <PanelErrorBoundary reporter={reporter} title={rootId}>
       <Provider>{element}</Provider>
-    </PanelErrorBoundary>,
+    </PanelErrorBoundary>
+  );
+  root.render(
+    devProfile ? <Profiler id={rootId} onRender={onCommit}>{tree}</Profiler> : tree,
   );
   return () => unmount(rootId);
 }

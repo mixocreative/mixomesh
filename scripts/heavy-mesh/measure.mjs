@@ -2,6 +2,7 @@
 //
 //   node scripts/heavy-mesh/measure.mjs [--dir DIR] [--files a.stl,b.3mf] [--gl d3d11|swiftshader]
 //                                       [--budget N] [--out results.json] [--runs N] [--uncap 1]
+//   (--files may include a 4096^2 textured fixture from generate.mjs: pillow-textured-2M.glb)
 //
 // Starts Vite + headless Chrome (real GPU through ANGLE/D3D11 by default),
 // fetches each fixture same-origin from .tmp/heavy-mesh (the app CSP blocks
@@ -18,6 +19,12 @@
 //   gizmoDragFrameMs / gizmoDragP95Ms  mean / p95 frame interval during a ~3 s real-pointer drag
 //                 on the translate gizmo's X handle (CDP Input.dispatchMouseEvent);
 //                 gizmoPosBefore/After (mm) + gizmoMovedMM prove the drag moved the object
+//   orbitCpuMean / orbitCpuP95 and gizmoCpuMean / gizmoCpuP95  CPU ms per frame (engine
+//                 onBeginFrame -> onEndFrame, the interval Babylon's EngineInstrumentation
+//                 captureFrameTime measures). NOT capped by vsync, so it is the regression gate.
+//   reactCommitMs / reactCommits  sum / count of React Profiler commit durations during the gizmo
+//                 drag (window.__mxReactCommits, filled by the dev-only hook in mountPanel);
+//                 0 while no React root is mounted (reactRoots = 0)
 //   afterDeleteMB renderer private bytes after deleting the object and trimming history
 // --runs N repeats each fixture N times (fresh page each) and prints the median of every
 // numeric metric. Every process it starts is killed in `finally`.
@@ -109,6 +116,17 @@ const MEASURE_IN_PAGE = (fileUrl, filename, budget) => `(async () => {
   };
 })()`;
 
+/** In-page CPU frame-time collector: engine begin->end frame, per frame, ms. */
+const CPU_HOOK = `window.__cpuStart = (engine) => { const a = []; let t = 0;
+    const b = engine.onBeginFrameObservable.add(() => { t = performance.now(); });
+    const en = engine.onEndFrameObservable.add(() => { a.push(performance.now() - t); });
+    return () => { engine.onBeginFrameObservable.remove(b); engine.onEndFrameObservable.remove(en); return a; }; };`;
+const cpuStats = (a, k) => {
+  const f = [...a].sort((x, y) => x - y);
+  return { [k + 'CpuMean']: +(f.reduce((x, y) => x + y, 0) / Math.max(1, f.length)).toFixed(2),
+    [k + 'CpuP95']: +(f[Math.min(f.length - 1, Math.floor(f.length * 0.95))] ?? 0).toFixed(2), [k + 'CpuFrames']: f.length };
+};
+
 const INTERACT_IN_PAGE = `(async () => {
   const sm = await import('/src/core/SceneManager.js');
   const scene = sm.SceneManager.getScene();
@@ -128,6 +146,8 @@ const INTERACT_IN_PAGE = `(async () => {
   t = performance.now();
   const warmId = sm.SceneManager.pickMeshIdAt(cx, cy);
   const pickWarmMs = performance.now() - t;
+  ${CPU_HOOK}
+  const stopCpu = window.__cpuStart(scene.getEngine());
   const cam = scene.activeCamera;
   const frames = [];
   let last = performance.now();
@@ -142,9 +162,11 @@ const INTERACT_IN_PAGE = `(async () => {
     requestAnimationFrame(step);
   });
   frames.shift();
+  const cpu = stopCpu();
   const sorted = [...frames].sort((a, b) => a - b);
   return {
     orbitP95Ms: +(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0).toFixed(1),
+    orbitCpu: cpu,
     picked: !!coldId && coldId === warmId,
     pickColdMs: Math.round(pickColdMs), pickWarmMs: Math.round(pickWarmMs), pickIndexWaitMs,
     orbitFrameMs: +(frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length)).toFixed(1),
@@ -165,6 +187,7 @@ const GIZMO_PREP_IN_PAGE = `(async () => {
   sm.SceneManager.frameAll?.();
   await new Promise(r => setTimeout(r, 600));
   const engine = scene.getEngine();
+  window.BABYLON_SCENE_ENGINE = () => engine;
   const canvas = engine.getRenderingCanvas();
   const rect = canvas.getBoundingClientRect();
   const cam = scene.activeCamera;
@@ -208,7 +231,9 @@ async function gizmoDrag(cdp) {
   if (!found) throw new Error('no gizmo handle found');
   const handle = { x: found.x, y: found.y, dx: prep.dx, dy: prep.dy };
   const posBefore = await evaluate(cdp, 'window.__objPos()');
-  await evaluate(cdp, `(() => { window.__fr = []; let last = performance.now(); window.__frRun = true;
+  await evaluate(cdp, `(() => { ${CPU_HOOK} window.__stopCpu = window.__cpuStart(window.BABYLON_SCENE_ENGINE());
+    window.__mxReactCommits = window.__mxReactCommits || []; window.__mxReactCommits.length = 0;
+    window.__fr = []; let last = performance.now(); window.__frRun = true;
     const step = () => { const n = performance.now(); window.__fr.push(n - last); last = n; if (window.__frRun) requestAnimationFrame(step); };
     requestAnimationFrame(step); })()`);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(handle.x), y: Math.round(handle.y) });
@@ -224,11 +249,15 @@ async function gizmoDrag(cdp) {
   await mouse('mouseMoved', handle.x + handle.dx * TRAVEL, handle.y + handle.dy * TRAVEL);
   await mouse('mouseReleased', handle.x + handle.dx * TRAVEL, handle.y + handle.dy * TRAVEL);
   const out = await evaluate(cdp, `(() => { window.__frRun = false; const f = window.__fr.slice(1).sort((a, b) => a - b);
-    return { frames: f, pos: window.__objPos() }; })()`);
+    const rc = window.__mxReactCommits || [];
+    return { frames: f, pos: window.__objPos(), cpu: window.__stopCpu(), reactCommits: rc.length,
+      reactCommitMs: rc.reduce((a, b) => a + b, 0), reactRoots: window.__mxReactRoots?.() ?? 0 }; })()`);
   const f = out.frames;
   return {
     gizmoDragFrameMs: +(f.reduce((a, b) => a + b, 0) / Math.max(1, f.length)).toFixed(1),
     gizmoDragP95Ms: +(f[Math.min(f.length - 1, Math.floor(f.length * 0.95))] ?? 0).toFixed(1),
+    ...cpuStats(out.cpu, 'gizmo'),
+    reactCommitMs: +out.reactCommitMs.toFixed(2), reactCommits: out.reactCommits, reactRoots: out.reactRoots,
     gizmoPosBefore: posBefore, gizmoPosAfter: out.pos,
     gizmoMovedMM: +Math.hypot(...out.pos.map((v, i) => v - posBefore[i])).toFixed(3),
   };
@@ -332,7 +361,7 @@ async function main() {
       let interact = {};
       let afterDeleteMB = null;
       if (!run.err) {
-        try { interact = await evaluate(cdp, INTERACT_IN_PAGE); } catch (e) { interact = { interactErr: String(e.message) }; }
+        try { interact = await evaluate(cdp, INTERACT_IN_PAGE); Object.assign(interact, cpuStats(interact.orbitCpu, 'orbit')); delete interact.orbitCpu; } catch (e) { interact = { interactErr: String(e.message) }; }
         try { Object.assign(interact, await gizmoDrag(cdp)); } catch (e) { interact.gizmoErr = String(e.message); }
         try {
           const del = await evaluate(cdp, DELETE_IN_PAGE);
@@ -362,6 +391,15 @@ async function main() {
 median of ${runs} run(s), gl=${gl}:`);
     for (const r of summary) {
       console.log(`${r.file}  n=${r.n}  orbitFrameMs mean/p95 ${r.orbitFrameMs}/${r.orbitP95Ms}  gizmoDragFrameMs mean/p95 ${r.gizmoDragFrameMs}/${r.gizmoDragP95Ms}  gizmoMovedMM ${r.gizmoMovedMM}`);
+      console.log(`    cpuFrameMs orbit mean/p95 ${r.orbitCpuMean}/${r.orbitCpuP95}  gizmo mean/p95 ${r.gizmoCpuMean}/${r.gizmoCpuP95}  reactCommitMs ${r.reactCommitMs} (${r.reactCommits} commits, ${r.reactRoots} roots)`);
+    }
+    if (runs > 1) {
+      console.log('run-to-run spread of cpuFrameMs p95 (max-min)/median:');
+      for (const r of summary) {
+        const rs = results.filter(x => x.file === r.file);
+        const sp = k => { const v = rs.map(x => x[k]).filter(Number.isFinite); const m = median(v); return v.length && m ? `${(100 * (Math.max(...v) - Math.min(...v)) / m).toFixed(1)}%` : 'n/a'; };
+        console.log(`${r.file}  orbit ${sp('orbitCpuP95')}  gizmo ${sp('gizmoCpuP95')}`);
+      }
     }
   }
   if (outPath) writeFileSync(outPath, JSON.stringify({ when: new Date().toISOString(), gl, budget, runs, results, median: summary }, null, 2));
