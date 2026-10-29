@@ -361,6 +361,10 @@ Behaviour contract (owner 2026-10-29 + guide 5, 5b, 8):
   (Tips only, Bottom view — hides BedGrid and floor disc —, Fit view); problem list with Show/Fix;
   Generate / Regenerate; undo toasts; job progress. Tree, Brace, Raft, Label, Roof, Cage sections
   are added by P5.
+- Lift (decision 2026-10-29, main session; owner may override): supports are built down to the bed. Generating
+  supports for an object lifts it by the preset's lift height (default 5 mm) with one undoable transform
+  command "Lift for supports" (plateY = bed); changing lift re-runs it; removing all supports offers to
+  drop the object back to the bed. Export matches the screen.
 - Support area meaning: Paint = no-support zone, Erase clears it (the engine's generic policy). The
   guide's "allowed area" meaning is P5.10.
 - Several selected objects: each has its own supports, generated independently.
