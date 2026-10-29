@@ -54,7 +54,20 @@ export function createPrepSteps({ BABYLON, weld, isSolidColor, tryCsg, tryRepair
     // vertex). Never throws: engine failures and still-not-watertight results
     // are recorded on ctx by tryRepair, not surfaced as a prep-step exception.
     repair(mesh, ctx)        { return tryRepair(mesh, ctx); },
-    optimizeIndices(mesh)    { mesh.optimizeIndices?.(); },
+    // Babylon's optimizeIndices finishes ASYNCHRONOUSLY (AsyncLoop) and then
+    // writes the index list it read at the start. Fire-and-forget let that
+    // late write land on the CSG re-bake's fresh geometry: every closed solid
+    // part of an STL / 3MF export shipped with its triangles joining the wrong
+    // corners (a 20 mm cube read back as 1333 mm^3; found with trimesh, P4.2).
+    // Awaited so the next step sees the finished mesh. Solid colour only: it
+    // merges vertices by POSITION alone, so on a textured part it would fold
+    // every UV seam onto one side (the weld step already merges what shares
+    // both position and UV there).
+    optimizeIndices(mesh) {
+      if (typeof mesh.optimizeIndices !== 'function' || !isSolidColor(mesh)) return undefined;
+      if (!mesh.getIndices?.()?.length || !mesh.getVerticesData?.('position')?.length) return undefined;
+      return new Promise(resolve => { mesh.optimizeIndices(() => resolve()); });
+    },
     createNormals(mesh)      { mesh.createNormals?.(true); },
     // Returned (not fire-and-forget): tryCsg re-diagnoses the re-baked clone
     // and updates ctx.repairReport, so the strict gate must not run before it

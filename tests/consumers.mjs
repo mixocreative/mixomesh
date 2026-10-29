@@ -55,6 +55,11 @@ const CAT_NAME = '猫　モデル';
 // Printer frame: v0 (0,0,0) v1 (10,0,0) v2 (0,0,20) v3 (0,-30,0); relative to
 // the bounding-box minimum (0,-30,0): (0,30,0) (10,30,0) (0,30,20) (0,0,0).
 //
+// Closed cubes (0.3.2 export fix): plain-cube.glb (master's tests/fixtures/support-cubes.mjs,
+// there support-plain-cube.glb) is a closed 20 mm cube, 96 facets, 8000 mm^3, one solid colour;
+// midtone-cube.glb (make-midtone-cube.mjs) a closed 20 mm textured cube, 12 facets, 8000 mm^3.
+// Both must export closed and outward (trimesh volume +8000, not torn, not -8000).
+//
 // cat-model-3mat.obj (+ .mtl), imported as "猫　モデル.obj": a closed Y-up box
 // 10 x 20 x 30 mm, 12 triangles, 6000 mm^3. OBJ top (+Y) red, +X green, the
 // rest blue; in the printer frame +Z red, +X green, size 10 x 30 x 20.
@@ -67,6 +72,8 @@ const TRUTH = {
     facets: 4, watertight: true, volume: 1000, size: [10, 30, 20],
     points: [[0, 30, 0], [10, 30, 0], [0, 30, 20], [0, 0, 0]],
   },
+  plaincube: { facets: 96, watertight: true, volume: 8000, size: [20, 20, 20] },
+  midcube: { facets: 12, watertight: true, volume: 8000, size: [20, 20, 20] },
   cat: {
     facets: 12, watertight: true, volume: 6000, size: [10, 30, 20],
     faceColours: { '+z': [RED], '+x': [GREEN], '-x': [BLUE], '+y': [BLUE], '-y': [BLUE], '-z': [BLUE] },
@@ -81,6 +88,8 @@ const MODELS = [
     formats: ['3mf', 'obj', 'stl', 'ply', 'wrl'] },
   { key: 'cat', variant: 'bambu', fixture: 'cat-model-3mat.obj', siblings: ['cat-model-3mat.mtl'], loadAs: `${CAT_NAME}.obj`,
     flavour: 'bambu', formats: ['3mf'] },
+  { key: 'plaincube', fixture: 'plain-cube.glb', formats: ['3mf', 'stl'] },
+  { key: 'midcube', fixture: 'midtone-cube.glb', formats: ['stl'] },
 ];
 
 // What each format can carry. PLY bakes the texture per vertex, and at the

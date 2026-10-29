@@ -74,7 +74,7 @@ function texMesh(name, { positions, indices, uvs, textureName = 'paint' }) {
     getWorldMatrix() { return window.BABYLON.Matrix.Translation(0, 0, 0); },
     bakeTransformIntoVertices() { this.__worldBaked = true; },
     setParent() {},
-    optimizeIndices() { this.__optimized = true; },
+    optimizeIndices(done) { this.__optimized = true; done?.(this); },   // Babylon calls back when finished
     createNormals() { this.__normals = true; },
     makeGeometryUnique() { this.__unique = true; },
     bakeCurrentTransformIntoVertices() {},
@@ -110,7 +110,7 @@ function solidMesh(name, { color = { r: 0.5, g: 0.5, b: 0.5 } } = {}) {
     getScene() { return {}; },
     computeWorldMatrix() {}, getWorldMatrix() { return window.BABYLON.Matrix.Translation(0, 0, 0); },
     bakeTransformIntoVertices() {}, setParent() {},
-    optimizeIndices() {}, createNormals() {}, makeGeometryUnique() {},
+    optimizeIndices(done) { done?.(this); }, createNormals() {}, makeGeometryUnique() {},
     bakeCurrentTransformIntoVertices() {}, refreshBoundingInfo() {},
     dispose() {},
     clone(cloneName) {

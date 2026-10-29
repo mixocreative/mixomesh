@@ -61,7 +61,7 @@ function mesh(name, { verts = 100, size = [10, 20, 30], color = null, origin = [
     getWorldMatrix() { return window.BABYLON.Matrix.Translation(this._origin[0], this._origin[1], this._origin[2]); },
     bakeTransformIntoVertices(M) { this.__worldBaked = true; this.__bakedMatrix = M; },
     setParent() {},
-    optimizeIndices() { this.__optimized = true; },
+    optimizeIndices(done) { this.__optimized = true; done?.(this); },   // Babylon calls back when finished
     createNormals() { this.__normals = true; },
     makeGeometryUnique() { this.__unique = true; },
     bakeCurrentTransformIntoVertices() { this.__baked = true; },

@@ -36,6 +36,7 @@ import { serializeWRL } from './WrlWriter.js';
 import { buildReadiness, boundsForExportContext } from './PrintReadiness.js';
 import { clampedUVsLeaveUnitSquare } from './UvTransform.js';
 import { getTextureDimensions } from './ExportTextures.js';
+import { frontFaceIsClockwise } from './PrintSpace.js';
 import { logicalObjectPartIds, shouldDisplayObject } from '../LogicalObjects.js';
 import { initCsg2 } from '../vendorUrl.js';
 import { whileBusy } from '../BusyRegistry.js';
@@ -70,16 +71,29 @@ async function _ensureCSG2() {
  */
 function _csgRebake(mesh) {
   const B = window.BABYLON;
+  // CSG2 reads the index order raw (it knows no side orientation), so it gets
+  // Babylon's native counter-clockwise order: a glTF clone (ClockWise flag,
+  // e.g. a closed part the repair step left alone) is re-indexed first. Same
+  // triangles and outward side, only the flag moves. Without it, a closed
+  // glTF solid came back inside-out (trimesh volume -8000 on a 20 mm cube).
+  if (frontFaceIsClockwise(mesh)) {
+    const idx = mesh.getIndices() ?? [];
+    const swapped = new Uint32Array(idx.length);
+    for (let i = 0; i + 2 < idx.length; i += 3) { swapped[i] = idx[i]; swapped[i + 1] = idx[i + 2]; swapped[i + 2] = idx[i + 1]; }
+    mesh.setIndices(swapped);
+    mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
+  }
   const csg = B.CSG2.FromMesh(mesh);
-  const baked = csg.toMesh(`${mesh.name}__csg`, mesh.getScene());
-  const vd = B.VertexData.ExtractFromMesh(baked);
+  // toVertexData, not toMesh: CSG2.toMesh re-centres the result on the origin
+  // (centerMesh defaults to true), which moved every re-baked part off its
+  // world position (a 20 mm cube resting on the bed came out at z -10..10).
+  const vd = csg.toVertexData();
   vd.applyToMesh(mesh);
   // CSG2.toMesh emits geometry in Babylon's NATIVE winding (CounterClockWise
   // front). A glTF-imported clone still carries the loader's ClockWise flag,
   // which would make PrintSpace.printIndices reverse the fresh winding and
   // ship the part inside-out (found 2026-09-17 on the STL path via trimesh).
   mesh.sideOrientation = 1;   // BABYLON.Material.CounterClockWiseSideOrientation
-  baked.dispose();
   csg.dispose?.();
 }
 
