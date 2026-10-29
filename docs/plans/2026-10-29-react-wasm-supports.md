@@ -443,6 +443,17 @@ Tasks:
 - **P4.3** Cost quote and triangle budget include supports. *Depends: P4.2.* **Done when** unit tests
   show the support volume and triangles added.
 
+- **P4.4** `[mixomesh]` Remaining known export defects (tests/consumers.mjs KNOWN table, owner question
+  2026-10-29 "should all be fixed"): (1) export repair closes an open single-sided sheet into a 0 mm³ double-sided
+  shell that slicers read as manifold — an open sheet must export as-is (or be refused with a notice), never as a
+  fake solid; (2) colour-group 3MF and OBJ write each colour as its own vertex set, so a closed multi-colour box
+  reads as 3 open parts — share vertices across colours (3MF: per-triangle pid/p1..p3 on one vertex list; OBJ: one
+  v list, per-face material), stay watertight; (3) colour-group 3MF object carries no name; (4) VRML DEF names keep
+  ASCII only — encode non-ASCII safely. Also resume paused run-2 L2-03 (textured exports non-manifold: vertices split
+  at UV seams; 3MF/OBJ allow per-corner UV indices) — `docs/handoff/2026-10-22-autonomous-run-2.md`,
+  `.audit/pending/E-handoff.md`, `E-wip.patch`. D9 holds (texture fidelity unchanged). *Depends: P4.2.* **Done
+  when** every KNOWN entry is removed from tests/consumers.mjs and `npm run test:consumers` passes with 0 KNOWN,
+  textured exports read watertight in trimesh and the slicer CLI, and colours/UVs read back identical.
 ### P5 Remaining support features (guide 2b — every row)
 
 Each task adds its settings section to SupportPanel, its walk scenario, and asserts its golden.
@@ -629,6 +640,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | P4.1 | sonnet | migration |
 | P4.2 | opus | export seam, 3MF structure, ratio rule |
 | P4.3 | haiku | counts |
+| P4.4 | opus | known export defects + L2-03 seams |
 | P5.1–P5.8, P5.12 | sonnet each | one golden/walk each |
 | P5.9 | Ollama draft → Gemini zh-Hant → haiku wiring | D8 |
 | P5.10, P5.11, P5.14 | opus (Rust + host) + sonnet (mixomesh UI) | engine work in mixo-geocore |
