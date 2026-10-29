@@ -103,15 +103,15 @@ Architecture rules:
   cross-section indicator quad).
 - D21. One undo stack: HistoryManager. The ported `editing/session.ts` reducer is pure view/tool
   state; mixosupports' undo history (`state/history.ts`) is not ported.
-- D23. mixomesh keeps its desktop build (owner 2026-10-29): one codebase, the web build on GitHub Pages plus the
-  Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
-  publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
-  is removed for being desktop-only. mixoDental is web-only (Vite, no Electron) and stays web-only.
 - D22. mixo-geocore imports no renderer, UI framework or DOM (no babylon, three, react, react-dom,
   `document`, `window`). Apps reach `editing/` through plain data and the `ViewportPort`
   interface (screen point → ray, world point → screen, pick through the engine session, viewport
   size/DPR, pointer records); all drawing (rings, ghost tips, overlays, highlights) stays in the app.
   Enforced by lint `no-restricted-imports` and a test (PE.2).
+- D23. mixomesh keeps its desktop build (owner 2026-10-29): one codebase, the web build on GitHub Pages plus the
+  Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
+  publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
+  is removed for being desktop-only. mixoDental is web-only (Vite, no Electron) and stays web-only.
 
 ---
 
@@ -550,6 +550,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | PE.4 | haiku | vendor script flags + rename |
 | PE.3 | haiku | CI workflow from the PE.1/PE.2 scripts |
 | PE.5 | sonnet | mixosupports switch + three.js ViewportPort + its walks |
+| PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
 | P2.1 | opus | handedness spike, weld, empirical proof |
 | P2.2 | haiku | loader smokes |
 | P3.1 | opus | data model + undo |
@@ -582,7 +583,7 @@ P0.1 → P0.2 → P0.3b → P0.6 → P0.5           P0.1 → P0.4a → P0.4b →
 P0.1 → P1.1 ─┐
 PE.1 ────────┴→ PE.2 → PE.4 → P2.1 → P2.2 → P3.1 → {P3.2 ∥ P3.3} → P3.4 → P3.5 → P3.6
                 PE.2 → PE.3                              P5.13 → P3.4
-                PE.4 → PE.5 → {P5.10, P5.11 → P5.14, P8.3}
+                PE.4 → PE.5 → {PE.6, P5.14 (first, high priority), P5.10, P5.11, P8.3}
 P3.6 → P4.1 → P4.2 → P4.3        P3.6 → P5.1–P5.8, P5.10–P5.12 → P5.9
 P0.3b → P6.1 → P6.2 ← P3.2       P0.6 → P7.* (serial) → P7.last
 PE.4 → P8.1 → {P8.2, P8.3} + P8.4
