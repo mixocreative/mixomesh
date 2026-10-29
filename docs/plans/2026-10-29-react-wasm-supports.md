@@ -571,7 +571,9 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | PE.4 | haiku | vendor script flags + rename |
 | PE.3 | haiku | CI workflow from the PE.1/PE.2 scripts |
 | PE.5 | sonnet | mixosupports switch + three.js ViewportPort + its walks |
-| PW.1 | sonnet (+ main for owner steps) | relay + web Publish path |`n| PW.2 | sonnet | manifest, SW, file handlers |`n| PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
+| PW.1 | sonnet (+ main for owner steps) | relay + web Publish path |
+| PW.2 | sonnet | manifest, SW, file handlers |
+| PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
 | P2.1 | opus | handedness spike, weld, empirical proof |
 | P2.2 | haiku | loader smokes |
 | P3.1 | opus | data model + undo |
