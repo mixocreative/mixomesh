@@ -103,6 +103,10 @@ Architecture rules:
   cross-section indicator quad).
 - D21. One undo stack: HistoryManager. The ported `editing/session.ts` reducer is pure view/tool
   state; mixosupports' undo history (`state/history.ts`) is not ported.
+- D23. Desktop stays (owner 2026-10-29, both apps): one codebase, the web build on GitHub Pages plus the
+  Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
+  publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
+  is removed for being desktop-only.
 - D22. mixo-geocore imports no renderer, UI framework or DOM (no babylon, three, react, react-dom,
   `document`, `window`). Apps reach `editing/` through plain data and the `ViewportPort`
   interface (screen point → ray, world point → screen, pick through the engine session, viewport
