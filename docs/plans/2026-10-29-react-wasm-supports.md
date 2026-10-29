@@ -364,6 +364,21 @@ on PE.5.
   inside and one outside the area → exactly one blue spot), the walk passes, a screenshot of the step shows
   vermilion area + blue spot, i18n en/ja/zh-Hant for any new string, exports byte-identical to the PE.5 baseline
   (visual-only change).
+- **PD.6** `[geocore]` + `[mixodental]` Denture profile (owner 2026-10-30; rules from analysing the owner's
+  LOW-D-37-36-46-47-_2 vs its -sup, owner-authorised; scans read in place, never committed). A separate profile
+  beside the aligner one (dentures are a different product), selected by profile/type, never by guessing:
+  - Orientation/angle: stand it upright (arch plane vertical, teeth side down), then search the print angle by
+    tilting DOWN from upright (example settled ≈ 10°; it is the search result, not a constant).
+  - Rim: open edge lines are normal (often broken at the front); never require a closed rim or a central opening.
+  - Permitted area: everything except the teeth/occlusal and the polished tissue face is permitted; the large
+    concave middle is ALLOWED but not a target. Tips go where the upright pose needs them: lowest points
+    (leg ends, bottom border) and internal connector bars (rods); light on teeth/molar pads.
+  - Supports (example values as profile defaults): tip ball 0.65 mm on a frustum (base 1.1 mm, 0.55 mm tall),
+    tip pitch ≈ 1.5 mm, pillars 1.1 mm with lattice bracing, raft two layers (0.5 + 1.0 mm), lift 3.5 mm.
+    Every pillar reaches the raft or the model (owner: the example's floating pillars were a mistake).
+  *Depends: PD.5 (shares dental orientation/region code).* **Done when** the owner's denture scans in
+  case-denture build in batch review (owner reviews in the viewer), the example's tip regions match its -sup
+  (leg ends + bars, ±), aligner results unchanged, tests green; compare to the -sup files (owner-authorised).
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
