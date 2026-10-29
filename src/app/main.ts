@@ -11,6 +11,7 @@ import { PropertiesPanel } from '../ui/PropertiesPanel.js';
 import { RefinementController } from '../core/refinement/RefinementController.js';
 import { installStaleWatch } from '../supports/stale';
 import { createSceneSource } from '../supports/sceneSource';
+import { SupportModeUI } from '../supports/SupportModeUI';
 import { ShaderPanel } from '../ui/ShaderPanel.js';
 import { ScenePanel } from '../ui/ScenePanel.js';
 import { PrintPanel } from '../ui/PrintPanel.js';
@@ -134,6 +135,7 @@ async function bootstrap() {
   NumberScrub.init(); // wheel-scrub on number inputs (panel never scrolls under them)
   CursorPanel.init(); // 3D-cursor N-panel (Shift+N) — mounts into #viewport
   CopyPaste.init();   // Ctrl+C / Ctrl+V with aspect chooser
+  SupportModeUI.init(); // header "Supports" entry + Shift+S (Support Mode, P3.2)
   SettingsStore.init(); // autosave hooks on the Scene/Print panel bodies (now mounted)
   PanelSheets.init(); // < 1280 px: edge tabs + slide-over sheets (8.3)
   ViewerMode.init();  // < 768 px: read-only phone viewer (8.6)

@@ -51,6 +51,8 @@ class BatchCommand {
   undo()    { [...this._commands].reverse().forEach(c => c.undo()); }
   retainedTriangles(side) { return this._commands.reduce((n, c) => n + _retained(c, side), 0); }
   release(side) { for (const c of this._commands) _release(c, side); }
+  /** A batch is a support edit only when every command in it is (Support Mode's scoped undo, P3.2). */
+  get supportsCommand() { return this._commands.length > 0 && this._commands.every(c => c.supportsCommand === true); }
 }
 
 function _retained(cmd, side) {
@@ -91,6 +93,19 @@ function _trimUndo() {
   dispatch(EVENTS.TOAST, { message: t('toast.undoTrimmed'), type: 'info', duration: 6000 });
 }
 
+// Undo scope (Support Mode, P3.2): while set, undo/redo only step over entries the scope accepts; an
+// entry it rejects stays where it is and `onBlocked('undo'|'redo', entry)` runs instead.
+let _scope = null;   // { accepts(cmd): boolean, onBlocked?(dir, cmd): void } | null
+
+/** Limit undo/redo to the entries `scope.accepts` (null lifts the limit). */
+export function setScope(scope) { _scope = scope ?? null; }
+
+function _blocked(dir, cmd) {
+  if (!_scope || _scope.accepts(cmd)) return false;
+  _scope.onBlocked?.(dir, cmd);
+  return true;
+}
+
 /** Test seam: override the retained-triangle cap (null = tier budget). */
 export function setRetainCap(cap) { _retainCap = cap; }
 
@@ -122,6 +137,7 @@ export function push(command) {
 /** Undo the most recent command. Dirty is derived from getPosition() (§5). */
 export function undo() {
   if (!_undoStack.length) return;
+  if (_blocked('undo', _undoStack[_undoStack.length - 1])) return;
   _applying = true;
   try {
     const cmd = _undoStack.pop();
@@ -136,6 +152,7 @@ export function undo() {
 /** Redo the most recently undone command. Dirty is derived from getPosition(). */
 export function redo() {
   if (!_redoStack.length) return;
+  if (_blocked('redo', _redoStack[_redoStack.length - 1])) return;
   _applying = true;
   try {
     const cmd = _redoStack.pop();
@@ -204,5 +221,5 @@ export function endBatch() {
 
 export const HistoryManager = {
   push, undo, redo, clear, getUndoLabel, getRedoLabel, beginBatch, endBatch,
-  getPosition, isApplying, setRetainCap,
+  getPosition, isApplying, setRetainCap, setScope,
 };

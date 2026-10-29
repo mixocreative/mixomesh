@@ -26,6 +26,18 @@ const SCALE_PX_SENS     = 0.005;  // factor / pixel
 
 const _handlers = new Map();   // `${key}::${context}` → fn
 let _currentContext = 'global';
+// Exclusive mode context (Support Mode, P3.2): independent of the focus-driven _currentContext (the
+// canvas focus/blur handlers keep rewriting that one). While set, keys in the mode's shadow set are
+// inert unless the mode registered its own handler, and the viewport's selection / edit pointer paths
+// (body drag, marquee, hover, cursor placement, context menu) are off.
+let _mode = null;
+const MODE_SHADOW = {
+  supports: new Set([
+    'G', 'R', 'S', 'X', 'Delete', 'H', 'Alt+H', 'A', 'Alt+A', 'L', 'F2', 'Shift+D', 'Ctrl+G', 'Ctrl+Shift+G',
+    'Shift+N', 'Ctrl+C', 'Ctrl+V', 'Ctrl+I',
+    ...['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].flatMap(k => ['', 'Shift+', 'Alt+', 'Ctrl+', 'Ctrl+Shift+', 'Ctrl+Alt+'].map(m => m + k)),
+  ]),
+};
 let _scene  = null;
 let _canvas = null;
 
@@ -114,6 +126,14 @@ function _handleKeyDown(e) {
   if (_modal) {
     if (_handleModalKey(e)) e.preventDefault();
     return;  // block normal shortcuts during a modal op
+  }
+
+  // Mode context: its own handlers first, its shadowed keys inert; Esc inside a text field is the field's.
+  if (_mode && !(_isTypingTarget(document.activeElement))) {
+    const mkey = _buildKey(e);
+    const mfn = _handlers.get(`${mkey}::${_mode}`);
+    if (mfn) { e.preventDefault(); mfn(e); return; }
+    if (MODE_SHADOW[_mode]?.has(mkey)) { e.preventDefault(); return; }
   }
 
   // Esc priority (task 3.2): modal G/R/S (above) > body drag > marquee >
@@ -226,10 +246,28 @@ export function unregister(shortcut, context) {
 }
 
 /**
+ * Enter (`'supports'`) or leave (`null`) an exclusive mode context. Also reachable as
+ * `setContext('supports')`. Entering drops any half-finished body drag / marquee / pending menu.
+ * @param {'supports'|null} mode
+ */
+export function setMode(mode) {
+  _mode = mode && mode in MODE_SHADOW ? mode : null;
+  if (_mode) {
+    _bodyDrag = null; _rmbPending = null; _touchBody = null; _lastClick = null;
+    if (BoxSelect.isActive()) BoxSelect.cancel();
+    Hover.clear();
+  }
+}
+
+/** @returns {string|null} the active mode context, if any */
+export function getMode() { return _mode; }
+
+/**
  * Set the active input context.
  * @param {'global'|'viewport'|'outliner'|'properties'} context
  */
 export function setContext(context) {
+  if (context in MODE_SHADOW) { setMode(context); return; }
   _currentContext = context;
 }
 
@@ -260,6 +298,7 @@ function _onPointer(info) {
     if (_modal)        _onModalMouseMove(ev);
     else if (_bodyDrag) _onBodyDragMove();
     else if (BoxSelect.isActive()) BoxSelect.update(_scene.pointerX, _scene.pointerY);
+    else if (_mode) { /* mode owns the pointer: no hover highlight of hidden / unrelated objects */ }
     // Hover highlight (overhaul 5.6): throttled to ≤1 pick per frame inside
     // Hover; any held button (drag / orbit / pan / marquee) clears it.
     else Hover.request(_scene.pointerX, _scene.pointerY, ev.buttons ?? 0);
@@ -273,6 +312,7 @@ function _onPointer(info) {
       else if (ev.button === 2) _cancelModal();
       return;
     }
+    if (_mode) return;   // mode tools (viewport tool handler) own LMB; RMB stays with the camera
     if (ev.button === 0) _onSelectionPointerDown(info);
     else if (ev.button === 2) {
       if (BoxSelect.isActive()) { BoxSelect.cancel(); return; }
@@ -427,6 +467,10 @@ function _onTouchGestures(list) {
  * During a modal G/R/S op a tap confirms, a long-press cancels.
  */
 function _onTouchGesture(g) {
+  if (_mode && (g.type === 'press' || g.type === 'tap' || g.type === 'doubletap' || g.type === 'longpress')) {
+    _touchBody = null;
+    return;
+  }
   if (g.type === 'press') {
     _touchBody = null;
     if (_modal) return;
@@ -1197,7 +1241,7 @@ function _registerAll() {
 }
 
 export const InputManager = {
-  init, register, unregister, setContext, setContextMenuHandler, setViewportToolHandler,
+  init, register, unregister, setContext, setMode, getMode, isModalActive: () => !!_modal, setContextMenuHandler, setViewportToolHandler,
   setReadOnly, isReadOnly,
   // Test seam (tests/safety-commands.test.mjs) — not part of the app API.
   __test: {

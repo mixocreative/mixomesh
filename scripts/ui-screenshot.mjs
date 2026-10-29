@@ -146,6 +146,22 @@ async function main() {
     await sleep(800);   // settle: auto-frame animation + thumbnail
     await evaluate(cdp, `document.querySelector('.ob-skip')?.click()`);
 
+    if (process.env.SUPPORT_MODE) {
+      // Support Mode (P3.2): enter on the selected fixture and capture the isolated, dimmed shell.
+      const mode = await evaluate(cdp, `(async () => {
+        const { supportMode } = await import('/src/supports/SupportMode.ts');
+        const entered = supportMode.enter();
+        await new Promise(r => setTimeout(r, 500));
+        const sel = ['#outliner', '#right-panel', '#asset-panel', '#viewport-toolbar', '.ws-switcher'];
+        return { entered, dataMode: document.getElementById('app').dataset.mode ?? null,
+          label: document.querySelector('#support-mode-label')?.textContent ?? null,
+          inert: sel.map(q => document.querySelector(q)?.inert), opacity: sel.map(q => Number(getComputedStyle(document.querySelector(q)).opacity)) };
+      })()`);
+      if (process.env.PROBE) console.log('PROBE', JSON.stringify(mode));
+      await snap('support-mode');
+      await cdp.close();
+      return;
+    }
     if (process.env.OPEN_SHEET) {
       // Show the React Transform sheet (normally touch-only) next to the Stats HUD.
       await evaluate(cdp, `import('/src/panels/TransformSheet/TransformSheet.tsx').then(m => m.TransformSheet.open())`);

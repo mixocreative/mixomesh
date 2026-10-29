@@ -95,6 +95,9 @@ export const EVENTS = {
   // of a lead's `object.supports` (an edit, an undo, or a stale flag change)
   SUPPORTS_CHANGED:        'supports:changed',
 
+  // Support Mode entered / left (P3.2): { active, objectIds }
+  SUPPORT_MODE_CHANGED:    'supports:modeChanged',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',
