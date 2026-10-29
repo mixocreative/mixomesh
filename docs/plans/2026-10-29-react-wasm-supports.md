@@ -103,10 +103,10 @@ Architecture rules:
   cross-section indicator quad).
 - D21. One undo stack: HistoryManager. The ported `editing/session.ts` reducer is pure view/tool
   state; mixosupports' undo history (`state/history.ts`) is not ported.
-- D23. Desktop stays (owner 2026-10-29, both apps): one codebase, the web build on GitHub Pages plus the
+- D23. mixomesh keeps its desktop build (owner 2026-10-29): one codebase, the web build on GitHub Pages plus the
   Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
   publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
-  is removed for being desktop-only.
+  is removed for being desktop-only. mixoDental is web-only (Vite, no Electron) and stays web-only.
 - D22. mixo-geocore imports no renderer, UI framework or DOM (no babylon, three, react, react-dom,
   `document`, `window`). Apps reach `editing/` through plain data and the `ViewportPort`
   interface (screen point → ray, world point → screen, pick through the engine session, viewport
@@ -280,11 +280,11 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   so app identity may change freely). GitHub `mixocreative/mixosupports` → `mixocreative/mixodental`
   (`gh repo rename`, redirects stay); local folder `S:\ai\mixosupports` → `S:\ai\mixodental` (no
   process may hold it: stop its graphify watcher first); product name "mixoDental" in package.json
-  `name`/`productName`, Electron app id, window title, installer name, EULA product name, locales
+  `name`, page title, web app manifest / Pages URL if any, product name in docs and licence notices, locales
   (en/ja/zh-Hant via Gemini, D8), logo text; update every reference in mixomesh (plan, port guide,
   ledger, vendor script defaults, graphify commands), mixo-geocore (README, AGENTS.md) and memory
   notes; rebuild its graph and the port graph. *Depends: PE.5.* **Done when** grep finds
-  "mixosupports" only in history notes, mixoDental's tests, walks and packaged smoke pass under the
+  "mixosupports" only in history notes, mixoDental's tests, walks and build pass under the
   new name, and both other repos' gates are green.
 Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geocore, bumps
 `engine_version`, and is re-vendored into both apps in the same task (D11); they therefore depend
