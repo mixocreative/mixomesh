@@ -2,7 +2,7 @@
 
 Owner goal (2026-10-29): mixomesh moves its web UI layer to React (Babylon stays the 3D engine),
 moves 3D geometry and export geometry to WASM wherever that is faster, and gains the full support
-generation of mixosupports as an isolated Support Mode that works only on the selected objects,
+generation of mixoDental as an isolated Support Mode that works only on the selected objects,
 with the extra Roof and Cage settings. The 3D gizmo is updated. The engine and the renderer-free
 support editing logic move to a shared private repo both apps consume. At the end: test, fix, push
 the three repos, tell the owner.
@@ -30,27 +30,27 @@ Ledger: `docs/handoff/react-wasm-supports.md`. It replaces `docs/handoff/support
 
 Handoff and workflow:
 - D1. Three repos, one branch each, local commits only: mixomesh `master` (`S:\ai\mixomesh`),
-  mixo-geocore `main` (`S:\ai\mixo-geocore`), mixosupports `main` (`S:\ai\mixosupports`). No
+  mixo-geocore `main` (`S:\ai\mixo-geocore`), mixoDental `main` (`S:\ai\mixodental`). No
   feature branches, no git worktrees, no `git stash`, no `git checkout --`. Never touch
-  mixosupports' untracked files. Each task names the repo it edits; a task that edits two repos
+  mixoDental' untracked files. Each task names the repo it edits; a task that edits two repos
   commits in each.
 - D2. One editing agent at a time, except pairs marked ∥ in section 4 (file-disjoint). Read-only
   reviewers may run any time.
 - D3. Each task ends with its repo's gates green (mixomesh: tests, `npm run lint`,
-  `npm run typecheck`; mixo-geocore: `cargo test`, wasm build, vitest; mixosupports: its `npm test`)
+  `npm run typecheck`; mixo-geocore: `cargo test`, wasm build, vitest; mixoDental: its `npm test`)
   and one commit (message ends with the session attribution lines). The agent reports back: commit,
   what is verified (commands + results), exact next step. The main session alone writes the ledger
   row and commits it. An interrupted agent reports `WIP:` with where it stopped and what is
   uncommitted.
-- D4. Query the graph before reading source: `graphify query "<q>"`; mixosupports code via
+- D4. Query the graph before reading source: `graphify query "<q>"`; mixoDental code via
   `graphify query "<q>" --graph graphify-out/port-graph.json` (refresh the merged graph first:
-  `graphify update S:\ai\mixosupports; graphify merge-graphs graphify-out/graph.json S:\ai\mixosupports\graphify-out\graph.json --out graphify-out/port-graph.json`;
+  `graphify update S:\ai\mixodental; graphify merge-graphs graphify-out/graph.json S:\ai\mixodental\graphify-out\graph.json --out graphify-out/port-graph.json`;
   from PE.1 on, merge `S:\ai\mixo-geocore\graphify-out\graph.json` too). Read only located lines.
   After code changes, `graphify update .` in the repo edited.
 - D5. Never claim a UI works without evidence: a Playwright screenshot or smoke (`ui-screenshot.mjs`
   with `PROBE=1`, or `tests/browser-*.mjs`). Measure layouts at rest, after import settles.
 - D6. No push of any of the three repos until P9.3 (pushing mixomesh deploys GitHub Pages; owner
-  pre-authorised P9.3 on 2026-10-29). Until then mixomesh and mixosupports vendor from a local
+  pre-authorised P9.3 on 2026-10-29). Until then mixomesh and mixoDental vendor from a local
   build of a committed mixo-geocore commit.
 
 Owner product rules:
@@ -102,7 +102,7 @@ Architecture rules:
   thumbnails, BoxSelect and every export path except the support export of P4.2 (precedent: the
   cross-section indicator quad).
 - D21. One undo stack: HistoryManager. The ported `editing/session.ts` reducer is pure view/tool
-  state; mixosupports' undo history (`state/history.ts`) is not ported.
+  state; mixoDental' undo history (`state/history.ts`) is not ported.
 - D22. mixo-geocore imports no renderer, UI framework or DOM (no babylon, three, react, react-dom,
   `document`, `window`). Apps reach `editing/` through plain data and the `ViewportPort`
   interface (screen point → ray, world point → screen, pick through the engine session, viewport
@@ -142,7 +142,7 @@ mixomesh (consumer)
   src/panels/supports/          React Support Mode panels (kit)
   src/kit/   src/react/   src/panels/   src/core/   as in P0 (kit, hooks, migrated panels, core)
 
-mixosupports (consumer from PE.5): same vendor layout, three.js ViewportPort, dental UI stays there
+mixoDental (consumer from PE.5): same vendor layout, three.js ViewportPort, dental UI stays there
 ```
 
 - Mount: legacy panels export a bare `init()` and find static roots in `index.html` by id
@@ -167,7 +167,7 @@ mixosupports (consumer from PE.5): same vendor layout, three.js ViewportPort, de
 ## 2. Phases and tasks
 
 Format: **id** goal. Files. *Depends.* **Done when.** Repo = mixomesh unless the task says
-`[geocore]` or `[mixosupports]`. Worker per section 4.
+`[geocore]` or `[mixodental]`. Worker per section 4.
 
 Executable order: P0 → PE.1 → PE.2 → PE.4 → (PE.3 ∥ PE.5) → P2 → P3 → P4 → P5 → P6 → P7 → P8 →
 P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 runs ∥ P3–P7.
@@ -216,7 +216,7 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
 
 ### PE Shared engine repo mixo-geocore (owner decision 2026-10-29: private, both apps switch)
 
-- **PE.1** `[geocore]` Create `S:\ai\mixo-geocore` from mixosupports main (`adbe7c3` or later):
+- **PE.1** `[geocore]` Create `S:\ai\mixo-geocore` from mixoDental main (`adbe7c3` or later):
   `git subtree split --prefix=crates` keeps the engine history; then one commit adds
   `scripts/build-geometry-wasm.mjs`, `scripts/geometry-wasm-smoke.mjs`,
   `scripts/geometry-wasm-bench.mjs`, `scripts/host-example.mjs`, `tools/blender-parity/`, the golden
@@ -240,13 +240,13 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
     `selection`, `selectionHighlight` (data only), `removal`, `regenerate`, `shapeEdit`, `check`,
     `status`, `toast` (data), `view`, `numberInput`, `project`, `types`, `errors`, `zones`,
     `contactEdits`, `landing`, `islandProblems`, `omittedProblem`, `genericPolicy`,
-    `genericPlacement`, add-tip snapping (from mixosupports `App.tsx` `addTip`: click reach, snap
+    `genericPlacement`, add-tip snapping (from mixoDental `App.tsx` `addTip`: click reach, snap
     to `suggested_points` + `candidate_points`, upward-face warning), `arrange` (from
     `src/dental/arrange.ts`, generic). `ViewportPort.ts` is the only way this code reaches a view
     (D22); each app implements it.
   - D22 enforcement: eslint `no-restricted-imports` + a vitest that no file in `host/` or
     `editing/` imports babylon, three, react, react-dom or references `document`/`window`.
-  - Tests: the mixosupports `*.test.ts` of every moved file (dental cases removed), `editing/uiFixture.ts`,
+  - Tests: the mixoDental `*.test.ts` of every moved file (dental cases removed), `editing/uiFixture.ts`,
     `genericParity.test.ts`, `supportBuildParity.test.ts`; goldens `goldens.test.ts` + `fixtures.ts`
     + `pipeline.ts` with a `goldenImport.ts` on `pkg-node` `BinaryStlSession` (replaces
     `scripts/test-support/rustImport.ts` and its three.js glTF types).
@@ -254,7 +254,7 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
     `PORTED.md` is replaced by a pointer to mixo-geocore; imports go through `@mixo-geocore/*`
     (vendored by a `--from S:\ai\mixo-geocore` run of the existing script; PE.4 finishes the script).
   *Depends: P1.1, PE.1.* **Done when** host + editing vitest and the 4 fixtures (cube-overhang,
-  knot, thin-slab, v-ridge) × 4 variants (default, tree, roof, ridge) match the mixosupports
+  knot, thin-slab, v-ridge) × 4 variants (default, tree, roof, ridge) match the mixoDental
   snapshots exactly, the D22 test passes, and mixomesh typecheck + `npm test` are green on the
   vendored copy.
 - **PE.4** mixomesh `scripts/vendor-geometry.mjs`: `--release v<N>` (`gh release download`, verifies
@@ -274,7 +274,7 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   `ViewportPort`, point `wasm:build`/`pretest`/`prebuild`/`prewalk` at the vendored packages;
   dental Rust stays in the engine's `dental` module (one engine for both). Run its `npm test`, wasm
   smoke and walks (`scripts/walk.mjs`). Commit on its `main`. *Depends: PE.4.* **Done when**
-  mixosupports' tests and walks are green on the vendored engine and its `crates/` is gone, and
+  mixoDental' tests and walks are green on the vendored engine and its `crates/` is gone, and
   its exports are byte-identical before and after the switch (export walks c, d and a dental
   export on its reference model: hash of the written STL/3MF compared; any change is a defect).
 
@@ -284,21 +284,21 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   engine contract, the dental algorithms already live in geocore's `dental` module; (2) `editing/`
   gains extension points: a mode/tool registry and policy hooks so an app adds modes (mixoDental's
   dental steps, paint/erase allowed area) without forking `session`, `commands`, `keys`, `gesture`,
-  `surfaceBrush`; (3) mixosupports deletes its local copies, imports the packages, keeps only
+  `surfaceBrush`; (3) mixoDental deletes its local copies, imports the packages, keeps only
   dental flow/UI, and wires its three.js `ViewportPort` into its components. *Depends: PE.5.*
-  **Done when** mixosupports holds no copy of a geocore module (a script diffs file lists and fails on
+  **Done when** mixoDental holds no copy of a geocore module (a script diffs file lists and fails on
   overlap), its tests, walks and build are green, its exports are byte-identical to the PE.5
   baseline (two walk runs; PE.5 saw one pointer-timing flake in the drag-over scenario), and mixomesh
   re-vendored to the new geocore commit is green.
 - **PE.6** `[mixodental]` Rename mixosupports → mixoDental (owner 2026-10-29; not distributed yet,
-  so app identity may change freely). GitHub `mixocreative/mixosupports` → `mixocreative/mixodental`
-  (`gh repo rename`, redirects stay); local folder `S:\ai\mixosupports` → `S:\ai\mixodental` (no
+  so app identity may change freely). GitHub `mixocreative/mixodental` → `mixocreative/mixodental`
+  (`gh repo rename`, redirects stay); local folder `S:\ai\mixodental` → `S:\ai\mixodental` (no
   process may hold it: stop its graphify watcher first); product name "mixoDental" in package.json
   `name`, page title, web app manifest / Pages URL if any, product name in docs and licence notices, locales
   (en/ja/zh-Hant via Gemini, D8), logo text; update every reference in mixomesh (plan, port guide,
   ledger, vendor script defaults, graphify commands), mixo-geocore (README, AGENTS.md) and memory
   notes; rebuild its graph and the port graph. *Depends: PE.5.* **Done when** grep finds
-  "mixosupports" only in history notes, mixoDental's tests, walks and build pass under the
+  "mixoDental" only in history notes, mixoDental's tests, walks and build pass under the
   new name, and both other repos' gates are green.
 Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geocore, bumps
 `engine_version`, and is re-vendored into both apps in the same task (D11); they therefore depend
@@ -354,7 +354,7 @@ Behaviour contract (owner 2026-10-29 + guide 5, 5b, 8):
   walks only support commands; an older non-support step is not undone while the mode is open.
   Esc order: support selection → active tool → leave mode.
 - Exit (Done, Esc, or `Shift+S`) restores the mask, panels, input context and selection.
-- Inside: the mixosupports generic UI (guide 5b A, B, C): presets Light / Middle / Heavy / Custom;
+- Inside: the mixoDental generic UI (guide 5b A, B, C): presets Light / Middle / Heavy / Custom;
   tips, neck, pillar, foot; Support area brush; Edit (Add / Select, Click / Drag over, circle size,
   Shift flips, Delete, right-click/Ctrl+click remove, ghost tip, remove ring, crosshair while adding,
   tool name with what a click does); per-support overrides (reset, select customised); view toggles
@@ -394,8 +394,8 @@ Tasks:
   layers draw, picking hits tips, and stats HUD / world extents / selection outline / export are
   unchanged by their presence.
 - **P3.4** React panels `src/panels/supports/`: SupportPanel (presets, tips, neck, pillar, foot),
-  EditBar, ZonesBar, SurfaceBrushBar, ProblemList, ViewToggles — rebuilt from the mixosupports `.tsx`
-  with the kit (check `port/mixosupports/` first, P5.13). *Depends: P0.4b, P3.1, P5.13.* **Done
+  EditBar, ZonesBar, SurfaceBrushBar, ProblemList, ViewToggles — rebuilt from the mixoDental `.tsx`
+  with the kit (check `port/mixodental/` first, P5.13). *Depends: P0.4b, P3.1, P5.13.* **Done
   when** vitest per panel + screenshot.
 - **P3.5** Live generation: debounced worker jobs (port of `useRegenerate`), latest-job-only and
   worker respawn per D15, stale results dropped, problem list greys until the new verdict lands;
@@ -450,7 +450,7 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
   components coloured by length, click selects, a loop seeds a support area. *Depends: P3.6, PE.5.*
 - **P5.12** Arrange several objects on the plate without overlap: `editing/arrange.ts` (PE.2) +
   a mixomesh command and button. *Depends: P3.6.*
-- **P5.13** Check `S:\ai\mixomesh\port\mixosupports\` (guide 10) for handed-over code; record the
+- **P5.13** Check `S:\ai\mixomesh\port\mixoDental\` (guide 10) for handed-over code; record the
   result (folder absent today). *Depends: —; before P3.4.*
 - **P5.14** `[geocore]` + both apps. **HIGH priority** — edge reinforcement on high-poly models
   (owner question 2026-10-29, measured with `scripts/probes/edge-probe.mjs` on engine 9):
@@ -527,13 +527,13 @@ Rule D18; inventory section 3.
 
 - **P9.1** Full gates on a quiet machine. mixomesh: `npm test` (node + vitest), lint, typecheck,
   i18n:check, build, `test:all`, `test:electron`, `test:publish`, perf harness vs the P0.3b baseline.
-  mixo-geocore: cargo test, wasm build, vitest, D22 test, goldens. mixosupports: `npm test`, wasm
+  mixo-geocore: cargo test, wasm build, vitest, D22 test, goldens. mixoDental: `npm test`, wasm
   smoke, walks. Fix failures. *Depends: everything above.*
 - **P9.2** Final whole-diff review (Fable) of the three repos: correctness, D-rule compliance;
   findings fixed. *Depends: P9.1.*
 - **P9.3** Push in order: mixo-geocore `main` + tag `v<N>` (PE.3 release job runs; verify assets),
   re-vendor both apps from the published release (`--release`, hash-checked) if they were on
-  `--from`, then mixomesh `master` and mixosupports `main` (D6); confirm CI and Pages deploy; ledger
+  `--from`, then mixomesh `master` and mixoDental `main` (D6); confirm CI and Pages deploy; ledger
   status done with the summary and the owner eyeball checklist; prompt the owner.
   *Depends: P9.2.* **Owner checkpoint 7.**
 
