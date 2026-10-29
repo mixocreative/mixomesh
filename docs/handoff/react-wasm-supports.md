@@ -16,6 +16,10 @@ P0.3b (de9726a), cpuFrameMs mean/p95 ms, median of 5: pillow-1M orbit 0.9/1.2 gi
 
 P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbit and gizmo drag) = "holds 60 fps". Real gate metric (CPU frame ms) comes with P0.6. Reproduce: `node scripts/heavy-mesh/generate.mjs --sizes 1,5 --3mf 0 --ascii 0` then `node scripts/heavy-mesh/measure.mjs --files pillow-1M.stl,pillow-5M.stl --runs 5`.
 
+## Hotfix 0.3.2 (owner-approved, 2026-10-29)
+
+Released v0.3.1 exported closed solid-colour parts broken (STL torn 166.67 mm³ 5/5, 3MF inside-out 4/5, textured STL non-watertight). Hotfix `a580408` on `hotfix/0.3.2` (from v0.3.1, only the two export fixes from f0e9b3c), tag `v0.3.2` pushed (verified on origin). Gates green, consumers 5 runs: solid cube STL/3MF and textured STL 8000 mm³ watertight; rows fail with fixes removed. Installer `S:\ai\mixomesh-hotfix\installers\MIXOMESH-Setup-0.3.2.exe` 147,215,223 B sha256 41686816129329f6c3183a3254dd60fd4ed77ead2aa697185dd353def2ee13ff, packaged smoke PASS. Pages deploy run 40883722670 success from hotfix/0.3.2 (verified); live solid-cube export 1833 → 8000 mm³; temp branch policy removed (verified: only master). Master: merge `fc51904` (-s ours) + `a95d3b2` version 0.3.2. Left for owner: clone `S:\ai\mixomesh-hotfix` (1009 MB, holds the installer) and remote branch `hotfix/0.3.2`. Not verified live: textured STL download (covered by consumers).
+
 ## Tasks
 
 | Task | Status | Commit | Verified / next |
