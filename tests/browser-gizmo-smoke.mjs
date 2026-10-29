@@ -1,3 +1,4 @@
+// P6.2 adds: Ctrl held before / after / between the press, blur + pointercancel guard, colours, constant size, hidden in Support Mode (.tmp/p62).
 // P6.1: move-gizmo plane handles. Real CDP pointer drags on each plane square
 // (XY / YZ / XZ) must change only that plane's two axes, undo in ONE step, and
 // land on the snap grid with Ctrl-snap. An axis-arrow drag must still work.
@@ -82,12 +83,20 @@ async function main() {
 
     let mods = 0;   // CDP modifier bitmask (2 = Ctrl)
     const mouse = (type, x, y) => cdp.send('Input.dispatchMouseEvent', {
-      modifiers: type === 'mousePressed' ? 0 : mods, type, x: Math.round(x), y: Math.round(y), button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1 });
+      modifiers: mods, type, x: Math.round(x), y: Math.round(y), button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1 });
+    // Hover registers on a rendered frame of the utility layer; under load that can take
+    // seconds on swiftshader. Poll the handles' isHovered instead of a fixed sleep.
+    const anyHover = () => evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => { const p = ps.getGizmoManager().gizmos.positionGizmo; return [p.xGizmo, p.yGizmo, p.zGizmo, p.xPlaneGizmo, p.yPlaneGizmo, p.zPlaneGizmo].some(h => h.isHovered); })`);
+    const hoverAt = async (x, y, md = 0) => {
+      for (let i = 0; i < 40; i++) {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x) + (i % 2), y: Math.round(y), modifiers: md });
+        await sleep(150);
+        if (await anyHover()) return;
+      }
+      throw new Error(`no gizmo handle hovered at ${Math.round(x)},${Math.round(y)}`);
+    };
     const drag = async (from, to) => {
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(from.x) - 6, y: Math.round(from.y) - 6 });
-      await sleep(200);
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(from.x), y: Math.round(from.y) });
-      await sleep(500);   // let the utility layer register the hover before pressing
+      await hoverAt(from.x, from.y, mods);
       await mouse('mousePressed', from.x, from.y);
       await mouse('mouseMoved', from.x, from.y);   // carries the Ctrl modifier: snap engages with zero accumulated delta
       await sleep(100);
@@ -159,19 +168,106 @@ async function main() {
       st.setState(s => ({ ...s, gizmo: { ...s.gizmo, snap: { ...s.gizmo.snap, translate: 5 } } }), { silent: true });
       })()`);
     await sleep(600);
-    mods = 2;   // Ctrl held from just after the press (Ctrl+press itself does not grab a handle): InputManager drives setGizmoSnap from the pointer modifiers
-    {
+    const key = (type) => cdp.send('Input.dispatchKeyEvent', { type, key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: type === 'keyDown' ? 2 : 0 });
+    const snapped = async (order) => {
       const g2 = await evaluate(cdp, GEOM);
       const p0 = await pos();
-      await drag(g2.y, { x: g2.y.x + (g2.to.y.x - g2.o.x) * 2.5 + 3, y: g2.y.y + (g2.to.y.y - g2.o.y) * 2.5 + 2 });
+      const from = g2.y, to = { x: g2.y.x + (g2.to.y.x - g2.o.x) * 2.5 + 3, y: g2.y.y + (g2.to.y.y - g2.o.y) * 2.5 + 2 };
+      const m = (t, x, y, md) => cdp.send('Input.dispatchMouseEvent', { modifiers: md, type: t, x: Math.round(x), y: Math.round(y), button: 'left', buttons: t === 'mouseReleased' ? 0 : 1, clickCount: t === 'mouseMoved' ? 0 : 1 });
+      const ctrlFirst = order === 'before';
+      if (ctrlFirst) { await key('keyDown'); mods = 2; }
+      await hoverAt(from.x, from.y, mods);
+      if (order === 'between') { await key('keyDown'); mods = 2; await sleep(200); }
+      await m('mousePressed', from.x, from.y, mods);
+      if (!ctrlFirst) { await sleep(100); await key('keyDown'); mods = 2; }
+      await m('mouseMoved', from.x, from.y, mods); await sleep(100);
+      for (let i = 1; i <= 12; i++) { await m('mouseMoved', from.x + (to.x - from.x) * i / 12, from.y + (to.y - from.y) * i / 12, mods); await sleep(30);  }
+      await m('mouseReleased', to.x, to.y, mods);
+      await key('keyUp'); mods = 0;
+      await sleep(250);
       const d = dist(await pos(), p0);
-      if (process.env.GIZMO_DEBUG) console.error('snapdbg', d, await evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => ({ on: ps.isGizmoSnapOn(), sd: ps.getGizmoManager().gizmos.positionGizmo.snapDistance, psd: ps.getGizmoManager().gizmos.positionGizmo.yPlaneGizmo.snapDistance, att: !!ps.getPivotNode() }))`));
       const off = v => Math.abs(v / 5 - Math.round(v / 5)) * 5;
-      assert.ok(Math.abs(d[0]) >= 4.99 && Math.abs(d[2]) >= 4.99, `snapped plane drag moved (${d})`);
-      assert.ok(off(d[0]) < 0.01 && off(d[2]) < 0.01, `snapped delta on 5 mm grid (${d.map(v => v.toFixed(3))})`);
-      assert.ok(Math.abs(d[1]) < 1e-3, 'snapped plane drag kept third axis');
-      results.push(`snap XZ d=[${d.map(v => v.toFixed(2))}] mm on the 5 mm grid`);
+      assert.ok(Math.abs(d[0]) >= 4.99 && Math.abs(d[2]) >= 4.99, `Ctrl ${order} press: handle grabbed and moved (${d})`);
+      assert.ok(off(d[0]) < 0.01 && off(d[2]) < 0.01, `Ctrl ${order} press: delta on 5 mm grid (${d.map(v => v.toFixed(3))})`);
+      assert.ok(Math.abs(d[1]) < 1e-3, `Ctrl ${order} press: third axis kept`);
+      await undo(); await sleep(300);
+      results.push(`snap Ctrl-${order}-press XZ d=[${d.map(v => v.toFixed(2))}] mm on the 5 mm grid`);
+    };
+    await snapped('before');
+    await snapped('after');
+    await snapped('between');
+
+    // ---- P6.2 ---------------------------------------------------------------
+    mkdirSync(join(ROOT, '.tmp/p62'), { recursive: true });
+    const camAttached = () => evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => !!ps.getGizmoManager().gizmos.positionGizmo.gizmoLayer.originalScene.activeCamera.inputs.attachedToElement)`);
+    const stDrags = () => evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => { const p = ps.getGizmoManager().gizmos.positionGizmo; return [p.xGizmo, p.yGizmo, p.zGizmo, p.xPlaneGizmo, p.yPlaneGizmo, p.zPlaneGizmo].filter(h => h.dragBehavior.dragging).length; })`);
+    assert.equal(await camAttached(), true, 'camera controls attached at rest');
+
+    // Interrupted drags: window blur and canvas pointercancel mid-drag.
+    for (const how of ['blur', 'pointercancel']) {
+      const g2 = await evaluate(cdp, GEOM);
+      const p0 = await pos(); const h0 = await hist();
+      const dx = g2.xArrow.x - g2.o.x, dy = g2.xArrow.y - g2.o.y;
+      await hoverAt(g2.xArrow.x, g2.xArrow.y);
+      await mouse('mousePressed', g2.xArrow.x, g2.xArrow.y);
+      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', g2.xArrow.x + dx * 0.25 * i, g2.xArrow.y + dy * 0.25 * i); await sleep(30); }
+      assert.equal(await stDrags(), 1, `${how}: a handle is dragging before the interruption`);
+      assert.equal(await camAttached(), false, `${how}: orbit is OFF during the handle drag`);
+      await evaluate(cdp, how === 'blur'
+        ? `window.dispatchEvent(new Event('blur'))`
+        : `document.querySelector('canvas').dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, bubbles: true }))`);
+      await sleep(200);
+      assert.equal(await stDrags(), 0, `${how}: no stuck drag`);
+      assert.equal(await camAttached(), true, `${how}: camera controls restored`);
+      const p1 = await pos();
+      const moved = dist(p1, p0);
+      assert.ok(Math.abs(moved[0]) > 0.5 && Math.abs(moved[1]) < 1e-3, `${how}: object kept the in-progress move (${moved})`);
+      assert.ok(await hist() !== h0, `${how}: drag committed as one undo step`);
+      await mouse('mouseMoved', g2.xArrow.x + dx * 3, g2.xArrow.y + dy * 3); await sleep(150);
+      await mouse('mouseReleased', g2.xArrow.x + dx * 3, g2.xArrow.y + dy * 3); await sleep(250);
+      assert.ok(Math.hypot(...dist(await pos(), p1)) < 1e-3, `${how}: later mouse moves do not drag the released handle`);
+      await undo(); await sleep(300);
+      assert.ok(Math.hypot(...dist(await pos(), p0)) < 1e-3, `${how}: ONE undo restores`);
+      assert.equal(await hist(), h0, `${how}: stack back to its pre-drag top`);
+      results.push(`${how} mid-drag: camera restored, no stuck drag, 1 undo step`);
     }
+
+    // Colours: X/Y/Z hues from the tokens; plane squares semi-transparent.
+    const look = await evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => {
+      const p = ps.getGizmoManager().gizmos.positionGizmo; const hex = c => c.toHexString();
+      return { ax: ['x','y','z'].map(k => hex(p[k + 'Gizmo'].coloredMaterial.diffuseColor)), hv: ['x','y','z'].map(k => hex(p[k + 'Gizmo'].hoverMaterial.diffuseColor)),
+        pl: ['x','y','z'].map(k => hex(p[k + 'PlaneGizmo'].coloredMaterial.diffuseColor)), al: ['x','y','z'].map(k => p[k + 'PlaneGizmo'].coloredMaterial.alpha),
+        hal: ['x','y','z'].map(k => p[k + 'PlaneGizmo'].hoverMaterial.alpha) }; })`);
+    const want = ['#7F0019', '#4A6B3A', '#2C476A'];
+    assert.deepEqual(look.ax.map(s => s.toUpperCase()), want, 'axis colours from tokens');
+    assert.deepEqual(look.pl.map(s => s.toUpperCase()), want, 'plane squares share the axis hues');
+    assert.ok(look.al.every(a => a > 0.2 && a < 0.7) && look.hal.every((a, i) => a > look.al[i]), `planes semi-transparent (${look.al}) and firmer on hover`);
+    assert.notDeepEqual(look.hv, look.ax, 'hover colour differs from rest');
+    results.push(`colours ${look.ax} hover ${look.hv} plane alpha ${look.al[0]}/${look.hal[0]}`);
+
+    // Constant screen size: dolly the camera, gizmo arrow length in pixels stays put.
+    const arrowPx = async () => { const g2 = await evaluate(cdp, GEOM); return Math.hypot(g2.xArrow.x - g2.o.x, g2.xArrow.y - g2.o.y); };
+    const a0 = await arrowPx();
+    await evaluate(cdp, `import('/src/core/SceneManager.js').then(sm => { const c = sm.SceneManager.getScene().activeCamera; c.radius *= 1.8; })`);
+    await sleep(500);
+    const a1 = await arrowPx();
+    assert.ok(Math.abs(a1 - a0) / a0 < 0.05, `gizmo keeps its screen size (${a0.toFixed(1)} px vs ${a1.toFixed(1)} px after a 1.8x dolly)`);
+    results.push(`constant screen size ${a0.toFixed(1)} px -> ${a1.toFixed(1)} px after 1.8x dolly`);
+    await evaluate(cdp, `import('/src/core/SceneManager.js').then(sm => { const c = sm.SceneManager.getScene().activeCamera; c.radius /= 1.8; })`);
+    await sleep(400);
+    writeFileSync(join(ROOT, '.tmp/p62/gizmo-look.png'), Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+
+    // Hidden in Support Mode, back on exit.
+    const attached = () => evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => !!ps.getGizmoManager().attachedMesh)`);
+    assert.equal(await attached(), true, 'gizmo attached before Support Mode');
+    assert.equal(await evaluate(cdp, `import('/src/supports/SupportMode.ts').then(m => m.supportMode.enter())`), true, 'Support Mode entered');
+    await sleep(300);
+    assert.equal(await attached(), false, 'gizmo hidden (detached) in Support Mode');
+    writeFileSync(join(ROOT, '.tmp/p62/gizmo-hidden-support-mode.png'), Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    await evaluate(cdp, `import('/src/supports/SupportMode.ts').then(m => m.supportMode.exit())`);
+    await sleep(300);
+    assert.equal(await attached(), true, 'gizmo back after leaving Support Mode');
+    results.push('gizmo hidden in Support Mode, restored on exit');
     console.log('PASS browser-gizmo-smoke\n  ' + results.join('\n  '));
     cdp.close?.();
   } finally { await stopProcess(browser); await stopProcess(vite); removeTempDir(userDataDir); }

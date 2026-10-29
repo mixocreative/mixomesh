@@ -56,6 +56,7 @@ export function initPivotSession(scene, { getCursorPosition }) {
   _gizmos.usePointerToAttachGizmos = false;
   _wireGizmoObservers();
   _initCoarseInputTracking();
+  _initDragInterruptGuard();
 
   const gz = getState().gizmo;
   setGizmoMode(gz.mode);
@@ -95,6 +96,69 @@ function _enablePlaneHandles(pos) {
   for (const [g, [x, y, z]] of layout) g?._gizmoMesh?.position.set(x, y, z);
 }
 
+// Gizmo palette (P6.2): X / Y / Z hues come from the mixo-app-style tokens
+// (src/kit/styles/tokens.css): X = --red #7f0019, Y = --success #4a6b3a,
+// Z = --info #3b4a5c with saturation lifted (HSL s 22% -> 40%, same hue and
+// lightness) to #2c476a so it reads as blue next to the ink-dark UI. Hover /
+// active (Babylon shows the hover material while dragging) = each hue mixed
+// 40% toward white. Plane squares share the hue at 0.45 alpha (0.75 hovered).
+export const GIZMO_AXIS_HEX = Object.freeze({ x: '#7f0019', y: '#4a6b3a', z: '#2c476a' });
+export const GIZMO_PLANE_ALPHA = 0.45;
+export const GIZMO_PLANE_ALPHA_HOVER = 0.75;
+const GIZMO_HOVER_MIX = 0.4;
+
+function _styleGizmo(g, hex, plane) {
+  if (!g?.coloredMaterial || !g.hoverMaterial) return;
+  const base = BABYLON.Color3.FromHexString(hex);
+  const hover = BABYLON.Color3.Lerp(base, BABYLON.Color3.White(), GIZMO_HOVER_MIX);
+  g.coloredMaterial.diffuseColor = base;
+  g.coloredMaterial.specularColor = base.scale(0.5);
+  g.hoverMaterial.diffuseColor = hover;
+  if (plane) {
+    g.coloredMaterial.alpha = GIZMO_PLANE_ALPHA;
+    g.hoverMaterial.alpha = GIZMO_PLANE_ALPHA_HOVER;
+  }
+}
+
+function _applyGizmoColours() {
+  const pos = _gizmos?.gizmos?.positionGizmo;
+  const scl = _gizmos?.gizmos?.scaleGizmo;
+  for (const a of ['x', 'y', 'z']) {
+    _styleGizmo(pos?.[`${a}Gizmo`], GIZMO_AXIS_HEX[a], false);
+    _styleGizmo(pos?.[`${a}PlaneGizmo`], GIZMO_AXIS_HEX[a], true);
+    _styleGizmo(scl?.[`${a}Gizmo`], GIZMO_AXIS_HEX[a], false);
+  }
+}
+
+// A drag cut short (window blur, pointercancel, tab hidden) never gets its
+// pointerup: PointerDragBehavior would stay `dragging` with the camera
+// controls detached. Release every live handle drag: Babylon fires drag-end
+// (our _onGizmoDragEnd commits ONE undo step, or none when nothing moved) and
+// re-attaches the camera.
+export function releaseGizmoDrags() {
+  const g = _gizmos?.gizmos;
+  if (!g) return 0;
+  let n = 0;
+  for (const name of ['positionGizmo', 'rotationGizmo', 'scaleGizmo']) {
+    const sub = g[name];
+    if (!sub) continue;
+    for (const k of ['x', 'y', 'z']) {
+      for (const h of [sub[`${k}Gizmo`], sub[`${k}PlaneGizmo`]]) {
+        const b = h?.dragBehavior;
+        if (b?.dragging) { b.releaseDrag(); n++; }
+      }
+    }
+  }
+  return n;
+}
+
+function _initDragInterruptGuard() {
+  const release = () => { releaseGizmoDrags(); };
+  window.addEventListener?.('blur', release);
+  document.addEventListener?.('visibilitychange', () => { if (document.hidden) release(); });
+  _scene.getEngine().getRenderingCanvas?.()?.addEventListener('pointercancel', release);
+}
+
 function _enabledGizmoChanged() {
   // Babylon recreates the sub-gizmos when modes toggle. Re-attach observers.
   _wireGizmoObservers();
@@ -102,6 +166,7 @@ function _enabledGizmoChanged() {
   // same positionGizmo drag observables, so one drag = one undo step; snap
   // (snapDistance) and space (updateGizmoRotationToMatchAttachedMesh) apply too.
   _enablePlaneHandles(_gizmos.gizmos.positionGizmo);
+  _applyGizmoColours();
   _applyGizmoSnap();
   _applyGizmoScale();
 }
