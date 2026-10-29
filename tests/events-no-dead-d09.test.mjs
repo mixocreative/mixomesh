@@ -1,5 +1,6 @@
 // cia D-09: an EVENTS key nobody references is a trap (a module that subscribes
-// to it waits forever and nothing fails). Every key must be used outside events.js.
+// to it waits forever and nothing fails). Every key must be used outside events.js
+// (JS and TS sources alike).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -12,14 +13,14 @@ const files = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p);
-    else if (/\.(js|mjs|cjs)$/.test(name)) files.push(p);
+    else if (/\.(js|mjs|cjs|ts|tsx)$/.test(name)) files.push(p);
   }
 })(join(root, 'src'));
 (function walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p);
-    else if (/\.(js|mjs|cjs)$/.test(name)) files.push(p);
+    else if (/\.(js|mjs|cjs|ts|tsx)$/.test(name)) files.push(p);
   }
 })(join(root, 'electron'));
 const sources = files

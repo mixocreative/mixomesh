@@ -91,6 +91,10 @@ export const EVENTS = {
   LOCALE_CHANGED:          'i18n:localeChanged',
   GEOMETRY_CHANGED:        'geometry:changed',
 
+  // Supports (plan 2026-10-29 P3): { objectId, revision, stale } after any write
+  // of a lead's `object.supports` (an edit, an undo, or a stale flag change)
+  SUPPORTS_CHANGED:        'supports:changed',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',

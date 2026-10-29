@@ -1,0 +1,40 @@
+/**
+ * Object-wide support settings. ChangeSettings writes keys through `updateSetting` (clamps, and
+ * switches a preset to Custom when a preset key changes); ApplyPreset writes a preset's values over
+ * the current settings (`applyPreset`). A lift change is a settings change; the caller batches it
+ * with `LiftForSupportsCommand` (P3 lift decision).
+ */
+import { applyPreset, updateSetting, type LiveSupportSettings, type PresetName, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
+import { t } from '../../i18n/index.js';
+import type { ObjectSupports } from '../model';
+import { SupportEditCommand } from './SupportEditCommand';
+
+export type SettingsPatch = { [K in SettingKey]?: LiveSupportSettings[K] };
+
+export class ChangeSettingsCommand extends SupportEditCommand {
+  private readonly patch: SettingsPatch;
+
+  constructor(objectId: string, patch: SettingsPatch) {
+    super(objectId, t('history.supportSettings'));
+    this.patch = { ...patch };
+  }
+
+  protected transition(prev: ObjectSupports): ObjectSupports {
+    let settings = prev.settings;
+    for (const key of Object.keys(this.patch) as SettingKey[]) settings = updateSetting(settings, key, this.patch[key] as never);
+    return { ...prev, settings };
+  }
+}
+
+export class ApplyPresetCommand extends SupportEditCommand {
+  private readonly preset: PresetName;
+
+  constructor(objectId: string, preset: PresetName) {
+    super(objectId, t('history.supportPreset', { name: t(`supports.preset.${preset}`) }));
+    this.preset = preset;
+  }
+
+  protected transition(prev: ObjectSupports): ObjectSupports {
+    return { ...prev, settings: applyPreset(this.preset, prev.settings) };
+  }
+}
