@@ -90,6 +90,9 @@ Architecture rules:
   `isPickable=false`, excluded from WorldExtents, MeshStats, MeshValidator, SelectionOutline,
   thumbnails, BoxSelect and every export path except the support export of P4.2 (precedent: the
   cross-section indicator quad).
+- D22. The shared repo mixo-geometry imports no renderer, UI framework or DOM (no babylon, three,
+  react, document, window). Apps reach it through plain data and the `ViewportPort` interface; all
+  drawing (rings, ghost tips, overlays) stays in the app.
 - D21. One undo stack: HistoryManager. The ported mixosupports `session.ts` reducer is used as pure
   state logic; its undo history and `state/history.ts` are not ported.
 
@@ -177,7 +180,7 @@ Format: **id** goal. Files. *Depends.* **Done when.** Worker per section 4.
   module returned by `loadGeometryEngine` (no static named imports, no `?url`). No import from
   `src/dental/`. *Depends: P0.1.* **Done when** `tsc --noEmit` is clean over `src/support-engine/`
   and `grep -ri dental src/support-engine` is empty.
-- **P1.2** Port the matching `*.test.ts` (dental cases removed) and the goldens: a mixomesh
+- **P1.2** (moved into PE.2: the tests and goldens run in mixo-geometry) Port the matching `*.test.ts` (dental cases removed) and the goldens: a mixomesh
   `src/support-engine/goldens/goldenImport.ts` builds fixtures with `BinaryStlSession` on the vendored
   pkg-browser (`initSync`), replacing mixosupports' `scripts/test-support/rustImport.ts` /
   pkg-node / three.js glTF types. *Depends: P1.1.* **Done when** the 4 fixtures (cube-overhang,
@@ -195,12 +198,26 @@ Format: **id** goal. Files. *Depends.* **Done when.** Worker per section 4.
   `mixocreative/mixo-geometry` (`gh repo create --private`), add the remote, do not push before P9.3.
   *Depends: —.* **Done when** `cargo test` and the wasm build pass in the new repo and
   `engine_version()` is 9.
-- **PE.2** Move the ABI-bound TypeScript into `mixo-geometry/host/` (settings layout + packer from
-  `supportBuildWasm.ts` / `settings.ts`, result decoder `generateSupports.ts`, `flat.rs` stride
-  mirrors, `geometryVersion`, worker protocol types), taken from mixomesh's P1.1 port; with its
-  vitest. mixomesh's `src/support-engine/` then imports them from the vendored package instead of
-  owning copies. *Depends: P1.1, PE.1.* **Done when** the host tests pass in mixo-geometry and
-  mixomesh typechecks against the vendored copy.
+- **PE.2** Move the shared TypeScript into mixo-geometry as two packages, taken from mixomesh's
+  P1.1 port (`src/support-engine/`, see its PORTED.md):
+  - `host/` — ABI-bound: settings layout + packer (`supportBuildWasm.ts`, `settings.ts`), result
+    decoder (`generateSupports.ts`), contact/shape strides (`flat.rs` mirrors), `geometryVersion`,
+    engine loader, worker protocol + worker (`meshProtocol`, `meshWorker`, `meshClient`,
+    `buildSessions`, `geometryClient`).
+  - `editing/` — renderer-free support editing (owner 2026-10-29: select paint, area paint, add
+    support, everything 3D shared): reducer, commands, keys, pick, stroke, strokeQueue,
+    surfaceBrush (stamps), screenBrush (circle hit test), brushScheduler, selection, removal,
+    regenerate/rekey, shapeEdit, add-tip snapping (click reach, snap to suggested/candidate tips,
+    upward-face warning), zones, contactEdits, landing, problems (islands, omitted).
+  - A `ViewportPort` interface in `editing/` is the only way the logic reaches a 3D view:
+    screen point → ray, world point → screen, pick via the engine session, pointer records. Each
+    app implements it (Babylon in mixomesh, three.js in mixosupports).
+  - D22 is enforced: lint `no-restricted-imports` + a test that no file imports babylon, three,
+    react, react-dom or touches `document`/`window`.
+  The ported `*.test.ts` and goldens (old P1.2) run here. mixomesh's `src/support-engine/` shrinks
+  to its app glue and imports the packages from the vendored copy. *Depends: P1.1, PE.1.* **Done
+  when** host + editing tests and goldens pass in mixo-geometry, the D22 test passes, and mixomesh
+  typechecks and tests green against the vendored copy.
 - **PE.3** Engine CI (GitHub Actions in mixo-geometry): cargo test, wasm build (both packages),
   generic + dental goldens, host vitest; a tag `v<N>` builds and attaches the release assets
   (`pkg-browser`, `pkg-node`, `host/`, `SHA256SUMS`). *Depends: PE.2.* **Done when** a local
