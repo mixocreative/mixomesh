@@ -1,4 +1,5 @@
 import { resolve, type CommandId, type UiState } from './commands';
+import { modeExtension } from './modes';
 
 /** The part of a key event target the keyboard rules look at (an HTMLElement satisfies it). */
 export interface KeyTarget {
@@ -61,7 +62,9 @@ export interface KeyAction {
 }
 
 const NONE: KeyAction = { command: undefined, preventDefault: false };
-const run = (command: CommandId, preventDefault = true): KeyAction => ({ command, preventDefault });
+/** A key that runs `command` (and stops the browser's own action unless `preventDefault` is false): what a mode's `keys` returns. */
+export const runKey = (command: CommandId, preventDefault = true): KeyAction => ({ command, preventDefault });
+const run = runKey;
 
 /** The editor's keyboard rules, first match wins. Keys typed into a field that takes text are left alone. */
 export function keyAction({ key, ctrl, shift, target, ui }: KeyInput): KeyAction {
@@ -82,6 +85,8 @@ function bound({ key, ctrl, shift, target, ui }: KeyInput): KeyAction {
   // Esc first drops the selection, then leaves the mode.
   if (mode === 'edit' && hasSelection && key === 'Escape') return run('edit.clearSelection');
   if (mode === 'edit' && done) return run('mode.exit');
+  const extension = modeExtension(mode);
+  if (extension?.keys) return extension.keys({ key, ctrl, shift, target, ui }, { lower, done, hasSelection }) ?? NONE;
   if (mode === 'off' && key === 'Delete') return run('objects.delete', false);
   if (mode === 'off' && lower === 'g') return run('transform.move', false);
   if (mode === 'off' && lower === 'r') return run('transform.rotate', false);

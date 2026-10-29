@@ -92,6 +92,22 @@ export type IslandReport =
   | { status: 'ok'; islands: Array<{ height: number; vertex: number; status: 'resolved' | 'unresolved' | 'manual-only' | 'outside-policy' }> }
   | { status: 'inconclusive'; reason: string };
 
+/** Dental (host/dental): the final built contacts on one rim of a two-contour aligner. */
+export interface DentalRimCoverageItem {
+  perimeterMm: number;
+  retained: number;
+  maxGapMm: number;
+  /** This is a review trigger, not a clinical acceptance threshold. */
+  reviewGapMm: number;
+  needsReview: boolean;
+}
+
+export interface DentalRimCoverage {
+  outer: DentalRimCoverageItem;
+  opening: DentalRimCoverageItem;
+  needsReview: boolean;
+}
+
 export interface GeneratedSupportMesh extends TriangleMesh {
   parts: SupportPart[];
   components: SupportComponent[];
@@ -105,4 +121,8 @@ export interface GeneratedSupportMesh extends TriangleMesh {
   revision?: number;
   /** Islands of the model against the built supports (`generate`). */
   islands?: IslandReport;
+  /** Dental jobs: final built contacts on each dental rim; absent when the detector could not certify a contour. */
+  dentalRimCoverage?: DentalRimCoverage;
+  /** Dental jobs: requested dental structures omitted because their built geometry crossed the model. */
+  dentalStructureFallback?: Array<'tree' | 'brace' | 'brace-pruned'>;
 }

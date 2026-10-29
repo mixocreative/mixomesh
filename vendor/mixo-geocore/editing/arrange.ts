@@ -15,7 +15,8 @@ export interface Footprint { id: string; minX: number; maxX: number; minZ: numbe
 export function footprintOf(unit: PrintUnit): Footprint {
   const box = meshBounds(applyTransform(unit.source, unit.transform));
   const settings = resolveSettings(unit.settings);
-  const pad = unit.supports ? (settings.raftEnabled ? settings.raftExpandWidth : 0) + settings.baseDiameter / 2 + 1 : 0;
+  // A dental aligner reserves the room of the supports it is about to get.
+  const pad = unit.supports || unit.dental ? (settings.raftEnabled ? settings.raftExpandWidth : 0) + settings.baseDiameter / 2 + 1 : 0;
   return { id: unit.id, minX: box.min[0] - pad, maxX: box.max[0] + pad, minZ: box.min[2] - pad, maxZ: box.max[2] + pad };
 }
 

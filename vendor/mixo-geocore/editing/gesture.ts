@@ -1,4 +1,5 @@
 import type { Brush } from './brushScheduler';
+import { gestureOwner, modeExtension } from './modes';
 import { effectiveBrushMode } from './selection';
 import type { EditSession } from './session';
 import type { BrushMode, EditMode, ZoneKind } from './types';
@@ -8,7 +9,12 @@ import type { BrushMode, EditMode, ZoneKind } from './types';
  * while painting zones, and in Support Edit Mode one of its three ways of working (Add supports;
  * Select supports by Click, `pick`; Select supports by Drag over, `drag`, with the circle).
  */
-export type Gesture =
+export type Gesture = CoreGesture | ExtraGestures[keyof ExtraGestures];
+
+/** Extension point: an app mode's own gestures (`interface ExtraGestures { dental: DentalGesture }`), listed in its `gestureKinds`. */
+export interface ExtraGestures {}
+
+export type CoreGesture =
   | { kind: 'none' }
   | { kind: 'zones'; brush: { radius: number; kind: ZoneKind } }
   /** `remove`: a click removes the support it hits instead of adding one. */
@@ -22,13 +28,14 @@ export type EditGesture = Extract<Gesture, { kind: 'add' | 'pick' | 'drag' }>;
 
 export type GestureKind = Gesture['kind'];
 
-/** The gesture the canvas acts on. */
+/** The gesture the canvas acts on: an app mode may hand the canvas another one (an Edit Mode tool inside a step). */
 export function canvasGesture(press: Gesture): Gesture {
-  return press;
+  return gestureOwner(press.kind)?.canvasGesture?.(press) ?? press;
 }
 
-function editGesture(session: EditSession): EditGesture {
-  if (session.tool === 'add') return { kind: 'add', remove: session.addAction === 'remove' };
+/** The Support Edit Mode gesture of the session's tool; `forceAdd`: Add never removes (a mode without Remove). */
+export function editGesture(session: EditSession, forceAdd = false): EditGesture {
+  if (session.tool === 'add') return { kind: 'add', remove: !forceAdd && session.addAction === 'remove' };
   return session.selectStyle === 'click' ? { kind: 'pick' } : { kind: 'drag', brush: { radius: session.brushRadius, mode: effectiveBrushMode(session.brushMode, session.shiftHeld) }, base: session.brushMode, flipped: session.shiftHeld, sizing: session.brushSizing };
 }
 
@@ -38,10 +45,12 @@ export function gesture(session: EditSession): Gesture {
     case 'zones': return { kind: 'zones', brush: { radius: session.zoneRadius, kind: session.zoneKind } };
     case 'edit':
       return editGesture(session);
+    default:
+      return modeExtension(session.mode)?.gesture?.(session) ?? { kind: 'none' };
   }
 }
 
 /** The mode a gesture belongs to. */
 export function gestureMode(gesture: Gesture): EditMode {
-  return gesture.kind === 'none' ? 'off' : gesture.kind === 'zones' ? 'zones' : 'edit';
+  return gesture.kind === 'none' ? 'off' : gesture.kind === 'zones' ? 'zones' : gestureOwner(gesture.kind)?.id ?? 'edit';
 }

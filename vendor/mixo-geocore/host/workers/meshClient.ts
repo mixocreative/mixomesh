@@ -192,10 +192,10 @@ export class SupportMeshClient {
 
   private payload(unitId: string, job: SupportJob, revision: number): SupportJobPayload {
     const { mesh: _mesh, ...rest } = job;
-    return { unitId, revision, sourceToken: this.token(job.mesh), job: rest };
+    return { unitId, revision, sourceToken: this.token(job.mesh), ...(job.dental ? { policyToken: this.token(job.dental) } : {}), job: rest };
   }
 
-  /** One token per object (a unit's model, a policy): the worker keys what it keeps on them. */
+  /** One token per object (a unit's model, a dental policy): the worker keys what it keeps on them. */
   private token(of: object): number {
     let token = this.tokens.get(of);
     if (token === undefined) this.tokens.set(of, (token = this.nextToken++));

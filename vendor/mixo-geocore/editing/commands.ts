@@ -1,5 +1,6 @@
-import type { AddAction, BrushMode, EditMode, EditTool, SelectStyle, StatusMessage, StepKind } from './types';
+import type { AddAction, BrushMode, EditMode, EditTool, SelectStyle, StatusMessage, StepKind, STEP_KINDS } from './types';
 import { busyStatus } from './status';
+import { modeExtension } from './modes';
 
 /**
  * The command registry: every control that has a name (a button, a key) is one row here, and the
@@ -21,12 +22,17 @@ export const COMMAND_IDS = [
   'shape.reset', 'shape.selectCustomised',
   'export.active-printable', 'export.active-supports', 'export.separate-printable', 'export.separate-supports', 'export.whole-printable',
 ] as const;
-export type CommandId = (typeof COMMAND_IDS)[number];
+/** The built-in commands. */
+export type CoreCommandId = (typeof COMMAND_IDS)[number];
+/** Every command id: the built-in ones and an app's own (`interface ExtraCommandIds { 'dental.next': true }`, rows via `registerCommands`). */
+export type CommandId = CoreCommandId | keyof ExtraCommandIds;
+/** Extension point: an app's own command ids. */
+export interface ExtraCommandIds {}
 
 /** `primary` is the red fill (one per view), `destructive` the danger outline; the button reads both. */
 export type Role = 'primary' | 'secondary' | 'destructive';
 
-/** What the registry's rules read, built by the host from its own state. */
+/** What the registry's rules read, built by the host from its own state; an app mode adds (optional) fields by augmenting it. */
 export interface UiState {
   mode: EditMode;
   /** There is an active object. */
@@ -76,7 +82,8 @@ export interface UiState {
   generating: boolean;
 }
 
-interface Command {
+/** One row of the registry: what a control shows and does, as functions of the `UiState`. */
+export interface Command {
   role: Role;
   /**
    * The key that runs it, as "Ctrl+Shift+Z" or "Esc": the one source of the key text in hints and
@@ -97,42 +104,47 @@ interface Command {
   runs?(s: UiState): CommandId;
 }
 
-const UNDO_HINTS: Record<StepKind, string> = {
+const UNDO_HINTS: Record<(typeof STEP_KINDS)[number], string> = {
   addObjects: 'Undo the import', deleteObjects: 'Undo deleting objects', generate: 'Undo generating supports', removeSupports: 'Undo removing the supports',
   clearManual: 'Undo clearing manual edits', addSupport: 'Undo adding a support', deleteSupports: 'Undo deleting supports', zones: 'Undo the zone change', move: 'Undo moving the object', settings: 'Undo the settings change', openProject: 'Undo opening the project',
 };
-const REDO_HINTS: Record<StepKind, string> = {
+const REDO_HINTS: Record<(typeof STEP_KINDS)[number], string> = {
   addObjects: 'Redo the import', deleteObjects: 'Redo deleting objects', generate: 'Redo generating supports', removeSupports: 'Redo removing the supports',
   clearManual: 'Redo clearing manual edits', addSupport: 'Redo adding a support', deleteSupports: 'Redo deleting supports', zones: 'Redo the zone change', move: 'Redo moving the object', settings: 'Redo the settings change', openProject: 'Redo opening the project',
 };
-/** Supports can be picked, added and deleted: Support Edit Mode. */
-const editing = (s: UiState) => s.mode === 'edit';
-/** Where a selection of supports can be made and deleted. */
-const selecting = (s: UiState) => editing(s);
+/** Supports can be picked, added and deleted: Support Edit Mode, and where an app mode says so. */
+const editing = (s: UiState) => s.mode === 'edit' || modeExtension(s.mode)?.uiEditsSupports?.(s) === true;
+/** Where a selection of supports (or tips) can be made and deleted. */
+const selecting = (s: UiState) => editing(s) || modeExtension(s.mode)?.uiSelectsTips?.(s) === true;
 const editable = (s: UiState) => s.active && s.heavy === undefined;
 const always = () => true;
 const never = () => undefined;
-const heavyReason = (s: UiState): StatusMessage => ({ key: 'Too detailed to edit by hand ({n} triangles). Generate and export still use the full model.', vars: { n: (s.heavy ?? 0).toLocaleString() } });
+/** Why a heavy active object takes no hand edits (for an app's own rows too). */
+export const heavyReason = (s: UiState): StatusMessage => ({ key: 'Too detailed to edit by hand ({n} triangles). Generate and export still use the full model.', vars: { n: (s.heavy ?? 0).toLocaleString() } });
 /** Why a mode button is off: no object, a heavy one, or the other mode is on. */
-const entryReason = (s: UiState): StatusMessage | undefined => {
+export const entryReason = (s: UiState): StatusMessage | undefined => {
   if (s.mode !== 'off') return busyStatus(s.mode);
   if (!s.active) return { key: 'Select an object first.' };
   return s.heavy === undefined ? undefined : heavyReason(s);
 };
 const inMode = (mode: EditMode) => (s: UiState) => s.mode === mode;
 const noModelReason: StatusMessage = { key: 'Import a model first.' };
-const generatingReason: StatusMessage = { key: 'Supports are being generated: wait for it to finish.' };
+/** Why a control waits while supports are generated. */
+export const generatingReason: StatusMessage = { key: 'Supports are being generated: wait for it to finish.' };
 
-export const COMMANDS: Readonly<Record<CommandId, Command>> = {
+/** The undo and redo hints of a step kind. */
+const stepHint = (kind: StepKind, hints: Readonly<Record<string, string>>, own: 'undo' | 'redo'): string => hints[kind] ?? extraStepHints.get(kind)?.[own] ?? (own === 'undo' ? 'Undo' : 'Redo');
+
+export const COMMANDS: Readonly<Record<CoreCommandId, Command>> = {
   'history.undo': {
     role: 'secondary', shortcut: 'Ctrl+Z',
-    label: () => 'Undo', hint: (s) => (s.undoStep ? UNDO_HINTS[s.undoStep] : 'Undo'),
+    label: () => 'Undo', hint: (s) => (s.undoStep ? stepHint(s.undoStep, UNDO_HINTS, 'undo') : 'Undo'),
     visible: always, enabled: (s) => s.canUndo,
     disabledReason: (s) => (s.canUndo ? undefined : { key: s.mode === 'off' ? 'Nothing to undo.' : 'Nothing to undo here: leave the mode to undo earlier steps.' }),
   },
   'history.redo': {
     role: 'secondary', shortcut: 'Ctrl+Shift+Z',
-    label: () => 'Redo', hint: (s) => (s.redoStep ? REDO_HINTS[s.redoStep] : 'Redo'),
+    label: () => 'Redo', hint: (s) => (s.redoStep ? stepHint(s.redoStep, REDO_HINTS, 'redo') : 'Redo'),
     visible: always, enabled: (s) => s.canRedo,
     disabledReason: (s) => (s.canRedo ? undefined : { key: 'Nothing to redo.' }),
   },
@@ -347,8 +359,38 @@ export interface ResolvedCommand {
   runs: CommandId;
 }
 
+const extraCommands = new Map<CommandId, Command>();
+const extraStepHints = new Map<StepKind, { undo: string; redo: string }>();
+
+/** Adds an app's command rows (ids from `ExtraCommandIds`); returns the call that removes them again (tests). */
+export function registerCommands(rows: Partial<Record<CommandId, Command>>): () => void {
+  const added = Object.entries(rows) as [CommandId, Command][];
+  for (const [id] of added) if (id in COMMANDS || extraCommands.has(id)) throw new Error(`command '${id}' is already defined`);
+  for (const [id, row] of added) extraCommands.set(id, row);
+  return () => { for (const [id, row] of added) if (extraCommands.get(id) === row) extraCommands.delete(id); };
+}
+
+/** Names an app's own step kinds (`ExtraStepKinds`) in Undo and Redo hints; returns the call that removes them. */
+export function registerStepHints(hints: Partial<Record<StepKind, { undo: string; redo: string }>>): () => void {
+  const added = Object.entries(hints) as [StepKind, { undo: string; redo: string }][];
+  for (const [kind, hint] of added) extraStepHints.set(kind, hint);
+  return () => { for (const [kind, hint] of added) if (extraStepHints.get(kind) === hint) extraStepHints.delete(kind); };
+}
+
+/** Every command id: the built-in ones in their order, then the app's in registration order. */
+export function commandIds(): readonly CommandId[] {
+  return extraCommands.size === 0 ? COMMAND_IDS : [...COMMAND_IDS, ...extraCommands.keys()];
+}
+
+/** The row of `id`; throws for an id nothing defines. */
+export function commandOf(id: CommandId): Command {
+  const command = (COMMANDS as Partial<Record<CommandId, Command>>)[id] ?? extraCommands.get(id);
+  if (!command) throw new Error(`unknown command '${id}'`);
+  return command;
+}
+
 export function resolve(id: CommandId, state: UiState): ResolvedCommand {
-  const command = COMMANDS[id];
+  const command = commandOf(id);
   const { shortcut } = command;
   return {
     id, role: command.role, shortcut: typeof shortcut === 'function' ? shortcut(state) : shortcut,

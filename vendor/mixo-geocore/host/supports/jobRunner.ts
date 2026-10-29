@@ -1,7 +1,8 @@
 import { PROGRESS_STAGE } from '../core/progress';
 import type { SupportProblem } from '../core/analysis/supportCheck';
 import type { PlacementResult, ProgressCallback } from '../core/analysis/types';
-import { type CheckJob, type JobTransform, type PlacementJob, type SupportJob } from '../core/jobs';
+import { orientationOnly, type CheckJob, type PlacementJob, type SupportJob } from '../core/jobs';
+import { dentalPolicy } from '../dental/placement';
 import type { GeneratedSupportMesh } from '../core/supports/mesh';
 import { genericPolicy, jobContacts } from './genericPolicy';
 import { placeGeneric } from './genericPlacement';
@@ -17,7 +18,7 @@ import { applyTransform, transformDirection, transformPoint } from '../state/tra
  * core/transform.ts.
  *
  * The support build is one Rust `generate` call (U7): Rust makes the unit's policy from its saved
- * data in the same session (`generic_policy`), the host puts the contacts in plate
+ * data in the same session (`generic_policy`, or `dental_policy` for a dental job), the host puts the contacts in plate
  * space and reads the mesh and verdicts back. No policy, collision test, landing rule or retry runs here.
  */
 
@@ -40,20 +41,24 @@ export function runSupportJob(job: SupportJob, onProgress?: ProgressCallback, re
     normal: transformDirection(frame, contact.normal),
   }));
   const zones = job.contacts.zones.map((stamp) => ({ ...stamp, center: transformPoint(frame, stamp.center), normal: transformDirection(frame, stamp.normal) }));
-  const policy = genericPolicy(job.contacts, job.settings);
+  const dental = job.dental;
+  // Dental: the aligner's Step 3 switches decide Tree and Brace and Roof/Cage stay off, in Rust.
+  const policy = dental ? dentalPolicy(dental, frame, job.contacts.manual) : genericPolicy(job.contacts, job.settings);
   const out = generateSupports(contacts, job.settings, policy, {
     mode: job.mode, model: job.mesh, frame, plateY: job.plate ?? 0, labelText: job.labelText, zones, timeoutMs: GENERATE_TIMEOUT_MS, revision, ...(site ? { site } : {}),
     ...(onProgress ? { onProgress } : {}),
   });
   const mesh = out.mesh;
+  if (dental && out.fallback.length > 0) mesh.dentalStructureFallback = out.fallback;
+  if (dental?.kind === 'two-contour' && out.rings.length === 2) {
+    const [outer, opening] = out.rings as [typeof out.rings[number], typeof out.rings[number]];
+    mesh.dentalRimCoverage = { outer, opening, needsReview: outer.needsReview || opening.needsReview };
+  }
   onProgress?.(1, PROGRESS_STAGE.done);
   return supportMeshToUnitLocal(mesh, frame);
 }
 
-/** Rotation without translation. */
-export function orientationOnly(transform: JobTransform): JobTransform {
-  return { position: [0, 0, 0], rotation: [...transform.rotation] };
-}
+export { orientationOnly };
 
 /** Automatic contacts, in the frame of the turned model (the caller maps them back to the unit). */
 export function runPlacementJob(job: PlacementJob, onProgress?: ProgressCallback): PlacementResult {

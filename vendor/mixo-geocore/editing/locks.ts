@@ -1,6 +1,7 @@
 import type { StatusMessage } from './types';
 import type { EditMode } from './types';
 import { busyStatus } from './status';
+import { modeExtension } from './modes';
 
 /**
  * Which panel sections a mode locks (docs/design/ui-structure.md 4.4). A locked section is
@@ -18,6 +19,8 @@ const SECTIONS: Record<Panel, readonly PanelSection[]> = {
 
 export function sectionLocked(section: PanelSection, mode: EditMode): boolean {
   if (mode === 'off') return false;
+  const extension = modeExtension(mode);
+  if (extension?.locks) return extension.locks(section);
   if (section === 'check' || section === 'settings' || section === 'export') return mode === 'zones';
   return true;
 }

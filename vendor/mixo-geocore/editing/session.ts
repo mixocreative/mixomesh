@@ -1,11 +1,13 @@
 import type { SupportContact } from '../host/core/supports/mesh';
+import { bindInitialSession, modeExtension, modeOwnedTool, editModes, type SessionKit, type SessionView } from './modes';
 import { paintSelection, pruneSelection, toggleSelection } from './selection';
 import type { AddAction, BrushMode, EditMode, EditTool, SelectStyle, ZoneKind } from './types';
 
 /**
  * The editing session of the active object: which mode is on, its tools and the selected
  * supports. View state only, never in the undo history; the host keeps the undo floor (history)
- * and sets it when `startsEditing` says a mode was entered from outside.
+ * and sets it when `startsEditing` says a mode was entered from outside. An app mode adds its own
+ * fields by augmenting this interface and naming their values in its `initial` (modes.ts).
  */
 export interface EditSession {
   mode: EditMode;
@@ -34,6 +36,7 @@ export interface EditSession {
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
+/** The session before anything happened; a registered mode's `initial` fields are merged into it. */
 export const initialSession: EditSession = {
   mode: 'off',
   activeUnitId: undefined,
@@ -48,7 +51,15 @@ export const initialSession: EditSession = {
   zoneKind: 'paint',
   zoneRadius: 2,
   selection: NO_SELECTION,
-};
+} satisfies Partial<EditSession> as EditSession;
+
+bindInitialSession((fields, remove) => {
+  const target = initialSession as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(fields)) {
+    if (remove) delete target[key];
+    else target[key] = value;
+  }
+});
 
 /** What Fix on a check finding sets: the Add tool with its click adding (a Remove left on would take supports away). */
 export const FIX_TOOL_EVENTS: readonly SessionEvent[] = [{ type: 'setTool', tool: 'add' }, { type: 'setAddAction', action: 'add' }];
@@ -59,7 +70,12 @@ export const FIX_TOOL_EVENTS: readonly SessionEvent[] = [{ type: 'setTool', tool
  * either mode (Done, the left Exit button, Esc, Enter); `leave` ends any mode without a word (Remove supports, a check's Fix);
  * `activeUnitChanged` (with the triangles of a heavy object) and `contactsChanged` follow the scene.
  */
-export type SessionEvent =
+export type SessionEvent = CoreSessionEvent | ExtraSessionEvents[keyof ExtraSessionEvents];
+
+/** Extension point: an app mode's own events (`interface ExtraSessionEvents { dental: DentalEvent }`), reduced by its `reduce`. */
+export interface ExtraSessionEvents {}
+
+export type CoreSessionEvent =
   | { type: 'enterEdit' }
   | { type: 'enterZones' }
   | { type: 'exit' }
@@ -81,10 +97,10 @@ export type SessionEvent =
   /** Undo of a cleared selection: exactly these ids again. */
   | { type: 'restoreSelection'; ids: readonly string[] };
 
-/** The selection empties on every mode change. */
+/** The selection empties on every mode change; a tool only one mode offers falls back to Add. */
 function withMode(state: EditSession, mode: EditMode): EditSession {
   if (mode === state.mode) return state;
-  return { ...state, mode, shiftHeld: false, selection: NO_SELECTION, tool: state.tool };
+  return { ...state, mode, shiftHeld: false, selection: NO_SELECTION, tool: modeOwnedTool(state.tool) ? 'add' : state.tool };
 }
 
 function withSelection(state: EditSession, selection: ReadonlySet<string>): EditSession {
@@ -130,17 +146,30 @@ export function reduceSession(state: EditSession, event: SessionEvent): EditSess
       return selectsTips(state) ? withSelection(state, new Set(event.ids)) : state;
     case 'clearSelection':
       return withSelection(state, state.selection.size === 0 ? state.selection : NO_SELECTION);
+    default:
+      return reduceModeEvent(state, event);
   }
 }
 
-/** Supports can be picked, added and deleted: Support Edit Mode. */
-export function editsSupports(state: Pick<EditSession, 'mode'>): boolean {
-  return state.mode === 'edit';
+const KIT: SessionKit = { withMode, set, emptySelection: NO_SELECTION };
+
+/** An app mode's own event: the first registered mode that reduces it decides; unknown events change nothing. */
+function reduceModeEvent(state: EditSession, event: SessionEvent): EditSession {
+  for (const mode of editModes()) {
+    const next = mode.reduce?.(state, event, KIT);
+    if (next) return next;
+  }
+  return state;
 }
 
-/** Tips can be selected: where supports can be edited. */
-export function selectsTips(state: Pick<EditSession, 'mode'>): boolean {
-  return editsSupports(state);
+/** Supports can be picked, added and deleted: Support Edit Mode, and where an app mode says so. */
+export function editsSupports(state: SessionView): boolean {
+  return state.mode === 'edit' || modeExtension(state.mode)?.editsSupports?.(state) === true;
+}
+
+/** Tips can be selected: where supports can be edited, and where an app mode says so. */
+export function selectsTips(state: SessionView): boolean {
+  return editsSupports(state) || modeExtension(state.mode)?.selectsTips?.(state) === true;
 }
 
 /** There is an active object and it takes hand edits (it is not heavy). */

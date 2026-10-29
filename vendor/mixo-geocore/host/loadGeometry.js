@@ -12,21 +12,23 @@ let _engine = null;
 /**
  * The engine's module namespace, ready to call. A worker has no
  * document.baseURI, so the caller passes absolute URLs (vendorUrl on the main
- * thread). A failed load or a version mismatch clears the cache so a later call
- * can retry.
+ * thread). A host that bundles the glue itself (a static import of the vendored
+ * pkg-browser) passes the imported module namespace instead of its URL. A failed
+ * load or a version mismatch clears the cache so a later call can retry.
  *
- * @param {string} glueUrl absolute URL of mixo_geometry_wasm.js
+ * @param {string | object} glue absolute URL of mixo_geometry_wasm.js, or its imported module namespace
  * @param {string | URL | BufferSource} [wasm] wasm URL or bytes; defaults to the file beside the glue
  * @returns {Promise<any>}
  */
-export function loadGeometryEngine(glueUrl, wasm) {
-  _engine ??= import(/* @vite-ignore */ glueUrl)
+export function loadGeometryEngine(glue, wasm) {
+  const glueUrl = typeof glue === 'string' ? glue : undefined;
+  _engine ??= (glueUrl === undefined ? Promise.resolve(glue) : import(/* @vite-ignore */ glueUrl))
     .then(async glue => {
-      const module_or_path = wasm ?? new URL(GEOMETRY_WASM, glueUrl);
+      const module_or_path = wasm ?? (glueUrl === undefined ? undefined : new URL(GEOMETRY_WASM, glueUrl));
       if (ArrayBuffer.isView(module_or_path) || module_or_path instanceof ArrayBuffer) {
         glue.initSync({ module: module_or_path });
       } else {
-        await glue.default({ module_or_path });
+        await glue.default(module_or_path === undefined ? undefined : { module_or_path });
       }
       assertGeometryVersion(glue.engine_version());
       return glue;

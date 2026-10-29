@@ -1,6 +1,7 @@
 // Types of the scene a unit (one printable object) carries, from mixosupports src/state/project.ts.
 // Only the types: the scene reducer, normalisers and (de)serialisation are not ported (mixomesh
 // stores supports on its own objects and its own undo stack, plan D21).
+import type { DentalPolicy } from '../dental/dentalPolicy';
 import type { PlacementResult, SupportPoint, TriangleMesh } from '../core/analysis/types';
 import type { ShapeOverride } from '../core/supports/settings';
 import type { ZoneStamp } from '../core/supports/zones';
@@ -36,6 +37,8 @@ export interface PrintUnit {
   zones: ZoneStamp[];
   /** Per-support settings by exact contact id: only the keys the user set. */
   contactSettings: ContactSettings;
+  /** Dental (host/dental): accepted local dental footprint and its ordered allow/erase edits; absent until the workflow is approved. */
+  dental?: DentalPolicy;
 }
 
 export interface PrintScene {

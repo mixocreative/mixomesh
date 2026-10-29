@@ -5,6 +5,7 @@
  *
  * Meshes are unit-local; a job's transform says where the unit stood (Euler XYZ radians, mm).
  */
+import type { DentalPolicy } from '../dental/dentalPolicy';
 import type { CheckSettings } from './analysis/supportCheck';
 import type { PlacementSettings, SupportPoint, TriangleMesh } from './analysis/types';
 import type { LiveSupportSettings, ShapeOverride } from './supports/settings';
@@ -44,6 +45,8 @@ export interface SupportJob {
   /** Label text embossed on the raft (the unit's own text or its automatic letter). */
   labelText: string;
   mode: 'preview' | 'export';
+  /** Dental (host/dental): the accepted policy also constrains secondary model landings during mesh construction. */
+  dental?: DentalPolicy;
 }
 
 /** Automatic placement on the model turned by `orientation` (its position is ignored). */
@@ -53,6 +56,13 @@ export interface PlacementJob {
   settings: PlacementSettings;
 }
 
+/** Dental (host/dental): automatic placement restricted to an accepted, unit-local dental support policy. */
+export interface DentalPlacementJob extends PlacementJob {
+  dental: DentalPolicy;
+  /** The unit's manual tips (unit-local): the policy offers no suggested tip next to one. */
+  manual?: readonly SupportPoint[];
+}
+
 /** What the contacts leave unsupported, with model and contacts turned by `orientation`. */
 export interface CheckJob {
   mesh: TriangleMesh;
@@ -60,4 +70,9 @@ export interface CheckJob {
   /** Unit-local contact positions. */
   contacts: Vector[];
   settings: CheckSettings;
+}
+
+/** Rotation without translation: the frame placement and checks analyse a unit in. */
+export function orientationOnly(transform: JobTransform): JobTransform {
+  return { position: [0, 0, 0], rotation: [...transform.rotation] };
 }

@@ -2,7 +2,8 @@ import { labelForIndex } from '../core/analysis/mesh';
 import type { PlacementResult, ProgressCallback, SupportPoint } from '../core/analysis/types';
 import { hidingRemovals, positionIds, rekeyHandWork, type RekeyedHandWork } from './contactEdits';
 import { jobContacts } from './genericPolicy';
-import { type CheckJob, type ContactInputs, type JobTransform, type PlacementJob, type SupportJob } from '../core/jobs';
+import { type CheckJob, type ContactInputs, type DentalPlacementJob, type JobTransform, type PlacementJob, type SupportJob } from '../core/jobs';
+import { DEFAULT_DENTAL_LABEL } from '../dental/label';
 import type { GeneratedSupportMesh, SupportContact } from '../core/supports/mesh';
 import { defaultSupportSettings, toPlacementSettings, type LiveSupportSettings, type SettingKey } from '../core/supports/settings';
 import type { ContactSettings, JSONObject, PrintUnit, SceneCommand, SupportSettings } from '../state/projectTypes';
@@ -190,8 +191,9 @@ export function supportJobOf(unit: PrintUnit, unitIndex: number, mode: 'preview'
     ...(generationPlate(unit) !== 0 ? { plate: generationPlate(unit) } : {}),
     settings,
     contacts: contactInputs(unit),
-    // The label is the object's own text, else its letter A, B, …
-    labelText: settings.labelText || labelForIndex(unitIndex),
+    ...(unit.dental ? { dental: unit.dental } : {}),
+    // The label is the object's own text, else its letter A, B, … (a dental aligner's default is its own, X).
+    labelText: settings.labelText || (unit.dental ? DEFAULT_DENTAL_LABEL : labelForIndex(unitIndex)),
     mode,
   };
 }
@@ -299,4 +301,10 @@ export function placementCommands(unit: PrintUnit, orientation: JobTransform, re
     { type: 'handWork/set', unitId: unit.id, deleted: handWork.deleted, contactSettings: handWork.overrides },
   ];
   return { commands, handWork };
+}
+
+/** Dental placement is unavailable until an accepted dental policy was stored for this unit. */
+export function dentalPlacementJobOf(unit: PrintUnit): DentalPlacementJob | undefined {
+  if (!unit.dental) return undefined;
+  return { ...placementJobOf(unit), dental: unit.dental, manual: unit.manual };
 }

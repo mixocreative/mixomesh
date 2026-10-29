@@ -1,6 +1,7 @@
 import { meshTier, TRIANGLE_BUDGET, type Runtime } from '../host/core/budget';
 import { gesture, type Gesture } from './gesture';
-import type { EditSession, SessionEvent } from './session';
+import { gestureOwner, modeExtension } from './modes';
+import { selectsTips, type EditSession, type SessionEvent } from './session';
 import type { EditMode, StatusMessage } from './types';
 
 // Status lines are i18n keys (data); the host translates them where they are shown.
@@ -14,7 +15,8 @@ const GESTURE_STATUS = {
   drag: 'Support Edit Mode: drag the circle over supports to select them. Supports hidden behind the model are skipped.',
   dragUnselect: 'Support Edit Mode: drag the circle over supports to unselect them. Supports hidden behind the model are skipped.',
 } as const;
-const gestureStatus = (press: Gesture): string | undefined => (press.kind === 'none' ? undefined : press.kind === 'add' && press.remove ? GESTURE_STATUS.remove : press.kind === 'drag' && press.brush.mode === 'unselect' ? GESTURE_STATUS.dragUnselect : GESTURE_STATUS[press.kind]);
+const gestureStatus = (press: Gesture): string | undefined => (press.kind === 'none' ? undefined : press.kind === 'add' && press.remove ? GESTURE_STATUS.remove : press.kind === 'drag' && press.brush.mode === 'unselect' ? GESTURE_STATUS.dragUnselect
+  : (GESTURE_STATUS as Partial<Record<string, string>>)[press.kind] ?? gestureOwner(press.kind)?.gestureStatus?.[press.kind]);
 
 /**
  * A Support Edit Mode click that hit neither the model nor a support: what to click instead.
@@ -39,9 +41,9 @@ export function editStatus(session: EditSession): StatusMessage | undefined {
   return keyed(gestureStatus(gesture(session)));
 }
 
-/** What the status line rests on in a mode: how Esc leaves while supports are selected, else the tool line. */
+/** What the status line rests on in a mode: how Esc leaves while supports (or tips) are selected, else the tool line. */
 function standingStatus(session: EditSession): StatusMessage | undefined {
-  return session.mode === 'edit' && session.selection.size > 0 ? keyed(ESC_AGAIN) : editStatus(session);
+  return selectsTips(session) && session.selection.size > 0 ? keyed(ESC_AGAIN) : editStatus(session);
 }
 
 /**
@@ -57,8 +59,11 @@ export function sessionStatus(previous: EditSession, next: EditSession, event: S
   if (event.type === 'exit' && next.mode === 'off') {
     if (previous.mode === 'edit') return { key: 'Support edits kept.' };
     if (previous.mode === 'zones') return { key: 'No-support zones kept.' };
+    const left = modeExtension(previous.mode)?.exitStatus;
+    if (left) return left;
   }
   if (next.mode === 'off' || next === previous) return undefined;
+  if (next.mode === previous.mode && modeExtension(next.mode)?.restatesStatus?.(previous, next)) return standingStatus(next);
   const now = standingStatus(next);
   return next.mode !== previous.mode || now?.key !== standingStatus(previous)?.key ? now : undefined;
 }
@@ -75,6 +80,8 @@ export function heavyStatus(session: EditSession): StatusMessage | undefined {
 
 /** Another object was picked while a mode is on: finish the mode first. */
 export function busyStatus(mode: Exclude<EditMode, 'off'>): StatusMessage {
+  const own = modeExtension(mode)?.busy;
+  if (own) return own;
   return { key: mode === 'zones' ? 'Finish painting zones first: press Esc or Done.' : 'Finish editing supports first: press Esc or Done.' };
 }
 
