@@ -26,9 +26,14 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P0.4b | todo | | |
 | P0.5 | todo | | |
 | P0.6 | todo | | |
-| P1.1 | todo | | |
+| P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geometry/host in PE.2. |
 | P1.2 | todo | | |
-| P2.1 | todo | | |
+| PE.1 | todo | | owner: private repo mixocreative/mixo-geometry |
+| PE.2 | todo | | |
+| PE.3 | todo | | |
+| PE.4 | todo | | |
+| PE.5 | todo | | owner: mixosupports switches this mission |
+| P2.1 | todo | | after PE.4 |
 | P2.2 | todo | | |
 | P3.1 | todo | | |
 | P3.2 | todo | | |

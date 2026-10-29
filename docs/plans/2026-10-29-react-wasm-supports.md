@@ -24,8 +24,8 @@ Ledger: `docs/handoff/react-wasm-supports.md` (P0.0). It replaces `docs/handoff/
 
 Handoff and workflow:
 - D1. Work on `master` in `S:\ai\mixomesh`. No branches, no git worktrees, no `git stash`, no
-  `git checkout --`. In `S:\ai\mixosupports` (P8.3 only): commit on its `main` locally, never push
-  before P9.3.
+  `git checkout --`. In `S:\ai\mixo-geometry` and `S:\ai\mixosupports` (PE and engine tasks):
+  commit on `main` locally, never push before P9.3; never touch mixosupports' untracked files.
 - D2. One editing agent at a time, except pairs marked ∥ in section 4 (file-disjoint). Read-only
   reviewers may run any time.
 - D3. Each task ends with its tests green, `npm run lint`, `npm run typecheck`, and one commit on
@@ -52,10 +52,17 @@ Owner product rules:
   on/off screenshot), never by handedness reasoning alone. The scene stays left-handed:
   `scene.useRightHandedSystem` is never set (it would invalidate ImportNormalizer, PrintSpace
   signed volume, NavCube and the orientation smokes).
-- D11. `public/vendor/mixo-geometry/` is never edited. Engine changes are made in mixosupports
-  `crates/geometry-core`, built there (`npm run wasm:build`), re-vendored here
-  (`npm run vendor:geometry`); `HOST_GEOMETRY_VERSION` and `VERSION` change in the same mixomesh
-  commit.
+- D11. The shared engine lives in its own private repo `mixocreative/mixo-geometry`
+  (`S:\ai\mixo-geometry`; owner decision 2026-10-29): the Rust core (`geometry-core`,
+  `geometry-wasm`, generic and dental), the thin TypeScript layer that must match its ABI (settings
+  layout + packer, result decoder, contact/shape strides, version check, worker protocol types),
+  its Rust tests, generic and dental goldens, parity and bench tools. No UI, no app editing logic.
+  Engine changes are made only there, released as a tag `v<engine_version>` with built
+  `pkg-browser` + `pkg-node` + the TS layer as release assets. Each app pins one release
+  (`npm run vendor:geometry -- --release v<N>`, hash-checked) and upgrades deliberately;
+  `public/vendor/mixo-geometry/` is never edited by hand; `HOST_GEOMETRY_VERSION` and `VERSION`
+  change in the same app commit. The engine repo works on `main`, commits locally, pushes only at
+  P9.3 (until then mixomesh vendors from a local build of a committed engine commit).
 - D12. Per-user settings persist through SettingsStore; `panelCollapsed` is tri-state (absent =
   defer to workspace); toggle button for feature/mode/visibility, checkbox for sub-options.
 
@@ -177,9 +184,44 @@ Format: **id** goal. Files. *Depends.* **Done when.** Worker per section 4.
   knot, thin-slab, v-ridge) × 4 variants (default, tree, roof, ridge) match the mixosupports
   snapshots exactly, and every ported test is green.
 
+### PE Shared engine repo (owner decision 2026-10-29: private, both apps switch)
+
+- **PE.1** Create `S:\ai\mixo-geometry` from mixosupports (commit `adbe7c3` or later main):
+  `git subtree split --prefix=crates` keeps the engine history; then add, in one commit,
+  `scripts/build-geometry-wasm.mjs`, `scripts/geometry-wasm-smoke.mjs`, `scripts/geometry-wasm-bench.mjs`,
+  `scripts/host-example.mjs`, `tools/blender-parity/`, the goldens snapshots and fixtures, a
+  `package.json` (wasm-pack, vitest), `README.md`, `AGENTS.md` (engine rules: version bump on any ABI
+  change, never break a pinned app silently). Create the private GitHub repo
+  `mixocreative/mixo-geometry` (`gh repo create --private`), add the remote, do not push before P9.3.
+  *Depends: —.* **Done when** `cargo test` and the wasm build pass in the new repo and
+  `engine_version()` is 9.
+- **PE.2** Move the ABI-bound TypeScript into `mixo-geometry/host/` (settings layout + packer from
+  `supportBuildWasm.ts` / `settings.ts`, result decoder `generateSupports.ts`, `flat.rs` stride
+  mirrors, `geometryVersion`, worker protocol types), taken from mixomesh's P1.1 port; with its
+  vitest. mixomesh's `src/support-engine/` then imports them from the vendored package instead of
+  owning copies. *Depends: P1.1, PE.1.* **Done when** the host tests pass in mixo-geometry and
+  mixomesh typechecks against the vendored copy.
+- **PE.3** Engine CI (GitHub Actions in mixo-geometry): cargo test, wasm build (both packages),
+  generic + dental goldens, host vitest; a tag `v<N>` builds and attaches the release assets
+  (`pkg-browser`, `pkg-node`, `host/`, `SHA256SUMS`). *Depends: PE.2.* **Done when** a local
+  `act`-free dry run of the workflow steps passes (scripted) and the release job is reviewed.
+- **PE.4** mixomesh `scripts/vendor-geometry.mjs` gains `--release v<N>` (downloads via
+  `gh release download`, checks `SHA256SUMS`) next to `--from <local mixo-geometry>`; SOURCE.json
+  records repo `mixocreative/mixo-geometry`, tag or commit. *Depends: PE.2.* **Done when** vendoring
+  from the local mixo-geometry build passes `--check` and `npm test`.
+- **PE.5** mixosupports consumes the shared engine: replace its `crates/` and ABI-bound TS with the
+  vendored release (same script pattern), its `wasm:build`/`pretest`/`prebuild`/`prewalk` hooks
+  read the vendored packages; dental-only Rust stays in the engine's `dental` module (one engine for
+  both). Run mixosupports' own `npm test`, wasm smoke and walks (`scripts/walk.mjs`). Commit on its
+  `main` locally. *Depends: PE.4.* **Done when** mixosupports' tests and walks are green on the
+  vendored engine and its `crates/` is gone.
+
+Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geometry and re-vendored
+into both apps (D11).
+
 ### P2 Spike
 
-- **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. Handedness rule
+- **P2.1** (after PE.4) One selected mesh → worker job → `generate` → tips drawn in Babylon. Handedness rule
   (D10): conversion only in `src/supports/frame.ts` (negate Z of positions and normals, swap triangle
   indices 1↔2 per triangle, both directions). The adapter also sends the engine a copy welded by
   position (geometry only; UV/colour seams split mixomesh's textured meshes, and the engine's edge
@@ -296,7 +338,7 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
   overhang *outline* is region-based (works on rounded edges), but internal ridges
   (`generic/placement/anchors.rs`, per-edge `angle_between > ridge angle`) and the hard-edge finder
   (`dental/topology.rs`, per-edge `|n1·n2| ≤ cos θ`) miss a turn spread over many small facets.
-  Fix once in mixosupports `geometry-core` (D11): weld by position, segment faces into near-planar
+  Fix once in mixo-geometry `geometry-core` (D11): weld by position, segment faces into near-planar
   patches (normal tolerance), report patch boundaries whose patch mean normals differ by more than
   θ; anchors and `hard_edges` both use it, so dental and generic gain it together. *Depends:
   P5.11.* **Done when** a cube with a 0.5 mm fillet of 8+ segments yields the same 4 edge chains /
@@ -339,7 +381,7 @@ Rule D18; inventory section 3.
   and Tier B module has a row (WASM column "n/a" until a WASM version exists).
 - **P8.2** Wire functions the engine already has (see section 3 "Engine has") where P8.1 shows
   ≥1.1x. *Depends: P8.1.* **Done when** parity tests (P8.4) green for each switched path.
-- **P8.3** New Rust in mixosupports `crates/geometry-core/src/generic/mesh/` (one module per op, Rust
+- **P8.3** New Rust in mixo-geometry `geometry-core/src/generic/mesh/` (one module per op, Rust
   tests) for Tier A modules with no engine function, then Tier B loops, batched into one engine
   version bump per batch (D11). Export writers keep JS containers (zip, XML, text); only per-vertex /
   per-triangle loops move. *Depends: P8.1.* **Done when** each new function has a P8.1 row showing
@@ -422,7 +464,12 @@ Vendored MeshFix and Manifold stay.
 | P7 panels < 150 lines | haiku | mechanical |
 | P7 others, P7.last | sonnet (Codex low for "who owns this root id") | |
 | P8.1, P8.2, P8.4 | sonnet | bench, wiring, parity |
-| P8.3 | opus (Rust) + sonnet (wiring) | |
+| P8.3 | opus (Rust) + sonnet (wiring) |
+| PE.1 | sonnet | git subtree split + repo scaffold |
+| PE.2 | sonnet | move ABI-bound TS + tests |
+| PE.3 | sonnet | CI workflow |
+| PE.4 | haiku | vendor script --release |
+| PE.5 | sonnet | mixosupports switch + its walks | |
 | P9.1 | sonnet | gates |
 | P9.2 | fable | diff review |
 | P9.3 | main session | owner gate |
