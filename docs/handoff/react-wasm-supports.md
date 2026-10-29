@@ -72,8 +72,9 @@ Released v0.3.1 exported closed solid-colour parts broken (STL torn 166.67 mm³ 
 | P5.4 | done | 81c24a2, 60459cf | see P5.1–P5.4 note |
 | P5.1–P5.4 note | — | — | Kit TextField (+vitest, gallery). Tree golden asserted (features.test.ts): 70 placement / 62 contacts, parts neck 34 pillar 68 foot 34 branch 28 trunk 7 raft 17 label 2; tris 14656 vs golden 14680 (1 µm snap), budget 0. Budget 3: cube-overhang tree → fallbacks ['tree'] (braces); wall-between-plates → brace-pruned, braces kept (2688 tris), none cross; notice in problem list + verdict + toast. Raft/label on/off + params, supportsOnly export == drawn; label A–Z0–9- 8 chars, default object name. Gates green incl. consumers 233/233 (supcube-full), supports-walk 50, supports-features. Screenshot .tmp/p5a checked by main. 1M all features: 20.7 s (placement 12.8, build 7.3), 915 tips; peak memory NOT measured (D24 → P8.1). Deviations: raft wall lean 90° HANGS engine 11 → capped 89 (jobInputs.ts) → P5.3b; 2 strings ja/zh-Hant hand-translated (Gemini quota) → redo in P5.9; consumers supports.under now footprint coverage (label pad). test:browser narrow-window flake once. |
 | P5.3b | todo | | geocore: raft wall lean 90° never returns (engine 11) → fix + settings fuzz test (every setting at min/max/edge values must return within timeout) → re-vendor both apps, drop the 89° cap. After PE.7. |
-| P5.5 | todo | | |
-| P5.6 | todo | | |
+| P5.5 | done | ea2796d | see P5.5–P5.6 note |
+| P5.6 | done | ea2796d | see P5.5–P5.6 note |
+| P5.5–P5.6 note | — | — | roofMode OFF/ROOF/CAGE (engine: one at a time; first pick seeds defaults incl. shared column count/diameter). Roof golden exact part counts (12 columns, 72 cross bars, 1 roof, 15 braces), tris within 1%, clear. Cage test: rings = ceil((top+topGap)/pitch) (3), 12 columns, side/top gaps held, clear. Consumers 283/283 (supcube-roof, supcube-cage); supports.under loosened for roof/cage above model. 1M roof on: 13.7 s (off 12.7); main heap 311 MB, Chrome tree 2176 MB (off 2141), WASM 858 MB (→ P8 memory target). Node runSupportJob 129–236 s vs ~4 s browser worker (→ P8: batch review runs in Node!). NEEDS-GEMINI: 24 supportPanel.* keys en-only + 2 from P5.4 → P5.9. Screenshot shows label possibly MIRRORED → label check agent running. |
 | P5.7 | todo | | |
 | P5.8 | todo | | |
 | P5.9 | todo | | |
