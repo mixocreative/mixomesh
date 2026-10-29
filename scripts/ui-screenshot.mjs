@@ -155,7 +155,11 @@ async function main() {
         const sel = ['#outliner', '#right-panel', '#asset-panel', '#viewport-toolbar', '.ws-switcher'];
         return { entered, dataMode: document.getElementById('app').dataset.mode ?? null,
           label: document.querySelector('#support-mode-label')?.textContent ?? null,
-          inert: sel.map(q => document.querySelector(q)?.inert), opacity: sel.map(q => Number(getComputedStyle(document.querySelector(q)).opacity)) };
+          inert: sel.map(q => document.querySelector(q)?.inert), opacity: sel.map(q => Number(getComputedStyle(document.querySelector(q)).opacity)),
+          // P3.4: the Support Mode panel stack over the right panel.
+          panel: (() => { const r = document.getElementById('support-panel-root'); const b = r?.getBoundingClientRect();
+            return r ? { display: getComputedStyle(r).display, w: Math.round(b.width), h: Math.round(b.height), engaged: r.querySelector('[data-testid="engaged-tool"]')?.textContent ?? null,
+              buttons: [...r.querySelectorAll('button')].map(x => x.textContent.trim()).filter(Boolean).slice(0, 40) } : null; })() };
       })()`);
       if (process.env.PROBE) console.log('PROBE', JSON.stringify(mode));
       await snap('support-mode');

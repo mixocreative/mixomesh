@@ -12,6 +12,7 @@ import { RefinementController } from '../core/refinement/RefinementController.js
 import { installStaleWatch } from '../supports/stale';
 import { createSceneSource } from '../supports/sceneSource';
 import { SupportModeUI } from '../supports/SupportModeUI';
+import { SupportPanels } from '../panels/supports/index.tsx';
 import { ShaderPanel } from '../ui/ShaderPanel.js';
 import { ScenePanel } from '../ui/ScenePanel.js';
 import { PrintPanel } from '../ui/PrintPanel.js';
@@ -136,6 +137,7 @@ async function bootstrap() {
   CursorPanel.init(); // 3D-cursor N-panel (Shift+N) — mounts into #viewport
   CopyPaste.init();   // Ctrl+C / Ctrl+V with aspect chooser
   SupportModeUI.init(); // header "Supports" entry + Shift+S (Support Mode, P3.2)
+  SupportPanels.init(); // Support Mode panels over the right panel (P3.4)
   SettingsStore.init(); // autosave hooks on the Scene/Print panel bodies (now mounted)
   PanelSheets.init(); // < 1280 px: edge tabs + slide-over sheets (8.3)
   ViewerMode.init();  // < 768 px: read-only phone viewer (8.6)
