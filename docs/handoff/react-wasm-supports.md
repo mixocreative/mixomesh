@@ -6,6 +6,8 @@ commit bb55c8e). Only the main session writes this file (D3).
 
 ## Resume
 
+
+**Milestone 2026-10-30:** focus is dental real scans (PD.5 running: owner's orientation method, Fable; then PD.6 dentures, P5.15 overlap rule, PD.7 dental multi-mesh). Owner scope: only fixtures\case-001 + case-aligner; -sup = supported version (use only when told). Owner reviews every batch in the viewer. Uncommitted on purpose: geocore PD.5 WIP; mixoDental vendor a295ae4 (1 red oracle test, PD.5 updates it); mixoDental scripts/walk.mjs (owner: don't touch).
 1. Read the plan section 0 (directives) and this ledger.
 2. Find the first row that is not `done`; its "next" column is the exact next step.
 3. Refresh the cross-repo graph (D4), then dispatch the worker named in plan section 4.
