@@ -29,6 +29,8 @@ export interface VerdictInfo {
   dropped: number;
   /** Islands no support carries to the plate. */
   islands: number;
+  /** Structure fallbacks the repair applied (plan P5.2): `brace-pruned` = only the braces that cross the model were left out. */
+  fallbacks?: readonly ('tree' | 'brace' | 'brace-pruned')[];
 }
 
 export interface SupportUiState {

@@ -105,4 +105,74 @@ describe('SupportPanel', () => {
     act(() => { supportSession.send({ type: 'paint', ids: ['auto-a', 'auto-b'], mode: 'select' }); });
     expect(screen.getByLabelText('Neck length (mixed)')).toBeTruthy();
   });
+
+  describe('structure sections (plan P5.1-P5.4)', () => {
+    it('Tree: the toggle shows merge distance, branch descent and safe distance, clamped by the limits', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      expect(screen.queryByLabelText('Merge distance')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Auto tree' }));
+      expect(record().settings.scatterAutoTree).toBe(true);
+      expect(screen.getByLabelText('Merge distance')).toBeTruthy();
+      commit('Merge distance', '2500');
+      expect(record().settings.scatterMergeDistance).toBe(1000);
+      commit('Branch descent', '-4');
+      expect(record().settings.scatterBranchDescent).toBe(-4);
+      commit('Safe distance', '1.5');
+      expect(record().settings.scatterSafeDistance).toBe(1.5);
+      expect(record().settings.preset).toBe('CUSTOM');
+    });
+
+    it('Preset values: Heavy sets the merge distance to 4 mm and keeps the raft / brace defaults', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      fireEvent.click(screen.getByRole('button', { name: 'Heavy' }));
+      expect(record().settings.scatterMergeDistance).toBe(4);
+      expect(record().settings.raftWallAngle).toBe(30);
+      expect(record().settings.trussSpacing).toBe(2);
+    });
+
+    it('Brace: angle, spacing, min height and distance limit are clamped; the toggle hides them', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      commit('Brace angle', '85');
+      expect(record().settings.trussAngle).toBe(60);
+      commit('Brace spacing', '3');
+      commit('Min height', '4');
+      commit('Distance limit', '50');
+      expect(record().settings).toMatchObject({ trussSpacing: 3, trussMinHeight: 4, trussDistanceLimit: 50 });
+      fireEvent.click(screen.getByRole('button', { name: 'Cross-braces' }));
+      expect(record().settings.trussEnabled).toBe(false);
+      expect(screen.queryByLabelText('Brace angle')).toBeNull();
+    });
+
+    it('Raft: parameters write through; off hides them', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      commit('Floor thickness', '1.5');
+      commit('Wall height', '2');
+      commit('Wall thickness', '0.8');
+      commit('Wall lean', '120');
+      commit('Expand', '4');
+      expect(record().settings).toMatchObject({ raftFloorThickness: 1.5, raftWallHeight: 2, raftWallThickness: 0.8, raftWallAngle: 89, raftExpandWidth: 4 });
+      fireEvent.click(screen.getByRole('button', { name: 'Add raft' }));
+      expect(record().settings.raftEnabled).toBe(false);
+      expect(screen.queryByLabelText('Wall lean')).toBeNull();
+    });
+
+    it('Label: text is uppercased and limited to A-Z 0-9 - and 8 characters, with a hint for rejected characters; the default is the object name', () => {
+      renderPanel(<SupportPanel objectId="obj" />);
+      const text = screen.getByLabelText('Text') as HTMLInputElement;
+      expect(text.placeholder).toBe('CROWN');
+      fireEvent.change(text, { target: { value: 'ab_c 12!' } });
+      expect(text.value).toBe('ABC12');
+      expect(screen.getByText('Only letters A-Z, digits 0-9 and - are allowed, up to 8 characters.')).toBeTruthy();
+      fireEvent.change(text, { target: { value: 'abc-1234567' } });
+      expect(text.value).toBe('ABC-1234');
+      fireEvent.keyDown(text, { key: 'Enter' });
+      expect(record().settings.labelText).toBe('ABC-1234');
+      commit('Size', '80');
+      commit('Height', '0.05');
+      expect(record().settings).toMatchObject({ labelSize: 50, labelHeight: 0.1 });
+      fireEvent.click(screen.getByRole('button', { name: 'Add label' }));
+      expect(record().settings.labelEnabled).toBe(false);
+      expect(screen.queryByLabelText('Text')).toBeNull();
+    });
+  });
 });

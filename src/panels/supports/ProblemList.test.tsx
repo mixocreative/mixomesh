@@ -15,6 +15,14 @@ const island: PanelProblem = { kind: 'island', position: [0, 0, 0], area: 0, uni
 const overhang: PanelProblem = { kind: 'overhang', position: [1, 0, 0], area: 12.4, unitId: 'obj', inZone: true };
 
 describe('ProblemList', () => {
+  it('lists the brace-pruned notice of the latest build, and the verdict line says it too (plan P5.2)', () => {
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0, fallbacks: ['brace-pruned'] } } });
+    const { container } = renderPanel(<><ProblemList unitName={() => 'Wall'} /><GenerateRow objectIds={['obj']} objectId="obj" /></>);
+    const note = container.querySelector('[data-fallback="brace-pruned"]');
+    expect(note?.textContent).toContain('Only the cross-braces that would cross the model were left out.');
+    expect(container.querySelector('.sp-verdict')?.textContent).toContain('Only the cross-braces that would cross the model were left out.');
+  });
+
   it('renders nothing without findings', () => {
     const { container } = renderPanel(<ProblemList />);
     expect(container.querySelector('.sp-problems')).toBeNull();

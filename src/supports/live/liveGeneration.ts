@@ -34,7 +34,7 @@ import type { AnalysisResult, AnalysisTask } from '../../support-engine/analysis
 import { getState, subscribe } from '../../core/StateManager.js';
 import { EVENTS } from '../../core/events.js';
 import { t } from '../../i18n/index.js';
-import { supportUi, type PanelProblem } from '../../panels/supports/supportUi';
+import { supportUi, type PanelProblem, type VerdictInfo } from '../../panels/supports/supportUi';
 import { supportMode } from '../SupportMode';
 import { emptySupports, isBuilt, readStamps, samePose, type ObjectSupports } from '../model';
 import { readSupports, supportsOwner } from '../store';
@@ -180,7 +180,9 @@ function contactInputs(id: string, record: ObjectSupports): ContactInputs {
 // ── state shared with the panels ──
 
 const problemsByObject = new Map<string, PanelProblem[]>();
-const verdicts = new Map<string, { status: 'clear' | 'blocked' | 'inconclusive'; dropped: number; islands: number }>();
+const verdicts = new Map<string, VerdictInfo>();
+
+const objectName = (id: string): string => String((getState().scene.objects[id] as { name?: unknown } | undefined)?.name ?? '');
 
 function publishProblems(): void {
   const ids = supportMode.getObjectIds();
@@ -241,7 +243,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
 
   const inputs = contactInputs(id, record);
   const tb = performance.now();
-  const built = await mesher().build(id, buildJob(om.model, record, inputs), { key: 'Support building' });
+  const built = await mesher().build(id, buildJob(om.model, record, inputs, objectName(id)), { key: 'Support building' });
   ms.build = Math.round(performance.now() - tb);
   if (!job.current()) { liveStats.dropped++; return; }
   if (!built) {
@@ -267,8 +269,8 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   liveStats.rendered++;
   const tips = new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : []))).size;
   liveStats.last = { objectId: id, revision: record.revision, tips, verdict: built.verdict?.status ?? 'none', ms, settings: record.settings };
-  verdicts.set(id, { status: built.verdict?.status ?? 'clear', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0 });
-  if (built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
+  verdicts.set(id, { status: built.verdict?.status ?? 'clear', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
+  if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
   // The check that fills the list; the verdict and the build are already on screen.
   const tc = performance.now();
@@ -416,7 +418,7 @@ async function exportBuild(id: string, scale: number, tag: 'export' | 'measure')
   const sized = scale === 1 ? { model: om.model, inputs } : scaledJobInputs(om.model, inputs, scale);
   // As shown, the preview's own model is reused (the worker keeps it); another size is a unit of its own, freed after.
   const unitId = scale === 1 && tag === 'export' ? owner : `${owner}#${tag}`;
-  const built = await mesher().build(unitId, { ...buildJob(sized.model, record, sized.inputs), mode: 'export' }, { key: 'Support building' });
+  const built = await mesher().build(unitId, { ...buildJob(sized.model, record, sized.inputs, objectName(owner)), mode: 'export' }, { key: 'Support building' });
   if (unitId !== owner) mesher().forget(unitId);
   if (!built || built.indices.length === 0) return null;
   return { owner, om, built };

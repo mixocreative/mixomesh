@@ -7,6 +7,25 @@ import { PLACEMENT_KEYS } from '@mixo-geocore/host/supports/unitSupports';
 import type { LocalModel } from '../supportJob';
 import type { ObjectSupports } from '../model';
 import { cachedPlacement } from '../supportCache';
+import { labelTextFor } from '../label';
+
+/**
+ * Safety-repair trials every generic build may spend (plan P5.2): a budget of 0 only reports, so brace
+ * pruning (drop exactly the braces that cross the model) and the structure fallbacks never run.
+ */
+export const REPAIR_BUDGET = 3;
+
+/**
+ * Largest raft wall lean the engine builds: at 90 degrees the flare offset is tan(90) (engine 11 never
+ * returns), so the host stops one degree short. The settings limit (0-90) stays the engine's; this is
+ * the app's guard for every path (panel, project file, automation API).
+ */
+export const RAFT_WALL_ANGLE_MAX = 89;
+
+/** The record's settings as the engine may take them. */
+export function engineSettings(settings: ObjectSupports['settings']): ObjectSupports['settings'] {
+  return settings.raftWallAngle > RAFT_WALL_ANGLE_MAX ? { ...settings, raftWallAngle: RAFT_WALL_ANGLE_MAX } : settings;
+}
 
 /** Placement settings differ from the ones the contacts were placed with (lift does not move contacts). */
 export function placementChanged(record: ObjectSupports): boolean {
@@ -21,14 +40,15 @@ export function needsPlacement(record: ObjectSupports, hash: string | null, have
 }
 
 /** The support job of a record on an object model, in the support frame (object-local). */
-export function buildJob(model: Pick<LocalModel, 'local' | 'center' | 'minY'>, record: ObjectSupports, inputs: ContactInputs): SupportJob {
+export function buildJob(model: Pick<LocalModel, 'local' | 'center' | 'minY'>, record: ObjectSupports, inputs: ContactInputs, objectName = ''): SupportJob {
   return {
     mesh: model.local,
     frame: { position: [...model.center], rotation: [0, 0, 0] },
     plate: model.minY - record.settings.liftHeight,
-    settings: record.settings,
+    settings: engineSettings(record.settings),
     contacts: inputs,
-    labelText: '',
+    labelText: labelTextFor(record.settings.labelText, objectName),
+    repairBudget: REPAIR_BUDGET,
     mode: 'preview',
   };
 }

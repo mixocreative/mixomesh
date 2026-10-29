@@ -24,12 +24,22 @@ export function problemText(tt: ReturnType<typeof useT>, p: PanelProblem): strin
 
 export function ProblemList({ unitName }: { unitName?: (unitId: string) => string }) {
   const tt = useT();
-  const { problems, problemsStale, job } = useSupportUi();
-  if (problems.length === 0) return null;
+  const { problems, problemsStale, job, verdicts } = useSupportUi();
+  // Structure notices of the latest builds (plan P5.2): brace pruning and the tree / brace fallbacks.
+  const notices = Object.entries(verdicts).flatMap(([unitId, v]) => (v.fallbacks ?? []).map((f) => ({ unitId, f })));
+  if (problems.length === 0 && notices.length === 0) return null;
   const grey = problemsStale || job.running;
   return (
     <section className="sp-problems" aria-label={tt('supportPanel.problems.title')} aria-busy={grey} data-stale={grey ? 'true' : 'false'}>
       <h3 className="sp-title">{tt('supportPanel.problems.title')} <small>{problems.length}</small></h3>
+      {notices.map(({ unitId, f }) => (
+        <div key={`${unitId}-${f}`} data-fallback={f}>
+          <Notice severity="info">
+            {tt(`supportPanel.fallback.${f}`)}
+            <small className="sp-where">{unitName?.(unitId) ?? unitId}</small>
+          </Notice>
+        </div>
+      ))}
       {grey && <p className="mx-hint" role="status">{tt('supportPanel.problems.stale')}</p>}
       <div className={grey ? 'sp-grey' : undefined}>
         {problems.slice(0, PROBLEMS_SHOWN).map((p, i) => {

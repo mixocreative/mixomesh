@@ -113,6 +113,9 @@ const MODELS = [
   { key: 'supcube', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'] },
   { key: 'supcube', variant: 'only', fixture: 'support-plain-cube.glb', supports: 'supportsOnly', formats: ['3mf', 'stl'] },
   { key: 'supmid', fixture: 'midtone-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'] },
+  // P5: every structure feature on at once (Auto tree + cross-braces + raft + embossed label MIXO-1).
+  { key: 'supcube', variant: 'full', fixture: 'support-plain-cube.glb', supports: 'printable', formats: ['3mf', 'obj', 'stl'],
+    supportSettings: { scatterAutoTree: true, trussEnabled: true, raftEnabled: true, labelEnabled: true, labelText: 'MIXO-1' } },
 ];
 
 /** Support Mode generation in the page (the panel's Generate), then Support Mode closed again. */
@@ -127,6 +130,10 @@ const GENERATE_SUPPORTS = `
   sel.Selection.set([id], id);
   sm.supportMode.enter();
   await sleep(300);
+  if (supportSettings) {
+    const cmds = await import('/src/supports/commands/index.ts');
+    cmds.commitSupportEdits([new cmds.ChangeSettingsCommand(id, supportSettings)]);
+  }
   window.__mxSupportLive.generate([id]);
   let built = false;
   for (let i = 0; i < 1800 && !built; i++) {
@@ -261,9 +268,11 @@ function supportChecksFor(model, format, facts, prusa) {
       add('supports.outward', 'positive signed volume', sup.signedVolume, sup.signedVolume > 0);
       if (modelPart) {
         const z = modelPart.min[2];
-        add('supports.under', `ending at the model bottom (z ${z.toFixed(3)}), starting ${truth.lift} mm under it, inside its footprint`, box(sup),
+        // The raft flares past the model and carries the label pad on one corner (P5), so the supports' footprint
+        // covers the model's footprint rather than matching its centre.
+        add('supports.under', `ending at the model bottom (z ${z.toFixed(3)}), starting ${truth.lift} mm under it, under the whole model footprint`, box(sup),
           near(sup.min[2], z - truth.lift, 0.05) && sup.max[2] <= z + 0.5 && sup.max[2] >= z - 0.5
-          && [0, 1].every(k => near((sup.min[k] + sup.max[k]) / 2, (modelPart.min[k] + modelPart.max[k]) / 2, 0.5)));
+          && [0, 1].every(k => sup.min[k] <= modelPart.min[k] + 0.05 && sup.max[k] >= modelPart.max[k] - 0.05));
       }
     }
   }
@@ -343,7 +352,7 @@ async function exportAll(app, outDir) {
         const get = async (f) => new File([await (await fetch('/tests/fixtures/' + f)).blob()], f);
         const siblingFiles = await Promise.all(${JSON.stringify(model.siblings ?? [])}.map(get));
         const ids = await AssetLoader.loadFromBlob(await get(${JSON.stringify(model.fixture)}), ${JSON.stringify(model.loadAs ?? model.fixture)}, undefined, { siblingFiles });
-        ${model.supports ? GENERATE_SUPPORTS : ''}
+        ${model.supports ? `const supportSettings = ${JSON.stringify(model.supportSettings ?? null)};${GENERATE_SUPPORTS}` : ''}
         const r = await PrintManager.collectExportFiles(${JSON.stringify(model.formats)}, { acknowledgeWarnings: true${model.supports ? `, includeSupports: ${JSON.stringify(model.supports)}` : ''} });
         if (r.blocked) return { error: 'export blocked: ' + r.code + ' ' + JSON.stringify(r.readinessIssues) };
         const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };

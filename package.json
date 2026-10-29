@@ -40,6 +40,7 @@
     "test:support-mode": "node tests/browser-support-mode-smoke.mjs",
     "test:support-workers": "node tests/browser-support-worker-shapes-smoke.mjs && node tests/browser-support-worker-shapes-smoke.mjs --preview && node tests/browser-support-worker-shapes-smoke.mjs --electron",
     "test:supports-walk": "node tests/browser-supports-walk.mjs",
+    "test:supports-features": "node tests/browser-supports-features.mjs",
     "test:supports-persist": "node tests/browser-supports-persist-smoke.mjs",
     "test:supports-export": "node tests/browser-supports-export-smoke.mjs",
     "test:support-layers": "node tests/browser-support-layers-smoke.mjs --no-perf",
