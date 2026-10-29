@@ -3,6 +3,10 @@ import { withDentalMesh, type DentalRegionResultLike } from './dentalEngine';
 import type { DentalTuning } from './dentalTuning';
 import { decodeContacts, type DiagnosticContourContact } from './dentalContourContacts';
 
+/**
+ * The two-contour support region of an aligner (unit-local per-face masks and the contour edge
+ * lists), or why it was not found.
+ */
 export type DentalRegionProposal =
   | { kind: 'proposal'; allowedFaces: Uint8Array; outerEdges: Uint32Array; outerRidgeEdges: Uint32Array;
     outerConnectorEdges: Uint32Array; openingEdges: Uint32Array;

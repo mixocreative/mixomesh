@@ -9,8 +9,10 @@ import type { Vector } from '../core/vec3';
 
 /** The hard rules, in the order of the Rust flag bits. */
 export const TILT_RULES = ['resin-trap', 'rim-gap', 'crossing', 'too-thin'] as const;
+/** One of the `TILT_RULES`. */
 export type TiltRule = (typeof TILT_RULES)[number];
 
+/** One tilt of the scan with what the rules measured there (lengths mm, area mm2). */
 export interface TiltRow {
   tiltDeg: number;
   /** Steps from the start tilt. */
@@ -27,8 +29,13 @@ export interface TiltRow {
   rotation: Vector;
 }
 
+/** Why the pick was made: a robust tilt exists, only a passing one, or no tilt passes. */
 export type TiltPickReason = 'robust' | 'passing' | 'failing';
 
+/**
+ * The decoded scan: rows, `order` (row indices in pick order, the pick first), the pick reason and
+ * `band` (first and last row index of the robust run containing the pick), or why it failed.
+ */
 export type TiltScan =
   | { kind: 'scan'; startDeg: number; rows: TiltRow[]; order: number[]; reason: TiltPickReason; band: [number, number] | undefined }
   | { kind: 'failed'; reason: string };
@@ -41,9 +48,13 @@ export interface TiltScanSettings {
   braced: boolean;
 }
 
+// Row layout (f64 x ROW): 0 tilt deg, 1 step, 2 failed-rule bits (TILT_RULES order), 3 fitting-side
+// tips, 4 largest gap mm, 5 largest slenderness, 6 largest layer mm2, 7 height mm, 8 robust 0/1,
+// 9-11 rotation (Euler XYZ radians). `failing()` holds 4 strings per row, one per rule bit.
 const ROW = 12;
 const REASONS: readonly TiltPickReason[] = ['robust', 'passing', 'failing'];
 
+/** Decodes and frees a `dental_tilt_scan` result. */
 export function decodeTiltScan(result: DentalTiltScanResultLike): TiltScan {
   try {
     if (!result.ok()) return { kind: 'failed', reason: result.reason() };

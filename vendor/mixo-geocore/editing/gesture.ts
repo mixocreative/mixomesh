@@ -14,6 +14,7 @@ export type Gesture = CoreGesture | ExtraGestures[keyof ExtraGestures];
 /** Extension point: an app mode's own gestures (`interface ExtraGestures { dental: DentalGesture }`), listed in its `gestureKinds`. */
 export interface ExtraGestures {}
 
+/** The gestures of the built-in modes (off, zones, Support Edit Mode). */
 export type CoreGesture =
   | { kind: 'none' }
   | { kind: 'zones'; brush: { radius: number; kind: ZoneKind } }
@@ -26,6 +27,7 @@ export type CoreGesture =
 /** A Support Edit Mode gesture: Add supports, or Select supports by Click (`pick`) or Drag over (`drag`). */
 export type EditGesture = Extract<Gesture, { kind: 'add' | 'pick' | 'drag' }>;
 
+/** The `kind` tag of any gesture, built-in or an app mode's. */
 export type GestureKind = Gesture['kind'];
 
 /** The gesture the canvas acts on: an app mode may hand the canvas another one (an Edit Mode tool inside a step). */
@@ -39,6 +41,7 @@ export function editGesture(session: EditSession, forceAdd = false): EditGesture
   return session.selectStyle === 'click' ? { kind: 'pick' } : { kind: 'drag', brush: { radius: session.brushRadius, mode: effectiveBrushMode(session.brushMode, session.shiftHeld) }, base: session.brushMode, flipped: session.shiftHeld, sizing: session.brushSizing };
 }
 
+/** The gesture of the session's mode and tool now; an app mode answers through its `gesture` (else none). */
 export function gesture(session: EditSession): Gesture {
   switch (session.mode) {
     case 'off': return { kind: 'none' };

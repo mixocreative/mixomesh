@@ -12,6 +12,10 @@ export interface HoverProbe<A extends unknown[]> {
   reset(): void;
 }
 
+/**
+ * Builds a probe over `port`: `test` is the costly check, run with the latest `ask` arguments;
+ * `requestFrame` / `cancelFrame` are the host's animation-frame calls; `onAnswer` hears each result.
+ */
 export function createHoverProbe<A extends unknown[]>(port: {
   test: (...args: A) => boolean;
   requestFrame: (run: () => void) => number;
@@ -32,6 +36,7 @@ export function createHoverProbe<A extends unknown[]>(port: {
       return answer;
     },
     ask(...args) {
+      // Only the latest arguments are kept: a frame tests where the pointer is now, not where it was.
       latest = args;
       if (handle === undefined) handle = port.requestFrame(run);
     },

@@ -37,10 +37,17 @@ export interface DragOver {
   leave(): boolean;
 }
 
+/**
+ * Wires the pointer rules to a `Stroke` (button state) and a `BrushScheduler` (hit tests).
+ * `onStrokeStart` runs once per stroke, before its first sample (the host uses it to open one
+ * undo step for the whole stroke, for example).
+ */
 export function createDragOver(stroke: Stroke, scheduler: BrushScheduler, onStrokeStart: () => void): DragOver {
+  // The brush mode at the press; every sample of the stroke uses it, even if Shift changes later.
   let latched: BrushMode = 'select';
   return {
     down(button, at, brush, onObject) {
+      // A press on empty space belongs to the camera; end any stroke left open so it cannot resume.
       if (!onObject) {
         stroke.end();
         return false;
@@ -53,11 +60,13 @@ export function createDragOver(stroke: Stroke, scheduler: BrushScheduler, onStro
       return true;
     },
     move(at, { held, onCanvas, onObject }, brush) {
+      // Outside a stroke, a held button means the camera is orbiting: no hover circle then.
       if (!stroke.active && (!onCanvas || !onObject || held)) {
         scheduler.clearHover();
         return false;
       }
       const state = stroke.move(held);
+      // The radius follows the slider live; only the mode is latched.
       if (state === 'sample') scheduler.sample(at, brush.mode === latched ? brush : { radius: brush.radius, mode: latched });
       else if (state === 'idle') scheduler.hover(at, brush);
       return true;

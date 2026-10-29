@@ -10,6 +10,7 @@
  * only imports and edits meshes, measured 2.5M / 10M web.) Raise these when placement memory drops.
  */
 
+/** Where the editor runs: a browser tab or the desktop shell (same Chromium renderer). */
 export type Runtime = 'web' | 'desktop';
 
 /** Triangle budget per runtime: above it the editor warns and switches to the heavy tier. */
@@ -31,11 +32,13 @@ export const FULL_TIER_MAX = 300_000;
  */
 export type Tier = 'full' | 'large' | 'heavy';
 
+/** The tier for a mesh of `triangles` (see `Tier`): under `FULL_TIER_MAX` full, up to the budget large, above heavy. */
 export function meshTier(triangles: number, runtime: Runtime): Tier {
   if (triangles < FULL_TIER_MAX) return 'full';
   return triangles <= TRIANGLE_BUDGET[runtime] ? 'large' : 'heavy';
 }
 
+/** Triangles above which an import is refused: the runtime budget times `REFUSE_FACTOR` (6M today). */
 export function refusalLimit(runtime: Runtime): number {
   return TRIANGLE_BUDGET[runtime] * REFUSE_FACTOR;
 }
@@ -73,14 +76,18 @@ export function assertTriangleCapacity(fileName: string, triangles: number, runt
  *   Generate ≈ 850 MiB per million triangles (2M → 1.89 GB, 5M → 4.13 GB renderer peak), the
  *            placement and support jobs' working memory; 10M stopped the tab at 6.5 GB.
  */
+/** Peak import bytes per triangle (measured, see above). */
 export const IMPORT_BYTES_PER_TRIANGLE = 56;
+/** Peak Generate bytes per triangle: 850 MiB per million triangles, as bytes. */
 export const GENERATE_BYTES_PER_TRIANGLE = Math.round(850 * 2 ** 20 / 1e6);
 const IMPORT_OVERHEAD_BYTES = 64 * 1024 * 1024;
 
+/** Estimated peak bytes of importing `triangles`: per-triangle cost plus a fixed 64 MiB overhead. */
 export function estimateImportBytes(triangles: number): number {
   return triangles * IMPORT_BYTES_PER_TRIANGLE + IMPORT_OVERHEAD_BYTES;
 }
 
+/** Estimated peak bytes of a Generate over `triangles` (all jobs that can run together). */
 export function estimateGenerateBytes(triangles: number): number {
   return triangles * GENERATE_BYTES_PER_TRIANGLE;
 }
@@ -107,8 +114,10 @@ export function assertMemoryCapacity(fileName: string, triangles: number, runtim
  * unknown or large and the 6M job gate alone applies. `triangles`: what can run at the same time
  * (the job gate never lets more than the refusal limit run together).
  */
+/** `navigator.deviceMemory` value (GB) at and above which the device counts as large/unknown. */
 export const LARGE_DEVICE_MEMORY_GB = 8;
 
+/** Throws `CapacityError` (reason 'memory') when `triangles` would not fit half of a small device's memory; no-op otherwise. */
 export function assertGenerateMemory(triangles: number, runtime: Runtime, deviceMemoryGb: number | undefined): void {
   if (deviceMemoryGb === undefined || deviceMemoryGb >= LARGE_DEVICE_MEMORY_GB) return;
   const cap = deviceMemoryGb * 1024 ** 3 / 2;

@@ -4,7 +4,9 @@
 // load their own.
 import { assertGeometryVersion } from './geometryVersion.js';
 
+/** File name of the wasm-bindgen glue module in the engine package. */
 export const GEOMETRY_GLUE = 'mixo_geometry_wasm.js';
+/** File name of the wasm binary, looked up beside the glue by default. */
 export const GEOMETRY_WASM = 'mixo_geometry_wasm_bg.wasm';
 
 let _engine = null;

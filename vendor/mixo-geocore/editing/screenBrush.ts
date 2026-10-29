@@ -5,10 +5,11 @@ import type { GeneratedSupportMesh } from '../host/core/supports/mesh';
  * pointer. A support is under it when its projected body (each part reduced to its axis) comes
  * within the circle and some part of it under the circle is not hidden behind the model. The
  * maths runs in the Rust core (`body_segments`, `GeometrySession.project_brush`); this file is the
- * typed host glue. The TypeScript version it replaced lives with the tests
- * as a reference.
+ * typed host glue; there is no TypeScript fallback in this repo. Units: the circle and the canvas
+ * in CSS px, the support bodies in support-local mm.
  */
 
+/** A canvas position in px, as [x, y] (same convention as strokeQueue `Point`). */
 export type Point2 = readonly [number, number];
 
 /** Support bodies as axis segments: contact `ids[i]` owns segments `first[i]` to `first[i + 1]`; 6 floats each (a, b). */
@@ -28,6 +29,7 @@ interface BodySegmentsEngine {
   };
 }
 
+// u32::MAX marks a component with no contact (the raft, a brace); the engine skips it.
 const NO_CONTACT = 0xffffffff;
 
 /** Each support part with a contact reduced to its axis, per contact (unit-local, like the mesh). Built once per support mesh. */
@@ -38,6 +40,8 @@ export function bodySegments(engine: BodySegmentsEngine, mesh: Pick<GeneratedSup
   const contact = new Uint32Array(components.length);
   const start = new Uint32Array(components.length);
   const count = new Uint32Array(components.length);
+  // Contact ids become dense keys 0..n-1 in first-seen order, so the engine works on numbers and
+  // `ids[key]` maps a result back to its contact.
   components.forEach((component, k) => {
     let key = NO_CONTACT;
     if (component.contactId) {
@@ -100,6 +104,7 @@ export function brushHits(
   want?: (id: string) => boolean,
 ): string[] {
   const slots = bodies.ids.length;
+  // An empty mask means "every slot is wanted"; otherwise one byte per contact slot (1 = test it).
   const mask = new Uint8Array(want ? slots : 0);
   if (want) for (let slot = 0; slot < slots; slot++) mask[slot] = want(bodies.ids[slot]!) ? 1 : 0;
   const matrices = new Float64Array(occluders.length * 16);
@@ -108,6 +113,7 @@ export function brushHits(
     bodies.points, bodies.first,
     Uint32Array.from(occluders, (occluder) => occluder.handle), matrices, Uint32Array.from(occluders, (occluder) => occluder.side),
     Float64Array.from(view.clip), Float64Array.from(view.eye), Float64Array.of(view.width, view.height),
+    // The stroke is 4 floats (a swept segment) or 2 (a lone circle).
     radius, Float64Array.from(from ? [from[0], from[1], to[0], to[1]] : [to[0], to[1]]), start, slots, mask,
   );
   return Array.from(hits, (slot) => bodies.ids[slot]!);

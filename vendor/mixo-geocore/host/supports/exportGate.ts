@@ -13,11 +13,16 @@ import type { ExportUnitResult } from '../workers/meshProtocol';
  * in `scripts/fixtures/knot.stl`, make the topology refuse; degenerate triangles are skipped). The island
  * verdict is reported in the problem list ("Could not judge islands"), not by stopping the export.
  */
+/** Why the export was refused, and the first unit that caused it. */
 export interface ExportRefusal {
   reason: 'stale' | 'failed' | 'inconclusive';
   unitId: string;
 }
 
+/**
+ * The first refusal for the units in `needed`, in their order, or undefined when the files may be
+ * written. `requested` is the export's revision and per-unit results (`workers/meshClient.exportFiles`).
+ */
 export function exportRefusal(
   requested: { revision: number; units: readonly ExportUnitResult[] },
   /** Units whose supports are in the files. */

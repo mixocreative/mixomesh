@@ -10,6 +10,7 @@ import { modeExtension } from './modes';
  * panel live; zones locks both panels (its only live control is the left Exit button).
  */
 export type PanelSection = 'import' | 'objects' | 'transform' | 'supports' | 'check' | 'settings' | 'export';
+/** The two side panels of the app shell. */
 export type Panel = 'left' | 'right';
 
 const SECTIONS: Record<Panel, readonly PanelSection[]> = {
@@ -17,6 +18,7 @@ const SECTIONS: Record<Panel, readonly PanelSection[]> = {
   right: ['settings', 'export'],
 };
 
+/** Whether `section` is locked (inert, dimmed) in `mode`; an app mode decides through its `locks`. */
 export function sectionLocked(section: PanelSection, mode: EditMode): boolean {
   if (mode === 'off') return false;
   const extension = modeExtension(mode);

@@ -13,10 +13,12 @@ export interface TransformEngine {
 
 let current: TransformEngine | undefined;
 
+/** Registers this realm's engine; `workers/geometryClient.geometryReady` calls it. */
 export function setTransformEngine(engine: TransformEngine): void {
   current = engine;
 }
 
+/** The registered engine; throws when `geometryReady()` has not resolved in this realm. */
 export function transformEngine(): TransformEngine {
   if (!current) throw new Error('Geometry engine is not ready: await geometryReady() before transforming');
   return current;

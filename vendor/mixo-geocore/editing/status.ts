@@ -37,6 +37,7 @@ const ESC_AGAIN = 'Esc again to exit';
 
 const keyed = (key: string | undefined): StatusMessage | undefined => (key ? { key } : undefined);
 
+/** The tool line of the session's gesture (what a click or drag does now); undefined outside the modes. */
 export function editStatus(session: EditSession): StatusMessage | undefined {
   return keyed(gestureStatus(gesture(session)));
 }
@@ -68,6 +69,7 @@ export function sessionStatus(previous: EditSession, next: EditSession, event: S
   return next.mode !== previous.mode || now?.key !== standingStatus(previous)?.key ? now : undefined;
 }
 
+/** What to say when a click hit nothing (what to click instead); undefined where a miss says nothing. */
 export function missStatus(session: EditSession): StatusMessage | undefined {
   return keyed(missKey(gesture(session)));
 }

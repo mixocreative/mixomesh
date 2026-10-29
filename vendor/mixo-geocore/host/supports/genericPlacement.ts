@@ -7,6 +7,7 @@ import { withSession } from './supportEngine';
  * deterministic IDs, plus the downward regions. Typed arrays in once, out once.
  */
 
+// Index = the Rust source code in `take_sources`.
 const SOURCES: readonly SupportPoint['source'][] = ['interior', 'physical-boundary', 'sharp-ridge', 'island'];
 
 interface PlacementSession {
@@ -26,6 +27,11 @@ export function packPlacementSettings(s: PlacementSettings): Float64Array {
     s.includeDownward === false ? 0 : 1, s.reinforceEdges === false ? 0 : 1, s.maxBevelWidth ?? DEFAULT_MAX_BEVEL_WIDTH);
 }
 
+/**
+ * Automatic placement on `mesh` (already turned into the frame wanted; results are in that frame)
+ * with `settings`. Runs in a one-shot session; the points carry their Rust ids and `regionId` -1
+ * (regions are returned separately). Used by `jobRunner.runPlacementJob`.
+ */
 export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings): PlacementResult {
   return withSession((raw) => {
     const session = raw as unknown as PlacementSession;
@@ -42,6 +48,7 @@ export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings): P
         normal: [normals[k * 3]!, normals[k * 3 + 1]!, normals[k * 3 + 2]!],
         source: SOURCES[sources[k]!]!,
       }));
+      // Regions come in CSR form: region r owns faces[starts[r] .. starts[r + 1]).
       const faces = result.take_region_faces();
       const starts = result.take_region_starts();
       const regions = Array.from({ length: Math.max(0, starts.length - 1) }, (_, id) => ({ id, faceIndices: Array.from(faces.subarray(starts[id]!, starts[id + 1]!)) }));

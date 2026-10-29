@@ -1,5 +1,6 @@
 import type { StatusMessage } from './types';
 
+/** Why a project file cannot be opened: not a project, written by a newer file version, or unreadable. */
 export type ProjectErrorCode = 'not-project' | 'newer' | 'damaged';
 
 /** A project file that cannot be opened: what is wrong with it, and the numbers its message needs. */
@@ -12,9 +13,11 @@ export class ProjectFileError extends Error {
 
 /** Status lines of Save project and Open project. Keys are i18n keys (src/i18n.ts). */
 
+/** The status line after Save project wrote `name`. */
 export const savedStatus = (name: string): StatusMessage => ({ key: 'Saved {name}.', vars: { name } });
 /** Shown in place of the opened line when model files were dropped together with the project. */
 export const MODELS_IGNORED: StatusMessage = { key: 'Open the project alone; models were not imported.' };
+/** The status line after Open project read `name`. */
 export const openedStatus = (name: string): StatusMessage => ({ key: 'Opened {name}.', vars: { name } });
 
 /** A project too big for this device's plate, found before it replaces anything. */
@@ -39,8 +42,10 @@ export function openFailure(error: unknown, name: string): StatusMessage {
   return { key: 'Could not open {name} ({error}). The plate is unchanged.', vars: { name, error: error instanceof Error ? error.message : String(error) } };
 }
 
+/** Why Save project failed; the raw error message fills `{error}`. */
 export function saveFailure(error: unknown, name: string): StatusMessage {
   return { key: 'Could not save {name} ({error}). Nothing was written; try again.', vars: { name, error: error instanceof Error ? error.message : String(error) } };
 }
 
+/** The status line when the user closed the save picker. */
 export const SAVE_CANCELLED: StatusMessage = { key: 'Save cancelled; no file was written.' };

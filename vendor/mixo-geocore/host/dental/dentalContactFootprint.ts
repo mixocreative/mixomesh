@@ -5,6 +5,7 @@ import { decodeContacts, type DiagnosticContourContact } from './dentalContourCo
 
 type Region = Extract<DentalRegionProposal, { kind: 'proposal' }>;
 
+/** Inputs of `proposeDentalContactFootprint` (packed in this order for Rust); lengths mm. */
 export interface DentalContactFootprintSettings {
   /** The area: faces whose signed contour distance lies in `[low, high]` mm (negative across the edge). */
   low: number;
@@ -20,6 +21,7 @@ export interface DentalContactFootprintSettings {
   fromBelow?: { up: [number, number, number]; maxUp: number; moveMm: number };
 }
 
+/** The contact strip (per-face 0/1 mask) and its contacts on each rim, or why it failed. */
 export type DentalContactFootprint =
   | { kind: 'proposal'; contactFaces: Uint8Array; outerContacts: DiagnosticContourContact[];
     innerContacts: DiagnosticContourContact[] }

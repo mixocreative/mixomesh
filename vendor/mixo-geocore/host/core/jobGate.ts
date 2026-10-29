@@ -11,6 +11,11 @@ interface Waiter {
   start: (release: () => void) => void;
 }
 
+/**
+ * FIFO admission gate by triangle count (see the file header). `acquire` resolves with a
+ * release function; call it exactly once when the job settles (extra calls are ignored).
+ * Used by `workers/meshClient` (`RunOptions.admit`) and the app's placement jobs.
+ */
 export class TriangleGate {
   private total = 0;
   private readonly queue: Waiter[] = [];
@@ -51,6 +56,8 @@ export class TriangleGate {
     });
   }
 
+  // Starts waiters from the front while they fit. Never skips the head (FIFO, no starvation of a
+  // big job); `total > 0` lets a single job over the limit start alone.
   private pump(): void {
     while (this.queue.length > 0) {
       const next = this.queue[0]!;

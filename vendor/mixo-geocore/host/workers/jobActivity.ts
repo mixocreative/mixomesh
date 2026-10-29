@@ -15,6 +15,7 @@ export const LONG_JOB_MS = 10_000;
 export const CANCEL_LINGER_MS = 1_500;
 /** Time left only once the rate is known (at least 3 s of progress and 10 % done). */
 export const ETA_MIN_MS = 3_000;
+/** See `ETA_MIN_MS`: the fraction a job must have reached before it shows time left. */
 export const ETA_MIN_FRACTION = 0.1;
 
 /** What a job is, as an i18n key with values ("Importing {name}"). */
@@ -23,6 +24,7 @@ export interface JobLabel {
   vars?: Record<string, string | number>;
 }
 
+/** A failed job's error as the UI shows it: the shared error code (null if none) and its message. */
 export interface JobError {
   code: string | null;
   message: string;
@@ -30,8 +32,13 @@ export interface JobError {
   vars?: Record<string, string | number>;
 }
 
+/** A row's state: running without / with a fraction, or finished (done, failed, cancelled). */
 export type JobState = 'indeterminate' | 'determinate' | 'done' | 'failed' | 'cancelled';
 
+/**
+ * One row of `JobActivity.view`: a visible job with its progress (`fraction` 0..1, `percent`
+ * 0..100), times in ms, and what the UI may offer (Cancel) or must do (block edits).
+ */
 export interface JobRow {
   id: number;
   label: JobLabel;
@@ -51,6 +58,7 @@ export interface JobRow {
   error: JobError | null;
 }
 
+/** What `JobActivity.begin` returns: report progress fields, then `end()` (with the error if it failed). Calls after `end` are ignored. */
 export interface JobHandle {
   id: number;
   progress(fields: Record<string, unknown>): void;
@@ -92,6 +100,10 @@ function isAbort(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError';
 }
 
+/**
+ * Registry of running jobs. `clock` is injectable for tests. Listeners from `subscribe` run on
+ * every change; the UI re-reads `view(now)` (which also drops rows whose linger time is up).
+ */
 export class JobActivity {
   private readonly entries = new Map<number, Entry>();
   private readonly subscribers = new Set<() => void>();
@@ -99,6 +111,7 @@ export class JobActivity {
 
   constructor(private readonly clock: () => number = () => Date.now()) {}
 
+  /** Adds a change listener; returns its unsubscribe. */
   subscribe(listener: () => void): () => void {
     this.subscribers.add(listener);
     return () => {
@@ -166,6 +179,7 @@ export class JobActivity {
     this.notify();
   }
 
+  /** Whether any job (running or still listed) is registered. */
   hasJobs(): boolean {
     return this.entries.size > 0;
   }

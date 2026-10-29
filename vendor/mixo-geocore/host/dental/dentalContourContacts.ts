@@ -2,6 +2,10 @@ import { dentalInternals } from './dentalEngine';
 import type { TriangleMesh } from '../core/analysis/types';
 
 type Vec3 = [number, number, number];
+/**
+ * One contact sampled on a contour: the face it sits on, its position and normal (unit-local mm,
+ * unit normal) and its distances (mm) along and away from the contour.
+ */
 export type DiagnosticContourContact = {
   /** Production detector sets this; older saved policies and standalone diagnostics may omit it. */
   rim?: 'outer' | 'opening';
@@ -11,12 +15,15 @@ export type DiagnosticContourContact = {
   distanceAlongContour: number;
   distanceFromContour: number;
 };
+/** Result of `sampleDiagnosticContourContacts`: the contacts, the number of samples skipped, and the contour length (mm). */
 export type DiagnosticContactSample =
   | { kind: 'proposal'; contacts: DiagnosticContourContact[]; skippedSamples: number; perimeter: number }
   | { kind: 'inconclusive'; reason: string };
 
 /** Contacts from the flat arrays the Rust calls return (face, position + normal, along + from). */
 export function decodeContacts(faces: Uint32Array, points: Float64Array, distances: Float64Array, rims?: Uint8Array): DiagnosticContourContact[] {
+  // Layout: `points` 6 f64 per contact (position xyz, normal xyz), `distances` 2 f64 (along, from),
+  // `rims` one byte (0 outer, 1 opening) when given.
   return Array.from(faces, (face, at) => ({
     ...(rims ? { rim: rims[at] === 0 ? 'outer' as const : 'opening' as const } : {}),
     face,

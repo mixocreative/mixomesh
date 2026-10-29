@@ -4,9 +4,10 @@ import type { ShapeOverride } from './settings';
 
 /*
  * Types of the support mesh the build produces and the host consumes. The builder itself is the
- * Rust `generate` (`src/supports/generateSupports.ts`).
+ * Rust `generate` (host adapter `host/supports/generateSupports.ts`).
  */
 
+/** A 2D point `[x, y]` (mm). */
 export type Point2 = [number, number];
 
 /** A point where a support lands on the model, with the landed-on surface normal (pointing up). */
@@ -39,6 +40,10 @@ export interface SupportContact {
   shape?: ShapeOverride;
 }
 
+/**
+ * What a built component is. Order is the Rust part code (`supports/parts/tags`), decoded by
+ * index in `supports/supportBuildWasm.decodeComponents`; keep both in step.
+ */
 export type SupportPart =
   | 'tip' | 'neck' | 'pillar' | 'foot' | 'brace' | 'raft'
   | 'tree-branch' | 'tree-trunk'
@@ -50,6 +55,10 @@ export type ContactIntent =
   | { kind: 'primary'; contactId: string; point: Vector; normal: Vector; faceIndex?: number }
   | { kind: 'secondary'; point: Vector; normal: Vector; faceIndex?: number };
 
+/**
+ * One tagged slice of a support mesh's `indices`: the part it is, the contact it belongs to and
+ * where its triangles start. Components are sorted by `start` (`contactAtTriangle` relies on it).
+ */
 export interface SupportComponent {
   part: SupportPart;
   /** Marks a neck split from an Auto Tree branch rather than an ordinary pillar. */
@@ -102,13 +111,19 @@ export interface DentalRimCoverageItem {
   needsReview: boolean;
 }
 
+/** Dental two-contour jobs: built contact coverage of the outer rim and of the opening rim. */
 export interface DentalRimCoverage {
   outer: DentalRimCoverageItem;
   opening: DentalRimCoverageItem;
   needsReview: boolean;
 }
 
+/**
+ * A built support mesh with its component tags and verdicts. Plate space as `generate` returns it;
+ * `supports/jobRunner.runSupportJob` hands it back in unit-local space.
+ */
 export interface GeneratedSupportMesh extends TriangleMesh {
+  /** Every part kind present, in first-seen order. */
   parts: SupportPart[];
   components: SupportComponent[];
   /** Automatic contacts this build left out (policy, landing rule, no-support zone or repair). */
@@ -123,8 +138,11 @@ export interface GeneratedSupportMesh extends TriangleMesh {
   islands?: IslandReport;
   /** Dental jobs: final built contacts on each dental rim; absent when the detector could not certify a contour. */
   dentalRimCoverage?: DentalRimCoverage;
-  /** Dental jobs: requested dental structures omitted because their built geometry crossed the model. */
-  /** Generic jobs: the structure fallbacks the repair applied (`brace-pruned`: only crossing brace segments were left out); absent when none. */
+  /**
+   * Generic jobs: the structure fallbacks the repair applied (`brace-pruned`: only crossing brace
+   * segments were left out); absent when none. Dental jobs report theirs in `dentalStructureFallback`.
+   */
   fallbacks?: Array<'tree' | 'brace' | 'brace-pruned'>;
+  /** Dental jobs: requested dental structures omitted because their built geometry crossed the model. */
   dentalStructureFallback?: Array<'tree' | 'brace' | 'brace-pruned'>;
 }

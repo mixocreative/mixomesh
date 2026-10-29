@@ -11,6 +11,8 @@ import { supportEngine } from './supportEngine';
  * the re-keyed lists come out; the matching itself runs in Rust.
  */
 
+// The edit calls of the engine module (crates/geometry-wasm), typed here because they are not part
+// of `SupportEngine`. Positions are flat xyz f64, unit-local mm.
 interface EditsEngine {
   position_ids(positions: Float64Array): string[];
   remap_deleted_ids(deleted: string[], pointIds: string[], pointPositions: Float64Array, matchRadius: number): string[];
@@ -30,6 +32,7 @@ export function positionIds(positions: readonly Vector[]): string[] {
   return positions.length === 0 ? [] : engine().position_ids(Float64Array.from(positions.flat()));
 }
 
+/** The ID one position encodes (see `positionIds`). */
 export function positionId(position: Vector): string {
   return positionIds([position])[0]!;
 }
@@ -73,6 +76,8 @@ export function rekeyHandWork<T>(deleted: readonly string[], overrides: Readonly
   const result = engine().rekey_hand_work([...deleted], overrideIds, [...manualIds], points.map((p) => p.id), flat(points), matchRadius);
   try {
     const targets = result.take_targets();
+    // `targets[k]` is the new id of override k, '' when no new contact matched it (dropped and counted).
+    // Counts come as one Uint32Array: removals kept, removals reset, overrides kept, overrides reset.
     const [removalsKept, removalsReset, customisedKept, customisedReset] = result.take_counts();
     const out: Record<string, T> = {};
     overrideIds.forEach((id, k) => {

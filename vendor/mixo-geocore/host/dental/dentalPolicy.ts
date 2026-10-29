@@ -26,7 +26,7 @@ interface DentalPolicyBase {
 /**
  * Old saved policies stay readable but cannot inherit the two-contour permission implicitly.
  * `origin: 'manual-area'` is the policy of an area painted from scratch because detection found
- * none (`src/dental/manualArea.ts`): only the paint permits, never the cavity footprint.
+ * none (the app's (mixodental) `src/dental/manualArea.ts`): only the paint permits, never the cavity footprint.
  */
 export type DentalPolicy =
   | (DentalPolicyBase & { kind?: 'legacy'; origin?: 'manual-area' })

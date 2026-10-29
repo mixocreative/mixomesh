@@ -1,6 +1,7 @@
 import { createStrokeQueue, type BrushJob, type Point } from './strokeQueue';
 import type { BrushMode } from './types';
 
+/** The Drag over brush as one sample sees it: circle size and whether it selects or unselects. */
 export interface Brush {
   /** Circle radius in screen px. */
   radius: number;
@@ -68,6 +69,10 @@ export function frameBudget(renderMs: number): number {
   return Math.min(MAX_BUDGET, Math.max(MIN_BUDGET, FRAME_MS - renderMs, renderMs / 4));
 }
 
+/**
+ * Builds a scheduler bound to `port`. It starts with no supports: call `setSupports` before
+ * samples can be tested. At most one animation frame is requested at a time.
+ */
 export function createBrushScheduler(port: BrushPort): BrushScheduler {
   const queue = createStrokeQueue();
   let total = 0;
@@ -79,6 +84,7 @@ export function createBrushScheduler(port: BrushPort): BrushScheduler {
   let lastEnd = 0;
   let renderMs = FIRST_RENDER_MS;
 
+  // Tell the host only when the preview list really changed (same ids in the same order = no call).
   const show = (ids: readonly string[]) => {
     if (ids.length === shown.length && ids.every((id, index) => id === shown[index])) return;
     shown = ids;
@@ -92,10 +98,13 @@ export function createBrushScheduler(port: BrushPort): BrushScheduler {
     if (!queue.pending && !hover) return;
     const started = port.now();
     // Time since the hit tests of the last frame is what rendering took (when frames run back to back).
+    // Exponential smoothing (0.7 old / 0.3 new) so one slow frame does not swing the budget; a gap
+    // over 1 s means the loop was idle, not that rendering was slow, so it is not counted.
     if (lastEnd > 0 && started - lastEnd < 1000) renderMs = renderMs * 0.7 + (started - lastEnd) * 0.3;
     const budget = frameBudget(renderMs);
     const stop = () => port.now() - started > budget;
     const test = port.frame();
+    // A queued stroke has priority over the hover preview: the hover waits until the queue is empty.
     if (test && queue.pending) {
       // A stroke: the circle sweeps every queued sample. One selection commit per frame (per
       // brush mode), however many samples were tested in it.
@@ -103,6 +112,8 @@ export function createBrushScheduler(port: BrushPort): BrushScheduler {
     } else if (test && hover) {
       const { job, found } = hover;
       const adding = job.mode === 'select';
+      // The hover only previews supports the brush would change: unselected ones for Select,
+      // selected ones for Unselect. It resumes from `job.next` when the budget ran out.
       const part = test(job, (id) => port.isSelected(id) !== adding, stop);
       found.push(...part.hits);
       job.next = part.next;

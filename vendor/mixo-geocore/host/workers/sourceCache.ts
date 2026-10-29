@@ -19,6 +19,7 @@ export class SourceCache {
 
   constructor(readonly capBytes: number) {}
 
+  /** Stores the unit's model under `token`, replacing any older one, as the most recently used. */
   put(unitId: string, token: number, mesh: TriangleMesh): void {
     this.delete(unitId);
     const bytes = meshBytes(mesh);
@@ -35,6 +36,7 @@ export class SourceCache {
     return entry.mesh;
   }
 
+  /** Drops the unit's model (no-op when absent). */
   delete(unitId: string): void {
     const entry = this.entries.get(unitId);
     if (!entry) return;

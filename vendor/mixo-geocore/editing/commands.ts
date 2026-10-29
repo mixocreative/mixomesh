@@ -112,7 +112,10 @@ const REDO_HINTS: Record<(typeof STEP_KINDS)[number], string> = {
   addObjects: 'Redo the import', deleteObjects: 'Redo deleting objects', generate: 'Redo generating supports', removeSupports: 'Redo removing the supports',
   clearManual: 'Redo clearing manual edits', addSupport: 'Redo adding a support', deleteSupports: 'Redo deleting supports', zones: 'Redo the zone change', move: 'Redo moving the object', settings: 'Redo the settings change', openProject: 'Redo opening the project',
 };
-/** Supports can be picked, added and deleted: Support Edit Mode, and where an app mode says so. */
+/**
+ * Supports can be picked, added and deleted: Support Edit Mode, and where an app mode says so.
+ * The `UiState` twin of session.ts `editsSupports` (that one reads the `EditSession`).
+ */
 const editing = (s: UiState) => s.mode === 'edit' || modeExtension(s.mode)?.uiEditsSupports?.(s) === true;
 /** Where a selection of supports (or tips) can be made and deleted. */
 const selecting = (s: UiState) => editing(s) || modeExtension(s.mode)?.uiSelectsTips?.(s) === true;
@@ -132,9 +135,16 @@ const noModelReason: StatusMessage = { key: 'Import a model first.' };
 /** Why a control waits while supports are generated. */
 export const generatingReason: StatusMessage = { key: 'Supports are being generated: wait for it to finish.' };
 
-/** The undo and redo hints of a step kind. */
+/**
+ * The undo and redo hints of a step kind. Lookup order: the built-in table, then a hint an app
+ * registered for its own step kind (`registerStepHints`), then the bare "Undo" / "Redo".
+ */
 const stepHint = (kind: StepKind, hints: Readonly<Record<string, string>>, own: 'undo' | 'redo'): string => hints[kind] ?? extraStepHints.get(kind)?.[own] ?? (own === 'undo' ? 'Undo' : 'Redo');
 
+/**
+ * The built-in rows, one per `COMMAND_IDS` entry (the `Record` type makes a missing row a type
+ * error). Read through `commandOf` / `resolve`, which also see the rows an app registered.
+ */
 export const COMMANDS: Readonly<Record<CoreCommandId, Command>> = {
   'history.undo': {
     role: 'secondary', shortcut: 'Ctrl+Z',
@@ -359,14 +369,18 @@ export interface ResolvedCommand {
   runs: CommandId;
 }
 
+// App rows and app step hints, filled by registerCommands / registerStepHints. Module-level on
+// purpose: one registry per page, like COMMANDS itself.
 const extraCommands = new Map<CommandId, Command>();
 const extraStepHints = new Map<StepKind, { undo: string; redo: string }>();
 
 /** Adds an app's command rows (ids from `ExtraCommandIds`); returns the call that removes them again (tests). */
 export function registerCommands(rows: Partial<Record<CommandId, Command>>): () => void {
   const added = Object.entries(rows) as [CommandId, Command][];
+  // Check every id before adding any, so a clash leaves the registry unchanged.
   for (const [id] of added) if (id in COMMANDS || extraCommands.has(id)) throw new Error(`command '${id}' is already defined`);
   for (const [id, row] of added) extraCommands.set(id, row);
+  // The remover deletes only rows that are still the ones it added.
   return () => { for (const [id, row] of added) if (extraCommands.get(id) === row) extraCommands.delete(id); };
 }
 
@@ -389,6 +403,10 @@ export function commandOf(id: CommandId): Command {
   return command;
 }
 
+/**
+ * Evaluates every rule of the row `id` against `state` once, for a control to render. `shortcut`
+ * is resolved when it depends on the state; `runs` defaults to `id`. Throws for an unknown id.
+ */
 export function resolve(id: CommandId, state: UiState): ResolvedCommand {
   const command = commandOf(id);
   const { shortcut } = command;

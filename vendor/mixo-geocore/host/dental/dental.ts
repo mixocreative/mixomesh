@@ -2,6 +2,7 @@ import type { Vector } from '../core/vec3';
 import { dentalInternals, rimOf, rimScalars } from './dentalEngine';
 import type { TriangleMesh } from '../core/analysis/types';
 
+/** The detected rim of an aligner's cavity opening and its local frame (unit-local mm, unit vectors). */
 export interface DentalRim {
   /** Only a paired lower-edge loop may authorize automatic dental supports. */
   boundaryKind: 'lower-edge-loop' | 'projection-fallback';
@@ -19,12 +20,14 @@ export interface DentalRim {
   visibilityMax: [number, number];
 }
 
+/** Detector diagnostics: overall confidence and the two shape ratios behind it. */
 export interface DentalDiagnostics {
   confidence: number;
   terminalAreaRatio: number;
   axialVarianceRatio: number;
 }
 
+/** An orientation proposal with its rim, or why none was found; diagnostics either way. */
 export type DentalProposal =
   | { kind: 'proposal'; rim: DentalRim; diagnostics: DentalDiagnostics }
   | { kind: 'inconclusive'; reason: 'invalid-mesh' | 'no-cavity' | 'ambiguous-cavity'; diagnostics: DentalDiagnostics };

@@ -20,6 +20,7 @@ export function transferable<R>(result: R, transfer: Transferable[]): Transferre
   return { [TRANSFER]: true, result, transfer };
 }
 
+/** What a handler gets besides the payload: a progress poster and the request's revision (if any). */
 export interface TaskContext {
   progress(fields: Record<string, unknown>): void;
   revision: number | undefined;
@@ -30,6 +31,11 @@ interface Scope {
   postMessage(message: unknown, transfer?: Transferable[]): void;
 }
 
+/**
+ * Installs `handler` as the worker's message handler (call once per worker module). Replies 'done'
+ * with the result (echoing the revision), or 'error' with the thrown message and its string `code`
+ * and object `vars`. `scope` replaces the worker global in tests.
+ */
 export function serveTask<P, R>(handler: (payload: P, context: TaskContext) => R | Transferred<R> | Promise<R | Transferred<R>>, scope?: Scope): void {
   // Resolved per message (not once) so a stubbed global in tests still gets the replies.
   const target = () => scope ?? (self as unknown as Scope);

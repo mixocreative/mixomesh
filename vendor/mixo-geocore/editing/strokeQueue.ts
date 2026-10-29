@@ -1,5 +1,6 @@
 import type { BrushMode } from './types';
 
+/** A pointer position in screen px (canvas CSS pixels), as [x, y]. */
 export type Point = readonly [number, number];
 
 /** One Drag over hit test to run: the circle swept from → to, from support index `next`. */
@@ -51,6 +52,7 @@ export interface StrokeQueue {
 
 const newStroke = (): QueuedStroke => ({ steps: [], painted: new Set(), last: undefined });
 
+/** Builds an empty queue; `brushScheduler.ts` owns the one the viewport uses. */
 export function createStrokeQueue(): StrokeQueue {
   /** Strokes with steps left, oldest first. */
   const queue: QueuedStroke[] = [];
@@ -62,8 +64,10 @@ export function createStrokeQueue(): StrokeQueue {
       current = newStroke();
     },
     push(to, mode, radius) {
+      // Each step is the segment from the previous sample, so a fast drag sweeps the gap too.
       current.steps.push({ from: current.last, to, next: 0, mode, radius });
       current.last = to;
+      // Re-queue the current stroke if draining emptied and removed it.
       if (queue[queue.length - 1] !== current) queue.push(current);
     },
     clear() {
@@ -83,6 +87,7 @@ export function createStrokeQueue(): StrokeQueue {
       while (queue.length > 0) {
         const stroke = queue[0]!;
         const step = stroke.steps[0]!;
+        // Shift can flip the mode mid-stroke: flush the hits of the old mode before switching.
         if (batch.length > 0 && mode !== step.mode) {
           commit(batch, mode!);
           batch = [];
@@ -95,6 +100,7 @@ export function createStrokeQueue(): StrokeQueue {
           stroke.painted.add(id);
           hit.set(id, step.mode);
         }
+        // The test stopped early (frame budget spent): keep the step, resume at `next` next frame.
         if (part.next < total) {
           step.next = part.next;
           break;

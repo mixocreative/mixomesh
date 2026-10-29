@@ -46,6 +46,7 @@ export type PickAction =
   | { type: 'pass' | 'none' | 'add' | 'erase' | 'removeContact' | 'toggle' | 'miss' }
   | { type: 'select'; additive: boolean };
 
+/** Decides what one click means (pure); the host runs the returned action. */
 export function pickAction(input: PickInput): PickAction {
   const { hit, button, ctrl, mode, tool, active } = input;
   if (input.travel > CLICK_TOLERANCE) return { type: 'pass' };

@@ -16,6 +16,7 @@ type Legacy = Exclude<DentalPolicy, { kind: 'two-contour' }>;
 /** The policy's area edits as the Rust calls take them (8 numbers each, in stroke order). */
 export function stampRows(policy: DentalPolicy): Float64Array {
   const rows = new Float64Array(policy.stamps.length * 8);
+  // Row: center xyz, radius, normal xyz, allow 1 / erase 0 (note: not the zone stamp order of `packZones`).
   policy.stamps.forEach((stamp, at) => rows.set([...stamp.center, stamp.radius, ...stamp.normal, stamp.kind === 'allow' ? 1 : 0], at * 8));
   return rows;
 }

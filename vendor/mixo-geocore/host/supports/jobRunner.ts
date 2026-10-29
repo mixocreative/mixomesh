@@ -12,8 +12,8 @@ import { supportMeshToUnitLocal } from './supportFrame';
 import { applyTransform, transformDirection, transformPoint } from '../state/transform';
 
 /*
- * Runs support core jobs (src/core/jobs.ts) on whatever thread calls it: the workers, and the main
- * thread for tests and goldens. Outside src/core only because it takes its transform math from the
+ * Runs support core jobs (host/core/jobs.ts) on whatever thread calls it: the workers, and the main
+ * thread for tests and goldens. Outside host/core only because it takes its transform math from the
  * app module state/transform (three-free since Task 7); it could move into the core by switching to
  * core/transform.ts.
  *

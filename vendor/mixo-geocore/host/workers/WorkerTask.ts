@@ -24,6 +24,17 @@
  * `jobActivity` unless another is given) under its label, with the worker's progress forwarded. A
  * job run with a `signal` or `cancellable: true` gets a Cancel in the activity UI, which rejects it
  * with AbortError exactly like the caller's own signal would.
+ *
+ * Cancellation and stale results: an aborted job rejects at once with AbortError and its later
+ * reply is ignored (a settled job is never settled twice, and replies are matched by job id). A
+ * reply whose `revision` differs from the request's rejects with code 'stale'. Callers that drop
+ * superseded work (`meshClient`) abort with reason `REPLACED` so the activity list does not show a
+ * cancel.
+ *
+ * Memory (plan D24, large print meshes): pass the request's big buffers in `RunOptions.transfer`
+ * so they move to the worker instead of being copied (the sender's views become empty, so copy
+ * first if you still need the data), and have the worker answer with `serveTask`'s `transferable`.
+ * A per-job worker is terminated when its job settles, freeing its WASM memory with it.
  */
 import { jobActivity, type JobActivity, type JobLabel } from './jobActivity';
 
@@ -43,15 +54,18 @@ export interface WorkerLike {
 /** Progress fields a worker posts, e.g. `{ fraction, stage }`. */
 export type ProgressFields = Record<string, unknown>;
 
-/** 'timeout' | 'restarted' | 'crashed' | 'stale' | 'unavailable' */
+/** Why WorkerTask failed a job (`WorkerTaskError.code`): timed out, restarted by another job's failure, worker crashed, stale reply, or no Worker. */
 export type WorkerTaskErrorCode = 'timeout' | 'restarted' | 'crashed' | 'stale' | 'unavailable';
 
+/** Constructor options of a `WorkerTask`. */
 export interface WorkerTaskOptions<P, R> {
   /** Worker factory; null when there is no Worker. */
   create: (() => WorkerLike) | null;
   /** One long-lived worker (default), or a fresh worker per job that ends with the job. */
   mode?: 'persistent' | 'per-job';
+  /** 'parallel' (default): jobs run at once on the worker; 'serial': one after another in call order. */
   concurrency?: 'parallel' | 'serial';
+  /** Default per-job timeout (ms); 120 s when absent. A timeout terminates the persistent worker. */
   timeoutMs?: number;
   /** Main-thread implementation, used only when the worker cannot be created. */
   fallback?: (payload: P) => R | Promise<R>;
@@ -63,11 +77,15 @@ export interface WorkerTaskOptions<P, R> {
   activity?: JobActivity;
 }
 
+/** Per-job options of `WorkerTask.run`. */
 export interface RunOptions {
+  /** Buffers moved (not copied) to the worker with the request; they are detached on this side. */
   transfer?: Transferable[];
+  /** Aborting rejects the job with AbortError; the reply, if it still comes, is ignored. */
   signal?: AbortSignal;
   timeoutMs?: number;
   onProgress?: (fields: ProgressFields) => void;
+  /** Echoed by the worker; a reply with another revision rejects as 'stale'. */
   revision?: number;
   /** This job's label in the activity UI. */
   label?: JobLabel;
@@ -104,6 +122,7 @@ export class WorkerJobError extends Error {
   }
 }
 
+/** A failure of the job runner itself (not of the job), with its `WorkerTaskErrorCode`. */
 export class WorkerTaskError extends Error {
   constructor(message: string, readonly code: WorkerTaskErrorCode) {
     super(message);
@@ -114,6 +133,10 @@ function abortError(name: string): Error {
   return new DOMException(`${name} aborted`, 'AbortError');
 }
 
+/**
+ * Client of one worker module (see the file header for the protocol and failure rules). `P` is the
+ * request payload, `R` the worker's result.
+ */
 export class WorkerTask<P = unknown, R = unknown> {
   private readonly create: (() => WorkerLike) | null;
   private readonly mode: 'persistent' | 'per-job';
@@ -126,7 +149,9 @@ export class WorkerTask<P = unknown, R = unknown> {
   private worker: WorkerLike | null = null;
   /** Running jobs of the persistent worker, by id. */
   private readonly jobs = new Map<number, Job>();
+  // Job ids are per client and increasing; replies carry them back.
   private seq = 0;
+  // Serial mode: each job starts after the previous one settled (its failure does not break the chain).
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor({ create, mode = 'persistent', concurrency = 'parallel', timeoutMs = DEFAULT_TIMEOUT_MS, fallback, name = 'worker task', label, activity = jobActivity }: WorkerTaskOptions<P, R>) {
@@ -253,6 +278,7 @@ export class WorkerTask<P = unknown, R = unknown> {
       }
       return;
     }
+    // Revision echo check: only when the request carried one.
     if (message.type === 'done') {
       if (job.opts.revision != null && message.revision !== job.opts.revision) this.settle(job, new WorkerTaskError(`stale ${this.name} result`, 'stale'));
       else this.settle(job, null, message.result);

@@ -1,7 +1,7 @@
 /**
  * Support core jobs: everything placement, a support check or a support mesh build needs, as plain
  * data (no app types), so any host can run them on any thread. The app makes them from its units
- * in `src/supports/unitSupports.ts` (the only adapter) and runs them with `src/supports/jobRunner.ts`.
+ * in `host/supports/unitSupports.ts` (the only adapter) and runs them with `host/supports/jobRunner.ts`.
  *
  * Meshes are unit-local; a job's transform says where the unit stood (Euler XYZ radians, mm).
  */

@@ -11,6 +11,7 @@ import { setTransformEngine } from '../state/transformEngine';
 
 /** The vendored engine's module namespace (its `.d.ts` is the contract). */
 export type GeometryEngine = typeof GeometryModule;
+/** An instance of the engine's `GeometrySession` (meshes by handle in WASM memory; call `free()`). */
 export type GeometrySessionLike = InstanceType<GeometryEngine['GeometrySession']>;
 
 interface GeometrySource {

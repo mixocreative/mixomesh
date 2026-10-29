@@ -25,6 +25,8 @@ export function releaseBuildSessions(): void {
 
 const PROGRESS_INTERVAL_MS = 60;
 
+// Progress posts at most every 60 ms (the last one, fraction 1, always goes); `scale` maps a
+// step's own 0..1 into its share of the whole task.
 function throttled(post: TaskContext['progress'], scale = (fraction: number) => fraction) {
   let last = 0;
   return (fraction: number, stage: string) => {
@@ -87,6 +89,7 @@ serveTask<MeshTask, MeshTaskResult>((task, { progress }) => {
     const { unitId, sourceToken, policyToken, job, revision } = task.unit;
     const model = models.get(unitId)!;
     const mesh = runSupportJob({ ...job, mesh: model }, throttled(progress), revision, sessions.site(unitId, sourceToken, model, policyToken));
+    // The mesh's buffers move to the client (D24: no copy); this worker keeps no reference to them.
     return transferable<MeshTaskResult>({ kind: 'mesh', mesh }, [mesh.positions.buffer, mesh.indices.buffer]);
   });
 });

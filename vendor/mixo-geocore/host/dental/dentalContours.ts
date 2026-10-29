@@ -2,6 +2,7 @@ import type { DentalRim } from './dental';
 import { dentalInternals, rimScalars } from './dentalEngine';
 import type { TriangleMesh } from '../core/analysis/types';
 
+/** Whether the mesh has a central opening: present (with its edge list), absent, or ambiguous (with a reason). */
 export type CentralOpeningEvidence =
   | { kind: 'present'; edges: Uint32Array }
   | { kind: 'absent' }

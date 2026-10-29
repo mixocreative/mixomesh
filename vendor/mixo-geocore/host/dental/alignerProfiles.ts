@@ -12,6 +12,11 @@ export type Lang = 'en' | 'ja' | 'zh-Hant';
  * `alignerProfiles.test.ts` checks both read the same set.
  */
 
+/**
+ * The operator controls of an aligner type (its profile's `defaults` block): the area tuning a new
+ * aligner starts with and its UI limits (`position*`, `stripWidth*`, `density*`), contact spacing
+ * on the two rims, search and repair limits, and the tip-facing rules. Lengths mm, angles degrees.
+ */
 export interface ProfileDefaults {
   positionMm: number;
   stripWidthMm: number;
@@ -53,7 +58,7 @@ export interface ProfileStability {
 
 /**
  * The Step 3 support settings a new aligner of this type starts with (Rust `profiles::SupportDefaults`);
- * `src/dental/supportPreset.ts` applies them, and the operator can change every one.
+ * the app's (mixodental) `src/dental/supportPreset.ts` applies them, and the operator can change every one.
  */
 export interface ProfileSupports {
   pillarDiameterMm: number;
@@ -168,10 +173,12 @@ export function profileData(id: string): AlignerProfileData {
 /** One Step 0 card. */
 export type AlignerProfile = Pick<AlignerProfileData, 'id' | 'name' | 'description' | 'opening' | 'card' | 'fixture'>;
 
+/** The Step 0 cards, the default profile first, then file order. */
 export const ALIGNER_PROFILES: readonly AlignerProfile[] = [...PROFILES]
   .sort((a, b) => Number(b.id === DEFAULT_PROFILE_ID) - Number(a.id === DEFAULT_PROFILE_ID))
   .map(({ id, name, description, opening, card, fixture }) => ({ id, name, description, opening, card, fixture }));
 
+/** The card of `id`, or undefined for an unknown or absent id. */
 export const profileById = (id: string | undefined): AlignerProfile | undefined => ALIGNER_PROFILES.find((profile) => profile.id === id);
 
 /** Profiles a mesh without a central opening could be: the ones that do not insist on one. */

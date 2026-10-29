@@ -6,6 +6,7 @@ import { transformEngine } from './transformEngine';
 /** A unit's placement on the plate: position in mm, rotation as Euler XYZ in radians. */
 export type ModelTransform = Placement;
 
+/** No move, no rotation. */
 export const identityTransform: ModelTransform = {
   position: [0, 0, 0],
   rotation: [0, 0, 0],
@@ -18,6 +19,7 @@ const through = (matrix: Float64Array, value: readonly number[], direction: bool
   return [out[0]!, out[1]!, out[2]!];
 };
 
+/** A copy of `mesh` placed by `transform` (unit-local to plate space); indices are copied too. */
 export function applyTransform(mesh: TriangleMesh, transform: ModelTransform): TriangleMesh {
   return { positions: transformEngine().transform_positions(mesh.positions, placement(transform), 0), indices: new Uint32Array(mesh.indices) };
 }
@@ -42,10 +44,12 @@ export function inverseTransformPoint(transform: ModelTransform, point: readonly
   return through(inverse(transform), point, false);
 }
 
+/** Unit-local direction to plate space (rotation only; rigid transforms keep unit length). */
 export function transformDirection(transform: ModelTransform, direction: readonly number[]): Vector {
   return through(placement(transform), direction, true);
 }
 
+/** Plate-space direction to unit-local space. */
 export function inverseTransformDirection(transform: ModelTransform, direction: readonly number[]): Vector {
   return through(inverse(transform), direction, true);
 }

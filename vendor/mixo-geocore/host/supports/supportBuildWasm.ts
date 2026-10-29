@@ -39,6 +39,7 @@ const ENUMS: Record<string, readonly string[]> = {
   previewMode: ['FULL', 'ONLY_TIP'],
 };
 
+// One setting as f64: booleans 0/1, enums their index in ENUMS (the Rust codes), numbers as is.
 function encode(key: string, value: unknown): number {
   if (typeof value === 'boolean') return value ? 1 : 0;
   if (typeof value === 'string') {
@@ -49,12 +50,15 @@ function encode(key: string, value: unknown): number {
   return value as number;
 }
 
+/** The flat settings array for the Rust calls: one f64 per `SETTINGS_ORDER` key (layout in `core/supports/settings.ts`). */
 export function packSettings(settings: Readonly<LiveSupportSettings>): Float64Array {
   return Float64Array.from(SETTINGS_ORDER, (key) => encode(key, settings[key]));
 }
 
+/** f64 per zone stamp: center xyz, normal xyz, radius, paint 1 / erase 0. */
 export const ZONE_STRIDE = 8;
 
+/** Zone stamps as flat `ZONE_STRIDE` rows, in stroke order (the last covering stamp wins). */
 export function packZones(zones: readonly ZoneStamp[]): Float64Array {
   const flat = new Float64Array(zones.length * ZONE_STRIDE);
   zones.forEach((z, k) => flat.set([...z.center, ...z.normal, z.radius, z.kind === 'paint' ? 1 : 0], k * ZONE_STRIDE));
@@ -73,9 +77,20 @@ export interface ColumnInput {
   shape?: ShapeOverride;
 }
 
+/**
+ * f64 per contact (Rust `supports/flat.rs` `CONTACT_STRIDE`): 0-2 point xyz, 3-5 normal xyz,
+ * 6 source face (-1 none), 7 origin (0 auto, 1 manual), 8 has landing (0/1), 9-11 landing point,
+ * 12-14 landing normal, 15 landing face (-1 none), 16 point kind (0 none, 1 face, 2 edge, 3 vertical).
+ * The host never supplies landings (slot 8 is 0), so Rust casts them against the model.
+ */
 export const CONTACT_STRIDE = 17;
 const KIND_CODE = { face: 1, edge: 2, vertical: 3 } as const;
 
+/**
+ * Contacts as flat `CONTACT_STRIDE` rows, plus a per-contact shape-override table (13 f64 per
+ * contact in `SHAPE_ORDER`, NaN = follows the object). `shapes` is empty when no contact has an
+ * override, so the common case sends nothing.
+ */
 export function packContacts(contacts: readonly ColumnInput[]): { contacts: Float64Array; shapes: Float64Array } {
   const flat = new Float64Array(contacts.length * CONTACT_STRIDE);
   contacts.forEach((c, k) => {
@@ -92,11 +107,13 @@ export function packContacts(contacts: readonly ColumnInput[]): { contacts: Floa
   return { contacts: flat, shapes };
 }
 
+// Index = the Rust part code (component tag 0).
 const PARTS: readonly SupportPart[] = [
   'tip', 'neck', 'pillar', 'foot', 'brace', 'raft', 'tree-branch', 'tree-trunk', 'roof', 'column', 'roof-brace', 'cross-bar', 'cage-ring', 'label',
 ];
 const NO_CONTACT = 0xffffffff;
 
+/** A decoded component tag: `SupportComponent` plus the origin of its owning contact. */
 export interface TaggedComponent {
   part: SupportPart;
   structureKind?: 'tree';
@@ -113,6 +130,11 @@ export interface TaggedComponent {
 export function decodeComponents(tags: Uint32Array, reach: Float64Array, intents: Float64Array, idOf: (contact: number) => string): TaggedComponent[] {
   const components: TaggedComponent[] = [];
   for (let k = 0; k < reach.length; k += 1) {
+    // Tag row (u32 x COMPONENT_STRIDE 8): 0 part, 1 structure kind (1 tree), 2 contact index
+    // (NO_CONTACT none), 3 origin (0 none, 1 auto, 2 manual), 4 first index, 5 index count,
+    // 6 first intent, 7 intent count. `reach[k]` is the landing reach (NaN none). Intent rows are
+    // INTENT_STRIDE 9 f64: kind (1 primary, 2 secondary), contact index (-1 none), face (-1 none),
+    // point xyz, normal xyz.
     const t = k * 8;
     const contact = tags[t + 2]!;
     const origin = tags[t + 3]!;

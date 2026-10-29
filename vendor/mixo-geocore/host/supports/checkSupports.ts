@@ -3,7 +3,7 @@ import type { TriangleMesh } from '../core/analysis/types';
 import type { Vector } from '../core/vec3';
 import { supportEngine } from './supportEngine';
 
-/*
+/**
  * Host adapter of the Rust support check (`crates/geometry-core/src/supports/check`): what the
  * contacts leave unsupported, in the frame of the checked mesh (Y up). The overhang-coverage part is
  * a non-gating warning of the generic policy (SHIP-PLAN D1); islands are not judged here, the

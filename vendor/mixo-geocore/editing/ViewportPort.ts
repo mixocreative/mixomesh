@@ -46,6 +46,11 @@ export interface SurfacePick {
   distance: number;
 }
 
+/**
+ * What an app's viewport answers for editing code. Every method is synchronous and has no side
+ * effect on the view; the brush, pick and hover helpers in this folder call it per pointer event or
+ * per frame. tests/d22.test.ts checks that editing/ imports no renderer, framework or DOM module.
+ */
 export interface ViewportPort {
   /** Current viewport size and device pixel ratio. */
   size(): ViewportSize;

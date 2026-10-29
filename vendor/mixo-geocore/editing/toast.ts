@@ -25,6 +25,7 @@ export type UndoAction =
   /** A regeneration landed on an object (one history step): `message` is its report. */
   | { kind: 'regenerate'; message: StatusMessage };
 
+/** One Undo toast on screen: its action and the status line it shows. */
 export interface UndoToast {
   id: number;
   action: UndoAction;
@@ -33,6 +34,7 @@ export interface UndoToast {
   scene?: unknown;
 }
 
+/** Builds the toast for `action` with its status line; `id` is a host-chosen identifier, kept as given. */
 export function undoToast(id: number, action: UndoAction): UndoToast {
   const message: StatusMessage = action.kind === 'regenerate'
     ? action.message

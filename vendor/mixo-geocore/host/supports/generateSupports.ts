@@ -85,6 +85,10 @@ export function withOneShotSite<T>(model: TriangleMesh, run: (site: BuildSite) =
   }
 }
 
+/**
+ * Dental two-contour jobs: built coverage of one rim, 5 f64 per ring in the `take_rings` rows
+ * (perimeter mm, retained contacts, largest gap mm, review gap mm, needs review 0/1).
+ */
 export interface RingMeasure {
   perimeterMm: number;
   retained: number;
@@ -93,14 +97,18 @@ export interface RingMeasure {
   needsReview: boolean;
 }
 
+/** Options of one `generateSupports` call. */
 export interface GenerateOptions {
+  /** Preview (mode 0, default) or full export resolution (mode 1). */
   mode?: 'preview' | 'export';
   /** The unit-local model; `frame` places it on the plate (absent: it is already in plate space). */
   model: TriangleMesh;
   frame?: JobTransform;
   /** The plate's height in `frame` (default 0); a lift change moves it instead of the model (see `SupportJob.plate`). */
   plateY?: number;
+  /** Text embossed on the raft label; '' for none. */
   labelText?: string;
+  /** No-support zone stamps, in the build frame. */
   zones?: readonly ZoneStamp[];
   /** The unit's persistent build site (the mesh worker's); absent: a one-shot session for this build. */
   site?: BuildSite;
@@ -111,6 +119,7 @@ export interface GenerateOptions {
   onProgress?: ProgressCallback;
 }
 
+/** What `generateSupports` returns: the mesh with its verdicts, dental ring coverage, structure fallbacks and repair trials spent. */
 export interface GenerateOutput {
   mesh: GeneratedSupportMesh;
   rings: RingMeasure[];
@@ -128,6 +137,11 @@ interface Generation {
   take_rings(): Float64Array; trials(): number; revision(): number; free(): void;
 }
 
+/**
+ * The `GeometrySession` calls a build uses: meshes are handles into the session; `load_placed`
+ * makes a plate-space copy of a model for a frame, `release_mesh` frees a handle (and the Rust
+ * caches keyed on it).
+ */
 export interface GenerateSession extends PolicySession {
   release_mesh(handle: number): void;
   load_placed(model: number, frame: Float64Array): number;
@@ -140,6 +154,8 @@ const PARTS: readonly SupportPart[] = [
 ];
 const STATUS = ['clear', 'blocked', 'inconclusive'] as const;
 const NO_CONTACT = 0xffffffff;
+// Issue rows (u32 x ISSUE_STRIDE): contact index (NO_CONTACT none), part code, model face,
+// blocked 0/1, origin code (ISSUE_ORIGIN). Status / island codes index STATUS / ISLAND_STATUS.
 const ISSUE_STRIDE = 5;
 const ISSUE_ORIGIN = ['auto', 'manual', 'structural'] as const;
 const ISLAND_STATUS = ['resolved', 'unresolved', 'manual-only', 'outside-policy'] as const;
@@ -169,6 +185,8 @@ export function generateSupports(contacts: readonly SupportContact[], settings: 
       ...(contact.shape ? { shape: contact.shape } : {}),
     }));
     const packed = packContacts(inputs);
+    // The policy handle is only borrowed by `generate`: release it right after the call (a site that
+    // keeps policies makes `release` a no-op).
     const data = site.policy(policy, options.frame);
     let result: Generation;
     try {
@@ -211,6 +229,7 @@ export function generateSupports(contacts: readonly SupportContact[], settings: 
         positions: result.take_positions(), indices: result.take_indices(), parts, components,
         dropped: result.take_dropped(), droppedByZones: result.take_dropped_by_zones(), verdict, islands,
       };
+      // Fallback codes: 1 tree, 3 brace-pruned, anything else brace.
       return { mesh, rings, fallback: Array.from(result.take_fallback(), (f) => (f === 1 ? 'tree' as const : f === 3 ? 'brace-pruned' as const : 'brace' as const)), trials: result.trials(), revision };
     } finally {
       result.free();

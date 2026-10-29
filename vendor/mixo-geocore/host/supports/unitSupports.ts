@@ -47,6 +47,8 @@ export function placementPending(unit: PrintUnit): boolean {
   return PLACEMENT_KEYS.some((key) => placedValue(placed, key) !== now[key]);
 }
 
+// Per-unit caches keyed on the immutable unit object: a changed unit is a new object, so a stale
+// entry is never read and is collected with the old unit.
 const contactCache = new WeakMap<PrintUnit, readonly SupportContact[]>();
 const builtCache = new WeakMap<PrintUnit, { dropped: readonly string[]; contacts: readonly SupportContact[] }>();
 
@@ -252,6 +254,8 @@ export function liftCommands(unit: PrintUnit, settings: LiveSupportSettings): Sc
   const turned = frame.rotation.some((angle, axis) => angle !== transform.rotation[axis]);
   const kept = turned ? transform : frame;
   const { plate: _plate, ...data } = unit.supports.data;
+  // Same rotation: keep the generation frame and express the new height as the plate moving in it
+  // (frame height minus the unit's new height). A rotated unit takes the new transform, plate 0.
   const plate = turned ? 0 : frame.position[1] - transform.position[1];
   return [
     { type: 'transform/set', unitId: unit.id, transform },

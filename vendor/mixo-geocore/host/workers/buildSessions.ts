@@ -31,6 +31,7 @@ export class BuildSessions {
     return unit;
   }
 
+  /** Frees the unit's session and every handle in it. */
   forget(unitId: string): void {
     this.units.get(unitId)?.free();
     this.units.delete(unitId);
@@ -41,6 +42,7 @@ export class BuildSessions {
     for (const unitId of [...this.units.keys()]) this.forget(unitId);
   }
 
+  /** Units with a live session. */
   get size(): number {
     return this.units.size;
   }

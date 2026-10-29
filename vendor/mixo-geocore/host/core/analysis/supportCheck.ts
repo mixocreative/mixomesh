@@ -2,8 +2,8 @@ import type { Vector } from '../vec3';
 
 /*
  * Types of the support check. Overhang coverage is the Rust `check_support_problems`
- * (crates/geometry-core/src/supports/check, host adapter `src/supports/checkSupports.ts`); islands
- * come from the `generate` verdict (`src/supports/islandProblems.ts`).
+ * (crates/geometry-core/src/supports/check, host adapter `host/supports/checkSupports.ts`); islands
+ * come from the `generate` verdict (`editing/islandProblems.ts`).
  */
 
 /**
@@ -31,6 +31,11 @@ export interface SupportProblem {
   points?: Vector[];
 }
 
+/**
+ * Settings of the support check (`CheckJob.settings`, made by `supports/unitSupports.checkJobOf`):
+ * `overhangAngleDegrees` is the placement's overhang angle in degrees (`scatterAngle`), `spacing`
+ * the contact spacing in mm (`scatterSpacing`).
+ */
 export interface CheckSettings {
   overhangAngleDegrees: number;
   spacing: number;

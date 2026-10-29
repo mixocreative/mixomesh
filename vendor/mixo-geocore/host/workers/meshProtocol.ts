@@ -3,6 +3,7 @@ import type { JobTransform, SupportJob } from '../core/jobs';
 import type { GeneratedSupportMesh } from '../core/supports/mesh';
 import type { ExportFilePlan } from '../supports/export';
 
+/** Build resolution: 'preview' or 'export' (full resolution). */
 export type MeshMode = SupportJob['mode'];
 
 /**
@@ -25,6 +26,7 @@ export interface ExportUnitPayload extends SupportJobPayload {
   transform: JobTransform;
 }
 
+/** A request to `meshWorker.ts` (sent by `meshClient.ts` through WorkerTask). */
 export type MeshTask =
   /** Support mesh of one unit (preview or full export resolution). */
   | { kind: 'build'; unit: SupportJobPayload }
@@ -42,11 +44,13 @@ export interface ExportUnitResult {
   islands: 'ok' | 'inconclusive';
 }
 
+/** One written STL file: its name and bytes (transferred back to the client). */
 export interface ExportedFile {
   fileName: string;
   buffer: ArrayBuffer;
 }
 
+/** The worker's reply to a `MeshTask`. */
 export type MeshTaskResult =
   | { kind: 'mesh'; mesh: GeneratedSupportMesh }
   | { kind: 'files'; files: ExportedFile[]; units: ExportUnitResult[] }

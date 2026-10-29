@@ -3,7 +3,9 @@ import type { Vector } from '../vec3';
 /** One immutable brush dab. Consumers choose the semantic meaning of `kind`. */
 export interface SurfaceStamp<K extends string> {
   center: Vector;
+  /** Brush radius (mm). */
   radius: number;
+  /** Unit surface normal under the brush; vertices facing away (dot <= 0) are not covered. */
   normal: Vector;
   kind: K;
 }
@@ -13,6 +15,7 @@ export interface SurfaceStamp<K extends string> {
 export type ZoneStamp = SurfaceStamp<'paint' | 'erase'>;
 
 /** A drag lays a new stamp once the brush has moved half a radius from the last one. */
+/** Whether a drag at `point` should lay a new stamp: none yet, or at least `radius / 2` from `last`. */
 export function nextStamp(last: Vector | undefined, point: Vector, radius: number): boolean {
   if (!last) return true;
   const dx = point[0] - last[0];
@@ -74,10 +77,12 @@ export function buildVertexGrid(positions: Float32Array, cellSize = 2, maxCells 
   if (count === 0) return { cellSize, min: [0, 0, 0], dims: [1, 1, 1], cellStart: new Uint32Array(2), cellVertices: new Uint32Array(0) };
   const dimsFor = (size: number): [number, number, number] => [0, 1, 2].map((axis) => Math.max(1, Math.floor((max[axis]! - min[axis]!) / size) + 1)) as [number, number, number];
   let dims = dimsFor(cellSize);
+  // Grow cells by 1.5x until the cell count fits the cap (bounded memory on huge or sparse meshes).
   while (dims[0] * dims[1] * dims[2] > maxCells) dims = dimsFor((cellSize *= 1.5));
   const cells = dims[0] * dims[1] * dims[2];
   const cellOf = new Uint32Array(count);
   const cellStart = new Uint32Array(cells + 1);
+  // Counting sort into cells: count per cell, prefix-sum into `cellStart`, then scatter vertex ids.
   for (let v = 0, i = 0; v < count; v++, i += 3) {
     const x = Math.min(dims[0] - 1, Math.floor((positions[i]! - min[0]) / cellSize));
     const y = Math.min(dims[1] - 1, Math.floor((positions[i + 1]! - min[1]) / cellSize));
@@ -109,6 +114,7 @@ export function stampVertices(stamp: ZoneStamp, positions: Float32Array, normals
     const dy = positions[i + 1]! - cy;
     const dz = positions[i + 2]! - cz;
     if (dx * dx + dy * dy + dz * dz > r2) return;
+    // Thin-wall rule: a vertex whose normal faces away from the stamp normal is on the far side.
     if (normals[i]! * nx + normals[i + 1]! * ny + normals[i + 2]! * nz <= 0) return;
     out[v] = value;
   };

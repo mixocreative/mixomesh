@@ -4,6 +4,10 @@ import type { PrintScene, PrintUnit } from '../state/projectTypes';
 import { transformPoint, type ModelTransform } from '../state/transform';
 import { unitContacts, type BuiltSupports } from './unitSupports';
 
+/**
+ * What an export writes: printable (model plus supports) or supports only; `active-*` one file of
+ * the active unit, `separate-*` one file per unit, `whole-printable` one file for the plate.
+ */
 export type ExportKind =
   | 'active-printable'
   | 'active-supports'
@@ -17,6 +21,7 @@ export interface ExportPartPlan {
   content: 'model' | 'supports';
 }
 
+/** One STL file of an export: its unique file name and the meshes it holds. */
 export interface ExportFilePlan {
   fileName: string;
   parts: ExportPartPlan[];
@@ -68,6 +73,8 @@ export function encodeStl(parts: readonly ExportPart[], onProgress?: ProgressCal
   view.setUint32(80, triangles, true);
   let offset = 84;
   let written = 0;
+  // Binary STL record: normal, three vertices (12 f32), then a 2-byte attribute count left 0.
+  // The (x, -z, y) swap turns Y-up plate space into the Z-up frame slicers expect.
   const write = (x: number, y: number, z: number) => {
     view.setFloat32(offset, x, true);
     view.setFloat32(offset + 4, -z, true);

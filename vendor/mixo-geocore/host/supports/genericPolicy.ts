@@ -13,6 +13,7 @@ import type { MakePolicy } from './generateSupports';
  * and unpacks the arrays out; no decision is made here.
  */
 
+// Index = the Rust source code; `KINDS` index = the Rust point-kind code (0 none).
 const SOURCES: readonly SupportPoint['source'][] = ['interior', 'physical-boundary', 'sharp-ridge', 'island'];
 const KINDS = [undefined, 'face', 'edge', 'vertical'] as const;
 

@@ -5,10 +5,12 @@ export const ENGINE_OVER_CAPACITY = 'CAPACITY';
 
 /** What went wrong, independent of the language it is shown in. */
 export const ERROR_CODES = ['non-finite', 'no-mesh', 'file-type', 'bad-stl', 'too-large', 'out-of-memory', 'plate-full', 'over-capacity', 'timeout', 'worker-stopped', 'unknown'] as const;
+/** One of `ERROR_CODES`. */
 export type ErrorCode = typeof ERROR_CODES[number];
 
 /** The job that failed. */
 export const ERROR_CONTEXTS = ['import', 'place', 'build', 'check', 'export'] as const;
+/** One of `ERROR_CONTEXTS`. */
 export type ErrorContext = typeof ERROR_CONTEXTS[number];
 
 /** An error that carries its code (and the numbers its message needs), so the host can translate it. */

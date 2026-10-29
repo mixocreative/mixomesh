@@ -27,6 +27,7 @@ export type ZoneKind = 'paint' | 'erase';
 export const STEP_KINDS = ['addObjects', 'deleteObjects', 'generate', 'removeSupports', 'clearManual', 'addSupport', 'deleteSupports', 'zones', 'move', 'settings', 'openProject'] as const;
 /** An app's own step kinds (`interface ExtraStepKinds { dentalArea: true }`), named with `registerStepHints` (commands.ts). */
 export interface ExtraStepKinds {}
+/** A history step's kind: a built-in one or an app's (`ExtraStepKinds`). */
 export type StepKind = (typeof STEP_KINDS)[number] | keyof ExtraStepKinds;
 
 /**

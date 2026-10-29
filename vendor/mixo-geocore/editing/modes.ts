@@ -44,6 +44,10 @@ export interface KeyContext {
 /** A session, or the part of one a predicate is handed (at least its mode). */
 export type SessionView = Pick<EditSession, 'mode'> & Partial<EditSession>;
 
+/**
+ * One app edit mode, handed to `registerEditMode`. Only `id` is required; every hook left out means
+ * the generic behaviour (see each member).
+ */
 export interface EditModeExtension {
   /** The mode id, added to `EditMode` by augmenting `ExtraEditModes`. */
   readonly id: EditMode;
@@ -77,9 +81,12 @@ export interface EditModeExtension {
   keys?(input: KeyInput, context: KeyContext): KeyAction | undefined;
   /** The command registry's view of `editsSupports` / `selectsTips` (it reads `UiState`, not the session). */
   uiEditsSupports?(state: UiState): boolean;
+  /** The `UiState` twin of `selectsTips`. */
   uiSelectsTips?(state: UiState): boolean;
 }
 
+// The registry, one per page. Map order is registration order, which decides who reduces an
+// event first (session.ts reduceModeEvent) and who owns a gesture kind.
 const modes = new Map<EditMode, EditModeExtension>();
 let mergeInitial: ((fields: Partial<EditSession>, remove: boolean) => void) | undefined;
 

@@ -1,8 +1,10 @@
-// Ported from mixodental src/workers/geometryVersion.ts (engine_version 9; 10 since P5.14).
+// Ported from mixodental src/workers/geometryVersion.ts. The version is bumped with every ABI change
+// (9 at the port, 10 since P5.14, now 11).
 
 /** Must equal the Rust `engine_version()`; both change together on any ABI change. */
 export const HOST_GEOMETRY_VERSION = 11;
 
+/** Thrown when the loaded engine's `engine_version()` is not `HOST_GEOMETRY_VERSION` (code 'geometry-version-mismatch'). */
 export class GeometryVersionMismatch extends Error {
   /** @param {number} actual */
   constructor(actual) {
@@ -14,11 +16,15 @@ export class GeometryVersionMismatch extends Error {
 }
 
 /** @param {number} actual */
+/** Throws `GeometryVersionMismatch` unless `actual` equals `HOST_GEOMETRY_VERSION`. */
 export function assertGeometryVersion(actual) {
   if (actual !== HOST_GEOMETRY_VERSION) throw new GeometryVersionMismatch(actual);
 }
 
 /**
+ * Awaits `ready()` (the realm's engine load), then runs `work`, so a worker never calls the
+ * engine before it is loaded. meshWorker wraps every engine task (all but `forget`) in it.
+ *
  * @template T
  * @param {() => Promise<unknown>} ready
  * @param {() => T | Promise<T>} work

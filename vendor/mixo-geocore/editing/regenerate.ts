@@ -1,3 +1,20 @@
+/**
+ * @file Regeneration bookkeeping for the status line: the report of what happened to an object's
+ * hand work, the status messages, and the debounce queue that batches placement-setting edits.
+ *
+ * How hand edits survive a regenerate (the rekey). Done before this module sees anything, by
+ * host/supports/contactEdits.ts `rekeyHandWork` over the wasm `rekey_hand_work`
+ * (crates/geometry-core/src/supports/edits.rs):
+ * - An automatic contact id encodes its position on a 0.01 mm grid (`auto-...`), so a stored id
+ *   still says where its support stood after the support itself is gone.
+ * - Manual (hand-added) supports are not regenerated: they and their per-support settings stay.
+ * - Each stored removal, then each automatic per-support setting, is matched in that order to the
+ *   new placement: the same id if a new contact has it, else the nearest new contact within the
+ *   match radius (mm) of the encoded spot that nothing earlier claimed. One new contact is claimed
+ *   by at most one stored id, so two removals never collapse onto one support.
+ * - A stored id with no match is dropped and counted as reset.
+ * The counts come back as `RekeyedHandWork` and `regenReport` turns them into a `RegenReport`.
+ */
 import type { RekeyedHandWork } from '../host/core/analysis/types';
 import type { StatusMessage } from './types';
 
@@ -89,9 +106,11 @@ export class RegenerateQueue {
     private readonly delay = REGENERATE_DELAY_MS,
   ) {}
 
+  /** Adds `ids` to the waiting set and restarts the quiet timer; an empty list does nothing. */
   schedule(ids: readonly string[]): void {
     if (ids.length === 0) return;
     ids.forEach((id) => this.ids.add(id));
+    // Trailing-edge debounce: every new id restarts the wait, and all ids run in one call.
     clearTimeout(this.timer);
     this.onQueued(true);
     this.timer = setTimeout(() => {
@@ -103,6 +122,7 @@ export class RegenerateQueue {
     }, this.delay);
   }
 
+  /** Drops every waiting id without running them; does nothing when nothing waits. */
   cancel(): void {
     if (this.timer === undefined) return;
     clearTimeout(this.timer);

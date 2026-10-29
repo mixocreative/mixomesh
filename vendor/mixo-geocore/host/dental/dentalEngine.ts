@@ -8,6 +8,7 @@ import type { PolicyHandle } from '../supports/generateSupports';
  * `supports/supportEngine`: detection is synchronous from the caller's side. Every production call
  * works on a mesh loaded once in a `GeometrySession` and names its aligner profile.
  */
+/** Result handle of `orient_dental` / `propose_dental_orientation`; read it, then `free()`. */
 export interface DentalOrientResultLike {
   free(): void;
   status(): number;
@@ -22,6 +23,7 @@ export interface DentalOrientResultLike {
   matches_profile(): boolean;
 }
 
+/** Result handle of the region and footprint calls; read it, then `free()`. */
 export interface DentalRegionResultLike {
   free(): void;
   ok(): boolean;
@@ -53,6 +55,7 @@ export interface DentalTiltScanResultLike {
   band(): Uint32Array;
 }
 
+/** Result handle of `dental_legacy_fill`: kept indices into the initial points, plus the added contacts. */
 export interface LegacyFillLike {
   free(): void; take_kept(): Uint32Array; take_positions(): Float64Array; take_normals(): Float64Array; take_ids(): string[];
 }
@@ -77,6 +80,7 @@ export interface DentalSession {
     initialPositions: Float64Array, initialNormals: Float64Array): LegacyFillLike;
 }
 
+/** The dental calls of the engine module the browser build has (sessions and the overlay mask). */
 export interface DentalEngine {
   GeometrySession: new (maxBytes: number) => unknown;
   dental_allowed_vertices(positions: Float32Array, indices: Uint32Array, normals: Float32Array, rim: Float64Array, visibilityMask: Uint8Array,
@@ -107,10 +111,12 @@ export interface DentalInternals {
 
 let current: DentalEngine | undefined;
 
+/** Registers this realm's engine; `workers/geometryClient.geometryReady` calls it. */
 export function setDentalEngine(engine: DentalEngine): void {
   current = engine;
 }
 
+/** The registered engine; throws when `geometryReady()` has not resolved in this realm. */
 export function dentalEngine(): DentalEngine {
   if (!current) throw new Error('Geometry engine is not ready: await geometryReady() before dental detection');
   return current;
@@ -138,6 +144,9 @@ export function withDentalMesh<T>(mesh: TriangleMesh, use: (session: DentalSessi
 
 /** The flat frame the pose and opening calls take: the layout of `DentalOrientResult.rim_scalars`. */
 export function rimScalars(rim: DentalRim): Float64Array {
+  // 18 f64: 0 boundary kind (0 lower-edge loop, 1 projection fallback), 1-3 opening direction,
+  // 4-6 centroid, 7-9 tangent, 10-12 bitangent, 13 visibility resolution, 14-15 visibility min,
+  // 16-17 visibility max. `rimOf` reads the same layout back.
   return Float64Array.of(rim.boundaryKind === 'lower-edge-loop' ? 0 : 1, ...rim.openingDirection, ...rim.centroid,
     ...rim.tangent, ...rim.bitangent, rim.visibilityResolution, ...rim.visibilityMin, ...rim.visibilityMax);
 }

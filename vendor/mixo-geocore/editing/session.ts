@@ -53,6 +53,9 @@ export const initialSession: EditSession = {
   selection: NO_SELECTION,
 } satisfies Partial<EditSession> as EditSession;
 
+// modes.ts cannot import this module (session.ts imports modes.ts), so it gets a writer instead:
+// registerEditMode merges a mode's `initial` fields into this one shared object, and the
+// remover deletes them again. initialSession is mutated in place so every importer sees them.
 bindInitialSession((fields, remove) => {
   const target = initialSession as unknown as Record<string, unknown>;
   for (const [key, value] of Object.entries(fields)) {
@@ -75,6 +78,7 @@ export type SessionEvent = CoreSessionEvent | ExtraSessionEvents[keyof ExtraSess
 /** Extension point: an app mode's own events (`interface ExtraSessionEvents { dental: DentalEvent }`), reduced by its `reduce`. */
 export interface ExtraSessionEvents {}
 
+/** The events every app gets; `SessionEvent` adds the app modes' own (`ExtraSessionEvents`). */
 export type CoreSessionEvent =
   | { type: 'enterEdit' }
   | { type: 'enterZones' }
@@ -111,7 +115,11 @@ function set<K extends keyof EditSession>(state: EditSession, key: K, value: Edi
   return state[key] === value ? state : { ...state, [key]: value };
 }
 
-/** The next session; the same object when the event changes nothing. */
+/**
+ * The next session; the same object when the event changes nothing, so a host can skip work with
+ * `next === previous`. Pure: no timers, no I/O. Events the core does not know go to the registered
+ * modes (`reduceModeEvent`).
+ */
 export function reduceSession(state: EditSession, event: SessionEvent): EditSession {
   switch (event.type) {
     case 'enterEdit':
@@ -133,6 +141,7 @@ export function reduceSession(state: EditSession, event: SessionEvent): EditSess
     case 'setSelectStyle': return set(state, 'selectStyle', event.style);
     case 'setBrushMode':
       return set(state, 'brushMode', event.mode);
+    // Selection events only count where tips can be selected; elsewhere they change nothing.
     case 'shift': return selectsTips(state) ? set(state, 'shiftHeld', event.held) : state;
     case 'setBrushRadius': return set(state, 'brushRadius', event.radius);
     case 'setBrushSizing': return set(state, 'brushSizing', event.sizing);
@@ -151,6 +160,7 @@ export function reduceSession(state: EditSession, event: SessionEvent): EditSess
   }
 }
 
+// The helpers a mode's `reduce` gets, so its mode changes clear the selection the same way.
 const KIT: SessionKit = { withMode, set, emptySelection: NO_SELECTION };
 
 /** An app mode's own event: the first registered mode that reduces it decides; unknown events change nothing. */

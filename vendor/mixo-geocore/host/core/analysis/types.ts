@@ -1,15 +1,31 @@
+/**
+ * An indexed triangle mesh: `positions` is flat xyz f32 (mm, 3 per vertex), `indices` is flat
+ * vertex-index triples (3 per triangle). Frame depends on the caller: unit-local for a unit's
+ * source, plate space (Y up, plate at y = 0) after `applyTransform`.
+ */
 export interface TriangleMesh {
   positions: Float32Array;
   indices: Uint32Array;
 }
 
+/** A downward region of placement: an id and the indices of the faces it covers. */
 export interface Region {
   id: number;
   faceIndices: number[];
 }
 
+/**
+ * Why placement put a point there: inside a downward region, on its physical boundary, along a
+ * sharp ridge, or at the lowest point of an island. Order matches the Rust source codes 0..3.
+ */
 export type SupportPointSource = 'interior' | 'physical-boundary' | 'sharp-ridge' | 'island';
 
+/**
+ * One automatic or manual contact tip. `id` is the stable contact id (`auto-X_Y_Z` for automatic
+ * ones, see `supports/contactEdits`); `regionId` is -1 when the point belongs to no region;
+ * `position` (mm) and unit `normal` (pointing out of the model) are in the frame of the mesh the
+ * point was placed on.
+ */
 export interface SupportPoint {
   id: string;
   regionId: number;
@@ -18,11 +34,20 @@ export interface SupportPoint {
   source: SupportPointSource;
 }
 
+/**
+ * Inputs of the automatic placement (Rust `generic_place`, packed by
+ * `supports/genericPlacement.packPlacementSettings`). Angles in degrees, lengths in mm.
+ */
 export interface PlacementSettings {
+  /** Overhang angle threshold in degrees (`scatterAngle`). */
   overhangAngleDegrees: number;
+  /** Target distance between contacts (mm). */
   spacing: number;
+  /** How far contacts on a region's edge are moved inwards (mm). */
   edgeInset: number;
+  /** Dihedral turn (degrees) above which an edge counts as a sharp ridge. */
   sharpEdgeAngleDegrees: number;
+  /** Add a contact at the lowest point of each island. */
   includeIslands: boolean;
   /** Blender "Downward Faces"; defaults to true. */
   includeDownward?: boolean;
@@ -35,6 +60,10 @@ export interface PlacementSettings {
   maxBevelWidth?: number;
 }
 
+/**
+ * What a placement returns. `contactPositions` / `contactNormals` are the `points` again as flat
+ * xyz f32 arrays (3 per point, same order), ready for a renderer or a transfer.
+ */
 export interface PlacementResult {
   points: SupportPoint[];
   regions: Region[];

@@ -35,6 +35,10 @@ export function effectiveBrushMode(brushMode: BrushMode, shiftHeld: boolean): Br
   return brushMode === 'select' ? 'unselect' : 'select';
 }
 
+/**
+ * The selection after a Drag over hit: `ids` added (`select`) or taken out (`unselect`). Returns
+ * `selected` itself when no id changes state, so callers can compare by identity.
+ */
 export function paintSelection(
   selected: ReadonlySet<string>,
   ids: readonly string[],
@@ -50,12 +54,17 @@ export function paintSelection(
   return next;
 }
 
+/** The selection with `id` flipped (Click select). Always a new set. */
 export function toggleSelection(selected: ReadonlySet<string>, id: string): ReadonlySet<string> {
   const next = new Set(selected);
   if (!next.delete(id)) next.add(id);
   return next;
 }
 
+/**
+ * The selection without ids that no current contact has (after undo or a regeneration). Returns
+ * `selected` itself when nothing dropped out.
+ */
 export function pruneSelection(
   selected: ReadonlySet<string>,
   contacts: readonly SupportContact[],

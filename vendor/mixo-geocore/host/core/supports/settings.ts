@@ -4,10 +4,45 @@ import type { PlacementSettings } from '../analysis/types';
  * Live support settings transcribed from the Blender Resin UV support tab
  * (`mixo3d/properties.py` + `helpers/slasg_map.py`). Lengths are millimetres and
  * angles are degrees. Bake and hidden proxy/original-copy settings are excluded.
+ *
+ * Mirror of the Rust settings (crates/geometry-core/src/supports/settings/): the keys here, their
+ * enum values and `settingLimits` must match `SETTINGS_LAYOUT` / `SHAPE_LAYOUT` in `mod.rs` and the
+ * range checks in `read.rs`. Change both sides together (and bump `HOST_GEOMETRY_VERSION` when the
+ * flat layout changes); `workers/supportBuildParity.test.ts` checks the order against the engine.
+ *
+ * Flat array scheme (packed by `supports/supportBuildWasm.packSettings`, one f64 per key in
+ * `SETTINGS_ORDER` = Rust `SETTINGS_LAYOUT`, 66 values). Offsets:
+ *   0-10  tip / contact: contactShape, pointDiameter, pointDepth, tipSection, tipCrossWidth,
+ *         tipProfile, touchDiameter, touchDepth, neckDiameter, neckLength, maxNeckAngle
+ *   11-14 pillar and foot: pillarDiameter, treeSectionIncrement, baseDiameter, baseHeight
+ *   15-21 bracing: trussEnabled, trussDiameter, trussAngle, trussSpacing, trussMinHeight,
+ *         trussTopSpacing, trussDistanceLimit
+ *   22-28 raft: raftEnabled, raftExpandWidth, raftFloorThickness, raftWallHeight,
+ *         raftWallThickness, raftWallAngle, voxelResolution
+ *   29-43 roof / cage: roofMode, roofGap, cageSideGap, cageTopGap, cagePitch, cageRingDiameter,
+ *         columnCount, columnDiameter, diagonalEnabled, diagonalDiameter, braceConcentric,
+ *         braceThickness, braceAngle, storeyFloorThickness, storeyEncloseCeiling
+ *   44-49 label: labelEnabled, labelSize, labelHeight, labelMargin, labelOffsetX, labelOffsetY
+ *   50-53 advanced: previewMode, autoSnap, lowPolyMode, resolution
+ *   54-63 placement: scatterSpacing, scatterAngle, scatterSafeDistance, scatterFacingDown,
+ *         scatterIslands, scatterRidgeAngle, scatterAutoTree, scatterMergeDistance,
+ *         scatterBranchDescent, reinforceOverhangEdges
+ *   64-65 editing: liftHeight, eraseRadius
+ * Enums are their index (contactShape NONE=0 SPHERE=1; tipSection ROUND=0 SQUARE=1 CROSS=2;
+ * tipProfile TAPERED=0 STRAIGHT=1; roofMode OFF=0 ROOF=1 CAGE=2; previewMode FULL=0 ONLY_TIP=1),
+ * booleans 0/1. Not in the array: `preset` and `roofSeededModes` (UI state), `labelText` (passed
+ * as its own string to `generate`) and `scatterMaxBevelWidth` (placement only, see
+ * `toPlacementSettings`). A per-contact override is 13 f64 in `SHAPE_LAYOUT` order (= `SHAPE_KEYS`
+ * order below), NaN for a key that follows the object. Rust re-checks every limit and rejects
+ * (never clamps); this side clamps edits like Blender's UI.
  */
+/** The built-in support presets (Blender Light / Middle / Heavy). */
 export type PresetName = 'LIGHT' | 'MIDDLE' | 'HEAVY';
+/** The preset a unit shows; `CUSTOM` once a preset-owned key was edited. */
 export type SupportPreset = PresetName | 'CUSTOM';
+/** Roof / cage structure over the model: off, a roof, or a cage (Rust codes 0, 1, 2). */
 export type RoofMode = 'OFF' | 'ROOF' | 'CAGE';
+/** Viewport preview: the full supports, or only the contact tips (Rust codes 0, 1). */
 export type PreviewMode = 'FULL' | 'ONLY_TIP';
 /** What touches the model: a Contact Ø sphere or the tip itself. */
 export type ContactShape = 'NONE' | 'SPHERE';
@@ -16,6 +51,11 @@ export type TipSection = 'ROUND' | 'SQUARE' | 'CROSS';
 /** Tapered narrows from Middle Ø to the contact end (cone, pyramid); Straight keeps the end Ø. */
 export type TipProfile = 'TAPERED' | 'STRAIGHT';
 
+/**
+ * Every support setting of one unit (object), as the UI edits it. Lengths mm, angles degrees,
+ * ranges in `settingLimits`. The numeric and boolean keys go to Rust as the flat array described
+ * in the file header.
+ */
 export type LiveSupportSettings = {
   preset: SupportPreset;
   // Top / contact
@@ -104,7 +144,9 @@ export type LiveSupportSettings = {
   eraseRadius: number;
 };
 
+/** Keys `updateSetting` may change: every setting except the preset name and the seeded roof modes. */
 export type SettingKey = Exclude<keyof LiveSupportSettings, 'preset' | 'roofSeededModes'>;
+// Keys whose value is a number: the ones `settingLimits` clamps.
 type NumericKey = { [K in SettingKey]: LiveSupportSettings[K] extends number ? K : never }[SettingKey];
 
 /**
@@ -116,7 +158,9 @@ export const SHAPE_KEYS = [
   'pointDiameter', 'touchDiameter', 'pointDepth', 'touchDepth', 'neckDiameter',
   'neckLength', 'maxNeckAngle', 'baseDiameter', 'baseHeight',
 ] as const satisfies readonly SettingKey[];
+/** One of the per-support keys in `SHAPE_KEYS`. */
 export type ShapeKey = typeof SHAPE_KEYS[number];
+/** The full set of per-support values (all `SHAPE_KEYS`). */
 export type ShapeSettings = Pick<LiveSupportSettings, ShapeKey>;
 /** One support's own values: only the keys the user set; every other key follows the object. */
 export type ShapeOverride = Partial<ShapeSettings>;
@@ -153,6 +197,7 @@ export function withShape(settings: Readonly<LiveSupportSettings>, shape: ShapeO
 const BASE_DIAMETER = 3;
 const BASE_HEIGHT = 1.2;
 
+// The values a preset owns; every other key keeps its current value when a preset is applied.
 function preset(touch: number, depth: number, neck: number, neckLength: number, pillar: number, merge: number, descent: number) {
   return {
     touchDiameter: touch,
@@ -178,8 +223,10 @@ function preset(touch: number, depth: number, neck: number, neckLength: number, 
   } satisfies Partial<LiveSupportSettings>;
 }
 
+/** The keys and values one preset sets (see `PRESET_KEYS`). */
 export type PresetValues = ReturnType<typeof preset>;
 
+/** Values of each built-in preset (touch, depth, neck, neck length, pillar, merge distance, branch descent). */
 export const presetValues: Readonly<Record<PresetName, Readonly<PresetValues>>> = {
   LIGHT: preset(0.5, 0, 0.3, 2, 0.8, 2, 2),
   MIDDLE: preset(0.8, 0, 0.4, 2, 1.2, 3, 3),
@@ -200,6 +247,7 @@ const ROOF_DEFAULTS: Record<Exclude<RoofMode, 'OFF'>, Partial<LiveSupportSetting
   },
 };
 
+/** Settings a new unit starts with: the LIGHT preset plus the Blender defaults of every other key. */
 export const defaultSupportSettings: Readonly<LiveSupportSettings> = {
   preset: 'LIGHT',
   ...presetValues.LIGHT,
@@ -319,10 +367,16 @@ export const settingLimits: Record<NumericKey, NumericLimit> = {
   eraseRadius: { min: 0.1, max: 50 },
 };
 
+/** `base` with the preset's values applied and `preset` set to `name`; keys the preset does not own are kept. */
 export function applyPreset(name: PresetName, base: Readonly<LiveSupportSettings> = defaultSupportSettings): LiveSupportSettings {
   return { ...cloneSettings(base), ...presetValues[name], preset: name };
 }
 
+/**
+ * `settings` with `key` set to `value`, clamped (and rounded for integer keys) to `settingLimits`.
+ * Changing a preset-owned key to a new value switches the preset to `CUSTOM`. Throws RangeError for
+ * a non-finite number.
+ */
 export function updateSetting<K extends SettingKey>(
   settings: Readonly<LiveSupportSettings>,
   key: K,
@@ -359,6 +413,7 @@ export function contactRadius(settings: Readonly<LiveSupportSettings>): number {
   return (settings.contactShape === 'SPHERE' ? settings.touchDiameter : settings.pointDiameter) / 2;
 }
 
+/** The placement inputs of a unit's settings (`PlacementJob.settings`). */
 export function toPlacementSettings(settings: Readonly<LiveSupportSettings>): PlacementSettings {
   return {
     overhangAngleDegrees: settings.scatterAngle,
@@ -373,6 +428,7 @@ export function toPlacementSettings(settings: Readonly<LiveSupportSettings>): Pl
   };
 }
 
+// Throws on NaN/Infinity rather than clamping it: a bad number is a caller bug, not an edit.
 function clampSetting(key: NumericKey, value: number): number {
   if (!Number.isFinite(value)) throw new RangeError(`${key} must be a finite number`);
   const limit = settingLimits[key];

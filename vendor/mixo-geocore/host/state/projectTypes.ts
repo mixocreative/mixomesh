@@ -7,10 +7,14 @@ import type { ShapeOverride } from '../core/supports/settings';
 import type { ZoneStamp } from '../core/supports/zones';
 import type { ModelTransform } from './transform';
 
+/** JSON scalar. */
 export type JSONPrimitive = string | number | boolean | null;
+/** Any JSON value. */
 export type JSONValue = JSONPrimitive | JSONValue[] | { [key: string]: JSONValue };
+/** A JSON object. */
 export type JSONObject = { [key: string]: JSONValue };
 
+/** A unit's stored support settings: a JSON form of `LiveSupportSettings`, possibly partial (see `unitSupports.resolveSettings`). */
 export type SupportSettings = JSONObject & { preset?: string };
 
 /** A serializable representation of geometry derived from support contacts. */
@@ -19,8 +23,13 @@ export interface SupportMesh {
   data: JSONObject;
 }
 
+/** Per-support shape overrides by contact id. */
 export type ContactSettings = Record<string, ShapeOverride>;
 
+/**
+ * One printable object on the plate and everything its supports are made from. Immutable: every
+ * change makes a new object (the `unitSupports` caches are keyed on it).
+ */
 export interface PrintUnit {
   id: string;
   name: string;
@@ -28,8 +37,11 @@ export interface PrintUnit {
   source: TriangleMesh;
   transform: ModelTransform;
   settings: SupportSettings;
+  /** The latest automatic placement (unit-local); absent before one. */
   placement?: PlacementResult;
+  /** The supports' stored data (`data.transform` generation frame, `data.plate`, `data.placed`); absent: no supports. */
   supports?: SupportMesh;
+  /** Hand-added contacts (unit-local). */
   manual: SupportPoint[];
   /** Exact removals by contact ID: each hides one automatic contact and nothing else. */
   deleted: string[];
@@ -41,12 +53,14 @@ export interface PrintUnit {
   dental?: DentalPolicy;
 }
 
+/** The plate: its units and the selection. */
 export interface PrintScene {
   units: PrintUnit[];
   selectedUnitIds: string[];
   activeUnitId?: string;
 }
 
+/** The scene edits the app's reducer applies (the reducer itself lives in the app). */
 export type SceneCommand =
   | { type: 'batch'; commands: SceneCommand[] }
   | { type: 'unit/add'; unit: PrintUnit; owned?: boolean }

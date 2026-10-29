@@ -26,6 +26,7 @@ export interface Stroke {
   samples(point: Vector, fill: StrokeFill): Vector[];
 }
 
+/** Builds a closed stroke; `onEnd` runs once each time an open stroke ends. */
 export function createStroke(onEnd?: () => void): Stroke {
   let active = false;
   let last: Vector | undefined;

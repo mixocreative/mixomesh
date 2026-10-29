@@ -5,6 +5,7 @@ import { tuningArray } from './dentalRegion';
 import type { DentalTuning } from './dentalTuning';
 
 type Region = Extract<DentalRegionProposal, { kind: 'proposal' }>;
+/** Per-face 0/1 masks of the four diagnostic strips: each side of the outer and of the inner (opening) curve. */
 export type DentalDiagnosticBands = { kind: 'proposal'; outerOpeningSide: Uint8Array; outerOtherSide: Uint8Array;
   innerOpeningSide: Uint8Array; innerOtherSide: Uint8Array };
 type BandResult = DentalDiagnosticBands | { kind: 'inconclusive'; reason: string };

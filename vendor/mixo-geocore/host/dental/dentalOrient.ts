@@ -18,6 +18,7 @@ export type DentalOrientation =
 
 const OPENING = ['present', 'absent', 'ambiguous'] as const;
 
+/** Step 1 of the dental flow on `mesh` (unit-local) for the aligner type `profile`, in a one-shot session. */
 export function orientDentalAligner(mesh: TriangleMesh, profile: string): DentalOrientation {
   return withDentalMesh(mesh, (session, model) => decode(session.orient_dental(model, profile)));
 }

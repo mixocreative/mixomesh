@@ -7,6 +7,7 @@ import type { TriangleGate } from '../core/jobGate';
 import type { JobLabel } from './jobActivity';
 import { REPLACED, WorkerTask, WorkerTaskError, type WorkerLike } from './WorkerTask';
 
+/** A progress report of one unit's build: fraction 0..1 and a stage code (`core/progress`). */
 export interface MeshProgress {
   unitId: string;
   mode: MeshMode;
@@ -63,6 +64,7 @@ const RESTART_AFTER_MS = 800;
 const BUILD_TIMEOUT_MS = 5 * 60_000;
 const EXPORT_TIMEOUT_MS = 15 * 60_000;
 
+/** Constructor options of `SupportMeshClient`. */
 export interface SupportMeshClientOptions {
   create: (() => WorkerLike) | null;
   /**
@@ -71,6 +73,7 @@ export interface SupportMeshClientOptions {
    */
   mode?: 'persistent' | 'per-job';
   onProgress?: (progress: MeshProgress) => void;
+  /** Called when a unit's build of `mode` finished and no newer one of it is queued. */
   onIdle?: (mode: MeshMode, unitId: string) => void;
   /** Heavy-job admission shared with placement: a build or export waits ("Queued") while it would not fit. */
   gate?: TriangleGate;
@@ -104,6 +107,11 @@ export class SupportMeshClient {
     this.runner = new WorkerTask({ create: options.create, mode: options.mode ?? 'persistent', name: 'Support building' });
   }
 
+  /**
+   * Builds `job` for the unit. A newer build of the same unit and mode replaces a queued one at
+   * once (it resolves undefined); a running one is cut short only after RESTART_AFTER_MS, since
+   * restarting the worker throws away its caches.
+   */
   build(unitId: string, job: SupportJob, label: JobLabel): Promise<GeneratedSupportMesh | undefined> {
     const key = `${unitId}|${job.mode}`;
     const queued = this.queue.findIndex((pending) => pending.key === key);
@@ -272,6 +280,8 @@ export class SupportMeshClient {
   /** A build's result is delivered only if it answers the newest request of its unit and mode. */
   private current(pending: Pending, result: MeshTaskResult): boolean {
     if (!pending.build || result.kind !== 'mesh') return true;
+    // Two checks: the mesh echoes this request's revision (not an older reply), and no newer request
+    // of the same key was made while it ran.
     return result.mesh.revision === pending.revision && this.latest.get(pending.key) === pending.revision;
   }
 

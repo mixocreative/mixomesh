@@ -1,5 +1,6 @@
 /** The label embossed on a dental aligner's raft (Step 3): short, printable, sortable. */
 export const DENTAL_LABEL_MAX = 8;
+/** The label used when the field is left empty. */
 export const DEFAULT_DENTAL_LABEL = 'X';
 
 /**
