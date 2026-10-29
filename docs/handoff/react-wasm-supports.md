@@ -37,6 +37,8 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | PE.4 | todo | | |
 | PE.5 | todo | | owner: mixosupports switches this mission |
 | PE.6 | todo | | owner: rename to mixoDental (not distributed) |
+| PW.1 | todo | | Cults3D web publish via relay; needs owner Cloudflare + Cults key |
+| PW.2 | todo | | installable web app, file handlers, offline |
 | P2.1 | todo | | after PE.4 |
 | P2.2 | todo | | |
 | P3.1 | todo | | |

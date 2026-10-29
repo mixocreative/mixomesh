@@ -108,7 +108,9 @@ Architecture rules:
   interface (screen point → ray, world point → screen, pick through the engine session, viewport
   size/DPR, pointer records); all drawing (rings, ghost tips, overlays, highlights) stays in the app.
   Enforced by lint `no-restricted-imports` and a test (PE.2).
-- D23. mixomesh keeps its desktop build (owner 2026-10-29): one codebase, the web build on GitHub Pages plus the
+- D23. Web first (owner 2026-10-29): the web app on GitHub Pages is the primary product; every feature is
+  built and verified on the web first (dev server + production build smokes). mixomesh keeps its desktop build as
+  a secondary target: one codebase, the web build plus the
   Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
   publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
   is removed for being desktop-only. mixoDental is web-only (Vite, no Electron) and stays web-only.
@@ -290,6 +292,25 @@ Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geocore, 
 `engine_version`, and is re-vendored into both apps in the same task (D11); they therefore depend
 on PE.5.
 
+### PW Web parity (owner 2026-10-29: web is priority over desktop)
+
+- **PW.1** `[mixomesh]` Cults3D publishing from the web app. Measured 2026-10-29: Cults3D GraphQL
+  sends no CORS headers (preflight `OPTIONS /graphql` → 404, POST → no `Access-Control-Allow-Origin`),
+  so a page cannot call it directly. Add a small relay (Cloudflare Worker, owner's account, free tier)
+  that forwards only to `https://cults3d.com/graphql` (and, if the presigned S3 upload also lacks CORS,
+  streams the file upload), allows only the Pages origin, never stores or logs the API key, and has a
+  request-size limit. The web Publish tab uses the relay; desktop keeps calling Cults3D directly.
+  *Owner prerequisites: Cloudflare account access; Cults3D key for the live Secret-listing test
+  (as PB.11).* *Depends: P4.2.* **Done when** a Secret listing is published from the Pages build
+  through the relay, the relay rejects other origins and other targets (tests), and the desktop path
+  is unchanged.
+- **PW.2** `[mixomesh]` Installable web app: web app manifest + service worker (offline after first
+  visit, versioned cache busted per deploy), `file_handlers` for `.stl`, `.3mf`, `.obj`, `.glb`,
+  `.mixo` (Chrome/Edge), launch queue opens the files like `--open` does on desktop; CSP unchanged
+  except what the worker needs. *Depends: P0.1.* **Done when** a Playwright run installs-equivalent
+  (manifest + SW registered), reloads offline and opens a file via the launch queue; Lighthouse PWA
+  checks pass; Electron build unaffected.
+- Desktop-only by nature (stays in Electron): automation API / named pipe / batch jobs / `--job`.
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
@@ -550,7 +571,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | PE.4 | haiku | vendor script flags + rename |
 | PE.3 | haiku | CI workflow from the PE.1/PE.2 scripts |
 | PE.5 | sonnet | mixosupports switch + three.js ViewportPort + its walks |
-| PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
+| PW.1 | sonnet (+ main for owner steps) | relay + web Publish path |`n| PW.2 | sonnet | manifest, SW, file handlers |`n| PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
 | P2.1 | opus | handedness spike, weld, empirical proof |
 | P2.2 | haiku | loader smokes |
 | P3.1 | opus | data model + undo |
