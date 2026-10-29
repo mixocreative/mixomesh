@@ -381,6 +381,10 @@ on PE.5.
   - Supports (example values as profile defaults): tip ball 0.65 mm on a frustum (base 1.1 mm, 0.55 mm tall),
     tip pitch ≈ 1.5 mm, pillars 1.1 mm with lattice bracing, raft two layers (0.5 + 1.0 mm), lift 3.5 mm.
     Every pillar reaches the raft or the model (owner: the example's floating pillars were a mistake).
+  Batch type selection (owner 2026-10-30): run-batch-review.bat asks once per run Aligner/Retainer or Denture?`n  (one key press; drag-and-drop and double-click alike); the whole run uses that profile; summary.json + viewer show the
+  profile per case. Shape check only VERIFIES: a file that does not look like the chosen type gets needs-a-look
+  ("looks like a denture" / "looks like an aligner"), never a silent switch. Modular (D26): profile selection and
+  the shape check are their own units.
   *Depends: PD.5 (shares dental orientation/region code).* **Done when** the owner's denture scans in
   case-denture build in batch review (owner reviews in the viewer), the example's tip regions match its -sup
   (leg ends + bars, ±), aligner results unchanged, tests green; compare to the -sup files (owner-authorised).
