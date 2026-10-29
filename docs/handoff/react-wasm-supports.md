@@ -1,0 +1,107 @@
+# Ledger: React UI, WASM geometry, Support Mode
+
+Plan: `docs/plans/2026-10-29-react-wasm-supports.md` (rev 2, reviewed by Fable + egm design /
+readiness / zoom-out). Replaces `docs/handoff/support-port.md` (A1 done = engine 9 vendored,
+commit bb55c8e). Only the main session writes this file (D3).
+
+## Resume
+
+1. Read the plan section 0 (directives) and this ledger.
+2. Find the first row that is not `done`; its "next" column is the exact next step.
+3. Refresh the cross-repo graph (D4), then dispatch the worker named in plan section 4.
+
+## Baselines
+
+(P0.3 fills in gizmoDragFrameMs / orbitFrameMs, median of 5)
+
+## Tasks
+
+| Task | Status | Commit | Verified / next |
+|---|---|---|---|
+| P0.0 | done 2026-10-29 | (this commit) | ledger created from plan rev 2 |
+| P0.1 | todo | | |
+| P0.2 | todo | | |
+| P0.3 | todo | | |
+| P0.4a | todo | | |
+| P0.4b | todo | | |
+| P0.5 | todo | | |
+| P0.6 | todo | | |
+| P1.1 | todo | | |
+| P1.2 | todo | | |
+| P2.1 | todo | | |
+| P2.2 | todo | | |
+| P3.1 | todo | | |
+| P3.2 | todo | | |
+| P3.3 | todo | | |
+| P3.4 | todo | | |
+| P3.5 | todo | | |
+| P3.6 | todo | | |
+| P4.1 | todo | | |
+| P4.2 | todo | | |
+| P4.3 | todo | | |
+| P5.1 | todo | | |
+| P5.2 | todo | | |
+| P5.3 | todo | | |
+| P5.4 | todo | | |
+| P5.5 | todo | | |
+| P5.6 | todo | | |
+| P5.7 | todo | | |
+| P5.8 | todo | | |
+| P5.9 | todo | | |
+| P5.10 | todo | | |
+| P5.11 | todo | | |
+| P5.12 | todo | | |
+| P5.13 | todo | | |
+| P6.1 | todo | | |
+| P6.2 | todo | | |
+| P7.last | todo | | |
+| P8.1 | todo | | |
+| P8.2 | todo | | |
+| P8.3 | todo | | |
+| P8.4 | todo | | |
+| P9.1 | todo | | |
+| P9.2 | todo | | |
+| P9.3 | todo | | |
+| P7 Toast | todo | | |
+| P7 Modal | todo | | |
+| P7 ProgressOverlay | todo | | |
+| P7 JobActivity | todo | | |
+| P7 BootBanner | todo | | |
+| P7 StatusBar | todo | | |
+| P7 ViewportEmptyState | todo | | |
+| P7 ViewportToggles | todo | | |
+| P7 ViewportToolbar | todo | | |
+| P7 NavCube | todo | | |
+| P7 MeshStats | todo | | |
+| P7 LocaleSwitcher | todo | | |
+| P7 ScopeBreadcrumb | todo | | |
+| P7 CursorPanel | todo | | |
+| P7 ContextMenu | todo | | |
+| P7 ProjectMenu | todo | | |
+| P7 SourcesModal | todo | | |
+| P7 ImportError | todo | | |
+| P7 Onboarding | todo | | |
+| P7 RepairFeedback | todo | | |
+| P7 CopyPaste | todo | | |
+| P7 FindMoved | todo | | |
+| P7 ViewportDrop | todo | | |
+| P7 SliceConnectorSession | todo | | |
+| P7 ViewerMode | todo | | |
+| P7 Outliner | todo | | |
+| P7 AssetPanel | todo | | |
+| P7 ShaderPanel | todo | | |
+| P7 ScenePanel | todo | | |
+| P7 RefinementSection | todo | | |
+| P7 ReadinessStrip | todo | | |
+| P7 PrintSizes | todo | | |
+| P7 PrinterTab | todo | | |
+| P7 ExportTab | todo | | |
+| P7 CostBlock | todo | | |
+| P7 PublishModel | todo | | |
+| P7 PublishTab | todo | | |
+| P7 PrintPanel | todo | | |
+| P7 PropertiesPanel | todo | | |
+| P7 Workspace | todo | | |
+| P7 PanelSheets | todo | | |
+| P7 RenderFrame | todo | | |
+| P7 AppShell | todo | | |

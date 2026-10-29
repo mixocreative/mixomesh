@@ -1,3 +1,5 @@
+> **Superseded 2026-10-29** by `docs/handoff/react-wasm-supports.md`. Mapping: A2→P1, A3→P2, A4/A5→P3/P4, A5b→P5, A6→P4.1, A7→P8.
+
 # Support generation port: execution ledger
 
 Spec: `docs/support-generation-port.md` (sections 2b inventory, 8 order). Update this file at every step.
@@ -34,3 +36,4 @@ mixomesh uses `node --test`, so convert or add a runner: decide in the spec).
   mixomesh's own graph refreshes itself on commit (graphify git hooks); `.graphifyignore` keeps vendored
   minified code out.
 - Paused run 2 leftovers (L2-03 etc.) are separate: `docs/handoff/2026-10-22-autonomous-run-2.md`.
+
