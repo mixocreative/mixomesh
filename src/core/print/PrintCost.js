@@ -20,7 +20,7 @@ import { withRestTransform } from '../scene/ImportBounce.js';
 import { positionsToPrintSpace, printIndices, signedVolume, toPrintSpace } from './PrintSpace.js';
 import { REPAIR_TRIANGLE_CAP } from '../repair/MeshRepair.js';
 import { caps } from '../storage/capabilities.js';
-import { supportMeshFor } from '../scene/SupportMeshSource.js';
+import { supportFiguresFor } from '../scene/SupportMeshSource.js';
 import { hasBuiltSupports } from './ExportContext.js';
 
 const BABYLON = window.BABYLON;
@@ -151,28 +151,31 @@ export function unitBoxVolumesMM3(ctx) {
 }
 
 /**
- * Support volume per object that an export of this ctx would write (P4.3). Only objects whose
- * `includeSupports` is `printable` or `supportsOnly` count; `none` yields an empty map. A built
- * object whose supports are stale, or whose cached mesh is missing for its current revision, is
- * reported `stale: true` with zero volume: it is left out of the quote, never quoted from a guess.
- * The support mesh is in engine mm (mm-physical: supports are never scaled with the model), so its
- * volume goes through the same signed-volume path as the model, without the ratio or pivot maths.
+ * Support volume per object that an export of this ctx would write (P4.3, P4.3b). Only objects whose
+ * `includeSupports` is `printable` or `supportsOnly` count; `none` yields an empty map. The volume is
+ * the EXPORT build's (engine mode 1, measured in the worker and cached per object revision), never the
+ * drawn preview mesh: tips only or a lighter preview would quote far too little. A built object whose
+ * supports are stale, or whose export build cannot be made, is `stale: true` with zero volume: left
+ * out of the quote, never quoted from a guess. One whose figures are not measured yet is
+ * `pending: true` (the caller asks for them via `requestSupportFigures`). The figures are in engine mm
+ * (mm-physical: supports are never scaled with the model), so no ratio or pivot maths.
  *
  * @param {import('./ExportContext.js').ExportContext} ctx
- * @returns {Map<string, {volumeMM3:number, triangles:number, stale:boolean}>}
+ * @returns {Map<string, {volumeMM3:number, triangles:number, stale:boolean, pending:boolean}>}
  */
 export function supportVolumesMM3(ctx) {
   const out = new Map();
   if (ctx?.includeSupports !== 'printable' && ctx?.includeSupports !== 'supportsOnly') return out;
   for (const unit of ctx.units ?? []) {
     if (!hasBuiltSupports(unit.obj)) continue;
-    const mesh = unit.obj.supports.stale ? null : supportMeshFor(unit.logicalId, unit.obj.supports.revision);
-    if (!mesh?.indices?.length) {
-      out.set(unit.logicalId, { volumeMM3: 0, triangles: 0, stale: true });
+    if (unit.obj.supports.stale) {
+      out.set(unit.logicalId, { volumeMM3: 0, triangles: 0, stale: true, pending: false });
       continue;
     }
-    const vol = signedVolume(positionsToPrintSpace(mesh.positions), mesh.indices);
-    out.set(unit.logicalId, { volumeMM3: Math.abs(vol), triangles: mesh.indices.length / 3, stale: false });
+    const f = supportFiguresFor(unit.logicalId, unit.obj.supports.revision, 1);
+    if (!f) out.set(unit.logicalId, { volumeMM3: 0, triangles: 0, stale: false, pending: true });
+    else if (f.failed) out.set(unit.logicalId, { volumeMM3: 0, triangles: 0, stale: true, pending: false });
+    else out.set(unit.logicalId, { volumeMM3: f.volumeMM3, triangles: f.triangles, stale: false, pending: false });
   }
   return out;
 }
@@ -309,7 +312,11 @@ export function quote(ctx, s, material, geometry = null) {
   const vols = boxMode ? (geometry?.volsBox ?? unitBoxVolumesMM3(ctx)) : (geometry?.vols ?? unitVolumesMM3(ctx));
   const pairs = geometry?.pairs ?? overlappingPairs(ctx);
   const supports = geometry?.supports ?? supportVolumesMM3(ctx);
-  const volumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
+  const modelVolumeCM3 = [...vols.values()].reduce((a, v) => a + v.volumeMM3, 0) / 1000;
+  // P4.3b: 'supportsOnly' writes no model, so the quote costs the supports alone and the model line is
+  // reported excluded (volume/weight/cost 0), never quoted.
+  const modelExcluded = ctx.includeSupports === 'supportsOnly';
+  const volumeCM3 = modelExcluded ? 0 : modelVolumeCM3;
 
   const density = material?.densityGcm3 || null;
   const price = s?.pricePerGram || material?.pricePerGram || 0;
@@ -319,17 +326,20 @@ export function quote(ctx, s, material, geometry = null) {
 
   // P4.3: fresh support meshes that the export writes replace the support-%
   // estimate with their measured volume. Stale ones are left out (and flagged).
+  // P4.3b: a support whose export-build figures are still being measured is `pending`; while any is,
+  // the figure is the support-% estimate (flagged `supportsPending`), never the preview volume.
   const supportList = [...supports.values()];
-  const counted = supportList.filter(v => !v.stale);
-  const supportsStale = supportList.length - counted.length;
-  const actualSupports = counted.length > 0;
+  const counted = supportList.filter(v => !v.stale && !v.pending);
+  const supportsStale = supportList.filter(v => v.stale).length;
+  const supportsPending = supportList.filter(v => v.pending).length;
+  const actualSupports = counted.length > 0 && supportsPending === 0;
   const supportVolumeCM3 = actualSupports ? counted.reduce((a, v) => a + v.volumeMM3, 0) / 1000 : null;
-  const supportTriangles = counted.reduce((a, v) => a + v.triangles, 0);
+  const supportTriangles = actualSupports ? counted.reduce((a, v) => a + v.triangles, 0) : 0;
 
   const grams = density ? volumeCM3 * density : null;
   const supportGrams = actualSupports
     ? (sDensity ? supportVolumeCM3 * sDensity : null)
-    : (grams != null && sDensity ? volumeCM3 * (pct / 100) * sDensity : null);
+    : (density && sDensity ? modelVolumeCM3 * (pct / 100) * sDensity : null);
 
   const reasons = [];
   const open = [...vols.values()].filter(v => !v.watertight).length;
@@ -337,10 +347,13 @@ export function quote(ctx, s, material, geometry = null) {
   // NOT evidence of watertightness — say so rather than quoting a number as
   // if it were exact (CIA F5 / I11).
   const unchecked = [...vols.values()].filter(v => !v.validated).length;
-  if (open) reasons.push(`notWatertight:${open}`);
-  if (unchecked) reasons.push(`notValidated:${unchecked}`);
-  if (pairs.length) reasons.push(`overlap:${pairs.length}`);
+  if (!modelExcluded) {
+    if (open) reasons.push(`notWatertight:${open}`);
+    if (unchecked) reasons.push(`notValidated:${unchecked}`);
+    if (pairs.length) reasons.push(`overlap:${pairs.length}`);
+  }
   if (supportsStale) reasons.push(`supportsStale:${supportsStale}`);
+  if (supportsPending) reasons.push(`supportsPending:${supportsPending}`);
   // Supports are sized as shown; a print at another ratio regenerates them, so the measured volume is not that size's volume.
   if (actualSupports && Math.abs((ctx.ratioFactor ?? 1) - 1) > 1e-9) reasons.push('supportsAsShown');
   if (!density) reasons.push('noDensity');
@@ -355,6 +368,8 @@ export function quote(ctx, s, material, geometry = null) {
 
   return {
     volumeMode: boxMode ? 'bbox' : 'mesh',
+    modelExcluded,
+    supportsEstimated: !actualSupports,
     volumeCM3,
     grams,
     materialCost,
@@ -366,7 +381,7 @@ export function quote(ctx, s, material, geometry = null) {
     total,
     currency,
     approximate: reasons.length > 0,
-    overlaps: pairs.length,
+    overlaps: modelExcluded ? 0 : pairs.length,
     reasons,
   };
 }

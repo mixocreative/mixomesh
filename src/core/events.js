@@ -95,6 +95,10 @@ export const EVENTS = {
   // of a lead's `object.supports` (an edit, an undo, or a stale flag change)
   SUPPORTS_CHANGED:        'supports:changed',
 
+  // The support caches (generated mesh, export-build figures) changed (P4.3b): { objectId, kind }.
+  // Fires AFTER the cache write, so a reader (HUD, cost card) that recomputes on it sees the new value.
+  SUPPORTS_CACHE_CHANGED:  'supports:cacheChanged',
+
   // Support Mode entered / left (P3.2): { active, objectIds }
   SUPPORT_MODE_CHANGED:    'supports:modeChanged',
 

@@ -20,7 +20,8 @@ installEnv();
 const { StateManager } = await import('../src/core/StateManager.js');
 const { unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, quote, totalTriangles, costTriangleCap, supportVolumesMM3 } =
   await import('../src/core/print/PrintCost.js');
-const { setSupportMeshLookup } = await import('../src/core/scene/SupportMeshSource.js');
+const { setSupportMeshLookup, setSupportFiguresLookup } = await import('../src/core/scene/SupportMeshSource.js');
+const { signedVolume } = await import('../src/core/print/PrintSpace.js');
 const { countSceneSupportTriangles } = await import('../src/core/scene/TriangleCount.js');
 const { setCapabilities } = await import('../src/core/storage/capabilities.js');
 
@@ -315,6 +316,20 @@ function lookupFor(entries) {
     return hit && hit.revision === revision ? hit.mesh : undefined;
   };
 }
+// Export-build figures of the same entries (what the worker measures and the cache holds): per object, at the revision.
+function figuresFor(entries) {
+  return (id, revision) => {
+    const hit = entries[id];
+    if (!hit || hit.revision !== revision) return undefined;
+    if (hit.failed) return { failed: true };
+    return { volumeMM3: Math.abs(signedVolume(hit.mesh.positions, hit.mesh.indices)), triangles: hit.mesh.indices.length / 3 };
+  };
+}
+/** Install (or with null clear) both the preview-mesh cache and the export-figures cache stand-ins. */
+function useSupports(entries) {
+  setSupportMeshLookup(entries ? lookupFor(entries) : () => undefined);
+  setSupportFiguresLookup(entries ? figuresFor(entries) : () => undefined);
+}
 const supportMesh = { positions: new Float32Array(SUPPORT_BOX.pos), indices: Uint32Array.from(SUPPORT_BOX.idx) };
 const builtSupports = (extra = {}) => ({ supports: { sourceHash: 'h', pose: {}, revision: 3, stale: false, ...extra } });
 
@@ -330,7 +345,7 @@ const SETTINGS = { pricePerGram: 0.5, supportPricePerGram: 0, supportPercent: 0,
 const fresh = () => setValidation({ a: { results: [], validatedAt: Date.now(), stale: false } });
 
 await test('P4.3 (a): cost total = model + measured support volume x price (cube + known supports)', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
   fresh();
   const q = quote(cubeWithSupports(), SETTINGS, MATERIAL);
   assert.ok(Math.abs(q.supportVolumeCM3 - 0.04) < 1e-9, `support volume 0.04 cm³, got ${q.supportVolumeCM3}`);
@@ -340,39 +355,39 @@ await test('P4.3 (a): cost total = model + measured support volume x price (cube
   assert.ok(Math.abs(q.supportCost - 0.02) < 1e-9, `support cost 0.02, got ${q.supportCost}`);
   assert.ok(Math.abs(q.total - 0.57) < 1e-9, `total 0.57, got ${q.total}`);
   assert.ok(!q.reasons.some(r => /support/.test(r)), `fresh supports carry no reason, got ${q.reasons.join(',')}`);
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
 await test('P4.3 (a2): a measured support volume replaces the support-% estimate (no double count)', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
   fresh();
   const q = quote(cubeWithSupports(), { ...SETTINGS, supportPercent: 50 }, MATERIAL);
   assert.ok(Math.abs(q.supportCost - 0.02) < 1e-9, `supports measured, so 50% is ignored; got ${q.supportCost}`);
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
 await test('P4.3 (a3): a ratio other than as shown is flagged approximate (supports are sized as shown)', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
   fresh();
   const q = quote(cubeWithSupports({ ratio: 2 }), SETTINGS, MATERIAL);
   assert.ok(q.reasons.includes('supportsAsShown'), `got ${q.reasons.join(',')}`);
   assert.equal(q.approximate, true);
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
 await test('P4.3 (b): includeSupports = none leaves supports out (no Supports line, model-only total)', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
   fresh();
   const ctx = cubeWithSupports({ includeSupports: 'none' });
   assert.equal(supportVolumesMM3(ctx).size, 0);
   const q = quote(ctx, SETTINGS, MATERIAL);
   assert.equal(q.supportVolumeCM3, null, 'no Supports line when none is exported');
   assert.ok(Math.abs(q.total - 0.55) < 1e-9, `total is the model only, 0.55; got ${q.total}`);
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
 await test('P4.3 (b2): a STALE support is excluded and flagged, never quoted', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
   fresh();
   const q = quote(cubeWithSupports({ obj: builtSupports({ stale: true }) }), SETTINGS, MATERIAL);
   assert.equal(q.supportVolumeCM3, null);
@@ -380,16 +395,73 @@ await test('P4.3 (b2): a STALE support is excluded and flagged, never quoted', (
   assert.ok(Math.abs(q.total - 0.55) < 1e-9, `total is the model only, 0.55; got ${q.total}`);
   assert.ok(q.reasons.includes('supportsStale:1'), `got ${q.reasons.join(',')}`);
   assert.equal(q.approximate, true);
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
-await test('P4.3 (b3): a mesh cached for another revision (or none) is treated as stale', () => {
-  setSupportMeshLookup(lookupFor({ a: { revision: 2, mesh: supportMesh } }));
+await test('P4.3 (b3): figures cached for another revision (or none) are PENDING, never stale or guessed', () => {
+  useSupports({ a: { revision: 2, mesh: supportMesh } });
+  fresh();
+  const ctx = cubeWithSupports();
+  assert.equal(supportVolumesMM3(ctx).get('a').pending, true);
+  const q = quote(ctx, SETTINGS, MATERIAL);
+  assert.equal(q.supportVolumeCM3, null, 'record at revision 3, figures cached at 2: not quoted as measured');
+  assert.ok(q.reasons.includes('supportsPending:1'), `got ${q.reasons.join(',')}`);
+  useSupports(null);
+});
+
+await test('P4.3b (1): supportsOnly quotes the supports alone; the model line is excluded', () => {
+  useSupports({ a: { revision: 3, mesh: supportMesh } });
+  fresh();
+  const q = quote(cubeWithSupports({ includeSupports: 'supportsOnly' }), SETTINGS, MATERIAL);
+  assert.equal(q.modelExcluded, true);
+  assert.equal(q.volumeCM3, 0, 'no model volume');
+  assert.equal(q.grams, 0);
+  assert.equal(q.materialCost, 0);
+  assert.ok(Math.abs(q.supportCost - 0.02) < 1e-9, `supports 0.02, got ${q.supportCost}`);
+  assert.ok(Math.abs(q.total - 0.02) < 1e-9, `total = supports only (0.02), got ${q.total}`);
+  assert.ok(!q.reasons.some(r => /^(notWatertight|notValidated|overlap)/.test(r)), `model reasons are moot, got ${q.reasons.join(',')}`);
+  // printable still carries the model.
+  const both = quote(cubeWithSupports({ includeSupports: 'printable' }), SETTINGS, MATERIAL);
+  assert.equal(both.modelExcluded, false);
+  assert.ok(Math.abs(both.total - 0.57) < 1e-9);
+  useSupports(null);
+});
+
+await test('P4.3b (3a): the quote reads the EXPORT build figures, never the preview mesh volume', () => {
+  // The drawn (preview) mesh is 0.04 cm³ (tips only would be less); the export build measured 0.2 cm³.
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  setSupportFiguresLookup(() => ({ volumeMM3: 200, triangles: 24 }));
   fresh();
   const q = quote(cubeWithSupports(), SETTINGS, MATERIAL);
-  assert.equal(q.supportVolumeCM3, null, 'record at revision 3, mesh cached at 2: not quoted');
+  assert.ok(Math.abs(q.supportVolumeCM3 - 0.2) < 1e-9, `export volume 0.2 cm³, got ${q.supportVolumeCM3}`);
+  assert.equal(q.supportTriangles, 24);
+  useSupports(null);
+});
+
+await test('P4.3b (3b): not measured yet = pending: labelled support-% estimate, never the preview volume', () => {
+  // A preview mesh is cached, the export figures are not: the quote must not fall back to the preview.
+  setSupportMeshLookup(lookupFor({ a: { revision: 3, mesh: supportMesh } }));
+  setSupportFiguresLookup(() => undefined);
+  fresh();
+  const ctx = cubeWithSupports();
+  assert.deepEqual(supportVolumesMM3(ctx).get('a'), { volumeMM3: 0, triangles: 0, stale: false, pending: true });
+  const q = quote(ctx, { ...SETTINGS, supportPercent: 50 }, MATERIAL);
+  assert.equal(q.supportVolumeCM3, null, 'no measured volume');
+  assert.equal(q.supportTriangles, 0);
+  assert.ok(q.reasons.includes('supportsPending:1'), `got ${q.reasons.join(',')}`);
+  assert.equal(q.approximate, true);
+  // Estimate: 1.0 cm³ x 50 % x 1.0 g/cm³ = 0.5 g x 0.5 = 0.25 (the support-% path).
+  assert.ok(Math.abs(q.supportCost - 0.25) < 1e-9, `estimate 0.25, got ${q.supportCost}`);
+  useSupports(null);
+});
+
+await test('P4.3b (3c): an export build that cannot be made is left out as stale, not pending forever', () => {
+  useSupports({ a: { revision: 3, mesh: supportMesh, failed: true } });
+  fresh();
+  const q = quote(cubeWithSupports(), SETTINGS, MATERIAL);
   assert.ok(q.reasons.includes('supportsStale:1'), `got ${q.reasons.join(',')}`);
-  setSupportMeshLookup(() => undefined);
+  assert.ok(!q.reasons.some(r => r.startsWith('supportsPending')));
+  useSupports(null);
 });
 
 await test('P4.3 (c): support triangles are counted apart from the model, fresh objects only', () => {
@@ -400,7 +472,7 @@ await test('P4.3 (c): support triangles are counted apart from the model, fresh 
     c: {},
   };
   assert.equal(countSceneSupportTriangles(objects), SUPPORT_TRIS, 'only the fresh support mesh counts');
-  setSupportMeshLookup(() => undefined);
+  useSupports(null);
 });
 
 console.log('\n' + out.join('\n'));

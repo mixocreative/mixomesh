@@ -70,6 +70,8 @@ const GEOMETRY_EVENTS = [
   EVENTS.REFINEMENT_STALE,
   // P4.3: support faces are shown beside the model count (their cache changes with the record).
   EVENTS.SUPPORTS_CHANGED,
+  // ...and the mesh lands in the cache AFTER SUPPORTS_CHANGED (the job is async), so recompute on its own event.
+  EVENTS.SUPPORTS_CACHE_CHANGED,
 ];
 
 let _cachedSceneTris = 0;

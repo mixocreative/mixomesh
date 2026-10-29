@@ -38,7 +38,9 @@ import { supportUi, type PanelProblem } from '../../panels/supports/supportUi';
 import { supportMode } from '../SupportMode';
 import { emptySupports, isBuilt, readStamps, samePose, type ObjectSupports } from '../model';
 import { readSupports, supportsOwner } from '../store';
-import { cachePlacement, cacheSupportMesh, cachedPlacement, dropSupportMesh } from '../supportCache';
+import { cachePlacement, cacheSupportFigures, cacheSupportMesh, cachedPlacement, cachedSupportFigures, dropSupportMesh } from '../supportCache';
+import { setSupportFiguresRequester } from '../../core/scene/SupportMeshSource.js';
+import { signedVolume } from '../../core/print/PrintSpace.js';
 import { forgetObjectModel, leadPosition, objectModelStaged, type ObjectModel } from '../objectModel';
 import { positionsFromEngine, type Vec3 } from '../frame';
 import { anchorOffset, supportToBabylon } from '../BabylonViewportPort';
@@ -370,6 +372,26 @@ export const exportStats: { last: Record<string, { scale: number; contactIds: st
  * none (every support removed).
  */
 export async function buildSupportsForExport(id: string, scale = 1): Promise<SupportExportBuild | null> {
+  const made = await exportBuild(id, scale, 'export');
+  if (!made) return null;
+  const { owner, om, built } = made;
+  const offset = anchorOffset(om.anchor, withRestTransform(() => leadPosition(owner)));
+  const contactIds = [...new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : [])))];
+  exportStats.last[owner] = { scale, contactIds, tris: built.indices.length / 3 };
+  return {
+    positions: positionsFromEngine(built.positions),
+    indices: Uint32Array.from(built.indices),
+    origin: supportToBabylon([0, 0, 0], om.anchor, offset),
+    contactIds,
+  };
+}
+
+/**
+ * The export-mode build (engine mode 1) of one object's supports, raw (engine frame). `tag` names the
+ * worker unit when it must not be the preview's own: the cost measurement ('measure') never shares a
+ * unit with the preview build or an export, so one cannot replace the other in the mesh worker.
+ */
+async function exportBuild(id: string, scale: number, tag: 'export' | 'measure'): Promise<{ owner: string; om: ObjectModel; built: GeneratedSupportMesh } | null> {
   const owner = supportsOwner(id);
   const record = readSupports(owner);
   if (!record || !isBuilt(record)) return null;
@@ -385,7 +407,7 @@ export async function buildSupportsForExport(id: string, scale = 1): Promise<Sup
   if (!points) {
     // A loaded project before Support Mode was opened: the placement is derived data (same geometry
     // and settings give the same contacts), rebuilt here exactly as the restoring path does.
-    const placed = await analyse(`${owner}|export`, { kind: 'place', job: { mesh: om.model.local, orientation: ORIGIN, settings: toPlacementSettings(record.settings) } });
+    const placed = await analyse(`${owner}|${tag}`, { kind: 'place', job: { mesh: om.model.local, orientation: ORIGIN, settings: toPlacementSettings(record.settings) } });
     if (!placed || placed.kind !== 'placed') throw new Error(`Support placement for the export of "${owner}" did not finish`);
     points = placed.result.points;
     cachePlacement(owner, points);
@@ -393,19 +415,59 @@ export async function buildSupportsForExport(id: string, scale = 1): Promise<Sup
   const inputs = { ...contactInputs(owner, record), points };
   const sized = scale === 1 ? { model: om.model, inputs } : scaledJobInputs(om.model, inputs, scale);
   // As shown, the preview's own model is reused (the worker keeps it); another size is a unit of its own, freed after.
-  const unitId = scale === 1 ? owner : `${owner}#export`;
+  const unitId = scale === 1 && tag === 'export' ? owner : `${owner}#${tag}`;
   const built = await mesher().build(unitId, { ...buildJob(sized.model, record, sized.inputs), mode: 'export' }, { key: 'Support building' });
   if (unitId !== owner) mesher().forget(unitId);
   if (!built || built.indices.length === 0) return null;
-  const offset = anchorOffset(om.anchor, withRestTransform(() => leadPosition(owner)));
-  const contactIds = [...new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : [])))];
-  exportStats.last[owner] = { scale, contactIds, tris: built.indices.length / 3 };
-  return {
-    positions: positionsFromEngine(built.positions),
-    indices: Uint32Array.from(built.indices),
-    origin: supportToBabylon([0, 0, 0], om.anchor, offset),
-    contactIds,
-  };
+  return { owner, om, built };
+}
+
+// ── export-build figures for the cost quote (P4.3b) ──
+
+/**
+ * Volume and triangle count of the export-mode build of one object's supports, as the export writes
+ * them (volume is the abs signed volume of the closed mesh; engine mm = mm-physical). The mesh itself
+ * is dropped at once (D24). Null when nothing builds.
+ */
+export async function measureSupportsForExport(id: string, scale = 1): Promise<{ volumeMM3: number; triangles: number } | null> {
+  const made = await exportBuild(id, scale, 'measure');
+  if (!made) return null;
+  const { built } = made;
+  return { volumeMM3: Math.abs(signedVolume(built.positions, built.indices)), triangles: built.indices.length / 3 };
+}
+
+const measuring = new Set<string>();
+
+/**
+ * Measure the export build of `id` for its current revision and cache the figures (one entry per
+ * object). Latest wins: a revision that moved on meanwhile discards the result and measures anew.
+ * A build that cannot be made (stale supports) is cached as `failed`, never retried for that revision.
+ * No-op while a measurement of the object runs or when the figures are already cached.
+ */
+export function requestSupportFigures(id: string): void {
+  const owner = supportsOwner(id);
+  if (measuring.has(owner)) return;
+  const record = readSupports(owner);
+  if (!record || !isBuilt(record) || record.stale) return;
+  const revision = record.revision;
+  if (cachedSupportFigures(owner, revision, 1)) return;
+  measuring.add(owner);
+  void (async () => {
+    try {
+      const figures = await measureSupportsForExport(owner, 1);
+      const now = readSupports(owner);
+      if (!now || now.revision !== revision) return;   // moved on: the re-request below measures the new revision
+      cacheSupportFigures(owner, figures ? { revision, scale: 1, ...figures } : { revision, scale: 1, failed: true });
+    } catch (error) {
+      const now = readSupports(owner);
+      if (now && now.revision === revision) cacheSupportFigures(owner, { revision, scale: 1, failed: true });
+      console.warn('support figures for the cost quote failed', error);
+    } finally {
+      measuring.delete(owner);
+      const now = readSupports(owner);
+      if (now && isBuilt(now) && !now.stale && !cachedSupportFigures(owner, now.revision, 1)) requestSupportFigures(owner);
+    }
+  })();
 }
 
 // ── wiring ──
@@ -465,6 +527,7 @@ let installed = false;
 export function installLiveGeneration(): void {
   if (installed) return;
   installed = true;
+  setSupportFiguresRequester(requestSupportFigures);
   supportUi.register({ generate, cancelJob });
   subscribe(EVENTS.SUPPORTS_CHANGED, onSupportsChanged);
   // A project load / new reuses saved mesh ids with GeometryStore revisions back at 0, so the version key

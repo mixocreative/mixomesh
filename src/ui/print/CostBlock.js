@@ -13,7 +13,9 @@
  * module owns both the render and the wiring for the block.
  */
 
-import { getState, setState } from '../../core/StateManager.js';
+import { getState, setState, subscribe } from '../../core/StateManager.js';
+import { EVENTS } from '../../core/events.js';
+import { requestSupportFigures } from '../../core/scene/SupportMeshSource.js';
 import { SettingsStore } from '../../core/SettingsStore.js';
 import { PrintManager } from '../../core/PrintManager.js';
 import { quote, unitVolumesMM3, unitBoxVolumesMM3, overlappingPairs, supportVolumesMM3, totalTriangles, costTriangleCap } from '../../core/print/PrintCost.js';
@@ -80,6 +82,8 @@ function _reasonText(reason) {
   if (ov) return t('print.cost.reasonOverlap', { n: Number(ov[1]) });
   const ss = /^supportsStale:(\d+)$/.exec(reason);
   if (ss) return t('print.cost.reasonSupportsStale', { n: Number(ss[1]) });
+  const sp = /^supportsPending:(\d+)$/.exec(reason);
+  if (sp) return t('print.cost.reasonSupportsPending', { n: Number(sp[1]) });
   if (reason === 'supportsAsShown') return t('print.cost.reasonSupportsAsShown');
   if (reason === 'noPrice') return t('print.cost.reasonNoPrice');
   if (reason === 'noDensity') return t('print.cost.reasonNoDensity');
@@ -110,6 +114,8 @@ function _numberField(id, labelKey, value, fallback) {
  */
 export function renderCostBlock(container, state) {
   _invalidateGeometryCache();
+  _liveContainer = container;
+  _watchSupportCaches();
   const materials = _materials();
   const material = _material(state);
   const cost = state.cost ?? {};
@@ -317,7 +323,25 @@ function _geometryFor(ctx) {
   if (_geomCacheCtx === ctx && _geomCache) return _geomCache;
   _geomCacheCtx = ctx;
   _geomCache = { vols: unitVolumesMM3(ctx), volsBox: unitBoxVolumesMM3(ctx), pairs: overlappingPairs(ctx), supports: supportVolumesMM3(ctx) };
+  // P4.3b: the quote costs the EXPORT build of the supports, measured off the main thread. The card is
+  // visible here, so ask for every figure not measured yet; the cache event below re-renders when they land.
+  for (const [id, v] of _geomCache.supports) if (v.pending) requestSupportFigures(id);
   return _geomCache;
+}
+
+// P4.3b: the support caches write AFTER SUPPORTS_CHANGED (the job is async), so the card recomputes on
+// the cache's own event, once the figure it shows is the cache's. No polling.
+let _liveContainer = null;
+let _watching = false;
+function _watchSupportCaches() {
+  if (_watching) return;
+  _watching = true;
+  subscribe(EVENTS.SUPPORTS_CACHE_CHANGED, () => {
+    const el = _liveContainer;
+    if (!el?.isConnected) return;
+    _invalidateGeometryCache();
+    _renderResult(el, getState());
+  });
 }
 
 /**
@@ -411,15 +435,23 @@ function _renderResult(container, state, override = null) {
 
   const pctUsed = cost.supportPercent || material?.defaultSupportPercent || 0;
   const priceUsed = cost.pricePerGram || material?.pricePerGram || 0;
-  let html = row('volume', q.volumeMode === 'bbox' ? 'print.cost.rowVolumeBox' : 'print.cost.rowVolume', `${fmt(q.volumeCM3, 2)} cm\u00b3`);
-  html += row('grams', 'print.cost.rowWeight', q.grams == null ? '\u2014'
+  // P4.3b: 'supportsOnly' writes no model, so the model lines read "not exported" and cost nothing.
+  const excluded = t('print.cost.modelExcluded');
+  let html = row('volume', q.volumeMode === 'bbox' ? 'print.cost.rowVolumeBox' : 'print.cost.rowVolume',
+    q.modelExcluded ? excluded : `${fmt(q.volumeCM3, 2)} cm\u00b3`);
+  html += row('grams', 'print.cost.rowWeight', q.modelExcluded ? t('print.cost.weightSupportsOnly', { support: fmt(q.supportGrams ?? 0, 1) })
+    : q.grams == null ? '\u2014'
     : t('print.cost.weightValue', { grams: fmt(q.grams, 1), support: fmt(q.supportGrams ?? 0, 1) }));
-  html += row('material', 'print.cost.rowMaterial', q.materialCost == null ? '\u2014'
+  html += row('material', 'print.cost.rowMaterial', q.modelExcluded ? excluded : q.materialCost == null ? '\u2014'
     : t('print.cost.materialValue', { cost: money(q.materialCost), price: fmt(priceUsed, 2), currency }));
   // P4.3: measured support volume (fresh supports the export writes) is its own line; the support-%
   // estimate stays for objects without measured supports.
   if (q.supportVolumeCM3 != null) {
     html += row('supports', 'print.cost.rowSupports', `${fmt(q.supportVolumeCM3, 2)} cm\u00b3 \u00b7 ${q.supportCost == null ? '\u2014' : money(q.supportCost)}`);
+  } else if (q.reasons.some(r => r.startsWith('supportsPending:'))) {
+    // Never the preview volume: until the export build is measured, the support-% estimate, labelled as one.
+    html += row('supports', 'print.cost.rowSupports', t('print.cost.supportsCalculating',
+      { estimate: q.supportCost == null ? '\u2014' : money(q.supportCost), pct: fmt(pctUsed, 0) }));
   } else {
     html += row('support', 'print.cost.rowSupport', q.supportCost == null ? '\u2014'
       : t('print.cost.supportValue', { cost: money(q.supportCost), pct: fmt(pctUsed, 0) }));

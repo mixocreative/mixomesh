@@ -5,6 +5,9 @@
 //      the model doubles, the lift stays 5 mm (a scaled support would stand 10 mm), tips not scaled
 //   s1 stale: a rotation makes the supports stale; readiness blocks an export that carries them
 //      (issue supports-stale, the Export tab says so, the button is off), 'none' still exports
+//   c1 cost (P4.3b): with Tips only on, the quoted support volume is the EXPORT build's (equals the
+//      supportsOnly STL's volume), 'calculating' shows until it lands, supportsOnly costs supports alone,
+//      and after a regenerate the HUD support figure equals the cache with no extra event
 //   a1 API: export.run with options.includeSupports through createAppDispatcher (printable /
 //      supportsOnly / none, and an unknown value rejected)
 //   screenshots: .tmp/p42/
@@ -22,6 +25,19 @@ const check = (name, ok, detail = '') => {
 };
 const J = JSON.stringify;
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+/** Enclosed volume (mm^3) of a binary STL: abs of the summed signed tetrahedra. */
+function stlVolume(b64) {
+  const buf = Buffer.from(b64, 'base64');
+  const n = buf.readUInt32LE(80);
+  let v6 = 0;
+  for (let k = 0; k < n; k++) {
+    const f = (v, a) => buf.readFloatLE(84 + k * 50 + 12 + v * 12 + a * 4);
+    const [ax, ay, az] = [f(0, 0), f(0, 1), f(0, 2)], [bx, by, bz] = [f(1, 0), f(1, 1), f(1, 2)], [cx, cy, cz] = [f(2, 0), f(2, 1), f(2, 2)];
+    v6 += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return Math.abs(v6 / 6);
+}
 
 /** Binary STL facts: facet count and bounds (mm, print frame). */
 function stl(b64) {
@@ -96,6 +112,56 @@ try {
   const only = stl((await w(`exportStl({ includeSupports: 'supportsOnly' })`)).b64);
   check('r1 supportsOnly writes only the supports', only.facets === ex1.tris && near(only.max[2], modelOnly.min[2], 0.5) && near(only.min[2], modelOnly.min[2] - 5, 0.05),
     `facets ${only.facets}, z ${only.min[2].toFixed(2)}..${only.max[2].toFixed(2)}`);
+
+  // ───────── c1: cost quote (P4.3b) ─────────
+  await run(`(() => { window.__w.m.data.commitSetting(${J(id)}, { view: {}, selected: [] }, 'previewMode', 'ONLY_TIP'); return true; })()`);
+  check('c1 Tips only is on', (await w(`rec(${J(id)})`))?.settings?.previewMode === 'ONLY_TIP');
+  const exportVol = stlVolume((await w(`exportStl({ includeSupports: 'supportsOnly' })`)).b64);
+  // The cost card is visible on the Print > Export tab: it asks for the export-build figures itself.
+  const card = await run(`(async () => {
+    window.__w.x.ws.setWorkspace('print');
+    document.querySelector('#rp-print-body .pp-tab[data-tab="export"]')?.click();
+    const read = () => document.querySelector('#rp-print-body [data-cost="supports"]')?.textContent ?? null;
+    const first = read();
+    for (let i = 0; i < 300 && (read() === null || /calculating|計算|计算/.test(read())); i++) await new Promise(r => setTimeout(r, 100));
+    return { first, settled: read() };
+  })()`);
+  check('c1 the card shows "calculating" (never the preview volume) until the export figures land',
+    /calculating/i.test(card.first ?? '') && /cm/.test(card.settled ?? '') && !/calculating/i.test(card.settled ?? ''), JSON.stringify(card));
+  const quoted = await run(`(async () => {
+    const pc = await import('/src/core/print/PrintCost.js');
+    const ctx = window.__w.x.pm.previewExportContext();
+    const q = pc.quote(ctx, { pricePerGram: 0.5, currency: 'USD' }, { densityGcm3: 1.1, supportDensityGcm3: 1.0 });
+    const rec = window.__w.m.store.readSupports(${J(id)});
+    const prev = window.__w.m.cache.cachedSupportMesh(${J(id)}, rec.revision);
+    return { vol: q.supportVolumeCM3, tris: q.supportTriangles, pending: q.reasons.filter(r => r.startsWith('supportsPending')), previewTris: prev ? prev.indices.length / 3 : -1 };
+  })()`);
+  check('c1 with Tips only on, the quoted support volume equals the export build (supportsOnly STL volume)',
+    quoted.vol != null && Math.abs(quoted.vol * 1000 - exportVol) <= Math.max(0.5, exportVol * 0.002) && quoted.pending.length === 0,
+    `quoted ${quoted.vol != null ? (quoted.vol * 1000).toFixed(3) : null} mm3 vs export ${exportVol.toFixed(3)} mm3 (export tris ${ex1.tris}, quoted ${quoted.tris}, preview cache ${quoted.previewTris})`);
+  check('c1 the quoted triangle count is the export build count', quoted.tris === ex1.tris, `${quoted.tris} vs ${ex1.tris}`);
+  const onlyQ = await run(`(async () => {
+    const pc = await import('/src/core/print/PrintCost.js');
+    const q = pc.quote(window.__w.x.pm.previewExportContext({ includeSupports: 'supportsOnly' }), { pricePerGram: 0.5, currency: 'USD' }, { densityGcm3: 1.1, supportDensityGcm3: 1.0 });
+    return { excluded: q.modelExcluded, vol: q.volumeCM3, material: q.materialCost, support: q.supportCost, total: q.total };
+  })()`);
+  check('c1 supportsOnly total = supports only (model excluded)', onlyQ.excluded === true && onlyQ.vol === 0 && onlyQ.material === 0 && onlyQ.total != null && Math.abs(onlyQ.total - onlyQ.support) < 1e-9, JSON.stringify(onlyQ));
+  // HUD: after a regenerate the support figure equals the cache, with no event but the cache's own.
+  const rendered0 = await run(`window.__mxSupportLive.stats.rendered`);
+  await run(`(() => { window.__mxSupportLive.request(${J(id)}, false, true); return true; })()`);
+  await waitFor(() => run(`window.__mxSupportLive.stats.rendered > ${rendered0}`), 90000, 'regenerate');
+  await settle(id);
+  const hud = await run(`(async () => {
+    await new Promise(r => setTimeout(r, 250));
+    const { formatTriCount } = await import('/src/core/scene/TriangleCount.js');
+    const rec = window.__w.m.store.readSupports(${J(id)});
+    const cached = window.__w.m.cache.cachedSupportMesh(${J(id)}, rec.revision);
+    const text = document.getElementById('sb-center')?.textContent ?? '';
+    const m = /supports ([0-9.]+[kM]?)/.exec(text);
+    return { text, shown: m ? m[1] : null, expected: cached ? formatTriCount(cached.indices.length / 3) : null };
+  })()`);
+  check('c1 the HUD support figure equals the cache after a regenerate', hud.expected != null && hud.shown === hud.expected, JSON.stringify(hud));
+  await run(`(() => { window.__w.m.data.commitSetting(${J(id)}, { view: {}, selected: [] }, 'previewMode', 'FULL'); return true; })()`);
 
   // ───────── r2: ratio (print size 2x) ─────────
   await w(`setTargets([{ kind: 'factor', value: 2 }])`);

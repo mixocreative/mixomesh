@@ -7,9 +7,14 @@
  */
 import type { SupportPoint } from '@mixo-geocore/host/core/analysis/types';
 import type { GeneratedSupportMesh } from '@mixo-geocore/host/core/supports/mesh';
-import { setSupportMeshLookup } from '../core/scene/SupportMeshSource.js';
+import { setSupportFiguresLookup, setSupportMeshLookup } from '../core/scene/SupportMeshSource.js';
+import { dispatch } from '../core/StateManager.js';
+import { EVENTS } from '../core/events.js';
 
 const meshes = new Map<string, { revision: number; mesh: GeneratedSupportMesh }>();
+/** Export-build figures per object (P4.3b, D24: volume and triangle count only, never the mesh). */
+export type SupportFigures = { revision: number; scale: number } & ({ volumeMM3: number; triangles: number; failed?: never } | { failed: true });
+const figures = new Map<string, SupportFigures>();
 const placements = new Map<string, readonly SupportPoint[]>();
 
 export function cachedSupportMesh(objectId: string, revision: number): GeneratedSupportMesh | undefined {
@@ -19,11 +24,24 @@ export function cachedSupportMesh(objectId: string, revision: number): Generated
 
 export function cacheSupportMesh(objectId: string, revision: number, mesh: GeneratedSupportMesh): void {
   meshes.set(objectId, { revision, mesh });
+  // After the write: a reader that recomputes on this event (HUD, cost card) sees the new mesh.
+  dispatch(EVENTS.SUPPORTS_CACHE_CHANGED, { objectId, kind: 'mesh' });
 }
 
 /** Forget the support mesh of one object (nothing is built for it now), keeping its placement. */
 export function dropSupportMesh(objectId: string): void {
-  meshes.delete(objectId);
+  const had = meshes.delete(objectId);
+  if (had) dispatch(EVENTS.SUPPORTS_CACHE_CHANGED, { objectId, kind: 'mesh' });
+}
+
+export function cachedSupportFigures(objectId: string, revision: number, scale = 1): SupportFigures | undefined {
+  const hit = figures.get(objectId);
+  return hit && hit.revision === revision && hit.scale === scale ? hit : undefined;
+}
+
+export function cacheSupportFigures(objectId: string, entry: SupportFigures): void {
+  figures.set(objectId, entry);
+  dispatch(EVENTS.SUPPORTS_CACHE_CHANGED, { objectId, kind: 'figures' });
 }
 
 export function cachedPlacement(objectId: string): readonly SupportPoint[] | undefined {
@@ -39,12 +57,15 @@ export function cachePlacement(objectId: string, points: readonly SupportPoint[]
 export function forgetSupportCaches(objectId?: string): void {
   if (objectId === undefined) {
     meshes.clear();
+    figures.clear();
     placements.clear();
     return;
   }
   meshes.delete(objectId);
+  figures.delete(objectId);
   placements.delete(objectId);
 }
 
 // Let the JS side (print cost, triangle budget) read these meshes without importing TypeScript.
 setSupportMeshLookup(cachedSupportMesh);
+setSupportFiguresLookup(cachedSupportFigures);
