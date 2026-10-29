@@ -54,6 +54,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P4.2 | todo | | |
 | P4.3 | todo | | |
 | P5.1 | todo | | |
+| P5.2a | done | geocore 091d3fb + 96b0a81, mixoDental 8de9709, mixomesh 80b95cf + smoke | ENGINE 11: generic_policy(..., zones, repair_budget) (default 0 = unchanged), host genericPolicy(inputs, settings, repairBudget=0), SupportJob.repairBudget, non-dental mesh.fallbacks e.g. ['brace-pruned']. Rust test: budget 3 prunes only crossing segments + reports. geocore 746 vitest; mixoDental 857 + walk 113, 34 export hashes identical; mixomesh npm test + test:supports-engine (dev/preview/electron) green. Missing: host-level test that mesh.fallbacks surfaces (→ P5.2 UI task). Smoke hard-codes engine version → should read VERSION (P9.1). |
 | P5.2 | todo | | |
 | P5.3 | todo | | |
 | P5.4 | todo | | |
