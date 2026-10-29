@@ -434,6 +434,12 @@ on PE.5.
   Modular (D26), designer-editable (CSS tokens, icons as assets). Sonnet writes the guide after PD.11 batch C; haiku
   builds. Done when screenshots of every step + the viewer show the colours from tokens.css, and changing one token
   changes it everywhere (test).
+- **PD.13** `[geocore]` Rotation-invariant print-angle choice (found 2026-10-30, owner question "does the aligner make the
+  same mistake?"): real scans rotated randomly at import orient identically (8/8: same up/back, built clear), but the
+  tilt search picked 33.5° instead of 36.5° on one rotation of case-aligner #1 and tip counts varied by ±1 — scoring
+  runs in import coordinates, so float noise tips close calls. Fix: score tilts in the model's own frame (from the trim
+  plane / denture bottom plane) with quantised keys (core/proximity), test: ≥ 8 random rotations of real scans → identical
+  angle and tips (both aligner and denture). After the denture rules land.
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
