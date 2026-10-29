@@ -116,6 +116,13 @@ Architecture rules:
   Electron wrapper with its desktop-only features (automation API / batch jobs / --open, Listbridge
   publishing, installer, heap flag). Every task keeps the Electron build and its smokes green; nothing
   is removed for being desktop-only. mixoDental is web-only (Vite, no Electron) and stays web-only.
+- D24. Memory first (owner 2026-10-29: 3D print files can be very large). Every import, geometry, support and export
+  path is designed for the lowest peak memory: stream instead of building whole files (no full-file strings or
+  buffers; 3MF via streamed zip, STL/OBJ written in chunks), keep mesh data in typed arrays or WASM memory (never
+  arrays of objects per vertex), move buffers between threads as transferables (no copies), free WASM handles and
+  caches as soon as a step ends, process large models in chunks or across workers rather than one giant buffer, and
+  never hold two full copies of a large mesh when one will do. Tasks that touch heavy data report peak memory (JS heap
+  + WASM + process) on the large fixtures next to time; a change that raises peak memory needs a stated reason.
 
 ---
 
@@ -546,6 +553,9 @@ they read legacy DOM), kit-only controls, no `innerHTML`, screenshot (D5).
 
 Rule D18; inventory section 3.
 - **P8.1** `scripts/bench-geometry.mjs`: JS vs WASM per function, corpus = cube, knot, the three
+  Memory (D24): the bench also records peak memory per function (JS heap via CDP, WASM memory size, process private
+  bytes) on a 5M-triangle and a 10M-triangle fixture plus the 4096² textured one, and import/export of each format end
+  to end (STL, OBJ, 3MF, glTF); the table lists the top memory hotspots as P8 targets alongside the speed ones.
   heavy-mesh fixtures (1M, 5M, 4096² textured); median of 5; table in the ledger. *Depends: PE.4.*
   **Done when** every Tier A and Tier B module has a row (WASM column "n/a" until a WASM version
   exists).
