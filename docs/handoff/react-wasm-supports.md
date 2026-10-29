@@ -28,7 +28,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P0.4b | done | 9a09573 | Section (tri-state, header buttons stopPropagation), FieldRow, Modal (trap/Esc/focus return), Toast(+Provider/Host), ProgressRow, KeyCaps, Notice; 57 vitest; screenshot .tmp/kit-gallery-containers.png checked by main. Agent used Playwright from another project (scratch script only): later agents use scripts/ui-screenshot.mjs. |
 | P0.3b | done | de9726a | cpuFrameMs (begin→end frame) + reactCommitMs (dev-only Profiler in mountPanel, checked DEV-gated). Gate = mean +max(0.1 ms,10%), median of 5. 4096² textured 2M GLB fixture added. |
 | P0.5 | todo | | |
-| P0.6 | todo | | |
+| P0.6 | done | 5e87036 (+34ffa3e) | StatsHud + TransformSheet in React (kit), "original" style removed (grep proof), node 1066 + vitest 67, build, test:browser, test:ui-style green. Perf gate PASS (cpuFrameMs mean ≤ baseline+max(0.1ms,10%) on 3 fixtures), 0 React commits during gizmo drag. Screenshot .tmp/p06-shots/ui-layout.png checked (Apply button oversized: polish later). Main fixed: probe lint, hint via Gemini. Open: i18n:check red on 7 hardcoded strings in src/support-engine (P1.1) → fixed in PE.2 (geocore returns codes, app translates). **Checkpoint 1** evidence = this row. |
 | P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geocore/host in PE.2. |
 | P1.2 | retired → PE.2 | | tests + goldens run in mixo-geocore |
 | PE.1 | done | geocore 6ea602d | S:\ai\mixo-geocore: 51 engine commits kept (filter-branch on scratch clone, = mixosupports count) + scaffold; cargo test ok, wasm build both pkgs, smoke engine 9; GitHub mixocreative/mixo-geocore PRIVATE, empty (verified), remote added, not pushed. Goldens vitest waits for PE.2 (imports app code). |
@@ -36,6 +36,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | PE.3 | todo | | |
 | PE.4 | todo | | |
 | PE.5 | todo | | owner: mixosupports switches this mission |
+| PE.6 | todo | | owner: rename to mixoDental (not distributed) |
 | P2.1 | todo | | after PE.4 |
 | P2.2 | todo | | |
 | P3.1 | todo | | |

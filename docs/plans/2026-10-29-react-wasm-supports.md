@@ -272,6 +272,16 @@ P9. P0.4b/P0.6/P0.5 run ∥ PE.1/PE.2 (file-disjoint); P7 runs ∥ P5/P6; P8.1 r
   its exports are byte-identical before and after the switch (export walks c, d and a dental
   export on its reference model: hash of the written STL/3MF compared; any change is a defect).
 
+- **PE.6** `[mixodental]` Rename mixosupports → mixoDental (owner 2026-10-29; not distributed yet,
+  so app identity may change freely). GitHub `mixocreative/mixosupports` → `mixocreative/mixodental`
+  (`gh repo rename`, redirects stay); local folder `S:\ai\mixosupports` → `S:\ai\mixodental` (no
+  process may hold it: stop its graphify watcher first); product name "mixoDental" in package.json
+  `name`/`productName`, Electron app id, window title, installer name, EULA product name, locales
+  (en/ja/zh-Hant via Gemini, D8), logo text; update every reference in mixomesh (plan, port guide,
+  ledger, vendor script defaults, graphify commands), mixo-geocore (README, AGENTS.md) and memory
+  notes; rebuild its graph and the port graph. *Depends: PE.5.* **Done when** grep finds
+  "mixosupports" only in history notes, mixoDental's tests, walks and packaged smoke pass under the
+  new name, and both other repos' gates are green.
 Engine work in later tasks (P5.10, P5.11, P5.14, P8.3) is done in mixo-geocore, bumps
 `engine_version`, and is re-vendored into both apps in the same task (D11); they therefore depend
 on PE.5.
