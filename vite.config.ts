@@ -1,10 +1,39 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import react from '@vitejs/plugin-react';
+import type { Plugin } from 'vite';
 
 const PROJECT_ROOT = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * Serve-only CSP allowance for the React Fast Refresh preamble. plugin-react
+ * injects an INLINE module script into index.html in dev; the page CSP has no
+ * 'unsafe-inline' for scripts. Hash exactly those inline scripts and append the
+ * hashes to script-src. apply:'serve' => the built index.html (and its CSP,
+ * pinned by tests/electron-security.test.mjs) is untouched.
+ */
+function reactRefreshCsp(): Plugin {
+  return {
+    name: 'mixo-react-refresh-csp',
+    apply: 'serve',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+          .map((m) => m[1])
+          .filter((body) => body.trim().length > 0)
+          .map((body) => `'sha256-${createHash('sha256').update(body).digest('base64')}'`);
+        if (hashes.length === 0) return html;
+        return html.replace(/(<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*?script-src [^;"]*)/i, `$1 ${hashes.join(' ')}`);
+      },
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [react(), reactRefreshCsp()],
   root: PROJECT_ROOT,
   appType: 'spa',
   // Relative base so the built app runs from ANY location without edits:
