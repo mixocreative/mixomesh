@@ -28,6 +28,11 @@ export interface PlacementSettings {
   includeDownward?: boolean;
   /** Blender "Reinforce Overhang Edges"; defaults to true. */
   reinforceEdges?: boolean;
+  /**
+   * Max bevel width W (mm, engine 10): a ridge rounded over many facets is reinforced when its turn
+   * beyond the ridge angle is completed within this surface distance. Defaults to 2.5.
+   */
+  maxBevelWidth?: number;
 }
 
 export interface PlacementResult {

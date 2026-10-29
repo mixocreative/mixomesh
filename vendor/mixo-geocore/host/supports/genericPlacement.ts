@@ -17,9 +17,13 @@ interface PlacementSession {
   };
 }
 
-/** Order of the placement settings array (Rust `generic_place`). */
+/** Default max bevel width (mm), Rust `crease::DEFAULT_MAX_BEVEL_WIDTH_MM`. */
+export const DEFAULT_MAX_BEVEL_WIDTH = 2.5;
+
+/** Order of the placement settings array (Rust `generic_place`, 8 values since engine 10). */
 export function packPlacementSettings(s: PlacementSettings): Float64Array {
-  return Float64Array.of(s.overhangAngleDegrees, s.spacing, s.edgeInset, s.sharpEdgeAngleDegrees, s.includeIslands ? 1 : 0, s.includeDownward === false ? 0 : 1, s.reinforceEdges === false ? 0 : 1);
+  return Float64Array.of(s.overhangAngleDegrees, s.spacing, s.edgeInset, s.sharpEdgeAngleDegrees, s.includeIslands ? 1 : 0,
+    s.includeDownward === false ? 0 : 1, s.reinforceEdges === false ? 0 : 1, s.maxBevelWidth ?? DEFAULT_MAX_BEVEL_WIDTH);
 }
 
 export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings): PlacementResult {

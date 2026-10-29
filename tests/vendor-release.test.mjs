@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts', 'vendor-geometry.mjs');
+// The fake release carries the vendored engine, so its tag follows the vendored engine_version.
+const ENGINE = JSON.parse(readFileSync(join(ROOT, 'public', 'vendor', 'mixo-geocore', 'SOURCE.json'), 'utf8')).engineVersion;
+const TAG = `v${ENGINE}`;
 
 const tar = (cwd, args) => {
   const run = spawnSync('tar', args, { cwd, encoding: 'utf8' });
@@ -26,8 +29,8 @@ function fakeRelease(base, { hostVersionSource } = {}) {
   for (const f of ['SOURCE.json', 'VERSION']) rmSync(join(work, 'pkg-browser', f));
   for (const name of ['host', 'editing']) cpSync(join(ROOT, 'vendor', 'mixo-geocore', name), join(work, name), { recursive: true });
   if (hostVersionSource) writeFileSync(join(work, 'host', 'geometryVersion.js'), hostVersionSource);
-  for (const name of ['pkg-browser', 'host', 'editing']) tar(out, ['-czf', `mixo-geocore-v9-${name}.tgz`, '-C', work, name]);
-  writeFileSync(join(out, 'mixo-geocore-v9-pkg-node.tgz'), 'node package placeholder');
+  for (const name of ['pkg-browser', 'host', 'editing']) tar(out, ['-czf', `mixo-geocore-${TAG}-${name}.tgz`, '-C', work, name]);
+  writeFileSync(join(out, `mixo-geocore-${TAG}-pkg-node.tgz`), 'node package placeholder');
   const sums = readdirSync(out).filter(f => f.endsWith('.tgz')).sort()
     .map(f => `${createHash('sha256').update(readFileSync(join(out, f))).digest('hex')}  ${f}\n`);
   writeFileSync(join(out, 'SHA256SUMS'), sums.join(''));
@@ -36,7 +39,7 @@ function fakeRelease(base, { hostVersionSource } = {}) {
 
 function vendor(base, releaseDir, extra = []) {
   const outRoot = mkdtempSync(join(base, 'root-'));
-  const run = spawnSync(process.execPath, [SCRIPT, '--release', 'v9', '--release-dir', releaseDir, '--out-root', outRoot, ...extra], { encoding: 'utf8' });
+  const run = spawnSync(process.execPath, [SCRIPT, '--release', TAG, '--release-dir', releaseDir, '--out-root', outRoot, ...extra], { encoding: 'utf8' });
   return { run, outRoot };
 }
 
@@ -47,9 +50,9 @@ test('release path: good release installs and verifies, tampering and version mi
     const { run, outRoot } = vendor(base, good);
     assert.equal(run.status, 0, run.stderr);
     const source = JSON.parse(readFileSync(join(outRoot, 'public', 'vendor', 'mixo-geocore', 'SOURCE.json'), 'utf8'));
-    assert.equal(source.tag, 'v9');
+    assert.equal(source.tag, TAG);
     assert.equal(source.repo, 'mixocreative/mixo-geocore');
-    assert.equal(source.engineVersion, 9);
+    assert.equal(source.engineVersion, ENGINE);
     const check = spawnSync(process.execPath, [SCRIPT, '--check', '--out-root', outRoot], { encoding: 'utf8' });
     assert.equal(check.status, 0, check.stderr);
 
@@ -58,7 +61,7 @@ test('release path: good release installs and verifies, tampering and version mi
     assert.notEqual(spawnSync(process.execPath, [SCRIPT, '--check', '--out-root', outRoot], { encoding: 'utf8' }).status, 0);
 
     const tampered = fakeRelease(base);
-    writeFileSync(join(tampered, 'mixo-geocore-v9-host.tgz'), 'tampered', { flag: 'a' });
+    writeFileSync(join(tampered, `mixo-geocore-${TAG}-host.tgz`), 'tampered', { flag: 'a' });
     const bad = vendor(base, tampered);
     assert.notEqual(bad.run.status, 0);
     assert.match(bad.run.stderr, /does not match SHA256SUMS/);
@@ -69,7 +72,7 @@ test('release path: good release installs and verifies, tampering and version mi
     });
     const wrong = vendor(base, mismatch);
     assert.notEqual(wrong.run.status, 0);
-    assert.match(wrong.run.stderr, /engine_version\(\) is 9, host expects 8/);
+    assert.match(wrong.run.stderr, new RegExp(String.raw`engine_version\(\) is ${ENGINE}, host expects 8`));
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

@@ -93,6 +93,8 @@ export type LiveSupportSettings = {
   scatterFacingDown: boolean;
   scatterIslands: boolean;
   scatterRidgeAngle: number;
+  /** Max bevel width W (mm): a rounded ridge counts when its turn is completed within it (engine 10). */
+  scatterMaxBevelWidth: number;
   scatterAutoTree: boolean;
   scatterMergeDistance: number;
   scatterBranchDescent: number;
@@ -245,6 +247,7 @@ export const defaultSupportSettings: Readonly<LiveSupportSettings> = {
   scatterFacingDown: true,
   scatterIslands: true,
   scatterRidgeAngle: 45,
+  scatterMaxBevelWidth: 2.5,
   scatterAutoTree: false,
   reinforceOverhangEdges: true,
   liftHeight: 5,
@@ -309,6 +312,7 @@ export const settingLimits: Record<NumericKey, NumericLimit> = {
   scatterAngle: ANGLE_90,
   scatterSafeDistance: LENGTH,
   scatterRidgeAngle: { min: 0, max: 180 },
+  scatterMaxBevelWidth: { min: 0.1, max: 50 },
   scatterMergeDistance: LENGTH,
   scatterBranchDescent: { min: -1000, max: 1000 },
   liftHeight: { min: 0, max: 200 },
@@ -362,6 +366,7 @@ export function toPlacementSettings(settings: Readonly<LiveSupportSettings>): Pl
     // Blender insets edge anchors by the contact radius plus EDGE_INSET_MARGIN (0.05 mm), measured.
     edgeInset: contactRadius(settings) + 0.05,
     sharpEdgeAngleDegrees: settings.scatterRidgeAngle,
+    maxBevelWidth: settings.scatterMaxBevelWidth,
     includeIslands: settings.scatterIslands,
     includeDownward: settings.scatterFacingDown,
     reinforceEdges: settings.reinforceOverhangEdges,

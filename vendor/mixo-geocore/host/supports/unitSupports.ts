@@ -22,12 +22,17 @@ export function resolveSettings(settings: SupportSettings | undefined): LiveSupp
 
 /** Settings whose change moves contacts: the unit's placement is out of date until it is generated again. */
 export const PLACEMENT_KEYS: readonly SettingKey[] = [
-  'scatterSpacing', 'scatterAngle', 'scatterFacingDown', 'scatterIslands', 'scatterRidgeAngle', 'reinforceOverhangEdges', 'liftHeight',
+  'scatterSpacing', 'scatterAngle', 'scatterFacingDown', 'scatterIslands', 'scatterRidgeAngle', 'scatterMaxBevelWidth', 'reinforceOverhangEdges', 'liftHeight',
 ];
 
 /** The placement settings a generation ran with; stored with the unit's supports so a later change shows. */
 export function placementSignature(settings: LiveSupportSettings): JSONObject {
   return Object.fromEntries(PLACEMENT_KEYS.map((key) => [key, settings[key]]));
+}
+
+/** A recorded placement setting; one recorded before the key existed (scatterMaxBevelWidth, engine 10) reads as its default. */
+function placedValue(placed: JSONObject, key: SettingKey): unknown {
+  return placed[key] ?? (defaultSupportSettings as unknown as Record<string, unknown>)[key];
 }
 
 /**
@@ -39,7 +44,7 @@ export function placementPending(unit: PrintUnit): boolean {
   const placed = unit.supports?.data.placed as JSONObject | undefined;
   if (!placed) return false;
   const now = resolveSettings(unit.settings);
-  return PLACEMENT_KEYS.some((key) => placed[key] !== now[key]);
+  return PLACEMENT_KEYS.some((key) => placedValue(placed, key) !== now[key]);
 }
 
 const contactCache = new WeakMap<PrintUnit, readonly SupportContact[]>();
@@ -240,7 +245,7 @@ export function unitLowestY(unit: PrintUnit): number {
 export function liftCommands(unit: PrintUnit, settings: LiveSupportSettings): SceneCommand[] | undefined {
   if (!unit.supports || !unit.placement) return undefined;
   const placed = unit.supports.data.placed as JSONObject | undefined;
-  if (placed && PLACEMENT_KEYS.some((key) => key !== 'liftHeight' && placed[key] !== settings[key])) return undefined;
+  if (placed && PLACEMENT_KEYS.some((key) => key !== 'liftHeight' && placedValue(placed, key) !== settings[key])) return undefined;
   const [x, y, z] = unit.transform.position;
   const transform: ModelTransform = { position: [x, y + settings.liftHeight - unitLowestY(unit), z], rotation: [...unit.transform.rotation] };
   const frame = generationTransform(unit);
