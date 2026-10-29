@@ -468,7 +468,9 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
   face it lands; never drop a sample because one facet is thin; (2) segment faces into near-planar
   patches (normal tolerance) and detect ridges / hard edges between patches by patch mean normals,
   so a turn spread over many facets counts once; anchors and `hard_edges` share it, so dental and
-  generic gain it together. *Depends: PE.5 (can start right after PE.5; it does not need P5.11).*
+  generic gain it together. (3) Placement must be stable under sub-micron input noise: P2.2 measured 54 vs 62 tips
+  for the same cube when world coordinates carried ~1e-4 mm float32 noise (mixomesh now snaps its input to 1 µm in
+  `supportJob.ts toLocal`; the engine should quantise internally so every app is safe). *Depends: PE.5b (starts right after it; it does not need P5.11).*
   **Done when** the probe shows ≥ 80% of the sharp box's edge points along the bevelled boxes'
   long edges, the rounded V keeps ridge reinforcement, split and welded inputs give the same
   anchors, the dental reference keeps its θ 60° chains (110.2 mm, 56.1 mm), the generic goldens
