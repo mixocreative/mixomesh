@@ -1,3 +1,9 @@
+> **OWNER ANSWERS 2026-10-30 (binding; override anything below):**
+> 1. Keep the label **Back** (no rename to Prev).
+> 2. **Exit is a text button labelled Exit (not an arrow)**, at the top right of the nav bar, shown **always** (every step).
+> 3. **Remove the Hide models button everywhere** (not only Step 1).
+> 4. In Free transform mode, **Auto orient RESTORES the stored automatic pose and exits Free transform mode** (no re-run of the orientation worker / tilt scan).
+> 5. **Step 1 shows the gizmo ONLY in Free transform mode** (never in normal Step 1).
 # PD.11 build guide: mixoDental Step 1 (orientation) UI
 
 Spec (owner, 2026-10-30): `docs/plans/2026-10-29-react-wasm-supports.md`, item PD.11, plus D26 (modular: every new rule or
