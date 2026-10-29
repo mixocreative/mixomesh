@@ -1,3 +1,5 @@
+// P6.4 adds: rotate-ring and scale-handle Ctrl-snap (PivotSession). After a warm-up drag, two identical
+// snapped drags land the same and on the 10 deg / 0.1 step (the rotate ring leaked its remainder before).
 // P6.3 adds: two identical Ctrl-snapped plane / axis drags after a leftover drag land the same, on the 5 mm grid.
 // P6.2 adds: Ctrl held before / after / between the press, blur + pointercancel guard, colours, constant size, hidden in Support Mode (.tmp/p62).
 // P6.1: move-gizmo plane handles. Real CDP pointer drags on each plane square
@@ -323,6 +325,148 @@ async function main() {
     await sleep(300);
     assert.equal(await attached(), true, 'gizmo back after leaving Support Mode');
     results.push('gizmo hidden in Support Mode, restored on exit');
+
+    // ---- P6.4 ---------------------------------------------------------------
+    // Rotate-ring and scale-handle Ctrl-snap. Babylon's rotation ring kept its snap remainder
+    // in a closure, so a 4 deg warm-up leaked into the next 7 deg snapped drag (10 deg, then 0).
+    // Each snapped drag must land on the step, and two identical drags must land the same.
+    {
+      const setMode = mode => evaluate(cdp, `import('/src/core/SceneManager.js').then(sm => sm.SceneManager.setGizmoMode('${mode}'))`);
+      await evaluate(cdp, `(async () => {
+        const st = await import('/src/core/StateManager.js');
+        st.setState(s => ({ ...s, gizmo: { ...s.gizmo, snap: { ...s.gizmo.snap, rotate: 10, scale: 0.1 } } }), { silent: true });
+      })()`);
+      const MESH = `(async () => {
+        const sm = await import('/src/core/SceneManager.js');
+        const st = await import('/src/core/StateManager.js');
+        const id = Object.keys(st.getState().scene.objects)[0];
+        const mesh = sm.SceneManager.getScene().meshes.find(m => m.metadata?.meshId === id);
+        mesh.computeWorldMatrix(true);
+        const q = mesh.absoluteRotationQuaternion, s = mesh.absoluteScaling;
+        return { q: [q.x, q.y, q.z, q.w], s: [s.x, s.y, s.z] };
+      })()`;
+      const angleBetween = (a, b) => {
+        const dot = Math.min(1, Math.abs(a.reduce((t, v, i) => t + v * b[i], 0)));
+        return 2 * Math.acos(dot) * 180 / Math.PI;
+      };
+      const off = (v, step) => Math.abs(v / step - Math.round(v / step)) * step;
+      // Screen points on the Y rotation ring (world XZ circle through the pivot), at the given degrees.
+      const ringPts = degs => `(async () => {
+        const B = window.BABYLON;
+        const sm = await import('/src/core/SceneManager.js');
+        const ps = await import('/src/core/scene/PivotSession.js');
+        const scene = sm.SceneManager.getScene();
+        const engine = scene.getEngine();
+        const rect = engine.getRenderingCanvas().getBoundingClientRect();
+        const vp = scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
+        const proj = v => { const p = B.Vector3.Project(v, B.Matrix.Identity(), scene.getTransformMatrix(), vp);
+          return { x: rect.left + p.x * rect.width / engine.getRenderWidth(), y: rect.top + p.y * rect.height / engine.getRenderHeight() }; };
+        const o = ps.getPivotNode().getAbsolutePosition();
+        // Grab the ring most face-on to the camera (an edge-on ring is a thin line to hit).
+        const camDir = scene.activeCamera.position.subtract(o).normalize();
+        let best = null;
+        for (const [k, ax] of [['x', [1, 0, 0]], ['y', [0, 1, 0]], ['z', [0, 0, 1]]]) {
+          const ring = ps.getGizmoManager().gizmos.rotationGizmo[k + 'Gizmo'];
+          ring._rootMesh.computeWorldMatrix(true);
+          const n = B.Vector3.TransformNormal(new B.Vector3(...ax), ring._rootMesh.getWorldMatrix()).normalize();
+          const facing = Math.abs(B.Vector3.Dot(n, camDir));
+          if (!best || facing > best.facing) best = { k, n, ring, facing };
+        }
+        const u = B.Vector3.Cross(best.n, Math.abs(best.n.x) < 0.9 ? new B.Vector3(1, 0, 0) : new B.Vector3(0, 0, 1)).normalize();
+        const v = B.Vector3.Cross(best.n, u);
+        const ms = best.ring._gizmoMesh.getChildMeshes(false); ms.forEach(m => m.computeWorldMatrix(true));
+        const r = Math.max(...ms.map(m => m.getBoundingInfo().boundingBox.extendSizeWorld.x)) * 0.9;
+        return { key: best.k, pts: ${JSON.stringify(degs)}.map(d => { const a = d * Math.PI / 180;
+          return proj(o.add(u.scale(r * Math.cos(a)).add(v.scale(r * Math.sin(a))))); }) };
+      })()`;
+      const SCREEN_CENTRE = `(async () => {
+        const B = window.BABYLON;
+        const sm = await import('/src/core/SceneManager.js');
+        const ps = await import('/src/core/scene/PivotSession.js');
+        const scene = sm.SceneManager.getScene();
+        const engine = scene.getEngine();
+        const rect = engine.getRenderingCanvas().getBoundingClientRect();
+        const vp = scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
+        const p = B.Vector3.Project(ps.getPivotNode().getAbsolutePosition(), B.Matrix.Identity(), scene.getTransformMatrix(), vp);
+        return { x: rect.left + p.x * rect.width / engine.getRenderWidth(), y: rect.top + p.y * rect.height / engine.getRenderHeight() };
+      })()`;
+      const ringHover = k => `import('/src/core/scene/PivotSession.js').then(ps => !!ps.getGizmoManager().gizmos.rotationGizmo[${JSON.stringify(k + 'Gizmo')}].isHovered)`;
+      const SCALE_HOVER = `import('/src/core/scene/PivotSession.js').then(ps => !!ps.getGizmoManager().gizmos.scaleGizmo.uniformScaleGizmo.isHovered)`;
+      // Hover the handle (with Ctrl state), then press, drag through pts, release.
+      const runDrag = async (ctrl, pts, probe) => {
+        mods = ctrl ? 2 : 0;
+        if (ctrl) await key('keyDown');
+        let hovered = false;
+        for (let i = 0; i < 40 && !hovered; i++) {
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(pts[0].x) + (i % 2), y: Math.round(pts[0].y), modifiers: mods });
+          await sleep(150);
+          hovered = await evaluate(cdp, probe);
+        }
+        if (!hovered) throw new Error(`P6.4: handle not hovered at ${Math.round(pts[0].x)},${Math.round(pts[0].y)}`);
+        await mouse('mousePressed', pts[0].x, pts[0].y);
+        await sleep(100);
+        for (let i = 1; i < pts.length; i++) { await mouse('mouseMoved', pts[i].x, pts[i].y); await sleep(30); }
+        await mouse('mouseReleased', pts[pts.length - 1].x, pts[pts.length - 1].y);
+        if (ctrl) await key('keyUp');
+        mods = 0;
+        await sleep(250);
+      };
+      // Enlarge the rings (as P6.1 does for the move gizmo) and find a grab point on the
+      // face-on ring that hovers that ring and not a neighbour (their colliders overlap).
+      await setMode('rotate'); await sleep(400);
+      await evaluate(cdp, `import('/src/core/scene/PivotSession.js').then(ps => { ps.getGizmoManager().gizmos.rotationGizmo.scaleRatio = 3; })`);
+      await sleep(400);
+      let ringK = null, ringBase = 0;
+      for (let base = 0; base < 360 && !ringK; base += 30) {
+        const { key: k, pts } = await evaluate(cdp, ringPts([base]));
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(pts[0].x), y: Math.round(pts[0].y), modifiers: 0 });
+        for (let i = 0; i < 4 && !ringK; i++) {
+          await sleep(150);
+          if (await evaluate(cdp, ringHover(k))) { ringK = k; ringBase = base; }
+        }
+      }
+      assert.ok(ringK, 'P6.4: a ring point hovers the face-on ring');
+      const ringRun = async (deg0, deg1, ctrl) => {
+        const k = ringK;
+        const { pts } = await evaluate(cdp, ringPts(Array.from({ length: 13 }, (_, i) => ringBase + deg0 + (deg1 - deg0) * i / 12)));
+        const before = await evaluate(cdp, MESH);
+        await runDrag(ctrl, pts, ringHover(k));
+        const after = await evaluate(cdp, MESH);
+        await undo(); await sleep(300);
+        return angleBetween(before.q, after.q);
+      };
+      const scaleRun = async (dy, ctrl) => {
+        const c = await evaluate(cdp, SCREEN_CENTRE);
+        const pts = Array.from({ length: 13 }, (_, i) => ({ x: c.x, y: c.y - dy * i / 12 }));
+        const before = await evaluate(cdp, MESH);
+        await runDrag(ctrl, pts, SCALE_HOVER);
+        const after = await evaluate(cdp, MESH);
+        await undo(); await sleep(300);
+        return after.s[0] / before.s[0];
+      };
+
+      const free = await ringRun(0, 7, false);          // calibration: no Ctrl, the free total
+      await ringRun(0, 4, true);                        // warm-up: 4 deg
+      const A = await ringRun(0, 7, true);
+      const B = await ringRun(0, 7, true);
+      const expected = Math.round(free / 10) * 10;
+      assert.ok(free > 5 && free < 9, `rotate drag is ~7 deg free (free=${free.toFixed(2)} deg, ring ${ringK} base ${ringBase})`);
+      assert.ok(Math.abs(A - expected) < 0.1, `rotate snapped drag lands on the 10 deg step (${A.toFixed(2)} vs ${expected})`);
+      assert.ok(Math.abs(A - B) < 0.05, `two identical snapped rotate drags land the same (${A.toFixed(2)} vs ${B.toFixed(2)} deg)`);
+      assert.ok(off(B, 10) < 0.05, `second rotate lands on the step (${B.toFixed(2)} deg)`);
+      results.push(`rotate Ctrl-snap after 4 deg warm-up: free ${free.toFixed(2)} deg -> ${A.toFixed(2)} then ${B.toFixed(2)} deg`);
+
+      await setMode('scale'); await sleep(400);
+      await scaleRun(20, true);                         // warm-up
+      const fA = await scaleRun(60, true);
+      const fB = await scaleRun(60, true);
+      assert.ok(Math.abs(fA - 1) > 0.09, `scale snapped drag changed the size (${fA.toFixed(3)})`);
+      assert.ok(off(fA, 0.1) < 1e-3, `scale snapped drag lands on the 0.1 step (${fA.toFixed(4)})`);
+      assert.ok(Math.abs(fA - fB) < 1e-3, `two identical snapped scale drags land the same (${fA.toFixed(4)} vs ${fB.toFixed(4)})`);
+      assert.ok(off(fB, 0.1) < 1e-3, `second scale lands on the step (${fB.toFixed(4)})`);
+      results.push(`scale Ctrl-snap after warm-up: factor ${fA.toFixed(3)} then ${fB.toFixed(3)}`);
+      await setMode('translate'); await sleep(300);
+    }
     console.log('PASS browser-gizmo-smoke\n  ' + results.join('\n  '));
     cdp.close?.();
   } finally { await stopProcess(browser); await stopProcess(vite); removeTempDir(userDataDir); }

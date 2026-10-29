@@ -7,7 +7,7 @@
 
 import { getState, setState, dispatch } from '../StateManager.js';
 import { EVENTS } from '../events.js';
-import { gizmoSnapDistances } from '../SnapUnits.js';
+import { gizmoSnapDistances, snapToStep } from '../SnapUnits.js';
 
 const BABYLON = window.BABYLON;
 
@@ -83,6 +83,8 @@ function _wireGizmoObservers() {
     sub._mixomeshWired = true;
   }
   _wireTranslateSnap(_gizmos.gizmos.positionGizmo);
+  _wireRotateSnap(_gizmos.gizmos.rotationGizmo);
+  _wireScaleSnap(_gizmos.gizmos.scaleGizmo);
 }
 
 // ── Translate Ctrl-snap (P6.3) ───────────────────────────
@@ -136,6 +138,82 @@ function _snapTranslateDrag(e) {
     _pivotNode.position.addInPlace(corr);
     _pivotNode.computeWorldMatrix(true);
   }
+}
+
+// ── Rotate / scale Ctrl-snap (P6.4) ──────────────────────
+// Babylon's rotation ring keeps its snap remainder in a closure nothing resets
+// between drags (the same leftover as translate, P6.3). Babylon's scale snap
+// works on drag strength rather than the factor, so a 60 px drag stopped at
+// 1.058 instead of a 0.1 step. Rotate and scale therefore snap here, with
+// Babylon's snapDistance held at 0. Each drag event rebuilds the pivot from its
+// DRAG-START value and the TOTAL free amount for this drag, so nothing carries
+// over. Steps come from SnapUnits, as in the G/R/S modal.
+const ROTATE_RINGS = [['xGizmo', [1, 0, 0]], ['yGizmo', [0, 1, 0]], ['zGizmo', [0, 0, 1]]];
+const SCALE_HANDLES = ['xGizmo', 'yGizmo', 'zGizmo', 'uniformScaleGizmo'];
+let _rotateStep = 0;   // radians, 0 = off
+let _scaleStep  = 0;   // multiplier step, 0 = off
+let _rotDrag    = null; // { ring, axis: Vector3, q0: Quaternion } for the live rotate drag
+let _scaleDrag  = null; // { start, prev, free: Vector3 } for the live scale drag
+
+function _wireRotateSnap(rg) {
+  if (!rg || rg._mixomeshSnapWired) return;
+  rg._mixomeshSnapWired = true;
+  for (const [name, [x, y, z]] of ROTATE_RINGS) {
+    const ring = rg[name];
+    const db = ring?.dragBehavior;
+    if (!db) continue;
+    db.onDragStartObservable.add(() => {
+      const q = _pivotNode?.rotationQuaternion;
+      _rotDrag = _pivotNode
+        ? { ring, axis: new BABYLON.Vector3(x, y, z), q0: q ? q.clone() : BABYLON.Quaternion.Identity() }
+        : null;
+    });
+    db.onDragObservable.add(_snapRotateDrag);
+  }
+}
+
+// Babylon's ring keeps `angle` = the free total of this drag (reset at drag start,
+// accumulated about the ring normal in the pivot's frame). Pivot = start * snapped total.
+function _snapRotateDrag() {
+  const d = _rotDrag;
+  if (!d || !_pivotNode) return;
+  const free = d.ring.angle;
+  const a = _rotateStep > 0 ? snapToStep(free, _rotateStep) : free;
+  _pivotNode.rotationQuaternion = d.q0.multiply(BABYLON.Quaternion.RotationAxis(d.axis, a));
+  _pivotNode.computeWorldMatrix(true);
+}
+
+function _wireScaleSnap(sg) {
+  if (!sg || sg._mixomeshSnapWired) return;
+  sg._mixomeshSnapWired = true;
+  for (const name of SCALE_HANDLES) {
+    const db = sg[name]?.dragBehavior;
+    if (!db) continue;
+    db.onDragStartObservable.add(() => {
+      const s = _pivotNode?.scaling;
+      _scaleDrag = s ? { start: s.clone(), prev: s.clone(), free: new BABYLON.Vector3(1, 1, 1) } : null;
+    });
+    db.onDragObservable.add(_snapScaleDrag);
+  }
+}
+
+// Babylon scales incrementally from whatever the pivot holds, so each event's free
+// step is (its new scaling / the scaling we last set). Multiplying those steps gives
+// the free total factor for this drag; snap that (min one step, as the G/S modal).
+function _snapScaleDrag() {
+  const d = _scaleDrag;
+  if (!d || !_pivotNode) return;
+  const s = _pivotNode.scaling;
+  const target = new BABYLON.Vector3(1, 1, 1);
+  for (const c of ['x', 'y', 'z']) {
+    if (d.prev[c]) d.free[c] *= s[c] / d.prev[c];
+    let f = d.free[c];
+    if (_scaleStep > 0 && Math.abs(f - 1) > 1e-9) f = Math.max(_scaleStep, snapToStep(f, _scaleStep));
+    target[c] = d.start[c] * f;
+  }
+  _pivotNode.scaling.copyFrom(target);
+  _pivotNode.computeWorldMatrix(true);
+  d.prev = target.clone();
 }
 
 // Babylon centres each plane square on the pivot, hidden under the arrow bases
@@ -270,11 +348,14 @@ function _applyGizmoSnap() {
   const g = _gizmos?.gizmos;
   if (!g) return;
   const d = gizmoSnapDistances(getState().gizmo?.snap, _gizmoSnapOn);
-  // Translate snap runs in _snapTranslateDrag (P6.3), so Babylon's position snap stays off.
+  // Translate, rotate and scale snap all run in PivotSession (P6.3 / P6.4), so
+  // Babylon's own snapDistance stays 0 everywhere.
   _snapStep = d.translate;
+  _rotateStep = d.rotate;
+  _scaleStep = d.scale;
   if (g.positionGizmo) g.positionGizmo.snapDistance = 0;
-  if (g.rotationGizmo) g.rotationGizmo.snapDistance = d.rotate;
-  if (g.scaleGizmo)    g.scaleGizmo.snapDistance    = d.scale;
+  if (g.rotationGizmo) g.rotationGizmo.snapDistance = 0;
+  if (g.scaleGizmo)    g.scaleGizmo.snapDistance    = 0;
 }
 
 /**
@@ -610,6 +691,8 @@ function _onGizmoDragStart() {
 
 function _onGizmoDragEnd() {
   _snapDrag = null;
+  _rotDrag = null;
+  _scaleDrag = null;
   if (!_dragSnapshot) return;
   const prev = _dragSnapshot;
   const next = _snapshotAbsolute(_selectedMeshes);
