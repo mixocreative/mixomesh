@@ -12,7 +12,7 @@ commit bb55c8e). Only the main session writes this file (D3).
 
 ## Baselines
 
-(P0.3 fills in gizmoDragFrameMs / orbitFrameMs, median of 5)
+P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbit and gizmo drag) = "holds 60 fps". Real gate metric (CPU frame ms) comes with P0.6. Reproduce: `node scripts/heavy-mesh/generate.mjs --sizes 1,5 --3mf 0 --ascii 0` then `node scripts/heavy-mesh/measure.mjs --files pillow-1M.stl,pillow-5M.stl --runs 5`.
 
 ## Tasks
 
@@ -21,7 +21,7 @@ commit bb55c8e). Only the main session writes this file (D3).
 | P0.0 | done 2026-10-29 | (this commit) | ledger created from plan rev 2 |
 | P0.1 | done | f5020db | node 1086 + vitest green, build CSP byte-identical, lint/typecheck clean, test:browser + test:electron PASS, dev CSP allows refresh preamble (hash). vitest = 2 projects (.ts node, .tsx jsdom). |
 | P0.2 | done | 48df345 | mountPanel/useStore/useCommand/useT + error boundary; 5 vitest (selective re-render, one history step, batch = one undo, unmount leak-free, boundary reports). |
-| P0.3 | todo | | |
+| P0.3 | done (partial) | f2a283b | gizmoDragFrameMs added; median of 5: pillow-1M orbit 16.7/17.1, gizmo 16.7/17.2; pillow-5M orbit 16.7/17.0, gizmo 16.7/17.2 (mean/p95 ms). All at the 60 Hz vsync cap: cannot show a 5% regression. No textured fixture (generate.mjs has none). P0.6 adds CPU frame time (Babylon EngineInstrumentation frameTimeCounter) + React commit time as the gate, and a 4096² textured fixture. |
 | P0.4a | todo | | |
 | P0.4b | todo | | |
 | P0.5 | todo | | |
