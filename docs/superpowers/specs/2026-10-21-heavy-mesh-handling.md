@@ -2,10 +2,10 @@
 
 Date: 2026-10-21 · Status: approved to build (owner: "optimise mixomesh for heavy print-ready
 meshes (2M–10M+ triangles), and make sure ALL workers show on-screen loading/progress").
-Input: `S:\ai\mixosupports\docs\migration\2026-10-21-mixomesh-perf-audit.md` (file:line
+Input: `S:\ai\mixodental\docs\migration\2026-10-21-mixomesh-perf-audit.md` (file:line
 evidence), ADR 0006, `2026-10-21-worker-memory-design.md`.
 
-**This is also the shared heavy-mesh spec mixosupports links to.** Sections 1–6 are the
+**This is also the shared heavy-mesh spec mixoDental links to.** Sections 1–6 are the
 cross-app contract (budgets pattern, tiers, pre-parse refusal, memory model, progress UX,
 measurement). Section 7 is mixomesh's own implementation.
 
@@ -55,7 +55,7 @@ pre-parse decision; the parse-time check decides.
 ## 4. Memory model
 
 - **One CPU copy per mesh** in the viewer's own format (mixomesh: Babylon's vertex buffers;
-  mixosupports: the immutable `TriangleMesh`). Workers get a transferred **extracted copy** per
+  mixoDental: the immutable `TriangleMesh`). Workers get a transferred **extracted copy** per
   job and keep nothing after the job.
 - **Welded, indexed geometry**, `Uint32Array` indices. STL welds by exact float bits with a
   typed-array open-addressing hash — no strings, no per-vertex objects. Vertices are split again
@@ -205,13 +205,13 @@ on the reference GPU.
    with `slice()` and no per-element callback, big import blobs hashed in a worker, Electron
    `--max-old-space-size=4096`.
 
-## 8. mixosupports implementation
+## 8. mixoDental implementation
 
-Source: mixosupports `docs/migration/2026-10-21-heavy-mesh-mixosupports.md` (Release 2). Generation-heavy, so its budgets are lower than mixomesh's import/edit budgets.
+Source: mixoDental `docs/migration/2026-10-21-heavy-mesh-mixodental.md` (Release 2). Generation-heavy, so its budgets are lower than mixomesh's import/edit budgets.
 
 Shared contract (budgets pattern, tiers, pre-parse refusal, memory model, progress UX): mixomesh
 `docs/superpowers/specs/2026-10-21-heavy-mesh-handling.md` (branch `feat/heavy-mesh`). This note holds
-the mixosupports side; the controller merges these numbers into the shared spec.
+the mixoDental side; the controller merges these numbers into the shared spec.
 
 Fixtures: `npx vite-node scripts/make-heavy-meshes.ts` (bumpy closed spheres, binary STL, written to the
 git-ignored `.playwright-mcp/heavy/`). Harness: `node scripts/measure-heavy.mjs [--runtime desktop]` (Vite
@@ -234,7 +234,7 @@ the refusal line follows generation, not import. A desktop shell runs the same C
 gets the same numbers until placement memory drops. mixomesh (import and editing only) measured web
 2.5M / 10M and desktop 6M / 24M.
 
-Differences from the shared wording: the refusal omits "or use the desktop app" (mixosupports has none).
+Differences from the shared wording: the refusal omits "or use the desktop app" (mixoDental has none).
 
 Guards added after review (Task 9 fix round 1): the plate may hold at most 6M triangles (`plate-full`
 at import); placements, preview builds and exports start only while running heavy jobs plus their own

@@ -1,4 +1,4 @@
-// Types of the scene a unit (one printable object) carries, from mixosupports src/state/project.ts.
+// Types of the scene a unit (one printable object) carries, from mixodental src/state/project.ts.
 // Only the types: the scene reducer, normalisers and (de)serialisation are not ported (mixomesh
 // stores supports on its own objects and its own undo stack, plan D21).
 import type { DentalPolicy } from '../dental/dentalPolicy';

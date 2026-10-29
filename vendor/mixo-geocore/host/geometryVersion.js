@@ -1,4 +1,4 @@
-// Ported from mixosupports src/workers/geometryVersion.ts (engine_version 9).
+// Ported from mixodental src/workers/geometryVersion.ts (engine_version 9).
 
 /** Must equal the Rust `engine_version()`; both change together on any ABI change. */
 export const HOST_GEOMETRY_VERSION = 9;

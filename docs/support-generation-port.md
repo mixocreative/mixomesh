@@ -1,15 +1,15 @@
-# Support generation port: mixosupports to mixomesh
+# Support generation port: mixoDental to mixomesh
 
-For a future Claude session in the mixomesh repo. All paths below are in `S:\ai\mixosupports` unless stated. Each step in section 8 needs its own spec and review before it is built.
+For a future Claude session in the mixomesh repo. All paths below are in `S:\ai\mixodental` unless stated. Each step in section 8 needs its own spec and review before it is built.
 
 ## 1. Decisions already made (owner and lead)
 
-- mixomesh becomes the generic 3D tool with auto supports. mixosupports becomes dental-only.
+- mixomesh becomes the generic 3D tool with auto supports. mixoDental becomes dental-only.
 - Electron stays (automation server, batch jobs, 4 GB heap, file opening, publishing). WASM runs inside it.
-- Shared: the Rust/WASM geometry engine, vendored as a built artifact like `manifold.wasm` with a VERSION check at load; the framework-free editing logic; the mixo-app-style tokens. UI components are not shared (mixosupports is React with three.js, mixomesh is Babylon with plain JS).
-- Same UX as mixosupports: paint and erase the support area, select by paint, then edit each tip. It works on the models selected in the scene, with no auto-orientation. Keep it simpler.
+- Shared: the Rust/WASM geometry engine, vendored as a built artifact like `manifold.wasm` with a VERSION check at load; the framework-free editing logic; the mixo-app-style tokens. UI components are not shared (mixoDental is React with three.js, mixomesh is Babylon with plain JS).
+- Same UX as mixoDental: paint and erase the support area, select by paint, then edit each tip. It works on the models selected in the scene, with no auto-orientation. Keep it simpler.
 - Tips preview and export go through the engine. Other geometry moves to WASM only when a benchmark shows at least 2x. Manifold and MeshFix stay.
-- Licence: the owner decided (2026-10-29) that the code first modelled on Blender nodes and OpenVDB behaviour is re-implemented far enough to carry no licence issue (mixosupports D23). No audit is needed before porting.
+- Licence: the owner decided (2026-10-29) that the code first modelled on Blender nodes and OpenVDB behaviour is re-implemented far enough to carry no licence issue (mixoDental D23). No audit is needed before porting.
 
 ## 2. Generic pipeline (not dental)
 
@@ -29,7 +29,7 @@ Units: mm, Y up. Settings arrive as one flat f64 array (section 3).
 
 ## 2b. Complete generic feature inventory (port every row; nothing stays behind)
 
-Owner, 2026-10-29: every generic support feature of mixosupports moves to mixomesh, including Roof and Cage. Tick each row off when its mixomesh step is done. Engine paths are under `crates/geometry-core/src/`, host paths under `src/`.
+Owner, 2026-10-29: every generic support feature of mixoDental moves to mixomesh, including Roof and Cage. Tick each row off when its mixomesh step is done. Engine paths are under `crates/geometry-core/src/`, host paths under `src/`.
 
 | Feature | Engine | Host logic and UI |
 |---|---|---|
@@ -38,7 +38,7 @@ Owner, 2026-10-29: every generic support feature of mixosupports moves to mixome
 | Contact tip shapes (round, square, cross; tapered, straight; sphere contact), neck, pillar, foot | `supports/parts/column.rs`, `profile.rs`, `landing.rs` | `components/ShapeBand.tsx`, `SettingsPanel.tsx` |
 | Per-support overrides (reset, select customised) | `supports/edits.rs` | `editing/shapeEdit.ts` |
 | Tree and Auto tree (merge distance, branch descent, safe distance) | `supports/parts/tree.rs`, `autotree.rs`, `autotree_safe.rs` | `SettingsPanel.tsx` |
-| Cross-braces (truss: angle, spacing, min height, distance limit), **with brace pruning** (mixosupports B4 / D24): on every build the repair finds each brace segment that crosses the model (exact check on the finished mesh), rebuilds without exactly those segments (keyed by their endpoints on a 0.01 mm grid, up to two passes), and only switches all braces off if one still crosses. Dynamic: recomputed for whatever model, pose and columns the build has. For mixomesh to use it, its policy must give the repair a trial budget (mixosupports' generic policy uses budget 0, which only reports; the dental policy uses 8): set a small budget, at least 3, so pruning and its fallback can run. Fallback code 3 `brace-pruned` with its notice | `supports/parts/brace.rs`, `supports/generate/repair.rs`, `supports/safety/clearance.rs` | `SettingsPanel.tsx`; notice as in `DentalSupports.tsx` |
+| Cross-braces (truss: angle, spacing, min height, distance limit), **with brace pruning** (mixoDental B4 / D24): on every build the repair finds each brace segment that crosses the model (exact check on the finished mesh), rebuilds without exactly those segments (keyed by their endpoints on a 0.01 mm grid, up to two passes), and only switches all braces off if one still crosses. Dynamic: recomputed for whatever model, pose and columns the build has. For mixomesh to use it, its policy must give the repair a trial budget (mixoDental' generic policy uses budget 0, which only reports; the dental policy uses 8): set a small budget, at least 3, so pruning and its fallback can run. Fallback code 3 `brace-pruned` with its notice | `supports/parts/brace.rs`, `supports/generate/repair.rs`, `supports/safety/clearance.rs` | `SettingsPanel.tsx`; notice as in `DentalSupports.tsx` |
 | Raft (outline, flared wall, drainage gaps) | `supports/parts/raft.rs`, `raft_field.rs`, `raft_outline.rs` | `SettingsPanel.tsx` |
 | Object letter label on the raft | `supports/parts/label.rs`, `font.rs`, `labelFont.json` | `SettingsPanel.tsx` |
 | **Roof** (multi-storey columns around the raft perimeter, ceiling braces, storey floors) | `supports/parts/roof.rs`, `plan.rs`, `structures.rs` | `core/supports/settings.ts` `ROOF_DEFAULTS` (roofGap, columnCount, columnDiameter, diagonal*, brace*, storey*) |
@@ -129,7 +129,7 @@ The port has three layers. Each has its own rule.
 
 | Layer | What | How it moves | Proof it works |
 |---|---|---|---|
-| Engine | `crates/geometry-wasm/pkg-browser` (wasm + JS glue) | **Reused as built.** Copy into `vendor/mixo-geocore/` with a `VERSION` file holding `engine_version()`; never edit it in mixomesh. Upgrade by re-copying from a mixosupports commit and bumping `VERSION`. | Load check refuses a mismatch; generic goldens (section 7) give the same counts. |
+| Engine | `crates/geometry-wasm/pkg-browser` (wasm + JS glue) | **Reused as built.** Copy into `vendor/mixo-geocore/` with a `VERSION` file holding `engine_version()`; never edit it in mixomesh. Upgrade by re-copying from a mixoDental commit and bumping `VERSION`. | Load check refuses a mismatch; generic goldens (section 7) give the same counts. |
 | Logic | `src/editing/*.ts` (framework-free: session reducer, commands, keys, pick, stroke, strokeQueue, selection, removal, regenerate, shapeEdit, screenBrush, surfaceBrush, brushScheduler, locks, status), the settings layout and packer (`src/core/supports/settings.ts`, `src/supports/supportBuildWasm.ts`), the result decoder (`src/supports/generateSupports.ts`), contact edits (`src/supports/contactEdits.ts`), the worker protocol (`src/workers/meshProtocol.ts`, `meshWorker.ts`, `meshClient.ts`, `buildSessions.ts`) | **Ported as code, once.** Transpile TypeScript to plain ES modules with `esbuild` (types stripped, no bundling) into `src/support-engine/`; keep the file names. Drop the `dental` mode, `dental.*` commands and keys, and every import from `src/dental/`. After the copy, mixomesh owns the files: no sync back. | Their `*.test.ts` run in mixomesh (vitest runs on JS too) with the dental cases removed. |
 | UI | React components and three.js layers | **Rebuilt** in mixomesh's own stack (Babylon, plain JS, mixo-app-style `tokens.css`/`base.css`). Nothing is copied. The behaviour contract below is the spec; the React files are for reading only. | The generic walk scenarios (section 7) re-written against mixomesh. |
 
@@ -144,7 +144,7 @@ The port has three layers. Each has its own rule.
 - No auto-orientation, no print-angle scan, no start screen, no aligner profiles.
 
 **Order** (each step is specified and reviewed before building):
-- A0. Licence: decided (owner, 2026-10-29, mixosupports D23): no licence issue assumed; the code is treated as re-implemented. No audit blocks the port.
+- A0. Licence: decided (owner, 2026-10-29, mixoDental D23): no licence issue assumed; the code is treated as re-implemented. No audit blocks the port.
 - A1. Vendor `pkg-browser` and add the load-time version check. **Done 2026-10-29**: `public/vendor/mixo-geocore/` (VERSION, SOURCE.json), `scripts/vendor-geometry.mjs` (`--check`), `src/support-engine/geometryVersion.js` + `loadGeometry.js`, `tests/geometry-engine.test.mjs`. Browser and Electron loading are proven in A3.
 - A2. Port the logic layer (esbuild once) and its tests.
 - A3. Spike: one selected mesh, generate in a worker, show tips in Babylon (decide right-handed scene per section 6), one golden matches.
@@ -156,9 +156,9 @@ The port has three layers. Each has its own rule.
 
 ## 9. What moves and what stays (owner, 2026-10-29: everything reusable moves)
 
-Rule: every support-related piece moves to mixomesh. Only what is purely dental stays in mixosupports. Much of `dental/` is generic geometry under a dental name; port it under a neutral name. Whether mixomesh shows a feature in its UI (for example automatic orientation, which the owner kept out of the first mixomesh UI) is a separate decision: the code still moves.
+Rule: every support-related piece moves to mixomesh. Only what is purely dental stays in mixodental. Much of `dental/` is generic geometry under a dental name; port it under a neutral name. Whether mixomesh shows a feature in its UI (for example automatic orientation, which the owner kept out of the first mixomesh UI) is a separate decision: the code still moves.
 
-| mixosupports module | Moves as (generic) | Stays (dental only) |
+| mixoDental module | Moves as (generic) | Stays (dental only) |
 |---|---|---|
 | `dental/topology.rs`, `contour.rs` | Hard-edge finder and loop closing (section 2b) | the aligner's ridge minimums (35 / 20 mm) as profile data |
 | `dental/opening.rs` | Enclosed-hole finder (raster along an axis, flood fill, lift to edges, two resolutions) | "central opening" naming |
@@ -180,9 +180,9 @@ Rule: every support-related piece moves to mixomesh. Only what is purely dental 
 
 Also not ported as is: React and three.js code (rebuilt per section 8). Licence: settled by D23 (treated as re-implemented); everything moves.
 
-## 10. Code handed over from mixosupports
+## 10. Code handed over from mixoDental
 
-Owner rule: any mixosupports code that is removed later and could help mixomesh (for example the generic-mode UI at the dental-only step) is not deleted. It is first copied into `S:\ai\mixomesh\port\mixosupports\<area>\`, with a `README.md` handoff that gives what it is, the source path and commit, and how it maps onto this guide. Only then is it removed from mixosupports. That folder does not exist yet (nothing has been removed so far: the generic UI is still in mixosupports, hidden during the dental steps, so read it there). Check the folder before rebuilding anything.
+Owner rule: any mixoDental code that is removed later and could help mixomesh (for example the generic-mode UI at the dental-only step) is not deleted. It is first copied into `S:\ai\mixomesh\port\mixodental\<area>\`, with a `README.md` handoff that gives what it is, the source path and commit, and how it maps onto this guide. Only then is it removed from mixodental. That folder does not exist yet (nothing has been removed so far: the generic UI is still in mixoDental, hidden during the dental steps, so read it there). Check the folder before rebuilding anything.
 
 ---
-Describes mixosupports main `adbe7c3` (engine_version 9). Date: 2026-10-29.
+Describes mixoDental main `adbe7c3` (engine_version 9). Date: 2026-10-29.

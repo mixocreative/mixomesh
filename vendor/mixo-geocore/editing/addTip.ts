@@ -2,7 +2,7 @@ import type { SupportPoint } from '../host/core/analysis/types';
 import type { Vector } from '../host/core/vec3';
 
 /*
- * Add-tip snapping (the Add tool of Support Edit Mode, from mixosupports App.tsx `addTip`): a click
+ * Add-tip snapping (the Add tool of Support Edit Mode, from mixodental App.tsx `addTip`): a click
  * lands a manual tip at the hit, or on the nearest suggested or shown tip within Click reach. A snap
  * takes that tip's point and normal, and that tip is deleted in the same step so the two never stand
  * together. A spot that faces up gets a warning. Pure data in, plan out: the app turns the plan into

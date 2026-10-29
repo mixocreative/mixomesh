@@ -182,11 +182,11 @@ export const COMMANDS: Readonly<Record<CoreCommandId, Command>> = {
   'transform.move': transformChoice('Move', 'Move the active object with the gizmo', 'G'),
   'transform.rotate': transformChoice('Rotate', 'Rotate the active object with the gizmo', 'R'),
   'project.open': {
-    role: 'secondary', label: () => 'Open project', hint: () => 'Open a .mixosupports project. It replaces the plate; Undo brings the previous plate back',
+    role: 'secondary', label: () => 'Open project', hint: () => 'Open a .mixodental project. It replaces the plate; Undo brings the previous plate back',
     visible: always, enabled: (s) => s.mode === 'off', disabledReason: (s) => (s.mode === 'off' ? undefined : busyStatus(s.mode)),
   },
   'project.save': {
-    role: 'secondary', label: () => 'Save project', hint: () => 'Save the plate, supports and hand edits as a .mixosupports file. Models stay on this device',
+    role: 'secondary', label: () => 'Save project', hint: () => 'Save the plate, supports and hand edits as a .mixodental file. Models stay on this device',
     visible: always, enabled: (s) => s.units > 0, disabledReason: (s) => (s.units > 0 ? undefined : noModelReason),
   },
   'supports.generate': {
