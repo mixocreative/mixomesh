@@ -116,3 +116,12 @@ for (const [name, prof] of [['box sharp', box], ['box bevel r1 16 seg', bevelBox
   placeDetail(`${name} welded`, wp, wi);
 }
 
+
+// Rounded crease and split-seam cases (baseline engine 9: V sharp welded ridge 9, V rounded ridge 0;
+// split meshes turn every seam inside an overhang into a false boundary).
+for (const [name, prof] of [['V sharp', vSharp], ['V rounded 8 seg r3', vRounded(8, 3)]]) {
+  const [sp, si] = extrudeSplit(prof, 20);
+  const [wp, wi] = weld(sp, si);
+  place(`${name} welded`, wp, wi);
+  place(`${name} split per face`, sp, si);
+}

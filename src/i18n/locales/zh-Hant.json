@@ -1011,7 +1011,7 @@
   "help.mouse.orbit": "右鍵拖曳旋轉、中鍵拖曳平移、滾輪縮放",
   "help.mouse.touch": "觸控：單指旋轉，雙指平移與縮放",
   "transformSheet.title": "變形",
-  "transformSheet.hint": "以軸心為基準的相對值。0(縮放為 100%)代表不變。",
+  "transformSheet.hint": "以軸心為基準。0（縮放 100%）表示不變。",
   "transformSheet.move": "移動",
   "transformSheet.rotate": "旋轉",
   "transformSheet.scale": "縮放",

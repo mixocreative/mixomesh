@@ -1011,7 +1011,7 @@
   "help.mouse.orbit": "右ドラッグで回転、中ドラッグで平行移動、スクロールでズーム",
   "help.mouse.touch": "タッチ：1本指で回転、2本指で平行移動とズーム",
   "transformSheet.title": "トランスフォーム",
-  "transformSheet.hint": "ピボット基準の相対値。0(スケールは100%)で変更なし。",
+  "transformSheet.hint": "ピボット基準。0（スケール 100%）は変更なし。",
   "transformSheet.move": "移動",
   "transformSheet.rotate": "回転",
   "transformSheet.scale": "拡大縮小",
