@@ -31,7 +31,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P0.6 | todo | | |
 | P1.1 | done | 624a34b | 66 files src/support-engine/ (PORTED.md); no dental; geometryClient rewritten on loadGeometryEngine (configureGeometry(glueUrl)); lint + npm test green; tsc clean in support-engine. ABI-bound parts move to mixo-geocore/host in PE.2. |
 | P1.2 | retired → PE.2 | | tests + goldens run in mixo-geocore |
-| PE.1 | todo | | owner: private repo mixocreative/mixo-geocore |
+| PE.1 | done | geocore 6ea602d | S:\ai\mixo-geocore: 51 engine commits kept (filter-branch on scratch clone, = mixosupports count) + scaffold; cargo test ok, wasm build both pkgs, smoke engine 9; GitHub mixocreative/mixo-geocore PRIVATE, empty (verified), remote added, not pushed. Goldens vitest waits for PE.2 (imports app code). |
 | PE.2 | todo | | |
 | PE.3 | todo | | |
 | PE.4 | todo | | |
