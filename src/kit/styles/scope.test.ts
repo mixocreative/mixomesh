@@ -7,9 +7,7 @@ const scopedPath = new URL('./kit.scoped.css', import.meta.url);
 
 describe('kit.scoped.css', () => {
   it('is up to date with the unchanged mixo-app-style copies', () => {
-    expect(readFileSync(scopedPath, 'utf8').replaceAll('\r\n', '\n')).toBe(buildScoped().replaceAll('
-', '
-'));
+    expect(readFileSync(scopedPath, 'utf8').replaceAll('\r\n', '\n')).toBe(buildScoped().replaceAll('\r\n', '\n'));
   });
   it('has no unscoped selector (cannot restyle legacy panels)', () => {
     const root = postcss.parse(readFileSync(scopedPath, 'utf8'));
