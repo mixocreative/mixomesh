@@ -76,6 +76,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P8.2 | todo | | |
 | P8.3 | todo | | |
 | P8.4 | todo | | |
+| P8.5 | todo | | shared export geometry core in geocore (consistency), after P4.4 |
 | P9.1 | todo | | |
 | P9.2 | todo | | |
 | P9.3 | todo | | |

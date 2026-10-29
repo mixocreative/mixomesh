@@ -560,6 +560,17 @@ Rule D18; inventory section 3.
 - **P8.4** Parity: per moved function, JS-vs-WASM equality on the corpus with its tolerance (weld
   order canonicalised, float epsilon stated). *With P8.2/P8.3.*
 
+- **P8.5** `[geocore]` + both apps. Shared export geometry core (owner 2026-10-29: "written in WASM for
+  consistency"). Move the geometry half of export into mixo-geocore so mixomesh and mixoDental produce identical
+  meshes: weld by position, shared vertex lists with per-triangle colour and per-corner UV indices, winding /
+  orientation in the print frame, signed volume + watertight checks, binary STL encoding, 3MF mesh-section and OBJ
+  v/vt/f encoding of the vertex/index data. Apps keep the containers (3MF zip + XML structure, OBJ/MTL text,
+  texture images read from frozen source bytes per D9, naming). D18 exception: these functions move for
+  consistency as long as they are not slower end to end (≥ 1.0x), not the 1.1x rule. *Depends: P4.4 (its
+  consumer checks are the spec), PE.5b.* **Done when** mixomesh `test:consumers` passes unchanged (0 KNOWN), the
+  same consumer harness (or its geocore port) passes for mixoDental's exports, mixoDental's dental exports are
+  byte-identical or explained, P8.1 shows no slowdown, and neither app keeps its own copy of the moved code
+  (duplicate check).
 ### P9 Close
 
 - **P9.1** Full gates on a quiet machine. mixomesh: `npm test` (node + vitest), lint, typecheck,
@@ -651,6 +662,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | P7 others, P7.last | sonnet (Codex low: "who owns this root id") | — |
 | P8.1, P8.2, P8.4 | sonnet | bench, wiring, parity |
 | P8.3 | opus (Rust) + sonnet (wiring) | engine work |
+| P8.5 | opus (Rust) + sonnet (app wiring) | shared export geometry core |
 | P9.1 | sonnet | gates, three repos |
 | P9.2 | fable | diff review |
 | P9.3 | main session | owner gate, pushes |
