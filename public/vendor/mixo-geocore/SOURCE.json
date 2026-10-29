@@ -1,12 +1,12 @@
 {
   "repo": "mixocreative/mixo-geocore",
-  "commit": "2facbe70ed625ec0493b599848bf6490ecbff8e5",
-  "committed": "2026-10-30T00:54:54+08:00",
+  "commit": "6cc5385be9295ffaba964b68139971b7771f93d8",
+  "committed": "2026-10-30T01:23:52+08:00",
   "engineVersion": 12,
   "sha256": {
-    "mixo_geometry_wasm.js": "e243c072b3953b4e4d75039215ce91d9b60e1974662673359d778cde5393bd1e",
-    "mixo_geometry_wasm_bg.wasm": "20a7f94ab8addb855411d78dc9eb9a6a2a51946b81cb051dc983c135399f73d7",
-    "mixo_geometry_wasm.d.ts": "1ad49e583b30baa28bc7d6fea2137763cb58500745adf2416fa8cdec3eb5496a",
+    "mixo_geometry_wasm.js": "597ccc425522659c3d9ac596fbf27c52f4f5a9d43a781d5c002ebfb8a1386348",
+    "mixo_geometry_wasm_bg.wasm": "3adca7c6e5dec9be44309f535a46aadb56fba9109f0a5f3789d33d4768777e94",
+    "mixo_geometry_wasm.d.ts": "bac0db3bd9677aec9958e4598831cc813ff3adb5bd3405210d0b7a62788512cf",
     "host/core/analysis/mesh.ts": "687b71e1815baeb4f306166a9d34e64513b89d542b1915f6ebe5762e44c94c63",
     "host/core/analysis/supportCheck.ts": "288321a6d0310b237e8c64dc28c83f9d81d92631bda46aae0796fba66cd6368c",
     "host/core/analysis/types.ts": "5a1b2dd3b07e1e0b3204ce4ad707bb726abf67202c8713aae1fde52b7dd2e788",

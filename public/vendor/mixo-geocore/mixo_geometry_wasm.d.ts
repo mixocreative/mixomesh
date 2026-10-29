@@ -34,7 +34,7 @@ export class DentalOrientResult {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * confidence, terminal area ratio, axial variance ratio.
+     * confidence, floor offset ratio (how far the axis-facing floor leans toward one end), axial variance ratio.
      */
     diagnostics(): Float64Array;
     /**

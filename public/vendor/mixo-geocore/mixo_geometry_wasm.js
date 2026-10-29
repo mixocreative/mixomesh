@@ -162,7 +162,7 @@ export class DentalOrientResult {
         wasm.__wbg_dentalorientresult_free(ptr, 0);
     }
     /**
-     * confidence, terminal area ratio, axial variance ratio.
+     * confidence, floor offset ratio (how far the axis-facing floor leans toward one end), axial variance ratio.
      * @returns {Float64Array}
      */
     diagnostics() {
