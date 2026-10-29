@@ -507,6 +507,9 @@ Today: `src/core/scene/PivotSession.js` — Babylon `GizmoManager`, one exclusiv
   changes only its two axes; one undo step per drag on every handle. *Depends: P0.3b.* **Done when**
   smoke: a plane drag changes exactly two axes and undoes in one step; `cpuFrameMs` mean during the drag within max(0.1 ms, 10%) of baseline.
 - **P6.2** Verify orbit stays off during every handle drag (Babylon `PointerDragBehavior`
+  Also (found in P6.1): pressing a gizmo handle while Ctrl is ALREADY held does not grab it, so snap-dragging only works if
+  Ctrl goes down after the press. Fix so Ctrl-then-press grabs the handle and snaps (users hold the modifier first); smoke
+  covers both orders.
   detaches camera controls) and add a pointercancel/blur guard if a drag can leak; gizmo colours
   (axes, hover, active) from mixo-app-style tokens; screen-constant size confirmed; gizmo hidden in
   Support Mode. *Depends: P6.1, P3.2.* **Done when** smoke + screenshot. **Owner checkpoint 5**
