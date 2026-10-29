@@ -64,7 +64,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P5.10 | todo | | |
 | P5.11 | todo | | |
 | P5.12 | todo | | |
-| P5.13 | todo | | |
+| P5.13 | done | — | Checked 2026-10-29 by main: S:\ai\mixomesh\port\ does not exist and mixosupports has no port\ folder → nothing handed over; the generic UI is still live in mixosupports (read it there). |
 | P5.14 | todo | | bevel-robust edge detection (owner question) |
 | P6.1 | todo | | |
 | P6.2 | todo | | |
