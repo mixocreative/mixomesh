@@ -5,7 +5,7 @@ import '../styles/kit.css';
 import './gallery.css';
 import { useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Button, Check, ColorField, NumberField, RangeField, Segmented, Select, Toggle } from '../index';
+import { Button, Check, ColorField, FieldRow, KeyCaps, Modal, Notice, NumberField, ProgressRow, RangeField, Section, Segmented, Select, Toast, ToastProvider, Toggle, useToasts } from '../index';
 
 type Row = readonly [name: string, type: string, note: string];
 
@@ -30,7 +30,16 @@ const noop = () => {};
 const SEG = [{ value: 'move', label: 'Move' }, { value: 'rotate', label: 'Rotate' }, { value: 'scale', label: 'Scale' }] as const;
 const SEL = [{ value: 'xy', label: 'XY plane' }, { value: 'xz', label: 'XZ plane' }, { value: 'yz', label: 'YZ plane' }] as const;
 
+function ToastDemo() {
+  const { push } = useToasts();
+  return <Button onClick={() => push({ message: 'Object deleted', action: { label: 'Undo', onClick: noop }, timeoutMs: 8000 })}>Push live toast (8 s)</Button>;
+}
+
 function Gallery() {
+  const [secA, setSecA] = useState<boolean | undefined>(undefined);
+  const [secLog, setSecLog] = useState('');
+  const [modal, setModal] = useState(false);
+  const [modalOpenStatic, setModalOpenStatic] = useState(true);
   const [seg, setSeg] = useState<'move' | 'rotate' | 'scale'>('move');
   const [tog, setTog] = useState(true);
   const [chk, setChk] = useState(true);
@@ -43,7 +52,7 @@ function Gallery() {
   const [rng, setRng] = useState(2.5);
   const [col, setCol] = useState('#7f0019');
   return (
-    <div className="mx-kit gallery">
+    <div className="mx-kit gallery"><ToastProvider>
       <h1>MIXOMESH UI kit</h1>
       <p className="g-note">Dev-only gallery (kit.html). mixo-app-style, scoped under .mx-kit. Hover and focus columns are forced classes mirroring the real :hover / :focus-visible rules.</p>
 
@@ -126,7 +135,68 @@ function Gallery() {
         <State name="focus" cls="g-focus"><ColorField label="Tint" value="#1d3461" onCommit={noop} /></State>
         <State name="disabled"><ColorField label="Tint" value="#1d3461" disabled onCommit={noop} /></State>
       </>} />
-    </div>
+
+      <Comp title="Section" log={`controlled collapsed: ${String(secA)}   ${secLog}`} props={[
+        ['title', 'ReactNode', ''],
+        ['collapsed', 'boolean | undefined', 'tri-state: true = hide, false = show, undefined = defer to defaultCollapsed'],
+        ['defaultCollapsed', 'boolean', 'workspace default used while collapsed is undefined'], ['onCollapsedChange', '(c: boolean) => void', 'header click / Enter / Space'],
+        ['onReset', '() => void', 'shows the reset button; never toggles collapse'], ['onCopyFromActive', '() => void', 'shows the copy-from-active button; never toggles collapse'],
+      ]} states={<>
+        <State name="expanded + both header buttons"><Section title="TRANSFORM" collapsed={false} onReset={() => setSecLog('reset')} onCopyFromActive={() => setSecLog('copy')}><FieldRow label="X">0 mm</FieldRow></Section></State>
+        <State name="collapsed"><Section title="SHADER" collapsed onReset={noop}><p>hidden</p></Section></State>
+        <State name="undefined, defaultCollapsed"><Section title="UV OVERRIDE" defaultCollapsed><p>hidden</p></Section></State>
+        <State name="undefined, default expanded"><Section title="EXPORT"><FieldRow label="Ratio">1:1</FieldRow></Section></State>
+        <State name="live (click header)"><Section title="LIVE" collapsed={secA} defaultCollapsed onCollapsedChange={setSecA} onReset={() => setSecLog('reset')}><FieldRow label="Row">value</FieldRow></Section></State>
+      </>} />
+
+      <Comp title="FieldRow" props={[
+        ['label', 'ReactNode', ''], ['children', 'ReactNode | (id) => ReactNode', 'control; render prop receives the id the label binds to'], ['hint', 'ReactNode', 'muted line under the row'],
+      ]} states={<>
+        <State name="default"><FieldRow label="Name">{(id) => <input id={id} defaultValue="Crown" />}</FieldRow></State>
+        <State name="with hint"><FieldRow label="Ratio" hint="Applies to export only">{(id) => <input id={id} defaultValue="1.0" />}</FieldRow></State>
+        <State name="focus" cls="g-focus"><FieldRow label="Name">{(id) => <input id={id} defaultValue="Crown" />}</FieldRow></State>
+      </>} />
+
+      <Comp title="Modal" props={[
+        ['open / onClose', 'boolean / () => void', 'Esc, scrim click and Close call onClose'], ['title', 'string', 'aria-labelledby target'],
+        ['actions', 'ModalAction[]', '{ label, onClick, variant: primary | danger | plain, disabled } - extra primaries demote to plain'],
+        ['behaviour', '', 'focus trapped, first control focused, focus returns to the opener'],
+      ]} states={<>
+        <State name="live"><Button onClick={() => setModal(true)}>Open modal</Button></State>
+        <State name="static preview (below)"><Button onClick={() => setModalOpenStatic((o) => !o)}>{modalOpenStatic ? 'Hide' : 'Show'} preview</Button></State>
+      </>} />
+      <Modal open={modal} title="Delete object?" onClose={() => setModal(false)} actions={[{ label: 'Cancel', onClick: () => setModal(false) }, { label: 'Delete', variant: 'danger', onClick: () => setModal(false) }]}>This removes the object and its shader slots.</Modal>
+      {modalOpenStatic && <div className="g-modal-preview"><Modal open title="Repair mesh?" onClose={() => setModalOpenStatic(false)} actions={[{ label: 'Cancel', onClick: () => setModalOpenStatic(false) }, { label: 'Repair', variant: 'primary', onClick: () => setModalOpenStatic(false) }]}>3 holes found. Repair closes them and keeps UVs.</Modal></div>}
+
+      <Comp title="Toast" props={[
+        ['ToastProvider', 'context', 'useToasts() => { push(spec), dismiss(id) }; no global singleton'],
+        ['message / action / timeoutMs', 'string / {label,onClick} / number', 'default 5000 ms, 0 = sticky; action runs then dismisses'],
+      ]} states={<>
+        <State name="with Undo"><div className="g-inline-toast"><Toast message="Object deleted" action={{ label: 'Undo', onClick: noop }} timeoutMs={0} onDismiss={noop} /></div></State>
+        <State name="message only"><div className="g-inline-toast"><Toast message="Saved" timeoutMs={0} onDismiss={noop} /></div></State>
+        <State name="live (bottom right)"><ToastDemo /></State>
+      </>} />
+
+      <Comp title="ProgressRow" props={[
+        ['label', 'string', ''], ['value', 'number (0..1) | undefined', 'undefined = indeterminate'], ['onCancel', '() => void', 'shows Cancel'],
+      ]} states={<>
+        <State name="determinate"><ProgressRow label="Repairing" value={0.45} /></State>
+        <State name="determinate + cancel"><ProgressRow label="Exporting" value={0.8} onCancel={noop} /></State>
+        <State name="indeterminate"><ProgressRow label="Loading" onCancel={noop} /></State>
+      </>} />
+
+      <Comp title="KeyCaps" props={[['shortcut', 'string', '"Ctrl+Shift+Z" split on +']]} states={<>
+        <State name="default"><span><KeyCaps shortcut="Ctrl+Shift+Z" /></span><span><KeyCaps shortcut="Delete" /></span></State>
+      </>} />
+
+      <Comp title="Notice" props={[
+        ['severity', "'info' | 'warn' | 'error'", ''], ['children', 'ReactNode', 'text'], ['actions', '{label,onClick}[]', 'own row below the text'],
+      ]} states={<>
+        <State name="info"><Notice severity="info">Autosave restored 2 objects.</Notice></State>
+        <State name="warn"><Notice severity="warn" actions={[{ label: 'Repair', onClick: noop }, { label: 'Ignore', onClick: noop }]}>Mesh is not watertight: 3 open holes.</Notice></State>
+        <State name="error"><Notice severity="error" actions={[{ label: 'Details', onClick: noop }]}>Export failed: texture could not be read.</Notice></State>
+      </>} />
+    </ToastProvider></div>
   );
 }
 

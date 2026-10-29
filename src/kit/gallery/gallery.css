@@ -20,3 +20,8 @@
 .mx-kit .g-hover .number input, .mx-kit .g-hover .mx-select { border-color: var(--ink); }
 .mx-kit .g-focus button, .mx-kit .g-focus .check input, .mx-kit .g-focus .mx-select { outline: 1px solid var(--ink); outline-offset: 2px; }
 .mx-kit .g-focus .number input { outline: 0; border-bottom-color: var(--red); }
+
+.mx-kit .g-modal-preview { position: relative; height: 190px; margin: 4px 0 12px; border: 1px dashed var(--line); overflow: hidden; transform: translateZ(0); }
+.mx-kit .g-modal-preview .mx-modal-scrim { position: absolute; z-index: 0; }
+.mx-kit .g-inline-toast .mx-toast { min-width: 0; }
+.mx-kit .g-state .mx-section, .mx-kit .g-state .mx-notice, .mx-kit .g-state .mx-progress, .mx-kit .g-state .mx-fieldrow { align-self: stretch; }
