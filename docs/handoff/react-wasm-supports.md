@@ -19,7 +19,7 @@ commit bb55c8e). Only the main session writes this file (D3).
 | Task | Status | Commit | Verified / next |
 |---|---|---|---|
 | P0.0 | done 2026-10-29 | (this commit) | ledger created from plan rev 2 |
-| P0.1 | todo | | |
+| P0.1 | done | f5020db | node 1086 + vitest green, build CSP byte-identical, lint/typecheck clean, test:browser + test:electron PASS, dev CSP allows refresh preamble (hash). vitest = 2 projects (.ts node, .tsx jsdom). |
 | P0.2 | todo | | |
 | P0.3 | todo | | |
 | P0.4a | todo | | |
