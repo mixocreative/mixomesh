@@ -20,7 +20,7 @@ commit bb55c8e). Only the main session writes this file (D3).
 |---|---|---|---|
 | P0.0 | done 2026-10-29 | (this commit) | ledger created from plan rev 2 |
 | P0.1 | done | f5020db | node 1086 + vitest green, build CSP byte-identical, lint/typecheck clean, test:browser + test:electron PASS, dev CSP allows refresh preamble (hash). vitest = 2 projects (.ts node, .tsx jsdom). |
-| P0.2 | todo | | |
+| P0.2 | done | 48df345 | mountPanel/useStore/useCommand/useT + error boundary; 5 vitest (selective re-render, one history step, batch = one undo, unmount leak-free, boundary reports). |
 | P0.3 | todo | | |
 | P0.4a | todo | | |
 | P0.4b | todo | | |
@@ -52,6 +52,7 @@ commit bb55c8e). Only the main session writes this file (D3).
 | P5.11 | todo | | |
 | P5.12 | todo | | |
 | P5.13 | todo | | |
+| P5.14 | todo | | bevel-robust edge detection (owner question) |
 | P6.1 | todo | | |
 | P6.2 | todo | | |
 | P7.last | todo | | |

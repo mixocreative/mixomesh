@@ -181,7 +181,11 @@ Format: **id** goal. Files. *Depends.* **Done when.** Worker per section 4.
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. Handedness rule
   (D10): conversion only in `src/supports/frame.ts` (negate Z of positions and normals, swap triangle
-  indices 1↔2 per triangle, both directions). *Depends: P1.2.* **Done when** cube-overhang tip count
+  indices 1↔2 per triangle, both directions). The adapter also sends the engine a copy welded by
+  position (geometry only; UV/colour seams split mixomesh's textured meshes, and the engine's edge
+  tests key edges by vertex index, so unwelded seams inside an overhang would read as region
+  boundaries and get false edge reinforcement). *Depends: P1.2.* **Done when** a textured cube whose
+  UV seams cross its bottom face gets the same edge anchors as the plain cube, cube-overhang tip count
   equals the golden, a cull on/off screenshot and a trimesh winding check of an exported support
   mesh are in the ledger, and the existing import/export orientation smokes are unchanged.
   **Owner checkpoint 2** (tips on a real model).
@@ -288,6 +292,16 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
 - **P5.12** Arrange several objects on the plate without overlap (`src/dental/arrange.ts` generic).
 - **P5.13** Check `S:\ai\mixomesh\port\mixosupports\` (guide 10) for handed-over code; record the
   result.
+- **P5.14** Bevel-robust edge detection in the shared engine (owner question 2026-10-29). Today the
+  overhang *outline* is region-based (works on rounded edges), but internal ridges
+  (`generic/placement/anchors.rs`, per-edge `angle_between > ridge angle`) and the hard-edge finder
+  (`dental/topology.rs`, per-edge `|n1·n2| ≤ cos θ`) miss a turn spread over many small facets.
+  Fix once in mixosupports `geometry-core` (D11): weld by position, segment faces into near-planar
+  patches (normal tolerance), report patch boundaries whose patch mean normals differ by more than
+  θ; anchors and `hard_edges` both use it, so dental and generic gain it together. *Depends:
+  P5.11.* **Done when** a cube with a 0.5 mm fillet of 8+ segments yields the same 4 edge chains /
+  anchor lines as the sharp cube, the dental reference keeps its θ 60° chains (110.2 mm, 56.1 mm),
+  and the generic goldens are unchanged or re-baselined with an explained diff.
 Each **done when** its golden/walk is green and the ledger row names it.
 
 ### P6 Gizmo update
