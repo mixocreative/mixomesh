@@ -39,7 +39,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | PE.6 | todo | | owner: rename to mixoDental (not distributed) |
 | PW.1 | todo | | Cults3D web publish via relay; needs owner Cloudflare + Cults key |
 | PW.2 | done | f1af56e | Upgraded existing PWA: SW cache per build hash, waiting worker + update toast (en/ja/zh-Hant, Gemini), file_handlers .stl .3mf .obj .glb .gltf .mixo, launchQueue -> same runner as desktop --open; browser-pwa-smoke: SW controlling, offline reload boots, launchQueue file opens; CSP unchanged; no SW under file:// (test). Only on real Pages: install prompt, Windows file association, real launchQueue, update toast on 2nd deploy (P9.3 checklist). |
-| PW.2b | todo | | Idle background prefetch of public/vendor engines (meshfix, manifold, draco, mixo-geocore) after first load, so offline repair/export/supports work without prior use. |
+| PW.2b | done | 0c9009e | SW prefetch-vendor on idle (not saveData, not file://, not dev): 10 engine files, 2.76 MB; cache id hashes engine list; pwa smoke: all engines served from cache offline. |
 | P2.1 | todo | | after PE.4 |
 | P2.2 | todo | | |
 | P3.1 | todo | | |
