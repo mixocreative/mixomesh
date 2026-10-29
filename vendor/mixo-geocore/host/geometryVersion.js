@@ -1,8 +1,8 @@
 // Ported from mixodental src/workers/geometryVersion.ts. The version is bumped with every ABI change
-// (9 at the port, 10 since P5.14, now 11).
+// (9 at the port, 10 since P5.14, 11 with the repair budget, now 12: STL import drops weld-collapsed triangles).
 
 /** Must equal the Rust `engine_version()`; both change together on any ABI change. */
-export const HOST_GEOMETRY_VERSION = 11;
+export const HOST_GEOMETRY_VERSION = 12;
 
 /** Thrown when the loaded engine's `engine_version()` is not `HOST_GEOMETRY_VERSION` (code 'geometry-version-mismatch'). */
 export class GeometryVersionMismatch extends Error {
