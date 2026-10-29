@@ -401,17 +401,28 @@ Each task adds its settings section to SupportPanel, its walk scenario, and asse
   a mixomesh command and button. *Depends: P3.6.*
 - **P5.13** Check `S:\ai\mixomesh\port\mixosupports\` (guide 10) for handed-over code; record the
   result (folder absent today). *Depends: —; before P3.4.*
-- **P5.14** `[geocore]` + both apps. Bevel-robust edge detection (owner question 2026-10-29). The
-  overhang *outline* is region-based (works on rounded edges), but internal ridges
-  (`generic/placement/anchors.rs`, per-edge `angle_between > ridge angle`) and the hard-edge finder
-  (per-edge `|n1·n2| ≤ cos θ`) miss a turn spread over many small facets. Fix once in
-  `geometry-core`: weld by position, segment faces into near-planar patches (normal tolerance),
-  report patch boundaries whose patch mean normals differ by more than θ; anchors and `hard_edges`
-  both use it, so dental and generic gain it together. *Depends: P5.11.* **Done when** a cube with a
-  0.5 mm fillet of 8+ segments yields the same 4 edge chains / anchor lines as the sharp cube, the
-  dental reference keeps its θ 60° chains (110.2 mm, 56.1 mm), the generic goldens are unchanged or
-  re-baselined with an explained diff, and both apps are re-vendored and green.
-
+- **P5.14** `[geocore]` + both apps. **HIGH priority** — edge reinforcement on high-poly models
+  (owner question 2026-10-29, measured with `scripts/probes/edge-probe.mjs` on engine 9):
+  - Bevelled cube: sharp box 19 edge points along its long bottom edges; same box with a 1 mm bevel
+    of 16 segments or a 2 mm bevel of 32 segments: **0**. Cause: `anchors.rs` insets each edge
+    sample into ONE incident triangle and needs clearance ≥ 0.05 mm inside it; bevel facets are
+    ~0.1 mm wide, so every sample is silently dropped. Real scans have such facets everywhere.
+  - Rounded crease inside an overhang (V ridge rounded by 8 facets): ridge points 9 → 0 (per-edge
+    `angle_between > ridge angle`). The hard-edge finder (`dental/topology.rs`, per-edge
+    `|n1·n2| ≤ cos θ`) has the same blindness.
+  - Split (unwelded) meshes: every seam inside an overhang becomes a false boundary (rounded V:
+    34 → 61 edge points). Covered by P2.1's weld-before-engine rule; geocore also welds internally.
+  Fix once in `geometry-core`: (1) inset by walking the surface from the edge sample by the contact
+  radius across triangles (geodesic step over the region's faces), keeping the anchor on whatever
+  face it lands; never drop a sample because one facet is thin; (2) segment faces into near-planar
+  patches (normal tolerance) and detect ridges / hard edges between patches by patch mean normals,
+  so a turn spread over many facets counts once; anchors and `hard_edges` share it, so dental and
+  generic gain it together. *Depends: PE.5 (can start right after PE.5; it does not need P5.11).*
+  **Done when** the probe shows ≥ 80% of the sharp box's edge points along the bevelled boxes'
+  long edges, the rounded V keeps ridge reinforcement, split and welded inputs give the same
+  anchors, the dental reference keeps its θ 60° chains (110.2 mm, 56.1 mm), the generic goldens
+  are unchanged or re-baselined with an explained diff, the probe is a geocore test, and both apps
+  are re-vendored and green.
 ### P6 Gizmo update
 
 Today: `src/core/scene/PivotSession.js` — Babylon `GizmoManager`, one exclusive mode
