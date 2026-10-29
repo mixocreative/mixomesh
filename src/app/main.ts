@@ -164,6 +164,8 @@ async function bootstrap() {
   safeAsync(() => LaunchRequests.init());
   // Automation API (API.6): answer requests from other apps. No-op without the bridge.
   safeAsync(() => ApiBridge.init());
+  // Support generation spike (plan P2.1): dev-only console trigger `window.__mxSupportSpike()`, no UI.
+  if (import.meta.env.DEV) safeAsync(() => import('../supports/spike').then(m => m.installSupportSpike()));
 }
 
 function wireCloseFlow() {

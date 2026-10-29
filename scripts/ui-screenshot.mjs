@@ -117,6 +117,12 @@ async function main() {
       return { innerW: innerWidth, docScrollW: de.scrollWidth, hScroll: de.scrollWidth > innerWidth + 1, overflowing: bad };
     })()`);
 
+    if (process.env.SPIKE === 'supports') {
+      await supportSpikeShots(cdp, snap);
+      await cdp.close();
+      return;
+    }
+
     for (const size of SIZES) {
       await setSize(size);
       const tag = `${size.w}x${size.h}${size.touch ? 't' : ''}`;
@@ -252,6 +258,90 @@ async function main() {
     await stopProcess(vite);
     try { rmSync(userDataDir, { recursive: true, force: true }); } catch { /* */ }
   }
+}
+
+// ── SPIKE=supports (plan P2.1): support spike evidence ───────────────────
+// Imports the support fixtures (tests/fixtures/support-cubes.mjs), runs the dev trigger
+// window.__mxSupportSpike(), and writes into OUT_DIR: cull on / off shots of the drawn supports
+// (plus an inverted-winding control shot), the support mesh as STL in the engine frame and through
+// the export seam (for trimesh), and spike-report.json.
+async function supportSpikeShots(cdp, snap) {
+  await waitFor(() => evaluate(cdp, `typeof window.__mxSupportSpike === 'function'`), 30000, 'support spike trigger');
+  const runOn = (file, options = {}, siblings = []) => evaluate(cdp, `(async () => {
+    const { resetWorld } = await import('/src/core/persist/ProjectLoader.js');
+    window.__mxSupportSpikeTools.clear();
+    resetWorld();
+    const get = async (f) => new File([await (await fetch('/tests/fixtures/' + f)).blob()], f);
+    const siblingFiles = await Promise.all(${JSON.stringify(siblings)}.map(get));
+    const { AssetLoader } = await import('/src/core/AssetLoader.js');
+    const ids = await AssetLoader.loadFromBlob(await get('${file}'), '${file}', undefined, { siblingFiles });
+    const { Selection } = await import('/src/core/Selection.js');
+    Selection.set([ids[0]], ids[0]);
+    await new Promise(r => setTimeout(r, 900));   // import bounce + validation settle
+    const stats = () => document.getElementById('status-bar')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+    const { SceneManager } = await import('/src/core/SceneManager.js');
+    const { worldExtentsOf } = await import('/src/core/scene/WorldExtents.js');
+    const content = () => SceneManager.getScene().meshes.filter(m => m.metadata?.meshId).length;
+    const before = { stats: stats(), content: content(), extents: JSON.stringify(worldExtentsOf(AssetLoader.getBabylonMesh(ids[0]))) };
+    const result = await window.__mxSupportSpike(${JSON.stringify(options)});
+    await new Promise(r => setTimeout(r, 600));
+    const [support] = window.__mxSupportSpikeTools.meshes();
+    const after = { stats: stats(), content: content(), extents: JSON.stringify(worldExtentsOf(AssetLoader.getBabylonMesh(ids[0]))) };
+    return { file: '${file}', result, before, after, d20: { meshId: support.metadata?.meshId ?? null, pickable: support.isPickable, parent: support.parent?.name ?? null } };
+  })()`);
+
+  const report = {};
+  report.goldenSettings = await runOn('support-cube-overhang.glb', { preset: 'LIGHT' });
+  report.plain = await runOn('support-plain-cube.glb');
+  report.seams = await runOn('support-seam-cube.glb');
+  // A counter-clockwise-front, multi-shader import (OBJ, 3 materials = one logical object, 3 parts).
+  report.objMultiPart = await runOn('cat-model-3mat.obj', {}, ['cat-model-3mat.mtl']);
+  report.middle = await runOn('support-cube-overhang.glb');
+
+  // Cull pair on the last (MIDDLE cube-overhang) build: camera on the support side, slightly below.
+  await evaluate(cdp, `(async () => {
+    const { SceneManager } = await import('/src/core/SceneManager.js');
+    SceneManager.setOverlay('grid', false);
+    const [m] = window.__mxSupportSpikeTools.meshes();
+    m.refreshBoundingInfo();
+    const bb = m.getBoundingInfo().boundingBox;
+    const cam = SceneManager.getCamera();
+    cam.setTarget(bb.centerWorld.clone());
+    cam.alpha = Math.PI / 3; cam.beta = 1.25; cam.radius = bb.extendSizeWorld.length() * 4.5;
+  })()`);
+  await sleep(800);
+  await snap('supports-cull-on');
+  await evaluate(cdp, `window.__mxSupportSpikeTools.setCulling(false)`);
+  await sleep(400);
+  await snap('supports-cull-off');
+  // Control: the same mesh with every triangle's winding reversed, culling on. A wrong winding looks like this.
+  await evaluate(cdp, `(() => {
+    window.__mxSupportSpikeTools.setCulling(true);
+    const [m] = window.__mxSupportSpikeTools.meshes();
+    const idx = Array.from(m.getIndices());
+    for (let i = 0; i < idx.length; i += 3) [idx[i + 1], idx[i + 2]] = [idx[i + 2], idx[i + 1]];
+    m.setIndices(idx);
+  })()`);
+  await sleep(400);
+  await snap('supports-control-inverted-cull-on');
+  await evaluate(cdp, `(() => {
+    const [m] = window.__mxSupportSpikeTools.meshes();
+    const idx = Array.from(m.getIndices());
+    for (let i = 0; i < idx.length; i += 3) [idx[i + 1], idx[i + 2]] = [idx[i + 2], idx[i + 1]];
+    m.setIndices(idx);
+  })()`);
+
+  const stl = await evaluate(cdp, `(() => {
+    const id = window.__mxSupportSpikeTools.meshes()[0].metadata.supportOf;
+    const f = window.__mxSupportSpikeTools.stlFiles(id);
+    const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+    return { engine: b64(f.engine), exported: b64(f.exported), sideOrientation: f.sideOrientation, materialSide: f.materialSide };
+  })()`);
+  writeFileSync(join(OUT_DIR, 'supports-engine-frame.stl'), Buffer.from(stl.engine, 'base64'));
+  writeFileSync(join(OUT_DIR, 'supports-export-frame.stl'), Buffer.from(stl.exported, 'base64'));
+  report.stl = { sideOrientation: stl.sideOrientation, materialSide: stl.materialSide };
+  writeFileSync(join(OUT_DIR, 'spike-report.json'), JSON.stringify(report, null, 2));
+  console.log('PROBE', JSON.stringify(report));
 }
 
 // ── plumbing (mirrors tests/browser-smoke.mjs) ───────────────────────────
