@@ -69,3 +69,18 @@ Babylon runs the decoder in `blob:` workers that `importScripts` the wrapper and
 receive the `.wasm` bytes from the page. The asm.js fallback
 (`draco_decoder_gltf.js`) is not shipped: the app already requires
 WebAssembly. The only URL in the wrapper is the attribution header.
+
+## `mixo-geometry/` — mixo geometry engine (first-party)
+
+| | |
+|---|---|
+| Upstream | `mixocreative/mixosupports`, `crates/geometry-wasm/pkg-browser` (Rust + wasm-bindgen, built there with `npm run wasm:build`) |
+| Licence | first-party code of this project's owner, not third-party; covered by `EULA.txt` |
+| Version | `VERSION` holds `engine_version()`; `SOURCE.json` holds the mixosupports commit and a SHA-256 per file |
+| Re-vendor / verify | `npm run vendor:geometry` (copies from `../mixosupports`, or `-- --from <dir>`) / `node scripts/vendor-geometry.mjs --check` |
+| Files | `mixo_geometry_wasm.js`, `mixo_geometry_wasm_bg.wasm`, `mixo_geometry_wasm.d.ts` (types, reading only), `VERSION`, `SOURCE.json` |
+
+The support-generation engine (docs/support-generation-port.md). Reused as
+built: never edit it here. `src/support-engine/loadGeometry.js` loads it and
+refuses an `engine_version()` other than `HOST_GEOMETRY_VERSION`
+(`src/support-engine/geometryVersion.js`); an ABI upgrade bumps both.

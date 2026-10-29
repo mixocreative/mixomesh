@@ -145,7 +145,7 @@ The port has three layers. Each has its own rule.
 
 **Order** (each step is specified and reviewed before building):
 - A0. Licence: decided (owner, 2026-10-29, mixosupports D23): no licence issue assumed; the code is treated as re-implemented. No audit blocks the port.
-- A1. Vendor `pkg-browser` and add the load-time version check.
+- A1. Vendor `pkg-browser` and add the load-time version check. **Done 2026-10-29**: `public/vendor/mixo-geometry/` (VERSION, SOURCE.json), `scripts/vendor-geometry.mjs` (`--check`), `src/support-engine/geometryVersion.js` + `loadGeometry.js`, `tests/geometry-engine.test.mjs`. Browser and Electron loading are proven in A3.
 - A2. Port the logic layer (esbuild once) and its tests.
 - A3. Spike: one selected mesh, generate in a worker, show tips in Babylon (decide right-handed scene per section 6), one golden matches.
 - A4. Rebuild the support-area and edit UI against the contract.

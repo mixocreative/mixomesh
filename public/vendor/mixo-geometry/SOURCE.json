@@ -1,0 +1,11 @@
+{
+  "repo": "mixocreative/mixosupports",
+  "commit": "adbe7c31902e5b8b8465b7e2b983f14d84fc796c",
+  "committed": "2026-10-29T04:22:12+08:00",
+  "engineVersion": 9,
+  "sha256": {
+    "mixo_geometry_wasm.js": "91d6c005d60eae8ab28c46666ed8a3f14b87add48a55316bc990e4f4f634ef2b",
+    "mixo_geometry_wasm_bg.wasm": "192d02e45b8509ed888c548600101c8e95b024dbd8bc44e9d494d8e8a688eae5",
+    "mixo_geometry_wasm.d.ts": "9a355885002afb35632c543fa860f3f1ce2ef0a8a483e3c2fb50f44b455c633a"
+  }
+}
