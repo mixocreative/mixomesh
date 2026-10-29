@@ -325,6 +325,21 @@ on PE.5.
   (manifest + SW registered), reloads offline and opens a file via the launch queue; Lighthouse PWA
   checks pass; Electron build unaffected.
 - Desktop-only by nature (stays in Electron): automation API / named pipe / batch jobs / `--job`.
+### PD mixoDental requests (owner 2026-10-29)
+
+- **PD.1** `[mixodental]` Support-area step colours and outside-area risks. In the dental step that shows the
+  support area: (1) permitted area painted vermilion `#E83F25` (replaces green `#2f6f5e` for the area fill and
+  outline; tip markers unchanged); (2) overhang low points OUTSIDE the permitted area painted blue `#1E50A2`: per
+  downward overhang region (profile overhang angle) find its lowest points (engine island / minima detection,
+  e.g. `check_support_problems` with the step's tips as contacts), keep those on faces outside the permitted
+  area, paint a disc around each (radius ≈ click reach, restricted to that region's faces) and list each in the
+  problem list with Show; recompute ~0.5 s after each paint/erase stroke (worker, revision, stale dropped);
+  (3) the blue `#007ed3` contour line becomes ink `#3b3631` so blue means only "risk outside the area" (owner
+  may veto). Colours live in `PREVIEW` (style.ts) as named entries `areaPermitted`, `riskOutside`.
+  *Depends: PE.5b.* **Done when** a vitest covers the outside-low-point selection (a model with one low point
+  inside and one outside the area → exactly one blue spot), the walk passes, a screenshot of the step shows
+  vermilion area + blue spot, i18n en/ja/zh-Hant for any new string, exports byte-identical to the PE.5 baseline
+  (visual-only change).
 ### P2 Spike
 
 - **P2.1** One selected mesh → worker job → `generate` → tips drawn in Babylon. `src/supports/frame.ts`
@@ -600,6 +615,7 @@ drafts that a verifier checks; Codex low for bounded "who owns this" lookups.
 | PW.1 | sonnet (+ main for owner steps) | relay + web Publish path |
 | PW.2 | sonnet | manifest, SW, file handlers |
 | PE.5b | opus | dental host bindings + editing extension points, mixoDental drops duplicates |
+| PD.1 | sonnet | mixoDental support-area colours + outside-area risk paint |
 | PE.6 | sonnet | rename mixosupports → mixoDental (web only), every reference in the three repos |
 | P2.1 | opus | handedness spike, weld, empirical proof |
 | P2.2 | haiku | loader smokes |
