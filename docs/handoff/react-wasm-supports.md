@@ -33,7 +33,7 @@ P0.3 (f2a283b): frame intervals at vsync cap 16.7 ms for 1M and 5M pillows (orbi
 | P1.2 | retired → PE.2 | | tests + goldens run in mixo-geocore |
 | PE.1 | done | geocore 6ea602d | S:\ai\mixo-geocore: 51 engine commits kept (filter-branch on scratch clone, = mixosupports count) + scaffold; cargo test ok, wasm build both pkgs, smoke engine 9; GitHub mixocreative/mixo-geocore PRIVATE, empty (verified), remote added, not pushed. Goldens vitest waits for PE.2 (imports app code). |
 | PE.2 | done | geocore 006c8dc, mixomesh 2488894 | geocore: host/ + editing/ (ViewportPort: size, screenToRay, worldToScreen, pick, brushView; planAddTip; arrange), D22 lint + test, 725 tests incl. 16 goldens byte-identical to mixosupports (main re-ran). mixomesh: vendor/mixo-geocore/{host,editing} (--packages-only), src/support-engine = loadGeometry.js + meshWorker.entry.ts + progressLabel.ts; 7 strings → PROGRESS_STAGE codes + locale keys (Gemini). Follow-ups: command labels / StatusMessage in editing/commands.ts, status.ts still English-as-key (→ P3.4 maps codes); dropped tests to recover in P3: selection, pickIndexes, transformParity (three.js), reducer-dependent landing/unitSupports cases. |
-| PE.3 | todo | | |
+| PE.3 | done (local) | geocore a1fa01f | ci.yml + release.yml (actions SHA-pinned, gh release create), scripts/assemble-release.mjs (4 tgz + SHA256SUMS verified, tag must equal engine_version), scripts/ci-local.mjs passes all CI steps (725 tests). First real CI run + release only after push (P9.3). |
 | PE.4 | todo | | |
 | PE.5 | todo | | owner: mixosupports switches this mission |
 | PE.6 | todo | | owner: rename to mixoDental (not distributed) |
