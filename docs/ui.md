@@ -201,3 +201,16 @@ node scripts/heavy-mesh/measure.mjs --files pillow-1M.stl,pillow-5M.stl,pillow-t
 **Gate rule (P0.6 done-when):** on each fixture, the median `cpuFrameMs` mean must be at most
 `baseline + max(0.1 ms, 10%)`. The baseline is the P0.3b row in
 `docs/handoff/react-wasm-supports.md`. Record the before and after numbers, not just "passes".
+
+---
+
+## 7. Shared style with mixoDental (later)
+
+Decision of 2026-11-02 by the owner. mixomesh and mixoDental (github.com/mixocreative/mixodental) each
+keep their own style for now. There is no shared kit repo and no sync step. A designer works only
+inside the app repo they are changing.
+
+Once both apps are published, compare the two styles side by side (tokens, controls, panels,
+spacing, type) and merge them into one final, organised style that both apps share. Decide at
+that point where the shared tokens live. Until then, do not copy styles between the two apps by
+hand.
