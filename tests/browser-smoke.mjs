@@ -14,6 +14,45 @@ const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');
 // Rendering eval records a 1 s turntable (possibly twice — the mp4→WebM
 // empty-result retry) on a SwiftShader render loop.
 
+/*
+ * THE ALLOWLIST IS A LIST OF WHAT IS ACCEPTABLE, NOT OF WHERE NOISE WAS ONCE SEEN (MX-07).
+ *
+ * It used to be `/Babylon\.js/i`, which silenced the engine's ENTIRE error channel in the app's
+ * primary smoke, with no reason written anywhere — against AGENTS.md's own rule that open
+ * console errors are real. The audit could not produce a single Babylon *error* carrying that
+ * token (the version banner is a console.log, not an error), so the pattern is gone rather than
+ * narrowed: an entry is added back only with the exact string and the reason, when a run
+ * actually fails on it.
+ *
+ * Each entry is an exact substring, case-sensitive. Hits are counted and REPORTED at the end of
+ * the run, because an allowlist nobody watches is how one quietly outlives its noise and starts
+ * hiding real errors instead.
+ */
+const ALLOWED_CONSOLE_ERRORS = [
+  { text: 'synthetic import failure',
+    why: 'the import-error-modal check throws this on purpose; safeImport logs it before showing the modal' },
+];
+/*
+ * Empty on purpose. It held `favicon`, and the first run with this report said it matched NOTHING:
+ * index.html serves `<link rel="icon" href="data:,">`, so Chrome never fetches /favicon.ico any
+ * more. Deleted per MX-07's own rule — if it comes back, the smoke fails and prints the exact line.
+ */
+const ALLOWED_LOG_ERRORS = [];
+const allowHits = new Map();
+const allowed = (list, text) => {
+  const hit = list.find(entry => text.includes(entry.text));
+  if (hit) allowHits.set(hit.text, (allowHits.get(hit.text) ?? 0) + 1);
+  return !!hit;
+};
+const reportAllowlist = () => {
+  for (const entry of [...ALLOWED_CONSOLE_ERRORS, ...ALLOWED_LOG_ERRORS]) {
+    const n = allowHits.get(entry.text) ?? 0;
+    console.log(n
+      ? `allowlist "${entry.text}": silenced ${n} error(s) — ${entry.why}`
+      : `allowlist "${entry.text}": MATCHED NOTHING this run — delete it, or find out why the noise stopped (${entry.why})`);
+  }
+};
+
 async function main() {
   const browserPath = findBrowser();
   if (!browserPath) {
@@ -69,9 +108,7 @@ async function main() {
       if (msg.method === 'Runtime.consoleAPICalled') {
         const { type, args = [] } = msg.params;
         const text = args.map(a => a.value ?? a.description ?? '').join(' ');
-        // The import-error-modal check deliberately throws; safeImport logs it.
-        const expected = /Babylon\.js/i.test(text) || /synthetic import failure/.test(text);
-        if (type === 'error' && !expected) failures.push(`console ${type}: ${text}`);
+        if (type === 'error' && !allowed(ALLOWED_CONSOLE_ERRORS, text)) failures.push(`console ${type}: ${text}`);
       }
       if (msg.method === 'Runtime.exceptionThrown') {
         failures.push(`exception: ${msg.params.exceptionDetails?.exception?.description
@@ -80,7 +117,7 @@ async function main() {
       }
       if (msg.method === 'Log.entryAdded') {
         const e = msg.params.entry;
-        if (e.level === 'error' && !/favicon|Babylon\.js/i.test(e.text)) {
+        if (e.level === 'error' && !allowed(ALLOWED_LOG_ERRORS, e.text)) {
           failures.push(`log error: ${e.text} ${e.url ?? ''}`.trim());
         }
       }
@@ -2718,6 +2755,9 @@ async function main() {
     await cdp.close();
     console.log('PASS Vite browser smoke');
   } finally {
+    // In the finally, so it prints on the three early-surface throws too (MX-07): an allowlist is
+    // only an instrument while someone can see what it did.
+    reportAllowlist();
     await stopProcess(browser);
     await stopProcess(vite);
     removeTempDir(userDataDir);
