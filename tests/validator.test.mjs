@@ -249,6 +249,36 @@ await test('open mesh → holes warning with count, auto-fix available', async (
   assert.equal(m.getIndices().length, 12, 'engine closed the hole');
   assert.equal(holes.fixed, true);
 });
+// MX-01: the whole chain, with an engine that really counts boundary edges on
+// the triangles it is handed (an independent reader). The validator welds for
+// its own topology pass; the engine diagnose must answer the same question, or
+// a seam-split closed mesh — every textured import — carries a `holes` warning
+// Repair cannot clear and strict export refuses. Seam-splitting at the mesh
+// level is what buildMesh() does: one vertex copy per triangle corner.
+await test('MX-01: unwelded closed cube → NO holes result (the engine is asked the welded question)', async () => {
+  const R = await import('../src/core/repair/MeshRepair.js');
+  R.__test.setEngine({
+    diagnose: (V, T) => {
+      const used = new Map();
+      for (const [a, b, c] of T) for (const [x, y] of [[a, b], [b, c], [c, a]]) {
+        const k = x < y ? `${x}:${y}` : `${y}:${x}`;
+        used.set(k, (used.get(k) ?? 0) + 1);
+      }
+      let boundary = 0, nonManifold = 0;
+      for (const n of used.values()) { if (n === 1) boundary++; else if (n > 2) nonManifold++; }
+      return { boundary, nonManifold, components: 1, isWatertight: !boundary && !nonManifold };
+    },
+    repairObject: async (V, T) => ({ V, T, report: {} }),
+  });
+  const results = await MeshValidator.validateMesh(buildMesh(TRIS));
+  assert.equal(results.find(r => r.type === 'holes'), undefined,
+    `a closed cube must report no holes however its vertices are split: ${JSON.stringify(results)}`);
+  const open = await MeshValidator.validateMesh(buildMesh(TRIS.slice(0, 10)));
+  const holes = open.find(r => r.type === 'holes');
+  assert.ok(holes, 'two faces removed is a real hole and must still be reported');
+  assert.ok(holes.count > 0 && holes.count <= 8, `expected the real boundary count, got ${holes.count}`);
+});
+
 // I4: the validator's own badEdgeCount is boundary edges PLUS non-manifold
 // edges, so using it as the offline `holes` count reported the very same
 // edges twice — once as nonManifold, once as holes. Offline, only

@@ -21,6 +21,7 @@
 
 import { signedVolume, frontFaceIsClockwise } from '../print/PrintSpace.js';
 import { capBoundaryLoops } from './CapLoops.js';
+import { weldArrays } from './Weld.js';
 import { vendorUrl } from '../vendorUrl.js';
 import { bump } from '../geometry/GeometryStore.js';
 
@@ -306,7 +307,22 @@ export async function diagnoseMesh(mesh, opts = {}) {
   const tris = (mesh.getIndices()?.length ?? 0) / 3;
   const name = mesh.name ?? 'mesh';
   if (tris > cap) throw new Error(`"${name}" is too large to diagnose in the browser (${tris} triangles > ${cap})`);
-  const lib = await ensureRepairEngine(); const { V, T } = meshToArrays(mesh);
+  // MX-01: diagnose the mesh POSITION-WELDED, which is the only topology
+  // question worth asking and the one `repairObject` will act on (its stage 1
+  // merges duplicate positions before it counts anything). Read raw, an
+  // imported mesh's UV seams — four vertices per cube face so each corner can
+  // hold its own UV — are 24 "open edges" on a closed cube: a warning no
+  // repair can clear, and strict export refusing a correct file. The
+  // validator's own topology pass (2026-09-17) and the group diagnose
+  // (2026-09-18) already weld; this call was the one left reading raw.
+  // The weld belongs HERE, not at each call site: three callers pass a live
+  // mesh (MeshValidator.validateMesh, PrintPipeline._tryRepair and
+  // _refreshRepairVerdict) and fixing one of them is what left the others
+  // wrong. `repairMesh` keeps passing RAW geometry on purpose — the engine
+  // merges for itself and arraysToMesh needs the original UVs to put back.
+  const welded = weldArrays(mesh.getVerticesData('position') ?? [], mesh.getIndices() ?? []);
+  const lib = await ensureRepairEngine();
+  const { V, T } = meshToArrays({ getVerticesData: () => welded.positions, getIndices: () => welded.indices });
   const d = lib.diagnose(V, T);
   return { boundaryEdges: d.boundary, nonManifoldEdges: d.nonManifold, components: d.components, isWatertight: !!d.isWatertight, triangles: T.length };
 }

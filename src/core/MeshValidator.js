@@ -363,7 +363,10 @@ function _groupOrientation(siblings) {
  * POSITION (each part carries its own copy), so the unwelded concatenation
  * showed every seam as an open boundary: a perfectly closed cube split into
  * two materials reported "16 holes" (measured live 2026-09-18). _topology
- * welds internally already; the engine diagnose did not.
+ * welds internally already; the engine diagnose did not — and the single-mesh
+ * route kept reading raw for another year (MX-01). The weld now lives inside
+ * `diagnoseMesh`, so every caller gets it; the explicit weld below is still
+ * needed because the UNION is built from several meshes' vertices.
  *
  * Auto-Fix on a group result = GroupRepair on the welded union (one solid),
  * offered only when the engine answered and the union is inside the cap.
@@ -534,6 +537,8 @@ export async function validateMesh(mesh) {
       // is boundary edges only; the validator's own badEdgeCount is boundary
       // PLUS non-manifold, so using it as a fallback reported the same edges
       // twice (once as nonManifold, once as holes).
+      // Pass the LIVE mesh, not welded arrays: diagnoseMesh welds for itself
+      // (MX-01), so welding here too would only pay for it twice.
       const { diag } = await engineDiagnose(mesh);
       if (diag && diag.boundaryEdges > 0) {
         results.push(_holesResult(diag.boundaryEdges, repairable && diag.triangles <= REPAIR_TRIANGLE_CAP));
