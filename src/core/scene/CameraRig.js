@@ -45,9 +45,12 @@ let _cachedActiveId   = null;
 let _cachedActivePartIds = [];   // active object's logical parts (event-cached, not per-frame)
 let _followSuspended = false;    // set by RenderOutput during offline render/capture
 // Zoom to cursor (overhaul 5.6, plan §4.7 "Camera"): wheel zoom dollies toward
-// the point under the pointer. Default ON; inactive in follow modes (the
-// target is re-locked every frame there, so the zoom pan would just fight it).
-let _zoomToCursor = true;
+// the point under the pointer, in 'free' mode only — a follow mode re-locks the
+// target every frame, so the zoom's pan would just fight it. There is no
+// preference: the setZoomToCursor / isZoomToCursor pair that used to carry one
+// had no caller and no UI in any build (audit MX-09), so the knob was removed
+// rather than left looking live. A real preference belongs in the Scene panel,
+// next to the other camera settings, and would reinstate a flag here.
 let _wheelZoomed  = false;       // a wheel step moved the target this frame (ortho auto-revert must ignore it)
 
 /** Suspend the per-frame follow-target hook (offline render drives target itself). */
@@ -189,21 +192,8 @@ function _setupCamera() {
 
 function _syncZoomToCursor() {
   const wheel = _camera?.inputs?.attached?.mousewheel;
-  if (wheel) wheel.zoomToMouseLocation = _zoomToCursor && _cachedFollowMode === 'free';
+  if (wheel) wheel.zoomToMouseLocation = _cachedFollowMode === 'free';
 }
-
-/**
- * Turn wheel zoom-to-cursor on/off (default on). Follow modes always zoom to
- * the locked target regardless.
- * @param {boolean} on
- */
-export function setZoomToCursor(on) {
-  _zoomToCursor = !!on;
-  _syncZoomToCursor();
-}
-
-/** @returns {boolean} the zoom-to-cursor preference. */
-export function isZoomToCursor() { return _zoomToCursor; }
 
 function _preventMmbDefault(e) {
   if (e.button === 1) e.preventDefault();
@@ -287,13 +277,13 @@ export function touchPan(dx, dy) {
 /**
  * Pinch zoom by finger-distance ratio `scale` (> 1 zooms in) towards the
  * pinch centre (`x`,`y` canvas px). Follows the wheel rules: zoom-to-cursor
- * only when enabled AND follow mode is 'free' (otherwise zoom about the
+ * only when follow mode is 'free' (otherwise zoom about the
  * target); ortho extents follow the radius in the per-frame hook, and the
  * target shift is flagged so a face preset's auto-revert reads it as a zoom.
  */
 export function touchPinch(scale, x, y) {
   if (!_camera) return;
-  const toPoint = _zoomToCursor && _cachedFollowMode === 'free';
+  const toPoint = _cachedFollowMode === 'free';
   const point = toPoint ? _pointOnTargetPlane(x, y) : null;
   const r = zoomAboutPoint(_camera.target, point, _camera.radius, scale,
     _camera.lowerRadiusLimit ?? 0, _camera.upperRadiusLimit ?? Infinity);

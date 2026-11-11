@@ -22,10 +22,6 @@ export function linearToSrgb01(c) {
   return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
 }
 
-/** True when a material stores its solid colour in linear space (PBR). */
-export function isLinearColorMaterial(mat) {
-  return !!mat && !mat.diffuseColor && !!(mat.albedoColor || mat.baseColor);
-}
 
 /**
  * A material's solid colour as sRGB {r,g,b} in [0,1] — the value export

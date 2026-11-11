@@ -71,7 +71,12 @@ const INITIAL_STATE = {
   // in .mixo (ProjectSerializer.buildDocument does not sweep this slice).
   cost: { ...DS.cost },
   ui: {
-    activePanel: 'properties', outlinerCollapsed: {}, assetPanelHeight: 220, scaleLocked: true,
+    // MX-10: `activePanel` and `assetPanelHeight` lived here with no reader anywhere. Plausible
+    // panel state is the worst kind of dead field — the next reader treats it as live. Removed,
+    // not wired: the panel layout is the workspace's job (below) and the asset panel sizes itself.
+    // A saved .mixo written by an older build still carries them; the loader spreads `data.ui`
+    // over this default, so they land in state unread and round-trip back out, exactly as before.
+    outlinerCollapsed: {}, scaleLocked: true,
     // Workspaces (PART 13b) — per-user preference, seeded from localStorage,
     // NEVER persisted in .mixo. Manual N/T/\ toggles layer on top of the
     // active workspace's defaults; switching workspace resets them.

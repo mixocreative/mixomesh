@@ -91,20 +91,6 @@ const _platform = () => S.desc?.platforms?.find(p => p.id === S.platformId) ?? n
 const _needsHost = d => d?.transfer === 'url';
 const _s3Spec = () => S.desc?.fileHosts?.find(h => h.type === 's3') ?? null;
 
-/** Test seam: drop all module state. */
-export function _resetPublishTabState() {
-  for (const g of S.gallery) URL.revokeObjectURL(g.url);
-  if (S.hero) URL.revokeObjectURL(S.hero.url);
-  Object.assign(S, {
-    desc: null, descError: null, loading: false, platformId: null, connected: {}, s3Connected: false,
-    editingConn: false, connBusy: false, connMsg: null, form: null, formKey: null, tagDraft: '',
-    hero: null, gallery: [], transparent: false, capturing: false, heroTried: false, formats: null,
-    built: [], phase: 'form', steps: [], jobId: null, outcome: null, lastPkg: null, lastReq: null,
-    blocked: null, note: null, cancelRequested: false, hold: null, linksOpen: null, extending: false, options: {},
-    pending: [], pendingFor: undefined, pendingBusy: false,
-  });
-  _guardUnload(false);
-}
 
 // ---------------------------------------------------------------------------
 // Loading

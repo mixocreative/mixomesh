@@ -58,5 +58,3 @@ function _tick() {
   }
 }
 
-/** Current hardware-scaling level (smoke/diagnostics). */
-export function getScalingLevel() { return _level; }

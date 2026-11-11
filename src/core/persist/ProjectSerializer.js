@@ -139,7 +139,6 @@ export function deriveDisplayName(a) {
 let _preservedTopLevel = {};
 /** @param {Record<string, unknown>} keys */
 export function setPreservedTopLevelKeys(keys) { _preservedTopLevel = { ...(keys ?? {}) }; }
-export function getPreservedTopLevelKeys() { return { ..._preservedTopLevel }; }
 
 async function _serialiseAssetLibrary(state, { skipEmbed = false } = {}) {
   const lib = state.scene.assetLibrary;
@@ -447,7 +446,7 @@ export async function buildDocument(opts = {}) {
 // ── Document → bytes ─────────────────────────────────────
 
 /** An embedded `fileData` string at least this long becomes its own Blob part. */
-export const STREAM_PART_MIN = 1 << 20;
+const STREAM_PART_MIN = 1 << 20;
 
 /**
  * Turn a built document into what the adapter writes. A document with no

@@ -234,9 +234,9 @@ function _enablePlaneHandles(pos) {
 // lightness) to #2c476a so it reads as blue next to the ink-dark UI. Hover /
 // active (Babylon shows the hover material while dragging) = each hue mixed
 // 40% toward white. Plane squares share the hue at 0.45 alpha (0.75 hovered).
-export const GIZMO_AXIS_HEX = Object.freeze({ x: '#7f0019', y: '#4a6b3a', z: '#2c476a' });
-export const GIZMO_PLANE_ALPHA = 0.45;
-export const GIZMO_PLANE_ALPHA_HOVER = 0.75;
+const GIZMO_AXIS_HEX = Object.freeze({ x: '#7f0019', y: '#4a6b3a', z: '#2c476a' });
+const GIZMO_PLANE_ALPHA = 0.45;
+const GIZMO_PLANE_ALPHA_HOVER = 0.75;
 const GIZMO_HOVER_MIX = 0.4;
 
 function _styleGizmo(g, hex, plane) {
@@ -267,7 +267,7 @@ function _applyGizmoColours() {
 // controls detached. Release every live handle drag: Babylon fires drag-end
 // (our _onGizmoDragEnd commits ONE undo step, or none when nothing moved) and
 // re-attaches the camera.
-export function releaseGizmoDrags() {
+function releaseGizmoDrags() {
   const g = _gizmos?.gizmos;
   if (!g) return 0;
   let n = 0;
@@ -318,7 +318,7 @@ function _applyGizmoScale() {
 }
 
 /** @param {boolean} coarse */
-export function setCoarseInput(coarse) {
+function setCoarseInput(coarse) {
   const next = !!coarse;
   if (next === _coarseInput) return;
   _coarseInput = next;
@@ -327,8 +327,6 @@ export function setCoarseInput(coarse) {
   document.dispatchEvent?.(new CustomEvent('mx:input-kind', { detail: { coarse: next } }));
 }
 
-/** @returns {boolean} touch/pen is the live input kind. */
-export function isCoarseInput() { return _coarseInput; }
 
 function _initCoarseInputTracking() {
   try {
@@ -371,8 +369,6 @@ export function setGizmoSnap(on) {
   _applyGizmoSnap();
 }
 
-/** @returns {boolean} gizmo Ctrl-snap currently engaged. */
-export function isGizmoSnapOn() { return _gizmoSnapOn; }
 
 /**
  * @param {'translate'|'rotate'|'scale'|'none'} mode
