@@ -22,7 +22,7 @@
 
 import { collectMimakiTextures } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
-import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { bundleName, exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
 import { isCollapsed } from './VertexWeld.js';
@@ -183,12 +183,12 @@ export async function serializeWRL(ctx) {
     const entries = ctx.cloneGroups.map(unit => ({
       path: `${perMeshBaseName(ctx, unit.name)}.wrl`, data: encodeVRML([...unit.meshes, ...(unit.supports ?? [])], urlByMesh),
     }));
-    return { kind: 'zip', mime: 'application/zip', filename: `${base}.zip`, entries: [...entries, ...textureEntries] };
+    return { kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, 'wrl'), entries: [...entries, ...textureEntries] };
   }
   const wrl = encodeVRML(ctx.meshes, urlByMesh);
   if (textureEntries.length) {
     return {
-      kind: 'zip', mime: 'application/zip', filename: `${base}.zip`,
+      kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, 'wrl'),
       entries: [{ path: `${base}.wrl`, data: wrl }, ...textureEntries],
     };
   }

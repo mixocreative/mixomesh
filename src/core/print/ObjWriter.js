@@ -17,7 +17,7 @@
 
 import { collectTextureExportData, clamp255, hex2 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
-import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { bundleName, exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, bufferZUpToYUp } from './PrintSpace.js';
 import { getPrinterProfile, PRINTER_OBJ_AXES } from './PrinterProfiles.js';
 import { isFaceted } from '../scene/FlatShading.js';
@@ -92,7 +92,7 @@ export async function serializeOBJ(ctx) {
 
   for (const [filename, blob] of textureBlobs) entries.push({ path: `textures/${filename}`, data: blob });
   for (const [filename, blob] of synth.blobByName) entries.push({ path: `textures/${filename}`, data: blob });
-  return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
+  return { kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, 'obj'), entries };
 }
 
 /**

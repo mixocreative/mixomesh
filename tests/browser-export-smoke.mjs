@@ -254,8 +254,9 @@ async function main() {
       }
     })()`);
     if (objExport?.error) throw new Error(`OBJ export failed: ${objExport.error}`);
-    assert(/_r1to1\.zip$/.test(objExport.suggested ?? ''),
-      `OBJ suggested filename should end _r1to1.zip, got ${objExport.suggested}`);
+    // MX-05: a bundle names its format, so two bundling formats in one call cannot collide.
+    assert(/_r1to1_obj\.zip$/.test(objExport.suggested ?? ''),
+      `OBJ suggested filename should end _r1to1_obj.zip, got ${objExport.suggested}`);
     const objZip = await JSZip.loadAsync(Buffer.from(objExport.b64, 'base64'));
     const objEntries = Object.keys(objZip.files);
     const objName = objEntries.find(p => /\.obj$/.test(p));

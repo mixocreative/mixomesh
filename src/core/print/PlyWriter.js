@@ -22,7 +22,7 @@
 
 import { collectMimakiTextures, clamp255 } from './ExportTextures.js';
 import { materialSrgbColor } from '../shaders/ColorSpace.js';
-import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { bundleName, exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices, toPrintSpace } from './PrintSpace.js';
 import { exportUVs, baseColorTexture, textureAddressing } from './UvTransform.js';
 
@@ -318,7 +318,7 @@ export async function serializePLY(ctx) {
     for (const unit of ctx.cloneGroups) {
       entries.push({ path: `${perMeshBaseName(ctx, unit.name)}.ply`, data: encodeBinaryPLY([...unit.meshes, ...(unit.supports ?? [])], images) });
     }
-    return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
+    return { kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, 'ply'), entries };
   }
   return {
     kind: 'blob', mime: 'application/octet-stream',

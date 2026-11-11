@@ -11,5 +11,14 @@ export default class JSZip {
     const self = this;
     return { file(fname, blob) { self.files[`${name}/${fname}`] = blob; } };
   }
-  async generateAsync() { return { __fakeZip: true, names: Object.keys(this.files) }; }
+  async generateAsync({ mimeType } = {}) {
+    const names = Object.keys(this.files);
+    // The collect/sink path (publish, export.run) reads the packaged bytes straight back, so the
+    // fake zip has to answer arrayBuffer(). What comes out is NOT a zip — a test that cares about
+    // archive contents reads `.files` instead.
+    return {
+      __fakeZip: true, names, type: mimeType ?? 'application/zip',
+      arrayBuffer: async () => new TextEncoder().encode(names.join('\n')).buffer,
+    };
+  }
 }

@@ -23,7 +23,7 @@ import { settleImportBounce } from '../scene/ImportBounce.js';
 import { weldMesh, WELD_DISTANCE } from '../repair/Weld.js';
 import { exportTargetsFromState, objectRatio } from '../scale/ScaleMath.js';
 import { buildExportContext, collectPrintUnits, getExportReference, resolveExportUnits, hasBuiltSupports, resolveIncludeSupports } from './ExportContext.js';
-import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { bundleName, exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { createPrepSteps } from './PrintPrep.js';
 import { createFormats } from './PrintFormats.js';
 import { packageAndDownload, buildExportBlob } from './PrintPackaging.js';
@@ -931,7 +931,7 @@ async function _wrapIndividual3MF(ctx, entriesForUnit) {
     const data = await innerZip.generateAsync({ type: 'uint8array', mimeType: 'model/3mf' });
     entries.push({ path: `${perMeshBaseName(ctx, unit.name)}.3mf`, data });
   }
-  return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
+  return { kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, '3mf'), entries };
 }
 
 async function _serialize3MFColorGroup(ctx) {
@@ -979,8 +979,41 @@ export async function collectExportFiles(formatKeys, options = {}) {
     return { blocked: true, code: 'EXPORT_NEEDS_ACKNOWLEDGEMENT', readinessIssues: readiness.issues };
   }
   const sink = [];
-  for (const key of formatKeys) await _runExport(key, { ...options, sink });
+  // MX-05: the refusal that is left once bundleName() carries the format token. Downstream,
+  // ApiServer and listbridge's validateListing both refuse a repeated name — the right posture,
+  // but their message ("duplicate export file name") names the symptom and sends the reader
+  // looking at the file system. Here, where the format each name came from is still known, it
+  // can be named instead.
+  const produced = [];
+  for (const key of formatKeys) {
+    const before = sink.length;
+    await _runExport(key, { ...options, sink });
+    for (const file of sink.slice(before)) produced.push([key, file.name]);
+    const clash = nameCollision(produced);
+    if (clash) throw new Error(clash);
+  }
   return { blocked: false, files: sink };
+}
+
+/**
+ * The first two formats of `produced` that want the same file, as the message saying so — or null.
+ * Case-insensitive, because the file systems that matter are: Windows and macOS would silently
+ * leave one file where two were asked for.
+ * @param {Array<[string, string]>} produced  [formatKey, filename] in the order they were written
+ * @returns {string|null}
+ */
+function nameCollision(produced) {
+  const by = new Map();
+  for (const [format, name] of produced) {
+    const key = String(name).toLowerCase();
+    const first = by.get(key);
+    if (first && first !== format) {
+      return `Export name collision: formats "${first}" and "${format}" both produce "${name}". `
+        + 'A bundling writer is missing its format token (PrintNaming.bundleName).';
+    }
+    by.set(key, format);
+  }
+  return null;
 }
 
 export const exportOBJ     = (options = {}) => _runExport('obj', options);
@@ -989,5 +1022,9 @@ export const exportThreeMF = (options = {}) => _runExport('3mf', options);
 export const exportPLY     = (options = {}) => _runExport('ply', options);
 export const exportWRL     = (options = {}) => _runExport('wrl', options);
 
-/** Test seam: the one function whose "nothing built" branch MX-08 is about. */
-export const __test = { addSupportClones: _addSupportClones };
+/**
+ * Test seams: the function whose "nothing built" branch MX-08 is about, and the collision
+ * detector MX-05 left behind (pure, so it is tested on fabricated pairs rather than by forcing
+ * a writer to misbehave).
+ */
+export const __test = { addSupportClones: _addSupportClones, nameCollision };

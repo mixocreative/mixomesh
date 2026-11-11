@@ -44,6 +44,24 @@ export function exportBaseName(ctx) {
 }
 
 /**
+ * Bundle name for a format that packages several files: `{projectName}{suffix}_{format}.zip`.
+ *
+ * The format token is load-bearing. `exportBaseName` is format-blind by construction — project
+ * name plus the scale suffix, nothing else — and five writers used to return
+ * `${exportBaseName(ctx)}.zip` (OBJ, PLY, STL, WRL, and the per-part outer bundle). So ANY two
+ * bundling formats asked for in one `collectExportFiles` call wrote the same file: the audit
+ * caught it with obj + wrl, but it was never about those two formats. The only refusal left was
+ * ApiServer's "duplicate export file name", which names the symptom. The same class was solved
+ * one level down, inside a zip, by PrintPackaging.uniqueEntryPaths (audit 2026-09-17 C4).
+ * Single-file formats need no token: their extension already is one.
+ * @param {ExportContext} ctx
+ * @param {'obj'|'stl'|'ply'|'wrl'|'3mf'} format
+ */
+export function bundleName(ctx, format) {
+  return `${exportBaseName(ctx)}_${format}.zip`;
+}
+
+/**
  * Per-part name: `{projectName}_{partName}{suffix}`.
  * @param {ExportContext} ctx
  * @param {string} meshName

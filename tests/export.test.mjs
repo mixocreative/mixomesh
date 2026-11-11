@@ -764,8 +764,8 @@ await test('STL: individually → one STL call per mesh + outer zip of N parts',
     assert.notEqual(info.trisBE, 1, `${key}: count is NOT big-endian (regression: Babylon CreateSTL isLittleEndian=false)`);
     assert.equal(info.bytes, 84 + 50, `${key}: 80-byte header + count + 50 bytes/facet`);
   }
-  assert.equal(calls.downloads.at(-1), 'Test_r1to1.zip',
-    'outer zip uses project+ratio default filename');
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1_stl.zip',
+    'outer zip uses project+ratio+format default filename (MX-05)');
 });
 
 await test('STL: individually + selectedOnly → only selected mesh in outer zip', async () => {
@@ -1114,8 +1114,8 @@ await test('filename: combined OBJ → `${project}${suffix}.zip` is the save def
   setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.downloads.at(-1), 'Test_r1to1.zip',
-    'save default = project + ratio suffix even at 1:1');
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1_obj.zip',
+    'save default = project + ratio suffix + format token even at 1:1');
 });
 
 await test('filename: combined OBJ at 1:144 → suffix `_r1to144`', async () => {
@@ -1123,7 +1123,7 @@ await test('filename: combined OBJ at 1:144 → suffix `_r1to144`', async () => 
     workingRatio: 1, targetRatio: 144 });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip');
+  assert.equal(calls.downloads.at(-1), 'Test_r1to144_obj.zip');
 });
 
 await test('filename: combined STL → `${project}${suffix}.stl` (single-blob path)', async () => {
@@ -1162,7 +1162,7 @@ await test('as-shown: empty exportTargets prints at the active object ratio (dis
   assert.ok(Math.abs(d.x - 2000) < 1e-6, `as-shown should be size×1000 (displayed mm), got ${d.x}`);
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.downloads.at(-1), 'Test_r72to72.zip', `as-shown suffix should be _r72to72, got ${calls.downloads.at(-1)}`);
+  assert.equal(calls.downloads.at(-1), 'Test_r72to72_obj.zip', `as-shown suffix should be _r72to72, got ${calls.downloads.at(-1)}`);
 });
 
 await test('batch: exportTargets list emits one file per target ratio', async () => {
@@ -1172,8 +1172,8 @@ await test('batch: exportTargets list emits one file per target ratio', async ()
   StateManager.setState(s => ({ ...s, print: { ...s.print, exportTargets: [{ kind: 'ratio', value: 72 }, { kind: 'ratio', value: 144 }] } }), { silent: true });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.ok(calls.downloads.includes('Test_r72to72.zip'), `missing 1:72 file, got ${calls.downloads.join()}`);
-  assert.ok(calls.downloads.includes('Test_r72to144.zip'), `missing 1:144 file, got ${calls.downloads.join()}`);
+  assert.ok(calls.downloads.includes('Test_r72to72_obj.zip'), `missing 1:72 file, got ${calls.downloads.join()}`);
+  assert.ok(calls.downloads.includes('Test_r72to144_obj.zip'), `missing 1:144 file, got ${calls.downloads.join()}`);
   assert.equal(calls.downloads.filter(f => f.endsWith('.zip')).length, 2, 'exactly two zip outputs');
 });
 
@@ -1193,7 +1193,7 @@ await test('typed targets: ratio 144 / ×2 / 120 mm on a 60 mm-tall 1:72 referen
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
   const zips = calls.downloads.filter(f => f.endsWith('.zip'));
-  assert.deepEqual(zips, ['Test_r72to144.zip', 'Test_x2.zip', 'Test_h120mm.zip']);
+  assert.deepEqual(zips, ['Test_r72to144_obj.zip', 'Test_x2_obj.zip', 'Test_h120mm_obj.zip']);
 });
 
 await test('typed targets: as shown stays _r{ref}to{ref}; fractional tokens use p', async () => {
@@ -1249,7 +1249,7 @@ await test('export ratio reference ignores active object when it is not exported
     `dimension preview should use printable reference ratio 1, got ${dims.x}`);
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportOBJ();
-  assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip',
+  assert.equal(calls.downloads.at(-1), 'Test_r1to144_obj.zip',
     'non-exported active helper must not choose the export scale');
 });
 
@@ -1297,7 +1297,7 @@ await test('filename: individually OBJ → outer zip + per-mesh entries carry pr
   // mtllib reference inside the OBJ payload must match the matching .mtl file
   assert.match(outer['Test_m1_r1to144.obj'], /^mtllib Test_m1_r1to144\.mtl/m,
     'OBJ mtllib points at per-mesh MTL');
-  assert.equal(calls.downloads.at(-1), 'Test_r1to144.zip');
+  assert.equal(calls.downloads.at(-1), 'Test_r1to144_obj.zip');
 });
 
 // ── OBJ solid-colour PNG synthesis ───────────────────────
@@ -1807,7 +1807,7 @@ await test('WRL: textured export → zip with .wrl + packaged PNG; ImageTexture 
   setScene({ objects: { t1: obj('t1') }, registry: { t1: texturedMesh('t1') } });
   MeshValidator.validateMesh = valOK;
   await PrintManager.exportWRL();
-  assert.equal(calls.downloads.at(-1), 'Test_r1to1.zip');
+  assert.equal(calls.downloads.at(-1), 'Test_r1to1_wrl.zip');
   assert.equal(calls.csgFrom.length, 0, 'WRL keeps UVs — never CSG re-baked');
   const files = zipInstances.at(-1).files;
   const wrl = files['Test_r1to1.wrl'];
@@ -1936,6 +1936,42 @@ await test('OBJ axis: pipeline export for the default Mimaki target writes Y-up'
   await PrintManager.exportOBJ();
   assert.match(objTexts()[0], /^# mixomesh export: millimetres, right-handed, Z-up$/m);
   StateManager.setState(s => ({ ...s, print: { ...s.print, targetPrinterId: 'mimaki-3duj-553' } }), { silent: true });
+});
+
+// ── MX-05: one call, five formats, five distinct files ───
+//
+// `exportBaseName` is format-blind by construction (project name + scale suffix), and five writers
+// returned `${exportBaseName(ctx)}.zip`: ObjWriter, PlyWriter, StlWriter, WrlWriter (twice) and the
+// per-part outer bundle in PrintPipeline. So ANY two bundling formats in one `export.run` call
+// wrote the same name — the audit caught it with obj + wrl, but it was never about those two. The
+// only refusal left was ApiServer's "duplicate export file name", which names the symptom.
+await test('MX-05: collectExportFiles with all five formats returns five distinct filenames', async () => {
+  setScene({ objects: { m1: obj('m1') }, registry: { m1: mesh('m1') } });
+  MeshValidator.validateMesh = valOK;
+  const res = await PrintManager.collectExportFiles(['obj', 'stl', 'ply', 'wrl', '3mf'], { acknowledgeWarnings: true });
+  assert.equal(res.blocked, false, `expected files, got ${JSON.stringify(res)}`);
+  const names = res.files.map(f => f.name);
+  assert.equal(names.length, 5, names.join());
+  assert.equal(new Set(names.map(n => n.toLowerCase())).size, 5, `five formats must write five files, got ${names.join()}`);
+  // Each bundle says which format it is; the single-file formats already did, by extension.
+  // (WRL only bundles when it has textures to package — this scene is solid colour, so it is a
+  // bare .wrl here, which is exactly why distinctness is the assertion that matters.)
+  assert.ok(names.includes('Test_r1to1_obj.zip'), names.join());
+  for (const n of names.filter(x => x.endsWith('.zip'))) {
+    assert.match(n, /_(obj|stl|ply|wrl|3mf)\.zip$/, `a bundle must name its format: ${n}`);
+  }
+});
+
+// The refusal that is left if a future writer forgets its format token: it must name the two
+// formats and the file, which "duplicate export file name" downstream never could.
+await test('MX-05: a name collision is refused by its cause — both formats and the file', async () => {
+  const { nameCollision } = (await import('../src/core/print/PrintPipeline.js')).__test;
+  assert.equal(nameCollision([['obj', 'A_obj.zip'], ['wrl', 'A_wrl.zip']]), null);
+  const msg = nameCollision([['obj', 'A_r1to1.zip'], ['wrl', 'A_R1TO1.ZIP']]);
+  assert.ok(msg, 'a case-insensitive collision must be caught — the file systems that matter are');
+  assert.match(msg, /obj/, msg);
+  assert.match(msg, /wrl/, msg);
+  assert.match(msg, /A_R1TO1\.ZIP/, msg);
 });
 
 // ── Report ───────────────────────────────────────────────

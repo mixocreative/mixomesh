@@ -4113,10 +4113,20 @@ without opening the file. **The ratio suffix is always present, even at
 suffix         = `_r${referenceRatio}to${targetRatio}`   // e.g. `_r1to144`, `_r1to1` (per-object redesign §12)
 combined       = `${projectName}${suffix}.${ext}`        // e.g. `Saturn_r1to1.3mf`
 individually:
-  outer zip    = `${projectName}${suffix}.zip`           // e.g. `Saturn_r1to1.zip`
+  outer zip    = `${projectName}${suffix}_${format}.zip` // e.g. `Saturn_r1to1_3mf.zip`
   inner entry  = `${projectName}_${meshName}${suffix}.${ext}`
                                                           // e.g. `Saturn_hull_r1to1.3mf`
+bundles        = `${projectName}${suffix}_${format}.zip` // OBJ (always), PLY / STL / WRL when
+                                                          // they package textures or parts
 ```
+
+The `_${format}` token on a **bundle** is load-bearing, not decoration (audit MX-05). A bundle
+name has no extension to tell it apart — five writers package as `.zip` — and `exportBaseName` is
+format-blind by construction, so without the token any two bundling formats asked for in one
+`collectExportFiles` call write the same file. `PrintNaming.bundleName(ctx, format)` is the one
+place that builds it, and `PrintPipeline.collectExportFiles` refuses a collision by naming both
+formats if a future writer forgets to use it. A single-file format needs no token: its extension
+already is one.
 
 For OBJ, the OBJ payload's `mtllib` reference points at the **matching**
 `.mtl` filename (per-mesh in individually mode, combined otherwise) — never

@@ -10,7 +10,7 @@
  * every other writer; nothing here knows about handedness.
  */
 
-import { exportBaseName, perMeshBaseName } from './PrintNaming.js';
+import { bundleName, exportBaseName, perMeshBaseName } from './PrintNaming.js';
 import { positionsToPrintSpace, printIndices } from './PrintSpace.js';
 import { WorkerTask } from '../workers/WorkerTask.js';
 import { encodeBinarySTLFromArrays } from './stlEncode.js';
@@ -96,7 +96,7 @@ export async function serializeSTL(ctx) {
       const unitMeshes = [...unit.meshes, ...(unit.supports ?? [])];   // P4.2: supports in the same soup
       entries.push({ path: `${base}.stl`, data: await encodeBinarySTLAsync(unitMeshes, base, { signal: ctx.options?.signal }) });
     }
-    return { kind: 'zip', mime: 'application/zip', filename: `${exportBaseName(ctx)}.zip`, entries };
+    return { kind: 'zip', mime: 'application/zip', filename: bundleName(ctx, 'stl'), entries };
   }
   const base = exportBaseName(ctx);
   return { kind: 'blob', mime: 'model/stl', filename: `${base}.stl`, data: await encodeBinarySTLAsync(ctx.meshes, base, { signal: ctx.options?.signal }) };
