@@ -53,12 +53,16 @@ To make a double-clickable Windows installer (`.exe`) for other people, see
 
 Double-click **`build-installer.cmd`** in the repo root (or run `npm run build:installer -- [flags]`).
 It wipes `release/` and `dist/`, warns about uncommitted changes, runs `npm test` (stops on
-failure), builds the app, runs electron-builder, and copies only the installer to
+failure), then the **real-artefact gates** — `test:boot-gate`, `test:export` and `test:consumers`,
+the ones that prove the exported files against programs that share no code with MIXOMESH — builds
+the app, runs electron-builder, and copies only the installer to
 **`installers/MIXOMESH-Setup-<version>.exe`** (plus a `.sha256` file; size and hash are
 printed). `release/` and `dist/` are wiped again afterwards.
 
-Flags: `--skip-tests` (bypass the test gate) and `--keep-build` (keep `release/` + `dist/`,
-needed to run `npm run smoke:packaged`). Exit code 0 = ok; otherwise the failing step is named.
+Flags: `--skip-tests` (bypass `npm test`), `--skip-smoke` (bypass the real-artefact gates, the
+Electron smoke and the packaged smoke — the installer is then NOT release-verified) and
+`--keep-build` (keep `release/` + `dist/`, needed to run `npm run smoke:packaged`). Exit code 0 =
+ok; otherwise the failing step is named.
 
 The installer is a wizard: per-user by default (`%LOCALAPPDATA%\Programs\MIXOMESH`, no admin
 needed), you can choose another folder, and it uninstalls via Settings > Apps. It registers

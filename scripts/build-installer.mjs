@@ -3,10 +3,11 @@
 //   node scripts/build-installer.mjs [--skip-tests] [--skip-smoke] [--keep-build]
 //   (or double-click build-installer.cmd at the repo root)
 //
-// 1 wipe release/ + dist/   2 warn on uncommitted changes   3 npm test   4 npm run build,
-// test:electron (needs dist/), electron-builder --win, smoke:packaged (needs release/win-unpacked)
-// 5 copy ONLY the installer to installers/MIXOMESH-Setup-<v>.exe (+ .sha256)
-// 6 wipe release/ + dist/ again (unless --keep-build). The smokes open a window, so they need a
+// 1 wipe release/ + dist/   2 warn on uncommitted changes   3 npm test   4 the real-artefact gates
+// (test:boot-gate, test:export, test:consumers)   5 npm run build, test:electron (needs dist/),
+// electron-builder --win, smoke:packaged (needs release/win-unpacked)
+// 6 copy ONLY the installer to installers/MIXOMESH-Setup-<v>.exe (+ .sha256)
+// 7 wipe release/ + dist/ again (unless --keep-build). The smokes open a window, so they need a
 // desktop session; --skip-smoke bypasses them (the installer is then NOT release-verified).
 // Exit 0 = ok; non-zero names the failing step.
 
@@ -61,6 +62,20 @@ begin('git status');
 }
 
 if (skipTests) { begin('npm test'); console.log('skipped (--skip-tests)'); } else { begin('npm test'); run('npm', ['test']); }
+
+// MX-06: `npm test` proves the writers agree with themselves — its zips are
+// tests/jszip-stub.mjs and its IndexedDB is a map. The suites that prove the
+// files agree with the OUTSIDE WORLD had no caller at all, in CI or here, so
+// they ran when somebody remembered. They run here now, before the thing they
+// would condemn is packaged. They need a desktop session (and test:consumers a
+// PrusaSlicer install + python trimesh/pymeshlab), so --skip-smoke covers them
+// like the other heavy gates — and then the installer is NOT release-verified.
+const REAL_ARTEFACT_GATES = ['test:boot-gate', 'test:export', 'test:consumers'];
+for (const script of REAL_ARTEFACT_GATES) {
+  begin(`npm run ${script}`);
+  if (skipSmoke) console.log('skipped (--skip-smoke)');
+  else run('npm', ['run', script]);
+}
 
 begin('npm run build'); run('npm', ['run', 'build']);
 if (skipSmoke) { begin('npm run test:electron'); console.log('skipped (--skip-smoke)'); }
