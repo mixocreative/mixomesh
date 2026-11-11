@@ -148,8 +148,11 @@ function _capturePrefs(state) {
  *                                    open, or the attempt itself errored (e.g. the triangle cap). Does
  *                                    NOT include clones skipped by a batch-wide unavailable engine
  *                                    (that case is a single toast.repairUnavailable, not a per-part
- *                                    listing). Drives the post-export toast.exportedWithWarnings —
- *                                    PrintPipeline is the sole place that reads/fires it.
+ *                                    listing). Also carries a unit whose support build returned
+ *                                    nothing (MX-08) — see the note at that push: the toast's
+ *                                    wording is broader than that cause. Drives the post-export
+ *                                    toast.exportedWithWarnings — PrintPipeline is the sole place
+ *                                    that reads/fires it.
  * @property {Array<{name:string, isWatertight:boolean|null, error?:string, skipped?:boolean, afterCsg?:boolean}>} repairReport
  *                                    Mutated by pipeline: one entry per clone the repair step TOUCHED
  *                                    (repairReady true). isWatertight is false only for a

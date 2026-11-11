@@ -770,15 +770,26 @@ const SUPPORT_EXPORT_RGB = [0x8F / 255, 0xA3 / 255, 0xB8 / 255];
  * separate shell: never welded, repaired, re-baked or validated with the model. Stale supports
  * throw EXPORT_SUPPORTS_STALE (buildSupportsForExport).
  */
-async function _addSupportClones(ctx, out) {
-  const { buildSupportsForExport } = await import('../../supports/live/liveGeneration');
+async function _addSupportClones(ctx, out, build = null) {
+  // `build` is a test seam only (see tests/supports-nothing-built.test.mjs); production always
+  // takes the real builder. Injected because MX-08 is an asymmetry, not a reproduced input: the
+  // audit could not construct a case where this returns null on the printable route.
+  const buildSupportsForExport = build ?? (await import('../../supports/live/liveGeneration')).buildSupportsForExport;
   const { tagSupportLayer } = await import('../../supports/layers/supportLayerTag.js');
   for (const unit of ctx.units) {
     if (!hasBuiltSupports(unit.obj)) continue;
-    const built = await buildSupportsForExport(unit.logicalId, ctx.ratioFactor);
-    if (!built) continue;
-    const scene = unit.parts[0]?.mesh?.getScene?.();
     const name = `${unit.name ?? unit.logicalId} supports`;
+    const built = await buildSupportsForExport(unit.logicalId, ctx.ratioFactor);
+    // MX-08: this was `if (!built) continue;`, three lines from `:670` where the SAME condition on
+    // the supportsOnly route throws EXPORT_NO_SUPPORTS. A unit the viewport shows standing on
+    // supports left the file without them, and the export still said "✓ Exported". Now it is named.
+    // DEBT: toast.exportedWithWarnings reads "could not confirm watertight: {names}", which is
+    // broader than true here — nothing about these supports was confirmed because they do not
+    // exist. Reuse is the plan's own call (§5.4): one outcome channel, one toast, and the pipeline
+    // stays the sole owner of that toast. Give this its own key the moment a second cause lands in
+    // this list, or the moment the owner rewords it.
+    if (!built) { ctx.repairSkipped.push(name); continue; }
+    const scene = unit.parts[0]?.mesh?.getScene?.();
     const mesh = new BABYLON.Mesh(`${name}__export`, scene);
     out.push({ meshId: null, logicalId: unit.logicalId, mesh, name, logicalName: unit.name, isSupport: true });
     tagSupportLayer(mesh, 'export', unit.logicalId);   // D20: never content, never drawn
@@ -960,3 +971,6 @@ export const exportSTL     = (options = {}) => _runExport('stl', options);
 export const exportThreeMF = (options = {}) => _runExport('3mf', options);
 export const exportPLY     = (options = {}) => _runExport('ply', options);
 export const exportWRL     = (options = {}) => _runExport('wrl', options);
+
+/** Test seam: the one function whose "nothing built" branch MX-08 is about. */
+export const __test = { addSupportClones: _addSupportClones };
