@@ -511,6 +511,9 @@ async function _loadProjectInner(doc, previousId) {
   // onto one mesh and only one ratio/transform survives.
   const _claimed = new Set();
   const replayFailed = new Set();   // ids whose geometryFixes replay threw — dropped from state
+  // Object names whose saved supports record was damaged (MX-03). Hand work,
+  // not derived data: the load must say whose it could not restore.
+  const droppedSupports = [];
   for (const o of data.sceneObjects || []) {
     const res = assetRes.get(o.assetId);
     let mesh = null, ghost = false, unlinked = false;
@@ -582,6 +585,13 @@ async function _loadProjectInner(doc, previousId) {
         ghosts.push({ id: o.assetId, filename: o.name, name: o.name, missingEntry: true });
       }
     }
+    // Once per object, not twice: this used to be called inside the literal
+    // below for the test AND for the value, which also warned twice.
+    const supports = restoreSupports(o);
+    if (supports.dropped) {
+      console.warn(`Supports of "${supports.dropped}" are damaged and were dropped.`);
+      droppedSupports.push(supports.dropped);
+    }
     objMap[o.id] = {
       id: o.id, name: o.name, assetId: o.assetId,
       collectionId: o.collectionId ?? null, parentId: o.parentId ?? null,
@@ -604,7 +614,7 @@ async function _loadProjectInner(doc, previousId) {
       ratioSource: ratioSourceOf(o, assetById[o.assetId]),
       ...(!replayFailed.has(o.id) && Array.isArray(o.geometryFixes) && o.geometryFixes.length ? { geometryFixes: [...o.geometryFixes] } : {}),
       ...(o.sliceRecipe ? { sliceRecipe: JSON.parse(JSON.stringify(o.sliceRecipe)) } : {}),
-      ...(restoreSupports(o) ? { supports: restoreSupports(o) } : {}),
+      ...(supports.supports ? { supports: supports.supports } : {}),
       _savedTransform: o.transform ?? null,
     };
   }
@@ -702,6 +712,14 @@ async function _loadProjectInner(doc, previousId) {
   if (unmatched.length || ghosts.length) {
     const first = ghosts[0] ?? unmatched[0];
     dispatch(EVENTS.MODAL_OPEN, { id: 'assetSources', focusAssetId: first?.id ?? null, ghosts, unmatched });
+  }
+  // MX-03: said BEFORE the ghost/success line and never instead of it — a
+  // load that silently lost hand-placed supports used to end on a green
+  // "Loaded", and the user's next action was an export without them.
+  if (droppedSupports.length) {
+    Toast.show(t('toast.loadedWithDroppedSupports', {
+      n: droppedSupports.length, names: droppedSupports.slice(0, 3).join(', '),
+    }), 'warning', 8000);
   }
   if (ghosts.length) {
     // H3: never a plain "Loaded" — the scene is incomplete. The Sources modal

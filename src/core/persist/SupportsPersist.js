@@ -32,13 +32,22 @@ export function serialiseSupports(object) {
   return isSupportsRecord(s) ? JSON.parse(JSON.stringify(s)) : undefined;
 }
 
-/** The supports of a saved scene object, or undefined (absent in older files, or damaged). */
+/**
+ * The supports of a saved scene object, with the reason when there are none.
+ *
+ * MX-03: a damaged record is still dropped — half-applying one is worse — but
+ * the drop is REPORTED, not swallowed. What it costs the user is hand work
+ * (manual points, deleted contacts, overrides, stamps) that cannot be
+ * recomputed, so the loader must be able to say whose work it lost instead of
+ * ending on a green "Loaded". `dropped` is the object's name, or null when
+ * there was simply nothing to restore (older files have no record at all).
+ *
+ * @param {{supports?: unknown, name?: string, id?: string}|null|undefined} saved
+ * @returns {{supports: object|undefined, dropped: string|null}}
+ */
 export function restoreSupports(saved) {
   const s = saved?.supports;
-  if (s === undefined || s === null) return undefined;
-  if (!isSupportsRecord(s)) {
-    console.warn(`Supports of "${saved?.name ?? saved?.id}" are damaged and were dropped.`);
-    return undefined;
-  }
-  return JSON.parse(JSON.stringify(s));
+  if (s === undefined || s === null) return { supports: undefined, dropped: null };
+  if (!isSupportsRecord(s)) return { supports: undefined, dropped: saved?.name ?? saved?.id ?? 'unnamed object' };
+  return { supports: JSON.parse(JSON.stringify(s)), dropped: null };
 }

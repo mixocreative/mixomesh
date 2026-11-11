@@ -707,6 +707,7 @@
   "toast.undoTrimmed": "Older undo steps were cleared to free memory for large models.",
   "toast.exportedWithWarnings": "Exported with warnings — could not confirm watertight: {names}",
   "toast.loaded": "Loaded {name}",
+  "toast.loadedWithDroppedSupports": "Damaged supports were dropped on {n, plural, one{1 object} other{# objects}} ({names}) - the hand-placed points are not in this file",
   "toast.loadedWithGhosts": "Loaded {name} - {n, plural, one{1 asset} other{# assets}} could not be found (red placeholders)",
   "toast.projectSaved": "Project saved",
   "toast.newProject": "New project",

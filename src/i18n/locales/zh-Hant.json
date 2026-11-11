@@ -704,6 +704,7 @@
   "toast.undoTrimmed": "為了替大型模型釋放記憶體，已清除較早的復原步驟。",
   "toast.exportedWithWarnings": "已匯出但有警告 — 無法確認密閉性：{names}",
   "toast.loaded": "已載入 {name}",
+  "toast.loadedWithDroppedSupports": "{n, plural, other{# 個物件}}（{names}）的支撐已損壞並被捨棄 - 手動放置的支撐點不在這個檔案中",
   "toast.loadedWithGhosts": "已載入 {name} - {n, plural, other{# 個素材}}找不到（紅色佔位物件）",
   "toast.projectSaved": "已儲存專案",
   "toast.newProject": "新增專案",

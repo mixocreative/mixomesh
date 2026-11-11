@@ -704,6 +704,7 @@
   "toast.undoTrimmed": "大きなモデルのメモリを確保するため、古い元に戻す履歴を消去しました。",
   "toast.exportedWithWarnings": "警告付きで書き出しました — 水密を確認できませんでした: {names}",
   "toast.loaded": "{name} を読み込みました",
+  "toast.loadedWithDroppedSupports": "{n, plural, other{# 個のオブジェクト}}（{names}）のサポートが壊れていたため破棄しました - 手動で配置した点はこのファイルにありません",
   "toast.loadedWithGhosts": "{name} を読み込みました - {n, plural, other{# 件のアセット}}が見つかりません（赤いプレースホルダー）",
   "toast.projectSaved": "プロジェクトを保存しました",
   "toast.newProject": "新規プロジェクト",
