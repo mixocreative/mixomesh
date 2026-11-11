@@ -521,3 +521,11 @@ body.has-boot-banner #app { height: calc(100vh - 32px); }
 .bb-project { color: var(--text-2); }
 .bb-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); flex: 0 0 auto; }
 .bb-btn { display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* MX-02 debt, built: a snapshot whose last recovery FAILED. It reads as a caution, not as the
+   ordinary "Recover unsaved work" offer — the load is already known to have thrown once, and the
+   retry is deliberately not the primary button. Discard is the only destructive control on this
+   strip, so it carries the warning colour and nothing else does. */
+.bb-salvage { color: var(--text-0); }
+/* Two classes deep on purpose: blender.css loads last and its `.btn { color }` would otherwise
+   win on source order and paint Discard like any other button. */
+.boot-banner .bb-salvage-discard { color: var(--danger); }

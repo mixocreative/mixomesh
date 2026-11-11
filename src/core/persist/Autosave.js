@@ -11,7 +11,7 @@ import { buildDocument, referencedTextureImages, serialiseTextureImage } from '.
 import { loadProject, assertNoImportInFlight } from './ProjectLoader.js';
 import { isLoading } from './LoadGate.js';
 import { isDirty, whenSaveIdle, isSaving, saveGeneration } from './DirtyTracker.js';
-import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
+import { AUTOSAVE_PREFIX, AUTOSAVE_FAILED_PREFIX, SILENT } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
 import {
   autosaveKey, autosaveImageKey, autosaveImagePrefix, projectIdFromAutosaveKey, deleteAutosave,
@@ -163,6 +163,50 @@ export async function findRecoverableAutosave() {
   return {
     key: newest.key, projectId, savedAt: newest.savedAt,
     name: newest.name ?? newest.doc?.project?.name ?? '',
+  };
+}
+
+/**
+ * Boot check, second pass (MX-02 debt): the newest snapshot a recovery already FAILED on, or null.
+ *
+ * `keepFailedAutosave` moves such a snapshot to `autosavefailed_<projectId>` so the normal scan
+ * stops re-offering it — which is right (a poisoned snapshot must not fail on every launch) but
+ * left the bytes reachable only with a debugger. This is what makes them reachable with a click.
+ * The offer carries `failed: true` so the banner can say what it is instead of dressing a known
+ * failure up as a normal autosave, and the user gets a Discard beside the retry: a snapshot this
+ * build cannot read needs a way out that is not "try forever".
+ *
+ * Shaped exactly like `findRecoverableAutosave`'s result, including the `{ unreadable }` case
+ * (cia B-03: blind must not look like clean), so `recoverAutosave(offer)` and
+ * `discardAutosave(offer)` take it unchanged — the key is in the offer and the images are keyed
+ * on projectId, which does not change when a snapshot is set aside.
+ *
+ * There is deliberately no staleness check here. `findRecoverableAutosave` drops a snapshot not
+ * newer than the saved file; this one is already known to be the only copy of something that
+ * would not load, so the user decides whether it is worth anything, not the scan.
+ *
+ * @returns {Promise<{key:string, projectId:string, savedAt:string, name:string, failed:true}|{unreadable:Error}|null>}
+ */
+export async function findFailedAutosave() {
+  let newest = null;
+  try {
+    const keys = await storage.kvKeys();
+    const kept = (keys || []).filter(k => typeof k === 'string' && k.startsWith(AUTOSAVE_FAILED_PREFIX));
+    if (!kept.length) return null;
+    for (const k of kept) {
+      const v = await storage.kvGet(k);
+      if (v?.savedAt && (!newest || v.savedAt > newest.savedAt)) newest = { key: k, ...v };
+    }
+  } catch (err) {
+    return { unreadable: err instanceof Error ? err : new Error(String(err)) };
+  }
+  if (!newest) return null;
+  return {
+    key: newest.key,
+    projectId: newest.key.slice(AUTOSAVE_FAILED_PREFIX.length),
+    savedAt: newest.savedAt,
+    name: newest.name ?? newest.doc?.project?.name ?? '',
+    failed: true,
   };
 }
 

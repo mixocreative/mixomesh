@@ -61,9 +61,10 @@ async function _hasFailedSnapshot(projectId) {
  * not see them, which is the point: re-offering a snapshot that just threw is
  * how a poisoned autosave becomes a failure on every launch.
  *
- * DEBT: nothing in the UI offers a kept snapshot back yet (a Project-menu
- * "Retry recovery…" with its own Discard). Until then the failure toast is the
- * only notice, and `discardAutosave` is the only thing that clears it.
+ * Offered back by the boot banner: `findFailedAutosave` picks the newest kept snapshot when
+ * there is no live one, and the banner shows it as what it is — a recovery that FAILED — with
+ * Try again and a Discard that asks first. `discardAutosave` is still the only thing that
+ * destroys it, and it takes the texture images with it.
  *
  * @param {string|null|undefined} projectId
  * @returns {Promise<boolean>} true when a snapshot was moved

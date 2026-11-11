@@ -11,7 +11,7 @@ import { installEnv } from './env.mjs';
 installEnv();
 console.error = () => {};
 
-const { recoverAutosave, findRecoverableAutosave } = await import('../src/core/persist/Autosave.js');
+const { recoverAutosave, findRecoverableAutosave, findFailedAutosave, discardAutosave } = await import('../src/core/persist/Autosave.js');
 const { autosaveKey, failedAutosaveKey } = await import('../src/core/persist/AutosaveKeys.js');
 const { storage } = await import('../src/core/storage/StorageAdapter.js');
 const { Toast } = await import('../src/ui/Toast.js');
@@ -72,4 +72,62 @@ test('a second failed recovery of the same project does not lose the first kept 
   kv.set(autosaveKey('p1'), SNAPSHOT);   // a later tick wrote a fresh snapshot
   await recoverAutosave({ key: autosaveKey('p1'), projectId: 'p1' });
   assert.deepEqual(await storage.kvGet(failedAutosaveKey('p1')), SNAPSHOT);
+});
+
+// ── MX-02 debt, built: the kept snapshot is OFFERED back ─────────────────────
+//
+// Keeping the bytes was half the fix. Until the UI offers them, "recoverable" means "recoverable
+// by someone with a debugger", which is not recoverable. The offer reuses the boot banner rather
+// than growing a Project-menu entry: the banner is already where the user looks after a crash,
+// and it already owns the dirty-check, the folder re-mount and the recover gesture.
+//
+// It is presented as what it is — a snapshot whose last recovery FAILED — never as a normal
+// autosave. Two differences carry that: the offer is marked `failed`, and it comes with its own
+// Discard, because a snapshot that cannot be loaded needs a way out that is not "try forever".
+
+test('a kept snapshot is found as a salvage offer, marked as one', async () => {
+  seed();
+  await recoverAutosave({ key: autosaveKey('p1'), projectId: 'p1' });
+  const offer = await findFailedAutosave();
+  assert.ok(offer, 'the salvaged snapshot must be findable, or the bytes are only a debugger away');
+  assert.equal(offer.failed, true, 'it is marked a failed recovery, never shown as a normal autosave');
+  assert.equal(offer.projectId, 'p1');
+  assert.equal(offer.key, failedAutosaveKey('p1'));
+  assert.equal(offer.savedAt, SNAPSHOT.savedAt);
+  assert.equal(offer.name, SNAPSHOT.name);
+});
+
+test('no kept snapshot, no salvage offer', async () => {
+  seed();
+  assert.equal(await findFailedAutosave(), null, 'a live snapshot is the normal offer, not a salvage one');
+  kv.clear();
+  assert.equal(await findFailedAutosave(), null);
+});
+
+test('an unreadable store is reported, never mistaken for "nothing kept" (B-03)', async () => {
+  seed();
+  const real = storage.kvKeys;
+  storage.kvKeys = async () => { throw new Error('IndexedDB blocked'); };
+  try {
+    const offer = await findFailedAutosave();
+    assert.ok(offer?.unreadable, `blind must not read as clean, got ${JSON.stringify(offer)}`);
+  } finally { storage.kvKeys = real; }
+});
+
+test('retrying a salvage offer loads the SAME bytes, and keeps them when it fails again', async () => {
+  seed();
+  await recoverAutosave({ key: autosaveKey('p1'), projectId: 'p1' });
+  const offer = await findFailedAutosave();
+  assert.equal(await recoverAutosave(offer), false, 'this snapshot still cannot be read by this build');
+  assert.deepEqual(await storage.kvGet(failedAutosaveKey('p1')), SNAPSHOT, 'and the bytes are still there to try again');
+  assert.ok(kv.has(IMAGE_KEY), 'with their images');
+});
+
+test('discarding a salvage offer is the one thing that clears it, images and all', async () => {
+  seed();
+  await recoverAutosave({ key: autosaveKey('p1'), projectId: 'p1' });
+  await discardAutosave(await findFailedAutosave());
+  assert.equal(await storage.kvGet(failedAutosaveKey('p1')), undefined);
+  assert.equal(kv.has(IMAGE_KEY), false, 'the images go with it — nothing references them any more');
+  assert.equal(await findFailedAutosave(), null);
 });
