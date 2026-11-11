@@ -17,9 +17,13 @@
  * `npm run test:consumers` remains the stronger, occasional instrument: PrusaSlicer and python
  * trimesh / pymeshlab over all five formats. This is the one that runs on every change.
  *
- * DEBT, recorded in the plan's §6: the STL reader now exists in both apps, and is retired when the
- * export test moves into mixo-geocore (plan item C1). Until then, two copies beat a CI proof that
- * waits on a 51-version re-vendor.
+ * NOT DEBT, and the earlier note here saying otherwise was wrong. It called this reader a duplicate
+ * retired when the export test moves into mixo-geocore (C1). On review that is not what the two
+ * files are: C1 moves mixoDental's test, which proves GEOCORE's `encodeStl` and imports nothing
+ * else, into geocore. This one proves MIXOMESH'S OWN writer, over five formats and a real jszip
+ * that `encodeStl` never touches - and the handedness differs, since Babylon-native-outward is
+ * negative in the right-handed formula (see the winding note below). Two writers, two proofs. The
+ * reader being similar is not the same as the test being duplicated, and nothing retires this file.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
