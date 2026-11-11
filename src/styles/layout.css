@@ -135,11 +135,6 @@
   font-size: var(--fs-lg);
 }
 
-.boot-status-overlay {
-  z-index: 50;
-  pointer-events: auto;
-}
-
 /* ── Right panel ──────────────────────────────────────── */
 #right-panel {
   grid-column: 3;

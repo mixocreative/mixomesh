@@ -244,13 +244,20 @@ function renderBlockingMessage(title: string, message: string, reason: string) {
   document.body.appendChild(wrap);
 }
 
+// MX-13: this used to append an overlay to #viewport and return. bootstrap() is
+// 25 sequential .init() calls, so a throw in the middle left the header, the
+// outliner and the right panel mounted, live and clickable — with autosave
+// (:163) never started and nothing saying so. The app is not usable in that
+// state and must not look as if it is: same surface as the gates above.
+// Note it also needed #viewport to exist, so a throw before the shell rendered
+// printed nothing at all.
 gateStorage().then(ok => (ok ? bootstrap() : undefined)).catch((err: unknown) => {
   console.error('Bootstrap failed:', err);
-  const viewport = document.getElementById('viewport');
-  if (!viewport) return;
-  const errEl = document.createElement('div');
-  errEl.className = 'boot-status boot-status-error boot-status-overlay';
   const message = err instanceof Error ? err.message : String(err);
-  errEl.textContent = `Failed to initialise: ${message}`;
-  viewport.appendChild(errEl);
+  renderBlockingMessage(
+    'MIXOMESH could not start',
+    `Something failed while starting up, so the app was stopped rather than left half-ready. `
+      + `Reload the page to try again. (${message})`,
+    'bootstrap',
+  );
 });

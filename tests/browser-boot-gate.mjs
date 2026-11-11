@@ -1,18 +1,24 @@
 /*
- * THE NO-WebGL GATE: a device that cannot draw must be TOLD, never shown a half-painted app.
+ * THE BOOT GATE: a boot that cannot continue must be TOLD, never shown a half-painted app.
  *
- *   npm run test:nogl
+ *   npm run test:boot-gate
  *
- * Ported from mixodental's `scripts/no-webgl-gate.mjs` (audit MX-13 / the three-repo plan §5.1).
- * `engineGate` asks "which browser is this"; it never asked "can this device draw", so a machine
- * with WebGL blocked walked straight into `bootstrap()` and `new BABYLON.Engine` threw
- * "WebGL not supported" into a catch that paints an overlay on the viewport — a device limit
- * reported as a crash, with the header and panels still live behind it.
+ * Ported from mixodental's `scripts/no-webgl-gate.mjs` (the three-repo plan §5.1 and §5.2,
+ * audit MX-13). Two faults, one surface:
  *
- * TWO PASSES, AND THE CONTROL IS NOT OPTIONAL. Without a pass where WebGL works, a blocked page
- * proves the gate broke rather than that the app guards itself. So the control must reach a real
- * #renderCanvas with a real engine on it, and this gate FAILS when it does not: a green line from
- * a probe that never loaded the app is worth nothing.
+ *   1. `engineGate` asked "which browser is this" and never "can this device draw", so a machine
+ *      with WebGL blocked walked into `bootstrap()` and `new BABYLON.Engine` threw
+ *      "WebGL not supported" into the catch below.
+ *   2. That catch appended an overlay to #viewport and returned, leaving the header, outliner and
+ *      right panel mounted, live and clickable, with autosave never started (MX-13).
+ *
+ * THREE PASSES, AND THE CONTROL IS NOT OPTIONAL. Without a pass where boot succeeds, a blocked
+ * page proves the gate broke rather than that the app guards itself. So the control must reach a
+ * real #renderCanvas with a real engine on it, and this gate FAILS when it does not: a green line
+ * from a probe that never loaded the app is worth nothing.
+ *
+ * Both faults are injected from OUTSIDE the app — a patched `getContext` and a patched
+ * `getElementById` — so nothing in src/ exists for the sake of this test.
  *
  * Needs Vite + a real Chrome, so it is not part of `npm test` (node, no browser). It runs beside
  * the other browser smokes in `test:all` and in the installer gate.
@@ -41,6 +47,18 @@ const BLOCK_WEBGL = `{
   delete window.WebGLRenderingContext;
 }`;
 
+/*
+ * Makes ONE real `.init()` throw, from outside the app: #viewport goes missing, which
+ * `bootstrap()` needs near its end (`if (!viewport) throw new Error('Viewport root missing')`) and
+ * CursorPanel.init() mounts into just before that. Both sit AFTER the outliner, the shell and the
+ * workspace have mounted and BEFORE PersistenceManager.startAutosave() — the exact window MX-13
+ * describes, so this is the mid-boot throw and not a convenient early one.
+ */
+const BREAK_ONE_INIT = `{
+  const real = document.getElementById.bind(document);
+  document.getElementById = id => (id === 'viewport' ? null : real(id));
+}`;
+
 // No Vite HMR socket: another session editing src/ must not reload the page mid-check.
 const NO_HMR = `{
   const Real = WebSocket;
@@ -59,6 +77,8 @@ const READ = `(() => {
     canvases: document.querySelectorAll('canvas').length,
     renderCanvas: !!document.getElementById('renderCanvas'),
     outliner: !!document.getElementById('outliner'),
+    // "Not interactive" measured as nothing left to press, anywhere on the page.
+    controls: document.querySelectorAll('button, input, select, textarea, a[href], [role="button"], [tabindex]').length,
     engine: window.__MX_ENGINE ?? null,
     text: document.body.innerText.replace(/\\s+/g, ' ').trim().slice(0, 300),
   });
@@ -70,23 +90,23 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` | ${detail}` : ''}`);
 }
 
-/** One page load with WebGL either working or absent; returns what is on screen afterwards. */
-async function pass(debugPort, url, { nogl }) {
+/** One page load, optionally with a fault injected before any app code runs. */
+async function pass(debugPort, url, { fault = null } = {}) {
   const target = await openTarget(debugPort, 'about:blank');
   const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
   try {
     await cdp.send('Runtime.enable');
     await cdp.send('Page.enable');
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_HMR });
-    if (nogl) await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: BLOCK_WEBGL });
+    if (fault) await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: fault });
     await cdp.send('Page.navigate', { url });
     // Either outcome settles quickly; the control needs a cold Vite dep optimise plus engine init.
     await waitFor(() => evaluate(cdp, `document.readyState === 'complete'`), 90000, 'page load');
     await waitFor(
       () => evaluate(cdp, `!!document.querySelector('[data-ui="boot-blocked"]') || !!document.getElementById('renderCanvas')`),
-      90000, nogl ? 'blocking screen or shell' : 'app shell',
+      90000, fault ? 'blocking screen or shell' : 'app shell',
     );
-    await sleep(3000);   // let SceneManager.init finish (control) / nothing more happen (nogl)
+    await sleep(3000);   // let SceneManager.init finish (control) / the throw land (faults)
     return JSON.parse(await evaluate(cdp, READ));
   } finally {
     await cdp.close();
@@ -119,14 +139,16 @@ async function main() {
     await waitForBrowserWs(debugPort, browserStderr);
 
     // THE CONTROL FIRST. If this fails, nothing below means anything.
-    const control = await pass(debugPort, url, { nogl: false });
+    const control = await pass(debugPort, url);
     check('control: WebGL works, so the viewport mounts a real canvas', control.renderCanvas && control.canvases > 0,
       `renderCanvas ${control.renderCanvas}, canvases ${control.canvases}`);
     check('control: a render backend actually came up', control.engine === 'webgl' || control.engine === 'webgpu',
       `__MX_ENGINE ${control.engine ?? 'none'}`);
     check('control: the blocking screen never appears', control.reason === null, `reason ${control.reason ?? 'none'}`);
+    // The app the other two passes must NOT leave behind: it has controls to press.
+    check('control: a booted app has controls', control.controls > 0, `controls ${control.controls}`);
 
-    const blocked = await pass(debugPort, url, { nogl: true });
+    const blocked = await pass(debugPort, url, { fault: BLOCK_WEBGL });
     check('no WebGL: the blocking screen says WHY', blocked.reason === 'no-webgl', `reason ${blocked.reason ?? 'none'}`);
     check('no WebGL: a heading', blocked.title.length > 0, blocked.title);
     // A sentence, not a word: this line has to explain the situation to its reader.
@@ -136,6 +158,16 @@ async function main() {
     check('no WebGL: the shell is not left behind it', !blocked.renderCanvas && !blocked.outliner,
       `renderCanvas ${blocked.renderCanvas}, outliner ${blocked.outliner}`);
     check('no WebGL: it never silently tries to draw', blocked.canvases === 0, `canvases ${blocked.canvases}`);
+
+    // MX-13: a throw mid-bootstrap, after the panels mounted and before autosave starts.
+    const broken = await pass(debugPort, url, { fault: BREAK_ONE_INIT });
+    check('boot throw: the same blocking screen, not a viewport overlay', broken.reason === 'bootstrap',
+      `reason ${broken.reason ?? 'none'}`);
+    check('boot throw: a heading and a sentence', broken.title.length > 0 && broken.sentence.split(/\s+/).length > 4,
+      `${broken.title} | ${broken.sentence}`);
+    // THE INVARIANT: a boot failure leaves nothing interactive behind it.
+    check('boot throw: the outliner is gone, not live behind an overlay', !broken.outliner, `outliner ${broken.outliner}`);
+    check('boot throw: nothing is left to press', broken.controls === 0, `controls ${broken.controls}`);
   } finally {
     await stopProcess(browser);
     await stopProcess(vite);
@@ -143,7 +175,7 @@ async function main() {
   }
 
   const failed = results.filter(r => !r.ok);
-  console.log(`\nno-webgl gate: ${results.length - failed.length}/${results.length} PASS`);
+  console.log(`\nboot gate: ${results.length - failed.length}/${results.length} PASS`);
   if (failed.length) {
     console.error(`FAILED: ${failed.map(r => r.name).join('; ')}`);
     process.exitCode = 1;
