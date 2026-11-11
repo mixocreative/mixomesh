@@ -8,6 +8,8 @@
 //   c1 cost (P4.3b): with Tips only on, the quoted support volume is the EXPORT build's (equals the
 //      supportsOnly STL's volume), 'calculating' shows until it lands, supportsOnly costs supports alone,
 //      and after a regenerate the HUD support figure equals the cache with no extra event
+//   m4 strict scope (MX-04): the support build is closed but NOT a manifold while the model part
+//      is, which is why the strict-export label says "model parts"; strict on still ships both
 //   a1 API: export.run with options.includeSupports through createAppDispatcher (printable /
 //      supportsOnly / none, and an unknown value rejected)
 //   screenshots: .tmp/p42/
@@ -37,6 +39,38 @@ function stlVolume(b64) {
     v6 += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
   }
   return Math.abs(v6 / 6);
+}
+
+/**
+ * MX-04: welded-position edge census of a binary STL — an independent reader of the bytes, the
+ * same technique tests/diagnose-weld-mx01.test.mjs uses. This is the measurement the strict-export
+ * label's scope rests on: support geometry is CLOSED (no boundary edge) but NOT a manifold (pillars
+ * interpenetrate), so a watertight gate can never pass it. If this ever starts reporting a manifold
+ * support build, the narrowed label in i18n `print.strictExport` should be widened back.
+ */
+function census(b64) {
+  const buf = Buffer.from(b64, 'base64');
+  const n = buf.readUInt32LE(80);
+  const ids = new Map();
+  const idOf = (x, y, z) => {
+    const k = `${Math.round(x * 1000)}:${Math.round(y * 1000)}:${Math.round(z * 1000)}`;
+    if (!ids.has(k)) ids.set(k, ids.size);
+    return ids.get(k);
+  };
+  const used = new Map();
+  let degenerate = 0;
+  for (let t = 0; t < n; t++) {
+    const f = (v, a) => buf.readFloatLE(84 + t * 50 + 12 + v * 12 + a * 4);
+    const v = [0, 1, 2].map(k => idOf(f(k, 0), f(k, 1), f(k, 2)));
+    if (v[0] === v[1] || v[1] === v[2] || v[2] === v[0]) { degenerate++; continue; }
+    for (const [x, y] of [[v[0], v[1]], [v[1], v[2]], [v[2], v[0]]]) {
+      const k = x < y ? `${x}:${y}` : `${y}:${x}`;
+      used.set(k, (used.get(k) ?? 0) + 1);
+    }
+  }
+  let boundary = 0, nonManifold = 0;
+  for (const c of used.values()) { if (c === 1) boundary++; else if (c > 2) nonManifold++; }
+  return { facets: n, degenerate, boundary, nonManifold };
 }
 
 /** Binary STL facts: facet count and bounds (mm, print frame). */
@@ -109,9 +143,24 @@ try {
     `contacts drawn ${drawn.contactIds.length} / exported ${ex1?.contactIds.length}, facets ${modelOnly.facets} + ${ex1?.tris} = ${pr.facets}`);
   check('r1 the supports stand on the bed under the model: lift 5 mm', near(pr.size[2] - modelOnly.size[2], 5, 0.05) && near(modelOnly.size[2], 20, 0.01),
     `model ${modelOnly.size.map(v => v.toFixed(2))}, with supports ${pr.size.map(v => v.toFixed(2))}`);
-  const only = stl((await w(`exportStl({ includeSupports: 'supportsOnly' })`)).b64);
+  const onlyB64 = (await w(`exportStl({ includeSupports: 'supportsOnly' })`)).b64;
+  const only = stl(onlyB64);
   check('r1 supportsOnly writes only the supports', only.facets === ex1.tris && near(only.max[2], modelOnly.min[2], 0.5) && near(only.min[2], modelOnly.min[2] - 5, 0.05),
     `facets ${only.facets}, z ${only.min[2].toFixed(2)}..${only.max[2].toFixed(2)}`);
+
+  // ───────── m4: the scope the strict-export label claims (MX-04) ─────────
+  const sup = census(onlyB64);
+  check('m4 the support build is CLOSED but not a manifold — why strict export says "model parts"',
+    sup.boundary === 0 && sup.nonManifold > 0,
+    `boundary ${sup.boundary}, non-manifold ${sup.nonManifold}, zero-area ${sup.degenerate} of ${sup.facets} facets`);
+  const mdl = census((await w(`exportStl({ includeSupports: 'none' })`)).b64);
+  check('m4 the model part IS a manifold, so the gate it does cover is a real one',
+    mdl.boundary === 0 && mdl.nonManifold === 0, J(mdl));
+  await run(`(() => { window.__w.m.st.setState(s => ({ ...s, print: { ...s.print, strictExport: true } }), { silent: true }); return true; })()`);
+  const strictPrintable = await w(`exportStl({})`);
+  check('m4 strict export still ships model + supports: the narrowed gate does not refuse them',
+    !strictPrintable.blocked && stl(strictPrintable.b64).facets === pr.facets, J(strictPrintable.blocked ?? strictPrintable.name));
+  await run(`(() => { window.__w.m.st.setState(s => ({ ...s, print: { ...s.print, strictExport: false } }), { silent: true }); return true; })()`);
 
   // ───────── c1: cost quote (P4.3b) ─────────
   await run(`(() => { window.__w.m.data.commitSetting(${J(id)}, { view: {}, selected: [] }, 'previewMode', 'ONLY_TIP'); return true; })()`);

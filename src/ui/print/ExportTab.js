@@ -151,6 +151,12 @@ function _advancedHtml(print, eff, mods) {
     mods.splitByMaterial !== undefined ? modifiedDot('splitByMaterial', mods.splitByMaterial ? t('print.on') : t('print.off')) : '');
   html += _checkbox('pp-bake-solid', !!print.objBakeSolidTextures, t('print.bakeSolids'));
   html += _checkbox('pp-strict-export', !!print.strictExport, t('print.strictExport'));
+  // MX-04: the gate checks model parts only, and the file can also carry supports. Said here
+  // rather than in the label so the user reads WHY once the control is armed — the measured
+  // reason is at the gate itself (PrintPipeline, the `isSupport` skip).
+  if (print.strictExport) {
+    html += `<p class="pp-help pp-strict-export-help" id="pp-strict-export-help">${escapeHtml(t('print.strictExportSupports'))}</p>`;
+  }
   html += '</div></div>';
   return html;
 }

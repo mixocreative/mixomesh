@@ -679,7 +679,19 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
     // capped, errored, repair opted out) — "could not verify" is not "fine".
     if (ctx.prefs?.strictExport ?? state.print?.strictExport) {
       const open = [], unknown = [];
-      for (const c of clones) {
+      // MX-04: walk everything in the FILE and skip supports deliberately, so the scope is the
+      // gate's own decision and not whichever list was in scope. Why supports are out: MEASURED
+      // on support-plain-cube.glb through the real engine (2026-11-12), the support export build
+      // is 25528 facets with 0 boundary edges, 5410 NON-MANIFOLD edges and 226 zero-area facets —
+      // a closed, interpenetrating union of pillars and raft with positive signed volume. It
+      // slices (tests/consumers.mjs asserts supports.outward, never supports.watertight) and it
+      // can never be watertight, because nothing booleans the pillars into one manifold. Gating
+      // on a watertight verdict here would refuse EVERY strict export that includes supports, so
+      // the LABEL was narrowed instead (i18n print.strictExport + print.strictExportSupports).
+      // Guard: tests/export-gate-supports-mx04.test.mjs and the census check in
+      // tests/browser-supports-export-smoke.mjs, which re-measures the claim.
+      for (const c of ctx.meshes) {
+        if (c.isSupport) continue;
         const verdict = _reportEntryFor.get(c.mesh)?.isWatertight;
         if (verdict === false) open.push(c.name);
         else if (verdict !== true) unknown.push(c.name);
@@ -698,8 +710,13 @@ async function _runExportForTarget(fmt, target, options, csgReady, repairReady, 
       }
     }
 
+    // MX-04: the validator is handed the WHOLE file, supports included, so a validator crash on
+    // support geometry blocks the export instead of never being attempted. It still returns
+    // nothing for them — D20 (supportLayerTag.js) makes support-layer meshes invisible to every
+    // content walk, MeshValidator among them — which is the other half of why the strict label
+    // says "model parts". Pinned by tests/export-gate-supports-mx04.test.mjs.
     const remaining = await _validateExportMeshes(
-      clones, (d, tot) => progress(0.5 + 0.3 * (d / tot), t('progress.validating', { i: d, n: tot })));
+      ctx.meshes, (d, tot) => progress(0.5 + 0.3 * (d / tot), t('progress.validating', { i: d, n: tot })));
     if (remaining.length) throw _exportError('Validation errors remain after auto-fix.', remaining);
 
     progress(0.82, t('progress.writing', { format: fmt.label }));
