@@ -107,6 +107,7 @@ npm run typecheck
 npm run i18n:check
 npm run build
 npm run test
+npm run test:nogl
 npm run test:browser
 npm run test:export
 npm run test:repair
@@ -127,12 +128,15 @@ file with the manifold/volume verdict; see the header of
 `tests/scan-probe.mjs` for the `PROBE_*` switches.
 
 `npm run test:all` chains the test commands listed in the `test:all` script of
-`package.json` (currently `test && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle && test:outliner-hover && test:boolean && test:uv-transform && test:consumers`). The browser smokes
+`package.json` (currently `test && test:nogl && test:browser && test:export && test:repair && test:group && test:ui-style && test:refinement && test:3mf-orientation && test:settings-toggle && test:outliner-hover && test:boolean && test:uv-transform && test:consumers`). The browser smokes
 stay OUT of `npm test`: they launch a real Chrome/Edge and a Vite server, so
 the headless node:test suite must remain runnable without either.
 
 The browser smokes start a temporary Vite server and drive Chrome or Edge
-through the DevTools Protocol (`test:browser` covers UI + rendering output
+through the DevTools Protocol (`test:nogl` is the start gate: two passes, one
+with WebGL working that must reach a real canvas and one with
+`getContext('webgl*')` returning null that must reach the full-screen blocking
+screen and nothing else; `test:browser` covers UI + rendering output
 including a real headless turntable mp4; `test:export` is the functional
 export round-trip; `test:repair` imports an open (non-watertight) mesh,
 repairs it, exports it, and checks the result is actually watertight).

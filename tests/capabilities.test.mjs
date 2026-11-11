@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  detectCapabilities, detectEngine, engineGate, detectStorageTier, WEB_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_LIMIT, DESKTOP_BOOLEAN_TRIANGLE_CAP,
+  detectCapabilities, detectEngine, engineGate, gpuGate, hasRenderContext, detectStorageTier, WEB_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_BUDGET, DESKTOP_TRIANGLE_LIMIT, DESKTOP_BOOLEAN_TRIANGLE_CAP,
 } from '../src/core/storage/capabilities.js';
 
 let passed = 0, failed = 0;
@@ -99,6 +99,41 @@ test('engineGate: chromium + webkit pass; gecko/other blocked naming supported b
     assert.ok(g && g.title && /Chrome/.test(g.message) && /Edge/.test(g.message) && /Safari/.test(g.message), e);
   }
   assert.match(engineGate('gecko').message, /Firefox/);
+});
+
+test('gpuGate: a device that cannot draw is blocked with its own reason, not the browser message', () => {
+  assert.equal(gpuGate(true), null);
+  const g = gpuGate(false);
+  assert.equal(g.reason, 'no-webgl');
+  // Its own sentence: "unsupported browser" and "cannot draw" have different remedies.
+  assert.ok(g.title && /WebGL/.test(g.message) && !/Firefox/.test(g.message));
+  assert.equal(engineGate('gecko').reason, 'engine');
+});
+
+test('hasRenderContext: null getContext means no, and a THROWING getContext also means no', () => {
+  const saved = globalThis.document;
+  const canvasWith = getContext => ({ document: { createElement: () => ({ getContext }) } });
+  try {
+    globalThis.document = canvasWith(() => null).document;
+    assert.equal(hasRenderContext(), false, 'null context');
+    globalThis.document = canvasWith(() => { throw new Error('hardened browser'); }).document;
+    assert.equal(hasRenderContext(), false, 'a throw is not a context');
+    // webgl1 passes: Babylon falls back to it (thinEngine :234) and only SSAO2 needs WebGL2.
+    let asked = [];
+    globalThis.document = canvasWith(kind => {
+      asked.push(kind);
+      return kind === 'webgl' ? { getExtension: () => null } : null;
+    }).document;
+    assert.equal(hasRenderContext(), true, 'webgl1-only device still boots');
+    assert.deepEqual(asked, ['webgl2', 'webgl'], 'webgl2 first, exactly as BABYLON.Engine asks');
+    // The context is handed back: browsers cap live contexts near sixteen.
+    let released = 0;
+    globalThis.document = canvasWith(() => ({ getExtension: k => (k === 'WEBGL_lose_context' ? { loseContext: () => { released++; } } : null) })).document;
+    assert.equal(hasRenderContext(), true);
+    assert.equal(released, 1);
+  } finally {
+    globalThis.document = saved;
+  }
 });
 
 test('detectStorageTier is engine-aware: gecko/other never pick opfs', () => {

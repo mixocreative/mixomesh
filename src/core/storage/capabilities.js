@@ -101,9 +101,58 @@ export function detectEngine(ua = '', env = {}) {
 export function engineGate(engine) {
   if (engine === 'chromium' || engine === 'webkit') return null;
   return {
+    reason: 'engine',
     title: 'Browser not supported',
     message: `MIXOMESH needs a supported browser: ${SUPPORTED_BROWSERS_TEXT} `
       + (engine === 'gecko' ? 'Firefox is not supported.' : 'This browser is not supported.'),
+  };
+}
+
+/**
+ * Can this device draw at all? Impure (it touches the DOM), which is why the
+ * decision below is a separate pure function.
+ *
+ * TRAP — probe `webgl2` THEN `webgl`, in that order and no narrower. That is
+ * exactly what `new BABYLON.Engine(canvas, true, …)` asks for
+ * (`@babylonjs/core/Engines/thinEngine.js`: webgl2 at :214, webgl at :234), so a
+ * webgl2-only probe would block WebGL1 machines the app still runs on — the one
+ * WebGL2-only feature, SSAO2, already feature-detects itself away
+ * (`src/core/scene/ViewEffects.js:70`).
+ *
+ * A hardened browser can THROW here instead of returning null, so the try is
+ * load-bearing, not decoration.
+ * @returns {boolean}
+ */
+export function hasRenderContext() {
+  try {
+    const canvas = globalThis.document?.createElement?.('canvas');
+    if (!canvas) return false;
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (!gl) return false;
+    // Hand the context straight back: browsers cap live contexts near sixteen
+    // and the viewport is about to claim one for the rest of the session.
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Boot-gate decision on the GPU (plan §5.1): null = allowed, else the blocking
+ * screen's title + message. Separate from {@link engineGate} because "this
+ * browser is not supported" and "this machine cannot draw" are different
+ * problems with different remedies, and a user told the wrong one stays stuck.
+ * @param {boolean} [canDraw]
+ * @returns {{reason:string, title:string, message:string}|null}
+ */
+export function gpuGate(canDraw) {
+  if (canDraw) return null;
+  return {
+    reason: 'no-webgl',
+    title: 'No 3D graphics available',
+    message: 'MIXOMESH needs WebGL to show and prepare models, and this browser could not create a '
+      + '3D context. Hardware acceleration may be switched off, or the graphics driver blocked.',
   };
 }
 

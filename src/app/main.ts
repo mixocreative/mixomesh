@@ -44,7 +44,7 @@ import { ViewportEmptyState } from '../ui/ViewportEmptyState.js';
 import * as i18n from '../i18n/index.js';
 import { storage } from '../core/storage/StorageAdapter.js';
 import { reportKvDamage } from '../core/persist/KvDamage.js';
-import { engine, engineGate } from '../core/storage/capabilities.js';
+import { engine, engineGate, gpuGate, hasRenderContext } from '../core/storage/capabilities.js';
 
 type TransformCommit = {
   prev: unknown;
@@ -55,17 +55,22 @@ type TransformCommit = {
 type ContextMenuInfo = Parameters<typeof ContextMenu.open>[0];
 
 // Boot gate (task 4.4): nothing touches storage — and no UI initialises —
-// until the engine is supported and the active adapter says it is usable.
+// until the engine is supported, the device can draw, and the active adapter
+// says it is usable.
 // Engine (task 8.1, AGENTS rule 5): chromium + webkit pass, Firefox/other are
-// blocked with a message naming the supported browsers. Adapter: Chrome/Edge
-// File System Access or the Safari OPFS tier + IndexedDB probe (non-blocking);
-// desktop: the preload bridge is complete and main answers `storage:ready`.
+// blocked with a message naming the supported browsers. GPU (plan §5.1): a
+// supported browser with WebGL off used to walk into bootstrap() and have
+// `new BABYLON.Engine` throw — a device limit surfacing as a crash. Adapter:
+// Chrome/Edge File System Access or the Safari OPFS tier + IndexedDB probe
+// (non-blocking); desktop: the preload bridge is complete and main answers
+// `storage:ready`.
 // Failure = one blocking screen naming the problem, never a half-booted app.
 async function gateStorage(): Promise<boolean> {
   i18n.init();    // detect locale, set _locale, apply <html lang>, fire LOCALE_CHANGED; the gate's messages read it
-  const blocked = engineGate(engine);
+  // Engine first: an unsupported browser must hear about the browser, not the GPU.
+  const blocked = engineGate(engine) ?? gpuGate(hasRenderContext());
   if (blocked) {
-    renderBlockingMessage(blocked.title, blocked.message);
+    renderBlockingMessage(blocked.title, blocked.message, blocked.reason);
     return false;
   }
   try {
@@ -77,6 +82,7 @@ async function gateStorage(): Promise<boolean> {
     renderBlockingMessage(
       (e?.textKey && i18n.t(`${e.textKey}.title`)) || e?.title || 'Storage unavailable',
       (e?.textKey && i18n.t(`${e.textKey}.body`)) || e?.message || 'MIXOMESH could not initialise its file storage.',
+      'storage',
     );
     return false;
   }
@@ -214,14 +220,25 @@ function wireCloseFlow() {
   });
 }
 
-function renderBlockingMessage(title: string, message: string) {
+// The ONE surface for a boot that cannot continue: three ways in (engine/GPU
+// gate, storage, a throw in bootstrap), one surface out. It empties <body>
+// deliberately — a half-initialised app that still looks clickable is the
+// failure MX-13 named, not a lesser version of this screen.
+// `reason` is the machine-readable half, read by tests/browser-nogl-gate.mjs;
+// keep the data-ui names in step with it.
+function renderBlockingMessage(title: string, message: string, reason: string) {
   document.body.textContent = '';
   const wrap = document.createElement('div');
   wrap.className = 'boot-status boot-status-error boot-status-fullscreen';
+  wrap.dataset.ui = 'boot-blocked';
+  wrap.dataset.reason = reason;
   const titleEl = document.createElement('p');
   titleEl.className = 'boot-status-title';
+  titleEl.dataset.ui = 'boot-blocked-title';
   titleEl.textContent = title;
   const msgEl = document.createElement('p');
+  msgEl.className = 'boot-status-message';
+  msgEl.dataset.ui = 'boot-blocked-message';
   msgEl.textContent = message;
   wrap.append(titleEl, msgEl);
   document.body.appendChild(wrap);
