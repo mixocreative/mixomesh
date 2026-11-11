@@ -15,7 +15,7 @@ import { AUTOSAVE_PREFIX, SILENT } from './constants.js';
 import { mintProjectId } from './ProjectId.js';
 import {
   autosaveKey, autosaveImageKey, autosaveImagePrefix, projectIdFromAutosaveKey, deleteAutosave,
-  isImageStored, markImageStored,
+  failedAutosaveKey, keepFailedAutosave, isImageStored, markImageStored,
   AUTOSAVE_PAUSED_AFTER_SKIPS, autosaveStatus, setAutosaveStatus,
 } from './AutosaveKeys.js';
 
@@ -192,9 +192,12 @@ export async function recoverAutosave(offer = null) {
     autosaveTick();
     return true;
   } catch (err) {
-    // M2: a poisoned autosave (torn write, schema from another build) must
-    // not be re-offered on every boot — drop the key and say why.
-    await deleteAutosave(projectId);
+    // M2: a poisoned autosave (torn write, schema from another build) must not
+    // be re-offered on every boot. MX-02: but ANY throw lands here — a heavy
+    // scene running out of memory, a worker crash, a texture decode — and this
+    // snapshot is the user's only copy of hours of work. So it is moved out of
+    // the scanned namespace, never deleted: the offer stops, the bytes stay.
+    await keepFailedAutosave(projectId);
     reportError(err, { title: t('toast.autosaveRecoverFailed') });
     return false;
   }
@@ -202,8 +205,13 @@ export async function recoverAutosave(offer = null) {
 
 /**
  * Drop an offered autosave (snapshot + its stored images) without loading it.
+ * The user's explicit Discard is the ONE place allowed to destroy unsaved
+ * work, so it also clears any copy a failed recovery set aside (MX-02) —
+ * dropped FIRST, so deleteAutosave's image sweep is no longer held back by it.
  * @param {{projectId:string}|null} offer
  */
 export async function discardAutosave(offer) {
-  if (offer?.projectId) await deleteAutosave(offer.projectId);
+  if (!offer?.projectId) return;
+  try { await storage.kvDelete(failedAutosaveKey(offer.projectId)); } catch { /* best effort */ }
+  await deleteAutosave(offer.projectId);
 }

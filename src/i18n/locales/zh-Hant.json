@@ -651,7 +651,7 @@
   "toast.errorTitle": "錯誤",
   "toast.assetEmbedFailed": "無法嵌入資產 {name}",
   "toast.autosaveFailed": "自動儲存失敗",
-  "toast.autosaveRecoverFailed": "無法復原自動儲存（已捨棄）",
+  "toast.autosaveRecoverFailed": "無法復原自動儲存（快照已保留，未刪除）",
   "toast.titleMessage": "{title}：{msg}",
   "toast.mounted": "已掛載：{name}",
   "toast.assetFolderRefreshed": "已重新整理：{name}",

@@ -651,7 +651,7 @@
   "toast.errorTitle": "エラー",
   "toast.assetEmbedFailed": "アセット {name} を埋め込めませんでした",
   "toast.autosaveFailed": "自動保存に失敗しました",
-  "toast.autosaveRecoverFailed": "自動保存を復元できませんでした（破棄しました）",
+  "toast.autosaveRecoverFailed": "自動保存を復元できませんでした（スナップショットは保持され、削除されていません）",
   "toast.titleMessage": "{title}: {msg}",
   "toast.mounted": "マウント: {name}",
   "toast.assetFolderRefreshed": "更新: {name}",

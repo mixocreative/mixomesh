@@ -654,7 +654,7 @@
   "toast.errorTitle": "Error",
   "toast.assetEmbedFailed": "Could not embed asset {name}",
   "toast.autosaveFailed": "Autosave failed",
-  "toast.autosaveRecoverFailed": "Could not recover the autosave (it has been discarded)",
+  "toast.autosaveRecoverFailed": "Could not recover the autosave - the snapshot was kept, nothing was deleted",
   "toast.titleMessage": "{title}: {msg}",
   "toast.mounted": "Mounted: {name}",
   "toast.assetFolderRefreshed": "Refreshed: {name}",

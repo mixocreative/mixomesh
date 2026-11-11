@@ -18,5 +18,9 @@ export const RECENT_KEY      = 'recent_projects';
 export const RECENT_MAX      = 10;
 export const AUTOSAVE_PREFIX = 'autosave_';
 export const AUTOSAVE_IMG_PREFIX = 'autosaveimg_';   // per-hash texture images (0.11); must NOT start with AUTOSAVE_PREFIX
+// A snapshot a recovery attempt could not load (cia MX-02). Same rule as the
+// image prefix: it must NOT start with AUTOSAVE_PREFIX, or the boot scan would
+// offer it again and every launch would repeat the failure.
+export const AUTOSAVE_FAILED_PREFIX = 'autosavefailed_';
 export const SCAN_FILE_LIMIT = 4000;            // hash-scan safety cap
 export const SILENT          = { silent: true };
