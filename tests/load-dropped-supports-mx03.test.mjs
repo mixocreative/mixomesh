@@ -7,6 +7,7 @@
 // they deleted by hand, their overrides and stamps. The next action after a
 // silent drop is an export with no supports.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { PM, toasts, goodDoc, seedCurrentScene, sceneObject, meshAsset } from './load-harness.mjs';
 
@@ -47,6 +48,24 @@ test('the intact record on the other object still restores', async () => {
   const { getState } = await import('../src/core/StateManager.js');
   assert.equal(getState().scene.objects.o_ok.supports, undefined, 'damaged: dropped, never half-applied');
   assert.deepEqual(getState().scene.objects.o_two.supports, GOOD_SUPPORTS);
+});
+
+// MX-11: `restoreSupports` deep-copies with JSON.parse(JSON.stringify(...)), and the loader used
+// to call it twice per object — once for the test, once for the value — so every record was copied
+// twice on open. For a record carrying `stamps.data` that doubles peak memory on the path that
+// opens the biggest documents, against the standing rule to plan for the lowest peak. The MX-03
+// fix hoisted it to one call; this is what keeps it there.
+//
+// Guarded at the SOURCE on purpose. The second call produced no observable difference — same
+// deterministic input, same verdict, one warning either way — so there is nothing a behavioural
+// test could assert. What there is, is a line that must stay one call.
+test('MX-11: the loader reads an object\'s supports exactly once', () => {
+  const src = readFileSync(new URL('../src/core/persist/ProjectLoader.js', import.meta.url), 'utf8');
+  const calls = src.split('\n')
+    .filter(line => !/^\s*import\b/.test(line))
+    .reduce((n, line) => n + (line.match(/\brestoreSupports\s*\(/g) ?? []).length, 0);
+  assert.equal(calls, 1,
+    `ProjectLoader must call restoreSupports once per object (found ${calls} call sites) — a second call deep-copies the record again`);
 });
 
 test('a clean load says nothing about supports', async () => {
