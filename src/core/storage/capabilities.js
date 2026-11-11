@@ -94,9 +94,9 @@ export function detectEngine(ua = '', env = {}) {
 
 /**
  * Boot-gate decision on engine (task 8.1): null = allowed, else the blocking
- * screen's title + message. gecko / other are blocked regardless of tier.
+ * screen's reason + title + message. gecko / other are blocked regardless of tier.
  * @param {Engine} engine
- * @returns {{title:string, message:string}|null}
+ * @returns {{reason:string, title:string, message:string}|null}
  */
 export function engineGate(engine) {
   if (engine === 'chromium' || engine === 'webkit') return null;

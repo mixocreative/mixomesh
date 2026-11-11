@@ -119,7 +119,7 @@ test('hasRenderContext: null getContext means no, and a THROWING getContext also
     globalThis.document = canvasWith(() => { throw new Error('hardened browser'); }).document;
     assert.equal(hasRenderContext(), false, 'a throw is not a context');
     // webgl1 passes: Babylon falls back to it (thinEngine :234) and only SSAO2 needs WebGL2.
-    let asked = [];
+    const asked = [];
     globalThis.document = canvasWith(kind => {
       asked.push(kind);
       return kind === 'webgl' ? { getExtension: () => null } : null;
