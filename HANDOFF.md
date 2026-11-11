@@ -2,6 +2,20 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-12 — the three HIGH findings of `docs/cia-audit-2026-11-12.md` are CLOSED** (master,
+> NOT pushed). MX-01: `MeshRepair.diagnoseMesh` now welds by position before it asks the engine, so a
+> UV seam stops counting as a hole — the weld went into that shared seam, not into one call site, so
+> all three raw-mesh diagnose callers are covered; `repairMesh` keeps getting RAW geometry on purpose
+> (the engine merges for itself, `arraysToMesh` needs the original UVs). MX-02: a failed autosave
+> recovery MOVES the snapshot to `autosavefailed_<projectId>` instead of deleting it; the boot scan
+> ignores it, only an explicit Discard clears it — **open debt: no UI offers a salvaged snapshot
+> back.** MX-03: `restoreSupports` returns `{ supports, dropped }` and the loader toasts the names it
+> could not restore. Guards: `tests/diagnose-weld-mx01.test.mjs`,
+> `tests/autosave-recover-keeps-snapshot-mx02.test.mjs`, `tests/load-dropped-supports-mx03.test.mjs`,
+> plus a `validateMesh` case in `tests/validator.test.mjs`. The MEDIUM/LOW findings (MX-04…MX-13) are
+> still open, and the audit's §P2 plan stands. C9 (deleting `src/core/repair/` for geocore's Rust
+> repair) is untouched and still gated on the 12-scan comparison.
+
 > **2026-10-22 /cia run (`docs/reviews/2026-10-22-cia-full.md`): every owner decision is closed.**
 > W-13 bda8066, A-11 84dd6ef, E-03 7a5df43, F-08 632fefe; W-00 and C-06 kept as is (recorded in
 > Blueprint). Master is NOT pushed; after pushing, read the first CI run (it now runs
