@@ -30,6 +30,10 @@
   align-items: center;
   flex: 0 0 auto;
   color: var(--text-0);
+  /* It is the document's <h1> (MX-12), so the heading defaults have to go: the UA margin would
+     push the whole toolbar down, and 2em font-size would resize the svg's em-based box. */
+  margin: 0;
+  font-size: inherit;
 }
 #app-logo svg {
   height: 26px;
