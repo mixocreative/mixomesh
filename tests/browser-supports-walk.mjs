@@ -205,11 +205,26 @@ try {
   const contacts = await w(`contacts(${J(id)})`);
   const foot = feet[Math.floor(feet.length / 3)];
   const tip = contacts.find((c) => c.id === foot.id);
-  await app.hover(foot.x, foot.y);
-  await sleep(300);
-  await app.click(foot.x, foot.y, 'right');
-  await settle();
-  const removed = await counts();
+  /*
+   * WAIT FOR THE REMOVAL, DO NOT SLEEP FOR IT. This was `hover` + `sleep(300)` + one right-click,
+   * and the 300 ms was a guess at how long the app takes to work out which support is under the
+   * cursor (a pick on pointer move). Under load it is not enough: the click lands before anything is
+   * hovered, nothing is removed, and the check reports "removed 0 -> 0" with NO page error — which
+   * cost three separate diagnoses in one night, each time looking like a fresh defect.
+   *
+   * Retrying does not weaken the claim. The claim is that a right-click on a support removes it; if
+   * the handler were missing or the pick wrong, every attempt would fail and this still fails. What
+   * it stops asserting is a particular latency, which was never the point.
+   */
+  const base_removed = base.removed;
+  let removed = base;
+  for (let attempt = 0; attempt < 6 && removed.removed === base_removed; attempt++) {
+    await app.hover(foot.x, foot.y);
+    await sleep(150);
+    await app.click(foot.x, foot.y, 'right');
+    await settle();
+    removed = await counts();
+  }
   check('e right-click on a support removes it', removed.removed === base.removed + 1 && removed.auto === base.auto - 1, `removed ${base.removed} -> ${removed.removed}`);
   await app.hover(tip.x, tip.y);
   await sleep(300);
