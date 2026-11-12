@@ -13,6 +13,7 @@ export const STATUS_KEYS: Readonly<Record<string, string>> = {
   'Generated supports for {n} objects.': 'supportLive.generatedMany',
   'Regenerated {n} objects.': 'supportLive.regeneratedMany',
   'Regenerated {n} objects. Hand edits kept: {added} added, {removed} removed. Removals reset: {reset}.': 'supportLive.regeneratedManyHand',
+  '{n} contacts were left out: they sit inside another mesh of the object.': 'supportLive.buriedLeftOut',
   'Still unsupported here.': 'supportLive.stillUnsupported',
   'Spot covered.': 'supportLive.spotCovered',
   'Supports are still building.': 'supportLive.stillBuilding',

@@ -47,6 +47,10 @@ describe('status codes', () => {
       regeneratedStatus('A', 5, report),
       landedStatus([{ name: 'A', placed: 5, report }, { name: 'B', placed: 4, report }]),
       landedStatus([{ name: 'A', placed: 5 }, { name: 'B', placed: 4 }]),
+      // With the overlap rule's sentence, alone and behind a hand-work report: the walk below
+      // follows `then` to the end, so a sentence appended after another is covered only here.
+      landedStatus([{ name: 'A', placed: 5, buried: 9 }]),
+      landedStatus([{ name: 'A', placed: 5, report, buried: 9 }]),
       recheckStatus({ unitId: 'a', position: [0, 0, 0], radius: 1 }, []),
       recheckStatus({ unitId: 'a', position: [0, 0, 0], radius: 1 }, [{ position: [0, 0, 0] }]),
     ];

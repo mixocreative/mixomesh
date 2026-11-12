@@ -1511,6 +1511,7 @@
   "supportLive.failed": "Support generation failed: {message}",
   "supportLive.generated": "{name}: {n} automatic contacts generated.",
   "supportLive.regenerated": "Regenerated {name}: {n} supports placed. Hand edits kept: {added} added, {removed} removed. Removals reset: {reset}.",
+  "supportLive.buriedLeftOut": "{n} contacts were left out: they sit inside another mesh of the object.",
   "supportLive.customisedKept": "{n} customised kept, {m} reset.",
   "supportLive.generatedMany": "Generated supports for {n} objects.",
   "supportLive.regeneratedMany": "Regenerated {n} objects.",

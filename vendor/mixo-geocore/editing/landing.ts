@@ -10,7 +10,7 @@ export interface FinishedPlacement {
   unitId: string;
   orientation: JobTransform;
   settings: LiveSupportSettings;
-  result: Pick<PlacementResult, 'points' | 'regions'>;
+  result: Pick<PlacementResult, 'points' | 'regions' | 'buried'>;
 }
 
 /** What landed on one unit; `report` is set for a regeneration (the unit had supports) and says what became of its hand work. */
@@ -18,6 +18,13 @@ export interface LandedUnit {
   name: string;
   placed: number;
   report?: RegenReport;
+  /**
+   * Contacts the overlap rule left out, for standing on a face buried inside another mesh of this
+   * same object (engine 67). Carried so the status line can say it: they never reach the build, so
+   * no "supports left out" count mentions them, and an operator looking at an overlap with no
+   * supports would otherwise be given no reason.
+   */
+  buried?: number;
 }
 
 /**
@@ -43,6 +50,7 @@ export function landPlacements(units: readonly PrintUnit[], finished: readonly F
       name: now.name,
       placed: result.points.length,
       ...(now.supports ? { report: regenReport(now.manual.length, applied.handWork) } : {}),
+      ...(result.buried ? { buried: result.buried } : {}),
     });
   }
   return { commands, landed, again };

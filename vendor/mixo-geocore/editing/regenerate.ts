@@ -57,6 +57,26 @@ function withCustomised(message: StatusMessage, report: RegenReport): StatusMess
   return sentence ? { ...message, then: sentence } : message;
 }
 
+/**
+ * Appends `extra` as the LAST sentence of `message`, walking any sentences already chained.
+ *
+ * `withCustomised` may have put one there, and overwriting `then` would have dropped the report on
+ * exactly the regenerations that have the most to say.
+ */
+function withTail(message: StatusMessage, extra: StatusMessage | undefined): StatusMessage {
+  if (!extra) return message;
+  return { ...message, then: message.then ? withTail(message.then, extra) : extra };
+}
+
+/**
+ * The sentence about contacts the overlap rule left out, for an object whose file holds several
+ * meshes. Said because nothing else says it: those contacts never reach the build, so they are in no
+ * "supports left out" count, and the operator sees an overlap with no supports and no reason.
+ */
+function buriedSentence(total: number): StatusMessage | undefined {
+  return total > 0 ? { key: '{n} contacts were left out: they sit inside another mesh of the object.', vars: { n: total } } : undefined;
+}
+
 /** The status line while a regeneration runs, for what changed it (`placement`: a placement setting) and its scope. */
 export function regeneratingStatus(scope: { n: number; name: string }, cause: 'button' | 'placement'): StatusMessage {
   return cause === 'placement'
@@ -65,11 +85,14 @@ export function regeneratingStatus(scope: { n: number; name: string }, cause: 'b
 }
 
 /** The status line after placements landed together: one object reads as `regeneratedStatus` (or its first Generate), several as one summary. */
-export function landedStatus(landed: readonly { name: string; placed: number; report?: RegenReport }[]): StatusMessage {
+export function landedStatus(landed: readonly { name: string; placed: number; report?: RegenReport; buried?: number }[]): StatusMessage {
+  const buried = buriedSentence(landed.reduce((sum, entry) => sum + (entry.buried ?? 0), 0));
   const [only] = landed;
-  if (landed.length === 1 && only) return only.report ? regeneratedStatus(only.name, only.placed, only.report) : { key: '{name}: {n} automatic contacts generated.', vars: { name: only.name, n: only.placed } };
+  if (landed.length === 1 && only) {
+    return withTail(only.report ? regeneratedStatus(only.name, only.placed, only.report) : { key: '{name}: {n} automatic contacts generated.', vars: { name: only.name, n: only.placed } }, buried);
+  }
   const reports = landed.flatMap((entry) => (entry.report ? [entry.report] : []));
-  if (reports.length < landed.length) return { key: 'Generated supports for {n} objects.', vars: { n: landed.length } };
+  if (reports.length < landed.length) return withTail({ key: 'Generated supports for {n} objects.', vars: { n: landed.length } }, buried);
   const total = reports.reduce((sum, report): RegenReport => ({
     added: sum.added + report.added,
     removed: sum.removed + report.removed,
@@ -77,9 +100,9 @@ export function landedStatus(landed: readonly { name: string; placed: number; re
     customisedKept: sum.customisedKept + report.customisedKept,
     customisedReset: sum.customisedReset + report.customisedReset,
   }), { added: 0, removed: 0, reset: 0, customisedKept: 0, customisedReset: 0 });
-  if (!hasHandWork(total)) return { key: 'Regenerated {n} objects.', vars: { n: landed.length } };
-  if (!hasEdits(total)) return withCustomised({ key: 'Regenerated {n} objects.', vars: { n: landed.length } }, total);
-  return withCustomised({ key: 'Regenerated {n} objects. Hand edits kept: {added} added, {removed} removed. Removals reset: {reset}.', vars: { n: landed.length, added: total.added, removed: total.removed, reset: total.reset } }, total);
+  if (!hasHandWork(total)) return withTail({ key: 'Regenerated {n} objects.', vars: { n: landed.length } }, buried);
+  if (!hasEdits(total)) return withTail(withCustomised({ key: 'Regenerated {n} objects.', vars: { n: landed.length } }, total), buried);
+  return withTail(withCustomised({ key: 'Regenerated {n} objects. Hand edits kept: {added} added, {removed} removed. Removals reset: {reset}.', vars: { n: landed.length, added: total.added, removed: total.removed, reset: total.reset } }, total), buried);
 }
 
 /** The status line (and the Undo toast) after a regeneration landed on an object. */

@@ -1487,6 +1487,7 @@
   "supportLive.failed": "產生支撐失敗：{message}",
   "supportLive.generated": "{name}：已產生 {n} 個自動接觸點。",
   "supportLive.regenerated": "已重新產生 {name}：放置了 {n} 個支撐。保留手動編輯：新增 {added} 個，移除 {removed} 個。重設移除：{reset}。",
+  "supportLive.buriedLeftOut": "已略過 {n} 個接觸點：其位於物件的另一個網格內部。",
   "supportLive.customisedKept": "保留 {n} 個自訂項目，已重設 {m} 個。",
   "supportLive.generatedMany": "已為 {n} 個物件產生支撐。",
   "supportLive.regeneratedMany": "已重新產生 {n} 個物件。",

@@ -1487,6 +1487,7 @@
   "supportLive.failed": "サポートの生成に失敗しました: {message}",
   "supportLive.generated": "{name}: {n} 個の自動接点が生成されました。",
   "supportLive.regenerated": "{name} を再生成しました: {n} 個のサポートが配置されました。手動編集を維持: 追加 {added}、削除 {removed}。リセットされた削除: {reset}。",
+  "supportLive.buriedLeftOut": "{n} 個の接点を除外しました：オブジェクトの別のメッシュ内部にあります。",
   "supportLive.customisedKept": "カスタム {n} 個を保持、{m} 個をリセットしました。",
   "supportLive.generatedMany": "{n} 個のオブジェクトのサポートを生成しました。",
   "supportLive.regeneratedMany": "{n} 個のオブジェクトを再生成しました。",
