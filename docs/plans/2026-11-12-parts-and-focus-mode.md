@@ -346,11 +346,25 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   merely TOUCH getting flagged (the engine counts "against" within `TOUCH_MM` plus the tip radius, so
   a strict-inside mode or a penetration threshold would be needed); or pair cost on a full plate (then
   batch every neighbour into one call per object).
-- **Gap 2** (merge then Repair), **gap 4** (origin = bbox centre of the picked set, only where new
-  geometry is minted), **gap 5** (derived assets with `retainedTriangles`/`release`) and **gap 6**
-  (the lead's export ratio). None is reachable from the new UI yet: it moves link fields only, so no
-  geometry is minted, no origin is chosen and no ratio is combined. They become live when a
-  TOPOLOGICAL split lands, which is what gap 5 describes.
+- **Gap 2 is FIXED, and it was never about a topological split** — merge, Repair and split all exist
+  today. A multi-part object repaired as ONE solid records `groupRepair` on every part so a reload
+  replays it once for the object; separate them and the reload replays it **per object**, a per-part
+  repair of a union that is gone. The project reloaded as different geometry from the screen and
+  nothing said so. Both split commands now drop that entry (and only that one — every other fix type
+  replays correctly per object) and warn by name; undo restores it. `SeparateSelectionCommand` drops
+  it on BOTH sides, because the object left behind is a different union too. "Block" was the other
+  sanctioned option and was rejected: it refuses an edit the operator is entitled to make.
+
+- **Gap 6 is FIXED**: a merge warns when it swallows an object built at another print scale, since the
+  export reads the LEAD's ratio as the reference and the swallowed object's becomes a field nothing
+  reads. Reported, not corrected — re-baking vertices is what Join must never do.
+
+- **Gaps 4 and 5 are PINNED where they can be, and the rest genuinely waits on a topological split.**
+  What is assertable now is that this separate is not one: `tests/split-join.test.mjs` asserts it
+  moves no vertex and no node, mints no asset, and declares neither `retainedTriangles` nor
+  `release`. So there is no origin to choose (gap 4's "nothing may move in world space" holds) and no
+  owned geometry to evict undo history (gap 5). **A future topological split will fail those
+  assertions**, which is the point: it has to bring its own answers rather than inherit a silence.
 
 ### U6 — mixomesh: re-vendor 12 → 65
 

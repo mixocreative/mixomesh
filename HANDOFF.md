@@ -2,6 +2,37 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13 (last): U5 GAP 2 FIXED, GAPS 4/5 PINNED, and two self-inflicted defects caught before
+> they shipped** (`9c4568c`, `733807f`, `384db03`).
+>
+> **Gap 2 was a live data-fidelity defect and I had wrongly filed it as "unreachable".** Merge,
+> Repair and split all exist today. A multi-part object repaired as ONE solid records `groupRepair`
+> on every part; separate them and the reload replays it PER OBJECT — a per-part repair of a union
+> that is gone, the internal-wall result `GroupRepair` exists to avoid. **The project reloaded as
+> different geometry from the screen, silently.** Both split commands drop that entry and warn; undo
+> restores it; only `groupRepair` goes.
+>
+> **Gaps 4 and 5 are pinned where they can be**: the separate moves no vertex and no node, mints no
+> asset, and declares no `retainedTriangles`/`release`. A future TOPOLOGICAL split will fail those
+> assertions, which is the point — it must bring its own answers instead of inheriting a silence.
+>
+> **TWO THINGS I ALMOST SHIPPED, both found by being suspicious of a green gate:**
+>
+> 1. **The 1M long task hit 99 ms of a 100 ms limit** and the gate was GREEN. `boxesOverlap` took
+>    meshes, so it re-derived the asked object's box per neighbour — O(neighbours x vertices) on the
+>    main thread. It now takes BOUNDS, computed once; back to 51-52 ms. A budget that varies by tens
+>    of milliseconds under load, sat one millisecond inside, would have read as a flake in CI for
+>    weeks.
+> 2. **An INCOMPLETE FORGE looked exactly like a vacuous test.** Proving the retried right-click
+>    check still had teeth, I disabled ONE of the two right-click paths; it still passed, and I
+>    nearly "fixed" a working guard. There are two — the action decision (`button: 'right'`) and the
+>    removing flag (`down.button === 2`). With both gone it fails. **An incomplete forge is
+>    indistinguishable from a test that proves nothing.**
+>
+> **And the flake that cost three diagnoses is fixed at the root**: the walk's right-click step waited
+> `sleep(300)` for the app's pick latency. It now waits for the removal to register. Same claim, no
+> latency assertion.
+
 > **2026-11-13 (latest): C2 IS DECIDED AND BUILT, and U5 gap 6 with it (`6374613`, `380be47`).**
 >
 > **C2's instrument is GEOMETRY, not history** (decided with Fable; the reasoning is in
