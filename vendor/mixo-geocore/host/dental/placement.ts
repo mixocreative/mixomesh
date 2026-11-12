@@ -9,6 +9,7 @@ import type { DentalSession } from './dentalEngine';
 import { orientationOnly } from '../core/jobs';
 import { legacyDentalPlacement, stampRows } from './legacyArea';
 import { defaultDentalTuning } from './tuning';
+import { partsOf, type FileParts } from './dentureParts';
 
 /*
  * Host side of the dental policy: the saved policy of a unit is packed as numbers and handed to Rust
@@ -59,28 +60,33 @@ function pointsOf(flat: Float64Array, unique: boolean): SupportPoint[] {
 
 const EMPTY: PlacementResult = { points: [], regions: [], contactPositions: new Float32Array(), contactNormals: new Float32Array() };
 
+/** A dental placement with the file's parts (engine 56): the aligner policy's part list and per-face part ids; absent for a legacy area. */
+export type DentalPlacementResult = PlacementResult & { parts?: FileParts };
+
 /**
  * Automatic contacts of a dental policy, in the frame of the turned model. Two-contour placement is
  * the policy's own candidates (Rust: recomputed strip, face gate, never saved contacts); a saved
  * area that detection does not reproduce gives none. A legacy policy (painted from scratch, or an
  * older saved project) keeps the generic contacts its area permits and fills the allowed downward
- * faces (Rust).
+ * faces (Rust). A two-contour placement also reports the file's parts (`parts`: the aligner, fused attachments, free add-ons with
+ * their generic tips, debris).
  */
-export function filterDentalPlacement(job: DentalPlacementJob, placement: PlacementResult): PlacementResult {
+export function filterDentalPlacement(job: DentalPlacementJob, placement: PlacementResult): DentalPlacementResult {
   const { mesh, orientation, dental: policy } = job;
   if (policy.kind !== 'two-contour') return legacyDentalPlacement({ ...job, dental: policy }, placement);
-  const { candidates, suggestions } = withDentalMesh(mesh, (session, model) => {
+  const { candidates, suggestions, parts } = withDentalMesh(mesh, (session, model) => {
     const handle = makeDentalPolicy(session, model, policy, orientationOnly(orientation), job.manual);
     try {
-      return handle.reproduced() ? { candidates: handle.candidate_points(), suggestions: handle.suggested_points() } : { candidates: new Float64Array(), suggestions: new Float64Array() };
+      const parts = partsOf(handle);
+      return handle.reproduced() ? { candidates: handle.candidate_points(), suggestions: handle.suggested_points(), parts } : { candidates: new Float64Array(), suggestions: new Float64Array(), parts };
     } finally {
       handle.free();
     }
   });
-  if (candidates.length === 0) return { ...EMPTY, regions: placement.regions };
+  if (candidates.length === 0) return { ...EMPTY, regions: placement.regions, parts };
   const points = pointsOf(candidates, true);
   return { points, regions: placement.regions,
     contactPositions: new Float32Array(points.flatMap((point) => point.position)),
     contactNormals: new Float32Array(points.flatMap((point) => point.normal)),
-    suggested: pointsOf(suggestions, false) };
+    suggested: pointsOf(suggestions, false), parts };
 }

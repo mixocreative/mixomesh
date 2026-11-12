@@ -60,7 +60,7 @@ function exportFiles(task: Extract<MeshTask, { kind: 'export' }>, models: Map<st
     const progress = throttled(post, (fraction) => 0.8 * (k + fraction) / units.length);
     const built = runSupportJob({ ...job, mesh: models.get(unitId)! }, progress, revision);
     supports.set(unitId, built);
-    results.push({ unitId, revision: built.revision ?? -1, verdict: built.verdict?.status ?? 'inconclusive', islands: built.islands?.status === 'inconclusive' ? 'inconclusive' : 'ok' });
+    results.push({ unitId, revision: built.revision ?? -1, verdict: built.verdict?.status ?? 'inconclusive', islands: built.islands?.status === 'inconclusive' ? 'inconclusive' : 'ok', triangles: built.indices.length / 3 });
   });
   const byId = new Map<string, ExportUnitPayload>(task.units.map((payload) => [payload.unitId, payload]));
   const files = task.files.flatMap((file, k) => {

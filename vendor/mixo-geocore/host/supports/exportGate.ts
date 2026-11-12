@@ -6,7 +6,15 @@ import type { ExportUnitResult } from '../workers/meshProtocol';
  *  - stale: the unit changed while the export ran, or its result answers another revision;
  *  - failed: the build returned nothing for a unit that has supports in the files;
  *  - inconclusive: the body-clearance verdict could not be reached (a timeout or a crossing that
- *    cannot be judged), which is never treated as clear.
+ *    cannot be judged), which is never treated as clear;
+ *  - nothing-built: the unit's supports are in the files and the build produced no triangles, so
+ *    there is nothing to write and nothing was judged (GEO-002: this case used to be refused as
+ *    `stale`, naming a cause that had not happened, with no escape - exporting again gave the same
+ *    answer, and only adding a support back cleared it).
+ *
+ * PLACEHOLDER WORDING, for the owner to reword: `nothing-built` shows as "Nothing was built to
+ * check. Generate supports first." The app owns the text; this comment records what the reason is
+ * meant to say so the two cannot drift apart unnoticed.
  * Not refusals: a `blocked` verdict records where supports touch the model (every generic build is
  * blocked, and so is the reference aligner's default build), so it is not listed per issue, and an
  * inconclusive island verdict means the model's own mesh could not be analysed (non-manifold edges, as
@@ -15,7 +23,7 @@ import type { ExportUnitResult } from '../workers/meshProtocol';
  */
 /** Why the export was refused, and the first unit that caused it. */
 export interface ExportRefusal {
-  reason: 'stale' | 'failed' | 'inconclusive';
+  reason: 'stale' | 'failed' | 'inconclusive' | 'nothing-built';
   unitId: string;
 }
 
@@ -35,6 +43,9 @@ export function exportRefusal(
     const result = requested.units.find((unit) => unit.unitId === unitId);
     if (!result) return { reason: 'failed', unitId };
     if (result.revision !== requested.revision) return { reason: 'stale', unitId };
+    // Before `inconclusive`: an empty build IS inconclusive (nothing was judged), but "nothing was
+    // built" is the actionable half of that and the operator can only act on the actionable half.
+    if (result.triangles === 0) return { reason: 'nothing-built', unitId };
     if (result.verdict === 'inconclusive') return { reason: 'inconclusive', unitId };
   }
   return undefined;

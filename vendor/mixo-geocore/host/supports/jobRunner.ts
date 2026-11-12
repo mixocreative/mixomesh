@@ -1,4 +1,4 @@
-import { PROGRESS_STAGE } from '../core/progress';
+import { PROGRESS_STAGE, type GeneratePhaseCallback } from '../core/progress';
 import type { SupportProblem } from '../core/analysis/supportCheck';
 import type { PlacementResult, ProgressCallback } from '../core/analysis/types';
 import { orientationOnly, type CheckJob, type PlacementJob, type SupportJob } from '../core/jobs';
@@ -8,6 +8,8 @@ import { genericPolicy, jobContacts } from './genericPolicy';
 import { placeGeneric } from './genericPlacement';
 import { checkSupportProblems } from './checkSupports';
 import { generateSupports, type BuildSite } from './generateSupports';
+import { GENERATE_LIMITS } from './generateLimits';
+import { GENERATE_RULES } from './generateRules';
 import { supportMeshToUnitLocal } from './supportFrame';
 import { applyTransform, transformDirection, transformPoint } from '../state/transform';
 
@@ -22,9 +24,6 @@ import { applyTransform, transformDirection, transformPoint } from '../state/tra
  * space and reads the mesh and verdicts back. No policy, collision test, landing rule or retry runs here.
  */
 
-/** A `generate` call ends its repair and checks early after this long; the verdict is then inconclusive, never clear. */
-export const GENERATE_TIMEOUT_MS = 120_000;
-
 const EMPTY_MESH: GeneratedSupportMesh = { positions: new Float32Array(), indices: new Uint32Array(), parts: [], components: [], dropped: [], droppedByZones: [] };
 
 /**
@@ -32,7 +31,7 @@ const EMPTY_MESH: GeneratedSupportMesh = { positions: new Float32Array(), indice
  * the automatic contacts it left out (`dropped`: policy, landing rule, zones, safety repair), the
  * body-clearance `verdict` and the `islands` verdict.
  */
-export function runSupportJob(job: SupportJob, onProgress?: ProgressCallback, revision = 0, site?: BuildSite): GeneratedSupportMesh {
+export function runSupportJob(job: SupportJob, onProgress?: ProgressCallback, revision = 0, site?: BuildSite, onPhase?: GeneratePhaseCallback): GeneratedSupportMesh {
   const { frame } = job;
   if (frame === null) return { ...EMPTY_MESH, revision };
   const contacts = jobContacts(job.contacts).map((contact) => ({
@@ -45,8 +44,9 @@ export function runSupportJob(job: SupportJob, onProgress?: ProgressCallback, re
   // Dental: the aligner's Step 3 switches decide Tree and Brace and Roof/Cage stay off, in Rust.
   const policy = dental ? dentalPolicy(dental, frame, job.contacts.manual) : genericPolicy(job.contacts, job.settings, job.repairBudget ?? 0);
   const out = generateSupports(contacts, job.settings, policy, {
-    mode: job.mode, model: job.mesh, frame, plateY: job.plate ?? 0, labelText: job.labelText, zones, timeoutMs: GENERATE_TIMEOUT_MS, revision, ...(site ? { site } : {}),
+    mode: job.mode, model: job.mesh, frame, plateY: job.plate ?? 0, labelText: job.labelText, zones, limits: job.limits ?? GENERATE_LIMITS, rules: job.rules ?? GENERATE_RULES, revision, ...(site ? { site } : {}),
     ...(onProgress ? { onProgress } : {}),
+    ...(onPhase ? { onPhase } : {}),
   });
   const mesh = out.mesh;
   if (dental && out.fallback.length > 0) mesh.dentalStructureFallback = out.fallback;
@@ -64,7 +64,7 @@ export { orientationOnly };
 /** Automatic contacts, in the frame of the turned model (the caller maps them back to the unit). */
 export function runPlacementJob(job: PlacementJob, onProgress?: ProgressCallback): PlacementResult {
   onProgress?.(0, PROGRESS_STAGE.findingOverhangs);
-  const result = placeGeneric(applyTransform(job.mesh, orientationOnly(job.orientation)), job.settings);
+  const result = placeGeneric(applyTransform(job.mesh, orientationOnly(job.orientation)), job.settings, job.rules ?? GENERATE_RULES);
   onProgress?.(1, PROGRESS_STAGE.done);
   return result;
 }

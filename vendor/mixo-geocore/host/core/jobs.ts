@@ -5,6 +5,8 @@
  *
  * Meshes are unit-local; a job's transform says where the unit stood (Euler XYZ radians, mm).
  */
+import type { GenerateTimeLimits } from '../supports/generateLimits';
+import type { GenerateRules } from '../supports/generateRules';
 import type { DentalPolicy } from '../dental/dentalPolicy';
 import type { CheckSettings } from './analysis/supportCheck';
 import type { PlacementSettings, SupportPoint, TriangleMesh } from './analysis/types';
@@ -49,6 +51,10 @@ export interface SupportJob {
   dental?: DentalPolicy;
   /** Generic jobs: safety-repair trials the build may spend (brace pruning...). Absent or 0: report only. */
   repairBudget?: number;
+  /** Overrides of the engine's time rule for this job (absent: `GENERATE_LIMITS`, then the engine's defaults). */
+  limits?: GenerateTimeLimits;
+  /** Overrides of the engine's planner rules for this job (absent: `GENERATE_RULES`, then the engine's defaults). */
+  rules?: GenerateRules;
 }
 
 /** Automatic placement on the model turned by `orientation` (its position is ignored). */
@@ -56,6 +62,8 @@ export interface PlacementJob {
   mesh: TriangleMesh;
   orientation: JobTransform;
   settings: PlacementSettings;
+  /** Overrides of the engine's planner rules the placement reads (engine 47: `areaDensity`, the edge rules; absent: `GENERATE_RULES`, then the engine's defaults). */
+  rules?: GenerateRules;
 }
 
 /** Dental (host/dental): automatic placement restricted to an accepted, unit-local dental support policy. */

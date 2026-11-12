@@ -100,6 +100,11 @@ export interface RunOptions {
    * function, which is called when the job settles. Aborting the job while it waits drops it.
    */
   admit?: (signal: AbortSignal) => Promise<() => void>;
+  /**
+   * Set by `run` and called by `start` when no Web Worker could be created and the fallback runs on
+   * this thread (GEO-012). Internal: a caller who sets it is overwritten by `run`.
+   */
+  onInline?: () => void;
 }
 
 interface Job {
@@ -181,6 +186,9 @@ export class WorkerTask<P = unknown, R = unknown> {
     });
     const inner: RunOptions = {
       ...opts,
+      // GEO-012: the no-worker fallback runs the build HERE, on the caller's thread. `start` says
+      // so through this, so the activity row can tell a degraded environment from a slow machine.
+      onInline: () => activity.inline(),
       signal: controller.signal,
       onProgress: (fields) => {
         activity.progress(fields);
@@ -220,7 +228,14 @@ export class WorkerTask<P = unknown, R = unknown> {
       if (!this.create) throw new WorkerTaskError(`${this.name} requires a Web Worker`, 'unavailable');
       worker = this.mode === 'per-job' ? this.create() : (this.worker ??= this.wire(this.create()));
     } catch (error) {
-      if (this.fallback) return Promise.resolve().then(() => this.fallback!(payload));
+      if (this.fallback) {
+        // The fallback is right - an engine that works where Web Workers do not is better than one
+        // that refuses. What was missing is the sentence: a denture build is about 8 s on the
+        // reference case, and on the main thread that is the whole UI frozen, with nothing on screen
+        // distinguishing it from a slow job (GEO-012).
+        opts.onInline?.();
+        return Promise.resolve().then(() => this.fallback!(payload));
+      }
       return Promise.reject(error instanceof WorkerTaskError ? error : new WorkerTaskError(`${this.name} requires a Web Worker (${(error as Error).message})`, 'unavailable'));
     }
     return new Promise<R>((resolve, reject) => {

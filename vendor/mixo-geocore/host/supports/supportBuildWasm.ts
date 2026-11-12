@@ -22,7 +22,7 @@ export const SETTINGS_ORDER = [
   'previewMode', 'autoSnap', 'lowPolyMode', 'resolution',
   'scatterSpacing', 'scatterAngle', 'scatterSafeDistance', 'scatterFacingDown', 'scatterIslands', 'scatterRidgeAngle',
   'scatterAutoTree', 'scatterMergeDistance', 'scatterBranchDescent', 'reinforceOverhangEdges',
-  'liftHeight', 'eraseRadius',
+  'liftHeight', 'eraseRadius', 'neckMaxShift', 'minClearance',
 ] as const satisfies readonly SettingKey[];
 
 /** Order of a per-contact shape override (Rust `SHAPE_LAYOUT`); the same order as `SHAPE_KEYS`. */
@@ -141,7 +141,7 @@ export function decodeComponents(tags: Uint32Array, reach: Float64Array, intents
     const intentStart = tags[t + 6]! * 9;
     const intentCount = tags[t + 7]!;
     components.push({
-      part: PARTS[tags[t]!]!,
+      part: PARTS[tags[t]!] ?? 'unknown',
       ...(contact === NO_CONTACT ? {} : { contactId: idOf(contact) }),
       ...(origin === 0 ? {} : { origin: origin === 2 ? 'manual' as const : 'auto' as const }),
       start: tags[t + 4]!,

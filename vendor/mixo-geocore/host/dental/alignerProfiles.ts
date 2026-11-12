@@ -34,7 +34,7 @@ export interface ProfileDefaults {
   matchToleranceMm: number;
   matchMinDot: number;
   minTipSeparationMm: number;
-  tipMinFromUpDeg: number;
+  overhangAngleDeg: number;
   tipMoveMaxMm: number;
 }
 
@@ -99,7 +99,7 @@ const POSE_KEYS: readonly (keyof ProfilePose)[] = ['tiltDeg', 'headingDeg', 'rol
 const STABILITY_KEYS: readonly (keyof ProfileStability)[] = ['maxSlendernessUnbraced', 'maxSlendernessBraced', 'cupProminenceMm'];
 const DEFAULT_KEYS: readonly (keyof ProfileDefaults)[] = ['positionMm', 'stripWidthMm', 'density', 'positionMinMm', 'positionMaxMm', 'stripWidthMinMm',
   'stripWidthMaxMm', 'densityMin', 'densityMax', 'outerSpacingMm', 'innerSpacingMm', 'maxSearchMm', 'repairBudget',
-  'matchToleranceMm', 'matchMinDot', 'minTipSeparationMm', 'tipMinFromUpDeg', 'tipMoveMaxMm'];
+  'matchToleranceMm', 'matchMinDot', 'minTipSeparationMm', 'overhangAngleDeg', 'tipMoveMaxMm'];
 const SUPPORT_NUMBERS = ['pillarDiameterMm', 'tipDiameterMm', 'liftHeightMm'] as const;
 const SUPPORT_SWITCHES = ['tree', 'brace', 'raft'] as const;
 

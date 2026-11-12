@@ -4,10 +4,15 @@ import './testEnv';
  * app's support pipeline produces on the smoke fixtures at the engine it vendors TODAY.
  *
  * The plan says to capture and commit this before touching `vendor/`, and the reason is specific.
- * mixoMesh is pinned at engine 12 while geocore is at 65 -- 53 ABI versions -- and the known breaks
- * include `scatterAngle` 50 -> 45 and `minFromUpDeg` -> `overhangAngleDeg` where four `0` sites
- * become 180. Those change WHAT GETS PRINTED. Without a before, the after cannot be read: every
- * difference looks equally like a fix and like a regression.
+ * mixoMesh is pinned at engine 12 while geocore is at 65 -- 53 ABI versions -- and the changes in
+ * between move WHAT GETS PRINTED. Without a before, the after cannot be read: every difference looks
+ * equally like a fix and like a regression.
+ *
+ * And a before is what stops a WRONG attribution surviving. The density change this captured
+ * (cube-overhang 70 -> 51 contacts) looks exactly like the `scatterAngle` 50 -> 45 default, and is
+ * not: at engine 65 the count is 51 at 45, 50 and 60 degrees alike. It is ENGINES 47/48 - island and
+ * lowest-point tips claim first with a half-pitch gap, every edge corner gets a tip, and edges space
+ * in round(length / pitch) - an owner decision of 2026-11-01 that is not optional at 65.
  *
  * In process, not in a browser: this is the same `placeGeneric` + `runSupportJob` path the live code
  * runs, with no Vite, no worker and no renderer, so a difference is the engine's and nothing else's.

@@ -1,5 +1,6 @@
 import type { PlacementResult, PlacementSettings, SupportPoint, TriangleMesh } from '../core/analysis/types';
 import { withSession } from './supportEngine';
+import { packRules, type GenerateRules } from './generateRules';
 
 /*
  * Host adapter of the Rust generic placement (`crates/geometry-core/src/generic/placement`): the
@@ -12,7 +13,7 @@ const SOURCES: readonly SupportPoint['source'][] = ['interior', 'physical-bounda
 
 interface PlacementSession {
   load_mesh(positions: Float32Array, indices: Uint32Array): number;
-  generic_place(model: number, settings: Float64Array): {
+  generic_place(model: number, settings: Float64Array, rules?: Float64Array): {
     take_positions(): Float64Array; take_normals(): Float64Array; take_sources(): Uint8Array; take_ids(): string[];
     take_region_faces(): Uint32Array; take_region_starts(): Uint32Array; free(): void;
   };
@@ -29,13 +30,14 @@ export function packPlacementSettings(s: PlacementSettings): Float64Array {
 
 /**
  * Automatic placement on `mesh` (already turned into the frame wanted; results are in that frame)
- * with `settings`. Runs in a one-shot session; the points carry their Rust ids and `regionId` -1
- * (regions are returned separately). Used by `jobRunner.runPlacementJob`.
+ * with `settings` and the planner `rules` (engine 47: `areaDensity` and the edge rules; absent = engine defaults). Runs in a
+ * one-shot session; the points carry their Rust ids and `regionId` -1 (regions are returned separately). Used by
+ * `jobRunner.runPlacementJob`.
  */
-export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings): PlacementResult {
+export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings, rules?: GenerateRules): PlacementResult {
   return withSession((raw) => {
     const session = raw as unknown as PlacementSession;
-    const result = session.generic_place(session.load_mesh(Float32Array.from(mesh.positions), Uint32Array.from(mesh.indices)), packPlacementSettings(settings));
+    const result = session.generic_place(session.load_mesh(Float32Array.from(mesh.positions), Uint32Array.from(mesh.indices)), packPlacementSettings(settings), packRules(rules));
     try {
       const ids = result.take_ids();
       const positions = result.take_positions();
@@ -46,7 +48,7 @@ export function placeGeneric(mesh: TriangleMesh, settings: PlacementSettings): P
         regionId: -1,
         position: [positions[k * 3]!, positions[k * 3 + 1]!, positions[k * 3 + 2]!],
         normal: [normals[k * 3]!, normals[k * 3 + 1]!, normals[k * 3 + 2]!],
-        source: SOURCES[sources[k]!]!,
+        source: SOURCES[sources[k]!] ?? 'unknown',
       }));
       // Regions come in CSR form: region r owns faces[starts[r] .. starts[r + 1]).
       const faces = result.take_region_faces();

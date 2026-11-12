@@ -1,14 +1,14 @@
 {
  "note": "mixoMesh own output, engine as vendored. RE-TAKE on re-vendor and READ the diff.",
- "engineVersion": 12,
+ "engineVersion": 65,
  "cube-overhang/LIGHT/budget": {
-  "placed": 70,
+  "placed": 51,
   "regions": 2,
-  "tips": 70,
+  "tips": 51,
   "dropped": 0,
   "droppedIds": [],
   "verdict": "clear",
-  "triangles": 21804,
+  "triangles": 16716,
   "parts": [
    "brace",
    "foot",
@@ -18,23 +18,23 @@
    "raft"
   ],
   "perPart": {
-   "brace": 28,
-   "foot": 70,
+   "brace": 19,
+   "foot": 51,
    "label": 9,
-   "neck": 70,
-   "pillar": 140,
+   "neck": 51,
+   "pillar": 102,
    "raft": 17
   },
   "fallbacks": []
  },
  "cube-overhang/LIGHT/nobudget": {
-  "placed": 70,
+  "placed": 51,
   "regions": 2,
-  "tips": 70,
+  "tips": 51,
   "dropped": 0,
   "droppedIds": [],
   "verdict": "clear",
-  "triangles": 21804,
+  "triangles": 16716,
   "parts": [
    "brace",
    "foot",
@@ -44,179 +44,28 @@
    "raft"
   ],
   "perPart": {
-   "brace": 28,
-   "foot": 70,
+   "brace": 19,
+   "foot": 51,
    "label": 9,
-   "neck": 70,
-   "pillar": 140,
+   "neck": 51,
+   "pillar": 102,
    "raft": 17
   },
   "fallbacks": []
  },
  "cube-overhang/MIDDLE/budget": {
-  "placed": 70,
+  "placed": 51,
   "regions": 2,
-  "tips": 68,
-  "dropped": 2,
-  "droppedIds": [
-   "auto-215_100_-485",
-   "auto-215_100_485"
-  ],
-  "verdict": "clear",
-  "triangles": 20940,
-  "parts": [
-   "brace",
-   "foot",
-   "label",
-   "neck",
-   "pillar",
-   "raft"
-  ],
-  "perPart": {
-   "brace": 24,
-   "foot": 68,
-   "label": 9,
-   "neck": 68,
-   "pillar": 136,
-   "raft": 17
-  },
-  "fallbacks": []
- },
- "cube-overhang/MIDDLE/nobudget": {
-  "placed": 70,
-  "regions": 2,
-  "tips": 70,
-  "dropped": 0,
-  "droppedIds": [],
-  "verdict": "blocked",
-  "triangles": 21564,
-  "parts": [
-   "brace",
-   "foot",
-   "label",
-   "neck",
-   "pillar",
-   "raft"
-  ],
-  "perPart": {
-   "brace": 26,
-   "foot": 70,
-   "label": 9,
-   "neck": 70,
-   "pillar": 140,
-   "raft": 17
-  },
-  "fallbacks": []
- },
- "cube-overhang/HEAVY/budget": {
-  "placed": 70,
-  "regions": 2,
-  "tips": 68,
-  "dropped": 2,
-  "droppedIds": [
-   "auto-215_100_-485",
-   "auto-215_100_485"
-  ],
-  "verdict": "clear",
-  "triangles": 20916,
-  "parts": [
-   "brace",
-   "foot",
-   "label",
-   "neck",
-   "pillar",
-   "raft"
-  ],
-  "perPart": {
-   "brace": 19,
-   "foot": 68,
-   "label": 9,
-   "neck": 68,
-   "pillar": 136,
-   "raft": 17
-  },
-  "fallbacks": []
- },
- "cube-overhang/HEAVY/nobudget": {
-  "placed": 70,
-  "regions": 2,
-  "tips": 70,
-  "dropped": 0,
-  "droppedIds": [],
-  "verdict": "blocked",
-  "triangles": 21444,
-  "parts": [
-   "brace",
-   "foot",
-   "label",
-   "neck",
-   "pillar",
-   "raft"
-  ],
-  "perPart": {
-   "brace": 19,
-   "foot": 70,
-   "label": 9,
-   "neck": 70,
-   "pillar": 140,
-   "raft": 17
-  },
-  "fallbacks": []
- },
- "seam-cube-split/LIGHT/budget": {
-  "placed": 93,
-  "regions": 1,
   "tips": 49,
-  "dropped": 44,
+  "dropped": 2,
   "droppedIds": [
-   "auto--1000_-1000_-100",
-   "auto--1000_-1000_-500",
-   "auto--1000_-1000_100",
-   "auto--1000_-1000_700",
-   "auto--100_-1000_-1000",
-   "auto--100_-1000_1000",
-   "auto--167_-1000_985",
-   "auto--333_-1000_-985",
-   "auto--492_-1000_-236",
-   "auto--500_-1000_-1000",
-   "auto--500_-1000_900",
-   "auto--500_-1000_985",
-   "auto--667_-1000_-985",
-   "auto--700_-1000_1000",
-   "auto--833_-1000_985",
-   "auto--900_-1000_500",
-   "auto--985_-1000_-333",
-   "auto--985_-1000_-667",
-   "auto--985_-1000_-985",
-   "auto--985_-1000_0",
-   "auto--985_-1000_333",
-   "auto--985_-1000_667",
-   "auto-0_-1000_-985",
-   "auto-1000_-1000_-300",
-   "auto-1000_-1000_-700",
-   "auto-1000_-1000_100",
-   "auto-1000_-1000_500",
-   "auto-100_-1000_1000",
-   "auto-167_-1000_985",
-   "auto-300_-1000_-1000",
-   "auto-333_-1000_-985",
-   "auto-500_-1000_-900",
-   "auto-500_-1000_1000",
-   "auto-500_-1000_985",
-   "auto-700_-1000_-1000",
-   "auto-833_-1000_-985",
-   "auto-833_-1000_985",
-   "auto-900_-1000_-500",
-   "auto-985_-1000_-167",
-   "auto-985_-1000_-500",
-   "auto-985_-1000_-833",
-   "auto-985_-1000_167",
-   "auto-985_-1000_500",
-   "auto-985_-1000_833"
+   "auto-215_100_-485",
+   "auto-215_100_485"
   ],
   "verdict": "clear",
-  "triangles": 14700,
+  "triangles": 16020,
   "parts": [
+   "brace",
    "foot",
    "label",
    "neck",
@@ -224,6 +73,7 @@
    "raft"
   ],
   "perPart": {
+   "brace": 17,
    "foot": 49,
    "label": 9,
    "neck": 49,
@@ -232,14 +82,104 @@
   },
   "fallbacks": []
  },
- "seam-cube-split/LIGHT/nobudget": {
-  "placed": 93,
-  "regions": 1,
-  "tips": 93,
+ "cube-overhang/MIDDLE/nobudget": {
+  "placed": 51,
+  "regions": 2,
+  "tips": 51,
   "dropped": 0,
   "droppedIds": [],
   "verdict": "blocked",
-  "triangles": 24876,
+  "triangles": 16596,
+  "parts": [
+   "brace",
+   "foot",
+   "label",
+   "neck",
+   "pillar",
+   "raft"
+  ],
+  "perPart": {
+   "brace": 18,
+   "foot": 51,
+   "label": 9,
+   "neck": 51,
+   "pillar": 102,
+   "raft": 17
+  },
+  "fallbacks": []
+ },
+ "cube-overhang/HEAVY/budget": {
+  "placed": 51,
+  "regions": 2,
+  "tips": 49,
+  "dropped": 2,
+  "droppedIds": [
+   "auto-215_100_-485",
+   "auto-215_100_485"
+  ],
+  "verdict": "clear",
+  "triangles": 15852,
+  "parts": [
+   "brace",
+   "foot",
+   "label",
+   "neck",
+   "pillar",
+   "raft"
+  ],
+  "perPart": {
+   "brace": 12,
+   "foot": 49,
+   "label": 9,
+   "neck": 49,
+   "pillar": 98,
+   "raft": 17
+  },
+  "fallbacks": []
+ },
+ "cube-overhang/HEAVY/nobudget": {
+  "placed": 51,
+  "regions": 2,
+  "tips": 51,
+  "dropped": 0,
+  "droppedIds": [],
+  "verdict": "blocked",
+  "triangles": 16380,
+  "parts": [
+   "brace",
+   "foot",
+   "label",
+   "neck",
+   "pillar",
+   "raft"
+  ],
+  "perPart": {
+   "brace": 12,
+   "foot": 51,
+   "label": 9,
+   "neck": 51,
+   "pillar": 102,
+   "raft": 17
+  },
+  "fallbacks": []
+ },
+ "seam-cube-split/LIGHT/budget": {
+  "placed": 92,
+  "regions": 1,
+  "tips": 84,
+  "dropped": 8,
+  "droppedIds": [
+   "auto--1000_-1000_-100",
+   "auto--1000_-1000_-500",
+   "auto--1000_-1000_100",
+   "auto--1000_-1000_700",
+   "auto--100_-1000_1000",
+   "auto--700_-1000_1000",
+   "auto-100_-1000_1000",
+   "auto-500_-1000_1000"
+  ],
+  "verdict": "clear",
+  "triangles": 24084,
   "parts": [
    "foot",
    "label",
@@ -248,68 +188,59 @@
    "raft"
   ],
   "perPart": {
-   "foot": 93,
+   "foot": 84,
    "label": 9,
-   "neck": 93,
-   "pillar": 186,
+   "neck": 84,
+   "pillar": 168,
+   "raft": 17
+  },
+  "fallbacks": []
+ },
+ "seam-cube-split/LIGHT/nobudget": {
+  "placed": 92,
+  "regions": 1,
+  "tips": 92,
+  "dropped": 0,
+  "droppedIds": [],
+  "verdict": "blocked",
+  "triangles": 25620,
+  "parts": [
+   "foot",
+   "label",
+   "neck",
+   "pillar",
+   "raft"
+  ],
+  "perPart": {
+   "foot": 92,
+   "label": 9,
+   "neck": 92,
+   "pillar": 184,
    "raft": 17
   },
   "fallbacks": []
  },
  "seam-cube-split/MIDDLE/budget": {
-  "placed": 93,
+  "placed": 92,
   "regions": 1,
-  "tips": 48,
-  "dropped": 45,
+  "tips": 80,
+  "dropped": 12,
   "droppedIds": [
    "auto--1000_-1000_-100",
    "auto--1000_-1000_-500",
    "auto--1000_-1000_100",
    "auto--1000_-1000_700",
-   "auto--100_-1000_-1000",
    "auto--100_-1000_1000",
-   "auto--167_-1000_985",
-   "auto--333_-1000_-985",
-   "auto--492_-1000_-236",
-   "auto--500_-1000_-1000",
-   "auto--500_-1000_900",
-   "auto--500_-1000_985",
-   "auto--667_-1000_-985",
    "auto--700_-1000_1000",
-   "auto--833_-1000_985",
-   "auto--900_-1000_500",
-   "auto--985_-1000_-175",
-   "auto--985_-1000_-333",
-   "auto--985_-1000_-667",
-   "auto--985_-1000_-985",
    "auto--985_-1000_0",
-   "auto--985_-1000_333",
-   "auto--985_-1000_667",
    "auto-0_-1000_-985",
-   "auto-1000_-1000_-300",
-   "auto-1000_-1000_-700",
-   "auto-1000_-1000_100",
-   "auto-1000_-1000_500",
+   "auto-0_-1000_985",
    "auto-100_-1000_1000",
-   "auto-167_-1000_985",
-   "auto-300_-1000_-1000",
-   "auto-333_-1000_-985",
-   "auto-500_-1000_-900",
    "auto-500_-1000_1000",
-   "auto-500_-1000_985",
-   "auto-700_-1000_-1000",
-   "auto-833_-1000_-985",
-   "auto-833_-1000_985",
-   "auto-900_-1000_-500",
-   "auto-985_-1000_-167",
-   "auto-985_-1000_-500",
-   "auto-985_-1000_-833",
-   "auto-985_-1000_167",
-   "auto-985_-1000_500",
-   "auto-985_-1000_833"
+   "auto-985_-1000_0"
   ],
   "verdict": "clear",
-  "triangles": 14508,
+  "triangles": 22956,
   "parts": [
    "foot",
    "label",
@@ -318,22 +249,22 @@
    "raft"
   ],
   "perPart": {
-   "foot": 48,
+   "foot": 80,
    "label": 9,
-   "neck": 48,
-   "pillar": 96,
+   "neck": 80,
+   "pillar": 160,
    "raft": 17
   },
   "fallbacks": []
  },
  "seam-cube-split/MIDDLE/nobudget": {
-  "placed": 93,
+  "placed": 92,
   "regions": 1,
-  "tips": 93,
+  "tips": 92,
   "dropped": 0,
   "droppedIds": [],
   "verdict": "blocked",
-  "triangles": 24948,
+  "triangles": 25548,
   "parts": [
    "foot",
    "label",
@@ -342,68 +273,33 @@
    "raft"
   ],
   "perPart": {
-   "foot": 93,
+   "foot": 92,
    "label": 9,
-   "neck": 93,
-   "pillar": 186,
+   "neck": 92,
+   "pillar": 184,
    "raft": 17
   },
   "fallbacks": []
  },
  "seam-cube-split/HEAVY/budget": {
-  "placed": 93,
+  "placed": 92,
   "regions": 1,
-  "tips": 48,
-  "dropped": 45,
+  "tips": 82,
+  "dropped": 10,
   "droppedIds": [
    "auto--1000_-1000_-100",
    "auto--1000_-1000_-500",
    "auto--1000_-1000_100",
    "auto--1000_-1000_700",
-   "auto--100_-1000_-1000",
    "auto--100_-1000_1000",
-   "auto--167_-1000_985",
-   "auto--333_-1000_-985",
-   "auto--492_-1000_-236",
-   "auto--500_-1000_-1000",
-   "auto--500_-1000_900",
-   "auto--500_-1000_985",
-   "auto--667_-1000_-985",
    "auto--700_-1000_1000",
-   "auto--833_-1000_985",
-   "auto--900_-1000_500",
-   "auto--985_-1000_-333",
-   "auto--985_-1000_-667",
-   "auto--985_-1000_-985",
    "auto--985_-1000_0",
-   "auto--985_-1000_333",
-   "auto--985_-1000_667",
-   "auto-0_-1000_-985",
-   "auto-1000_-1000_-300",
-   "auto-1000_-1000_-700",
-   "auto-1000_-1000_100",
-   "auto-1000_-1000_500",
+   "auto-0_-1000_985",
    "auto-100_-1000_1000",
-   "auto-167_-1000_985",
-   "auto-300_-1000_-1000",
-   "auto-333_-1000_-985",
-   "auto-500_-1000_-900",
-   "auto-500_-1000_1000",
-   "auto-500_-1000_985",
-   "auto-700_-1000_-1000",
-   "auto-833_-1000_-985",
-   "auto-833_-1000_985",
-   "auto-900_-1000_-500",
-   "auto-980_-1000_-444",
-   "auto-985_-1000_-167",
-   "auto-985_-1000_-500",
-   "auto-985_-1000_-833",
-   "auto-985_-1000_167",
-   "auto-985_-1000_500",
-   "auto-985_-1000_833"
+   "auto-500_-1000_1000"
   ],
   "verdict": "clear",
-  "triangles": 14076,
+  "triangles": 23268,
   "parts": [
    "foot",
    "label",
@@ -412,22 +308,22 @@
    "raft"
   ],
   "perPart": {
-   "foot": 48,
+   "foot": 82,
    "label": 9,
-   "neck": 48,
-   "pillar": 96,
+   "neck": 82,
+   "pillar": 164,
    "raft": 17
   },
   "fallbacks": []
  },
  "seam-cube-split/HEAVY/nobudget": {
-  "placed": 93,
+  "placed": 92,
   "regions": 1,
-  "tips": 93,
+  "tips": 92,
   "dropped": 0,
   "droppedIds": [],
   "verdict": "blocked",
-  "triangles": 24444,
+  "triangles": 25332,
   "parts": [
    "foot",
    "label",
@@ -436,10 +332,10 @@
    "raft"
   ],
   "perPart": {
-   "foot": 93,
+   "foot": 92,
    "label": 9,
-   "neck": 93,
-   "pillar": 186,
+   "neck": 92,
+   "pillar": 184,
    "raft": 17
   },
   "fallbacks": []

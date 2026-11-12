@@ -2,6 +2,10 @@ import { meshBounds } from '../host/core/supports/meshQuery';
 import type { PrintUnit, SceneCommand } from '../host/state/projectTypes';
 import { applyTransform } from '../host/state/transform';
 import { resolveSettings } from '../host/supports/unitSupports';
+import { arrangePlate, type PlateCase, type PlateFootprint, type PlateSize } from '../host/supports/plateArrange';
+import type { GenerateRules } from '../host/supports/generateRules';
+
+export type { PlateFootprint, PlateSize } from '../host/supports/plateArrange';
 
 /** Free space kept between two objects' footprints, mm. */
 export const ARRANGE_GAP = 6;
@@ -68,4 +72,45 @@ export function arrangeCommands(units: readonly PrintUnit[], ids: readonly strin
     commands.push({ type: 'transform/set', unitId: unit.id, transform: { position: [x + move.dx, y, z + move.dz], rotation: [...unit.transform.rotation] } });
   }
   return commands;
+}
+
+/** The box footprint of a unit with no outline yet (`footprintOf`), as loops relative to its plate position. */
+export function boxFootprint(unit: PrintUnit): PlateFootprint {
+  const f = footprintOf(unit);
+  const [x, , z] = unit.transform.position;
+  return [[[f.minX - x, f.minZ - z], [f.maxX - x, f.minZ - z], [f.maxX - x, f.maxZ - z], [f.minX - x, f.maxZ - z]]];
+}
+
+/** What `arrangeOnPlate` decided: the moves as scene commands, and the cases it could not place or that overlap while frozen. */
+export interface PlateArrangeResult {
+  commands: SceneCommand[];
+  moved: string[];
+  unplaced: string[];
+  conflicts: string[];
+}
+
+/**
+ * Plate auto-arrange by outline (Round C, engine 53; `host/supports/plateArrange.ts`): the units packed on `plate` (from the printer
+ * profile) by their footprints, `plateGapMm` apart (one global rule, `rules`; default 6 mm). `footprints` are the builds' outlines
+ * (`GeneratedSupportMesh.footprint`, relative to the unit's plate position); a unit without one is packed by its box (`footprintOf`).
+ * Every case stays fully editable: only positions change, never supports, so each move is one `transform/set` (supports and raft
+ * ride along). With `edited` set, every other unit is frozen and only cases that now overlap move (the incremental re-pack after
+ * editing that case); `full` re-packs every unfrozen unit (a fresh layout). Deterministic.
+ */
+export function arrangeOnPlate(units: readonly PrintUnit[], footprints: ReadonlyMap<string, PlateFootprint>, plate: PlateSize,
+  options: { edited?: string; full?: boolean; rules?: GenerateRules } = {}): PlateArrangeResult {
+  const cases: PlateCase[] = units.map((unit) => ({
+    id: unit.id,
+    footprint: footprints.get(unit.id) ?? boxFootprint(unit),
+    offset: [unit.transform.position[0], unit.transform.position[2]],
+    frozen: options.edited !== undefined && unit.id !== options.edited,
+  }));
+  const layout = arrangePlate(cases, plate, { mode: options.full ? 'full' : 'keep', ...(options.rules ? { rules: options.rules } : {}) });
+  const commands: SceneCommand[] = [];
+  for (const unit of units) {
+    if (!layout.moved.includes(unit.id)) continue;
+    const [x, z] = layout.offsets.get(unit.id)!;
+    commands.push({ type: 'transform/set', unitId: unit.id, transform: { position: [x, unit.transform.position[1], z], rotation: [...unit.transform.rotation] } });
+  }
+  return { commands, moved: layout.moved, unplaced: layout.unplaced, conflicts: layout.conflicts };
 }

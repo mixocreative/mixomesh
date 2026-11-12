@@ -81,7 +81,7 @@ describe('support commands: one HistoryManager step each', () => {
   });
 
   it('AddSupport at a free spot adds one manual tip', () => {
-    const cmd = new AddSupportCommand('lead', { point: [20, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], minFromUpDeg: 0, candidates: AUTO, createId: () => 'manual-1' });
+    const cmd = new AddSupportCommand('lead', { point: [20, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], overhangAngleDeg: 180, candidates: AUTO, createId: () => 'manual-1' });
     const after = oneStep(() => commitSupportEdits([cmd]), t('history.supportAdd'));
     expect(after.lead.supports.manual.map((p: SupportPoint) => p.id)).toEqual(['manual-1']);
     expect(after.lead.supports.deleted).toEqual([]);
@@ -89,7 +89,7 @@ describe('support commands: one HistoryManager step each', () => {
   });
 
   it('AddSupport near an automatic tip snaps onto it and deletes that tip in the same step', () => {
-    const cmd = new AddSupportCommand('lead', { point: [3.4, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], minFromUpDeg: 0, candidates: AUTO, createId: () => 'manual-2' });
+    const cmd = new AddSupportCommand('lead', { point: [3.4, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], overhangAngleDeg: 180, candidates: AUTO, createId: () => 'manual-2' });
     const after = oneStep(() => commitSupportEdits([cmd]), t('history.supportAdd'));
     expect(after.lead.supports.manual[0].position).toEqual([3, -5, 0]);
     expect(after.lead.supports.deleted).toEqual(['auto-b']);
@@ -97,7 +97,7 @@ describe('support commands: one HistoryManager step each', () => {
 
   it('AddSupport does not snap to a tip already removed', () => {
     resetScene({ ...built(), deleted: ['auto-b'] });
-    const cmd = new AddSupportCommand('lead', { point: [3.4, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], minFromUpDeg: 0, candidates: AUTO, createId: () => 'm' });
+    const cmd = new AddSupportCommand('lead', { point: [3.4, -5, 0], normal: [0, -1, 0], worldNormal: [0, -1, 0], overhangAngleDeg: 180, candidates: AUTO, createId: () => 'm' });
     commitSupportEdits([cmd]);
     expect(cmd.plan!.removeId).toBeUndefined();
     expect(readSupports('lead')!.manual[0]!.position).toEqual([3.4, -5, 0]);

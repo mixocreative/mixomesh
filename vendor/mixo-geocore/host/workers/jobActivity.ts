@@ -56,12 +56,23 @@ export interface JobRow {
   /** What kind of job it is (import, place, build, check, export), for its failure message. */
   context: string | null;
   error: JobError | null;
+  /**
+   * The job is running on the calling thread because no Web Worker could be created (GEO-012).
+   * Nothing is lost and nothing is wrong - the window simply will not respond until it finishes, and
+   * on the reference denture that is about 8 s. Reporting the ABSENCE of a worker would tell the
+   * operator nothing; this is the consequence, which is what they can act on, and without it a
+   * degraded environment is indistinguishable from a slow machine, so the diagnosis starts in the
+   * wrong place.
+   */
+  inline: boolean;
 }
 
 /** What `JobActivity.begin` returns: report progress fields, then `end()` (with the error if it failed). Calls after `end` are ignored. */
 export interface JobHandle {
   id: number;
   progress(fields: Record<string, unknown>): void;
+  /** Mark the job as running on the calling thread (no Web Worker could be created) - GEO-012. */
+  inline(): void;
   end(error?: unknown): void;
 }
 
@@ -80,6 +91,7 @@ interface Entry {
   cancelling: boolean;
   blocking: boolean;
   context: string | null;
+  inline: boolean;
 }
 
 /** Fraction 0..1 from a worker progress message, or null when it carries none. */
@@ -122,7 +134,7 @@ export class JobActivity {
   /** Register a running job; `cancel` present = cancellable. */
   begin({ label, cancel = null, blocking = false, context = null }: { label: JobLabel; cancel?: (() => void) | null; blocking?: boolean; context?: string | null }): JobHandle {
     const id = ++this.seq;
-    const entry: Entry = { id, label, stage: null, fraction: null, startedAt: this.clock(), firstProgress: null, shownAt: null, endedAt: null, outcome: null, error: null, cancel, cancelling: false, blocking, context };
+    const entry: Entry = { id, label, stage: null, fraction: null, startedAt: this.clock(), firstProgress: null, shownAt: null, endedAt: null, outcome: null, error: null, cancel, cancelling: false, blocking, context, inline: false };
     this.entries.set(id, entry);
     this.notify();
     return {
@@ -137,6 +149,14 @@ export class JobActivity {
         }
         // A stage names what runs now; null clears it (a queued job that was admitted).
         if (typeof fields.stage === 'string' || fields.stage === null) entry.stage = fields.stage;
+        this.notify();
+      },
+      inline: () => {
+        if (entry.endedAt !== null) return;
+        // A cancellable inline job is a lie: nothing can interrupt a synchronous build on this
+        // thread, so the Cancel goes away with the worker it would have signalled.
+        entry.inline = true;
+        entry.cancel = null;
         this.notify();
       },
       end: (error) => {
@@ -224,6 +244,7 @@ export class JobActivity {
         cancelling: entry.cancelling,
         blocking: entry.blocking,
         context: entry.context,
+        inline: entry.inline,
         error: entry.error,
       });
     }

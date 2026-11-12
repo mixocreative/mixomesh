@@ -187,7 +187,7 @@ class Interaction {
     switch (type) {
       case 'add': {
         if (!local) return;
-        const command = new AddSupportCommand(id, { point: local.point, normal: local.normal, worldNormal: local.normal, candidates: cachedPlacement(id) ?? [], minFromUpDeg: 10 });
+        const command = new AddSupportCommand(id, { point: local.point, normal: local.normal, worldNormal: local.normal, candidates: cachedPlacement(id) ?? [], overhangAngleDeg: 170 });
         commitSupportEdits([command]);
         // A hand-added support before the first Generate: the object has no build yet, so this Add starts it.
         if (!isBuilt(readSupports(id))) generate([id]);

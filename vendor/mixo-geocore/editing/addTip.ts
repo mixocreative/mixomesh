@@ -23,8 +23,8 @@ export interface AddTipInput {
   candidates: readonly SupportPoint[];
   /** Ids of contacts the user already removed; they never attract a click. */
   removed: ReadonlySet<string>;
-  /** Smallest angle (degrees) a tip's surface may make with the plate's up; a smaller one warns. 0 never warns. */
-  minFromUpDeg: number;
+  /** The overhang angle (degrees of slope from horizontal; engine 57, was `minFromUpDeg` = 180 - this): a tip whose surface slope exceeds it warns (it stands on a face too steep to carry it). 180 never warns. */
+  overhangAngleDeg: number;
   /** Id for the new manual tip. */
   createId: () => string;
 }
@@ -63,12 +63,12 @@ export function planAddTip(input: AddTipInput): AddTipPlan {
     normal: snapped ? [...snapped.normal] : [...input.normal],
     source: 'interior',
   };
-  // Angle from +y (world up), degrees. Assumes a unit normal; the clamp guards acos against
-  // rounding just outside [-1, 1].
-  const fromUp = Math.acos(Math.max(-1, Math.min(1, input.worldNormal[1]))) * 180 / Math.PI;
+  // Slope of the clicked surface from horizontal, degrees: 0 for a flat ceiling (normal -y), 180 for a floor. Assumes a unit normal; the clamp guards acos
+  // against rounding just outside [-1, 1].
+  const slope = 180 - Math.acos(Math.max(-1, Math.min(1, input.worldNormal[1]))) * 180 / Math.PI;
   return {
     contact,
     ...(snapped ? { removeId: snapped.id } : {}),
-    status: fromUp < input.minFromUpDeg ? 'faces-up' : 'added',
+    status: slope > input.overhangAngleDeg ? 'faces-up' : 'added',
   };
 }

@@ -78,7 +78,7 @@ export const PROFILE_FILES: Readonly<Record<string, unknown>> = {
       "matchToleranceMm": 0.03,
       "matchMinDot": 0.95,
       "minTipSeparationMm": 0.6,
-      "tipMinFromUpDeg": 110,
+      "overhangAngleDeg": 70,
       "tipMoveMaxMm": 1
     },
     "supports": {

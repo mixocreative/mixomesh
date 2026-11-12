@@ -4,6 +4,7 @@
  */
 import type { ContactInputs, SupportJob } from '@mixo-geocore/host/core/jobs';
 import { PLACEMENT_KEYS } from '@mixo-geocore/host/supports/unitSupports';
+import { defaultSupportSettings } from '@mixo-geocore/host/core/supports/settings';
 import type { LocalModel } from '../supportJob';
 import type { ObjectSupports } from '../model';
 import { cachedPlacement } from '../supportCache';
@@ -24,7 +25,24 @@ export const RAFT_WALL_ANGLE_MAX = 89;
 
 /** The record's settings as the engine may take them. */
 export function engineSettings(settings: ObjectSupports['settings']): ObjectSupports['settings'] {
-  return settings.raftWallAngle > RAFT_WALL_ANGLE_MAX ? { ...settings, raftWallAngle: RAFT_WALL_ANGLE_MAX } : settings;
+  /*
+   * A SETTING THE SAVED RECORD PREDATES IS FILLED HERE, at the one place settings cross to the
+   * engine. `isSupportsRecord` checks that `settings` is an object with a string `preset` and
+   * nothing more -- and it should not enumerate the keys, because a record is not invalid for
+   * having been written by an older build. But the engine's type requires every number, so a
+   * `.mixo` saved before `neckMaxShift` and `minClearance` existed (engine 65) would hand it two
+   * `undefined`s, and an undefined neck offset is not a refusal, it is garbage geometry.
+   *
+   * Generic, not those two by name, because the next setting added will do the same thing. The
+   * record's own values always win; only what is MISSING is filled.
+   *
+   * It is HERE and not in `restoreSupports` for a reason worth keeping: the persistence modules are
+   * plain JSON by design (D19) and are loaded by `tests/*.test.mjs` under BARE NODE, which cannot
+   * resolve the `@mixo-geocore/host` alias that the bundler and vitest both resolve. Importing the
+   * engine's defaults there broke 108 node tests while tsc and all 223 vitest tests passed.
+   */
+  const filled = { ...defaultSupportSettings, ...settings };
+  return filled.raftWallAngle > RAFT_WALL_ANGLE_MAX ? { ...filled, raftWallAngle: RAFT_WALL_ANGLE_MAX } : filled;
 }
 
 /** Placement settings differ from the ones the contacts were placed with (lift does not move contacts). */

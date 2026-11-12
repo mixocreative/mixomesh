@@ -80,6 +80,14 @@ export interface UiState {
   generated: boolean;
   /** A placement job is running: Generate waits for it. */
   generating: boolean;
+  /**
+   * The app's own product name and project file extension, for the hints that have to name them
+   * (Open project, Save project). GEO-011: these were the literals "mixoDental" and ".mixodental"
+   * inside shared i18n keys, which pinned one consumer's product name in a package both apps vendor.
+   * The app sets them once from its own config; `hintVars` passes them to the hint.
+   */
+  product: string;
+  ext: string;
 }
 
 /** One row of the registry: what a control shows and does, as functions of the `UiState`. */
@@ -191,12 +199,16 @@ export const COMMANDS: Readonly<Record<CoreCommandId, Command>> = {
   'transform.select': transformChoice('Select', 'Select objects without a gizmo'),
   'transform.move': transformChoice('Move', 'Move the active object with the gizmo', 'G'),
   'transform.rotate': transformChoice('Rotate', 'Rotate the active object with the gizmo', 'R'),
+  // GEO-011: `{ext}` and not `.mixodental`. The hint is an i18n key both apps vendor, so a product
+  // name or extension written into it pins one consumer's product inside shared code (D11).
   'project.open': {
-    role: 'secondary', label: () => 'Open project', hint: () => 'Open a .mixodental project. It replaces the plate; Undo brings the previous plate back',
+    role: 'secondary', label: () => 'Open project', hint: () => 'Open a {ext} project. It replaces the plate; Undo brings the previous plate back',
+    hintVars: (s) => ({ ext: s.ext }),
     visible: always, enabled: (s) => s.mode === 'off', disabledReason: (s) => (s.mode === 'off' ? undefined : busyStatus(s.mode)),
   },
   'project.save': {
-    role: 'secondary', label: () => 'Save project', hint: () => 'Save the plate, supports and hand edits as a .mixodental file. Models stay on this device',
+    role: 'secondary', label: () => 'Save project', hint: () => 'Save the plate, supports and hand edits as a {ext} file. Models stay on this device',
+    hintVars: (s) => ({ ext: s.ext }),
     visible: always, enabled: (s) => s.units > 0, disabledReason: (s) => (s.units > 0 ? undefined : noModelReason),
   },
   'supports.generate': {

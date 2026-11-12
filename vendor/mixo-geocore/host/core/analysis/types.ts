@@ -18,7 +18,7 @@ export interface Region {
  * Why placement put a point there: inside a downward region, on its physical boundary, along a
  * sharp ridge, or at the lowest point of an island. Order matches the Rust source codes 0..3.
  */
-export type SupportPointSource = 'interior' | 'physical-boundary' | 'sharp-ridge' | 'island';
+export type SupportPointSource = 'interior' | 'physical-boundary' | 'sharp-ridge' | 'island' | 'unknown';
 
 /**
  * One automatic or manual contact tip. `id` is the stable contact id (`auto-X_Y_Z` for automatic

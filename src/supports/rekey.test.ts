@@ -69,7 +69,7 @@ describe('RegenerateRekey with the engine', () => {
     // Hand work: two removals, one setting, one manual tip far from every automatic one.
     commitSupportEdits([new DeleteSupportsCommand('cube', [gone1.id, gone2.id])]);
     commitSupportEdits([new SetOverrideCommand('cube', [custom.id], { neckDiameter: 0.55 })]);
-    const add = new AddSupportCommand('cube', { point: [0, 0, 20], normal: [0, -1, 0], worldNormal: [0, -1, 0], minFromUpDeg: 0, candidates: first, reach: 0.1, createId: () => 'manual-keep' });
+    const add = new AddSupportCommand('cube', { point: [0, 0, 20], normal: [0, -1, 0], worldNormal: [0, -1, 0], overhangAngleDeg: 180, candidates: first, reach: 0.1, createId: () => 'manual-keep' });
     commitSupportEdits([add]);
     commitSupportEdits([new ChangeSettingsCommand('cube', { scatterSpacing: 2.3 })]);
     const before = structuredClone(readSupports('cube')!) as ObjectSupports;

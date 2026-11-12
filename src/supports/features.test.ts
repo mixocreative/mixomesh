@@ -10,7 +10,7 @@ import { runSupportJob } from '@mixo-geocore/host/supports/jobRunner';
 import { defaultSupportSettings, presetValues, setRoofMode, toPlacementSettings, updateSetting, type LiveSupportSettings, type SettingKey } from '@mixo-geocore/host/core/supports/settings';
 import type { TriangleMesh } from '@mixo-geocore/host/core/analysis/types';
 import { emptySupports } from './model';
-import { buildJob, REPAIR_BUDGET } from './live/jobInputs';
+import { buildJob, engineSettings, REPAIR_BUDGET } from './live/jobInputs';
 import { tipCount, toLocal } from './supportJob';
 import golden from '../../tests/fixtures/support-golden-cube-overhang.json';
 import { cubeOverhang, seamCube } from '../../tests/fixtures/support-cubes.mjs';
@@ -64,18 +64,21 @@ function crossingModel(): TriangleMesh {
 const sig = (m: TriangleMesh): string => `${m.indices.length / 3}:${m.positions.reduce((a, v, i) => a + v * ((i % 7) + 1), 0).toFixed(3)}`;
 
 describe('P5.1 tree (golden cube-overhang tree variant)', () => {
-  it('tree on, the golden policy (no repair budget): 70 placement points and tips as the golden, trunks and branches, no braces', () => {
+  it('tree on, the golden policy (no repair budget): the golden placement, trunks and branches', () => {
     const { placement, built } = build(cubeOverhang(), set(base(), { scatterAutoTree: true, labelText: 'A' }), 'Cube', undefined, 0);
     expect(placement.points.length).toBe(golden.placementPoints);
-    // mixo-geocore goldens/__snapshots__/cube-overhang.tree.json: 62 contacts, 14680 triangles, and per part
-    // neck 34, pillar 68, foot 34, tree-branch 28, tree-trunk 7, raft 17, label 2.
-    expect(tipCount(built)).toBe(62);
-    expect(Math.abs(built.indices.length / 3 - 14680)).toBeLessThan(14680 * 0.01); // the 1 um snap of toLocal moves a few facets
+    // mixo-geocore dc9e636 goldens/__snapshots__/cube-overhang.tree.json (engine 65): 47 contacts
+    // (distinct contact ids over its components -- NOT the neck count, which is 34 because a tree
+    // hangs several contacts off one trunk), 11656 triangles, per part brace 2, foot 34, label 2,
+    // neck 34, pillar 68, raft 17, tree-branch 13, tree-trunk 5. Re-taken from engine 12's 62 contacts / 14680 triangles: the
+    // placement rewrite of engines 47/48 is what moved it, and the tree now keeps TWO braces where
+    // it kept none, so the old "no braces" assertion is gone rather than loosened.
+    expect(tipCount(built)).toBe(47);
+    expect(Math.abs(built.indices.length / 3 - 11656)).toBeLessThan(11656 * 0.01); // the 1 um snap of toLocal moves a few facets
     const perPart = built.components.reduce<Record<string, number>>((a, c) => ((a[c.part] = (a[c.part] ?? 0) + 1), a), {});
-    expect(perPart).toEqual({ neck: 34, pillar: 68, foot: 34, 'tree-branch': 28, 'tree-trunk': 7, raft: 17, label: 2 });
+    expect(perPart).toEqual({ brace: 2, foot: 34, label: 2, neck: 34, pillar: 68, raft: 17, 'tree-branch': 13, 'tree-trunk': 5 });
     expect(built.parts).toContain('tree-trunk');
     expect(built.parts).toContain('tree-branch');
-    expect(built.parts).not.toContain('brace');
     expect(built.fallbacks ?? []).toEqual([]);
   });
   /*
@@ -91,7 +94,7 @@ describe('P5.1 tree (golden cube-overhang tree variant)', () => {
    * survives a re-vendor but does not bound how many contacts get dropped. This does, in CI, which
    * is where the browser smokes are not.
    */
-  it('MIDDLE at the live repair budget: 70 placed, 2 dropped at the overhang edge, verdict clear', () => {
+  it('MIDDLE at the live repair budget: the golden placement, 2 dropped at the overhang edge, verdict clear', () => {
     const { placement, built } = build(cubeOverhang(), set(base(), presetValues.MIDDLE as Partial<Record<SettingKey, unknown>>));
     expect(placement.points.length).toBe(golden.placementPoints);
     expect(built.dropped.length + tipCount(built)).toBe(placement.points.length);
@@ -99,7 +102,7 @@ describe('P5.1 tree (golden cube-overhang tree variant)', () => {
     expect([...built.dropped].sort()).toEqual(['auto-215_100_-485', 'auto-215_100_485']);
     expect(built.verdict?.status).toBe('clear');
   });
-  it('without the budget the same preset keeps all 70 and cannot reach a clear verdict', () => {
+  it('without the budget the same preset keeps every placed point and cannot reach a clear verdict', () => {
     const { placement, built } = build(cubeOverhang(), set(base(), presetValues.MIDDLE as Partial<Record<SettingKey, unknown>>), 'Test part', () => true, 0);
     expect(tipCount(built)).toBe(placement.points.length);
     expect(built.dropped.length).toBe(0);
@@ -121,7 +124,12 @@ describe('P5.1 tree (golden cube-overhang tree variant)', () => {
     const run = (patch: Partial<Record<SettingKey, unknown>>) => sig(build(cubeOverhang(), set(base(), { scatterAutoTree: true, ...patch }), 'Cube', undefined, 0).built);
     const a = run({});
     expect(run({ scatterMergeDistance: 6 })).not.toBe(a);
-    expect(run({ scatterSafeDistance: 2 })).not.toBe(a);
+    // 4, not 2. The value is a property of THIS FIXTURE, not a contract: swept at engine 65, the
+    // mesh is identical at 0, 1, 2 and 3 and differs at 4 and 6, because the placement rewrite of
+    // engines 47/48 moved the contacts further apart than a 2 mm safe distance can reach. 2 bit at
+    // engine 12. So re-take this number on a re-vendor instead of concluding the setting is dead --
+    // which is what the sweep was for, and what a bare `not.toBe` cannot tell you.
+    expect(run({ scatterSafeDistance: 4 })).not.toBe(a);
     expect(run({ scatterBranchDescent: 8 })).not.toBe(a);
   });
   it('merge distance is 2, 3, 4 mm by preset', () => {
@@ -186,10 +194,11 @@ describe('P5.5 roof (golden cube-overhang roof variant)', () => {
   it('roof on, the golden policy: placement, triangle count and part counts as the golden', () => {
     const { placement, built } = build(cubeOverhang(), roofBase(), 'Cube', undefined, 0);
     expect(placement.points.length).toBe(golden.placementPoints);
-    // mixo-geocore goldens/__snapshots__/cube-overhang.roof.json: 24852 triangles; per part neck 70, pillar 140,
-    // foot 70, brace 28, raft 65, label 2, column 12, cross-bar 72, roof 1, roof-brace 15.
-    expect(Math.abs(built.indices.length / 3 - 24852)).toBeLessThan(24852 * 0.01); // the 1 um snap of toLocal moves a few facets
-    expect(perPartOf(built)).toEqual({ neck: 70, pillar: 140, foot: 70, brace: 28, raft: 65, label: 2, column: 12, 'cross-bar': 72, roof: 1, 'roof-brace': 15 });
+    // mixo-geocore dc9e636 goldens/__snapshots__/cube-overhang.roof.json (engine 65): 18612
+    // triangles; per part brace 19, column 12, cross-bar 48, foot 51, label 2, neck 51, pillar 102,
+    // raft 65, roof 1, roof-brace 15. Re-taken from engine 12's 24852 triangles.
+    expect(Math.abs(built.indices.length / 3 - 18612)).toBeLessThan(18612 * 0.01); // the 1 um snap of toLocal moves a few facets
+    expect(perPartOf(built)).toEqual({ brace: 19, column: 12, 'cross-bar': 48, foot: 51, label: 2, neck: 51, pillar: 102, raft: 65, roof: 1, 'roof-brace': 15 });
     expect([...built.parts].sort()).toEqual(['brace', 'column', 'cross-bar', 'foot', 'label', 'neck', 'pillar', 'raft', 'roof', 'roof-brace']);
     expect(built.verdict?.status).toBe('clear');
   });
@@ -282,5 +291,25 @@ describe('P5.6 cage (no golden: deterministic counts and bounds on a 20 mm cube)
     const back = setRoofMode(updateSetting(cage, 'columnDiameter', 2), 'ROOF');
     expect(back).toMatchObject({ roofMode: 'ROOF', roofGap: 12, columnDiameter: 2 }); // not re-seeded
     expect(build(cube(), setRoofMode(back, 'OFF'), 'Cube').built.parts).not.toContain('column');
+  });
+});
+
+describe('a saved record older than a setting', () => {
+  it('reaches the engine with the default filled in, not undefined', () => {
+    // The real case the engine-65 re-vendor brought: `neckMaxShift` and `minClearance` became
+    // required numbers. `isSupportsRecord` checks only that `settings` is an object with a string
+    // `preset`, as it should -- a record is not invalid for having been written by an older build --
+    // so without the fill the engine receives undefined where it needs a number, and an undefined
+    // neck offset is not a refusal, it is garbage geometry.
+    const settings = { ...base() } as unknown as Record<string, unknown>;
+    delete settings.neckMaxShift;
+    delete settings.minClearance;
+
+    const filled = engineSettings(settings as never) as unknown as Record<string, unknown>;
+    expect(typeof filled.neckMaxShift).toBe('number');
+    expect(typeof filled.minClearance).toBe('number');
+    // Only what is MISSING is filled: the record's own values still win.
+    expect(filled.liftHeight).toBe((base() as unknown as Record<string, unknown>).liftHeight);
+    expect(filled.preset).toBe((base() as unknown as Record<string, unknown>).preset);
   });
 });

@@ -5,6 +5,7 @@ import type { ExportFilePlan } from '../supports/export';
 import type { ExportedFile, ExportUnitPayload, ExportUnitResult, MeshMode, MeshTask, MeshTaskResult, SupportJobPayload } from './meshProtocol';
 import type { TriangleGate } from '../core/jobGate';
 import type { JobLabel } from './jobActivity';
+import { generateCeilingMs, GENERATE_LIMITS } from '../supports/generateLimits';
 import { REPLACED, WorkerTask, WorkerTaskError, type WorkerLike } from './WorkerTask';
 
 /** A progress report of one unit's build: fraction 0..1 and a stage code (`core/progress`). */
@@ -61,8 +62,12 @@ function triangles(sources: Map<string, TriangleMesh>): number {
 
 /** A running build is only cut short (worker restarted, caches lost) once it has run this long. */
 const RESTART_AFTER_MS = 800;
-const BUILD_TIMEOUT_MS = 5 * 60_000;
-const EXPORT_TIMEOUT_MS = 15 * 60_000;
+/** Slack over the engine's ceiling so the worker is never killed before the engine stops itself (and answers). */
+const WORKER_MARGIN_MS = 2 * 60_000;
+/** A support build is one `generate` call: the engine's ceiling plus the margin. */
+const BUILD_TIMEOUT_MS = generateCeilingMs(GENERATE_LIMITS) + WORKER_MARGIN_MS;
+/** An export runs one `generate` per unit in turn: each unit may use the ceiling. */
+const exportTimeoutMs = (units: number): number => units * generateCeilingMs(GENERATE_LIMITS) + WORKER_MARGIN_MS;
 
 /** Constructor options of `SupportMeshClient`. */
 export interface SupportMeshClientOptions {
@@ -148,7 +153,7 @@ export class SupportMeshClient {
         label,
         ...(signal ? { signal } : {}),
         cancellable: true,
-        timeoutMs: EXPORT_TIMEOUT_MS,
+        timeoutMs: exportTimeoutMs(units.length),
         settle: (result, error) => (error ? reject(error) : resolve(result)),
       });
     }).then((result): ExportResult => (result?.kind === 'files' ? { revision, files: result.files, units: result.units } : { revision, files: [], units: [] }));

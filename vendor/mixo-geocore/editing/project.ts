@@ -31,12 +31,26 @@ export class ProjectTooLarge extends Error {
   }
 }
 
+/**
+ * What the app is called and what its project files end in, for the two strings that have to name
+ * them. GEO-011: these were the literals "mixoDental" and ".mixodental" inside shared i18n KEYS, so
+ * the other consuming app would have had to ship a locale entry that says "mixoDental" in order to
+ * translate it - which is exactly what D11 ("no app glue in the shared packages") exists to prevent.
+ * The app passes its own two words once.
+ */
+export interface ProductNaming {
+  /** The app's product name as the operator sees it, e.g. `mixoDental`. */
+  product: string;
+  /** The project file extension, with the dot, e.g. `.mixodental`. */
+  ext: string;
+}
+
 /** Why a project could not be opened, and what to do next. */
-export function openFailure(error: unknown, name: string): StatusMessage {
+export function openFailure(error: unknown, name: string, naming: ProductNaming): StatusMessage {
   if (error instanceof ProjectTooLarge) return { key: '{name} is too large to open here: {n} triangles, the limit is {limit}. Open it on a device with more memory, or delete or simplify an object and save it again.', vars: { name, n: error.triangles.toLocaleString(), limit: error.limit.toLocaleString() } };
   if (error instanceof ProjectFileError) {
-    if (error.code === 'not-project') return { key: '{name} is not a mixoDental project. Choose a .mixodental file, or use Import models for STL, GLB and glTF.', vars: { name } };
-    if (error.code === 'newer') return { key: '{name} was saved by a newer version of mixoDental (file version {v}; this one reads up to {max}). Update the app, then open it again.', vars: { name, v: error.vars.v ?? 0, max: error.vars.max ?? 0 } };
+    if (error.code === 'not-project') return { key: '{name} is not a {product} project. Choose a {ext} file, or use Import models for STL, GLB and glTF.', vars: { name, ...naming } };
+    if (error.code === 'newer') return { key: '{name} was saved by a newer version of {product} (file version {v}; this one reads up to {max}). Update the app, then open it again.', vars: { name, product: naming.product, v: error.vars.v ?? 0, max: error.vars.max ?? 0 } };
     return { key: '{name} is damaged and could not be read ({error}). Open another copy of the project.', vars: { name, error: error.message } };
   }
   return { key: 'Could not open {name} ({error}). The plate is unchanged.', vars: { name, error: error instanceof Error ? error.message : String(error) } };

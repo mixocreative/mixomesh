@@ -11,7 +11,7 @@ import type { PlacementSettings } from '../analysis/types';
  * flat layout changes); `workers/supportBuildParity.test.ts` checks the order against the engine.
  *
  * Flat array scheme (packed by `supports/supportBuildWasm.packSettings`, one f64 per key in
- * `SETTINGS_ORDER` = Rust `SETTINGS_LAYOUT`, 66 values). Offsets:
+ * `SETTINGS_ORDER` = Rust `SETTINGS_LAYOUT`, 68 values). Offsets:
  *   0-10  tip / contact: contactShape, pointDiameter, pointDepth, tipSection, tipCrossWidth,
  *         tipProfile, touchDiameter, touchDepth, neckDiameter, neckLength, maxNeckAngle
  *   11-14 pillar and foot: pillarDiameter, treeSectionIncrement, baseDiameter, baseHeight
@@ -28,6 +28,7 @@ import type { PlacementSettings } from '../analysis/types';
  *         scatterIslands, scatterRidgeAngle, scatterAutoTree, scatterMergeDistance,
  *         scatterBranchDescent, reinforceOverhangEdges
  *   64-65 editing: liftHeight, eraseRadius
+ *   66-67 neck offset: neckMaxShift, minClearance
  * Enums are their index (contactShape NONE=0 SPHERE=1; tipSection ROUND=0 SQUARE=1 CROSS=2;
  * tipProfile TAPERED=0 STRAIGHT=1; roofMode OFF=0 ROOF=1 CAGE=2; previewMode FULL=0 ONLY_TIP=1),
  * booleans 0/1. Not in the array: `preset` and `roofSeededModes` (UI state), `labelText` (passed
@@ -142,6 +143,10 @@ export type LiveSupportSettings = {
   // Unit placement and editing
   liftHeight: number;
   eraseRadius: number;
+  /** Farthest sideways shift (mm) of a pillar top from its tip when the straight column is blocked or too close; 0 turns it off. */
+  neckMaxShift: number;
+  /** Gap (mm) pillars, angled necks and branches keep from the model; 0 turns the check off. */
+  minClearance: number;
 };
 
 /** Keys `updateSetting` may change: every setting except the preset name and the seeded roof modes. */
@@ -217,7 +222,7 @@ function preset(touch: number, depth: number, neck: number, neckLength: number, 
     trussDiameter: pillar,
     maxNeckAngle: 45,
     voxelResolution: 16,
-    scatterAngle: 50,
+    scatterAngle: 45,
     scatterMergeDistance: merge,
     scatterBranchDescent: descent,
   } satisfies Partial<LiveSupportSettings>;
@@ -300,6 +305,8 @@ export const defaultSupportSettings: Readonly<LiveSupportSettings> = {
   reinforceOverhangEdges: true,
   liftHeight: 5,
   eraseRadius: 1.5,
+  neckMaxShift: 6,
+  minClearance: 2,
 };
 
 interface NumericLimit {
@@ -365,6 +372,8 @@ export const settingLimits: Record<NumericKey, NumericLimit> = {
   scatterBranchDescent: { min: -1000, max: 1000 },
   liftHeight: { min: 0, max: 200 },
   eraseRadius: { min: 0.1, max: 50 },
+  neckMaxShift: { min: 0, max: 50 },
+  minClearance: { min: 0, max: 20 },
 };
 
 /** `base` with the preset's values applied and `preset` set to `name`; keys the preset does not own are kept. */

@@ -42,6 +42,8 @@ export interface ExportUnitResult {
   revision: number;
   verdict: 'clear' | 'blocked' | 'inconclusive';
   islands: 'ok' | 'inconclusive';
+  /** Triangles the build produced. 0 means nothing was built, which the export gate refuses by name (GEO-002). */
+  triangles: number;
 }
 
 /** One written STL file: its name and bytes (transferred back to the client). */

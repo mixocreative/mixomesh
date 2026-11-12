@@ -14,6 +14,11 @@ import type { MakePolicy } from './generateSupports';
  */
 
 // Index = the Rust source code; `KINDS` index = the Rust point-kind code (0 none).
+// EXEMPT from GEO-005's `unknown` rule, on purpose: this is an input packer, not a report. The kind
+// it reads is packed straight back to the engine (`packContacts`, `KIND_CODE`), so an invented
+// `'unknown'` would travel into a build as a shape. Index 0 is already `undefined` ("no kind"), and
+// an unknown code lands there too - the field is then ABSENT, which is the honest answer here and
+// the one the engine already understands.
 const SOURCES: readonly SupportPoint['source'][] = ['interior', 'physical-boundary', 'sharp-ridge', 'island'];
 const KINDS = [undefined, 'face', 'edge', 'vertical'] as const;
 

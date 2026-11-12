@@ -22,6 +22,9 @@ export interface SupportEngine {
   check_support_problems(positions: Float32Array, indices: Uint32Array, contacts: Float64Array, overhangAngleDegrees: number, spacing: number): SupportProblemsHandle;
   zoned_at(zones: Float64Array, point: Float64Array, normal: Float64Array): boolean;
   refine_for_overlay(positions: Float32Array, indices: Uint32Array, maxEdge: number, maxTriangles: number): { take_positions(): Float32Array; take_indices(): Uint32Array; free(): void };
+  /** Plate auto-arrange (engine 53, `crates/geometry-wasm/src/plate.rs`; `host/supports/plateArrange.ts` packs and decodes). */
+  arrange_plate(widthMm: number, depthMm: number, rules: Float64Array, loops: Float64Array, offsets: Float64Array, frozen: Uint8Array, full: boolean): {
+    offsets(): Float64Array; moved(): Uint32Array; unplaced(): Uint32Array; conflicts(): Uint32Array; free(): void };
 }
 
 let current: SupportEngine | undefined;
