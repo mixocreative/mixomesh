@@ -2,6 +2,16 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13 (late): vendored `1a3d62c` — one mesh fingerprint, `file_parts` in `supports/`.**
+> No app change, and the **baseline unchanged is the check that matters**: the move came with a
+> cache-key swap (`core::digest` now owns the mixer; `dental::denture::model_cache` had a second,
+> weaker mesh fingerprint beside it, re-hashing the whole mesh every lookup — and engine 67 made it
+> hot by calling `file_parts` on every placement). A key that stopped telling two meshes apart would
+> show as moved contacts in the baseline before any unit test caught it.
+>
+> Gate: typecheck 0, lint 0, 229 vitest, i18n 992 / 0 gaps, build, 260 PASS across all 23 suites,
+> 0 FAIL, exit 0.
+
 > **2026-11-13, U5's UI IS BUILT AND PUSHED (`11aaae6`), gate green: 260 PASS / 0 FAIL, 229 vitest,
 > i18n 992 / 0 gaps.** Double-click a multi-part object and you are inside it with its MESHES as the
 > selectable depth; pick them, press Separate selection, and they become one new object. The plan's
