@@ -703,6 +703,7 @@
   "toast.repairUnavailable": "メッシュ修復エンジンが利用できません — 水密修復をスキップしました",
   "toast.triangleBudget": "シーンの面数が {current} — このビルドの安全な上限 {budget} を超えています。インポートは続行しますが、動作が遅くなる可能性があります。",
   "toast.joinRatioMismatch": "{names} は {name} とは異なるプリントスケールで作成されています。目標サイズで書き出すと {name} のスケールが使われるため、結果を確認するか、元に戻してからスケールを合わせてください。",
+  "toast.splitDroppedGroupRepair": "{names} の修復は結合後のオブジェクトに対して行われたため、分離した各パーツには再現できません。再読み込み時は未修復の状態になります。もう一度修復するか、分離を元に戻してください。",
   "toast.joinDroppedSupports": "結合により、{names} のサポートが削除されました。結合後のオブジェクトに再度サポートを生成してください。",
   "toast.undoTrimmed": "大きなモデルのメモリを確保するため、古い元に戻す履歴を消去しました。",
   "toast.exportedWithWarnings": "警告付きで書き出しました — 水密を確認できませんでした: {names}",

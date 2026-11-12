@@ -706,6 +706,7 @@
   "toast.repairUnavailable": "Mesh repair engine unavailable — watertight repair skipped",
   "toast.triangleBudget": "Scene has {current} faces — over the {budget} safe budget for this build. Import continuing, but expect slower response.",
   "toast.joinRatioMismatch": "{names} was built at a different print scale from {name}. Exporting at a target size uses {name}'s scale, so check the result or undo and scale first.",
+  "toast.splitDroppedGroupRepair": "The repair of {names} was made on the merged object and cannot be reproduced for the separated parts. They will reload unrepaired — repair them again, or undo the separate.",
   "toast.joinDroppedSupports": "Supports on {names} were removed by the merge. Generate them again on the merged object.",
   "toast.undoTrimmed": "Older undo steps were cleared to free memory for large models.",
   "toast.exportedWithWarnings": "Exported with warnings — could not confirm watertight: {names}",

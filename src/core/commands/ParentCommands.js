@@ -602,6 +602,59 @@ function _ratioMismatches(leads, leadId, objects) {
   return out;
 }
 
+/**
+ * The `groupRepair` record cannot survive a separate, and this drops it.
+ *
+ * A multi-part object is repaired as ONE solid on the welded union of its parts
+ * (`RepairSession._repairGroupParts`), and the record is written on EVERY part so a reload replays
+ * it once for the whole object (`ProjectLoader`). Separate those parts and that promise cannot be
+ * kept: the reload walks each object, finds `groupRepair`, and replays it on THAT OBJECT ALONE — a
+ * per-part repair of a union that no longer exists, which is the internal-wall result
+ * `GroupRepair` was written to avoid. The project would reload as different geometry from the one
+ * on screen, silently.
+ *
+ * So the record goes, and the operator is told: after a reload those objects come back UNREPAIRED,
+ * which the validator reports, rather than repaired in a way nobody chose. Undo puts it back with
+ * the link fields. The alternative — refusing the separate until the repair is undone — was
+ * rejected because it blocks an edit the operator is entitled to make, and the plan sanctioned
+ * either (U5 gap 2: "block or invalidate; do not leave it to chance").
+ *
+ * Only `groupRepair` is union-specific. Every other fix type replays correctly per object and stays.
+ */
+const UNION_FIX = 'groupRepair';
+
+function _unionFixesToDrop(ids, objects) {
+  const found = {};
+  for (const id of ids) {
+    const fixes = objects[id]?.geometryFixes;
+    if (Array.isArray(fixes) && fixes.includes(UNION_FIX)) found[id] = [...fixes];
+  }
+  return found;
+}
+
+function _setGeometryFixes(records, keep) {
+  const ids = Object.keys(records);
+  if (ids.length === 0) return;
+  setState(state => {
+    const objects = { ...state.scene.objects };
+    for (const id of ids) {
+      if (!objects[id]) continue;
+      const fixes = keep ? records[id] : records[id].filter(fix => fix !== UNION_FIX);
+      objects[id] = { ...objects[id], geometryFixes: fixes };
+    }
+    return { scene: { ...state.scene, objects } };
+  });
+}
+
+/** Warn once, naming the objects whose union repair was dropped. */
+function _warnUnionFixDropped(records) {
+  const ids = Object.keys(records);
+  if (ids.length === 0) return;
+  const objects = getState().scene.objects;
+  const names = [...new Set(ids.map(id => objects[id]?.name).filter(Boolean))];
+  dispatch(EVENTS.TOAST, { message: t('toast.splitDroppedGroupRepair', { names: names.join(', ') }), type: 'warning', duration: 8000 });
+}
+
 function _setSupports(records, keep) {
   const ids = Object.keys(records);
   if (ids.length === 0) return;
@@ -671,11 +724,14 @@ export class SplitToPartsCommand {
     this._before = before;
     this._after = after;
     this._leadParentId = lead.parentId ?? null;
+    this._unionFixes = _unionFixesToDrop(ids, objects);
     return true;
   }
   execute() {
     if (!this._plan()) { this.applied = false; return; }
     _applyLinkPatches(this._after);
+    _setGeometryFixes(this._unionFixes, false);
+    _warnUnionFixDropped(this._unionFixes);
     // Group AFTER the flags are cleared so the group command sees N plain
     // objects (its id expansion would otherwise re-collapse them).
     this._group ??= new CreateGroupCommand(this._ids, `${getState().scene.objects[this._ids[0]].name} parts`);
@@ -692,6 +748,7 @@ export class SplitToPartsCommand {
     this._reparent?.undo();
     this._group?.undo();
     _applyLinkPatches(this._before);
+    _setGeometryFixes(this._unionFixes ?? {}, true);
     this.applied = false;
   }
 }
@@ -762,6 +819,9 @@ export class SeparateSelectionCommand {
     this._newLeadId = newLead;
     this._keptLeadId = keptLead;
     this._sourceLeadId = sourceLead;
+    // BOTH sides, not only the parts that leave: the object left behind is a different union now,
+    // so replaying a repair computed over the old one is just as wrong there.
+    this._unionFixes = _unionFixesToDrop(all, objects);
     this._before = before;
     this._after = after;
     this._parentId = source.parentId ?? null;
@@ -770,6 +830,8 @@ export class SeparateSelectionCommand {
   execute() {
     if (!this._plan()) { this.applied = false; return; }
     _applyLinkPatches(this._after);
+    _setGeometryFixes(this._unionFixes, false);
+    _warnUnionFixDropped(this._unionFixes);
     // The new object lives where the object it came from lives: a separate must
     // not move anything, in world space or in the outliner.
     if (this._reparent === undefined) {
@@ -793,6 +855,7 @@ export class SeparateSelectionCommand {
     if (!this.applied) return;
     this._reparent?.undo();
     _applyLinkPatches(this._before);
+    _setGeometryFixes(this._unionFixes ?? {}, true);
     this.applied = false;
   }
 

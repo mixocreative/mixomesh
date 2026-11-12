@@ -298,6 +298,80 @@ await test('a part keeps a name the operator chose through merge and separate; a
   }
 });
 
+await test('separating drops the union repair record, warns, and undo restores it (gap 2)', () => {
+  // THE DEFECT. A multi-part object is repaired as ONE solid on the welded union of its parts, and
+  // `groupRepair` is recorded on EVERY part so a reload replays it once for the whole object.
+  // Separate them and the reload walks each object, finds the record, and replays it on THAT OBJECT
+  // ALONE — a per-part repair of a union that no longer exists, which is the internal-wall result
+  // GroupRepair was written to avoid. The project would reload as different geometry from the one
+  // on screen, and nothing said so.
+  const fixes = ['holes', 'groupRepair'];
+  seed({
+    lead: base('lead', 'Bowl', { logicalObjectId: 'lead', geometryFixes: [...fixes], _tris: [[0, 2, 1]] }),
+    part: base('part', 'Handle', { logicalObjectId: 'lead', isInternalPart: true, geometryFixes: [...fixes], _tris: [[0, 1, 3]] }),
+  });
+  const toasts = [];
+  const off = subscribe(EVENTS.TOAST, (p) => toasts.push(p));
+  const cmd = new SplitToPartsCommand('lead');
+  cmd.execute();
+  let s = getState().scene.objects;
+  // Only the union-specific entry goes: every other fix type replays correctly per object.
+  assert.deepEqual(s.lead.geometryFixes, ['holes'], 'lead keeps its per-mesh fixes');
+  assert.deepEqual(s.part.geometryFixes, ['holes'], 'and so does the part');
+  assert.equal(toasts.length, 1, 'the operator is told the repair cannot be reproduced');
+  assert.equal(toasts[0].type, 'warning');
+  cmd.undo();
+  s = getState().scene.objects;
+  assert.deepEqual(s.lead.geometryFixes, fixes, 'undo restores the record');
+  assert.deepEqual(s.part.geometryFixes, fixes);
+  // Separate selection takes BOTH sides: the object left behind is a different union too.
+  seed({
+    lead: base('lead', 'Bowl', { logicalObjectId: 'lead', geometryFixes: [...fixes], _tris: [[0, 2, 1]] }),
+    a: base('a', 'A', { logicalObjectId: 'lead', isInternalPart: true, geometryFixes: [...fixes], _tris: [[0, 1, 3]] }),
+    b: base('b', 'B', { logicalObjectId: 'lead', isInternalPart: true, geometryFixes: [...fixes], _tris: [[0, 3, 2]] }),
+  });
+  toasts.length = 0;
+  new SeparateSelectionCommand(['a']).execute();
+  s = getState().scene.objects;
+  for (const id of ['lead', 'a', 'b']) assert.deepEqual(s[id].geometryFixes, ['holes'], `${id} lost only the union fix`);
+  assert.equal(toasts.length, 1);
+  // An object with no union repair says nothing: this must not warn on every separate.
+  seed({
+    lead: base('lead', 'Bowl', { logicalObjectId: 'lead', geometryFixes: ['holes'], _tris: [[0, 2, 1]] }),
+    part: base('part', 'Handle', { logicalObjectId: 'lead', isInternalPart: true, _tris: [[0, 1, 3]] }),
+  });
+  toasts.length = 0;
+  new SplitToPartsCommand('lead').execute();
+  assert.equal(toasts.length, 0, 'nothing to invalidate, nothing said');
+  off();
+});
+
+await test('separating moves nothing in world space and mints no geometry (gaps 4 and 5)', () => {
+  // The two gaps that only become live with a TOPOLOGICAL split. What is assertable NOW is that this
+  // separate is not one: it moves link fields only. So there is no origin to choose (gap 4 — nothing
+  // may move in world space) and no owned geometry to mint, which is why it needs no derived asset
+  // with `retainedTriangles`/`release` and cannot evict undo history (gap 5). A future topological
+  // split will fail these, which is the point: it must bring its own answers.
+  seed({
+    lead: base('lead', 'Bowl', { logicalObjectId: 'lead', _tris: [[0, 2, 1]] }),
+    part: base('part', 'Handle', { logicalObjectId: 'lead', isInternalPart: true, _tris: [[0, 1, 3]] }),
+  });
+  const posOf = () => Object.fromEntries(['lead', 'part'].map((id) => {
+    const mesh = meshes.get(id);
+    return [id, [mesh.position.x, mesh.position.y, mesh.position.z, ...(mesh.positions ?? [])]];
+  }));
+  const before = JSON.stringify(posOf());
+  const assets = new Set(Object.values(getState().scene.objects).map((o) => o.assetId));
+  const cmd = new SeparateSelectionCommand(['part']);
+  cmd.execute();
+  assert.equal(JSON.stringify(posOf()), before, 'no vertex and no node moved');
+  assert.deepEqual(new Set(Object.values(getState().scene.objects).map((o) => o.assetId)), assets, 'no new asset minted');
+  assert.equal(typeof cmd.retainedTriangles, 'undefined', 'nothing retained, so the undo cap is untouched');
+  assert.equal(typeof cmd.release, 'undefined');
+  cmd.undo();
+  assert.equal(JSON.stringify(posOf()), before, 'and the undo moves nothing either');
+});
+
 await test('a Join warns when it swallows an object built at another print scale', () => {
   // Each object's `ratio` is baked into its vertices, so the merge resizes nothing — but the export
   // reads the LEAD's ratio as the reference for a target size, and the swallowed object's own
