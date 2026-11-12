@@ -2,6 +2,38 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13 (latest): C2 IS DECIDED AND BUILT, and U5 gap 6 with it (`6374613`, `380be47`).**
+>
+> **C2's instrument is GEOMETRY, not history** (decided with Fable; the reasoning is in
+> `docs/plans/2026-11-12-parts-and-focus-mode.md` under C2). A recorded parent misses two unrelated
+> objects pushed into each other, still fires for siblings since moved apart, and needed a
+> save-format field that does not exist. `contactsBuried` answers the real question when the two
+> meshes are handed over CONCATENATED. **It warns; it never drops and never refuses** — dropping
+> would tie object A's supports to object B's pose with nothing to restale them, and silently
+> under-supporting a print is worse than visibly over-supporting one.
+>
+> **IT RUNS IN THE ANALYSIS WORKER, and that is the lesson.** On the main thread the call blocked
+> long enough to swallow a right-click. `browser-supports-walk` said "e right-click on a support
+> removes it -- removed 0 -> 0" with **no page error** — indistinguishable at a glance from the two
+> CPU-contention flakes seen earlier the same night. **It failed ALONE**, which is what forced the
+> bisect: stub the helper's body, it passes; stub only the engine call, it passes. The main thread
+> now keeps only the bounding-box prefilter (which is what stops a plate of non-touching objects
+> paying for a round trip), and the 1M long-task budget reads **53 ms, down from 69-72**.
+>
+> **A feared blind spot was checked and is NOT real**, so the check is sound for topological splits:
+> two surfaces cut from one mesh share corners and engine 68 welds duplicates, so they looked like
+> they would merge into one part and report nothing. They do not — `split` pairs faces around a
+> shared edge by the solid each bounds (engine 65). **The weld merges vertices, not solids.** Pinned
+> in geocore as `two_halves_of_one_surface_stay_two_parts_through_the_weld`, a test written expecting
+> the opposite.
+>
+> **Gap 6**: a merge now warns when it swallows an object built at another print scale — the export
+> reads only the LEAD's ratio, and the swallowed object's becomes a field nothing reads. Reported,
+> not corrected: re-baking vertices is what Join must never do.
+>
+> **What is left of U5 is gaps 2, 4 and 5, and none is reachable from the UI as built** (it moves
+> link fields only: no geometry minted, no origin chosen). They go live with a topological split.
+
 > **2026-11-13 (late): vendored `1a3d62c` — one mesh fingerprint, `file_parts` in `supports/`.**
 > No app change, and the **baseline unchanged is the check that matters**: the move came with a
 > cache-key swap (`core::digest` now owns the mixer; `dental::denture::model_cache` had a second,
