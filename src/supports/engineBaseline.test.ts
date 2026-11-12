@@ -137,7 +137,10 @@ function row(mesh: TriangleMesh, settings: LiveSupportSettings, budget: number) 
   const perPart = built.components.reduce<Record<string, number>>((a, c) => ((a[c.part] = (a[c.part] ?? 0) + 1), a), {});
   return {
     placed: placement.points.length,
-    buried: placement.buried ?? 0,
+    // The COUNT, not the positions the engine now reports: a baseline of coordinates would churn on
+    // any float change and say nothing a reader could use, while the count is exactly the fact
+    // ("the overlap rule dropped nine here") a diff needs to be readable.
+    buried: placement.buried?.length ?? 0,
     regions: placement.regions.length,
     tips: tipCount(built),
     dropped: built.dropped.length,

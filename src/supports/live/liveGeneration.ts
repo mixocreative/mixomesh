@@ -224,10 +224,11 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   const hash = await sceneSource.sourceHashStaged(id, yieldToMain);
   const pose = scenePose(id);
   const ms = { placement: 0, build: 0, check: 0 };
-  // Contacts the engine's overlap rule dropped for being buried in another mesh of this object
-  // (engine 67). Only a placement learns the number, so a job that reuses the cached placement
-  // keeps the one the last verdict carried: the overlap still has no supports, and saying nothing
-  // this time would read as "it does now".
+  // How many contacts the engine's overlap rule dropped for being buried in another mesh of this
+  // object (engine 67; the engine reports their positions, and the chip needs only the count).
+  // Only a placement learns it, so a job that reuses the cached placement keeps the number the last
+  // verdict carried: the overlap still has no supports, and saying nothing this time would read as
+  // "it does now".
   let buried = verdicts.get(id)?.buried;
 
   if (job.placement || needsPlacement(record, hash, !!cachedPlacement(id))) {
@@ -236,7 +237,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
     ms.placement = Math.round(performance.now() - t0);
     if (!placed || placed.kind !== 'placed' || !job.current()) { liveStats.dropped++; return; }
     liveStats.placements++;
-    buried = placed.result.buried;
+    buried = placed.result.buried?.length;
     const restoring = !job.placement && !record.stale && isBuilt(record) && record.sourceHash === hash && !placementChanged(record);
     if (restoring) {
       // A loaded project: the placement is derived data, rebuilt without a history step.

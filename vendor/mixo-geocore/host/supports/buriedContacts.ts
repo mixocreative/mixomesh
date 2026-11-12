@@ -17,8 +17,8 @@ import type { PlacementResult } from '../core/analysis/types';
  * `deleted`, `overrides` and manual entry still matches: dropping is the whole reason this is done
  * after placement instead of by placing differently.
  *
- * The count goes out as `buried`, so the app can say why the overlap has no supports instead of
- * leaving the operator to guess.
+ * The dropped POSITIONS go out as `buried`, so an app can both say how many
+ * (`.length`) and show where. A count alone hands the operator a number and nowhere to look.
  *
  * `regions` is kept whole: a region is a set of FACE indices, not of contacts, and a region that
  * loses its last contact is still the overhang region it was.
@@ -33,7 +33,7 @@ export function dropBuried(result: PlacementResult, buried: readonly boolean[]):
   return {
     ...result,
     points,
-    buried: result.points.length - points.length,
+    buried: result.points.flatMap((point, k) => (buried[k] ? [point.position] : [])),
     contactPositions: new Float32Array(points.flatMap((point) => point.position)),
     contactNormals: new Float32Array(points.flatMap((point) => point.normal)),
   };

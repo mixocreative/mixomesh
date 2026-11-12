@@ -50,7 +50,7 @@ export function landPlacements(units: readonly PrintUnit[], finished: readonly F
       name: now.name,
       placed: result.points.length,
       ...(now.supports ? { report: regenReport(now.manual.length, applied.handWork) } : {}),
-      ...(result.buried ? { buried: result.buried } : {}),
+      ...(result.buried?.length ? { buried: result.buried.length } : {}),
     });
   }
   return { commands, landed, again };

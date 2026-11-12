@@ -17,17 +17,23 @@ import type { Vector } from '../vec3';
  *     the first);
  *   - `omitted`: ONE entry for the automatic supports the build left out (`dropped`, minus those a
  *     no-support zone took), informational like `outside`; `points` holds their contacts (`position` is the first);
+ *   - `buried`: ONE entry for the automatic contacts the OVERLAP RULE left out, because they stood on
+ *     a face buried inside another mesh of the same object (engine 67). Informational like `outside`:
+ *     a support there could not be printed or removed, so there is nothing to fix -- but it carries
+ *     every dropped position in `points`, so the operator can look at the overlap instead of reading
+ *     a number. Distinct from `omitted` on purpose: those were dropped BY THE BUILD and could come
+ *     back if a setting changed; these cannot, and the reason is the model's own shape.
  *   - `unjudged`: the island verdict is `inconclusive` (the model's mesh cannot be judged, e.g.
  *     non-manifold edges); it has no place on the model, so `position` is the origin and the list
  *     offers no Show or Fix.
  */
 export interface SupportProblem {
-  kind: 'island' | 'overhang' | 'unjudged' | 'outside' | 'omitted';
+  kind: 'island' | 'overhang' | 'unjudged' | 'outside' | 'omitted' | 'buried';
   /** Centre of the spot, in the frame of the checked mesh (Y up). */
   position: Vector;
   /** Unsupported overhang area in mm² (0 for an island point). */
   area: number;
-  /** `outside` and `omitted`: every point the entry stands for (unit frame); `position` is the first. */
+  /** `outside`, `omitted` and `buried`: every point the entry stands for (unit frame); `position` is the first. */
   points?: Vector[];
 }
 
