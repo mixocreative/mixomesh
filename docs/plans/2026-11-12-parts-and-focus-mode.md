@@ -274,6 +274,33 @@ promise becomes true, at which point the separator mode may say so.
 **Done when** a body-and-arm object gets no tips in the overlap, and the part count and roles are
 shown before generate.
 
+#### U7 is NOT a drop-in, and the blocker is contact IDS (found 2026-11-12, after U6 landed)
+
+The obvious reading of this unit is "call `part_tips` instead of `placeGeneric`". That cannot be
+done as written, for a reason worth stating before anyone tries it:
+
+**`part_tips` returns different contact ids.** `supports::part_tips::tips_on_part` builds them as
+`format!("part{part}-{id}")`, so a contact the generic path calls `auto-215_100_-485` becomes
+`part0-auto-215_100_-485`. And **contact ids are the save format's keys**: `deleted`, `overrides`
+and the manual list in every `.mixo` record are keyed by them. Switching the live path to
+`part_tips` invalidates the hand work in every project the app has ever saved.
+
+**And the cheap alternative does not exist yet either.** The obvious way to keep the ids is to place
+as now and then drop any contact standing on a buried face -- but `PlacedPoint` carries
+`id`, `position`, `normal`, `source` and **no face**
+(`crates/geometry-core/src/generic/placement/mod.rs:83-90`), so the host cannot tell which contact is
+on which face. `part_tips` knows (it returns `tip_faces`), which is precisely the thing that cannot
+be used without the id change.
+
+**Recommended: add the face to the generic placement's output.** `PlacedPoint` gains `face: u32`,
+which is additive, needs no id change, needs no save migration, and lets the host drop buried
+contacts itself from the mask `part_tips` already exposes. That is an engine change (66) and a small
+one; the alternative is an id migration across every saved project, which is not a small one.
+
+**Until then the mask is reachable but unusable in the live path**, so the separator mode must keep
+saying nothing about supports (the trap at the top of this plan), and a body-and-arm object still
+gets tips in its overlap. The requirement is not met and this is why.
+
 ---
 
 ## 3b. Coherence pass: what contradicts, and what each app means by "overlap"
