@@ -40,7 +40,15 @@ below is cheap.**
 |---|---|---|---|
 | `src/supports/live/supportInteraction.ts:190` + 4 test sites | `editing/addTip` | **`minFromUpDeg` → `overhangAngleDeg`** (engine 57), and the semantics invert: the aligner profile's `tipMinFromUpDeg` became `overhangAngleDeg` as `180 − x`. So `minFromUpDeg: 10` becomes `overhangAngleDeg: 170`. | **The only real break.** `AddSupportCommand.ts:12` does `Omit<AddTipInput, …>`, so `npm run typecheck` names every site. 5 edits + confirm the inversion is what's wanted. |
 | `src/supports/commands/SettingsCommands.ts:47`, persisted settings records | `host/core/supports/settings` | Two **new required** fields: `neckMaxShift: 6`, `minClearance: 2` (engine 22). | **Migration.** Old `.mixo` saves have neither. Needs a default-fill on load (`src/supports/persist.test.ts` is the guard). This is what makes the band "a day" and not "small". |
-| `src/supports/live/liveGeneration.ts:291` | *(behaviour, not API)* | Engine 58 drops the generic `scatterAngle` default from 50 to 45. mixoMesh passes `scatterAngle` straight through. | **Silent output change** on existing projects. Decide: pin 50, or accept 45 and say so. |
+> **One thing this table could not predict, measured on 2026-11-12 after the re-vendor.** The
+> contact count on `cube-overhang` falls 70 → 51 at engine 65, and it is NOT `scatterAngle`: at
+> engine 65 the count is 51 at 45, 50 and 60 degrees alike. It is **engines 47/48** — island and
+> lowest-point tips claim first with a half-pitch gap, every edge corner gets a tip, and edges space
+> in `round(length / pitch)`. An owner decision of 2026-11-01, already shipped in mixoDental, and not
+> optional at 65. The baseline in `src/supports/engineBaseline.test.ts` is what made that readable;
+> without a before, this looked exactly like the angle change.
+
+| `src/supports/live/liveGeneration.ts:291` | *(behaviour, not API)* | Engine 58 drops the generic `scatterAngle` default from 50 to 45. mixoMesh passes `scatterAngle` straight through. | **NOT existing projects** (corrected 2026-11-12): a saved record carries its own full settings, so an opened project keeps 50. It changes NEW objects and a preset re-apply. **Decided: accept 45** — 45 lives inside `preset()` itself, so pinning means forking vendored code or a permanent CUSTOM badge. Measured cost: a face sloped 46–47° loses its FIELD tips (64 contacts vs 194 at 50), keeping only rim and island points; 45 is the industry self-support convention and 50 was more conservative than it. Island and lowest-point tips run on their own 60° rule either way. |
 | `src/supports/spike.ts:86` | `host/supports/genericPlacement` | `placeGeneric` gains an optional 3rd `rules` param. | None — optional. |
 | supports store / job layer | `host/core/supports/mesh`, `host/core/jobs`, `host/core/progress` | All **additive**: new optional result fields (`unresolved`, `footprint`, `modelLanded`, `lastResort`…), new optional `limits`/`rules` on jobs, new `GENERATE_PHASES` export. | None. Opt-in surface. |
 | — | `host/supports/jobRunner` | `GENERATE_TIMEOUT_MS` **deleted**; `runSupportJob` gains optional `onPhase`. | **None** — the only consumer is inside the vendored file itself (`jobRunner.ts:48`). No app code imports it. |
