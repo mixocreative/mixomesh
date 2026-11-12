@@ -2,8 +2,9 @@
 // the app ships in (plan 2026-10-29 P3.5 gap a / P3.6): the vite dev server, the production build
 // over http (the GitHub Pages shape) and the built app in Electron over file://. Each loads the
 // cube-overhang fixture, enters Support Mode with Shift+S, presses the panel's Generate button and
-// waits for the real job (placement -> rekey -> build -> check) to land, then asserts the tip count
-// of the golden, no console errors and no CSP violations. Nothing is imported from the page: only
+// waits for the real job (placement -> rekey -> build -> check) to land, then asserts that placement
+// produced the golden's point count, that every point became a tip or a recorded drop, that the
+// verdict is clear, and that there were no console errors and no CSP violations. Nothing is imported from the page: only
 // window.__mxSupportLive (installed in every build) is read.
 //
 //   node tests/browser-support-worker-shapes-smoke.mjs              dev server + headless Chrome
@@ -167,12 +168,24 @@ async function main() {
     await cdp.close();
     console.log(JSON.stringify({ mode: MODE, stats, problems }, null, 1));
     assert(stats.placements >= 1, 'the analysis worker did not place');
-    assert(stats.last.tips === GOLDEN.tips, `${stats.last.tips} tips, golden ${GOLDEN.tips}`);
+    // CONSERVATION, not an absolute tip count (Fable's decision, 2026-11-12; HANDOFF.md).
+    // This smoke drives the PANEL, which runs preset MIDDLE with repairBudget 3, while
+    // browser-support-engine-smoke drives the probe, which runs LIGHT with no budget. Measured
+    // in-process at every engine: MIDDLE places 70 and the safety repair drops the two contacts at
+    // the overhang edge, so 68 tips is the repair DOING ITS JOB. Asserting 68 would take the number
+    // from the writer and break at the next re-vendor with nobody able to tell a regression from a
+    // change; asserting 70 tips was only ever true because engine 10's repair budget did nothing.
+    // So: the one absolute number is geocore's own `placement.points`, and the rest is arithmetic.
+    assert(stats.last.points === GOLDEN.placementPoints, `${stats.last.points} placed, golden ${GOLDEN.placementPoints}`);
+    assert(stats.last.tips + stats.last.dropped === stats.last.points,
+      `${stats.last.tips} tips + ${stats.last.dropped} dropped != ${stats.last.points} placed`);
+    // Only reachable if the repair ran inside the worker: without it MIDDLE returns `blocked`.
+    assert(stats.last.verdict === 'clear', `verdict ${stats.last.verdict}, expected clear`);
     assert(stats.last.ms.build > 0 && stats.last.ms.placement > 0, 'placement and build both ran in a worker');
     assert(stats.last.verdict !== 'none', 'no verdict');
     assert(inert, 'the slow-job test hook is not inert');
     assert(problems.length === 0, `console/CSP problems: ${problems.join(' | ')}`);
-    console.log(`PASS ${MODE}: placement ${stats.last.ms.placement} ms, build ${stats.last.ms.build} ms, check ${stats.last.ms.check} ms, ${stats.last.tips} tips, no console errors or CSP violations`);
+    console.log(`PASS ${MODE}: placement ${stats.last.ms.placement} ms, build ${stats.last.ms.build} ms, check ${stats.last.ms.check} ms, ${stats.last.points} placed = ${stats.last.tips} tips + ${stats.last.dropped} dropped, verdict ${stats.last.verdict}, no console errors or CSP violations`);
   } finally {
     finished = true;
     for (const p of processes.reverse()) await stopProcess(p);

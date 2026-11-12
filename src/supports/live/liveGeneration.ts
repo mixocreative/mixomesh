@@ -70,7 +70,14 @@ export interface LiveStats {
   respawns: number;
   /** Longest synchronous main-thread step per name, ms. */
   steps: Record<string, number>;
-  last: { objectId: string; revision: number; tips: number; verdict: string; ms: { placement: number; build: number; check: number }; settings: LiveSupportSettings } | undefined;
+  /**
+   * `points` is what PLACEMENT produced and `dropped` what the safety repair then left out, so a
+   * test can assert `tips + dropped === points` instead of pinning an absolute tip count that the
+   * repair budget legitimately changes. `points` counts the AUTOMATIC points only, which is what
+   * geocore's golden `placement.points` is; with hand edits in play the identity does not hold and
+   * no test should assert it.
+   */
+  last: { objectId: string; revision: number; points: number; tips: number; dropped: number; verdict: string; ms: { placement: number; build: number; check: number }; settings: LiveSupportSettings } | undefined;
 }
 
 export const liveStats: LiveStats = { started: 0, rendered: 0, dropped: 0, placements: 0, respawns: 0, last: undefined, steps: {} };
@@ -268,7 +275,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   else layers.removeZones(id);
   liveStats.rendered++;
   const tips = new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : []))).size;
-  liveStats.last = { objectId: id, revision: record.revision, tips, verdict: built.verdict?.status ?? 'none', ms, settings: record.settings };
+  liveStats.last = { objectId: id, revision: record.revision, points: inputs.points.length, tips, dropped: built.dropped.length, verdict: built.verdict?.status ?? 'none', ms, settings: record.settings };
   verdicts.set(id, { status: built.verdict?.status ?? 'clear', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
   if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
