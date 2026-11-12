@@ -2,8 +2,9 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
-> **2026-11-12 — the three HIGH findings of `docs/cia-audit-2026-11-12.md` are CLOSED** (master,
-> NOT pushed). MX-01: `MeshRepair.diagnoseMesh` now welds by position before it asks the engine, so a
+> **2026-11-12 — ALL THIRTEEN findings of `docs/cia-audit-2026-11-12.md` are CLOSED, and master is
+> PUSHED at `e67d09e`** (CI green: lint, typecheck, `npm test`, `i18n:check`, build; Pages deployed
+> 06:28 UTC). The three HIGHs went first. MX-01: `MeshRepair.diagnoseMesh` now welds by position before it asks the engine, so a
 > UV seam stops counting as a hole — the weld went into that shared seam, not into one call site, so
 > all three raw-mesh diagnose callers are covered; `repairMesh` keeps getting RAW geometry on purpose
 > (the engine merges for itself, `arraysToMesh` needs the original UVs). MX-02: a failed autosave
@@ -12,8 +13,75 @@
 > back.** MX-03: `restoreSupports` returns `{ supports, dropped }` and the loader toasts the names it
 > could not restore. Guards: `tests/diagnose-weld-mx01.test.mjs`,
 > `tests/autosave-recover-keeps-snapshot-mx02.test.mjs`, `tests/load-dropped-supports-mx03.test.mjs`,
-> plus a `validateMesh` case in `tests/validator.test.mjs`. The MEDIUM/LOW findings (MX-04…MX-13) are
-> still open, and the audit's §P2 plan stands. C9 (deleting `src/core/repair/` for geocore's Rust
+> plus a `validateMesh` case in `tests/validator.test.mjs`.
+>
+> **The MEDIUM/LOW findings are closed too**, each in its own commit: MX-04 `66b5ccd` (strict export
+> says "model parts", because supports can never be a manifold), MX-05 `b18047f` (a bundle names its
+> format, so five formats write five files), MX-06 `c4caa6c` (the exported bytes are read by
+> something that is not the writer), MX-07 `bc40c9e` (the smoke allowlist is scoped by what the line
+> is and reports what it silenced), MX-08 `8ff27db` (a support build that returns nothing is named,
+> not skipped), MX-09/MX-10 `7394385` (the exports and state fields nothing reads are deleted),
+> MX-11 `c3e1ef1` (the single read of an object's supports on load is pinned), MX-12 `b8b65bf` (the
+> app route has an `h1`; the unit-suffix clip was fixed upstream in mixo-app-style `fc11115` and the
+> copies re-taken in `e67d09e`), MX-13 `aac3211` (one surface for every boot failure).
+>
+> **What is NOT shipped: the desktop app.** `installers/` still holds only
+> `MIXOMESH-Setup-0.3.1.exe` from 2026-10-23, while `package.json` is 0.3.2 — so no installer
+> contains any of the thirteen fixes. `npm run dist` is runnable (electron-builder 26.15.3 is a
+> devDependency) but has not been run since. The installer is also unsigned, which SmartScreen warns
+> on, and `electron-builder.yml` has no `publish` key, so there is no update channel for anyone who
+> already installed 0.3.1. The web app on Pages IS current.
+
+> **2026-11-12, LATER - `npm run test:all` WAS RUN FOR THE FIRST TIME IN WEEKS AND IT WAS RED.**
+> Three failures, none of which `npm test` or CI can see (CI runs lint, typecheck, `npm test`,
+> `i18n:check`, build - not the 25 browser smokes). Two are fixed here; the third needs a decision.
+> `&&` chaining means one red suite hides every suite after it, so each fix revealed the next.
+>
+> **1. FIXED - a mesh smaller than the weld cell was welded away and then called watertight.**
+> `test:outliner-hover` imports one open triangle; the importer normalises it to 0.02 mm across and
+> the weld cell is 0.1 mm, so all three vertices fell in one cell, the triangle was dropped as
+> degenerate, and the engine was handed an EMPTY mesh - `boundaryEdges: 0, triangles: 0,
+> isWatertight: true`. Measured live: `validation: { results: [] }`. No Repair pill, no warning,
+> strict export would have passed it. **MX-01's weld caused it**: before that fix the engine read
+> the raw arrays and saw three open edges, and `_checkNonManifold` welds at the same
+> `MERGE_DISTANCE` and skips degenerates, so after MX-01 no reader in the app could see sub-cell
+> geometry. `diagnoseMesh` now reads the raw arrays when the weld annihilates the mesh
+> (`MeshRepair.js`), with two guards in `tests/diagnose-weld-mx01.test.mjs`. Forged the fix away to
+> check them: the new guard fails, the four original MX-01 tests still pass.
+>
+> **This is a patch on a weld that is wrong by design, and the real fix is the re-vendor.**
+> mixoMesh welds at an absolute `WELD_DISTANCE = 1e-4` Babylon units with no edge guard and no
+> body-gap floor, so it also stitches two shells that pass within 0.1 mm. geocore solved this
+> properly in `core/proximity.rs`: `Weld` is `max(1e-7 mm, 1e-6 x bounding-box diagonal)` and
+> refuses any merge that joins two vertices sharing an edge or puts an edge on more than two faces,
+> and it sits three orders of magnitude below a fixed 0.005 mm `BodyGap` - `repair/weld.rs` asserts
+> `distance_mm * 50 < BodyGap`, so "welding never fuses two bodies" is true by arithmetic. That is
+> what `docs/geocore-adherence-2026-11-12.md` means by deleting the 1,644-line repair stack.
+>
+> **2. FIXED - the engine smoke test pinned engine 11 as a literal while the vendor has been 12
+> since 2026-10-30.** `tests/browser-support-engine-smoke.mjs` had `const EXPECTED_ENGINE = 11`, so
+> it had been red for thirteen days through three Pages deploys. It now reads `engineVersion` from
+> `public/vendor/mixo-geocore/SOURCE.json`: the assert exists to catch the app loading something
+> other than what it vendored, and a literal cannot do that job. All three shapes pass -
+> engine_version 12, 70 tips, 18004/18004/18244 support triangles.
+>
+> **3. OPEN, NEEDS A DECISION - `test:support-workers` asserts a golden captured for different
+> settings, and only ever passed by coincidence.** It reports **68 tips** against
+> `GOLDEN.tips = 70` and fails in the first (dev) mode. Do NOT change the golden number: 70 is
+> correct. Checked against the authority - geocore's own
+> `goldens/__snapshots__/cube-overhang.default.json` has 70 `placement.points` at the VENDORED
+> commit `6cc5385` (engine 12), and at `21c7840` and `6bf349a` too. The two app paths use different
+> presets: `__mxSupportEngineProbe` runs `runSupportSpike({ preset: 'LIGHT' })` and gets 70, while
+> this test presses the panel's Generate button, which runs **preset MIDDLE** (the settings dump in
+> the failure output confirms it). Both are asserted against the same golden. engine 11 -> 12
+> (`14e4f82`, "proximity weld, no coordinate snapping") separated two counts that happened to agree
+> at engine 10, which is when the golden was captured. geocore has no golden for MIDDLE (its
+> variants are default / roof / tree / low-poly, which are settings variants, not presets).
+> **Recommended fix: make the test generate with the settings the golden was captured from (select
+> the LIGHT preset before pressing Generate) and say so in a comment**, so the number stays anchored
+> to an independent source. The alternative - capturing a MIDDLE golden from mixoMesh's own run - is
+> the app blessing its own output, which is what the export reader (MX-06) exists to avoid. Not
+> done here because it changes what the test exercises, and that is a roadmap call. C9 (deleting `src/core/repair/` for geocore's Rust
 > repair) is untouched and still gated on the 12-scan comparison.
 
 > **2026-10-22 /cia run (`docs/reviews/2026-10-22-cia-full.md`): every owner decision is closed.**
