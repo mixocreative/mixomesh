@@ -280,10 +280,45 @@ part `<lead>.00N` unconditionally, so "hook" merged into "denture" came back as 
 earlier split's `<lead>.001`) from one the operator chose, and only derived names are replaced. The
 import case the 2-part test pins is unchanged, which is the point: that rename IS wanted.
 
-**Still open for U5**: the UI itself (double-click to enter an object with parts as the depth, the
-isolation dimming, the notice and its accept button), C2's recorded parent, gap 2 (merge then
-Repair), gap 4 (origin), gap 5 (derived assets with `retainedTriangles`/`release`) and gap 6 (the
-lead's export ratio).
+#### 2026-11-13: THE UI IS BUILT. What it is, and what is still open
+
+**Built**, and the plan's decision held — the scope was extended, no third mode:
+
+- **The depth.** Double-click (or double-tap) a multi-part object and its MESHES are the selectable
+  things: click picks, shift-click adds, Esc steps out to the object, a click outside leaves.
+  `isPartScopeId` is the single predicate for "can be entered", so `getScope`, `setScope` and
+  `enterScope` cannot disagree. `_canon` keeps a part id only while that part's object is the scope,
+  so parts stay unselectable everywhere else — one exception in one place, not a second selection
+  model. **No gizmo inside**: `getTransformTargets` returns nothing, because moving one part would
+  break the pose its supports were built against.
+- **The focus.** `PartScopeMode` applies the isolation (U4's module, now with its second caller),
+  dims the panels, and puts a notice at the bottom of the viewport: where you are, how many meshes
+  are picked, **Separate selection**, Done. The button says WHY it is off rather than being dead —
+  nothing picked and everything picked are both reasonable, and each has its own answer.
+- **The dimming became dynamic**, which is what the owner asked for. The panel list lived twice,
+  once in `INERT_SELECTORS` and once as a `:is(...)` list in layout.css; a mode now names its own
+  panels once and `applyModeShell` marks them `data-dimmed`, with one generic CSS rule. Support Mode
+  is the first caller and is proven unchanged by the browser smoke's computed-opacity check.
+- **`SeparateSelectionCommand`** moves link fields only. The case worth knowing: picking the object's
+  own lead means the object left behind needs a new one, so the first remaining part takes over. It
+  refuses nothing, every part, and parts of two objects. It does not drive the selection — a command
+  whose undo depends on a selection the user may have changed since is wrong.
+- **Gap 3's other half**: a real gap found on the way. `scopeChain` walked only groups, so an object
+  scope produced an EMPTY chain and HID the breadcrumb, at the one moment the operator most needs
+  telling where they are.
+
+**Still open**, with the reason each was left:
+
+- **C2's recorded parent.** Reading it through, the parent record may be the wrong instrument: what
+  the warning needs to know is whether two objects OVERLAP, which is geometry, not history — and a
+  geometric test also catches two unrelated objects the operator moved into each other, which a
+  parent record never would. It also avoids the save-format constraint entirely. Decide between the
+  two before building either.
+- **Gap 2** (merge then Repair), **gap 4** (origin = bbox centre of the picked set, only where new
+  geometry is minted), **gap 5** (derived assets with `retainedTriangles`/`release`) and **gap 6**
+  (the lead's export ratio). None is reachable from the new UI yet: it moves link fields only, so no
+  geometry is minted, no origin is chosen and no ratio is combined. They become live when a
+  TOPOLOGICAL split lands, which is what gap 5 describes.
 
 ### U6 — mixomesh: re-vendor 12 → 65
 

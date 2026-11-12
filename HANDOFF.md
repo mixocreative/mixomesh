@@ -2,6 +2,35 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13, U5's UI IS BUILT AND PUSHED (`11aaae6`), gate green: 260 PASS / 0 FAIL, 229 vitest,
+> i18n 992 / 0 gaps.** Double-click a multi-part object and you are inside it with its MESHES as the
+> selectable depth; pick them, press Separate selection, and they become one new object. The plan's
+> decision held — the click-depth scope was extended, no third mode.
+>
+> **Read `docs/plans/2026-11-12-parts-and-focus-mode.md` §U5 for what is built and what is left.**
+> The short version of the three things worth knowing:
+>
+> - **The dimming is now the mode's own decision.** `INERT_SELECTORS` lived twice, once in TS and
+>   once as a `:is(...)` list in layout.css. A mode names its panels once, `applyModeShell` marks
+>   them `data-dimmed`, one generic CSS rule. The browser smoke reads the computed opacity of all
+>   five panels (0.38, inert) — that guard is what made the move safe, and it is why Support Mode is
+>   provably unchanged.
+> - **`scopeChain` hid the breadcrumb inside an object**, because it walked only groups and produced
+>   an empty chain. The one moment the operator most needs telling where they are. Fixed.
+> - **C2 may be the wrong instrument, and that is the next decision, not the next task.** The plan
+>   wanted the split to record its parent so generation could warn about two overlapping objects.
+>   But what the warning needs is whether they OVERLAP — geometry, not history — and a geometric test
+>   also catches two unrelated objects moved into each other, which a parent record never would. It
+>   also sidesteps the save-format constraint. **Decide between them before building either.**
+>
+> **Gaps 2, 4, 5, 6 are not reachable from this UI**: it moves link fields only, so no geometry is
+> minted, no origin is chosen, no ratio is combined. They go live with a TOPOLOGICAL split (gap 5).
+>
+> **mixoDental got the other half**: a `buried` finding in the check list with **Show**, so the
+> operator can frame the overlap instead of reading a count. Its glossary guard caught the Gemini
+> bridge drifting from 接触 to 接点, and its geometry guard caught two new files passing engine
+> geometry unlisted. Both were right; both are in `da23596`.
+
 > **2026-11-13, LATER: U5 GAPS 1 AND 3 ARE FIXED, ahead of the separator-mode UI, because both were
 > live defects in the app as it shipped.**
 >
