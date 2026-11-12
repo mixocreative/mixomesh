@@ -1,11 +1,11 @@
 {
   "repo": "mixocreative/mixo-geocore",
-  "commit": "93093a01dbfa07134c108d600243b135e0dbbea3",
-  "committed": "2026-11-13T02:45:04+08:00",
+  "commit": "1a3d62c96395e20314789bcd67064a4d91fb0fae",
+  "committed": "2026-11-13T04:58:22+08:00",
   "engineVersion": 68,
   "sha256": {
     "mixo_geometry_wasm.js": "9c7bb7a61a50f718e0c5200788b0774242dde8be3dbb1bc7bc2740eeb5dd004b",
-    "mixo_geometry_wasm_bg.wasm": "031c1bf46832b11fda6c6f8ca3e07c073f394b23da450e15f3b14cb7bc295494",
+    "mixo_geometry_wasm_bg.wasm": "1af4ef782697b9e78c87b1d17691d6f7e6e2b91b8b58017a32b8255cec1b0e4c",
     "mixo_geometry_wasm.d.ts": "c14279a0b6c4888f5f76e95c3f26c818f574e9c093673389ab591c4f9da39ba4",
     "host/core/analysis/mesh.ts": "687b71e1815baeb4f306166a9d34e64513b89d542b1915f6ebe5762e44c94c63",
     "host/core/analysis/supportCheck.ts": "3e69a0fefcd7c3cf4d4eda894d53ecdd030d573b4248ba9ae6e5d77d6b92f5ae",
