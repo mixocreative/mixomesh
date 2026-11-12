@@ -20,7 +20,8 @@
 import { EVENTS } from '../core/events.js';
 import { getState, subscribe, dispatch } from '../core/StateManager.js';
 import { cascadeObjectIds } from '../core/hierarchy/GroupCascade.js';
-import { canonicalObjectId, logicalObjectPartIds, shouldDisplayObject } from '../core/LogicalObjects.js';
+import { canonicalObjectId, shouldDisplayObject } from '../core/LogicalObjects.js';
+import { createIsolation } from '../ui/isolation';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
@@ -29,7 +30,7 @@ import { HistoryManager } from '../core/HistoryManager.js';
 import { t } from '../i18n/index.js';
 
 /** Mesh layer bit that no camera renders (cameras default to 0x0FFFFFFF). */
-export const ISOLATION_LAYER = 0x10000000;
+export { ISOLATION_LAYER } from '../ui/isolation';
 
 /** Panels the mode does not use: dimmed (CSS on `[data-mode]`) and made `inert`. */
 export const INERT_SELECTORS = ['#outliner', '#right-panel', '#asset-panel', '#viewport-toolbar', '.ws-switcher'] as const;
@@ -104,7 +105,6 @@ export function createSupportMode(deps: SupportModeDeps): SupportModeController 
   let active = false;
   let ids: string[] = [];
   let saved: { ids: string[]; activeId: string | null } | null = null;
-  let masked = new Map<{ layerMask: number }, number>();
   let offs: Array<() => void> = [];
   const hooks: Record<EscapeStage, Array<() => boolean>> = { selection: [], tool: [] };
   const listeners = new Set<(info: SupportModeInfo) => void>();
@@ -116,22 +116,11 @@ export function createSupportMode(deps: SupportModeDeps): SupportModeController 
     deps.emit(EVENTS.SUPPORT_MODE_CHANGED, snapshot);
   };
 
-  function applyMask() {
-    const scene = deps.scene();
-    const keep = new Set(ids.flatMap((id) => logicalObjectPartIds(id, scene.objects)));
-    for (const partId of Object.keys(scene.objects)) {
-      if (keep.has(partId) || scene.objects[partId]?.isGhost) continue;
-      for (const mesh of deps.meshesOf(partId)) {
-        if (!masked.has(mesh)) masked.set(mesh, mesh.layerMask);
-        mesh.layerMask = ISOLATION_LAYER;
-      }
-    }
-  }
-
-  function clearMask() {
-    for (const [mesh, original] of masked) mesh.layerMask = original;
-    masked = new Map();
-  }
+  // The mask itself lives in `src/ui/isolation.ts`, because the separator mode (U5) needs the same
+  // behaviour. Nothing about it changed in the move.
+  const isolation = createIsolation(deps);
+  const applyMask = () => isolation.apply(ids);
+  const clearMask = () => isolation.clear();
 
   function onSceneChange() {
     if (!active) return;

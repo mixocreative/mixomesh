@@ -6,10 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as B from '@babylonjs/core';
 import type { GeneratedSupportMesh } from '@mixo-geocore/host/core/supports/mesh';
 import { ISOLATION_LAYER_BIT, hideSupportLayers, isSupportLayerMesh, seeIsolatedObjects, tagSupportLayer, withoutSupportLayers } from './supportLayerTag.js';
-import { readFileSync } from 'node:fs';
 
-// SupportMode.ts pulls the app graph in; its constant is read from source to pin the two equal.
-const ISOLATION_LAYER = Number(/export const ISOLATION_LAYER = (0x[0-9a-fA-F]+);/.exec(readFileSync(new URL('../SupportMode.ts', import.meta.url), 'utf8'))?.[1]);
+// The isolation layer used to be declared twice -- here via supportLayerTag and again in
+// SupportMode.ts -- and this file pinned them equal by reading the second one out of its SOURCE with
+// a regex, because importing SupportMode pulls the app graph in. There is one definition now
+// (supportLayerTag, re-exported by src/ui/isolation.ts), so there is nothing left to pin.
 import { groupByKind } from './supportMeshLayer';
 import { zonedTriangles } from './zoneOverlay';
 import { SupportLayers } from './index';
@@ -68,18 +69,17 @@ describe('D20 predicate', () => {
   });
 
   it('renders see Support Mode isolated objects (output ignores the isolation mask)', () => {
-    expect(ISOLATION_LAYER_BIT).toBe(ISOLATION_LAYER);
     const s = scene();
     const camera = s.activeCamera!;
     const masked = new B.Mesh('masked', s);
-    masked.layerMask = ISOLATION_LAYER;
+    masked.layerMask = ISOLATION_LAYER_BIT;
     const plain = new B.Mesh('plain', s);
     expect(camera.layerMask & masked.layerMask).toBe(0);
     const restore = seeIsolatedObjects(s);
     expect(masked.layerMask & camera.layerMask).toBe(camera.layerMask & 0x0fffffff);
     expect(plain.layerMask).toBe(0x0fffffff);
     restore();
-    expect(masked.layerMask).toBe(ISOLATION_LAYER);
+    expect(masked.layerMask).toBe(ISOLATION_LAYER_BIT);
   });
 
   it('world extents never include a support layer', () => {
