@@ -1510,6 +1510,7 @@
   "supportPanel.verdict.inconclusive": "クリアランスチェックを完了できませんでした",
   "supportPanel.verdict.nothing-built": "サポートは生成されませんでした",
   "supportPanel.verdict.dropped": "{n, plural, other{# 個のサポートが除外されました}}",
+  "supportPanel.verdict.buried": "{n, plural, other{# 個の接点が他のメッシュ内です}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個のアイランドが未サポートです}}",
   "print.includeSupports": "サポート",
   "print.includeSupports.none": "モデルのみ",

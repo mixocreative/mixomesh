@@ -2,6 +2,49 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13, ENGINE 68 IS VENDORED HERE AND THE OVERLAP RULE IS LIVE (U7 DONE).** An object whose
+> file holds several meshes now gets no support where they overlap -- the body-and-arm case the owner
+> asked for -- on the generic path, in both apps.
+>
+> **The fix was smaller than the plan's recommendation and the reason generalises.** The plan said to
+> give `PlacedPoint` a `face: u32`. The host never needed a face: it needed ONE BOOLEAN per contact,
+> which the dental path has asked per tip since engine 50 (`Overlap::blocked`). Engine 66 exposed it
+> (`contacts_buried`), engine 67 applies it in `runPlacementJob` (`host/supports/buriedContacts.ts`,
+> pure, tested without the engine). Calling `part_tips` instead -- the obvious route -- would have
+> renamed every contact to `part<N>-...`, and **contact ids are the keys of the save format**:
+> `deleted`, `overrides` and the manual list in every saved project. When a new call would rename the
+> thing a save format is keyed by, the call is the wrong size.
+>
+> **`PlacementResult.buried` carries the count, and the panel shows it** (`supportPanel.verdict.buried`,
+> EN/JA/ZH-Hant, the Chinese through the Gemini bridge). A contact dropped without a word is the
+> silence this codebase does not allow: the operator would see an overlap with no supports and no
+> reason.
+>
+> **THE BASELINE EARNED ITSELF A THIRD TIME, and this one is the best of the three.** At engine 67 it
+> reported `seam-cube-split` losing 16 of 92 contacts -- the sixteen bottom cells of an ordinary cube,
+> whose vertices are split as a textured import's are. `surface::parts::split` never welds (correctly:
+> a weld there would turn a crack into a seam) and ASSUMES the import weld has run; the ABI above it
+> ran none, so 32 unconnected faces became 32 touching "parts". **Engine 68 welds in the two bindings**
+> (`proximity::weld`, duplicates only, face order kept, no copy when nothing welds), guarded by
+> `a_split_vertex_file_is_one_part_and_nothing_on_it_is_buried` -- verified by forging the weld away.
+>
+> **And then the honest half: this app's LIVE path was never hit.** `frame.ts` `weldByPosition` (1 um
+> grid) runs before placement, for its own float-noise reasons. What was hit was the baseline, which
+> skipped that step -- so it was measuring a path nobody runs. Fixed: `row()` now welds as
+> `partsToEngine` does. Two lessons: an ABI that works only when the caller happens to have welded has
+> an unchecked precondition, and a fixture family built from one helper (`box_mesh`) shares its blind
+> spot, which is why the OTHER repo's baseline is what found this.
+>
+> **The new baseline row is `sunk-pair`**: two overlapping boxes, the only row where the rule can fire,
+> and the only app-level proof that this pipeline carries it. `placed` there is the count AFTER the
+> rule, so a row whose `placed` climbs back is the rule having stopped working.
+>
+> **NEXT: U5 (separator mode).** Its blocker is gone -- the plan's trap ("the separator mode must say
+> nothing about supports") is lifted for the live path, because the live path now honours parts. What
+> is still open: mixoDental reports a buried-dropped contact NOWHERE (it needs one problem kind, for a
+> dental user who meets a multi-mesh generic object), and `file_parts` still lives in `dental/` so the
+> generic ABI calls into a dental module.
+
 > **2026-11-12, ENGINE 65 IS VENDORED HERE (`cf6d0b4`) AND THE GATE IS GREEN.** 53 ABI versions in
 > one step, and the adherence audit's "a day, not a project" held: FIVE compile sites, all the
 > `minFromUpDeg` -> `overhangAngleDeg` rename. Gate: typecheck 0, lint 0, node 1124/1124, vitest

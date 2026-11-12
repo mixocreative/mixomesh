@@ -301,6 +301,33 @@ one; the alternative is an id migration across every saved project, which is not
 saying nothing about supports (the trap at the top of this plan), and a body-and-arm object still
 gets tips in its overlap. The requirement is not met and this is why.
 
+#### DONE at engine 67, and the fix was smaller than the one recommended above
+
+The recommendation was to give `PlacedPoint` a `face: u32`. Reading it through, that is wider than it
+looked: `Candidate` carries no face either, so a face would have to be threaded through all four
+placement streams, and an edge anchor sits on a boundary between faces, so "its face" is a design
+question rather than a lookup. `tips_on_part` answers that question with a nearest-triangle search
+AFTER placement, which is the hint: the face is derived, not carried.
+
+And the host never needed a face. It needed **one boolean per contact** -- is this contact buried
+inside another part of the same object -- which is what the dental path has asked per tip since
+engine 50 (`Overlap::blocked`). So:
+
+- **engine 66** exposed it: `contacts_buried(positions, indices, points, radius, debrisMm)`, one byte
+  per point. Placement is untouched, so no contact is renamed and no saved project needs migrating.
+- **engine 67** applies it: `runPlacementJob` drops what it marks
+  (`host/supports/buriedContacts.ts`, pure and tested without the engine), so EVERY generic
+  placement in both apps now honours the overlap rule, not only the dental one. Free on a
+  single-part file: the engine returns all-false without running a test.
+- The own-part lookup went down into `Overlap::own_part`, which uses the ray index it already
+  builds instead of scanning every face. A full-scan comparison in `parts.rs` guards the answers,
+  because a speed-up is invisible unless it is wrong.
+
+**The requirement is met**: a body-and-arm object keeps each mesh's own supports and gets none in the
+overlap, and the system still knows which part is which (`faceParts`, `parts`, `hidden` from
+`partTips`). What U5's separator mode may now say about supports follows from this, so the trap at
+the top of this plan is lifted for the LIVE path.
+
 ---
 
 ## 3b. Coherence pass: what contradicts, and what each app means by "overlap"
@@ -352,6 +379,18 @@ without changing what supports are.
 
 **This is a precondition on U5, not a nice-to-have.** A separator mode that ships without it turns a
 masked overlap into an unprintable one on the first use.
+
+**2026-11-13: C2 stopped being theoretical.** When it was written the generic path ignored parts, so
+"splitting un-masks the overlap" described a mask that was not applied either way. Engine 67 applies
+it, so the asymmetry is now real and measurable: one object with an overlap gets no contacts there
+(`sunk-pair` in the baseline), and the same geometry as two objects gets them. Nothing else changed
+about the recommendation.
+
+**A related coherence check, and it comes out clean.** A user hand-adding a support onto a buried
+face is NOT a new hole: the engine's tip rules (engine 41) already leave out a hand-placed tip whose
+path would enter the model, and the build reports it through `dropped`, which the panel shows. So the
+automatic path drops buried contacts before the build and the manual path drops them during it --
+two mechanisms, one outcome, both visible. Nothing to reconcile.
 
 ### C3 — AN ORDERING BUG IN THIS PLAN: U5 needs U1 step 4, not only U4
 

@@ -23,6 +23,18 @@ describe('ProblemList', () => {
     expect(container.querySelector('.sp-verdict')?.textContent).toContain('Only the cross-braces that would cross the model were left out.');
   });
 
+  it('says how many contacts the overlap rule left out, and says nothing when it left none', () => {
+    // The chip is the only place an operator can learn WHY an overlap has no supports. The build
+    // never saw those contacts, so they are not in `dropped` and no other line mentions them.
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0, buried: 3 } } });
+    const { container } = renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />);
+    expect(container.querySelector('.sp-verdict')?.textContent).toContain('3 contacts inside another mesh');
+    cleanup();
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0 } } });
+    const quiet = renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />);
+    expect(quiet.container.querySelector('.sp-verdict')?.textContent).not.toContain('inside another mesh');
+  });
+
   it('renders nothing without findings', () => {
     const { container } = renderPanel(<ProblemList />);
     expect(container.querySelector('.sp-problems')).toBeNull();
@@ -132,10 +144,13 @@ describe('every verdict the UI can show has a sentence in every locale', () => {
     // 0 gaps for a missing one, because it looks for literal keys and this one is interpolated --
     // so it would have let `nothing-built` ship untranslated. Assert the four by hand instead.
     const statuses = ['clear', 'blocked', 'inconclusive', 'nothing-built'] as const;
+    // `verdict.buried` and `verdict.dropped` ARE literal keys, so `i18n:check` sees them; they are
+    // here anyway because they sit on the same line and a locale that loses one loses the sentence.
+    const chips = ['dropped', 'islands', 'buried'] as const;
     for (const lang of ['en', 'ja', 'zh-Hant'] as const) {
       const dict = (await import(`../../i18n/locales/${lang}.json`)).default as Record<string, string>;
-      for (const status of statuses) {
-        expect(dict[`supportPanel.verdict.${status}`], `${lang} is missing ${status}`).toBeTruthy();
+      for (const key of [...statuses, ...chips]) {
+        expect(dict[`supportPanel.verdict.${key}`], `${lang} is missing ${key}`).toBeTruthy();
       }
     }
   });

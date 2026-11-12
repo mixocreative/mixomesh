@@ -224,6 +224,11 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   const hash = await sceneSource.sourceHashStaged(id, yieldToMain);
   const pose = scenePose(id);
   const ms = { placement: 0, build: 0, check: 0 };
+  // Contacts the engine's overlap rule dropped for being buried in another mesh of this object
+  // (engine 67). Only a placement learns the number, so a job that reuses the cached placement
+  // keeps the one the last verdict carried: the overlap still has no supports, and saying nothing
+  // this time would read as "it does now".
+  let buried = verdicts.get(id)?.buried;
 
   if (job.placement || needsPlacement(record, hash, !!cachedPlacement(id))) {
     const t0 = performance.now();
@@ -231,6 +236,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
     ms.placement = Math.round(performance.now() - t0);
     if (!placed || placed.kind !== 'placed' || !job.current()) { liveStats.dropped++; return; }
     liveStats.placements++;
+    buried = placed.result.buried;
     const restoring = !job.placement && !record.stale && isBuilt(record) && record.sourceHash === hash && !placementChanged(record);
     if (restoring) {
       // A loaded project: the placement is derived data, rebuilt without a history step.
@@ -281,7 +287,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   // operator reads "Supports clear the model" about supports that do not exist. And a MISSING
   // verdict is not clear either - nothing was checked - so the fallback is `inconclusive`.
   const emptyBuild = built.indices.length === 0;
-  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
+  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(buried ? { buried } : {}), ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
   if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
   // The check that fills the list; the verdict and the build are already on screen.

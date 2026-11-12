@@ -35,6 +35,12 @@ export interface VerdictInfo {
   status: 'clear' | 'blocked' | 'inconclusive' | 'nothing-built';
   /** Automatic supports the build left out. */
   dropped: number;
+  /**
+   * Contacts the overlap rule dropped before the build, for standing on a face buried inside another
+   * mesh of the same object (engine 67). Shown because the operator otherwise sees an overlap with no
+   * supports and no reason given; the build never saw these contacts, so they are not in `dropped`.
+   */
+  buried?: number;
   /** Islands no support carries to the plate. */
   islands: number;
   /** Structure fallbacks the repair applied (plan P5.2): `brace-pruned` = only the braces that cross the model were left out. */

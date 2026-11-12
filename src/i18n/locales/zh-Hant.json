@@ -1510,6 +1510,7 @@
   "supportPanel.verdict.inconclusive": "無法完成避讓檢查",
   "supportPanel.verdict.nothing-built": "未產生任何支撐",
   "supportPanel.verdict.dropped": "{n, plural, other{已省略 # 個支撐}}",
+  "supportPanel.verdict.buried": "{n, plural, other{# 個接點位於其他網格內}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個孤島缺乏支撐}}",
   "print.includeSupports": "支撐",
   "print.includeSupports.none": "僅模型",
