@@ -138,6 +138,30 @@ export function glbOf(name, { positions, indices, uvs }) {
   return glb;
 }
 
+/**
+ * TWO meshes in one file, overlapping: a 10 mm cube with a 4 mm cube sunk 2 mm into its top. The
+ * small cube's bottom face is INSIDE the big one, which is the body-and-arm case the overlap rule
+ * exists for (engine 67): a downward face no support can reach, so it gets no contacts, while every
+ * free face of both cubes keeps its own.
+ *
+ * Here rather than in geocore because the engine already has this case; what this fixture proves is
+ * that THIS APP's pipeline carries the rule end to end, which only the baseline can show.
+ */
+export function sunkPair() {
+  const pos = [], idx = [];
+  const box = ([x0, y0, z0], [x1, y1, z1]) => {
+    const base = pos.length / 3;
+    for (const [x, y, z] of [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]) pos.push(x, y, z);
+    // Outward-facing quads, counter-clockwise seen from outside.
+    for (const [a, b, c, d] of [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [3, 7, 6, 2], [0, 4, 7, 3], [1, 2, 6, 5]]) {
+      idx.push(base + a, base + b, base + c, base + a, base + c, base + d);
+    }
+  };
+  box([0, 0, 0], [10, 10, 10]);
+  box([3, 8, 3], [7, 14, 7]);
+  return { positions: new Float32Array(pos), indices: new Uint32Array(idx), uvs: null };
+}
+
 export const GLB_FILES = {
   'support-cube-overhang.glb': () => glbOf('CubeOverhang', { ...cubeOverhang(), uvs: null }),
   'support-seam-cube.glb': () => glbOf('SeamCube', seamCube({ split: true })),

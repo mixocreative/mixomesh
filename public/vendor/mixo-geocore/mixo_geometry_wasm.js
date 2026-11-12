@@ -4280,6 +4280,45 @@ export function check_support_problems(positions, indices, contacts, overhang_an
 }
 
 /**
+ * Which of `points` are BURIED inside (or against) another part of the same object: one byte per
+ * point, 1 for buried.
+ *
+ * This is the whole of what a host needs to stop supporting a face it cannot reach, and it is why
+ * `PlacedPoint` does not need a `face`. A generic policy places as it always has -- same contacts,
+ * SAME IDS, so every saved `deleted`, `overrides` and manual entry still matches -- and then drops
+ * the contacts this call marks. Changing placement's output instead would have renamed every
+ * contact (`part0-auto-...`), and contact ids are the keys of every saved record.
+ *
+ * `radius` is the contact's own radius in mm, so a tip whose BODY touches another part counts as
+ * buried and not only one whose centre does; pass 0 to test the point alone. `debris_mm` is the
+ * part rule, and 0 means nothing is debris.
+ *
+ * `points` is flat xyz f64 in the same frame as `positions`. A single-part file has nothing to be
+ * buried in, so every byte is 0.
+ * @param {Float32Array} positions
+ * @param {Uint32Array} indices
+ * @param {Float64Array} points
+ * @param {number} radius
+ * @param {number} debris_mm
+ * @returns {Uint8Array}
+ */
+export function contacts_buried(positions, indices, points, radius, debris_mm) {
+    const ptr0 = passArrayF32ToWasm0(positions, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(indices, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(points, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.contacts_buried(ptr0, len0, ptr1, len1, ptr2, len2, radius, debris_mm);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
  * Automatic contacts an old radius removal hid.
  * @param {string[]} auto_ids
  * @param {Float64Array} auto_positions

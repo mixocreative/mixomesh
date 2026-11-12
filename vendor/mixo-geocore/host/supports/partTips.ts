@@ -85,6 +85,9 @@ interface PartTipsEngine {
  * `debrisMm` is the part rule: a part whose bounding-box diagonal is under it is debris and gets no
  * tips. That is a DENTAL judgement about scan noise, so a generic caller that wants every part
  * supported passes 0.
+ *
+ * The caller does not have to weld (engine 68, see `contactsBuried`); face ids in the result are the
+ * caller's own either way, because the weld keeps face order and count.
  */
 export function partTips(
   mesh: TriangleMesh,
@@ -139,4 +142,39 @@ export function partTips(
       result.free();
     }
   }
+}
+
+interface BuriedEngine {
+  contacts_buried(positions: Float32Array, indices: Uint32Array, points: Float64Array, radius: number, debrisMm: number): Uint8Array;
+}
+
+/**
+ * Which of `contacts` are buried inside (or against) another part of the same object.
+ *
+ * This is what lets a generic policy stop supporting a face it cannot reach WITHOUT renaming a
+ * single contact: place as always, then drop what this marks. The alternative - taking the tips from
+ * `partTips` - renames every contact to `part<N>-…`, and contact ids are the keys of every saved
+ * record's `deleted`, `overrides` and manual list.
+ *
+ * `radius` is the contact's own radius in mm, so a tip whose BODY touches another part counts, not
+ * only one whose centre does. `debrisMm` is the part rule; 0 means nothing is debris, which is what
+ * a generic caller wants. A single-part file returns all false.
+ *
+ * `mesh` and the contact positions must be in the same frame.
+ *
+ * The caller does NOT have to weld: the binding welds duplicate corners itself (engine 68), because
+ * the parts split reads the mesh as imported and a render mesh - vertices split along every UV seam -
+ * would otherwise arrive as one part per face and mark its whole underside.
+ */
+export function contactsBuried(
+  mesh: TriangleMesh,
+  contacts: readonly { position: readonly [number, number, number] }[],
+  options: { radius?: number; debrisMm?: number } = {},
+): boolean[] {
+  if (contacts.length === 0) return [];
+  const points = new Float64Array(contacts.length * 3);
+  contacts.forEach((c, k) => points.set(c.position, k * 3));
+  const engine = supportEngine() as unknown as BuriedEngine;
+  const out = engine.contacts_buried(mesh.positions, mesh.indices, points, options.radius ?? 0, options.debrisMm ?? 0);
+  return Array.from(out, (v) => v === 1);
 }

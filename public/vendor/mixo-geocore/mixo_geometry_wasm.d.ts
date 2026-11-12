@@ -1351,6 +1351,25 @@ export function center_positions_in_place(positions: Float32Array): Float64Array
 export function check_support_problems(positions: Float32Array, indices: Uint32Array, contacts: Float64Array, overhang_angle_degrees: number, spacing: number): SupportProblems;
 
 /**
+ * Which of `points` are BURIED inside (or against) another part of the same object: one byte per
+ * point, 1 for buried.
+ *
+ * This is the whole of what a host needs to stop supporting a face it cannot reach, and it is why
+ * `PlacedPoint` does not need a `face`. A generic policy places as it always has -- same contacts,
+ * SAME IDS, so every saved `deleted`, `overrides` and manual entry still matches -- and then drops
+ * the contacts this call marks. Changing placement's output instead would have renamed every
+ * contact (`part0-auto-...`), and contact ids are the keys of every saved record.
+ *
+ * `radius` is the contact's own radius in mm, so a tip whose BODY touches another part counts as
+ * buried and not only one whose centre does; pass 0 to test the point alone. `debris_mm` is the
+ * part rule, and 0 means nothing is debris.
+ *
+ * `points` is flat xyz f64 in the same frame as `positions`. A single-part file has nothing to be
+ * buried in, so every byte is 0.
+ */
+export function contacts_buried(positions: Float32Array, indices: Uint32Array, points: Float64Array, radius: number, debris_mm: number): Uint8Array;
+
+/**
  * Automatic contacts an old radius removal hid.
  */
 export function contacts_hidden_by_marker_ids(auto_ids: string[], auto_positions: Float64Array, markers: string[], erase_radius: number): string[];
@@ -1552,6 +1571,7 @@ export interface InitOutput {
     readonly build_pick_index: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly center_positions_in_place: (a: number, b: number, c: any) => [number, number, number, number];
     readonly check_support_problems: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+    readonly contacts_buried: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly contacts_hidden_by_marker_ids: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly decimate_display: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dental_allowed_vertices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => [number, number, number, number];

@@ -23,13 +23,35 @@ import './testEnv';
  *
  *   npm run baseline:check                                        compare (also runs in `npm test`)
  *   UPDATE_BASELINE=1 npx vitest run src/supports/engineBaseline.test.ts   re-take
+ *
+ * ── RE-TAKEN 2026-11-13 at engine 68, and the diff was mostly NOT the engine ───────────────────
+ *
+ * Two changes landed together and the diff has to be read as two:
+ *
+ * 1. **The engine (65 -> 68)**: `buried` is new on every row, and `sunk-pair` is new. On the three
+ *    old fixtures the engine changed NOTHING -- measured in between, at 67 without the weld below,
+ *    where every old row was identical to the committed 65 capture. That is the useful fact about
+ *    engines 66-68: the overlap rule costs a single-part model nothing.
+ * 2. **This file started welding as the live path does**, and THAT moved most of the numbers:
+ *      seam-cube-split: dropped 10 -> 0, tips 82 -> 92, one verdict `blocked` -> `clear`
+ *      cube-overhang:   dropped 10/8/12 -> 0, tips 82/84/80 -> 92
+ *      slope-47:        placed 66 -> 65, dropped 40 -> 19, tips 26 -> 46, braces 10 -> 169
+ *    Every one of those moved the SAME WAY: fewer supports thrown away, more built, a `blocked`
+ *    verdict becoming `clear`. The old rows were pessimistic fiction -- supports dropped for
+ *    crossing a model whose faces were a few nanometres out of plane, on a mesh the app never hands
+ *    the engine. `weldByPosition`'s own comment says this happens (it measured 48 vs 62 contacts in
+ *    the browser against the goldens); what is new is seeing it cost ten built supports and a
+ *    verdict.
+ *
+ * **So the build is sensitive to sub-micron geometry, and that is worth knowing on its own.** It is
+ * not a defect to chase here: the fix is the one already in the live path, to hand the engine a
+ * snapped mesh, which is now also what this file hands it.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { configureGeometry, geometryReady } from '@mixo-geocore/host/workers/geometryClient';
-import { placeGeneric } from '@mixo-geocore/host/supports/genericPlacement';
-import { runSupportJob } from '@mixo-geocore/host/supports/jobRunner';
+import { runPlacementJob, runSupportJob } from '@mixo-geocore/host/supports/jobRunner';
 import {
   defaultSupportSettings, presetValues, toPlacementSettings, updateSetting,
   type LiveSupportSettings, type SettingKey,
@@ -38,7 +60,8 @@ import type { TriangleMesh } from '@mixo-geocore/host/core/analysis/types';
 import { emptySupports } from './model';
 import { buildJob, REPAIR_BUDGET } from './live/jobInputs';
 import { tipCount, toLocal } from './supportJob';
-import { cubeOverhang, seamCube } from '../../tests/fixtures/support-cubes.mjs';
+import { weldByPosition } from './frame';
+import { cubeOverhang, seamCube, sunkPair } from '../../tests/fixtures/support-cubes.mjs';
 
 const VENDOR = fileURLToPath(new URL('../../public/vendor/mixo-geocore/', import.meta.url));
 const BASELINE = new URL('../../tests/fixtures/engine-baseline.json', import.meta.url);
@@ -97,14 +120,24 @@ function tiltedPlate(deg: number): TriangleMesh {
 
 /** One row: what the pipeline did, in numbers a diff can be read from. */
 function row(mesh: TriangleMesh, settings: LiveSupportSettings, budget: number) {
-  const model = toLocal(lifted(mesh, settings.liftHeight));
-  const placement = placeGeneric(model.local, toPlacementSettings(settings));
+  // `weldByPosition` FIRST, because the live path does it (`frame.ts`, in `partsToEngine`) and a
+  // baseline that skips a step of the live path measures a path nobody runs. It mattered: without
+  // it, `seam-cube-split` -- a cube whose bottom cells have their own vertices, as a textured import
+  // does -- reached the engine as 32 unconnected faces, and engine 67's overlap rule read all
+  // sixteen bottom contacts as buried inside a neighbouring "part". That found a real engine defect
+  // (fixed in 68: the ABI welds too), and it was still the wrong path to be measuring.
+  const model = toLocal(weldByPosition(lifted(mesh, settings.liftHeight)).mesh);
+  // `runPlacementJob`, not `placeGeneric`: the live path goes through the job (that is where the
+  // overlap rule drops buried contacts, engine 67), and a baseline that skipped it would measure a
+  // path the app does not run. Orientation is identity here -- the object's pose is in `model`.
+  const placement = runPlacementJob({ mesh: model.local, orientation: { position: [0, 0, 0], rotation: [0, 0, 0] }, settings: toPlacementSettings(settings) });
   const record = { ...emptySupports(settings), settings };
   const inputs = { points: placement.points, manual: [], deleted: [], zones: [], contactSettings: {} };
   const built = runSupportJob({ ...buildJob(model, record, inputs, 'baseline'), repairBudget: budget }, undefined, 1);
   const perPart = built.components.reduce<Record<string, number>>((a, c) => ((a[c.part] = (a[c.part] ?? 0) + 1), a), {});
   return {
     placed: placement.points.length,
+    buried: placement.buried ?? 0,
     regions: placement.regions.length,
     tips: tipCount(built),
     dropped: built.dropped.length,
@@ -124,6 +157,10 @@ function capture() {
     'seam-cube-split': () => seamCube({ split: true }) as TriangleMesh,
     // 47 degrees: inside the 45-50 band, so this row and only this row moves with the overhang angle.
     'slope-47': () => tiltedPlate(47),
+    // Two overlapping meshes in one file: the only row where the overlap rule (engine 67) can fire,
+    // and the only app-level proof that this pipeline carries it. `placed` here is the count AFTER
+    // the rule, so a row whose `placed` climbs back up is the rule having stopped working.
+    'sunk-pair': () => sunkPair() as TriangleMesh,
   };
   const out: Record<string, unknown> = {
     note: 'mixoMesh own output, engine as vendored. RE-TAKE on re-vendor and READ the diff.',

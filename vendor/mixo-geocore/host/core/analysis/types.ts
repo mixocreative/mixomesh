@@ -71,6 +71,15 @@ export interface PlacementResult {
   contactNormals: Float32Array;
   /** Every suggested tip, painted or not (where Add may snap), in the placement's frame. Never stored in a unit. */
   suggested?: SupportPoint[];
+  /**
+   * How many contacts the overlap rule dropped for standing on a face buried inside another part of
+   * the same object (engine 67). Absent or 0 when none were.
+   *
+   * Reported rather than left implicit: an operator who expects supports where two meshes overlap
+   * and sees none must be able to find out why, and a placement that quietly returns fewer contacts
+   * than it found is the kind of silence this codebase does not allow.
+   */
+  buried?: number;
 }
 
 /** Reports how far a long job has come: `fraction` in [0, 1] and a short stage name. */

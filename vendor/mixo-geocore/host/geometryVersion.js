@@ -22,6 +22,25 @@
 // 20: denture review rim = low points joined over the mesh (rim_loops/rim_sizes/rim_closed/rim_edges/rim_info), holes by an axis ray grid (hole_outlines/hole_sizes/hole_info/hole_band_mask); rim_loop, rim_bridged, hole_loops, hole_edges removed.
 
 /** Must equal the Rust `engine_version()`; both change together on any ABI change. */
+// 68: `part_tips` and `contacts_buried` WELD the caller's mesh before splitting it into parts, as
+// `surface::parts::split` has always required. Without it a RENDER mesh - a glTF or textured import,
+// whose vertices are split along every UV seam - arrives as one part per face, every face touching
+// its neighbours, so every contact on it reads as buried. mixoMesh's baseline measured the cost at
+// engine 67: an ordinary cube lost the sixteen contacts under its 4 x 4 bottom. The weld is the
+// import weld itself (duplicates only), keeps face order and count, and costs no copy on a mesh
+// that is already welded.
+// 67: the overlap rule now applies to EVERY generic placement, not only the dental one:
+// `runPlacementJob` drops the contacts `contacts_buried` marks (host/supports/buriedContacts.ts), so
+// an object whose file holds several meshes gets no support where they overlap -- a body and an arm
+// keep their own supports and the joint gets none. No ABI change: contact IDS are untouched, which
+// is why this is a drop after placement and not a different placement. Same engine, cheaper:
+// `Overlap::own_part` finds a contact's own part off the ray index instead of scanning every face
+// (same answers, guarded by a full-scan comparison in `parts.rs`).
+// 66: new ABI export `contacts_buried(positions, indices, points, radius, debrisMm)` -> one byte per
+// point, 1 where the contact is buried inside or against another part of the same object. The
+// smallest thing a generic policy needs to stop supporting a face it cannot reach: placement is
+// untouched, so contact IDS do not change and no saved record needs migrating. Host side:
+// host/supports/partTips.ts.
 // 65: `LoopOutcome::Crack` = 9 (`fill-crack`): a rim of three or more edges enclosing no area is
 // a crack, reported apart from `fill-degenerate`, which now means only "fewer than three edges".
 // 65: new ABI export `part_tips(positions, indices, settings, rules, debrisMm, target)` ->
@@ -89,7 +108,7 @@
 // 38: the self-supporting overhang rule (rules overhangSelfSupport, overhangMinAreaMm2, overhangMaxReachMm, overhangMinAngleDeg, appended: 89 rule names); off by default, so a build without it is unchanged; the review result has `self_support_faces()` and `self_support_info()`; the tilt scan honours it.
 // 37: the plate outline and the grid raft (rules raftGrid, raftMapOutline, raftGridBottomMm, raftGridTopMm, raftRibMm, raftRibPitchMm, raftRimMm, raftPadMarginMm, appended: 85 rule names); both switches default off, so a build without them is unchanged.
 // 36: opt-in R1b, the steep no-support ray (rule noSupportSteepDeg, appended: 77 rule names; the review result has `no_support_steep_mask()` and `no_support_steep_deg()`).
-export const HOST_GEOMETRY_VERSION = 65;
+export const HOST_GEOMETRY_VERSION = 68;
 
 /** Thrown when the loaded engine's `engine_version()` is not `HOST_GEOMETRY_VERSION` (code 'geometry-version-mismatch'). */
 export class GeometryVersionMismatch extends Error {

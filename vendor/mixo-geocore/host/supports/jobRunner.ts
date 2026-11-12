@@ -6,6 +6,8 @@ import { dentalPolicy } from '../dental/placement';
 import type { GeneratedSupportMesh } from '../core/supports/mesh';
 import { genericPolicy, jobContacts } from './genericPolicy';
 import { placeGeneric } from './genericPlacement';
+import { contactsBuried } from './partTips';
+import { dropBuried } from './buriedContacts';
 import { checkSupportProblems } from './checkSupports';
 import { generateSupports, type BuildSite } from './generateSupports';
 import { GENERATE_LIMITS } from './generateLimits';
@@ -64,9 +66,15 @@ export { orientationOnly };
 /** Automatic contacts, in the frame of the turned model (the caller maps them back to the unit). */
 export function runPlacementJob(job: PlacementJob, onProgress?: ProgressCallback): PlacementResult {
   onProgress?.(0, PROGRESS_STAGE.findingOverhangs);
-  const result = placeGeneric(applyTransform(job.mesh, orientationOnly(job.orientation)), job.settings, job.rules ?? GENERATE_RULES);
+  const mesh = applyTransform(job.mesh, orientationOnly(job.orientation));
+  const result = placeGeneric(mesh, job.settings, job.rules ?? GENERATE_RULES);
+  // The overlap rule, which the dental path has had since engine 50: an object whose file holds
+  // several meshes gets no support where they overlap. Free on a single-part file (the engine
+  // returns all-false without a test), and it changes no contact id, so hand work survives.
+  // `debrisMm` 0: a generic caller has no scan-noise rule, so every part counts as a part.
+  const kept = dropBuried(result, contactsBuried(mesh, result.points));
   onProgress?.(1, PROGRESS_STAGE.done);
-  return result;
+  return kept;
 }
 
 /** Unsupported spots, in the frame of the turned model. */
