@@ -9,7 +9,8 @@ import { installEnv } from './env.mjs';
 
 installEnv();
 console.error = () => {};
-const { setState, getState } = await import('../src/core/StateManager.js');
+const { setState, getState, subscribe } = await import('../src/core/StateManager.js');
+const { EVENTS } = await import('../src/core/events.js');
 const { SplitToPartsCommand, JoinCommand } = await import('../src/core/HistoryManager.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
@@ -268,6 +269,72 @@ await test('PrintPartCommand on any part toggles every part of the logical objec
   const off = new PrintPartCommand('part', true, false);
   off.execute();
   assert.equal(getState().scene.objects.lead.isPrintPart, false);
+});
+
+await test('a part keeps a name the operator chose through merge and separate; a derived one is replaced', () => {
+  // The owner's case: "hook" merged into "denture" must come back as "hook".
+  // A name the APP derived (the import's `<lead>_primitive1`, or a previous
+  // split's `<lead>.001`) is not the operator's and still gets a fresh one --
+  // which is what the 2-part import test above pins.
+  seed({
+    denture: base('denture', 'denture', { _tris: [[0, 2, 1]] }),
+    hook: base('hook', 'hook', { _tris: [[0, 1, 3]] }),
+  });
+  new JoinCommand(['denture', 'hook'], { leadId: 'denture' }).execute();
+  assert.equal(getState().scene.objects.hook.name, 'hook', 'the merge never renamed it');
+  const split = new SplitToPartsCommand('denture');
+  split.execute();
+  assert.equal(getState().scene.objects.hook.name, 'hook', 'and the separate gives it back, not "denture.001"');
+  split.undo();
+  assert.equal(getState().scene.objects.hook.name, 'hook');
+  // Derived names, each replaced: the lead's name itself, the import form, an earlier split's form.
+  for (const [id, name] of [['a', 'denture'], ['b', 'denture_primitive1'], ['c', 'denture.007']]) {
+    seed({
+      denture: base('denture', 'denture', { logicalObjectId: 'denture', _tris: [[0, 2, 1]] }),
+      [id]: base(id, name, { logicalObjectId: 'denture', isInternalPart: true, _tris: [[0, 1, 3]] }),
+    });
+    new SplitToPartsCommand('denture').execute();
+    assert.equal(getState().scene.objects[id].name, 'denture.001', `${name} is a derived name`);
+  }
+});
+
+await test('a Join drops the swallowed object supports, warns, and undo brings them back', async () => {
+  // THE DEFECT: supports live on the LEAD and every read redirects there
+  // (src/supports/store.ts). Merge an unsupported object INTO a supported one
+  // and the record is unreachable while still in the save file: the operator is
+  // told nothing, export is not blocked, and the print goes out unsupported.
+  const record = { revision: 3, settings: { preset: 'MIDDLE' }, manual: [], deleted: [], stamps: [], overrides: {}, sourceHash: 'h' };
+  seed({
+    a: base('a', 'Body', { _tris: [[0, 2, 1]] }),
+    b: base('b', 'Arm', { _tris: [[0, 1, 3]], supports: record }),
+  });
+  const toasts = [];
+  const updated = [];
+  const off = subscribe(EVENTS.TOAST, (p) => toasts.push(p));
+  const offUpdated = subscribe(EVENTS.OBJECT_UPDATED, (p) => updated.push(p?.meshId));
+  const join = new JoinCommand(['a', 'b'], { leadId: 'a' });
+  join.execute();
+  assert.equal(getState().scene.objects.b.supports, undefined, 'the swallowed record is gone, not left unreachable');
+  assert.ok('supports' in getState().scene.objects.b === false, 'the field is removed, not set to undefined');
+  assert.equal(getState().scene.objects.a.supports, undefined, 'the lead had none and still has none');
+  assert.equal(toasts.length, 1, 'the operator is told');
+  assert.equal(toasts[0].type, 'warning');
+  assert.ok(toasts[0].message.includes('Arm'), `names the object: ${toasts[0].message}`);
+  // And the LEAD's own supports must be re-judged, because the logical object's geometry union just
+  // changed: `_applyLinkPatches` dispatches OBJECT_UPDATED per patched id, which is what the stale
+  // watch listens to (src/supports/stale.ts). Without it, supports built for A alone would still
+  // read as current on A+B -- and supports that clear A can cross B.
+  assert.ok(updated.includes('a'), `the lead is reported updated: ${updated.join(',')}`);
+  join.undo();
+  assert.deepEqual(getState().scene.objects.b.supports, record, 'undo brings the record back whole');
+  // A lead that HAS supports keeps them: they are the merged object's own.
+  seed({ a: base('a', 'Body', { _tris: [[0, 2, 1]], supports: record }), b: base('b', 'Arm', { _tris: [[0, 1, 3]] }) });
+  toasts.length = 0;
+  new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
+  assert.deepEqual(getState().scene.objects.a.supports, record, 'the lead keeps its own');
+  assert.equal(toasts.length, 0, 'nothing was lost, so nothing is said');
+  off();
+  offUpdated();
 });
 
 await test('validation of a joined object goes through the welded-union (group) path', async () => {

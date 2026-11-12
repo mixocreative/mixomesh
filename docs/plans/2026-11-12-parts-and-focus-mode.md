@@ -254,6 +254,37 @@ With the gaps Fable ranked, worst first:
 back, and undo each in one step; supports are never silently orphaned; and a project saved after a
 split reloads identically on a build that predates it.
 
+#### 2026-11-13: gaps 1 and 3 are FIXED, ahead of the UI, because both were live defects
+
+Neither needed the separator mode. Both were wrong in the app as it shipped, so they went in first.
+
+**Gap 1 — a Join orphaned the swallowed object's supports.** Supports live on the lead and every read
+redirects there (`src/supports/store.ts`), so merging a supported object into an unsupported one left
+the record unreachable AND still in the save file: nothing stale, export not blocked, **the print
+goes out unsupported**. `JoinCommand` now snapshots those records, drops them, and raises a warning
+toast naming the objects (`toast.joinDroppedSupports`, three locales); undo restores them whole. The
+record is read straight off `state.scene.objects` -- a command in core must not import the support
+modules, and the record is only a field there. Guarded in `tests/split-join.test.mjs`, verified by
+removing the drop and watching the test fail.
+
+**What was NOT a defect, checked rather than assumed:** the lead's own supports after a merge. The
+logical object's geometry union changed, so they must go stale -- and they do: `_applyLinkPatches`
+already dispatches `OBJECT_UPDATED` per patched id, `sourceHash` already covers the whole union
+(`sceneSource.ts`), and the stale watch forgets the hash on that event. Now pinned at both seams:
+the join test asserts the lead is reported updated, and `stale.test.ts` asserts a membership change
+marks it `geometry` (through a PART id too) and clears on undo.
+
+**Gap 3 — a split replaced a name the operator chose.** `SplitToPartsCommand` renamed every non-lead
+part `<lead>.00N` unconditionally, so "hook" merged into "denture" came back as "denture.001".
+`_isDerivedName` now tells a derived name (the lead's own name, the import's `<lead>_primitive1`, an
+earlier split's `<lead>.001`) from one the operator chose, and only derived names are replaced. The
+import case the 2-part test pins is unchanged, which is the point: that rename IS wanted.
+
+**Still open for U5**: the UI itself (double-click to enter an object with parts as the depth, the
+isolation dimming, the notice and its accept button), C2's recorded parent, gap 2 (merge then
+Repair), gap 4 (origin), gap 5 (derived assets with `retainedTriangles`/`release`) and gap 6 (the
+lead's export ratio).
+
 ### U6 — mixomesh: re-vendor 12 → 65
 
 The plan's §4 (in `S:\ai\mixodental\docs\design\2026-11-12-three-repo-refactor-plan.md`) holds the

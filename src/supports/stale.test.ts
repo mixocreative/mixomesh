@@ -109,6 +109,26 @@ describe('stale supports', () => {
     expect(readSupports('lead')!.deleted).toEqual([]);
   });
 
+  it('a membership change (join / split) re-hashes the union and marks them stale', () => {
+    // A Join or a Split changes WHICH parts a logical object has, and `sourceHash` covers the whole
+    // union (`sceneSource.ts`), so the supports of the lead no longer describe the object. The link
+    // commands dispatch OBJECT_UPDATED per patched id (`ParentCommands._applyLinkPatches`), and this
+    // is the subscriber that has to notice: it must FORGET the cached hash, not just re-compare it,
+    // or the stale cache answers for geometry that is no longer there.
+    expect(stale()).toBe(null);
+    scene.revision = 1;
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId: 'lead' });
+    expect(stale()).toBe('geometry');
+    // Undoing the join puts the membership back, and the flag clears by itself.
+    scene.revision = 0;
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId: 'lead' });
+    expect(stale()).toBe(null);
+    // Reported through a PART id too: a user joins by picking a part, and the owner is the lead.
+    scene.revision = 1;
+    dispatch(EVENTS.OBJECT_UPDATED, { meshId: 'part' });
+    expect(stale()).toBe('geometry');
+  });
+
   it('objects whose supports were never built are never stale', () => {
     setState((s: any) => ({ ...s, scene: { ...s.scene, objects: { ...s.scene.objects, lead: { ...s.scene.objects.lead, supports: emptySupports() } } } }), { silent: true });
     scene.pose_.scale = [3, 3, 3];

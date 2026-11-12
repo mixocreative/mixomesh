@@ -702,6 +702,7 @@
   "toast.partsNotWatertight": "{n, plural, other{# 個のパーツが非水密 — 再ベイクをスキップ、スライサーが自動修復します}}",
   "toast.repairUnavailable": "メッシュ修復エンジンが利用できません — 水密修復をスキップしました",
   "toast.triangleBudget": "シーンの面数が {current} — このビルドの安全な上限 {budget} を超えています。インポートは続行しますが、動作が遅くなる可能性があります。",
+  "toast.joinDroppedSupports": "結合により、{names} のサポートが削除されました。結合後のオブジェクトに再度サポートを生成してください。",
   "toast.undoTrimmed": "大きなモデルのメモリを確保するため、古い元に戻す履歴を消去しました。",
   "toast.exportedWithWarnings": "警告付きで書き出しました — 水密を確認できませんでした: {names}",
   "toast.loaded": "{name} を読み込みました",

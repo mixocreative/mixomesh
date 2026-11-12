@@ -516,6 +516,22 @@ export class UngroupCommand {
 // shaders and geometryFixes are untouched by both commands; only the
 // linkage flags, names and (for Split) the Outliner parent change.
 
+/**
+ * Does `name` look like a name this app derived from `leadName`?
+ *
+ * The import names a multi-material part after its lead (`Bowl_primitive1`),
+ * and a split names them `Bowl.001`, so both are names to replace. A name the
+ * OPERATOR chose is not: a "hook" merged into a "denture" must come back as
+ * "hook", not as "denture.001". Only the lead's own prefix counts, so an
+ * unrelated name is never mistaken for a derived one.
+ */
+function _isDerivedName(name, leadName) {
+  if (!name || !leadName) return true;
+  if (name === leadName) return true;
+  const prefix = leadName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${prefix}[._ ]`).test(name);
+}
+
 function _uniqueNameIn(baseName, objects) {
   const taken = new Set(Object.values(objects).map(o => o?.name));
   if (!taken.has(baseName)) return baseName;
@@ -534,6 +550,45 @@ function _snapshotLink(obj) {
   const out = {};
   for (const k of LINK_FIELDS) out[k] = obj[k];
   return out;
+}
+
+/**
+ * Support records of the leads a Join swallows.
+ *
+ * Supports live on the LEAD of a logical object and every read redirects there
+ * (`src/supports/store.ts`), so after a merge the other object's record is
+ * unreachable while still sitting in the save file: the operator is told
+ * nothing, export is not blocked, and if the new lead had no supports **the
+ * print goes out unsupported**. So the Join drops them and says so. Undo puts
+ * them back, which is why they are snapshotted rather than simply deleted.
+ *
+ * Read straight off `state.scene.objects` on purpose: a command in core must
+ * not import the support modules, and the record is only a field.
+ */
+function _supportsToDrop(leads, leadId, objects) {
+  const dropped = {};
+  for (const other of leads) {
+    if (other === leadId) continue;
+    if (objects[other]?.supports) dropped[other] = objects[other].supports;
+  }
+  return dropped;
+}
+
+function _setSupports(records, keep) {
+  const ids = Object.keys(records);
+  if (ids.length === 0) return;
+  setState(state => {
+    const objects = { ...state.scene.objects };
+    for (const id of ids) {
+      if (!objects[id]) continue;
+      const next = { ...objects[id] };
+      if (keep) next.supports = records[id];
+      else delete next.supports;
+      objects[id] = next;
+    }
+    return { scene: { ...state.scene, objects } };
+  });
+  dispatch(EVENTS.SUPPORTS_CHANGED, { objectIds: ids });
 }
 
 function _applyLinkPatches(patches) {
@@ -576,7 +631,11 @@ export class SplitToPartsCommand {
     ids.forEach((id, i) => {
       const obj = objects[id];
       before[id] = _snapshotLink(obj);
-      const name = i === 0 ? obj.name : _uniqueNameIn(`${lead.name}.${String(i).padStart(3, '0')}`, draft);
+      // A part that carries a name of its own keeps it; one named after the lead
+      // (an import part, or a name a previous split derived) gets a fresh one.
+      const name = i === 0 || !_isDerivedName(obj.name, lead.name)
+        ? obj.name
+        : _uniqueNameIn(`${lead.name}.${String(i).padStart(3, '0')}`, draft);
       after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
       draft[id] = { ...obj, ...after[id] };
     });
@@ -656,11 +715,17 @@ export class JoinCommand {
     this._leadId = leadId;
     this._before = before;
     this._after = after;
+    this._droppedSupports = _supportsToDrop(leads, leadId, objects);
     return true;
   }
   execute() {
     if (!this._plan()) { this.applied = false; return; }
     _applyLinkPatches(this._after);
+    _setSupports(this._droppedSupports, false);
+    const names = Object.keys(this._droppedSupports).map(id => getState().scene.objects[id]?.name).filter(Boolean);
+    if (names.length > 0) {
+      dispatch(EVENTS.TOAST, { message: t('toast.joinDroppedSupports', { names: names.join(', ') }), type: 'warning', duration: 8000 });
+    }
     // Parts live where their lead lives. First dissolve any `<lead> parts`
     // group that holds only members of this join (its children rise to the
     // group's parent), then reparent stragglers next to the lead.
@@ -693,6 +758,7 @@ export class JoinCommand {
     if (this._reparent) this._reparent.undo();
     for (let i = this._dissolves.length - 1; i >= 0; i--) this._dissolves[i].undo();
     _applyLinkPatches(this._before);
+    _setSupports(this._droppedSupports ?? {}, true);
     this.applied = false;
   }
 }

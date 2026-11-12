@@ -702,6 +702,7 @@
   "toast.partsNotWatertight": "{n, plural, other{# 個部件非水密 — 跳過重新烘焙；切片器將自動修復}}",
   "toast.repairUnavailable": "網格修復引擎無法使用 — 已跳過密閉修復",
   "toast.triangleBudget": "場景目前有 {current} 個面 — 已超過此版本的安全上限 {budget}。匯入將繼續，但反應可能變慢。",
+  "toast.joinDroppedSupports": "由於合併，{names} 上的支撐已被移除。請在合併後的物件上重新產生支撐。",
   "toast.undoTrimmed": "為了替大型模型釋放記憶體，已清除較早的復原步驟。",
   "toast.exportedWithWarnings": "已匯出但有警告 — 無法確認密閉性：{names}",
   "toast.loaded": "已載入 {name}",
