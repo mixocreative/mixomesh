@@ -45,7 +45,7 @@ U6 ─ mixomesh: re-vendor 12 → 65                       ←┘
 U7 ─ mixomesh: generic supports honour parts           ← U6
 
 U4 ─ mixomesh: the focus-mode module                    (no engine dependency: can run in parallel with U1/U2)
-U5 ─ mixomesh: scope depth = parts, separate + merge    ← U4
+U5 ─ mixomesh: scope depth = parts, separate + merge    ← U4 AND U1 step 4 (see 3b/C3)
 ```
 
 **THE TRAP: U4 and U5 can ship before the engine, but they must not promise what only U7 delivers.**
@@ -275,6 +275,96 @@ promise becomes true, at which point the separator mode may say so.
 shown before generate.
 
 ---
+
+## 3b. Coherence pass: what contradicts, and what each app means by "overlap"
+
+Checked 2026-11-12, after the owner asked whether the functions, intentions and UX all complement
+rather than contradict. Most do. Four did not, and one of those is an ordering bug in this plan.
+
+### C1 — THE TWO APPS MEAN OPPOSITE THINGS BY "TWO OBJECTS OVERLAP", and that is fine
+
+mixoDental's stance is already in its UI: the Arrange command's hint reads *"Move the objects so
+none overlaps another."* Overlapping objects there are an **arrange error** — a plate problem with a
+button to fix it — and `PlateLedger` reserves plate space so two concurrent imports cannot land on
+each other. Nothing in mixoDental reports a geometric collision between objects, because the app's
+whole stance is that the state should not exist.
+
+mixoMesh is an editor. **Overlapping objects are normal and intended** — an arm on a body is the
+example the owner gave. And the separator mode's entire purpose is to *create* that state
+deliberately.
+
+So the engine's rule is right to be per-object, and **each app owns what an inter-object overlap
+means**: an error to fix, or a normal state. The engine reports; the host judges. Written down
+because the opposite reading — one shared verdict on inter-object overlap — would make one of the
+two apps wrong by construction.
+
+### C2 — SPLITTING UN-MASKS THE OVERLAP, AND NOTHING CATCHES IT (the real contradiction)
+
+The rule holds *within one object*: the engine masks faces of one object buried inside another part
+of **that same object**. So:
+
+- body + arm as ONE object → the overlap is masked → no supports there. Correct.
+- separate them into TWO objects → the overlap is no longer within one object → **the mask stops
+  applying and both get supports inside solid material.**
+
+Those supports can be neither printed nor removed. It is the owner's original worry, arriving
+through the door the separator mode opens. And nothing would catch it: mixoDental has no
+inter-object collision report (C1), and mixoMesh has none either.
+
+**Recommended fix, and it is cheap: the split RECORDS THE PARENT.** Then generation can say, at the
+moment it matters:
+
+> These 2 objects were split from one assembly and overlap. Supports in the overlap cannot be
+> printed. **Merge them** / **Generate anyway**.
+
+Why this and not the alternatives: masking across objects would break the per-object storage the
+rule exists to protect (moving B would stale A's supports); forbidding the split would remove the
+feature; and saying nothing is the silent failure this codebase audits for. A recorded parent is one
+field the serialiser already has a home for — `logicalObjectId` — and it makes the warning possible
+without changing what supports are.
+
+**This is a precondition on U5, not a nice-to-have.** A separator mode that ships without it turns a
+masked overlap into an unprintable one on the first use.
+
+### C3 — AN ORDERING BUG IN THIS PLAN: U5 needs U1 step 4, not only U4
+
+The dependency diagram above says U5 depends on U4 (the focus module). It also depends on **U1 step
+4, the host-declared target**, and for a reason Fable measured: the engine picks the **largest part**
+as the target, while `JoinCommand` makes the **active object** the lead. Merge a small hook into a
+denture and the operator's active object is the hook, the engine's target is the denture, and the
+lead is what decides where supports are stored and which ratio export uses. Those must agree before
+a merge UI exists, or merging quietly produces the wrong target.
+
+So: **U5 depends on U4 and on U1 step 4.** The diagram is corrected.
+
+### C4 — "DEBRIS IS DENTAL-ONLY" LEAVES NOISE SHELLS SUPPORTED
+
+My recommendation in U1 stands — `debris` is a dental judgement about scan noise, and in a generic
+object a small part is as likely to be a deliberate detail, so the generic policy should support
+every part it is given. But the consequence has to be carried with it: **a generic object with scan
+noise will get supports on the noise.**
+
+The complement already exists in the engine — the noise-shell report (0.001 mm³, "report only",
+never deleted). It has to surface in the generic flow so the operator can remove the shells rather
+than print them. Without that, this recommendation trades one silent wrong for another.
+
+### What checks out
+
+- **Grouping does not decide physics.** The rule is per-object and geometric; grouping decides only
+  which meshes are in the object. Settled, and the owner's original "respects by object" was the
+  correct wording.
+- **Identify at load, repair on request.** Complementary: the lossless half runs at import, the
+  lossy half waits for a hand. Nothing in the plan asks repair to run unasked.
+- **`keep: []` and isolation.** The focus module serves focus-without-isolation and
+  focus-with-isolation from one call; the separator mode is one caller of three.
+- **Dimmed means disabled, and the outliner stays live.** No conflict: the outliner is in `live`
+  precisely because the operator verifies the picked set there.
+- **Merge takes the active object's origin; split takes the bounding-box centre of the picked set.**
+  Asymmetric but not contradictory — merge has an obvious anchor and split does not. Worth knowing
+  that **merge → split → merge is not origin-identity**; nothing moves in world space, so for print
+  prep this is benign, and it is written here rather than discovered.
+- **An open scan gets no hidden mask** (`inside_other` is a parity test needing a closed part), so
+  the UI must say so rather than imply the overlap was handled. Already U1's gap 6.
 
 ## 4. Not in this plan, on purpose
 
