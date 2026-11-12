@@ -2,6 +2,34 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-13, LATER: U5 GAPS 1 AND 3 ARE FIXED, ahead of the separator-mode UI, because both were
+> live defects in the app as it shipped.**
+>
+> **A Join orphaned the swallowed object's supports.** They live on the LEAD and every read redirects
+> there, so merging a supported object into an unsupported one left the record unreachable AND still
+> in the save file: nothing stale, export not blocked, **the print goes out unsupported**. The Join
+> now snapshots, drops and warns (`toast.joinDroppedSupports`, three locales); undo restores them.
+> The record is read straight off `state.scene.objects` -- a core command must not import the support
+> modules, and it is only a field there.
+>
+> **A split replaced a name the operator chose**: "hook" merged into "denture" came back as
+> "denture.001". `_isDerivedName` now separates a derived name (the lead's own, the import's
+> `<lead>_primitive1`, an earlier split's `<lead>.001`) from a chosen one. The import rename stays --
+> the 2-part test pins it, and that one IS wanted.
+>
+> **What was NOT broken, and I checked instead of assuming:** the lead's own supports after a merge.
+> The union changed, so they must go stale, and they already did -- `_applyLinkPatches` dispatches
+> `OBJECT_UPDATED` per id, `sourceHash` covers the union, the stale watch forgets the hash on that
+> event. Pinned at both seams rather than "fixed".
+>
+> **A process note worth keeping: the heredoc ate my regex escaping again** (it is in the memory
+> rules). The mangled `ParentCommands.js` broke app boot, and one gate run died in `test:ui-style`
+> with "Timed out waiting for app boot" -- a confusing symptom for a one-character cause. Write
+> regexes and Windows paths with Write/Edit, never through a Bash heredoc.
+>
+> **NEXT on U5:** the UI (double-click to enter an object with PARTS as the depth, the isolation
+> dimming, the notice and its accept button), C2's recorded parent, and gaps 2, 4, 5, 6.
+
 > **2026-11-13, ENGINE 68 IS VENDORED HERE AND THE OVERLAP RULE IS LIVE (U7 DONE).** An object whose
 > file holds several meshes now gets no support where they overlap -- the body-and-arm case the owner
 > asked for -- on the generic path, in both apps.
