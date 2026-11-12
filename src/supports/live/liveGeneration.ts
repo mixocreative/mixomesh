@@ -32,6 +32,7 @@ import analysisUrl from '../../support-engine/analysisWorker.entry.js?worker&url
 import { geometryGlueUrl, meshWorkerUrl } from '../../support-engine/loadGeometry.js';
 import type { AnalysisResult, AnalysisTask } from '../../support-engine/analysisProtocol';
 import { getState, subscribe } from '../../core/StateManager.js';
+import { canonicalObjectId, shouldDisplayObject } from '../../core/LogicalObjects.js';
 import { EVENTS } from '../../core/events.js';
 import { t } from '../../i18n/index.js';
 import { supportUi, type PanelProblem, type VerdictInfo } from '../../panels/supports/supportUi';
@@ -41,7 +42,8 @@ import { readSupports, supportsOwner } from '../store';
 import { cachePlacement, cacheSupportFigures, cacheSupportMesh, cachedPlacement, cachedSupportFigures, dropSupportMesh } from '../supportCache';
 import { setSupportFiguresRequester } from '../../core/scene/SupportMeshSource.js';
 import { signedVolume } from '../../core/print/PrintSpace.js';
-import { forgetObjectModel, leadPosition, objectModelStaged, type ObjectModel } from '../objectModel';
+import { forgetObjectModel, leadPosition, objectModel, objectModelStaged, type ObjectModel } from '../objectModel';
+import { boxesOverlap, type Neighbour } from '../crossObject';
 import { positionsFromEngine, type Vec3 } from '../frame';
 import { anchorOffset, supportToBabylon } from '../BabylonViewportPort';
 import { withRestTransform } from '../../core/scene/ImportBounce.js';
@@ -184,6 +186,55 @@ function contactInputs(id: string, record: ObjectSupports): ContactInputs {
   return { points: cachedPlacement(id) ?? [], manual: record.manual, deleted: record.deleted, zones: readStamps(record.stamps), contactSettings: record.overrides };
 }
 
+/**
+ * Contacts of `id` that stand inside ANOTHER visible object (C2).
+ *
+ * Only the objects whose boxes actually overlap reach the engine (`contactsInsideOthers` filters),
+ * so a plate of objects that do not touch costs a few bounding-box comparisons. It runs on the main
+ * thread because the result is needed with the build and the models are already here — which is
+ * affordable exactly because the prefilter makes it rare.
+ *
+ * Reported, never dropped: those supports are placed and the operator is warned. Dropping would tie
+ * this object's stored supports to another object's pose, with nothing to mark them stale when that
+ * object moves away — and silently under-supporting a print is worse than visibly over-supporting
+ * one. The decision and its alternatives are in docs/plans/2026-11-12-parts-and-focus-mode.md (C2).
+ */
+async function insideOtherObjects(id: string, om: ObjectModel, contacts: readonly { position: Vec3 }[]): Promise<{ count: number; names: string[] }> {
+  const objects = getState().scene.objects as Record<string, { name?: string; isGhost?: boolean } | undefined>;
+  const neighbours: Neighbour[] = [];
+  // Every DISPLAYED object, not just the ones in Support Mode: an object nobody selected still
+  // occupies space, and a support inside it is just as unprintable. `objectModel` caches, so the
+  // weld per object is paid once and reused by the next generate.
+  for (const other of Object.keys(objects)) {
+    if (other === id || !objects[other] || objects[other]?.isGhost) continue;
+    if (!shouldDisplayObject(objects[other])) continue;
+    if (canonicalObjectId(other, getState().scene.objects) !== other) continue;   // parts, not objects
+    const model = objectModel(other);
+    if (!model) continue;
+    neighbours.push({
+      objectId: other,
+      name: String(objects[other]?.name ?? other),
+      mesh: model.model.local,
+      // Both frames differ by a translation only: `toLocal` centres, it never rotates.
+      offset: [0, 1, 2].map((a) => model.anchor.center[a]! - om.anchor.center[a]!) as Vec3,
+    });
+  }
+  // The prefilter stays HERE, on the main thread: it is a few bounding-box comparisons, and it is
+  // what keeps a plate of objects that do not touch from paying for a worker round trip at all.
+  const near = neighbours.filter((n) => boxesOverlap(om.model.local, n.mesh, n.offset));
+  if (near.length === 0 || contacts.length === 0) return { count: 0, names: [] };
+  const answer = await analyse(id, {
+    kind: 'inside-others',
+    job: {
+      mesh: om.model.local,
+      contacts: contacts.map((contact) => ({ position: contact.position as [number, number, number] })),
+      others: near.map((n) => ({ name: n.name, mesh: n.mesh, offset: n.offset as [number, number, number] })),
+    },
+  });
+  if (!answer || answer.kind !== 'inside-others') return { count: 0, names: [] };
+  return { count: answer.positions.length, names: answer.names };
+}
+
 // ── state shared with the panels ──
 
 const problemsByObject = new Map<string, PanelProblem[]>();
@@ -288,7 +339,13 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   // operator reads "Supports clear the model" about supports that do not exist. And a MISSING
   // verdict is not clear either - nothing was checked - so the fallback is `inconclusive`.
   const emptyBuild = built.indices.length === 0;
-  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(buried ? { buried } : {}), ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
+  // Contacts inside ANOTHER object: computed from the contacts the build actually used, so a
+  // support the operator removed by hand is not reported as a problem with the overlap.
+  const dropped = new Set(built.dropped);
+  const others = await insideOtherObjects(id, om, jobContacts(inputs).filter((contact) => !dropped.has(contact.id)));
+  if (!job.current()) { liveStats.dropped++; return; }
+  if (others.count > 0) notify({ message: t('supportLive.insideOthers', { n: others.count, names: others.names.join(', ') }) });
+  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(buried ? { buried } : {}), ...(others.count ? { insideOthers: others.count } : {}), ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
   if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
   // The check that fills the list; the verdict and the build are already on screen.

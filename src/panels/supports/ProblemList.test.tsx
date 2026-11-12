@@ -35,6 +35,21 @@ describe('ProblemList', () => {
     expect(quiet.container.querySelector('.sp-verdict')?.textContent).not.toContain('inside another mesh');
   });
 
+  it('says how many contacts stand inside another object, apart from the within-object count', () => {
+    // Two different facts with two different remedies: `buried` the engine prevents (the overlap is
+    // inside one object), `insideOthers` it can only report (overlapping objects are normal here).
+    // One chip for both would tell the operator to look in the wrong place.
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0, buried: 2, insideOthers: 3 } } });
+    const { container } = renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />);
+    const text = container.querySelector('.sp-verdict')?.textContent ?? '';
+    expect(text).toContain('2 contacts inside another mesh');
+    expect(text).toContain('3 contacts inside another object');
+    cleanup();
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0 } } });
+    const quiet = renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />);
+    expect(quiet.container.querySelector('.sp-verdict')?.textContent ?? '').not.toContain('another object');
+  });
+
   it('renders nothing without findings', () => {
     const { container } = renderPanel(<ProblemList />);
     expect(container.querySelector('.sp-problems')).toBeNull();
@@ -146,7 +161,7 @@ describe('every verdict the UI can show has a sentence in every locale', () => {
     const statuses = ['clear', 'blocked', 'inconclusive', 'nothing-built'] as const;
     // `verdict.buried` and `verdict.dropped` ARE literal keys, so `i18n:check` sees them; they are
     // here anyway because they sit on the same line and a locale that loses one loses the sentence.
-    const chips = ['dropped', 'islands', 'buried'] as const;
+    const chips = ['dropped', 'islands', 'buried', 'insideOthers'] as const;
     for (const lang of ['en', 'ja', 'zh-Hant'] as const) {
       const dict = (await import(`../../i18n/locales/${lang}.json`)).default as Record<string, string>;
       for (const key of [...statuses, ...chips]) {

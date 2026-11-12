@@ -309,11 +309,43 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
 
 **Still open**, with the reason each was left:
 
-- **C2's recorded parent.** Reading it through, the parent record may be the wrong instrument: what
-  the warning needs to know is whether two objects OVERLAP, which is geometry, not history — and a
-  geometric test also catches two unrelated objects the operator moved into each other, which a
-  parent record never would. It also avoids the save-format constraint entirely. Decide between the
-  two before building either.
+- **C2 IS DECIDED (2026-11-13, Fable): the GEOMETRIC test, and the warning WARNS — it never drops
+  silently and never refuses.** Reasons, in the order that settles it:
+
+  - **A recorded parent answers the wrong question.** History is neither necessary nor sufficient: it
+    misses two unrelated objects pushed into each other (and overlaps made by duplicate or import),
+    and it still fires for split siblings the operator has since moved APART — unless you add a
+    geometry test anyway, at which point the parent record is redundant. Its only available field,
+    `logicalObjectId`, now points at the object's own lead, so it would need the save-format change
+    this plan forbids.
+  - **The geometric test is already available.** `contactsBuried` marks contacts buried inside
+    another PART of one mesh, so handing it two objects' meshes CONCATENATED is the right semantics:
+    the engine treats them as two parts of one file.
+  - **Warn and place, don't drop.** Dropping would make object A's stored supports depend on object
+    B's pose with nothing to restale them — move B away and A is silently under-supported, a failed
+    print nobody was told about. Extra supports with a warning on screen is the recoverable error.
+    Refusing is wrong because overlap is a NORMAL state in this app (C1). The drop belongs behind an
+    explicit **Fix** that writes to the object's existing `deleted` list: undoable, user-owned, no
+    new field.
+  - **Where:** a verdict chip beside the existing `buried` one (persistent, per object, which is
+    where the state lives), a findings row with Show, and the status line as the generation echo.
+  - **What it misses:** an overlap created AFTER generation, when B is moved onto an
+    already-supported A. Close that by re-running the check at export, not with cross-object
+    staleness.
+
+  **One feared blind spot was checked and is not real**, which is why the check is sound for a
+  topological split too. Two surfaces cut from one mesh share corners, and engine 68 welds duplicates
+  before splitting — so they looked like they would weld into ONE part and report nothing. They do
+  not: `split` pairs faces around a shared edge by the solid each face bounds (engine 65), so two
+  abutting shells stay two parts through the weld and a contact on the shared face IS reported.
+  Pinned in `geometry-wasm/src/part_tips.rs::two_halves_of_one_surface_stay_two_parts_through_the_weld`,
+  which was written expecting the opposite and corrected the assumption.
+
+  **What would say this was the wrong instrument:** operators pressing Fix after nearly every
+  generate (then the default should have been drop, and cross-object staleness is owed); objects that
+  merely TOUCH getting flagged (the engine counts "against" within `TOUCH_MM` plus the tip radius, so
+  a strict-inside mode or a penetration threshold would be needed); or pair cost on a full plate (then
+  batch every neighbour into one call per object).
 - **Gap 2** (merge then Repair), **gap 4** (origin = bbox centre of the picked set, only where new
   geometry is minted), **gap 5** (derived assets with `retainedTriangles`/`release`) and **gap 6**
   (the lead's export ratio). None is reachable from the new UI yet: it moves link fields only, so no

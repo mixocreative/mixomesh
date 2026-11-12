@@ -41,6 +41,12 @@ export interface VerdictInfo {
    * supports and no reason given; the build never saw these contacts, so they are not in `dropped`.
    */
   buried?: number;
+  /**
+   * Contacts standing inside ANOTHER object (C2). Separate from `buried`, which is within one
+   * object: that one the engine prevents, this one it can only report — overlapping objects are a
+   * normal state here, so the supports are placed and the operator is told.
+   */
+  insideOthers?: number;
   /** Islands no support carries to the plate. */
   islands: number;
   /** Structure fallbacks the repair applied (plan P5.2): `brace-pruned` = only the braces that cross the model were left out. */

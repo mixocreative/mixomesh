@@ -8,6 +8,7 @@ import { runCheckJob, runPlacementJob } from '@mixo-geocore/host/supports/jobRun
 import { runAfterGeometryReady } from '@mixo-geocore/host/geometryVersion.js';
 import { serveTask, transferable } from '@mixo-geocore/host/workers/serveTask';
 import { GEOMETRY_GLUE_PARAM } from './loadGeometry.js';
+import { contactsInsideOthers } from '../supports/crossObject';
 
 const glueUrl = new URL(self.location.href).searchParams.get(GEOMETRY_GLUE_PARAM);
 if (!glueUrl) throw new Error(`analysis worker started without ?${GEOMETRY_GLUE_PARAM}=<engine glue url>`);
@@ -24,6 +25,13 @@ serveTask((task, { progress: post }) => runAfterGeometryReady(geometryReady, () 
     post({ fraction, stage });
   };
   if (task.kind === 'check') return { kind: 'checked', problems: runCheckJob(task.job, progress) };
+  // The cross-object overlap test (C2) runs HERE because the engine is here and the main thread must
+  // not block: on the UI thread it swallowed a right-click, which `browser-supports-walk` caught.
+  if (task.kind === 'inside-others') {
+    const found = contactsInsideOthers(task.job.mesh, task.job.contacts, task.job.others);
+    progress(1, 'Done');
+    return { kind: 'inside-others', positions: found.positions, names: found.names };
+  }
   const result = runPlacementJob(task.job, progress);
   return transferable({ kind: 'placed', result }, [result.contactPositions.buffer, result.contactNormals.buffer]);
 }));

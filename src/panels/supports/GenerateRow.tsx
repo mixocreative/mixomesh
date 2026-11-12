@@ -33,6 +33,7 @@ export function GenerateRow({ objectIds, objectId }: { objectIds: readonly strin
           {tt(`supportPanel.verdict.${verdict.status}`)}
           {verdict.dropped > 0 ? ` · ${tt('supportPanel.verdict.dropped', { n: verdict.dropped })}` : ''}
           {verdict.buried ? ` · ${tt('supportPanel.verdict.buried', { n: verdict.buried })}` : ''}
+          {verdict.insideOthers ? ` · ${tt('supportPanel.verdict.insideOthers', { n: verdict.insideOthers })}` : ''}
           {verdict.islands > 0 ? ` · ${tt('supportPanel.verdict.islands', { n: verdict.islands })}` : ''}
           {verdict.fallbacks?.map((f) => ` · ${tt(`supportPanel.fallback.${f}`)}`).join('') ?? ''}
         </p>
