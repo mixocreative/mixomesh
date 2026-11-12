@@ -1508,6 +1508,7 @@
   "supportPanel.verdict.clear": "支撐已避開模型",
   "supportPanel.verdict.blocked": "部分支撐貫穿模型",
   "supportPanel.verdict.inconclusive": "無法完成避讓檢查",
+  "supportPanel.verdict.nothing-built": "未產生任何支撐",
   "supportPanel.verdict.dropped": "{n, plural, other{已省略 # 個支撐}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個孤島缺乏支撐}}",
   "print.includeSupports": "支撐",

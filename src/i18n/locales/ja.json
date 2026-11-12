@@ -1508,6 +1508,7 @@
   "supportPanel.verdict.clear": "サポートはモデルと干渉していません",
   "supportPanel.verdict.blocked": "一部のサポートがモデルと交差しています",
   "supportPanel.verdict.inconclusive": "クリアランスチェックを完了できませんでした",
+  "supportPanel.verdict.nothing-built": "サポートは生成されませんでした",
   "supportPanel.verdict.dropped": "{n, plural, other{# 個のサポートが除外されました}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個のアイランドが未サポートです}}",
   "print.includeSupports": "サポート",

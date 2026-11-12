@@ -276,7 +276,12 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   liveStats.rendered++;
   const tips = new Set(built.components.flatMap((c) => (c.contactId ? [c.contactId] : []))).size;
   liveStats.last = { objectId: id, revision: record.revision, points: inputs.points.length, tips, dropped: built.dropped.length, verdict: built.verdict?.status ?? 'none', ms, settings: record.settings };
-  verdicts.set(id, { status: built.verdict?.status ?? 'clear', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
+  // An EMPTY build is not `clear`: the engine's Clear means "no body intersection found" and
+  // disclaims being a print-stability claim, so with no supports it is vacuously true and the
+  // operator reads "Supports clear the model" about supports that do not exist. And a MISSING
+  // verdict is not clear either - nothing was checked - so the fallback is `inconclusive`.
+  const emptyBuild = built.indices.length === 0;
+  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
   if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
   // The check that fills the list; the verdict and the build are already on screen.

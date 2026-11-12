@@ -24,7 +24,15 @@ export interface JobInfo {
 
 /** The engine's verdict on the latest build of an object (plan P3.5). */
 export interface VerdictInfo {
-  status: 'clear' | 'blocked' | 'inconclusive';
+  /**
+   * `nothing-built` is not one of the engine's clearance statuses: it is this app's answer to an
+   * EMPTY build. `Status::Clear` means "no body intersection found" and says so in its own doc -
+   * "not a print-stability claim" - so on a build with no supports it is vacuously true, and the
+   * sentence beside it, "Supports clear the model", then claims something about supports that do
+   * not exist. Measured on a 47-degree tilted plate: 66 placed, all 66 dropped, 0 triangles,
+   * verdict clear.
+   */
+  status: 'clear' | 'blocked' | 'inconclusive' | 'nothing-built';
   /** Automatic supports the build left out. */
   dropped: number;
   /** Islands no support carries to the plate. */

@@ -1532,6 +1532,7 @@
   "supportPanel.verdict.clear": "Supports clear the model",
   "supportPanel.verdict.blocked": "Some supports cross the model",
   "supportPanel.verdict.inconclusive": "The clearance check could not finish",
+  "supportPanel.verdict.nothing-built": "No supports were built",
   "supportPanel.verdict.dropped": "{n, plural, one{1 support left out} other{# supports left out}}",
   "supportPanel.verdict.islands": "{n, plural, one{1 island unsupported} other{# islands unsupported}}",
   "print.includeSupports": "Supports",

@@ -125,3 +125,18 @@ describe('ViewToggles', () => {
     expect(fit).toHaveBeenCalled();
   });
 });
+
+describe('every verdict the UI can show has a sentence in every locale', () => {
+  it('covers each status, because the key is built from a template and the scanner cannot see it', async () => {
+    // `GenerateRow` renders `supportPanel.verdict.${verdict.status}`. `npm run i18n:check` reports
+    // 0 gaps for a missing one, because it looks for literal keys and this one is interpolated --
+    // so it would have let `nothing-built` ship untranslated. Assert the four by hand instead.
+    const statuses = ['clear', 'blocked', 'inconclusive', 'nothing-built'] as const;
+    for (const lang of ['en', 'ja', 'zh-Hant'] as const) {
+      const dict = (await import(`../../i18n/locales/${lang}.json`)).default as Record<string, string>;
+      for (const status of statuses) {
+        expect(dict[`supportPanel.verdict.${status}`], `${lang} is missing ${status}`).toBeTruthy();
+      }
+    }
+  });
+});

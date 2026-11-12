@@ -59,6 +59,42 @@ function lifted(mesh: TriangleMesh, lift: number): TriangleMesh {
   return { positions: Float32Array.from(mesh.positions, (v, i) => (i % 3 === 1 ? v - minY + lift : v)), indices: mesh.indices };
 }
 
+/**
+ * A flat 40 x 40 mm plate tilted `deg` from horizontal, floating 10 mm above the bed.
+ *
+ * Here because NEITHER other fixture can see the overhang angle: both are axis-aligned and have no
+ * face between 45 and 50 degrees, so `scatterAngle` moves nothing on them. Measured 2026-11-12 at
+ * engine 65, contacts per angle:
+ *
+ *   slope 44 deg -> 45:172  50:196
+ *   slope 46 deg -> 45:64   50:194
+ *   slope 47 deg -> 45:66   50:187
+ *
+ * So a face sloped 46-47 degrees loses its FIELD tips entirely at the engine's 45 default, keeping
+ * only the ~63 rim and island points every slope gets. That is the whole cost of taking 45 rather
+ * than pinning 50, and it is the industry 45-degree self-support convention: 50 was more
+ * conservative than convention, not more correct. An operator who sees sag on such a face raises
+ * one control per object. Captured so that a re-vendor which moves this BAND is noticed, because
+ * nothing else here would notice it.
+ */
+function tiltedPlate(deg: number): TriangleMesh {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const sn = Math.sin(r);
+  const half = 20;
+  const thick = 2;
+  const raw: [number, number, number][] = [];
+  for (const z of [-half, half]) for (const y of [0, thick]) for (const x of [-half, half]) raw.push([x, y, z]);
+  const pts = raw.map(([x, y, z]) => [x * c - y * sn, x * sn + y * c + 10, z] as [number, number, number]);
+  const quads: [number, number, number, number][] = [
+    [0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3],
+  ];
+  return {
+    positions: new Float32Array(pts.flat()),
+    indices: new Uint32Array(quads.flatMap(([a, b, cc, d]) => [a, b, cc, a, cc, d])),
+  };
+}
+
 /** One row: what the pipeline did, in numbers a diff can be read from. */
 function row(mesh: TriangleMesh, settings: LiveSupportSettings, budget: number) {
   const model = toLocal(lifted(mesh, settings.liftHeight));
@@ -86,6 +122,8 @@ function capture() {
   const fixtures: Record<string, () => TriangleMesh> = {
     'cube-overhang': () => cubeOverhang() as TriangleMesh,
     'seam-cube-split': () => seamCube({ split: true }) as TriangleMesh,
+    // 47 degrees: inside the 45-50 band, so this row and only this row moves with the overhang angle.
+    'slope-47': () => tiltedPlate(47),
   };
   const out: Record<string, unknown> = {
     note: 'mixoMesh own output, engine as vendored. RE-TAKE on re-vendor and READ the diff.',
@@ -103,7 +141,7 @@ function capture() {
 }
 
 describe('the engine-12 baseline this app is re-vendored FROM', () => {
-  it('matches the committed capture, or UPDATE_BASELINE=1 re-takes it', () => {
+  it('matches the committed capture, or UPDATE_BASELINE=1 re-takes it', { timeout: 60_000 }, () => {
     const now = capture();
     if (process.env.UPDATE_BASELINE === '1') {
       writeFileSync(BASELINE, `${JSON.stringify(now, null, 1)}\n`);
