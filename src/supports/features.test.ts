@@ -78,6 +78,33 @@ describe('P5.1 tree (golden cube-overhang tree variant)', () => {
     expect(built.parts).not.toContain('brace');
     expect(built.fallbacks ?? []).toEqual([]);
   });
+  /*
+   * CHARACTERISATION, not a contract: these numbers are mixoMesh's OWN output, so they are to be
+   * RE-TAKEN on the next re-vendor rather than defended. The one number that is a contract is
+   * `golden.placementPoints`, which comes from geocore's own snapshot.
+   *
+   * Why it exists (Fable, 2026-11-12): browser-support-support-worker-shapes-smoke.mjs asserted
+   * `tips === golden.tips` and had been red since the live job started sending
+   * `repairBudget: REPAIR_BUDGET`. 68 is correct - placement returns 70 and the safety repair drops
+   * the two contacts at the overhang edge where MIDDLE's thicker supports cross the model, which is
+   * why the verdict moves from `blocked` to `clear`. The smoke now asserts conservation, which
+   * survives a re-vendor but does not bound how many contacts get dropped. This does, in CI, which
+   * is where the browser smokes are not.
+   */
+  it('MIDDLE at the live repair budget: 70 placed, 2 dropped at the overhang edge, verdict clear', () => {
+    const { placement, built } = build(cubeOverhang(), set(base(), presetValues.MIDDLE as Partial<Record<SettingKey, unknown>>));
+    expect(placement.points.length).toBe(golden.placementPoints);
+    expect(built.dropped.length + tipCount(built)).toBe(placement.points.length);
+    expect(built.dropped.length).toBe(2);
+    expect([...built.dropped].sort()).toEqual(['auto-215_100_-485', 'auto-215_100_485']);
+    expect(built.verdict?.status).toBe('clear');
+  });
+  it('without the budget the same preset keeps all 70 and cannot reach a clear verdict', () => {
+    const { placement, built } = build(cubeOverhang(), set(base(), presetValues.MIDDLE as Partial<Record<SettingKey, unknown>>), 'Test part', () => true, 0);
+    expect(tipCount(built)).toBe(placement.points.length);
+    expect(built.dropped.length).toBe(0);
+    expect(built.verdict?.status).toBe('blocked');
+  });
   it('with the live repair budget the tree that would cross the model falls back to braces and says so', () => {
     const { placement, built } = build(cubeOverhang(), set(base(), { scatterAutoTree: true }));
     expect(placement.points.length).toBe(golden.placementPoints);
