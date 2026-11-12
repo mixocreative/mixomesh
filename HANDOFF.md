@@ -139,6 +139,19 @@
 > exactly `auto-215_100_±485`, verdict `clear`; without the budget it keeps all 70 and can only
 > reach `blocked`. Labelled a CHARACTERISATION, to be re-taken on re-vendor, not defended.
 
+> **`npm run test:all` IS GREEN END TO END, the first clean full run in weeks** (2026-11-12): all 23
+> suites, exit 0, node **1124/1124**, vitest **221/221**, consumers **283/283**, and
+> `test:support-workers` in all three shapes.
+>
+> **A FLAKE WORTH KNOWING ABOUT.** The run before this one failed at `test:repair` with "Timed out
+> waiting for Vite app" while Vite had already printed `ready in 558 ms` on port 1719. It passed
+> alone and passed in the next full run, so it is a flake and not a defect. But 23 suites chained
+> with `&&`, most of them starting their own Vite, means one start-up hiccup fails the chain and
+> hides every suite after it - which is exactly how two real defects hid behind each other earlier
+> that day. **The fix is a retry on the HTTP probe, not a longer timeout**, and it is worth doing
+> before the separator mode adds more browser tests. Recorded in section 4 of
+> `docs/plans/2026-11-12-parts-and-focus-mode.md`.
+
 > **THE SPLIT / MERGE UX THE OWNER DESIGNED: Fable judges it SOUND WITH CHANGES, and about half of
 > it already exists.** Full reasoning in the session; the load-bearing parts:
 >
