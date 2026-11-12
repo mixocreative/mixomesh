@@ -2,6 +2,55 @@
 
 > **ACTIVE WORK (2026-10-14): MIXOMESH overhaul — resume from `docs/handoff/overhaul-execution.md`.** Storage-adapter Phase 1a work described below is superseded by **ADR 0001 addendum (2026-10-14)** + **Blueprint.md §11** (overhaul Phase 4 complete).
 
+> **2026-11-12, ENGINE 65 IS VENDORED HERE (`cf6d0b4`) AND THE GATE IS GREEN.** 53 ABI versions in
+> one step, and the adherence audit's "a day, not a project" held: FIVE compile sites, all the
+> `minFromUpDeg` -> `overhangAngleDeg` rename. Gate: typecheck 0, lint 0, node 1124/1124, vitest
+> 224/224, consumers 283/283, all 23 suites of `test:all`, exit 0.
+>
+> **The two things that would have gone through silently:**
+> - the LIVE site was `minFromUpDeg: 10`, not 0, and the engine documents the conversion as
+>   `180 - this`, so it became **170**. Writing 10 compiles and changes which faces accept a manual
+>   support. The plan's summary said "four `0` sites"; the adherence table had the 10 -> 170 case
+>   right all along, so the lossy step was the summary.
+> - an old `.mixo` hands the engine `undefined` for `neckMaxShift` / `minClearance`. Filled
+>   GENERICALLY at `engineSettings` (`src/supports/live/jobInputs.ts`), the one place settings cross
+>   to the engine. **Not** in `restoreSupports`: that imported `@mixo-geocore/host` into a module
+>   that is plain JSON by design and is loaded by `tests/*.test.mjs` under BARE NODE, which cannot
+>   resolve the alias -- 108 node tests broke while tsc and all 223 vitest tests passed.
+>
+> **`src/supports/engineBaseline.test.ts` + `tests/fixtures/engine-baseline.json` is the thing to
+> keep using.** Eighteen rows, three fixtures x three presets x repair budget on/off, in process.
+> `npm run baseline:check` compares; `UPDATE_BASELINE=1 npx vitest run src/supports/engineBaseline.test.ts`
+> re-takes. **A baseline updated without reading the diff is worse than no baseline.** It earned
+> itself twice on the first use: it made the re-vendor diff readable, and it caught a WRONG
+> attribution -- cube-overhang's 70 -> 51 contacts looks exactly like the `scatterAngle` 50 -> 45
+> default and is not. At engine 65 the count is 51 at 45, 50 and 60 alike; it is **engines 47/48**,
+> an owner decision of 2026-11-01 already shipped in mixoDental. Decided (Fable): **take 45**, and
+> `docs/geocore-adherence-2026-11-12.md:43` carries the measured cost.
+>
+> **A defect the new slope fixture found on the way:** a 47-degree tilted plate placed 66 contacts,
+> the safety repair dropped all 66, 0 triangles were built -- and the verdict read **clear**, which
+> the panel renders as "Supports clear the model". `Status::Clear` means "no body intersection found
+> (not a print-stability claim)" and says so, so the engine was right and this app was making the
+> claim. Fixed in `dea6474`: an empty build reports `nothing-built`, and a MISSING verdict is
+> `inconclusive` rather than `clear`. **`npm run i18n:check` reported 0 gaps for the two missing
+> translations**, because `GenerateRow` renders `supportPanel.verdict.${verdict.status}` and the
+> scanner only sees literal keys; `ProblemList.test.tsx` now asserts all four statuses in all three
+> locales.
+>
+> **U4's load-bearing half is done** (`24d71ab`): the isolation mask is `src/ui/isolation.ts`, ready
+> for the separator mode, proven behaviour-neutral by the three browser suites that drive it. Only
+> the mask -- the chrome dimming, the notice and Esc have no caller until U5, and a module built for
+> a user that does not exist is a hub. Extracting it collapsed a duplication: the isolation layer was
+> declared twice and `layers.test.ts` pinned the two equal by reading one out of the other's SOURCE
+> with a regex.
+>
+> **NEXT: U5 (separator mode) and U7, in `docs/plans/2026-11-12-parts-and-focus-mode.md`.** U7's real
+> blocker is recorded there and is not what the plan assumed: `part_tips` returns ids like
+> `part0-auto-...` while contact ids are the save format's keys, and the cheap alternative needs a
+> face per placed point, which `PlacedPoint` does not carry. The fix is additive -- give it
+> `face: u32` -- and smaller than an id migration across every saved project.
+
 > **2026-11-12 — ALL THIRTEEN findings of `docs/cia-audit-2026-11-12.md` are CLOSED, and master is
 > PUSHED at `e67d09e`** (CI green: lint, typecheck, `npm test`, `i18n:check`, build; Pages deployed
 > 06:28 UTC). The three HIGHs went first. MX-01: `MeshRepair.diagnoseMesh` now welds by position before it asks the engine, so a
