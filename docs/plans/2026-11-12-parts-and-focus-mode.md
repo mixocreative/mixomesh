@@ -76,7 +76,11 @@ What is dental-only is the masking.
    computed only when something overlaps the *target*, so two add-ons overlapping each other get no
    mask. Rare in a dental file; the normal case for a body and two arms.
 3. Give the generic policy the part list and the hidden mask, so "outward-facing" means outward *per
-   part* and buried faces get nothing.
+   part* and buried faces get nothing. **By promoting `add_on_tips` out of `dental/`, NOT by adding
+   a mask to `generate_placement` — that was tried on 2026-11-12 and measured insufficient:** the
+   edge/ridge and island streams reach faces independently of the downward map, so masking the
+   downward faces emptied the regions and still left 184 contacts, and `PlacedPoint` carries no face
+   to filter on. Reverted. See `docs/parts-weld-repair.md` §8 in geocore, which owns this fact.
 4. **A host-declared target.** The engine picks the largest part as target and calls a small one
    debris — "reported, never supported" (`surface/parts.rs:16-18`). The operator's active object is
    not necessarily the engine's main body, so the host must be able to say which part is the target.
