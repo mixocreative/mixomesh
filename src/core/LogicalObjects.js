@@ -120,6 +120,24 @@ export function canonicalSelectableId(id, scene) {
 }
 
 /**
+ * Can `id` be entered as a click-depth scope whose contents are PARTS?
+ *
+ * A logical object with more than one part (U5). Entering a single-part object
+ * would open a depth with one thing in it, and entering a part is meaningless:
+ * the parts ARE the depth.
+ *
+ * @param {string|null|undefined} id
+ * @param {Record<string, any>} [objects]
+ * @returns {boolean}
+ */
+export function isPartScopeId(id, objects) {
+  if (id == null) return false;
+  const obj = objects?.[id];
+  if (!obj || obj.isGhost || obj.isInternalPart) return false;
+  return logicalObjectPartIds(id, objects).filter(partId => !objects[partId]?.isGhost).length > 1;
+}
+
+/**
  * Click-depth mapping (overhaul task 3.2, plan §4.5 Figma/Keynote model).
  * Maps a picked id (object, material part, or group) to the selectable item
  * at the depth of `scopeId`: material parts collapse to their logical lead,
@@ -135,6 +153,13 @@ export function canonicalSelectableId(id, scene) {
  * @returns {string|null}
  */
 export function selectableAtDepth(id, scene, scopeId = null) {
+  // Inside an OBJECT (U5), its parts are the depth: a picked part stays itself
+  // instead of collapsing to the lead, and anything outside reads as null so
+  // the caller steps out, exactly as it does for a group.
+  if (isPartScopeId(scopeId, scene?.objects)) {
+    const parts = logicalObjectPartIds(scopeId, scene?.objects);
+    return id != null && parts.includes(id) && !scene?.objects?.[id]?.isGhost ? id : null;
+  }
   const start = canonicalSelectableId(id, scene);
   if (start == null) return null;
   const objects = scene?.objects ?? {};

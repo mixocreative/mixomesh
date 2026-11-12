@@ -47,6 +47,7 @@ function obj(id, over = {}) {
     isGhost: false, isUnlinked: false, isPrintPart: true, ...over,
   };
 }
+const getScene = () => StateManager.getState().scene;
 function group(id, childIds, over = {}) {
   return { id, name: id, parentId: null, childIds, visible: true, locked: false, ...over };
 }
@@ -254,4 +255,59 @@ test('stale scope (group removed) reads as root; Outliner rule scopes to parent'
   assert.equal(Selection.getScope(), null);
   Selection.setScope('not-a-group');
   assert.equal(Selection.getScope(), null);
+});
+
+// ── U5: inside a multi-part object, its PARTS are the depth ──────────────────
+// The owner asked to pick the meshes of one object and separate them. The
+// decision (docs/plans/2026-11-12-parts-and-focus-mode.md) was to extend this
+// same scope rather than add a third mode, so everything below is the group
+// behaviour one level deeper: click = the part, Esc = out, outside = out.
+
+test('a double-click enters a multi-part object and its parts become selectable', () => {
+  reset();
+  // At root a part collapses to its lead, as it always has.
+  assert.equal(selectableAtDepth('lead.part', getScene(), null), 'outer');
+  assert.equal(Selection.inPartScope(), false);
+  // Inside the object, the part is the thing you get.
+  assert.equal(Selection.enterScope('lead', 'lead.part'), true);
+  assert.equal(Selection.getScope(), 'lead');
+  assert.equal(Selection.inPartScope(), true);
+  assert.deepEqual(Selection.getSelectedIds(), ['lead.part'], 'the part under the cursor is selected');
+  assert.equal(Selection.resolveClick('lead.part'), 'lead.part');
+  assert.equal(Selection.resolveClick('lead'), 'lead', 'the lead is a part of itself');
+});
+
+test('a click outside the object steps back out, and Esc leaves it selected', () => {
+  reset();
+  Selection.enterScope('lead', 'lead.part');
+  // `a` is not in this object: the scope is left and the click maps at root.
+  assert.equal(Selection.resolveClick('a'), 'outer');
+  assert.equal(Selection.getScope(), null);
+  Selection.enterScope('lead', 'lead.part');
+  assert.equal(Selection.exitScope(), true);
+  assert.equal(Selection.getScope(), 'inner', 'out to the object own parent group');
+  assert.deepEqual(Selection.getSelectedIds(), ['lead'], 'the object just left is selected');
+});
+
+test('a single-part object cannot be entered: the depth would hold one thing', () => {
+  reset();
+  assert.equal(Selection.enterScope('a'), false);
+  assert.equal(Selection.getScope(), null);
+  assert.equal(Selection.enterScope('loose'), false);
+  // And a PART is never a scope: the parts are the depth, not a level above it.
+  assert.equal(Selection.enterScope('lead.part'), false);
+});
+
+test('an object scope goes stale when its parts go, exactly as a removed group does', () => {
+  reset();
+  Selection.enterScope('lead', 'lead.part');
+  assert.equal(Selection.getScope(), 'lead');
+  StateManager.setState(s => {
+    const objects = { ...s.scene.objects };
+    delete objects['lead.part'];
+    return { ...s, scene: { ...s.scene, objects } };
+  }, { silent: true });
+  // One part left, so there is no depth to be in any more.
+  assert.equal(Selection.getScope(), null);
+  assert.equal(Selection.inPartScope(), false);
 });

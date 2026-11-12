@@ -4,7 +4,7 @@ import { SceneManager } from './SceneManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import {
   canonicalObjectId, logicalObjectPartIds, logicalObjectLeadIds, canonicalSelectableId, isGroupId,
-  selectableAtDepth,
+  isPartScopeId, selectableAtDepth,
 } from './LogicalObjects.js';
 
 // Selection writes are silent against PROJECT_DIRTY — clicking around shouldn't
@@ -85,7 +85,15 @@ function _resolveObjectMeshes(ids) {
  * @param {string|null|undefined} id
  */
 function _canon(id) {
-  return canonicalSelectableId(id, getState().scene);
+  const scene = getState().scene;
+  // Inside an object (U5) its PARTS are the selectable items, so a part id has
+  // to survive here. Everywhere else a part still collapses to its lead, which
+  // is what keeps parts unselectable in the rest of the app -- one exception,
+  // in one place, rather than a second selection model.
+  const scope = getScope();
+  if (scope != null && isPartScopeId(scope, scene.objects)
+      && logicalObjectPartIds(scope, scene.objects).includes(id) && !scene.objects[id]?.isGhost) return id;
+  return canonicalSelectableId(id, scene);
 }
 
 /**
@@ -140,6 +148,11 @@ export function isEffectivelyLocked(id) {
  *             activeNode: any|null, activeGeometry: any[] }}
  */
 export function getTransformTargets({ includeLocked = false } = {}) {
+  // No gizmo inside an object (U5, the plan's decision): the depth exists to
+  // PICK parts, and moving one part of a logical object would break the pose
+  // its supports were built against. Returning nothing is what turns G/R/S off,
+  // because every caller asks here first.
+  if (inPartScope()) return { targets: [], activeNode: null, activeGeometry: [], lockedSkipped: 0 };
   const { selectedIds, activeId } = getState().selection;
   const objects = getState().scene.objects;
   const targets = [];
@@ -356,7 +369,25 @@ export function getSelectedNodes() {
  * @returns {string|null}
  */
 export function getScope() {
-  return _scopeId != null && isGroupId(_scopeId, getState().scene.groups) ? _scopeId : null;
+  return _scopeId != null && _isScopeId(_scopeId) ? _scopeId : null;
+}
+
+/**
+ * A scope is a group, or a multi-part OBJECT whose parts are the depth (U5).
+ * One predicate, so `getScope`, `setScope` and `enterScope` cannot disagree
+ * about what can be entered -- which is how a scope would survive as a stale id.
+ * @param {string} id
+ * @returns {boolean}
+ */
+function _isScopeId(id) {
+  const scene = getState().scene;
+  return isGroupId(id, scene.groups) || isPartScopeId(id, scene.objects);
+}
+
+/** Is the current depth an object's parts (U5), rather than a group's children? */
+export function inPartScope() {
+  const scope = getScope();
+  return scope != null && isPartScopeId(scope, getState().scene.objects);
 }
 
 /**
@@ -366,7 +397,7 @@ export function getScope() {
  */
 export function setScope(groupId) {
   const next = groupId == null ? null : groupId;
-  if (next != null && !isGroupId(next, getState().scene.groups)) return;
+  if (next != null && !_isScopeId(next)) return;
   if (next === _scopeId) return;
   _scopeId = next;
   dispatch(EVENTS.SCOPE_CHANGED, { scopeId: next });
@@ -408,7 +439,7 @@ export function resolveClick(id) {
  * @returns {boolean} true when the scope was entered
  */
 export function enterScope(groupId, pickedId = null) {
-  if (!isGroupId(groupId, getState().scene.groups)) return false;
+  if (!_isScopeId(groupId)) return false;
   setScope(groupId);
   const child = pickedId == null ? null : selectableAtDepth(pickedId, getState().scene, groupId);
   if (child != null) set([child], child);
@@ -426,8 +457,11 @@ export function exitScope() {
     if (_scopeId != null) setScope(null);  // stale scope (group deleted) → root
     return false;
   }
-  const groups = getState().scene.groups;
-  const parent = groups[scope]?.parentId ?? null;
+  const { groups, objects } = getState().scene;
+  // A part scope steps out to the OBJECT's parent group (it has no group of its
+  // own), and the object just left becomes the selection -- the same shape as
+  // stepping out of a group.
+  const parent = (groups[scope] ?? objects[scope])?.parentId ?? null;
   setScope(isGroupId(parent, groups) ? parent : null);
   set([scope], scope);
   return true;
@@ -458,5 +492,5 @@ export const Selection = {
   setPivotMode, cyclePivotMode, refresh,
   getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
   getTransformTargets, isEffectivelyLocked,
-  getScope, setScope, targetAtScope, resolveClick, enterScope, exitScope, scopeToParentOf,
+  getScope, setScope, inPartScope, targetAtScope, resolveClick, enterScope, exitScope, scopeToParentOf,
 };

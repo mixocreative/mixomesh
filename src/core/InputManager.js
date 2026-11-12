@@ -4,7 +4,7 @@ import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
 import { getState, dispatch } from './StateManager.js';
 import { EVENTS } from './events.js';
-import { logicalObjectCommandIds, isGroupId } from './LogicalObjects.js';
+import { logicalObjectCommandIds, isGroupId, isPartScopeId } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
@@ -373,11 +373,14 @@ function _onSelectionPointerDown(info) {
   }
 
   // Double-click on a group at the current depth → enter it and select the
-  // child under the cursor. On an object a double-click is just a click.
+  // child under the cursor. On a multi-part OBJECT → enter it too, with its
+  // PARTS as the depth (U5), and select the part under the cursor. On anything
+  // else a double-click is just a click.
   const click = { t: _now(), x: _scene.pointerX, y: _scene.pointerY, target: id };
   if (_isDoubleClick(_lastClick, click)) {
     _lastClick = null;
-    if (isGroupId(id, getState().scene.groups) && Selection.enterScope(id, meshId)) {
+    const scene = getState().scene;
+    if ((isGroupId(id, scene.groups) || isPartScopeId(id, scene.objects)) && Selection.enterScope(id, meshId)) {
       _canvas?.focus();
       return;
     }
@@ -560,7 +563,11 @@ function _touchSelectAt(x, y, isDouble) {
   }
   if (isDouble && _lastTouchTap === id) {
     _lastTouchTap = null;
-    if (isGroupId(id, getState().scene.groups) && Selection.enterScope(id, meshId)) return;
+    // Touch enters the same two depths a double-click does (group, or an
+    // object's parts): one rule, or the two inputs would disagree about what
+    // can be opened.
+    const scene = getState().scene;
+    if ((isGroupId(id, scene.groups) || isPartScopeId(id, scene.objects)) && Selection.enterScope(id, meshId)) return;
   } else {
     _lastTouchTap = id;
   }
