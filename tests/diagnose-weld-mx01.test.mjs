@@ -84,3 +84,38 @@ test('engineDiagnose (the validator seam) agrees — one mesh, one verdict', asy
   assert.equal(diag.boundaryEdges, 0,
     'MeshValidator reads diag.boundaryEdges straight into its `holes` result');
 });
+
+// The follow-up the three tests above could not see, caught by
+// tests/browser-outliner-hover-w08.mjs and proved live on 2026-11-12: every
+// case here is a 20 mm cube, far larger than the 0.1 mm weld cell, so the weld
+// always leaves triangles behind. A mesh SMALLER than one cell does not.
+const TINY = 2e-5;   // 0.02 mm: what `v 0 0 0 / v 0.02 0 0 / v 0 0.02 0` becomes
+                     // once the OBJ importer normalises it into Babylon units
+
+/** One open triangle, every vertex inside a single 1e-4 weld cell. */
+function tinyTriangle() {
+  return {
+    name: 'OpenTri',
+    getVerticesData: (kind) => (kind === 'position' ? [0, 0, 0, TINY, 0, 0, 0, TINY, 0] : null),
+    getIndices: () => [0, 1, 2],
+  };
+}
+
+test('a mesh smaller than the weld cell is not welded into a clean verdict', async () => {
+  const { weldArrays } = await import('../src/core/repair/Weld.js');
+  const welded = weldArrays(tinyTriangle().getVerticesData('position'), [0, 1, 2]);
+  assert.equal(welded.indices.length, 0,
+    'the premise: all three vertices share one cell, so the weld drops the triangle as degenerate');
+
+  const d = await R.diagnoseMesh(tinyTriangle());
+  assert.equal(d.triangles, 1, 'the engine must be handed the triangle, not an empty mesh');
+  assert.equal(d.boundaryEdges, 3, 'an open triangle has exactly three open edges');
+  assert.equal(d.isWatertight, false,
+    'reporting watertight here is reporting on geometry the weld erased');
+});
+
+test('the collapse fallback does not touch a mesh the weld keeps', async () => {
+  const d = await R.diagnoseMesh(cubeMesh());
+  assert.equal(d.triangles, 12, 'the welded cube still reaches the engine welded');
+  assert.equal(d.boundaryEdges, 0, 'so a UV seam is still not a hole');
+});

@@ -320,9 +320,23 @@ export async function diagnoseMesh(mesh, opts = {}) {
   // _refreshRepairVerdict) and fixing one of them is what left the others
   // wrong. `repairMesh` keeps passing RAW geometry on purpose — the engine
   // merges for itself and arraysToMesh needs the original UVs to put back.
-  const welded = weldArrays(mesh.getVerticesData('position') ?? [], mesh.getIndices() ?? []);
+  const rawPositions = mesh.getVerticesData('position') ?? [];
+  const rawIndices = mesh.getIndices() ?? [];
+  const welded = weldArrays(rawPositions, rawIndices);
+  // ...but a mesh whose WHOLE geometry fits inside one 0.1 mm weld cell welds
+  // down to a single vertex, every triangle is then dropped as degenerate, and
+  // the engine is handed an EMPTY mesh - which it rightly calls watertight.
+  // That is the worst possible answer: "nothing wrong" about geometry the weld
+  // just erased, and once this weld landed no other reader could see it either
+  // (MeshValidator._checkNonManifold welds at the same MERGE_DISTANCE and skips
+  // degenerate triangles too). When the weld annihilates the mesh, the welded
+  // topology is not the question worth asking - read the raw arrays, which is
+  // what every caller got before the weld, and what the open-triangle import in
+  // tests/browser-outliner-hover-w08.mjs depends on to show its Repair pill.
+  const collapsed = welded.indices.length === 0 && rawIndices.length > 0;
+  const read = collapsed ? { positions: rawPositions, indices: rawIndices } : welded;
   const lib = await ensureRepairEngine();
-  const { V, T } = meshToArrays({ getVerticesData: () => welded.positions, getIndices: () => welded.indices });
+  const { V, T } = meshToArrays({ getVerticesData: () => read.positions, getIndices: () => read.indices });
   const d = lib.diagnose(V, T);
   return { boundaryEdges: d.boundary, nonManifoldEdges: d.nonManifold, components: d.components, isWatertight: !!d.isWatertight, triangles: T.length };
 }
