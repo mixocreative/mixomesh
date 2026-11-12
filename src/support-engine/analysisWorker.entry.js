@@ -9,6 +9,7 @@ import { runAfterGeometryReady } from '@mixo-geocore/host/geometryVersion.js';
 import { serveTask, transferable } from '@mixo-geocore/host/workers/serveTask';
 import { GEOMETRY_GLUE_PARAM } from './loadGeometry.js';
 import { contactsInsideOthers } from '../supports/crossObject';
+import { PROGRESS_STAGE } from '@mixo-geocore/host/core/progress';
 
 const glueUrl = new URL(self.location.href).searchParams.get(GEOMETRY_GLUE_PARAM);
 if (!glueUrl) throw new Error(`analysis worker started without ?${GEOMETRY_GLUE_PARAM}=<engine glue url>`);
@@ -29,7 +30,9 @@ serveTask((task, { progress: post }) => runAfterGeometryReady(geometryReady, () 
   // not block: on the UI thread it swallowed a right-click, which `browser-supports-walk` caught.
   if (task.kind === 'inside-others') {
     const found = contactsInsideOthers(task.job.mesh, task.job.contacts, task.job.others);
-    progress(1, 'Done');
+    // The stage CODE, as every other branch reports: a literal here would reach the progress sink
+    // as untranslatable English, which `i18n:check` refuses — and it was right to.
+    progress(1, PROGRESS_STAGE.done);
     return { kind: 'inside-others', positions: found.positions, names: found.names };
   }
   const result = runPlacementJob(task.job, progress);

@@ -43,7 +43,7 @@ import { cachePlacement, cacheSupportFigures, cacheSupportMesh, cachedPlacement,
 import { setSupportFiguresRequester } from '../../core/scene/SupportMeshSource.js';
 import { signedVolume } from '../../core/print/PrintSpace.js';
 import { forgetObjectModel, leadPosition, objectModel, objectModelStaged, type ObjectModel } from '../objectModel';
-import { boxesOverlap, type Neighbour } from '../crossObject';
+import { boundsOf, boxesOverlap, type Neighbour } from '../crossObject';
 import { positionsFromEngine, type Vec3 } from '../frame';
 import { anchorOffset, supportToBabylon } from '../BabylonViewportPort';
 import { withRestTransform } from '../../core/scene/ImportBounce.js';
@@ -221,7 +221,10 @@ async function insideOtherObjects(id: string, om: ObjectModel, contacts: readonl
   }
   // The prefilter stays HERE, on the main thread: it is a few bounding-box comparisons, and it is
   // what keeps a plate of objects that do not touch from paying for a worker round trip at all.
-  const near = neighbours.filter((n) => boxesOverlap(om.model.local, n.mesh, n.offset));
+  // Each box once: `boundsOf` walks every vertex, and asking per neighbour made this O(neighbours x
+  // vertices) on the main thread — 99 ms of a 100 ms budget on the 1M smoke.
+  const mine = boundsOf(om.model.local);
+  const near = neighbours.filter((n) => boxesOverlap(mine, boundsOf(n.mesh), n.offset));
   if (near.length === 0 || contacts.length === 0) return { count: 0, names: [] };
   const answer = await analyse(id, {
     kind: 'inside-others',

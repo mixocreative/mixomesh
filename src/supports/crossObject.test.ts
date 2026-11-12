@@ -32,26 +32,28 @@ describe('boundsOf', () => {
 
 describe('boxesOverlap', () => {
   const mine = box([0, 0, 0], [10, 10, 10]);
+  // It takes BOUNDS, not meshes: `boundsOf` walks every vertex, so asking it per neighbour was
+  // O(neighbours x vertices) and spent 99 ms of a 100 ms long-task budget on the 1M smoke.
 
   it('is the prefilter: a neighbour the operator moved away never reaches the engine', () => {
-    expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), [20, 0, 0])).toBe(false);
-    expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), [8, 0, 0])).toBe(true);
+    expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), [20, 0, 0])).toBe(false);
+    expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), [8, 0, 0])).toBe(true);
   });
 
   it('counts the offset on every axis, not just the one that happens to be tested', () => {
     for (const axis of [0, 1, 2]) {
       const far: Vec3 = [0, 0, 0];
       far[axis] = 50;
-      expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), far), `axis ${axis}`).toBe(false);
+      expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), far), `axis ${axis}`).toBe(false);
     }
   });
 
   it('still asks about a pair that merely abuts, and `margin` widens that', () => {
     // Touching exactly: asked, because the engine decides whether it is really buried.
-    expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), [10, 0, 0])).toBe(true);
+    expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), [10, 0, 0])).toBe(true);
     // A hair apart: not asked, unless the margin says to.
-    expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), [10.5, 0, 0])).toBe(false);
-    expect(boxesOverlap(mine, box([0, 0, 0], [4, 4, 4]), [10.5, 0, 0], 1)).toBe(true);
+    expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), [10.5, 0, 0])).toBe(false);
+    expect(boxesOverlap(boundsOf(mine), boundsOf(box([0, 0, 0], [4, 4, 4])), [10.5, 0, 0], 1)).toBe(true);
   });
 });
 

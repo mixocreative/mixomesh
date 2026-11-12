@@ -39,16 +39,22 @@ export function boundsOf(mesh: TriangleMesh): { min: Vec3; max: Vec3 } | null {
   return { min, max };
 }
 
+/** A mesh's box, as `boundsOf` returns it. */
+export type Bounds = { min: Vec3; max: Vec3 };
+
 /**
- * Do two objects' boxes overlap, once `other` is shifted into `mesh`'s frame by `offset`?
+ * Do two boxes overlap, once `other` is shifted by `offset`?
  *
- * The prefilter, and the reason this check costs nothing on the common path: a plate of objects that
- * do not touch never reaches the engine at all. `margin` is slack, so a pair that merely abuts is
- * still asked about (the engine decides whether it is really buried).
+ * **Takes BOUNDS, not meshes, and that is a performance contract rather than a style choice.**
+ * `boundsOf` is a pass over every vertex, so taking meshes here meant re-deriving the asked object's
+ * box once per neighbour — O(neighbours x vertices) on the main thread. On the 1M-triangle smoke the
+ * long-task budget went from 53 ms to 99 against a 100 ms limit, one millisecond from failing the
+ * gate. The caller computes each box once.
+ *
+ * `margin` is slack, so a pair that merely abuts is still asked about (the engine decides whether it
+ * is really buried).
  */
-export function boxesOverlap(mesh: TriangleMesh, other: TriangleMesh, offset: Vec3, margin = 0): boolean {
-  const a = boundsOf(mesh);
-  const b = boundsOf(other);
+export function boxesOverlap(a: Bounds | null, b: Bounds | null, offset: Vec3, margin = 0): boolean {
   if (!a || !b) return false;
   return [0, 1, 2].every((axis) =>
     a.min[axis]! - margin <= b.max[axis]! + offset[axis]! && a.max[axis]! + margin >= b.min[axis]! + offset[axis]!);
@@ -119,7 +125,8 @@ export function contactsInsideOthers(
 ): InsideOthers {
   const empty: InsideOthers = { positions: [], names: [] };
   if (contacts.length === 0 || neighbours.length === 0) return empty;
-  const near = neighbours.filter((n) => boxesOverlap(mesh, n.mesh, n.offset, options.margin ?? 0));
+  const mine = boundsOf(mesh);
+  const near = neighbours.filter((n) => boxesOverlap(mine, boundsOf(n.mesh), n.offset, options.margin ?? 0));
   if (near.length === 0) return empty;
   const marked = contactsBuried(combined(mesh, near), contacts as readonly { position: readonly [number, number, number] }[], { radius: options.radius ?? 0 });
   const positions = contacts.flatMap((contact, k) => (marked[k] ? [contact.position] : []));
