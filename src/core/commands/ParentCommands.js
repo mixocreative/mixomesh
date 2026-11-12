@@ -574,6 +574,34 @@ function _supportsToDrop(leads, leadId, objects) {
   return dropped;
 }
 
+/**
+ * Objects a Join swallows whose print RATIO differs from the lead's.
+ *
+ * Each object carries its own `ratio` and it is already baked into its vertices, so a merge does not
+ * resize anything — but the export reads the LEAD's ratio as the reference for a target size
+ * (`PrintPipeline` -> `ExportContext.referenceRatio`), and the swallowed object's own `ratio` becomes
+ * a field nothing reads. Ask for "print at 1:1" afterwards and the factor is computed from the
+ * lead's provenance and applied to geometry that came from another, which lands at a size that is
+ * right only if the two agreed.
+ *
+ * Reported, not corrected: re-baking vertices is exactly what Join must never do (it moves link
+ * fields only, so nothing shifts in world space). The operator is told, and can undo and scale
+ * first.
+ */
+function _ratioMismatches(leads, leadId, objects) {
+  const lead = Number(objects[leadId]?.ratio ?? objects[leadId]?.modelRatio ?? 1);
+  const out = [];
+  for (const other of leads) {
+    if (other === leadId) continue;
+    const ratio = Number(objects[other]?.ratio ?? objects[other]?.modelRatio ?? 1);
+    // Both fall back to 1 the way `objectRatio` does, so a missing field never reads as a mismatch.
+    if (Number.isFinite(ratio) && Number.isFinite(lead) && Math.abs(ratio - lead) > 1e-9) {
+      out.push({ name: objects[other]?.name ?? other, ratio, lead });
+    }
+  }
+  return out;
+}
+
 function _setSupports(records, keep) {
   const ids = Object.keys(records);
   if (ids.length === 0) return;
@@ -822,6 +850,7 @@ export class JoinCommand {
     this._before = before;
     this._after = after;
     this._droppedSupports = _supportsToDrop(leads, leadId, objects);
+    this._ratioMismatch = _ratioMismatches(leads, leadId, objects);
     return true;
   }
   execute() {
@@ -831,6 +860,14 @@ export class JoinCommand {
     const names = Object.keys(this._droppedSupports).map(id => getState().scene.objects[id]?.name).filter(Boolean);
     if (names.length > 0) {
       dispatch(EVENTS.TOAST, { message: t('toast.joinDroppedSupports', { names: names.join(', ') }), type: 'warning', duration: 8000 });
+    }
+    if (this._ratioMismatch.length > 0) {
+      const lead = getState().scene.objects[this._leadId]?.name ?? this._leadId;
+      dispatch(EVENTS.TOAST, {
+        message: t('toast.joinRatioMismatch', { names: this._ratioMismatch.map(entry => entry.name).join(', '), name: lead }),
+        type: 'warning',
+        duration: 8000,
+      });
     }
     // Parts live where their lead lives. First dissolve any `<lead> parts`
     // group that holds only members of this join (its children rise to the

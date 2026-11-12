@@ -298,6 +298,31 @@ await test('a part keeps a name the operator chose through merge and separate; a
   }
 });
 
+await test('a Join warns when it swallows an object built at another print scale', () => {
+  // Each object's `ratio` is baked into its vertices, so the merge resizes nothing — but the export
+  // reads the LEAD's ratio as the reference for a target size, and the swallowed object's own
+  // becomes a field nothing reads. Ask for 1:1 afterwards and the factor comes from the lead's
+  // provenance. Reported rather than corrected: re-baking vertices is what Join must never do.
+  seed({
+    a: base('a', 'Body', { ratio: 1, _tris: [[0, 2, 1]] }),
+    b: base('b', 'Arm', { ratio: 2, _tris: [[0, 1, 3]] }),
+  });
+  const toasts = [];
+  const off = subscribe(EVENTS.TOAST, (p) => toasts.push(p));
+  new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
+  assert.equal(toasts.length, 1, 'the operator is told');
+  assert.equal(toasts[0].type, 'warning');
+  assert.ok(toasts[0].message.includes('Arm') && toasts[0].message.includes('Body'), `names both: ${toasts[0].message}`);
+  // Matching ratios say nothing, and a missing field reads as 1 the way `objectRatio` does.
+  for (const pair of [{ a: 2, b: 2 }, { a: undefined, b: 1 }, { a: 1, b: undefined }]) {
+    seed({ a: base('a', 'Body', { ratio: pair.a, _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { ratio: pair.b, _tris: [[0, 1, 3]] }) });
+    toasts.length = 0;
+    new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
+    assert.equal(toasts.length, 0, `no warning for ${JSON.stringify(pair)}`);
+  }
+  off();
+});
+
 await test('a Join drops the swallowed object supports, warns, and undo brings them back', async () => {
   // THE DEFECT: supports live on the LEAD and every read redirects there
   // (src/supports/store.ts). Merge an unsupported object INTO a supported one
