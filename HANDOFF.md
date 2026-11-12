@@ -81,7 +81,51 @@
 > the LIGHT preset before pressing Generate) and say so in a comment**, so the number stays anchored
 > to an independent source. The alternative - capturing a MIDDLE golden from mixoMesh's own run - is
 > the app blessing its own output, which is what the export reader (MX-06) exists to avoid. Not
-> done here because it changes what the test exercises, and that is a roadmap call. C9 (deleting `src/core/repair/` for geocore's Rust
+> done here because it changes what the test exercises, and that is a roadmap call.
+
+> **DECIDED by Fable, 2026-11-12, and TWO OF MY CLAIMS ABOVE ARE WRONG.** Fable ran the in-process
+> path (no browser, no worker) on the vendored engine at each commit and measured it, which is why
+> its answer beats mine.
+>
+> **What actually causes 68, and it is not the weld and not the preset.** It is the REPAIR BUDGET.
+> cube-overhang, MIDDLE, in-process: engine 10 gives 70 tips `blocked` at any budget; engines 11 and
+> 12 give 70 tips `blocked` at budget 0 and **68 tips, 2 dropped, `clear` at budget 3**. LIGHT gives
+> 70 tips `clear` at every budget on 10 and 12. The engine side changed at **engine 11** (geocore
+> `091d3fb`, "generic policy takes the repair budget from the host"), and the app side at mixoMesh
+> **`60459cf`** (P5.1-P5.4), which added `repairBudget: REPAIR_BUDGET` (3) to `buildJob` in
+> `src/supports/live/jobInputs.ts`. So: my "engine 11 -> 12 proximity weld separated the counts" was
+> WRONG, and "the operative difference is the preset" was WRONG - the probe's `supportJob()` sets no
+> `repairBudget` (engine default 0) while the live `buildJob` sets 3, so the two tests differ in TWO
+> inputs, and MIDDLE through the probe would still report 70. "Never valid, only coincidence" is half
+> right: at engine 10 the assertion held because the budget did nothing, not because two counts
+> happened to agree.
+>
+> **68 IS LEGITIMATE - the repair is doing its job**, not a defect in the live worker path. Placement
+> still returns 70 points; the safety repair then drops the two contacts at the overhang edge
+> (`auto-215_100_485` and `auto-215_100_-485`) where MIDDLE's thicker supports cross the model, and
+> the verdict moves from `blocked` to `clear`.
+>
+> **VERDICT C, not A and not B.** Keep the smoke on the panel's DEFAULT path and replace the count
+> equality with a conservation check anchored to geocore's number. `tests/browser-support-worker-shapes-smoke.mjs`
+> line ~170 becomes three assertions: `stats.last.points === GOLDEN.placementPoints` (70, from
+> geocore's snapshot); `stats.last.tips + stats.last.dropped === stats.last.points`; and
+> `stats.last.verdict === 'clear'`, which holds only if the repair ran in the worker. That needs two
+> fields on `liveStats.last` in `src/supports/live/liveGeneration.ts` (~271): `points` and `dropped`
+> (`built.dropped.length` is already computed on the next line). **As a separate commit**, one vitest
+> case in `src/supports/features.test.ts` for MIDDLE with `REPAIR_BUDGET`: 70 placed, exactly those
+> two ids dropped, verdict `clear` - labelled as the app's OWN characterisation, to be re-taken on
+> re-vendor. It runs under `npm test`, so CI sees it; the browser smokes never are.
+>
+> Why not the two I offered: **A (select LIGHT)** goes green for the wrong reason - LIGHT at budget 3
+> drops nothing, so the smoke would stop exercising the repair path in the worker, which is the only
+> thing separating the live route from the probe route. **B (pin 68)** takes the number from the
+> writer (the MX-06 pattern) and breaks at the pending re-vendor, where nobody could tell a
+> regression from a legitimate change. C's own cost, stated: it does not bound HOW MANY contacts are
+> dropped, which is the gap the unit test fills cheaply and in CI.
+>
+> **OPEN UX QUESTION Fable raised and did not check: does the panel tell the operator that 2
+> contacts were dropped on a default Generate?** If it does not, that is a finding of its own - a
+> silent change to what gets printed - and it is exactly the "nothing dies silently" class. C9 (deleting `src/core/repair/` for geocore's Rust
 > repair) is untouched and still gated on the 12-scan comparison.
 
 > **2026-10-22 /cia run (`docs/reviews/2026-10-22-cia-full.md`): every owner decision is closed.**
