@@ -13,14 +13,10 @@
 .mx-kit .mx-hex { width: auto; min-width: 52px; font-variant-numeric: tabular-nums; }
 .mx-kit .mx-range input[type='range'] { flex: 1; min-width: 60px; height: var(--row); margin: 0 4px; accent-color: var(--ink); }
 .mx-kit .number input:disabled, .mx-kit .check input:disabled + span { color: var(--muted); opacity: .55; }
-/* MX-12: the unit suffix clipped its own text. base.css gives `.number small` a FIXED
-   `width: 16px`, but "mm" measures 18 px and "deg" more, so every number and range row in the
-   kit (and in the app, same component) overflowed its box by a couple of pixels — measured in
-   Chrome at 1440x900, `.field-row.mx-number` clientWidth 240 / scrollWidth 242. Kept at 16 px as
-   the RESERVED width so single- and multi-character units still line up in a column; it is just
-   no longer a cap. Overridden here and not in base.css / kit.scoped.css, which are unedited
-   copies of mixo-app-style (see scope.mjs) — the one-line fix belongs upstream in that repo too. */
-.mx-kit .number small { width: auto; min-width: 16px; }
+/* MX-12's `.number small` override is GONE, because the fix landed upstream (mixo-app-style
+   fc11115) and the copies were re-taken: kit.scoped.css now carries
+   `flex: none; min-width: 2em; nowrap` itself. Keeping a local override on top of an upstream fix
+   is how a copy silently diverges from the system it is supposed to be a copy of. */
 .mx-kit .check:has(input:disabled) { cursor: not-allowed; }
 
 /* Containers (P0.4b) */

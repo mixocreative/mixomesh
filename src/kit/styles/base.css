@@ -75,7 +75,14 @@ footer {
 }
 .number input:hover { border-bottom-color: var(--ink); }
 .number input:focus-visible { outline: 0; border-bottom-color: var(--red); }
-.number small { width: 16px; color: var(--muted); font-size: var(--fs-sm); }
+/* The unit label. A FIXED `width` here is wrong twice over, and it clipped every row for months:
+   `.number` is a flex row, so 16px was a basis that `flex-shrink: 1` could squeeze even further,
+   and 16px is simply too small - at --fs-sm "mm" measures 20.4px, "deg" 19.0px, "mm/s" 29.8px.
+   `flex: none` + `nowrap` means the text is never shrunk or wrapped; `min-width: 2em` keeps the
+   floor the fixed width was really buying, which is the input column lining up across rows. 2em,
+   not 22px, so it follows --fs-sm instead of silently clipping again when that changes. A unit
+   wider than the floor (mm/s) pushes its own row out a little rather than losing characters. */
+.number small { flex: none; min-width: 2em; white-space: nowrap; color: var(--muted); font-size: var(--fs-sm); }
 .check { display: flex; gap: 8px; align-items: center; min-height: var(--row); cursor: pointer; }
 .check input { accent-color: var(--ink); width: 12px; height: 12px; margin: 0; }
 
