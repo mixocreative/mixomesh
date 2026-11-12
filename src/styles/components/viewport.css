@@ -512,6 +512,46 @@ button.sb-crumb:hover { color: var(--hud-text-hi); background: var(--hud-hover-b
 .np-subhead { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin-bottom: var(--sp-2); }
 @media (max-width: 900px) { .sb-esc { display: none; } }
 
+/* ── Separator mode notice (U5) ────────────────────────────────────────────
+   Bottom-centre of the viewport while the click-depth scope is an OBJECT: what
+   to do, how many meshes are picked, and the one action. Same HUD tokens as the
+   breadcrumb above it, so the two read as one piece of chrome. */
+.part-scope-notice {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  max-width: calc(100% - 2 * var(--sp-4));
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 9px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  color: var(--hud-text);
+  font-size: var(--fs-sm);
+  text-shadow: var(--hud-text-shadow);
+  pointer-events: auto;
+}
+.part-scope-notice .psn-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.part-scope-notice .psn-text small { color: var(--hud-text-dim); font-size: var(--fs-xs); }
+.part-scope-notice button {
+  background: var(--hud-hover-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-3);
+  font: inherit;
+  color: var(--hud-text-hi);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.part-scope-notice button:hover:not(:disabled) { background: var(--accent-hi, var(--hud-hover-bg)); }
+.part-scope-notice button:disabled { opacity: 0.45; cursor: default; }
+.part-scope-notice .psn-action { font-weight: 600; }
+
 /* ── Touch gizmo + numeric Transform sheet (overhaul 8.5) ──── */
 /* Touch-only controls: hidden for mouse, shown once a touch/pen pointer is
    (or was) the live input (body.touch-input, set by PivotSession). */

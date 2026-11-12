@@ -669,6 +669,112 @@ export class SplitToPartsCommand {
 }
 
 /**
+ * Separate the PICKED parts of one logical object into ONE new object (U5, the
+ * owner's "pick the meshes and separate them"). Link fields only — geometry,
+ * shaders and transforms are untouched, exactly as Join and SplitToParts leave
+ * them, so nothing moves in world space and the plate position is preserved.
+ *
+ * No-op (`applied === false`) unless the picked ids are parts of ONE logical
+ * object and leave at least one part behind: separating every part is
+ * `SplitToPartsCommand`, and separating nothing is not an edit.
+ *
+ * Two cases, and the second is the one worth knowing about:
+ *   - the picked set does not include the object's lead → the first picked part
+ *     leads the new object, the rest follow it;
+ *   - it DOES include the lead → the object left behind needs a new lead, so
+ *     the first REMAINING part takes that job and the others re-point at it.
+ *     Nothing about the geometry changes; `logicalObjectId` is a pointer.
+ */
+export class SeparateSelectionCommand {
+  constructor(partIds) {
+    this._requested = partIds ?? [];
+    this._before = null;
+    this._after = null;
+    this._reparent = undefined;   // undefined = not decided yet; null = decided, none needed
+    this.applied = false;
+    this.label = t('history.separateSelection');
+  }
+  _plan() {
+    if (this._before) return true;
+    const objects = getState().scene.objects;
+    const picked = [...new Set(this._requested)].filter(id => objects[id] && !objects[id].isGhost);
+    const leads = new Set(picked.map(id => canonicalObjectId(id, objects)));
+    if (picked.length === 0 || leads.size !== 1) return false;
+    const sourceLead = [...leads][0];
+    const all = logicalObjectPartIds(sourceLead, objects).filter(id => !objects[id]?.isGhost);
+    const taken = all.filter(id => picked.includes(id));
+    const left = all.filter(id => !picked.includes(id));
+    if (taken.length === 0 || left.length === 0) return false;
+
+    const source = objects[sourceLead];
+    const before = {}, after = {};
+    const draft = { ...objects };
+    const newLead = taken[0];
+    // A part that carries a name of its own keeps it; one named after the
+    // object it came from gets a fresh derived name (`_isDerivedName`).
+    const name = _isDerivedName(objects[newLead].name, source.name)
+      ? _uniqueNameIn(`${source.name}.${String(all.indexOf(newLead)).padStart(3, '0')}`, draft)
+      : objects[newLead].name;
+    for (const id of taken) {
+      before[id] = _snapshotLink(objects[id]);
+      after[id] = id === newLead
+        ? { name, isInternalPart: false, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart }
+        : { isInternalPart: true, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
+      draft[id] = { ...objects[id], ...after[id] };
+    }
+    // The object left behind: its lead stays its lead unless it was taken, in
+    // which case the first remaining part takes over.
+    const keptLead = left.includes(sourceLead) ? sourceLead : left[0];
+    for (const id of left) {
+      before[id] ??= _snapshotLink(objects[id]);
+      after[id] = id === keptLead
+        ? { name: objects[keptLead].name, isInternalPart: false, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart }
+        : { isInternalPart: true, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
+    }
+    this._newLeadId = newLead;
+    this._keptLeadId = keptLead;
+    this._sourceLeadId = sourceLead;
+    this._before = before;
+    this._after = after;
+    this._parentId = source.parentId ?? null;
+    return true;
+  }
+  execute() {
+    if (!this._plan()) { this.applied = false; return; }
+    _applyLinkPatches(this._after);
+    // The new object lives where the object it came from lives: a separate must
+    // not move anything, in world space or in the outliner.
+    if (this._reparent === undefined) {
+      const now = getState().scene.objects;
+      this._reparent = (now[this._newLeadId]?.parentId ?? null) === this._parentId
+        ? null
+        : new ReparentCommand(this._newLeadId, this._parentId);
+    }
+    this._reparent?.execute();
+    // The supports of the object it came from were built against geometry that
+    // has just lost parts: `_applyLinkPatches` dispatches OBJECT_UPDATED per id,
+    // which is what marks them stale (src/supports/stale.ts).
+    //
+    // What is SELECTED afterwards is the caller's call, as it is for Join and
+    // SplitToParts: a command that also drove the selection would make its own
+    // undo depend on a selection the user may have changed since.
+    this.applied = true;
+    markDirty();
+  }
+  undo() {
+    if (!this.applied) return;
+    this._reparent?.undo();
+    _applyLinkPatches(this._before);
+    this.applied = false;
+  }
+
+  /** The new object's id, once planned: what a caller selects after the edit. */
+  get newObjectId() {
+    return this._plan() ? this._newLeadId : null;
+  }
+}
+
+/**
  * Merge two or more displayable objects into ONE logical object: the first
  * (or `opts.leadId`) becomes the lead, every other object — and each of its
  * existing parts — becomes an internal part. Meshes keep their transforms

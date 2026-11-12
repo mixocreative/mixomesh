@@ -16,6 +16,7 @@ import { t } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { ScenePanel } from './ScenePanel.js';
 import { ScopeBreadcrumb } from './ScopeBreadcrumb.js';
+import { PartScopeMode } from './PartScopeMode';
 import { SettingsStore } from '../core/SettingsStore.js';
 import { StatsHud } from '../panels/StatsHud/StatsHud.tsx';
 
@@ -40,6 +41,7 @@ export function init() {
   if (!_root) return;
   _render();
   ScopeBreadcrumb.init();   // viewport top-left chrome, same lifecycle as the toggle strip
+  PartScopeMode.init();     // the separator mode's notice (U5): also viewport chrome, same lifecycle
   StatsHud.onVisibilityChange(_render);   // the HUD's own hide button keeps this strip in sync
   // Overlays arrive restored on load (spec load step 12) and reset on new.
   subscribe(EVENTS.PROJECT_LOADED, _render);

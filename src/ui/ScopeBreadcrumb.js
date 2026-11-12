@@ -28,15 +28,24 @@ export function init() {
   _render();
 }
 
-/** Ancestor chain of a scope, outermost first: [{ id, name }]. */
-export function scopeChain(scopeId, groups) {
+/**
+ * Ancestor chain of a scope, outermost first: [{ id, name }].
+ *
+ * A scope can be an OBJECT whose parts are the depth (U5), not only a group. Without `objects` such
+ * a scope produced an EMPTY chain, which hid the breadcrumb altogether — the one moment the operator
+ * most needs to be told where they are. The object is the last crumb and the walk continues through
+ * its parent groups.
+ */
+export function scopeChain(scopeId, groups, objects) {
   const chain = [];
   const seen = new Set();
   let cur = scopeId;
-  while (cur != null && groups?.[cur] && !seen.has(cur)) {
+  while (cur != null && !seen.has(cur)) {
+    const node = groups?.[cur] ?? objects?.[cur];
+    if (!node) break;
     seen.add(cur);
-    chain.unshift({ id: cur, name: groups[cur].name ?? cur });
-    cur = groups[cur].parentId ?? null;
+    chain.unshift({ id: cur, name: node.name ?? cur });
+    cur = node.parentId ?? null;
   }
   return chain;
 }
@@ -50,7 +59,9 @@ function _render() {
     StatusBar.setHint('');   // back to the default hint
     return;
   }
-  const chain = scopeChain(scope, getState().scene.groups);
+  const { groups, objects } = getState().scene;
+  const chain = scopeChain(scope, groups, objects);
+  const inParts = Selection.inPartScope();
   const rootLabel = tr('scope.root', 'Scene');
   const sep = '<span class="sb-crumb-sep" aria-hidden="true">›</span>';
   const crumbs = [`<button type="button" class="sb-crumb" data-scope="">${escapeHtml(rootLabel)}</button>`];
@@ -60,11 +71,13 @@ function _render() {
       ? `<span class="sb-crumb sb-crumb-current" aria-current="true">${escapeHtml(c.name)}</span>`
       : `<button type="button" class="sb-crumb" data-scope="${escapeAttr(c.id)}">${escapeHtml(c.name)}</button>`);
   });
-  const hint = tr('scope.escHint', 'Esc to exit group');
+  const hint = inParts ? tr('scope.escHintObject', 'Esc to exit object') : tr('scope.escHint', 'Esc to exit group');
   _root.hidden = false;
   _root.setAttribute('aria-label', tr('scope.aria', 'Group path'));
   _root.innerHTML = `<span class="sb-crumbs">${crumbs.join(sep)}</span><span class="sb-esc">${escapeHtml(hint)}</span>`;
-  StatusBar.setHint(tr('scope.statusHint', 'Inside a group · Click to select · Esc to exit · Double-click a group to enter'));
+  StatusBar.setHint(inParts
+    ? tr('scope.statusHintObject', 'Inside an object · Click a mesh, Shift-click to add · Separate to make them one object · Esc to exit')
+    : tr('scope.statusHint', 'Inside a group · Click to select · Esc to exit · Double-click a group to enter'));
 }
 
 export const ScopeBreadcrumb = { init, scopeChain };

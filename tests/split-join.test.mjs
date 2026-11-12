@@ -11,7 +11,7 @@ installEnv();
 console.error = () => {};
 const { setState, getState, subscribe } = await import('../src/core/StateManager.js');
 const { EVENTS } = await import('../src/core/events.js');
-const { SplitToPartsCommand, JoinCommand } = await import('../src/core/HistoryManager.js');
+const { SplitToPartsCommand, JoinCommand, SeparateSelectionCommand } = await import('../src/core/HistoryManager.js');
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { Selection } = await import('../src/core/Selection.js');
@@ -335,6 +335,65 @@ await test('a Join drops the swallowed object supports, warns, and undo brings t
   assert.equal(toasts.length, 0, 'nothing was lost, so nothing is said');
   off();
   offUpdated();
+});
+
+await test('separate selection: the picked parts become ONE new object, the rest stay', () => {
+  // The owner's ask: enter an object, pick meshes, separate them.
+  const three = () => ({
+    body: base('body', 'body', { logicalObjectId: 'body', _tris: [[0, 2, 1]] }),
+    armA: base('armA', 'armA', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 1, 3]] }),
+    armB: base('armB', 'armB', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 3, 2]] }),
+  });
+  seed(three());
+  const cmd = new SeparateSelectionCommand(['armA']);
+  cmd.execute();
+  assert.equal(cmd.applied, true);
+  let s = getState().scene.objects;
+  assert.equal(s.armA.isInternalPart, false, 'the picked part leads a new object');
+  assert.equal(s.armA.logicalObjectId, 'armA');
+  assert.equal(s.armA.name, 'armA', 'it keeps the name the operator chose');
+  assert.deepEqual(logicalObjectPartIds('body', s).sort(), ['armB', 'body'], 'the rest stay together');
+  assert.equal(canonicalObjectId('armA', s), 'armA', 'and are no longer part of it');
+  cmd.undo();
+  s = getState().scene.objects;
+  assert.equal(s.armA.isInternalPart, true, 'undo puts it back');
+  assert.deepEqual(logicalObjectPartIds('body', s).sort(), ['armA', 'armB', 'body']);
+});
+
+await test('separate selection: taking the LEAD hands the rest a new lead', () => {
+  seed({
+    body: base('body', 'body', { logicalObjectId: 'body', _tris: [[0, 2, 1]] }),
+    armA: base('armA', 'armA', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 1, 3]] }),
+    armB: base('armB', 'armB', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 3, 2]] }),
+  });
+  const cmd = new SeparateSelectionCommand(['body']);
+  cmd.execute();
+  const s = getState().scene.objects;
+  assert.equal(s.body.logicalObjectId, 'body', 'the taken lead leads its own new object');
+  assert.equal(s.body.isInternalPart, false);
+  // The object left behind cannot be led by a part that has gone.
+  const keptLead = canonicalObjectId('armA', s);
+  assert.equal(keptLead, 'armA', 'the first remaining part takes over');
+  assert.equal(s.armA.isInternalPart, false);
+  assert.equal(s.armB.logicalObjectId, 'armA');
+  assert.deepEqual(logicalObjectPartIds('armA', s).sort(), ['armA', 'armB']);
+  cmd.undo();
+  assert.equal(canonicalObjectId('armA', getState().scene.objects), 'body', 'undo restores the old lead');
+});
+
+await test('separate selection: refuses nothing, everything, and parts of two objects', () => {
+  seed({
+    body: base('body', 'body', { logicalObjectId: 'body', _tris: [[0, 2, 1]] }),
+    armA: base('armA', 'armA', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 1, 3]] }),
+    other: base('other', 'other', { _tris: [[0, 3, 2]] }),
+  });
+  for (const picked of [[], ['body', 'armA'], ['armA', 'other'], ['missing']]) {
+    const cmd = new SeparateSelectionCommand(picked);
+    cmd.execute();
+    assert.equal(cmd.applied, false, `refused: ${JSON.stringify(picked)}`);
+  }
+  // Every part picked is SplitToParts work, not this; the object is untouched.
+  assert.deepEqual(logicalObjectPartIds('body', getState().scene.objects).sort(), ['armA', 'body']);
 });
 
 await test('validation of a joined object goes through the welded-union (group) path', async () => {
