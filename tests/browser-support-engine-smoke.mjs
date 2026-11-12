@@ -3,7 +3,8 @@
 // base './' (the GitHub Pages shape) and the built app in Electron over file://. Each mode loads
 // the cube-overhang fixture by dropping it on the viewport, runs the generation path through
 // window.__mxSupportEngineProbe (a lazy hook present in the production build, see src/app/main.ts),
-// and asserts engine_version 11, 70 tips (62 before P5.14), no console errors / exceptions and no CSP violations.
+// and asserts the vendored engine_version (public/vendor/mixo-geocore/SOURCE.json), 70 tips (62
+// before P5.14), no console errors / exceptions and no CSP violations.
 //
 //   node tests/browser-support-engine-smoke.mjs              vite dev server + headless Chrome
 //   node tests/browser-support-engine-smoke.mjs --preview    production build (npm run build first)
@@ -23,7 +24,12 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const MODE = process.argv.includes('--electron') ? 'electron' : process.argv.includes('--preview') ? 'preview' : 'dev';
 const FILE = join(ROOT, 'tests/fixtures/support-cube-overhang.glb');
 const GOLDEN = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/support-golden-cube-overhang.json'), 'utf8'));
-const EXPECTED_ENGINE = 11;
+// From the vendor STAMP, never a literal. This assert exists to catch the app loading something
+// other than the engine it vendored; a hard-coded number cannot do that job, it only goes stale on
+// the next re-vendor. It read 11 from the engine-12 bump (vendor 6cc5385, 2026-10-30) until the
+// first full `npm run test:all` on 2026-11-12 failed on it - CI runs only `npm test`, so nothing
+// else could see it. The tips count stays a golden number: that IS a behaviour pin.
+const EXPECTED_ENGINE = JSON.parse(readFileSync(join(ROOT, 'public/vendor/mixo-geocore/SOURCE.json'), 'utf8')).engineVersion;
 let finished = false;
 
 const BOOTED = `document.readyState === 'complete' && document.querySelector('#boot-status') === null
