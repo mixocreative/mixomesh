@@ -1,0 +1,284 @@
+# One notion of parts, and the UI that lets the operator own it
+
+**Status: plan, not approved. Nothing here is started.** Written 2026-11-12, after the owner asked
+whether everything he had specified was organised and planned. It was not — half of it was in two
+handoffs and one piece was only in conversation. This is the single ordered list.
+
+The owner set the order himself: **geocore first, before any further app review.** Both apps vendor
+from geocore, so fixing it upstream costs one re-vendor each instead of two app-side workarounds
+that then have to be unwound.
+
+---
+
+## 1. What was asked, and where each piece lands
+
+| # | What the owner asked for | Unit | Repo | Gated by |
+|---|---|---|---|---|
+| A | Generic support generation available in mixoMesh | **U7** | mixomesh | U6 |
+| B | Faces where two meshes of one object intersect get no support | **U1** | geocore | — |
+| C | Dental main object keeps its special treatment; the other meshes get supports on their **exposed faces only** | exists (dental), **U1** (generic) | geocore | — |
+| D | The same overlap rule applies to generic supports (body + arm) | **U1**, surfaced by **U7** | geocore → mixomesh | U1 |
+| E | Mesh-count detection respected in **both** apps | **U1** + **U3** + **U6** | all three | U1 |
+| F | Fix mesh / fill holes / weld vertices while respecting independent meshes | **U2** | geocore | — |
+| G | Identify meshes when loaded to the scene; repair only on request | **U2** (decided: identify at load, repair never at load) | geocore | — |
+| H | Split meshes into objects; merge objects into one | **U5** | mixomesh | U4 |
+| I | Support gen respects by object (overlap inside one object gets nothing) | **U1** + **U7** | geocore → mixomesh | U6 |
+| J | Merge uses the active object's origin | **already true** (`JoinCommand`; the active object becomes the lead) | mixomesh | — |
+| K | Split origin "each mesh's centre" | **U5**, corrected: the bounding-box centre of the **picked set**, since N meshes become ONE object with one origin | mixomesh | U4 |
+| L | A separate mode for splitting: hide everything, isolate the active object, dim its parts, click / shift-click to pick, picked parts brighten, confirm makes one new object | **U4** + **U5** | mixomesh | — |
+| M | In that mode, grey or darken all UI and background; a notice says what to do; a button accepts | **U4** | mixomesh | — |
+| N | Rename objects easily | **exists** (F2, row double-click, context menu, scene-wide `.001` collision rule) — **U5** adds part-row rename and makes the collision visible | mixomesh | U4 |
+
+**Two of these were in no document before this one:** M (the focus treatment) and the fact that A is
+blocked behind a 12 → 65 re-vendor rather than being a feature that can be written.
+
+---
+
+## 2. The order, and the one sequencing trap
+
+```
+U1 ─ geocore: one part list for both policies          ─┐
+U2 ─ geocore: repair splits parts before it welds      ─┤── engine 65
+                                                        │
+U3 ─ mixodental: re-vendor 64 → 65                     ←┘
+U6 ─ mixomesh: re-vendor 12 → 65                       ←┘
+U7 ─ mixomesh: generic supports honour parts           ← U6
+
+U4 ─ mixomesh: the focus-mode module                    (no engine dependency: can run in parallel with U1/U2)
+U5 ─ mixomesh: scope depth = parts, separate + merge    ← U4
+```
+
+**THE TRAP: U4 and U5 can ship before the engine, but they must not promise what only U7 delivers.**
+On engine 12 `partsToEngine` (`src/supports/frame.ts:105`) concatenates and welds and nothing more,
+so **merged overlapping parts get tips in the overlap today**. If the separator mode tells the
+operator that grouping controls support placement before U7 lands, the UI is making a claim the
+engine cannot keep. Until U7: the mode groups, renames and separates, and says nothing about
+supports.
+
+**The rule the whole plan serves**, worth holding onto because the first draft of it was wrong:
+
+> An object is one print — the engine decides from geometry which faces of **that one object** are
+> buried and never supports them; grouping decides only which meshes are in the object; and two
+> **separate** objects that overlap are a collision to **report**, not a fusion to assume.
+
+---
+
+## 3. The units
+
+### U1 — geocore: one part list, both policies (engine 65)
+
+`surface::parts::split` is already in the shared path (`crates/geometry-core/src/surface/parts.rs:218`).
+What is dental-only is the masking.
+
+1. Move `hidden_faces` and `inside_other` out of `dental/denture/parts.rs` into the shared surface
+   path.
+2. **Drop the "any `Fused`" condition** (`dental/denture/parts.rs:80`): today the hidden mask is
+   computed only when something overlaps the *target*, so two add-ons overlapping each other get no
+   mask. Rare in a dental file; the normal case for a body and two arms.
+3. Give the generic policy the part list and the hidden mask, so "outward-facing" means outward *per
+   part* and buried faces get nothing.
+4. **A host-declared target.** The engine picks the largest part as target and calls a small one
+   debris — "reported, never supported" (`surface/parts.rs:16-18`). The operator's active object is
+   not necessarily the engine's main body, so the host must be able to say which part is the target.
+5. Expose the part list and roles to the host, for step 5 of the dental plan's §3c (show roles before
+   generate).
+
+**Done when:** a generic build on a two-body mesh plants nothing on faces buried inside the other
+body; two add-ons overlapping each other are masked; the goldens are re-taken and `engine_version()`
+is 65; the 16 snapshots pass.
+
+**Open question for the owner, with my answer:** should a `debris` part in a *generic* (non-dental)
+object still get no supports? **My answer: no — report it, support it.** "Debris" is a dental
+judgement about scan noise; in a generic object a small part is as likely to be a deliberate detail.
+Make the debris rule dental-only and have the generic policy support every part it is given.
+
+### U2 — geocore: repair splits parts before it welds
+
+Fable measured engine 64's repair on synthetic denture-and-hook cases. Two failures, both on the
+owner's exact case:
+
+- A shared **patch** of identical triangulation makes every patch edge four-faced, so the patch is
+  **torn off both shells** — two watertight solids became six open pieces, and with fill on, 8
+  triangles were invented and it reported watertight.
+- If either shell is **open** where they meet, the two **fuse into one closed shell, reported
+  watertight, with no alarm.**
+
+The cause: `weld_map` merges every bit-identical position unconditionally
+(`core/proximity.rs:219-220`); the edge guard is only in the near pass. What saves *closed* shells is
+the later non-manifold split, which handles point and line contact but not an area patch.
+`pair_around` (`surface/parts.rs:110`) resolves it and the manifold step does not call it.
+
+1. **Split parts first**, on the import-welded mesh, before the repair weld.
+2. Forbid the exact-pass weld from merging across two parts.
+3. Have the manifold step use `pair_around` where it can pair, instead of shattering a four-faced
+   edge.
+4. Fill **per part**.
+5. Recognise a zero-area rim as a **crack** and report it as such, not as `fill-degenerate`.
+6. Leave `merge_near` uncalled. It has no topology guard and would collapse real short edges.
+
+**Done when:** the shared-patch case keeps both shells whole; two open rims meeting are **reported**
+rather than fused; each case has a test; and the honest guarantee is no longer only "closed shells
+are never fused".
+
+**And repair stays an explicit operator action, never a step at load.** What belongs at load is the
+lossless half — weld at noise scale, split parts, diagnose, report — which is what mixoDental's
+import already does. Repair changes what gets printed, so it needs the operator's hand and a
+before/after.
+
+### U3 — mixodental: re-vendor 64 → 65
+
+Mechanical, after U1 and U2. The 64 re-vendor's receipt is the template: `npm run gate` with the 13
+real scans is the evidence that engine output did not move.
+
+### U4 — mixomesh: the focus-mode module
+
+**This is the piece the owner asked about by name, and it is the right call for a reason that is
+already in the code: there are about to be two callers.** `SupportMode.ts:119-134` holds
+`applyMask` / `clearMask` as a closure, and the separator mode needs exactly the same behaviour.
+Fable's reading agrees: "the mask is a closure and needs extracting to reuse."
+
+It also passes this repo's extraction test — **a module is clean when its output is narrower than its
+input.** It takes which objects stay lit; it hands back everything else dimmed, the chrome inert, Esc
+wired and undo scoped. That is a job, not a hub.
+
+**It is parameterised per caller, because the owner's requirement is that the UI chooses what to dim
+and whether to hide other objects at all.** One call:
+
+```
+enterFocus({
+  name,      // -> #app[data-mode="<name>"], and the undo scope's label
+  keep,      // object ids that stay lit. EMPTY = do not touch the scene at all
+  live,      // the panels that stay interactive. Everything else dims AND disables
+  notice,    // { message, primary: { label, onPick }, onCancel }
+})
+```
+
+**`live` declares what stays bright, never what dims — and that direction is the whole safety
+property.** List what to dim and every panel added later stays interactive in every focus mode by
+accident, which is a bug nobody notices until a user clicks it mid-task. List what stays live and a
+new panel dims by default; the worst case is a panel the caller forgot to allow, which the user
+reports in a sentence.
+
+`keep: []` is a real and useful case: the chrome dims, the viewport is untouched, nothing is hidden.
+That is what an "inspect this problem" mode wants — focus without isolation. So the module serves
+three callers, not one:
+
+| caller | keep | live |
+|---|---|---|
+| separator mode (U5) | the active object | outliner + the focus notice |
+| Support Mode (today's behaviour, unchanged) | the selected objects | the support panel |
+| a future problem-inspect mode | `[]` — scene untouched | the problem list |
+
+**What the module owns:**
+
+| | |
+|---|---|
+| the layer mask | from `keep`; and a restore that puts every `layerMask` back exactly |
+| the mode attribute | `#app[data-mode="<name>"]` for per-mode styling, if a mode wants any |
+| the chrome | every panel not in `live` gets `data-focus="dim"` and is genuinely disabled — `disabled` or `pointer-events: none`, never greyed-but-clickable. **One CSS rule on `[data-focus="dim"]` serves every mode**, so adding a mode needs no new CSS |
+| the notice slot | one `.mx-notice` with `.mx-notice-actions`, always live whatever `live` says |
+| the keys | Esc cancels; mutual exclusion is free because `InputManager._mode` is a single slot |
+| undo | scoped on enter, released on exit |
+
+**What it must NOT own:** what the mode *does*. Separating parts, generating supports — that stays
+with each caller, or the module becomes the hub this repo's rule exists to prevent.
+
+**The inversion to get right (M):** the existing `.mx-modal-scrim` is `position: fixed; inset: 0` and
+covers the canvas. Focus mode needs the opposite — **dim the chrome, leave the viewport bright**, with
+the isolated object the one thing at full brightness. So it is a new treatment built from the same
+tokens, not the existing scrim reused.
+
+**Notice copy, in the house style — say the effect and the count, never "Accept":**
+
+| state | notice | primary |
+|---|---|---|
+| nothing picked | "Click the parts to separate. Shift-click to add." | **Separate** — disabled, and the notice says why |
+| 3 picked | "3 parts selected." | **Separate 3 parts into a new object** |
+| all picked | "That is every part; nothing would be left." | disabled |
+
+Every element gets a unique stable `data-ui` name (`focus-notice`, `focus-accept`, `focus-cancel`).
+
+**Done when:** Support Mode uses the module with **no behaviour change** and every browser smoke that
+drives it still passes. That is the whole acceptance test — an extraction that changes behaviour is a
+rewrite wearing an extraction's name.
+
+### U5 — mixomesh: scope depth = parts, separate and merge
+
+Half of this exists. `JoinCommand` merges and the active object already becomes the lead;
+`SplitToPartsCommand` separates by material, all parts at once; the click-depth scope (click = whole,
+double-click = enter, Esc = out) works **on groups only** (`src/core/Selection.js:358-431`).
+
+**Decision: extend the scope, do not add a third mode.** Double-click on an object is unbound today
+(`src/core/InputManager.js:375`). Bind it to enter the object with **parts** as the selectable depth,
+use U4 for the isolation, and give it one action: "Separate selection" → one new object. Gizmo off
+inside.
+
+With the gaps Fable ranked, worst first:
+
+1. **Merge must not hide the other object's supports.** They live on the lead only
+   (`src/supports/store.ts:15-26`) and the link snapshot excludes them
+   (`ParentCommands.js:531`), so if the lead had none, nothing is stale, export is not blocked and
+   **the print goes out unsupported**. Drop the merged-away record with a visible warning.
+2. **Merge then Repair** runs on the welded union of a logical object
+   (`src/core/repair/RepairSession.js:205-217`) — U2's case. And the repair record replays at load
+   (`ProjectLoader.js:624-632`), so repair → split → save reloads as different geometry. Block or
+   invalidate; do not leave it to chance.
+3. **Names**: parts are renamed `<lead>.00N` (`ParentCommands.js:580`), so "hook" merged then
+   separated returns as "denture.001". Keep the original name through a merge, derive on split, and
+   let part rows be renamed (`Outliner.js:478, 649` makes them inert today).
+4. **Origin**: the bounding-box centre of the picked set, and only where new geometry is minted.
+   Nothing may move in world space — the plate position is what matters.
+5. **A topological split must mint owned geometry** as derived assets, the way Boolean does
+   (`BooleanCommands.js:162-178`), because engine part ids are not stable. It must implement
+   `retainedTriangles` / `release` or the undo cap evicts history
+   (`HistoryManager.js:77-94`).
+6. **Export uses the lead's ratio** (`PrintPipeline.js:452`); merging objects with different ratios
+   is unguarded.
+
+**Two hard constraints:**
+
+- **Add no new per-object field to the save format.** `logicalObjectId` and `isInternalPart` are
+  already saved at schema 3.6, and an older build whitelists per-object fields on load
+  (`ProjectLoader.js:596-618`) — a new one is dropped, then lost on that build's next save. Derived
+  assets make split results plain objects to any build.
+- **Never `Mesh.MergeMeshes`.** It bakes world transforms into one vertex buffer, its multi-material
+  form produces exactly the MultiMaterial mesh the import path exists to eliminate
+  (`src/core/assets/MeshSplit.js:1-15`), and it breaks the `containerMeshIndex` reload depends on.
+  The link model already in place is the right one.
+
+**Done when:** a user can enter an object, pick parts, separate them into one named object, merge it
+back, and undo each in one step; supports are never silently orphaned; and a project saved after a
+split reloads identically on a build that predates it.
+
+### U6 — mixomesh: re-vendor 12 → 65
+
+The plan's §4 (in `S:\ai\mixodental\docs\design\2026-11-12-three-repo-refactor-plan.md`) holds the
+steps and they stand: **capture and commit the engine-12 baseline first**, estimate with the
+type-checker and the smokes rather than signature diffs, `scatterAngle` 50 → 45,
+`minFromUpDeg` → `overhangAngleDeg` where the four `0` sites become **180**, and default-fill
+`neckMaxShift` / `minClearance` in `SupportsPersist.js:36-44` for old `.mixo` saves.
+
+**This plan is what fires §4's trigger** — "mixoMesh needs a named engine feature it cannot have at
+12". That feature is the part list.
+
+### U7 — mixomesh: generic supports honour parts
+
+Only reachable after U6. `partsToEngine` (`src/supports/frame.ts:105`) stops being a concatenate-and-
+weld and starts passing the part list; the hidden mask reaches the generic policy; and the overlap
+promise becomes true, at which point the separator mode may say so.
+
+**Done when** a body-and-arm object gets no tips in the overlap, and the part count and roles are
+shown before generate.
+
+---
+
+## 4. Not in this plan, on purpose
+
+- **Pushing or publishing anything.** mixoMesh's push deploys to Pages; that is the owner's call.
+- **The 0.3.2 installer.** Unsigned, no update channel, and `installers/` still holds 0.3.1 from
+  2026-10-23. A release decision, not this plan's.
+- **`test:all`'s flakiness.** One Vite start-up probe timed out on 2026-11-12 while Vite had printed
+  ready; the suite passes alone. 23 suites chained with `&&`, most starting their own Vite, means one
+  hiccup fails the chain and hides every suite after it — which is how two real defects hid behind
+  each other earlier that day. The fix is a retry on the probe, not a longer timeout. Worth doing
+  before U5 adds more browser tests, and written down here rather than left as folklore.
