@@ -125,7 +125,88 @@
 >
 > **OPEN UX QUESTION Fable raised and did not check: does the panel tell the operator that 2
 > contacts were dropped on a default Generate?** If it does not, that is a finding of its own - a
-> silent change to what gets printed - and it is exactly the "nothing dies silently" class. C9 (deleting `src/core/repair/` for geocore's Rust
+> silent change to what gets printed - and it is exactly the "nothing dies silently" class.
+
+> **VERDICT C IS IMPLEMENTED, 2026-11-12, and `test:support-workers` is green in all three shapes.**
+> `liveStats.last` gained `points` (what placement produced) and `dropped` (`built.dropped.length`),
+> and the smoke asserts three things instead of one absolute count: `points ===
+> GOLDEN.placementPoints`, `tips + dropped === points`, and `verdict === 'clear'` (only reachable if
+> the repair ran in the worker). **The measurement that settles the argument: dev and preview report
+> 70 placed = 68 tips + 2 dropped, and ELECTRON reports 70 = 69 + 1.** Pinning 68 would have passed
+> twice and failed in Electron - so option B was not merely inelegant, it was wrong. It also means
+> *which* contacts the repair drops is not stable across shapes; recorded, not smoothed over. The CI
+> half is `src/supports/features.test.ts` (18/18): MIDDLE at `REPAIR_BUDGET` places 70, drops
+> exactly `auto-215_100_±485`, verdict `clear`; without the budget it keeps all 70 and can only
+> reach `blocked`. Labelled a CHARACTERISATION, to be re-taken on re-vendor, not defended.
+
+> **THE SPLIT / MERGE UX THE OWNER DESIGNED: Fable judges it SOUND WITH CHANGES, and about half of
+> it already exists.** Full reasoning in the session; the load-bearing parts:
+>
+> **The correct rule, in one sentence:** an object is one print - the engine decides from geometry
+> which faces of THAT ONE OBJECT are buried and never supports them, grouping decides only which
+> meshes are in the object, and two separate objects that overlap are a collision to REPORT, not a
+> fusion to assume.
+>
+> **The owner's wording "respects by object" was right and my correction of it was wrong.** The
+> buried-face rule cannot hold "regardless of grouping": supports are stored per object in the
+> lead's local frame and hashed per object, and `src/supports/stale.ts:1-8` makes translation never
+> stale them. A cross-object rule would make moving B invalidate A's supports, and no other object
+> is passed to a support job as an obstacle.
+>
+> **Already built:** `JoinCommand` (`src/core/commands/ParentCommands.js:619-700`, "Merge into one
+> object", active object becomes the lead - so "active's origin" is already true);
+> `SplitToPartsCommand` (`:556-603`, "Separate by material", all parts at once); click-depth scope
+> with a breadcrumb (`src/core/Selection.js:358-431`, groups only); isolation with a layer mask and
+> inert panels (`src/supports/SupportMode.ts:119-134`); rename by F2, row double-click and context
+> menu, with a scene-wide `.001` collision rule (`HierarchyCommands.js:156-173`) that is silent.
+>
+> **Decision: EXTEND THE SCOPE, do not add a third mode.** Double-click on an object is unbound
+> today (`src/core/InputManager.js:375`). Bind it to enter the object with PARTS as the selectable
+> depth, reuse Support Mode's mask for the dimming, and give it one action, "Separate selection",
+> producing one new object. Mutual exclusion with Support Mode is free because `InputManager._mode`
+> is a single slot. Gizmo off inside.
+>
+> **The gaps, worst first:**
+> 1. **Merge silently hides the other object's supports.** Supports live on the lead only
+>    (`src/supports/store.ts:15-26`) and the link snapshot excludes them (`ParentCommands.js:531`).
+>    If the lead had none, nothing is stale, export is not blocked, and **the print goes out
+>    unsupported**. The orphan record is still saved.
+> 2. **Merge then Repair reaches 3d's failures**: repair runs on the welded union of a logical object
+>    (`src/core/repair/RepairSession.js:205-217`), which for two touching solids is the fuse/tear
+>    case reported as watertight. The record replays at load, so repair -> split -> save reloads as
+>    different geometry.
+> 3. **The overlap promise is FALSE on engine 12.** `partsToEngine` only concatenates and welds
+>    (`src/supports/frame.ts:105`); merged overlapping parts get tips in the overlap today. This
+>    proposal fires section 4's re-vendor trigger ("a named engine feature it cannot have at 12").
+>    The scene-graph half can ship now; the STL half and the overlap rule wait for engine 65.
+> 4. Merge, save, reload loses the joined object's provenance and refinement
+>    (`ProjectSerializer.js:277-296`).
+> 5. **The lead is not the engine's target.** The engine picks the largest part as target and calls a
+>    small one debris, "reported, never supported" (`surface/parts.rs:16-18`), so a merged small hook
+>    gets nothing and the user's active object is not the engine's main body. The engine needs a
+>    host-declared target, and 3c step 5 (show roles before generate) belongs in this scope view.
+> 6. Hidden faces need CLOSED parts (`inside_other` is a parity test), so an open scan gets no mask
+>    and the UI must say so.
+> 7. Split destroys names: parts are renamed `<lead>.00N` (`ParentCommands.js:580`), so "hook" merged
+>    then separated returns as "denture.001", and part rows cannot be renamed.
+> 8. **The origin rule contradicts itself:** N picked meshes become ONE object, which has one origin,
+>    not "each mesh's centre". Use the bounding-box centre of the picked set, and only where new
+>    geometry is minted.
+> 9. Engine part ids are not stable, so a topological split must mint owned geometry as derived
+>    assets the way Boolean does (`BooleanCommands.js:162-178`) and implement
+>    `retainedTriangles`/`release` or the undo cap evicts history.
+> 10. Export uses the lead's ratio (`PrintPipeline.js:452`); merging objects with different ratios is
+>     unguarded and was not traced.
+>
+> **Persistence: ADD NO PER-OBJECT FIELD.** `logicalObjectId` and `isInternalPart` are already saved
+> at schema 3.6, and an older build whitelists per-object fields on load (`ProjectLoader.js:596-618`)
+> - a new one is dropped and then lost on that build's next save. Derived assets make split results
+> plain objects to any build.
+>
+> **Babylon: do NOT use `Mesh.MergeMeshes`.** It bakes world transforms into one vertex buffer, its
+> multi-material form produces exactly the MultiMaterial mesh the import path exists to eliminate
+> (`src/core/assets/MeshSplit.js:1-15`), and it breaks the `containerMeshIndex` reload depends on.
+> The existing link model is the right one. C9 (deleting `src/core/repair/` for geocore's Rust
 > repair) is untouched and still gated on the 12-scan comparison.
 
 > **2026-10-22 /cia run (`docs/reviews/2026-10-22-cia-full.md`): every owner decision is closed.**
