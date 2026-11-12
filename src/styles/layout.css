@@ -463,12 +463,13 @@ body:not([data-workspace="shade"]):not([data-workspace="scene"]):not([data-works
 }
 .sb-action:hover { background: var(--accent-hi); }
 
-/* ── Support Mode (P3.2) ──────────────────────────────────────────────────
-   data-mode="supports" on #app: the panels the mode does not use are dimmed (and made inert from
-   SupportMode.ts); the header shows the mode label + Done in place of the entry button. */
+/* ── Focus modes: Support Mode (P3.2) and the parts scope (U5) ────────────
+   data-mode on #app says a mode is on; the mode itself marks the panels it does not use with
+   data-dimmed (src/ui/modeShell.ts), so WHICH panels are dimmed is the mode's decision and is
+   written down once, in TypeScript, instead of once there and once as a selector list here. */
 #support-mode-root { display: flex; align-items: center; gap: var(--sp-2); margin-left: var(--sp-3); }
 #support-mode-root .sm-label { font-size: var(--fs-md, 12px); color: var(--text-0); white-space: nowrap; }
-#app[data-mode="supports"] :is(#outliner, #right-panel, #asset-panel, #viewport-toolbar, .ws-switcher) {
+#app[data-mode] [data-dimmed] {
   opacity: 0.38;
   pointer-events: none;
 }

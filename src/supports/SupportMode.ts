@@ -22,6 +22,7 @@ import { getState, subscribe, dispatch } from '../core/StateManager.js';
 import { cascadeObjectIds } from '../core/hierarchy/GroupCascade.js';
 import { canonicalObjectId, shouldDisplayObject } from '../core/LogicalObjects.js';
 import { createIsolation } from '../ui/isolation';
+import { applyModeShell, type ModeShell } from '../ui/modeShell';
 import { AssetLoader } from '../core/AssetLoader.js';
 import { Selection } from '../core/Selection.js';
 import { SceneManager } from '../core/SceneManager.js';
@@ -212,27 +213,15 @@ export function createSupportMode(deps: SupportModeDeps): SupportModeController 
 
 // ── The app instance ─────────────────────────────────────────────────────────────────────────────
 
-const inertBefore = new Map<HTMLElement, boolean>();
+let shell: ModeShell | null = null;
 
+/**
+ * The mode's chrome, through the shared `applyModeShell` — the parts scope (U5) is its second
+ * caller, and the panel list now lives only here instead of also as a `:is(...)` list in the CSS.
+ */
 function applyShell(on: boolean, count: number): void {
-  if (typeof document === 'undefined') return;
-  const app = document.getElementById('app');
-  if (app) {
-    if (on) { app.dataset.mode = 'supports'; app.dataset.modeCount = String(count); }
-    else { delete app.dataset.mode; delete app.dataset.modeCount; }
-  }
-  if (on) {
-    for (const el of document.querySelectorAll<HTMLElement>(INERT_SELECTORS.join(','))) {
-      if (!inertBefore.has(el)) inertBefore.set(el, el.inert);
-      el.inert = true;
-    }
-    // Focus inside a panel that just went inert would otherwise keep swallowing keys.
-    const focused = document.activeElement as HTMLElement | null;
-    if (focused && focused !== document.body && focused.closest('[inert]')) focused.blur();
-  } else {
-    for (const [el, was] of inertBefore) el.inert = was;
-    inertBefore.clear();
-  }
+  if (on) shell = applyModeShell('supports', INERT_SELECTORS, count);
+  else { shell?.clear(); shell = null; }
 }
 
 let toastSink: (message: string) => void = (message) => dispatch(EVENTS.TOAST, { message, type: 'info', duration: 6000 });
