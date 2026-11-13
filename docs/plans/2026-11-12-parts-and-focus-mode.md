@@ -501,6 +501,24 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   joined `LINK_FIELDS` so undo restores it, since a patch undo cannot reverse would be worse than
   the defect it fixed -- asserted directly in `tests/split-join.test.mjs`.
 
+  **And the first version of that fix, shipped in `19b2e41`, was WORSE than the defect -- caught by
+  walking the next surface rather than by any gate.** `ProjectLoader` re-bakes every object's
+  vertices on load by `bakedRatioOf`, so moving the label alone handed a part printed at 1:1 a body
+  baked at 1:2 with no anchor: it came back DOUBLE the size on reload. That is gap 2's exact shape,
+  reintroduced by the fix for gap 2's cousin, and `test:all` was green over it three times because
+  nothing in the suite reloaded a separated object.
+
+  The complete form keeps the whole scale TRIPLE coherent, in one helper (`_scaleFieldsFor`) so no
+  site can move a label and forget the anchor: `ratio` is the scale the object was being printed at,
+  `bakedRatio` records where the vertices actually are (`ScaleMath.anchorUnlessLabel`, which is what
+  "Set scale" has always done when it relabels without resizing -- now shared rather than copied),
+  and `ratioSource` follows the label it describes. Together: **a separate changes nothing** -- not
+  position, not size on screen, not size after a reload, not what gets printed. That is U5's own
+  invariant, applied to scale instead of position.
+
+  The test that catches it asserts `bakedRatioOf` is unchanged across the edit, and was confirmed by
+  forging the anchor back out, which reproduces `19b2e41` exactly.
+
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and
   this separate mints none. `tests/split-join.test.mjs` asserts exactly that (no vertex or node

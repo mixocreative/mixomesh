@@ -18,6 +18,7 @@ const { Selection } = await import('../src/core/Selection.js');
 const History = await import('../src/core/HistoryManager.js');
 const { logicalObjectPartIds, canonicalObjectId, shouldDisplayObject } = await import('../src/core/LogicalObjects.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
+const { bakedRatioOf } = await import('../src/core/scale/ScaleMath.js');
 const R = await import('../src/core/repair/MeshRepair.js');
 
 SceneManager.attachToSelection = () => {};
@@ -607,6 +608,24 @@ await test('a split never changes the print scale an object was being printed at
   assert.equal(ratioOf('body'), 1, 'the part that left keeps the object scale');
   assert.equal(ratioOf('armA'), 1, 'and so does the new lead of what remains');
 
+  // 2b. And the half of this that a one-field fix got WRONG: `ProjectLoader` re-bakes each
+  //     object's vertices by `bakedRatioOf`, so handing a part a new label without recording where
+  //     its vertices actually are made it come back at the wrong SIZE on reload -- gap 2's shape,
+  //     reintroduced by the fix for the label. This is the assertion that catches that.
+  seed({ a: base('a', 'Body', { ratio: 1, _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { ratio: 0.5, _tris: [[0, 1, 3]] }) });
+  const anchorBefore = bakedRatioOf(getState().scene.objects.b);
+  assert.equal(anchorBefore, 0.5, 'B vertices are baked at its own scale to start with');
+  new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
+  assert.equal(bakedRatioOf(getState().scene.objects.b), anchorBefore, 'a merge never re-bakes');
+  const sep2 = new SeparateSelectionCommand(['b']);
+  sep2.execute();
+  assert.equal(bakedRatioOf(getState().scene.objects.b), anchorBefore,
+    'separated, a reload still rebuilds the SAME vertices -- the label moved, the geometry did not');
+  assert.equal(getState().scene.objects.b.ratio, 1, 'while the label is the scale it was printed at');
+  sep2.undo();
+  assert.equal(bakedRatioOf(getState().scene.objects.b), anchorBefore, 'and undo leaves the anchor alone');
+  assert.equal(getState().scene.objects.b.ratio, 0.5, 'with the field it had');
+
   // 3. Split to parts: every id becomes its own object, so every one needs it.
   seed({
     lead: base('lead', 'Bowl', { logicalObjectId: 'lead', ratio: 2, _tris: [[0, 2, 1]] }),
@@ -616,6 +635,8 @@ await test('a split never changes the print scale an object was being printed at
   split.execute();
   assert.equal(ratioOf('p1'), 2, 'a split part is printed at the scale its object was');
   assert.equal(ratioOf('lead'), 2);
+  assert.equal(bakedRatioOf(getState().scene.objects.p1), 0.5,
+    'and its vertices are still rebuilt where they are, not where the new label says');
   split.undo();
   assert.equal(ratioOf('p1'), 0.5, 'and undo puts the field back');
 });

@@ -9,7 +9,7 @@ import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
 import { logicalObjectCommandIds, canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
-import { objectRatio } from '../scale/ScaleMath.js';
+import { objectRatio, bakedRatioOf, anchorUnlessLabel } from '../scale/ScaleMath.js';
 import { directSubgroupIds, validateParentChange } from '../hierarchy/HierarchyIntegrity.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteNodeTransform, findGroupNode,
@@ -552,7 +552,29 @@ function _uniqueNameIn(baseName, objects) {
  * is safe for the commands that do not write it: `_applyLinkPatches` only applies the keys each
  * patch actually carries, so for Join this restores a ratio to the value it already had.
  */
-const LINK_FIELDS = ['name', 'isInternalPart', 'logicalObjectId', 'sourceGroupId', 'isPrintPart', 'ratio'];
+const LINK_FIELDS = ['name', 'isInternalPart', 'logicalObjectId', 'sourceGroupId', 'isPrintPart', 'ratio', 'bakedRatio', 'ratioSource'];
+
+/**
+ * The scale fields a part needs to KEEP PRINTING at `ratio` when it becomes an object.
+ *
+ * Moving the label alone was a regression worse than the defect it fixed, and the reload is what
+ * catches it: `ProjectLoader` re-bakes each object's vertices by `bakedRatioOf`, so handing a part
+ * printed at 1:1 a body baked at 1:2 and no anchor made it come back DOUBLE the size -- the exact
+ * shape of gap 2, reintroduced by a one-field fix. The anchor records where the vertices actually
+ * are, which is what "Set scale" has always done when it relabels without resizing
+ * (`ScaleMath.anchorUnlessLabel`), and `ratioSource` follows the label it describes so the
+ * provenance is not left claiming a ratio the object no longer has.
+ *
+ * Together: a separate changes NOTHING -- not position, not size on screen, not size after a
+ * reload, not what gets printed. That is U5's own invariant, applied to scale.
+ */
+function _scaleFieldsFor(part, ratio, source) {
+  return {
+    ratio,
+    bakedRatio: anchorUnlessLabel(bakedRatioOf(part), ratio),
+    ratioSource: source.ratioSource,
+  };
+}
 
 function _snapshotLink(obj) {
   const out = {};
@@ -728,7 +750,7 @@ export class SplitToPartsCommand {
       // Every id here becomes its own object, so every one of them needs the lead's scale for the
       // reason `sourceRatio` gives in the separate above: a part's own `ratio` was a field nothing
       // read, and promoting it to a lead would make a stale one authoritative.
-      after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart, ratio: objectRatio(lead) };
+      after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart, ..._scaleFieldsFor(obj, objectRatio(lead), lead) };
       draft[id] = { ...obj, ...after[id] };
     });
     this._ids = ids;
@@ -833,7 +855,7 @@ export class SeparateSelectionCommand {
     for (const id of taken) {
       before[id] = _snapshotLink(objects[id]);
       after[id] = id === newLead
-        ? { name, isInternalPart: false, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ratio: sourceRatio }
+        ? { name, isInternalPart: false, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ..._scaleFieldsFor(objects[id], sourceRatio, source) }
         : { isInternalPart: true, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
       draft[id] = { ...objects[id], ...after[id] };
     }
@@ -843,7 +865,7 @@ export class SeparateSelectionCommand {
     for (const id of left) {
       before[id] ??= _snapshotLink(objects[id]);
       after[id] = id === keptLead
-        ? { name: objects[keptLead].name, isInternalPart: false, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ratio: sourceRatio }
+        ? { name: objects[keptLead].name, isInternalPart: false, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ..._scaleFieldsFor(objects[keptLead], sourceRatio, source) }
         : { isInternalPart: true, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
     }
     this._newLeadId = newLead;

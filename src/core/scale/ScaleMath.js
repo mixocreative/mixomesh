@@ -59,6 +59,14 @@ export function bakedRatioOf(obj) {
   return Number.isFinite(n) && n > 0 ? n : objectRatio(obj);
 }
 
+// `bakedRatio` is stored only while it differs from the label (see `bakedRatioOf`); equal means the
+// object never was relabelled. Used by every edit that MOVES an object's label without resizing it:
+// "Set scale" (`ScaleCommands`) and the two split commands (`ParentCommands`), which hand a part the
+// scale its object was printed at while its vertices stay where they are.
+export function anchorUnlessLabel(bakedRatio, ratio) {
+  return Math.abs(bakedRatio - ratio) <= 1e-9 * ratio ? undefined : bakedRatio;
+}
+
 // World-space node scale of a mesh: per-axis magnitude, so parent scaling
 // (a group at x2) counts and a negative (mirror) scale is just its size.
 // Reads the world matrix (row-major: rows 0-2 hold the scaled basis vectors),
