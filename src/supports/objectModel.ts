@@ -17,6 +17,7 @@ import { frontFaceIsClockwise } from '../core/print/PrintSpace.js';
 import { withRestTransform } from '../core/scene/ImportBounce.js';
 import { partsToEngine, type BabylonPart, type EngineModel, type Vec3 } from './frame';
 import { toLocal, type LocalModel } from './supportJob';
+import { noiseShellVolumes, shellsOf } from './noiseShells';
 import { scenePose } from './sceneSource';
 import type { SupportAnchor } from './BabylonViewportPort';
 
@@ -30,6 +31,17 @@ export interface ObjectModel {
   model: LocalModel;
   anchor: SupportAnchor;
   parts: number;
+  /**
+   * Volumes (mm3) of the tiny separate shells in this object — scan noise or stray fragments the
+   * generic policy will support and the printer will print (C4). Largest first; empty for a
+   * single-shell object.
+   *
+   * HERE because this is the one place that already walks the welded mesh and is CACHED PER GEOMETRY
+   * VERSION. A noise shell only appears when the geometry changes, so computing it with the model
+   * costs nothing per build — and a per-build scan is the long-task mistake this file's own staging
+   * exists to avoid.
+   */
+  noiseShells: number[];
 }
 
 function liveParts(objectId: string): { id: string; mesh: any }[] {
@@ -95,7 +107,8 @@ export function objectModel(objectId: string): ObjectModel | undefined {
   const engine = partsToEngine(parts);
   const model = toLocal(engine.mesh);
   const lead = withRestTransform(() => leadPosition(objectId)) ?? [0, 0, 0];
-  const built: ObjectModel = { objectId, version, engine, model, anchor: { center: model.center, lead }, parts: parts.length };
+  const built: ObjectModel = { objectId, version, engine, model, anchor: { center: model.center, lead }, parts: parts.length,
+    noiseShells: noiseShellVolumes(model.local, shellsOf(model.local)) };
   cache.set(objectId, built);
   return built;
 }
@@ -118,8 +131,12 @@ export async function objectModelStaged(objectId: string, between: () => Promise
   const engine = partsToEngine(parts);
   await between();
   const model = toLocal(engine.mesh);
+  await between();
+  // Its own staged step: a union-find over a million triangles belongs behind a yield, like the
+  // weld above it.
+  const noiseShells = noiseShellVolumes(model.local, shellsOf(model.local));
   const lead = withRestTransform(() => leadPosition(objectId)) ?? [0, 0, 0];
-  const built: ObjectModel = { objectId, version, engine, model, anchor: { center: model.center, lead }, parts: parts.length };
+  const built: ObjectModel = { objectId, version, engine, model, anchor: { center: model.center, lead }, parts: parts.length, noiseShells };
   cache.set(objectId, built);
   return built;
 }

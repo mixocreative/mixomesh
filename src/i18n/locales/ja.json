@@ -1526,6 +1526,7 @@
   "supportPanel.verdict.buried": "{n, plural, other{# 個の接点が他のメッシュ内です}}",
   "supportPanel.verdict.insideOthers": "{n, plural, other{# 個の接点が他のオブジェクト内です}}",
   "supportLive.insideOthers": "{n, plural, other{# 本のサポートが {names} の内部にあります}}。印刷も除去もできません。オブジェクトを離すか、1 つに結合してください。",
+  "supportPanel.verdict.noiseShells": "{n, plural, other{# 個のノイズシェルにサポートが付きます}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個のアイランドが未サポートです}}",
   "print.includeSupports": "サポート",
   "print.includeSupports.none": "モデルのみ",

@@ -1526,6 +1526,7 @@
   "supportPanel.verdict.buried": "{n, plural, other{# 個接點位於其他網格內}}",
   "supportPanel.verdict.insideOthers": "{n, plural, other{# 個接觸點位於其他物件內}}",
   "supportLive.insideOthers": "{n, plural, other{有 # 個支撐位於 {names} 內部}}，既無法列印也無法移除。請將物件分開，或合併為一個。",
+  "supportPanel.verdict.noiseShells": "{n, plural, other{# 個雜訊殼體已加上支撐}}",
   "supportPanel.verdict.islands": "{n, plural, other{# 個孤島缺乏支撐}}",
   "print.includeSupports": "支撐",
   "print.includeSupports.none": "僅模型",

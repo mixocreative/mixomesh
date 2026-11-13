@@ -44,6 +44,12 @@ describe('ProblemList', () => {
     const text = container.querySelector('.sp-verdict')?.textContent ?? '';
     expect(text).toContain('2 contacts inside another mesh');
     expect(text).toContain('3 contacts inside another object');
+    // The fourth fact with its own remedy: tiny stray shells the policy supports on purpose,
+    // because in a generic object a small part may be a deliberate detail. The operator decides.
+    cleanup();
+    supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0, noiseShells: 2 } } });
+    expect(renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />).container.querySelector('.sp-verdict')?.textContent ?? '')
+      .toContain('2 noise shells supported');
     cleanup();
     supportUi.set({ verdicts: { obj: { status: 'clear', dropped: 0, islands: 0 } } });
     const quiet = renderPanel(<GenerateRow objectIds={['obj']} objectId="obj" />);
@@ -161,7 +167,7 @@ describe('every verdict the UI can show has a sentence in every locale', () => {
     const statuses = ['clear', 'blocked', 'inconclusive', 'nothing-built'] as const;
     // `verdict.buried` and `verdict.dropped` ARE literal keys, so `i18n:check` sees them; they are
     // here anyway because they sit on the same line and a locale that loses one loses the sentence.
-    const chips = ['dropped', 'islands', 'buried', 'insideOthers'] as const;
+    const chips = ['dropped', 'islands', 'buried', 'insideOthers', 'noiseShells'] as const;
     for (const lang of ['en', 'ja', 'zh-Hant'] as const) {
       const dict = (await import(`../../i18n/locales/${lang}.json`)).default as Record<string, string>;
       for (const key of [...statuses, ...chips]) {

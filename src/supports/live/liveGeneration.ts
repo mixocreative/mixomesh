@@ -348,7 +348,7 @@ async function runJob(id: string, job: JobRequest): Promise<void> {
   const others = await insideOtherObjects(id, om, jobContacts(inputs).filter((contact) => !dropped.has(contact.id)));
   if (!job.current()) { liveStats.dropped++; return; }
   if (others.count > 0) notify({ message: t('supportLive.insideOthers', { n: others.count, names: others.names.join(', ') }) });
-  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(buried ? { buried } : {}), ...(others.count ? { insideOthers: others.count } : {}), ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
+  verdicts.set(id, { status: emptyBuild ? 'nothing-built' : built.verdict?.status ?? 'inconclusive', dropped: built.dropped.length, islands: built.islands?.status === 'ok' ? built.islands.islands.filter((i) => i.status === 'unresolved').length : 0, ...(buried ? { buried } : {}), ...(others.count ? { insideOthers: others.count } : {}), ...(om.noiseShells.length ? { noiseShells: om.noiseShells.length } : {}), ...(built.fallbacks?.length ? { fallbacks: built.fallbacks } : {}) });
   if (built.fallbacks?.includes('brace-pruned') || built.dentalStructureFallback?.includes('brace-pruned')) notify({ message: t('supportLive.bracePruned') });
 
   // The check that fills the list; the verdict and the build are already on screen.

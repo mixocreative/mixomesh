@@ -47,6 +47,12 @@ export interface VerdictInfo {
    * normal state here, so the supports are placed and the operator is told.
    */
   insideOthers?: number;
+  /**
+   * Tiny separate shells in this object — scan noise or stray fragments — that the generic policy
+   * supports and the printer prints (C4). Reported, never dropped: in a generic object a small part
+   * is as likely to be a deliberate detail as it is noise, so the operator decides.
+   */
+  noiseShells?: number;
   /** Islands no support carries to the plate. */
   islands: number;
   /** Structure fallbacks the repair applied (plan P5.2): `brace-pruned` = only the braces that cross the model were left out. */

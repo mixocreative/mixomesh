@@ -1550,6 +1550,7 @@
   "supportPanel.verdict.buried": "{n, plural, one{1 contact inside another mesh} other{# contacts inside another mesh}}",
   "supportPanel.verdict.insideOthers": "{n, plural, one{1 contact inside another object} other{# contacts inside another object}}",
   "supportLive.insideOthers": "{n, plural, one{1 support stands inside {names}} other{# supports stand inside {names}}}: they cannot be printed or removed. Move the objects apart, or merge them into one.",
+  "supportPanel.verdict.noiseShells": "{n, plural, one{1 noise shell supported} other{# noise shells supported}}",
   "supportPanel.verdict.islands": "{n, plural, one{1 island unsupported} other{# islands unsupported}}",
   "print.includeSupports": "Supports",
   "print.includeSupports.none": "Model only",
