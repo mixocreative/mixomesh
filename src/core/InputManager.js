@@ -1066,7 +1066,31 @@ function _lockToggleSelected() {
   push(new LockCommand(ids, prev, anyUnlocked));
 }
 
+/**
+ * Refuse a whole-object command while the operator is INSIDE an object (U5), and say so.
+ *
+ * Inside the part scope the selection is the object's PARTS, and these commands act on whole
+ * objects: `_expandedCommandIds` turns one part id into every part of its logical object. So Delete
+ * with one mesh picked removed ALL of them -- the notice read "1 of 3 meshes picked" and the object
+ * vanished. Undoable, but nothing warned, and the screen had just said the opposite.
+ *
+ * Refused rather than reinterpreted: deleting one mesh OUT of a logical object is a real edit with
+ * a separate's hazards (the union repair and the supports were built against the whole object), and
+ * minting that from a keypress is worse than the surprise it replaces. If the owner wants it, it is
+ * a command with its own warnings, not a key that quietly means something new.
+ *
+ * This follows the depth's own decision to turn the gizmo off rather than move one part
+ * (`Selection.getTransformTargets`) -- and unlike the gizmo it SAYS so, because a key that silently
+ * does nothing is its own defect. Duplicate is routed here too: it already did nothing at all.
+ */
+function _refuseInsideObject() {
+  if (!Selection.inPartScope()) return false;
+  Toast.show(t('toast.insideObjectPickOnly'), 'warning', 6000);
+  return true;
+}
+
 function _deleteSelected() {
+  if (_refuseInsideObject()) return;
   const ids = Selection.getSelectedIds();
   if (!ids.length) return;
   // Lock = transform-lock; Delete ASKS (Decision 9): a selection that holds a
@@ -1086,6 +1110,7 @@ function _deleteSelected() {
 }
 
 function _duplicateSelected() {
+  if (_refuseInsideObject()) return;
   const ids = Selection.getSelectedIds();
   if (!ids.length) return;
   push(new DuplicateCommand(ids));

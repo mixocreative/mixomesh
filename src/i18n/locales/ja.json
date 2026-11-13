@@ -694,6 +694,7 @@
   "toast.pngFailed": "PNG レンダリングに失敗しました — コンソールを確認",
   "toast.nothingSelected": "何も選択されていません",
   "toast.lockedNoTransform": "ロック中のアイテムは移動・回転・拡縮できません。先にロックを解除してください",
+  "toast.insideObjectPickOnly": "オブジェクト内ではメッシュを選択します。先にEscを押して抜けてください",
   "toast.csgUnavailable": "CSG2 が利用できません — 水密再ベイクをスキップ",
   "toast.exportCancelled": "書き出しをキャンセルしました — {filename} は保存されていません",
   "toast.importedAll": "{n} 個のファイルを読み込みました",

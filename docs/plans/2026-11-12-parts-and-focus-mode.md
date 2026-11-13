@@ -13,8 +13,12 @@
 >
 > **One defect was found AFTER all of that, on 2026-11-13, and fixed**: a structural edit (separate's
 > undo, and a merge's do) left a selected id the outliner could not draw -- the viewport looked
-> right and the list looked empty. `Selection.reconcile()`, on all four history paths. The finding is
-> in the U5 section; what found it was walking the workflow, not re-reading the gate.
+> right and the list looked empty. `Selection.reconcile()`, on all four history paths.
+>
+> **And a second, worse one right after it**: inside an object, with ONE mesh picked, Delete removed
+> the WHOLE object -- the notice said "1 of 3 meshes picked". It is now refused with a reason, as the
+> gizmo already is. Both findings are in the U5 section. What found them was walking the workflow;
+> three green gates never would, because every other reader canonicalises on read.
 >
 > **NOTHING IN THIS PLAN IS WAITING ON ANYTHING.** Gaps 4 and 5 are not met and are not open items of
 > this plan: they are preconditions on a TOPOLOGICAL SPLIT — minting new geometry — which this plan
@@ -426,6 +430,33 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   that compares raw ids disagreed. A defect that makes the app look right in the viewport and empty
   in the list is exactly the shape no screenshot test catches. `tests/split-join.test.mjs` now
   asserts the invariant on all three edits, and the test was confirmed by forging the fix away.
+
+- **Found the same way, same day, and worse: inside an object, Delete took the WHOLE object.** The
+  notice read "1 of 3 meshes picked"; the key removed all three.
+
+  Inside the part scope the selection is the object's PARTS, and Delete is registered globally on
+  whole objects -- `DeleteCommand` runs its ids through `_expandedCommandIds`, which turns one part
+  id into every part of its logical object. Undoable, and nothing warned, and the screen had just
+  said the opposite of what happened. Duplicate was the same shape one notch down: it silently did
+  nothing at all, a dead key.
+
+  **Refused, not reinterpreted.** Deleting one mesh OUT of a logical object is a real edit carrying
+  a separate's hazards -- the union repair and the supports were built against the whole object --
+  so it belongs in a command with its own warnings, not in a key that quietly means something new
+  because of the depth the operator happens to be at. That is the call this depth already made about
+  the gizmo (`getTransformTargets` returns nothing inside an object, so G/R/S are off rather than
+  moving one part). The difference is that this one SAYS so: a key that silently does nothing is its
+  own defect, so the refusal shows `toast.insideObjectPickOnly` -- "Inside an object you pick meshes.
+  Press Esc to leave it first." -- in all three locales, the zh-Hant through the Gemini bridge in
+  Taiwan wording and hand-checked against the English.
+
+  Pinned by two tests in `tests/selection-scope.test.mjs`, which drive the REAL handler through
+  `InputManager.__test.deleteSelected`: one that the refusal happens and explains itself inside the
+  scope, one that it does NOT happen at root -- because a test proving only "Delete does nothing"
+  would pass just as well if Delete had been broken everywhere. Confirmed by forging the guard away.
+
+  **If the owner wants deleting a mesh out of an object**, it is a command with the warnings a
+  separate already has, not a widening of this key.
 
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and

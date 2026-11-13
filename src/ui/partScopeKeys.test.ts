@@ -19,6 +19,7 @@ const KEYS = [
   'partScope.title', 'partScope.pickSome', 'partScope.pickedAll', 'partScope.ready',
   'partScope.separate', 'partScope.done',
   'history.separateSelection',
+  'toast.insideObjectPickOnly',
 ] as const;
 
 const DICTS = { en, ja, 'zh-Hant': zhHant } as Record<string, Record<string, string>>;

@@ -19,6 +19,7 @@ const { Selection } = await import('../src/core/Selection.js');
 const { BoxSelect, itemIdsInRect } = await import('../src/core/BoxSelect.js');
 const { selectableAtDepth } = await import('../src/core/LogicalObjects.js');
 const { InputManager } = await import('../src/core/InputManager.js');
+const { Toast } = await import('../src/ui/Toast.js');
 const { EVENTS } = await import('../src/core/events.js');
 
 const T = InputManager.__test;
@@ -332,4 +333,49 @@ test('the parts depth keys on SCENE object ids, never on engine part ids', () =>
   // An id that is NOT in the scene is not selectable at this depth, whatever it looks like.
   assert.equal(selectableAtDepth('part-0', getScene(), 'lead'), null, 'an engine-shaped id picks nothing');
   assert.equal(selectableAtDepth('0', getScene(), 'lead'), null, 'nor does a bare index');
+});
+
+/** Run `fn` with Toast.show captured; returns the messages it showed. */
+function toastsFrom(fn) {
+  const real = Toast.show;
+  const said = [];
+  Toast.show = (message) => { said.push(message); };
+  try { fn(); } catch { /* the fake meshes here are not disposable; the toast is what is asked */ }
+  finally { Toast.show = real; }
+  return said;
+}
+
+test('inside an object, Delete refuses instead of taking the whole object', () => {
+  /*
+   * Found 2026-11-13 by walking the shipped workflow: inside an object the selection is its PARTS,
+   * and Delete is registered globally on whole objects -- `DeleteCommand` expands one part id into
+   * every part of its logical object. So with ONE mesh picked the notice read "1 of 3 meshes
+   * picked" and pressing Delete removed ALL of them. Undoable, and nothing warned.
+   *
+   * Refused rather than reinterpreted: deleting one mesh OUT of a logical object is a real edit
+   * with a separate's hazards (its union repair and its supports were built against the whole
+   * object), so it belongs in a command with its own warnings, not in a key that quietly means
+   * something new inside a scope. This is the same call the depth already makes about the gizmo --
+   * and unlike the gizmo it SAYS so, because a key that silently does nothing is its own defect.
+   */
+  reset();
+  Selection.enterScope('lead', 'lead.part');
+  Selection.set(['lead.part'], 'lead.part');
+  assert.ok(Selection.inPartScope(), 'the fixture is inside an object');
+  const before = Object.keys(getScene().objects).sort();
+
+  const said = toastsFrom(() => T.deleteSelected());
+
+  assert.deepEqual(Object.keys(getScene().objects).sort(), before, 'nothing was deleted');
+  assert.equal(said.length, 1, `it says why rather than doing nothing: ${JSON.stringify(said)}`);
+  assert.ok(Selection.inPartScope(), 'and the operator is still where they were');
+});
+
+test('the refusal is scoped to being inside an object, not a disabled key', () => {
+  // The other half of the guard above: a test that only proved "Delete does nothing" would pass
+  // just as well if Delete had been refused everywhere. At root it must not explain itself.
+  reset();
+  Selection.set(['loose'], 'loose');
+  assert.equal(Selection.inPartScope(), false);
+  assert.deepEqual(toastsFrom(() => T.deleteSelected()), [], 'no refusal at root');
 });

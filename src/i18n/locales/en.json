@@ -697,6 +697,7 @@
   "toast.pngFailed": "PNG render failed — see console",
   "toast.nothingSelected": "Nothing selected",
   "toast.lockedNoTransform": "Locked items can't be moved, rotated or scaled — unlock first",
+  "toast.insideObjectPickOnly": "Inside an object you pick meshes. Press Esc to leave it first.",
   "toast.csgUnavailable": "CSG2 unavailable — watertight re-bake skipped",
   "toast.exportCancelled": "Export cancelled — {filename} was not written",
   "toast.importedAll": "Imported {n} files",
