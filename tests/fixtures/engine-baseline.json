@@ -698,12 +698,22 @@
   "fallbacks": []
  },
  "sunk-pair/LIGHT/budget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
   "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
+  "dropped": 9,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto--50_300_50",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
   "verdict": "clear",
   "triangles": 10932,
   "parts": [
@@ -723,14 +733,23 @@
   "fallbacks": []
  },
  "sunk-pair/LIGHT/nobudget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
-  "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
-  "verdict": "clear",
-  "triangles": 10932,
+  "tips": 33,
+  "dropped": 8,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
+  "verdict": "blocked",
+  "triangles": 11124,
   "parts": [
    "foot",
    "label",
@@ -741,19 +760,29 @@
   "perPart": {
    "foot": 32,
    "label": 9,
-   "neck": 32,
-   "pillar": 64,
+   "neck": 33,
+   "pillar": 65,
    "raft": 17
   },
   "fallbacks": []
  },
  "sunk-pair/MIDDLE/budget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
   "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
+  "dropped": 9,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto--50_300_50",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
   "verdict": "clear",
   "triangles": 10860,
   "parts": [
@@ -773,14 +802,23 @@
   "fallbacks": []
  },
  "sunk-pair/MIDDLE/nobudget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
-  "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
-  "verdict": "clear",
-  "triangles": 10860,
+  "tips": 33,
+  "dropped": 8,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
+  "verdict": "blocked",
+  "triangles": 11124,
   "parts": [
    "foot",
    "label",
@@ -791,19 +829,29 @@
   "perPart": {
    "foot": 32,
    "label": 9,
-   "neck": 32,
-   "pillar": 64,
+   "neck": 33,
+   "pillar": 65,
    "raft": 17
   },
   "fallbacks": []
  },
  "sunk-pair/HEAVY/budget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
   "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
+  "dropped": 9,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto--50_300_50",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
   "verdict": "clear",
   "triangles": 10932,
   "parts": [
@@ -823,12 +871,22 @@
   "fallbacks": []
  },
  "sunk-pair/HEAVY/nobudget": {
-  "placed": 32,
-  "buried": 9,
+  "placed": 41,
+  "buried": 0,
   "regions": 2,
   "tips": 32,
-  "dropped": 0,
-  "droppedIds": [],
+  "dropped": 9,
+  "droppedIds": [
+   "auto--185_100_-185",
+   "auto--185_100_0",
+   "auto--185_100_185",
+   "auto--50_300_50",
+   "auto-0_100_-185",
+   "auto-0_100_185",
+   "auto-185_100_-185",
+   "auto-185_100_0",
+   "auto-185_100_185"
+  ],
   "verdict": "clear",
   "triangles": 10932,
   "parts": [
