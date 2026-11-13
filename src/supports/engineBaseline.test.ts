@@ -160,9 +160,24 @@ function capture() {
     'seam-cube-split': () => seamCube({ split: true }) as TriangleMesh,
     // 47 degrees: inside the 45-50 band, so this row and only this row moves with the overhang angle.
     'slope-47': () => tiltedPlate(47),
-    // Two overlapping meshes in one file: the only row where the overlap rule (engine 67) can fire,
-    // and the only app-level proof that this pipeline carries it. `placed` here is the count AFTER
-    // the rule, so a row whose `placed` climbs back up is the rule having stopped working.
+    /*
+     * Two overlapping meshes in one file, and the row that records a DECIDED behaviour rather than a
+     * regression. Read this before "fixing" it.
+     *
+     * The generic placement path does NOT apply the overlap rule -- permanently, settled 2026-11-13
+     * (`host/supports/README.md` in geocore has the invariant). So this row reads
+     * `placed 41, buried 0, dropped 9, tips 33, verdict blocked`: a support is built onto the buried
+     * face and the build SAYS SO, in the panel, as "Some supports cross the model".
+     *
+     * Its earlier values -- `placed 32, buried 9, tips 32, verdict clear` -- are what the rule gave
+     * for the part of one day it ran here, and the previous note said a `placed` that climbed back
+     * up meant "the rule having stopped working". That is now exactly backwards: the climb IS the
+     * decision. The rule is defined over PARTS, a file only gives SHELLS, and shells are not parts
+     * -- mixodental's walk fixture has 588 of them, which cost it 92% of its automatic supports.
+     *
+     * A genuine two-part overlap in one file is a model problem, fixed by unioning or separating the
+     * parts. The loud verdict is the right answer; silently dropping the contacts was not.
+     */
     'sunk-pair': () => sunkPair() as TriangleMesh,
   };
   const out: Record<string, unknown> = {

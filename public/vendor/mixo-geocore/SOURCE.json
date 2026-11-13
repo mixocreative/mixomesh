@@ -1,7 +1,7 @@
 {
   "repo": "mixocreative/mixo-geocore",
-  "commit": "68b006ef9f3860bfbe2e03aaeedda6c428eecf3a",
-  "committed": "2026-11-13T15:38:28+08:00",
+  "commit": "2b29a2ccf57e383f895fe31032792886e630d29d",
+  "committed": "2026-11-13T18:05:46+08:00",
   "engineVersion": 68,
   "sha256": {
     "mixo_geometry_wasm.js": "9c7bb7a61a50f718e0c5200788b0774242dde8be3dbb1bc7bc2740eeb5dd004b",
@@ -66,7 +66,7 @@
     "host/supports/generateSupports.ts": "ea7a219657414d78aaa6764fb9fccbe11371f111300a2682542f442ccc9bc5b2",
     "host/supports/genericPlacement.ts": "271ca5d01aaf0ccd548f1cea1160fbb2c0ce7f0e999b8f831f5a1b05fb38220d",
     "host/supports/genericPolicy.ts": "4386eb2d9c87311f2b1fe966e2318e72681ab7696f4c690dff5b20aedfb053d6",
-    "host/supports/jobRunner.ts": "e48bb32075b578eb41bf563064d88728bfe1ec96b4b068760d1e6a33c74a1a42",
+    "host/supports/jobRunner.ts": "983f4ff8602e42917537f605bfdedd4a4647a4d8e84269362c353a79693b4a25",
     "host/supports/partTips.ts": "4ce0716a19edb286f00ca619c3c9c6089b98b31d8a20a45d460c48d19c2e4dfa",
     "host/supports/plateArrange.ts": "8a011b217d3ba3016248e7ee165f15a7c84e380f80214456888a3e30e9844f0e",
     "host/supports/supportBuildWasm.ts": "27e6c3ff8b1917b9f0f04ddf21b5c063036fafa3fc5fa25310631b4400f05fa8",

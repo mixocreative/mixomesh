@@ -74,22 +74,32 @@ export function runPlacementJob(job: PlacementJob, onProgress?: ProgressCallback
    * **That premise is false**, and it cost mixodental 92% of its automatic supports on a shipped,
    * deployed build before the browser walk caught it:
    *
-   *   `contacts_buried` on 179 points taken from the SURFACE of `scripts/fixtures/knot.stl` -- ONE
-   *   solid -- calls 88 of them buried. A torus knot wraps around itself, so a ray inward from one
-   *   lobe hits another lobe, and the rule reads that as "inside another part". mixodental's walk
-   *   went from `a1 auto 429` (its baseline, and its measured value on 2026-11-09 and 2026-11-11)
-   *   to `auto 35`. Proven by disabling exactly this line and watching 429 come back.
+   *   mixodental's walk went from `a1 auto 429` -- its baseline, and its measured value on
+   *   2026-11-09 and 2026-11-11 -- to `auto 35`, a 92% loss. Proven by disabling exactly this line
+   *   and watching 429 come back.
    *
-   * What the rule still needs before it returns, and what the re-land must prove:
-   *   1. all-false when the file is ONE part, which is what the old comment merely asserted;
-   *   2. each contact attributed to its OWN part before the test (`Overlap::own_part`), so a
-   *      self-occluding part never counts as "another part";
-   *   3. a guard test on a SELF-OCCLUDING SINGLE SOLID -- the case every existing test missed,
-   *      because they all used several separate boxes, where self-occlusion cannot arise.
+   * AND THE PREDICATE IS NOT AT FAULT, which took four wrong guesses to establish. The fixture is
+   * not one solid: by face-adjacency union-find after a 1 um weld, `scripts/fixtures/knot.stl` has
+   * **588 connected components and 8,666 non-manifold edges** (shells of 32,000, 25,640, then dozens
+   * of 216 faces). Its two big shells interleave, so contacts on one really are inside the other,
+   * and `contacts_buried` returning 88 of 179 is the rule WORKING. A procedural single-component
+   * torus returns 0 of 116, so the single-part short-circuit exists and works; welding to 0.1 mm,
+   * which merges 4,472 vertices, moves it only 88 -> 84, so the shells are separate SURFACES and not
+   * near-duplicate vertices.
+   *
+   * So the defect was never in Rust. It was applying a MULTI-PART rule to the GENERIC path, where
+   * real models are routinely multi-shell and non-manifold: every shell counts as a part, so a shell
+   * resting on another loses its supports. Dental geometry is single-shell scans, which is why the
+   * dental path has carried this rule safely since engine 50.
+   *
+   * Falsified on the way here, so nobody re-tries them: plain self-occlusion (a flat torus
+   * self-occludes and reports 0), downward shadowing (the same torus stood upright, with half the
+   * ring above the other half, also reports 0), an unwelded-soup artifact (soup and exact-weld give
+   * an identical 88), and near-duplicate vertices (the 0.1 mm weld above).
    *
    * `contactsBuried` is still exported and still used by mixomesh's CROSS-OBJECT check, which hands
    * it two objects' meshes concatenated on purpose: there, two parts really are two parts. The
-   * dental path is untouched and keeps the rule it has had since engine 50.
+   * dental path is untouched.
    */
   onProgress?.(1, PROGRESS_STAGE.done);
   return result;
