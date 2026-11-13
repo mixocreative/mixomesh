@@ -561,6 +561,33 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   **Left as known debt with its reason**, per the principle: the step is contention-sensitive in a
   batch run on a loaded machine and reliable alone. Do not "fix" it by widening the sleep.
 
+- **And then the MERGE side, which was the worse half: a merge left a divergence that deformed the
+  object on the next rescale.** Found by asking what a merge LEAVES BEHIND, having just fixed what a
+  separate promotes. Gap 6 already tells the operator the lead scale applies from here -- but it only
+  SAID so, and left each swallowed part own `ratio` in the data as a field nothing reads. Two
+  documented steps turned that into damage:
+
+  > merge an object printed at 1:2 into one printed at 1:1, then convert the merged object to 1:2 --
+  > and `_rescaleObject` scales each part from its OWN previous ratio, so the body scaled x0.5 and
+  > the arm x0.25. **One object, two factors: deformed, silently.**
+
+  Healed at the source rather than compensated for in every consumer: a merge now gives every
+  swallowed part the scale the merged object prints at, through the same `_scaleFieldsFor` helper a
+  separate uses, so `bakedRatio` records where each part vertices actually are (a merge must never
+  re-bake). After this no part of a logical object disagrees with its lead, so a rescale cannot
+  derive two factors and a later separate has no stale field to promote. Undo restores all three
+  fields, which `LINK_FIELDS` already covers.
+
+  **The test asserts the CONSEQUENCE first** -- that one object is asked for one scale factor -- and
+  the forge prints `the parts were asked for [0.5,0.25]`. Two instrument notes worth keeping: the
+  first probe reported OK because the stubbed `Matrix.Scaling` carries no `m`, so every bake recorded
+  x1 (a vacuous instrument, caught only by reading the numbers instead of the verdict); and the
+  harness mesh needed `bakeTransformIntoVertices` before a rescale took its geometry path at all.
+
+  **This change made two of my own earlier assertions false, and they said so.** They had encoded
+  "the merge leaves the swallowed scale in place (it only warns)" -- the behaviour this fixes. Both
+  were restated to the new truth with the reason, not deleted.
+
 - **Import and rescale were walked to check the ANCHOR rather than assume it**, since the anchor is
   the part of the scale fix that could be wrong in the common case. It is right, and for reasons
   worth stating: `AssetRegistration` seeds every SceneObject of an asset from that asset own

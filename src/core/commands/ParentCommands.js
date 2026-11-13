@@ -954,11 +954,35 @@ export class JoinCommand {
       before[id] = _snapshotLink(objects[id]);
       after[id] = { isInternalPart: true, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
     }
+    /*
+     * The scale every swallowed part now carries, and WHY a merge writes it instead of leaving it.
+     *
+     * A merge already tells the operator that the lead's scale applies from here (`_ratioMismatch`,
+     * gap 6) -- but it only SAID so, and left each swallowed part's own `ratio` sitting in the data
+     * as a field nothing reads. Two documented steps then turned that into damage:
+     *
+     *   merge an object printed at 1:2 into one printed at 1:1, then convert the merged object to
+     *   1:2 -- and `_rescaleObject` scales each part from its OWN previous ratio, so the body
+     *   scaled x0.5 and the arm x0.25. **One object, two factors: deformed, silently.**
+     *
+     * Healed at the source rather than compensated for in every consumer: after this, no part of a
+     * logical object disagrees with its lead about scale, so a rescale cannot derive two factors and
+     * a later separate (`_scaleFieldsFor`) has no stale field to promote. `bakedRatio` records where
+     * each part's vertices actually are, because a merge must never re-bake them -- which is the
+     * same reason a separate records it, and the same helper.
+     *
+     * Undo restores all three fields: `ratio`, `bakedRatio` and `ratioSource` are in `LINK_FIELDS`,
+     * so `_snapshotLink` above captured them before this patch.
+     */
+    const leadRatio = objectRatio(lead);
     for (const other of leads) {
       if (other === leadId) continue;
       for (const id of logicalObjectPartIds(other, objects)) {
         before[id] = _snapshotLink(objects[id]);
-        after[id] = { isInternalPart: true, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+        after[id] = {
+          isInternalPart: true, logicalObjectId: leadId, sourceGroupId: null, isPrintPart: !!lead.isPrintPart,
+          ..._scaleFieldsFor(objects[id], leadRatio, lead),
+        };
       }
     }
     this._leadId = leadId;

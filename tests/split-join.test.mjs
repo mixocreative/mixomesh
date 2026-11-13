@@ -19,6 +19,7 @@ const History = await import('../src/core/HistoryManager.js');
 const { logicalObjectPartIds, canonicalObjectId, shouldDisplayObject } = await import('../src/core/LogicalObjects.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const { bakedRatioOf } = await import('../src/core/scale/ScaleMath.js');
+const { RescaleObjectCommand } = await import('../src/core/HistoryManager.js');
 const R = await import('../src/core/repair/MeshRepair.js');
 
 SceneManager.attachToSelection = () => {};
@@ -57,6 +58,10 @@ function fakeMesh(id, tris) {
     setVerticesData: (k, d) => { if (k === 'position') positions = Array.from(d); },
     setIndices: (d) => { indices = Array.from(d); },
     getTotalVertices: () => positions.length / 3,
+    // Present so `_rescaleObject` actually takes its bake path: without it a rescale silently
+    // skips the geometry and a test about scale factors sees no calls at all.
+    bakeTransformIntoVertices() {},
+    refreshBoundingInfo() {},
     getWorldMatrix: () => B.Matrix.Identity(),
     computeWorldMatrix() {},
     getAbsolutePosition() { return this.position; },
@@ -588,14 +593,21 @@ await test('a split never changes the print scale an object was being printed at
 
   // 1. Separate, after a merge that crossed scales.
   seed({ a: base('a', 'Body', { ratio: 1, _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { ratio: 0.5, _tris: [[0, 1, 3]] }) });
-  new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
-  assert.equal(ratioOf('b'), 0.5, 'the merge leaves the swallowed scale in place (it only warns)');
+  const join = new JoinCommand(['a', 'b'], { leadId: 'a' });
+  join.execute();
+  // The merge now HEALS the divergence instead of only warning about it (see the merge test below):
+  // leaving it was what let a later rescale derive two factors for one object.
+  assert.equal(ratioOf('b'), 1, 'merged, the swallowed part carries the scale the object prints at');
+  assert.equal(bakedRatioOf(getState().scene.objects.b), 0.5, 'with its own anchor recorded, since a merge never re-bakes');
   const sep = new SeparateSelectionCommand(['b']);
   sep.execute();
-  assert.equal(ratioOf('b'), 1, 'separated, it keeps the scale it was being PRINTED at, not the stale field');
+  assert.equal(ratioOf('b'), 1, 'separated, it keeps that scale -- nothing about the print changes');
   assert.equal(ratioOf('a'), 1, 'and the object left behind is untouched');
   sep.undo();
-  assert.equal(ratioOf('b'), 0.5, 'undo restores the field exactly -- a patch undo cannot reverse is worse than the defect');
+  assert.equal(ratioOf('b'), 1, 'undo of the separate restores what the merge had left');
+  join.undo();
+  assert.equal(ratioOf('b'), 0.5, 'and undo of the MERGE restores the part own field exactly');
+  assert.equal(getState().scene.objects.b.bakedRatio, undefined, 'leaving no anchor behind');
 
   // 2. The lead itself taken: the object LEFT BEHIND gets a new lead, whose ratio becomes the
   //    reference too. This is the side a one-sided fix would have missed.
@@ -624,7 +636,7 @@ await test('a split never changes the print scale an object was being printed at
   assert.equal(getState().scene.objects.b.ratio, 1, 'while the label is the scale it was printed at');
   sep2.undo();
   assert.equal(bakedRatioOf(getState().scene.objects.b), anchorBefore, 'and undo leaves the anchor alone');
-  assert.equal(getState().scene.objects.b.ratio, 0.5, 'with the field it had');
+  assert.equal(getState().scene.objects.b.ratio, 1, 'restoring what the merge had left, not what it had before the merge');
 
   // 2c. THE COMMON CASE, which is every real split: the parts of one import all carry the SAME
   //     ratio -- `AssetRegistration` seeds every SceneObject of an asset from that asset's
@@ -658,6 +670,51 @@ await test('a split never changes the print scale an object was being printed at
     'and its vertices are still rebuilt where they are, not where the new label says');
   split.undo();
   assert.equal(ratioOf('p1'), 0.5, 'and undo puts the field back');
+});
+
+await test('a merge leaves no part disagreeing with its lead about scale, so a rescale cannot deform it', () => {
+  /*
+   * Found 2026-11-13 by asking what a merge LEAVES BEHIND, having just fixed what a separate
+   * promotes. A merge already tells the operator that the lead's scale applies from here (gap 6) --
+   * but it only SAID so, and left each swallowed part's own `ratio` in the data as a field nothing
+   * reads. Two documented steps turned that into damage:
+   *
+   *   merge an object printed at 1:2 into one printed at 1:1, then convert the merged object to
+   *   1:2 -- and `_rescaleObject` scales each part from its OWN previous ratio, so the body scaled
+   *   x0.5 and the arm x0.25. One object, two factors: DEFORMED, silently.
+   *
+   * The consequence is asserted first, with the fields after it, for the reason the reload test
+   * leads with a size: the factors are what the operator gets.
+   *
+   * (The first instrument for this reported OK because the stubbed `Matrix.Scaling` carries no `m`,
+   * so every bake recorded x1 -- a vacuous probe. Hence the spy below reads the ASKED factor.)
+   */
+  const asked = [];
+  const realScaling = B.Matrix.Scaling;
+  B.Matrix.Scaling = (x, y, z) => { asked.push(x); return realScaling(x, y, z); };
+  try {
+    seed({ a: base('a', 'Body', { ratio: 1, _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { ratio: 0.5, _tris: [[0, 1, 3]] }) });
+    const join = new JoinCommand(['a', 'b'], { leadId: 'a' });
+    join.execute();
+    const parts = logicalObjectPartIds('a', getState().scene.objects);
+    asked.length = 0;
+    new RescaleObjectCommand(parts, 2).execute();
+    const distinct = [...new Set(asked.map((v) => +v.toFixed(9)))];
+    assert.equal(distinct.length, 1,
+      `ONE object must scale by ONE factor; the parts were asked for ${JSON.stringify(distinct)}`);
+
+    // And the fields that make that true, including the anchor: a merge must never re-bake, so each
+    // part's vertices stay where they are and `bakedRatio` has to say so.
+    join.undo();
+    assert.equal(getState().scene.objects.b.ratio, 0.5, 'undo restores the swallowed part own field');
+    assert.equal(getState().scene.objects.b.bakedRatio, undefined, 'and leaves no anchor behind');
+    join.execute();
+    const b = getState().scene.objects.b;
+    assert.equal(b.ratio, 1, 'merged, the part carries the scale the object is printed at');
+    assert.equal(bakedRatioOf(b), 0.5, 'while a reload still rebuilds its vertices where they are');
+  } finally {
+    B.Matrix.Scaling = realScaling;
+  }
 });
 
 console.log('\n' + out.join('\n'));
