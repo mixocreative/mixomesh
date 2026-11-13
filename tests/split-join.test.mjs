@@ -347,11 +347,15 @@ await test('separating drops the union repair record, warns, and undo restores i
 });
 
 await test('separating moves nothing in world space and mints no geometry (gaps 4 and 5)', () => {
-  // The two gaps that only become live with a TOPOLOGICAL split. What is assertable NOW is that this
-  // separate is not one: it moves link fields only. So there is no origin to choose (gap 4 — nothing
-  // may move in world space) and no owned geometry to mint, which is why it needs no derived asset
-  // with `retainedTriangles`/`release` and cannot evict undo history (gap 5). A future topological
-  // split will fail these, which is the point: it must bring its own answers.
+  // THIS IS THE ENFORCEMENT of U5 gaps 4 and 5 — see "If a topological split is ever proposed" at the
+  // end of docs/plans/2026-11-12-parts-and-focus-mode.md.
+  //
+  // What is assertable now is that this separate is not a topological split: it moves link fields
+  // only. So there is no origin to choose (gap 4 — and "nothing may move in world space" is asserted
+  // below) and no owned geometry to mint, which is why it needs no derived asset with
+  // `retainedTriangles`/`release` and cannot evict undo history (gap 5). **A topological split added
+  // to these commands fails these assertions**, which is the point: it must bring its own answers to
+  // both rather than inherit a silence from code that never needed them.
   seed({
     lead: base('lead', 'Bowl', { logicalObjectId: 'lead', _tris: [[0, 2, 1]] }),
     part: base('part', 'Handle', { logicalObjectId: 'lead', isInternalPart: true, _tris: [[0, 1, 3]] }),

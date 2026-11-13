@@ -12,9 +12,21 @@
 > different geometry from the screen, silently.** Both split commands drop that entry and warn; undo
 > restores it; only `groupRepair` goes.
 >
-> **Gaps 4 and 5 are pinned where they can be**: the separate moves no vertex and no node, mints no
-> asset, and declares no `retainedTriangles`/`release`. A future TOPOLOGICAL split will fail those
-> assertions, which is the point — it must bring its own answers instead of inheriting a silence.
+> **Gaps 4 and 5 belong to a topological split, which nothing proposes.** One pointer, no second
+> copy: the requirements and their reasoning live in the plan's final section, "If a topological
+> split is ever proposed", and the assertions in `tests/split-join.test.mjs` are what enforce them.
+>
+> **Two things came out of a second pass with Fable** (which said, as I had, do not build it):
+> - **Row K of the plan promised a split origin and assigned it to U5**, so it was neither delivered
+>   nor decided — worse than either. **Decided: the separated object KEEPS its pivot.** There is
+>   nothing whose origin could be chosen without MOVING something, and moving anything is what a
+>   separate must never do; the gizmo is off inside the scope, so no operator can act on a pivot while
+>   picking. Row K now says so.
+> - **"Engine part ids are not stable" does NOT reach what shipped**, checked rather than assumed:
+>   the depth keys on `logicalObjectPartIds`, which reads `scene.objects`. Now pinned by
+>   `tests/selection-scope.test.mjs` as a PROPERTY (every selectable id is a key of `scene.objects`,
+>   and an engine-shaped id picks nothing), so reaching for the engine's part list to answer "what is
+>   inside this object" fails the test and lands on the warning.
 >
 > **TWO THINGS I ALMOST SHIPPED, both found by being suspicious of a green gate:**
 >

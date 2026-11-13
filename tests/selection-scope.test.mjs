@@ -311,3 +311,25 @@ test('an object scope goes stale when its parts go, exactly as a removed group d
   assert.equal(Selection.getScope(), null);
   assert.equal(Selection.inPartScope(), false);
 });
+
+test('the parts depth keys on SCENE object ids, never on engine part ids', () => {
+  /*
+   * Why this is a test and not a comment. U5 gap 5 warns that **engine part ids are not stable** — a
+   * part's index in the geometry engine's own split changes when the mesh does. If this depth keyed
+   * on those, a scope entered before a repair would point at a different part afterwards, silently.
+   *
+   * It does not: every id here comes from `logicalObjectPartIds`, which reads `scene.objects`. This
+   * asserts the property rather than the implementation, so the day someone reaches for the engine's
+   * part list to answer "what is inside this object", this fails and sends them to the warning.
+   */
+  reset();
+  Selection.enterScope('lead', 'lead.part');
+  const objects = getScene().objects;
+  for (const id of Selection.getSelectedIds()) {
+    assert.ok(Object.hasOwn(objects, id), `${id} is a key of scene.objects`);
+  }
+  assert.ok(Object.hasOwn(objects, Selection.getScope()), 'and so is the scope itself');
+  // An id that is NOT in the scene is not selectable at this depth, whatever it looks like.
+  assert.equal(selectableAtDepth('part-0', getScene(), 'lead'), null, 'an engine-shaped id picks nothing');
+  assert.equal(selectableAtDepth('0', getScene(), 'lead'), null, 'nor does a bare index');
+});

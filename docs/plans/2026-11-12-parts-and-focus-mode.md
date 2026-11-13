@@ -42,7 +42,7 @@ that then have to be unwound.
 | H | Split meshes into objects; merge objects into one | **U5** | mixomesh | U4 |
 | I | Support gen respects by object (overlap inside one object gets nothing) | **U1** + **U7** | geocore → mixomesh | U6 |
 | J | Merge uses the active object's origin | **already true** (`JoinCommand`; the active object becomes the lead) | mixomesh | — |
-| K | Split origin "each mesh's centre" | **U5**, corrected: the bounding-box centre of the **picked set**, since N meshes become ONE object with one origin | mixomesh | U4 |
+| K | Split origin "each mesh's centre" | **DECIDED, not delivered as written**: the separated object KEEPS the pivot it had. A new origin is only meaningful where new geometry is minted, and nothing is — see "Origin" at the end of U5 | mixomesh | U4 |
 | L | A separate mode for splitting: hide everything, isolate the active object, dim its parts, click / shift-click to pick, picked parts brighten, confirm makes one new object | **U4** + **U5** | mixomesh | — |
 | M | In that mode, grey or darken all UI and background; a notice says what to do; a button accepts | **U4** | mixomesh | — |
 | N | Rename objects easily | **exists** (F2, row double-click, context menu, scene-wide `.001` collision rule) — **U5** adds part-row rename and makes the collision visible | mixomesh | U4 |
@@ -250,10 +250,16 @@ With the gaps Fable ranked, worst first:
    let part rows be renamed (`Outliner.js:478, 649` makes them inert today).
 4. **Origin**: the bounding-box centre of the picked set, and only where new geometry is minted.
    Nothing may move in world space — the plate position is what matters.
+   → **Not applicable as written to the shipped separate** (which mints nothing); the origin question
+   it raises is decided under "Origin" at the end of this unit, and the minting half is in section 5.
 5. **A topological split must mint owned geometry** as derived assets, the way Boolean does
    (`BooleanCommands.js:162-178`), because engine part ids are not stable. It must implement
    `retainedTriangles` / `release` or the undo cap evicts history
    (`HistoryManager.js:77-94`).
+   → **Not applicable to the shipped separate**: it moves link fields only, so it holds no triangles
+   for the undo cap to evict, and it keys on SCENE object ids rather than engine part ids (checked,
+   and pinned in `tests/selection-scope.test.mjs`), so the id-stability warning does not reach it.
+   See section 5.
 6. **Export uses the lead's ratio** (`PrintPipeline.js:452`); merging objects with different ratios
    is unguarded.
 
@@ -376,6 +382,22 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
 - **Gap 6 is FIXED**: a merge warns when it swallows an object built at another print scale, since the
   export reads the LEAD's ratio as the reference and the swallowed object's becomes a field nothing
   reads. Reported, not corrected — re-baking vertices is what Join must never do.
+
+- **Origin: the separated object KEEPS the pivot it had** (decided 2026-11-13 with Fable, after it
+  spotted that row K of the table promised an origin and assigned it to U5 — so this was neither
+  delivered nor decided, which is worse than either).
+
+  Row K's "each mesh's centre" was written when a split was imagined as minting geometry. What
+  shipped moves link fields only, so there is nothing whose origin could be chosen without MOVING
+  something — and moving anything is the one thing a separate must not do, because the plate position
+  is what the print depends on. Recomputing a pivot would also be invisible to the operator and
+  consequential at export.
+
+  **Why it costs nothing to leave it:** the gizmo is off inside the part scope (U5's own decision), so
+  the operator cannot act on a pivot while picking, and after separating, the new object behaves like
+  any other object with any other pivot. If a topological split ever mints geometry, that code picks
+  an origin — the bounding-box centre of the picked set — because it will have geometry of its own to
+  pick one for. Section 5.
 
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and
