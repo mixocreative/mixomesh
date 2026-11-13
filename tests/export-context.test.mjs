@@ -108,6 +108,45 @@ await test('buildExportContext: 1:72 at node scale 2 -> effective 36; target 72 
   assert.equal(asShown.factor, ExportContext.BU_TO_MM);
 });
 
+await test('buildExportContext: the export reference is units[0] unless print.referenceObjectId pins it', () => {
+  /*
+   * Walked 2026-11-13, after a separate was changed to hand a part the print scale its object was
+   * being printed at: does that reach the exported FILE?
+   *
+   * For "as shown" it cannot, and the tests above are why -- `ratioFactor` is always 1 there, so no
+   * object's declared ratio scales the geometry. A typed target is different: its factor comes from
+   * ONE unit's ratio, and with nothing pinned that unit is whichever happens to be FIRST. An edit
+   * that adds an object -- a separate, a split, an import -- can change which one that is, and with
+   * it the scale of the whole exported plate.
+   *
+   * Pinned as a PROPERTY, not filed as a defect: `print.referenceObjectId` exists precisely so an
+   * operator who cares can make it deterministic, and this test proves that it works. Left as
+   * folklore it is the kind of thing that gets rediscovered from a wrong-sized print.
+   */
+  const a = unit('a', 72);
+  const b = unit('b', 36);
+  const first = ExportContext.buildExportContext({ state: FAKE_STATE, units: [a, b], target: 72 });
+  const swapped = ExportContext.buildExportContext({ state: FAKE_STATE, units: [b, a], target: 72 });
+  assert.equal(first.referenceRatio, 72, 'the first unit sets the reference');
+  assert.equal(swapped.referenceRatio, 36, 'and so does a different first unit');
+  assert.notEqual(first.ratioFactor, swapped.ratioFactor,
+    'so for a typed target the plate scale follows the unit ORDER -- this is the sharp edge');
+
+  // "As shown" is immune to all of it, which is what makes the common path safe.
+  for (const units of [[a, b], [b, a]]) {
+    const asShown = ExportContext.buildExportContext({ state: FAKE_STATE, units, target: null });
+    assert.equal(asShown.ratioFactor, 1, 'as shown never rescales, whatever the reference declares');
+    assert.equal(asShown.factor, ExportContext.BU_TO_MM);
+  }
+
+  // And pinning the reference makes the order irrelevant.
+  const pinned = { ...FAKE_STATE, print: { referenceObjectId: 'a' } };
+  const p1 = ExportContext.buildExportContext({ state: pinned, units: [a, b], target: 72 });
+  const p2 = ExportContext.buildExportContext({ state: pinned, units: [b, a], target: 72 });
+  assert.equal(p1.referenceRatio, 72);
+  assert.equal(p1.ratioFactor, p2.ratioFactor, 'with a pinned reference the order no longer matters');
+});
+
 await test('buildExportContext: returned object is frozen', () => {
   const ctx = ExportContext.buildExportContext({
     state: FAKE_STATE,

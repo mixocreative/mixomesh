@@ -517,7 +517,33 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   invariant, applied to scale instead of position.
 
   The test that catches it asserts `bakedRatioOf` is unchanged across the edit, and was confirmed by
-  forging the anchor back out, which reproduces `19b2e41` exactly.
+  forging the anchor back out, which reproduces `19b2e41` exactly. **And the gap that let it ship is
+  closed**: `tests/browser-smoke.mjs` now reloads a SEPARATED object through the real
+  `_buildDocument`/`_loadProject` and measures the restored mesh's bounding box. Nothing in the suite
+  had ever reloaded one, which is why three green batch gates said nothing. The leading assertion is
+  the SIZE, with the field checks after it -- a test that reports a missing field tells you a line
+  changed; one that reports an object came back at twice its size tells you what the operator would
+  have thrown away.
+
+- **Then the export pipeline was walked, to check the claim above rather than trust it.** "A separate
+  changes nothing -- not what gets printed" was asserted before it was verified, which is the habit
+  this document keeps catching.
+
+  **It holds, and the reason is structural:** the export applies ONE `ratioFactor` derived from a
+  single reference unit, and for "as shown" that factor is always 1 (`tests/export-context.test.mjs`
+  already pinned it). So no object's declared `ratio` scales the exported geometry on the common
+  path, and moving a separated part's label cannot move its exported size.
+
+  **But walking it found a sharp edge worth naming.** For a TYPED target (export at 1:72, or to a
+  height) the factor comes from one unit's ratio, and with nothing pinned that unit is whichever is
+  FIRST (`_selectReferenceUnit` -> `units[0]`). An edit that adds an object -- a separate, a split,
+  an import -- can change which one that is, and with it the scale of the whole exported plate.
+
+  **Pinned as a property, not filed as a defect**, because `print.referenceObjectId` exists exactly
+  so an operator who cares can make it deterministic, and the new test proves that it works. Left as
+  folklore it is the kind of thing that gets rediscovered from a wrong-sized print. Changing the
+  default (first unit -> something else) would be a design decision about export, which this plan
+  has no mandate for and nothing has asked for.
 
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and
