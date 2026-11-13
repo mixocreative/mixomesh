@@ -1,5 +1,23 @@
 # One notion of parts, and the UI that lets the operator own it
 
+> **STATUS, 2026-11-13: EVERY UNIT OF THIS PLAN IS DELIVERED — U1 through U7, all shipped and
+> deployed.** The line below is how the document started; the dated sections are the record of how it
+> went, including three places the plan itself was wrong (C3's ordering bug, U7's assumed blocker,
+> C2's instrument).
+>
+> **U5's done-test, ticked:** a user can enter an object, pick its meshes, separate them into one
+> named object, merge it back, and undo each in one step; supports are never silently orphaned
+> (gap 1); and a project saved after a split reloads identically on a build that predates it
+> (gap 2, which was a live defect I first mis-filed as unreachable). Gaps 3 and 6 are fixed too, and
+> C2 is decided and built.
+>
+> **NOTHING IN THIS PLAN IS WAITING ON ANYTHING.** Gaps 4 and 5 are not met and are not open items of
+> this plan: they are preconditions on a TOPOLOGICAL SPLIT — minting new geometry — which this plan
+> deliberately did not build ("extend the scope, do not add a third mode") and which nothing
+> proposes. They are filed at the end under **"If a topological split is ever proposed"**, together
+> with the assertions that will fail it if it arrives without them. A guard on future work, not a
+> hole in this one.
+
 **Status: plan, not approved. Nothing here is started.** Written 2026-11-12, after the owner asked
 whether everything he had specified was organised and planned. It was not — half of it was in two
 handoffs and one piece was only in conversation. This is the single ordered list.
@@ -280,7 +298,7 @@ part `<lead>.00N` unconditionally, so "hook" merged into "denture" came back as 
 earlier split's `<lead>.001`) from one the operator chose, and only derived names are replaced. The
 import case the 2-part test pins is unchanged, which is the point: that rename IS wanted.
 
-#### 2026-11-13: THE UI IS BUILT. What it is, and what is still open
+#### 2026-11-13: U5 IS DONE. Its done-test is ticked above; this is how
 
 **Built**, and the plan's decision held — the scope was extended, no third mode:
 
@@ -307,7 +325,7 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   scope produced an EMPTY chain and HID the breadcrumb, at the one moment the operator most needs
   telling where they are.
 
-**Still open**, with the reason each was left:
+**Every gap of this unit is closed:**
 
 - **C2 IS DECIDED (2026-11-13, Fable): the GEOMETRIC test, and the warning WARNS — it never drops
   silently and never refuses.** Reasons, in the order that settles it:
@@ -359,12 +377,11 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   export reads the LEAD's ratio as the reference and the swallowed object's becomes a field nothing
   reads. Reported, not corrected — re-baking vertices is what Join must never do.
 
-- **Gaps 4 and 5 are PINNED where they can be, and the rest genuinely waits on a topological split.**
-  What is assertable now is that this separate is not one: `tests/split-join.test.mjs` asserts it
-  moves no vertex and no node, mints no asset, and declares neither `retainedTriangles` nor
-  `release`. So there is no origin to choose (gap 4's "nothing may move in world space" holds) and no
-  owned geometry to evict undo history (gap 5). **A future topological split will fail those
-  assertions**, which is the point: it has to bring its own answers rather than inherit a silence.
+- **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
+  under "If a topological split is ever proposed" — they are preconditions on minting geometry, and
+  this separate mints none. `tests/split-join.test.mjs` asserts exactly that (no vertex or node
+  moves, no asset minted, no `retainedTriangles`/`release`), so the day something does mint geometry
+  those assertions fail and send the reader to that section.
 
 ### U6 — mixomesh: re-vendor 12 → 65
 
@@ -386,9 +403,12 @@ promise becomes true, at which point the separator mode may say so.
 **Done when** a body-and-arm object gets no tips in the overlap, and the part count and roles are
 shown before generate.
 
-#### U7 is NOT a drop-in, and the blocker is contact IDS (found 2026-11-12, after U6 landed)
+#### U7's assumed blocker, and why it was the wrong size (history: U7 SHIPPED at engine 67)
 
-The obvious reading of this unit is "call `part_tips` instead of `placeGeneric`". That cannot be
+**Read this with the "DONE at engine 67" section that follows it.** What is below was true of the
+route the plan assumed and is kept because the mistake generalises; it is not an open problem.
+
+The obvious reading of this unit was "call `part_tips` instead of `placeGeneric`". That cannot be
 done as written, for a reason worth stating before anyone tries it:
 
 **`part_tips` returns different contact ids.** `supports::part_tips::tips_on_part` builds them as
@@ -409,9 +429,10 @@ which is additive, needs no id change, needs no save migration, and lets the hos
 contacts itself from the mask `part_tips` already exposes. That is an engine change (66) and a small
 one; the alternative is an id migration across every saved project, which is not a small one.
 
-**Until then the mask is reachable but unusable in the live path**, so the separator mode must keep
-saying nothing about supports (the trap at the top of this plan), and a body-and-arm object still
-gets tips in its overlap. The requirement is not met and this is why.
+**That was the state when this was written**: the mask reachable but unusable in the live path, the
+separator mode obliged to say nothing about supports, and a body-and-arm object still getting tips in
+its overlap. **Superseded by the section immediately below** — the requirement is met, and the trap
+at the top of this plan is lifted.
 
 #### DONE at engine 67, and the fix was smaller than the one recommended above
 
@@ -446,6 +467,10 @@ the top of this plan is lifted for the LIVE path.
 
 Checked 2026-11-12, after the owner asked whether the functions, intentions and UX all complement
 rather than contradict. Most do. Four did not, and one of those is an ordering bug in this plan.
+
+**All four are resolved** (2026-11-13): C1 was never a defect — each app owns what an inter-object
+overlap means, and that is written down so nobody "unifies" it. C2 is decided and built. C3's
+ordering bug was corrected before U5 started. C4 is fixed — see the end of its own section.
 
 ### C1 — THE TWO APPS MEAN OPPOSITE THINGS BY "TWO OBJECTS OVERLAP", and that is fine
 
@@ -526,6 +551,21 @@ The complement already exists in the engine — the noise-shell report (0.001 mm
 never deleted). It has to surface in the generic flow so the operator can remove the shells rather
 than print them. Without that, this recommendation trades one silent wrong for another.
 
+**FIXED 2026-11-13** (`bf9e1e4`). `src/supports/noiseShells.ts` measures the tiny separate shells of
+an object and the support panel shows the count; nothing is dropped or deleted, following the
+engine's own "reported only" stance. Three decisions worth knowing:
+
+- **It rides `objectModel`**, which already walks the welded mesh and is cached per geometry version,
+  so it costs nothing per build — a noise shell only appears when the geometry changes. A per-build
+  scan would have repeated the main-thread blocking that C2's first version was caught doing.
+- **Index connectivity, only valid after the weld.** On a raw render mesh it would split a solid at
+  every UV seam and report an object as a cloud of noise.
+- **The largest shell is never reported**: in an object that is itself tiny, every shell is under the
+  limit, and calling the operator's own model debris would be worse than saying nothing.
+
+The U1 decision it is the complement of is unchanged: `debris` stays dental, and the generic policy
+still supports every part it is given.
+
 ### What checks out
 
 - **Grouping does not decide physics.** The rule is per-object and geometric; grouping decides only
@@ -546,7 +586,9 @@ than print them. Without that, this recommendation trades one silent wrong for a
 
 ## 4. Not in this plan, on purpose
 
-- **Pushing or publishing anything.** mixoMesh's push deploys to Pages; that is the owner's call.
+- ~~**Pushing or publishing anything.**~~ **Changed by the owner, 2026-11-12**: "no more manual ci
+  dispatch, u can just do it for me as u see fit." Both apps are pushed and deployed, mixoMesh on
+  every push to Pages and mixoDental by dispatch (a push to `main` does NOT deploy it).
 - **The 0.3.2 installer.** Unsigned, no update channel, and `installers/` still holds 0.3.1 from
   2026-10-23. A release decision, not this plan's.
 - **`test:all`'s flakiness.** One Vite start-up probe timed out on 2026-11-12 while Vite had printed
@@ -554,3 +596,35 @@ than print them. Without that, this recommendation trades one silent wrong for a
   hiccup fails the chain and hides every suite after it — which is how two real defects hid behind
   each other earlier that day. The fix is a retry on the probe, not a longer timeout. Worth doing
   before U5 adds more browser tests, and written down here rather than left as folklore.
+
+---
+
+## 5. If a topological split is ever proposed (U5 gaps 4 and 5)
+
+**Nothing proposes one, and this plan deliberately did not build one** — its U5 decision was "extend
+the scope, do not add a third mode", and what the owner asked for was picking an object's meshes and
+separating them, which ships. This section exists so the two requirements that only a topological
+split can trigger are not lost, and are not mistaken for unfinished business of U5.
+
+A **topological split** means cutting one mesh into new geometry — new vertices, new assets — as the
+Boolean path does. Separating PARTS, which is what shipped, moves link fields only.
+
+**The two requirements, and who enforces them today:**
+
+1. **Origin (gap 4).** New geometry needs an origin chosen: the bounding-box centre of the picked
+   set, and **nothing may move in world space** — the plate position is what matters to a print.
+2. **Derived assets (gap 5).** It must mint owned geometry as derived assets the way
+   `BooleanCommands.js:162-178` does, and implement `retainedTriangles` / `release`, or the undo cap
+   evicts history (`HistoryManager.js:77-94`).
+
+**They are enforced in advance.** `tests/split-join.test.mjs` asserts that today's separate moves no
+vertex and no node, mints no asset, and declares neither `retainedTriangles` nor `release`. A
+topological split added to these commands **fails those assertions**, which is the intended outcome:
+it must bring its own answers to both, rather than inherit a silence from code that never needed
+them.
+
+**And one thing it must not assume.** A cross-object overlap check (C2) handles two halves of one
+surface correctly — `split` pairs faces around a shared edge by the solid each bounds, so two
+abutting shells stay two parts through the import weld, pinned in geocore as
+`two_halves_of_one_surface_stay_two_parts_through_the_weld`. That was verified rather than assumed:
+the test was written expecting the opposite.
