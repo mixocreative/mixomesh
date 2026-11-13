@@ -525,6 +525,37 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   changed; one that reports an object came back at twice its size tells you what the operator would
   have thrown away.
 
+- **A readiness fix for the supports-walk right-click was tried and REVERTED, which is the finding.**
+  Step e of `browser-supports-walk` ("right-click on a support removes it") passes alone every time
+  and failed twice in loaded batch runs on 2026-11-13. Its own comment says "WAIT FOR THE REMOVAL, DO
+  NOT SLEEP FOR IT", and the code only half does: it retries six times, each attempt still sleeping
+  150 ms for the hover pick. So the obvious fix was to wait on the app own signal instead -- the
+  remove ring marks a tip doomed, `supportMeshLayer.removingIds()` already reads it, and a facade
+  pass-through plus a bounded poll replaced the sleep.
+
+  **It made the test fail ALONE**, where it had passed alone every time. That is a worse test, so it
+  was reverted whole rather than iterated on. The likely reason it is worth writing down: step e runs
+  with the tool set to ADD (the right-click removes while in add mode), so the REMOVE ring is
+  probably not what is showing -- the readiness signal was the wrong one, and waiting up to two
+  seconds on a signal that never arrives puts the click far later than the hover, which can lose the
+  hover altogether. A readiness wait is still the right shape; it needs the signal that actually
+  corresponds to add-mode right-click, which was not identified.
+
+  **Left as known debt with its reason**, per the principle: the step is contention-sensitive in a
+  batch run on a loaded machine and reliable alone. Do not "fix" it by widening the sleep.
+
+- **Import and rescale were walked to check the ANCHOR rather than assume it**, since the anchor is
+  the part of the scale fix that could be wrong in the common case. It is right, and for reasons
+  worth stating: `AssetRegistration` seeds every SceneObject of an asset from that asset own
+  `modelRatio`, so the parts of one import all share a ratio and a separate writes NO anchor -- there
+  is no divergence to record, and a `bakedRatio` equal to the label would be a relabel that never
+  happened. A rescale keeps them in step rather than breaking that: `_ratioTargetIds` expands the
+  selection to every part, so `_rescaleObject` bakes each part mesh AND relabels each part, each from
+  its OWN previous ratio -- which is also how a rescale HEALS a divergence a merge left behind.
+  `bakedRatioOf` is therefore truthful for every part at all times, which is exactly what the anchor
+  depends on. Pinned as case 2c in `tests/split-join.test.mjs`, and confirmed by forging the
+  equal-to-label guard out, which writes a spurious anchor on every ordinary split.
+
 - **Then the export pipeline was walked, to check the claim above rather than trust it.** "A separate
   changes nothing -- not what gets printed" was asserted before it was verified, which is the habit
   this document keeps catching.

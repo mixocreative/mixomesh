@@ -626,6 +626,25 @@ await test('a split never changes the print scale an object was being printed at
   assert.equal(bakedRatioOf(getState().scene.objects.b), anchorBefore, 'and undo leaves the anchor alone');
   assert.equal(getState().scene.objects.b.ratio, 0.5, 'with the field it had');
 
+  // 2c. THE COMMON CASE, which is every real split: the parts of one import all carry the SAME
+  //     ratio -- `AssetRegistration` seeds every SceneObject of an asset from that asset's
+  //     `modelRatio`, and a rescale expands to every part (`_ratioTargetIds`) so they stay in step.
+  //     So a separate here must write NO anchor at all: there is no divergence to record, and a
+  //     spurious `bakedRatio` equal to the label would be a relabel that never happened.
+  //     Walked 2026-11-13 to check the anchor against import and rescale rather than assume it.
+  seed({
+    lead: base('lead', 'Kit', { logicalObjectId: 'lead', ratio: 72, _tris: [[0, 2, 1]] }),
+    m1: base('m1', 'Kit_primitive1', { logicalObjectId: 'lead', isInternalPart: true, ratio: 72, _tris: [[0, 1, 3]] }),
+    m2: base('m2', 'Kit_primitive2', { logicalObjectId: 'lead', isInternalPart: true, ratio: 72, _tris: [[0, 3, 2]] }),
+  });
+  const imported = new SeparateSelectionCommand(['m1']);
+  imported.execute();
+  assert.equal(ratioOf('m1'), 72, 'the separated part keeps the scale every part shared');
+  assert.equal(getState().scene.objects.m1.bakedRatio, undefined,
+    'and NO anchor is written: nothing was relabelled, so there is nothing to anchor');
+  assert.equal(bakedRatioOf(getState().scene.objects.m1), 72, 'a reload rebuilds it exactly as it is');
+  assert.equal(getState().scene.objects.lead.bakedRatio, undefined, 'same on the side left behind');
+
   // 3. Split to parts: every id becomes its own object, so every one needs it.
   seed({
     lead: base('lead', 'Bowl', { logicalObjectId: 'lead', ratio: 2, _tris: [[0, 2, 1]] }),
