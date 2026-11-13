@@ -10,6 +10,7 @@ corrected in place with the correction marked, so a reader can tell what was bel
 | `ui.md` | the UI vocabulary and the rules the panels follow | touching anything the operator sees |
 | `TRANSLATIONS.md` | how locales are added and checked (`i18n:check`) | adding or changing a string |
 | `support-generation-port.md` | how support generation came across from mixoDental, and what stayed shared | working on supports |
+| `size-debt.md` | every file over ~600 lines with its next cut named, and which cuts are owed | before adding to a long file -- add at the seam |
 | `roadmap-kitbash.md` | the longer arc for kitbashing | deciding what is next |
 | `layperson-web-desktop-build-guide.md` | building and running without the context the rest assumes | first time through |
 | `adr/` | architecture decisions, one per file — the load-bearing ones | before changing what something IS |
@@ -25,6 +26,14 @@ Dated documents are `YYYY-MM-DD-<subject>.md` (or `<subject>-YYYY-MM-DD.md` for 
 the top level), kebab-case, in the folder matching their kind. A **contradiction with an ADR is
 escalated, not quietly fixed** — the ADR is the decision, and code that disagrees with it is either
 a bug or a decision nobody wrote down.
+
+## The code's own maps
+
+`docs/` is not the only map. Every folder past ~20 files carries its own README, and those are
+closer to the code than anything here: `src/core/`, `src/core/assets/`, `src/core/print/`,
+`src/ui/`, `src/kit/`, `src/supports/` and `tests/`. Start there for "where is X"; come here for
+"why is X this way". `python ~/.claude/skills/cia/tools/maintainability.py S:/ai/mixomesh` checks
+that a folder past the limit has one.
 
 ## Two things worth knowing before you trust a green run
 
