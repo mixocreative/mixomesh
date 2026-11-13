@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   findBrowser, freePort, waitForHttp, waitForBrowserWs, openTarget,
-  Cdp, evaluate, waitFor, assert, sleep, removeTempDir, stopProcess,
+  Cdp, evaluate, waitFor, assert, sleep, removeTempDir, stopProcess, assertionsRun,
+  expectAssertions,
 } from './cdp-harness.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -2817,7 +2818,12 @@ async function main() {
 
     if (failures.length) throw new Error(`Browser smoke found runtime errors:\n${failures.join('\n')}`);
     await cdp.close();
+    // The count is part of the result: a walk that stopped asserting exits 0 with nothing to
+    // show, and this is a 2,800-line file whose cut is named in docs/size-debt.md. Measured, not
+    // grepped -- loops and conditional branches make the source count wrong.
+    expectAssertions(321, 'browser smoke');
     console.log('PASS Vite browser smoke');
+    console.log(`     ${assertionsRun()} assertions ran`);
   } finally {
     // In the finally, so it prints on the three early-surface throws too (MX-07): an allowlist is
     // only an instrument while someone can see what it did.

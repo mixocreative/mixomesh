@@ -3,17 +3,9 @@
 The rule (the owner's code principle, rule 5): **size is debt with a date.** Over ~600 lines a
 file is named here with its next cut written down; over ~1000 the cut is taken, not named.
 
-**Status, honestly: eight files are over the cut limit and none of the cuts has been taken.** That
-is a live violation of rule 5, recorded here under rule 8 — *debt not taken is written down with
-the reason* — rather than left silent. The reason is the same for all eight and it is a judgement,
-not an excuse: every one of them sits on a path the 187-check browser suite and the 250 vitest
-checks currently cover green, and a six-file refactor landed without re-walking each surface is
-how this project shipped a 92% support-loss regression under three green gates on 2026-11-13. The
-cuts below are each a day's work *including* its walk. They are worth taking; they are not worth
-taking unwalked.
-
-**What this register is for:** so the next person adding to one of these files knows where the
-seam is, and adds at the seam instead of at the end of the file.
+**Status: four of eight cuts taken on 2026-11-14. Two of the remaining four are measured as NOT
+takeable** — the extraction would make a hub, and rule 1 comes before rule 5. The other two are
+test harnesses whose **vacuous-pass guard has landed**; the splits are owed and now safe to make.
 
 Measured by `cia`'s `tools/maintainability.py` (rule M2). Re-measure with:
 
@@ -21,31 +13,97 @@ Measured by `cia`'s `tools/maintainability.py` (rule M2). Re-measure with:
 python ~/.claude/skills/cia/tools/maintainability.py S:/ai/mixomesh --rule=M2
 ```
 
-## Over the cut limit (~1000) — the cut is owed
+## Cuts taken, 2026-11-14
 
-| File | Lines | The next cut, concretely |
+| Was | Now | How |
 |---|---|---|
-| `src/ui/PropertiesPanel.js` | 1,482 | Two cuts, in this order. **(1)** The four already-exported pure decisions — `sourceStatusFor`, `isTransformReadOnly`, `defaultScaleVerb`, `scaleConsequence` — go to `ui/propertiesRules.ts` with tests. They are pure, they are the panel's actual rules, and nothing tests them today: output much narrower than input, so a job and not a hub. **(2)** Then each `// ── X section ──` block's render/wire pair (`object`, `source row`, `transform`, `scale row`) becomes `ui/properties/<section>.js`. The file's own section comments are already the cut lines |
-| `tests/browser-smoke.mjs` | 2,839 | Split by subject into the folder's existing convention (`browser-<subject>-smoke.mjs`) and add each to `package.json`. **The risk to handle first:** a check that silently stops running is worse than a long file, so the split must assert the total check count before and after |
-| `tests/export.test.mjs` | 1,982 | By format, matching `src/core/print/`'s own split: `export-stl`, `export-threemf`, `export-obj-ply-wrl`, plus `export-context`. Same count assertion as above |
-| `src/core/InputManager.js` | 1,310 | **The keymap is the clean cut:** `_buildKey`, `_isTypingTarget`, `_isViewportKeyTarget`, `_handleKeyDown/Up` → `core/input/keymap.js`, pure and testable, which is what makes it worth doing. Second cut: the touch block (`_onTouchPointer`, `_onTouchGestures`, `_canvasLocal`, `_clearLongPress`) → `core/input/touch.js`, next to the existing `TouchGestures.js`. The pointer/selection core stays |
-| `src/ui/print/PublishTab.js` | 1,046 | Two jobs in one file. **Transport** (`_api`, `_request`, `_remoteId`, `_publish`, `_retry`, `_cancel`, `_connect`, `_testSaved`, `_disconnect`, `_checkPending`, `_resolvePending`) → `ui/print/publishClient.js`; **capture** (`_captureShot`, `_captureHero`, `_addGalleryShot`) → `ui/print/publishCapture.js`. What is left is a view, which is what a tab should be. This one also buys the most: the transport talks to someone else's service and is the hardest thing here to test today |
-| `src/core/commands/ParentCommands.js` | 1,052 | **The easiest cut of the eight, and the one to take first.** Line 511 already carries the comment `── Split to parts / Join ──`: two unrelated jobs, parenting/grouping above it and split/join below. Cut there into `ParentCommands.js` + `SplitJoinCommands.js`. No logic moves, no signature changes, and `tests/split-join.test.mjs` already exists to prove it |
-| `src/core/ShaderLibrary.js` | 1,091 | Three cuts, its own comments marking each. **Most valuable first:** the duplicate/conflict detection (`_buildSignatureIndex`, `_shaderSignature`, `_findNameConflicts`, `_findContentDuplicate`) → `core/shaders/dedupe.js` — pure, and the behaviour a user notices when it is wrong. Then colour helpers (`_color3ToHex`, `_hexToColor3`) → `core/shaders/color.js`, pure, trivially tested. Then material construction (`_detectType`, `_createBabylonMaterial`, `_buildEntryFromMaterial`) → `core/shaders/materialBuild.js` |
-| `src/core/print/PrintPipeline.js` | 1,031 | The repair/CSG block (`_ensureCSG2`, `_csgRebake`, `_tryCsg`, `_ensureRepairRuntime`, `_tryRepair`, `_tryRepairGroup`, `_recordRepairVerdict`, `_refreshRepairVerdict`) → `core/print/ExportRepair.js`. Then `getPrintReadiness` and `supportReadiness` move into the `PrintReadiness.js` that already exists — that cut **removes** a concept rather than adding a file, which is the best kind |
+| `core/commands/ParentCommands.js` 1,052 | **513** | `core/commands/SplitJoinCommands.js` (554), cut at the file's own line-511 section comment |
+| `ui/PropertiesPanel.js` 1,482 | **949** | `ui/properties/`: `ShaderSection.js` (279), `SourceRow.js`, `SourceUnitSection.js`, `UVOverrideSection.js`, `targets.js`, `format.js` |
+| `core/ShaderLibrary.js` 1,091 | **977** | `core/shaders/materials.js` (141): the colour conversions and material construction |
+| `core/print/PrintPipeline.js` 1,031 | **839** | `core/print/ExportRepair.js` (222): the CSG re-bake and watertight repair |
 
-## Over the debt limit (~600), named, no cut owed yet
+**What made these four safe, and it was not the line count.** Each boundary was measured before it
+was cut: what the block needs from outside, and what outside needs from the block. `ParentCommands`
+was one-way (three names out, nothing in). `PrintPipeline`'s repair block needed nothing but
+`window.BABYLON`. Then `eslint` named **17 now-unused imports** across the cuts — whole dependency
+sets leaving with their sections, which is the evidence that the seams were real and not chosen to
+hit a number. `test:all` (187 checks) and 250 vitest green after each.
 
-Listed so they are known, per rule 8. None needs action; each is here so a reader can see it was
-counted and not missed.
+**Two corrections made mid-cut, worth knowing:**
+- `PropertiesPanel`'s pure rules (`scaleConsequence`, `defaultScaleVerb`, …) are only ~20 lines.
+  Extracting them buys a test but is not a cut; the size came from four whole sections.
+- `PrintPipeline` exposes `repairVerdictOf(mesh)` rather than its `WeakMap`. The measurement said
+  the map crossed the boundary and the first attempt dismissed that; the accessor is the narrow
+  form. **The tool was right and the hunch was wrong.**
 
-`src/ui/AssetPanel.js` (881) · `src/ui/ScenePanel.js` (861) · `src/ui/ShaderPanel.js` (814) ·
-`src/core/persist/ProjectLoader.js` (796) · `src/core/scene/PivotSession.js` (760) ·
-`src/core/SceneManager.js` (727) · `src/core/print/ThreeMFWriter.js` (711) ·
-`src/ui/Outliner.js` (712) · `src/ui/ContextMenu.js` (706) · `src/core/repair/MeshRepair.js` (686) ·
-`src/ui/PrintPanel.js` (678) · `src/core/commands/HierarchyCommands.js` (637) ·
-`src/core/scene/CameraRig.js` (630) · `src/core/MeshValidator.js` (629) ·
-`src/supports/live/liveGeneration.ts` (621), and the test files
+## NOT takeable — measured, and the measurement is the reason
+
+Rule 1 of the principle: *a module is clean when its output is narrower than its input; a module
+that needs nearly as much handed in as it hands back is a hub, not a job, and moving code into it
+makes the codebase worse while looking like progress.* Rule 1 comes before rule 5. These two files
+are over the cut limit and stay that way until someone changes their shape, not their line count.
+
+### `core/InputManager.js` — 1,310 lines
+
+One state machine over pointer, key and touch input, sharing one set of mutable module variables.
+
+| Candidate block | What it needs from module state |
+|---|---|
+| keymap + dispatcher (`_buildKey`, `_isTypingTarget`, `_isViewportKeyTarget`, `_handleKeyDown/Up`) | **11 names**, including `_handlers`, `_modal`, `_mode`, `_readOnly`, `_currentContext`, `_canvas`, `_bodyDrag` |
+| touch (`_onTouchPointer`, `_onTouchGestures`, `_canvasLocal`, `_clearLongPress`) | **16 names**, including 13 references to `_touchBody` alone, plus `_gest`, `_longPressTimer`, `_lastTouchTap`, `_modal` |
+
+Either extraction is a module handed most of the file's state. **What IS worth taking, and is not
+a cut:** the pure predicates — `_isDoubleClick`, `_buildKey`, `_isTypingTarget`,
+`_isViewportKeyTarget`, `_canvasLocal` — about 60 lines, which would buy tests for rules nothing
+tests today. Do that for the tests, not for the number.
+
+### `ui/print/PublishTab.js` — 1,046 lines
+
+Its one separable block is the HTML builders (`_fieldLabel` … `_blocker`, ~310 lines), and they
+make **58 references to `S`**, the tab's own view state, plus eight helpers. Passing a nine-field
+context bag in to get six builders out is the hub pattern wearing a disguise.
+
+**The shape change that would make a cut possible** (a different, larger piece of work): give the
+tab an explicit view-model — one function from `S` to a plain object — and let the builders take
+that. Then they are pure, testable, and the boundary is one value wide. Until someone does that,
+this file is honestly 1,046 lines.
+
+## Guards landed; splits owed
+
+Both are harnesses with their **own** runners, which means the suite's totals say nothing about
+whether they still run everything. That hole is now closed, and closing it was the precondition
+for ever splitting them — a move that drops a check would otherwise still exit 0.
+
+### `tests/browser-smoke.mjs` — 2,845 lines
+
+`cdp-harness.mjs` now counts assertions (`assertionsRun()`, `expectAssertions()` — available to
+**all 34 browser walks**, not just this one), and this walk asserts `expectAssertions(321)`.
+Measured, not grepped: the source contains 310 `assert(` calls and runs 321, because of loops and
+conditional branches. Proven to bite — claiming 322 fails the walk with exit 1.
+
+**The next cut:** by subject into the folder's existing `browser-<subject>-smoke.mjs` convention,
+each added to `package.json`, with the total assertion count preserved across the split.
+
+### `tests/export.test.mjs` — 2,003 lines
+
+This file has its own tiny runner, so `node --test` counts the whole file as **one** test: its 113
+cases were invisible to the suite's `ℹ tests 1136` line, and a dropped case changed nothing it
+reported. It now asserts `EXPECTED_CASES = 113`. Proven to bite.
+
+**The next cut:** the 146-line preamble (env install, stubs, `mesh`/`setScene`/`obj` builders,
+validator fakes) becomes `tests/export-kit.mjs` — the same pattern as the existing
+`support-browser-kit.mjs` — and the 113 cases split by subject (`export-obj`, `export-stl`,
+`export-threemf`, `export-gate`, `export-preview`). The case count is what proves none was lost.
+
+## In the debt band (~600–1000), named, no cut owed
+
+`core/ShaderLibrary.js` (977) · `ui/PropertiesPanel.js` (949) · `ui/AssetPanel.js` (881) ·
+`ui/ScenePanel.js` (861) · `core/print/PrintPipeline.js` (839) · `ui/ShaderPanel.js` (814) ·
+`core/persist/ProjectLoader.js` (796) · `core/scene/PivotSession.js` (760) ·
+`core/SceneManager.js` (727) · `ui/Outliner.js` (712) · `core/print/ThreeMFWriter.js` (711) ·
+`ui/ContextMenu.js` (706) · `core/repair/MeshRepair.js` (686) · `ui/PrintPanel.js` (678) ·
+`core/commands/HierarchyCommands.js` (637) · `core/scene/CameraRig.js` (630) ·
+`core/MeshValidator.js` (629) · `supports/live/liveGeneration.ts` (621), plus the test files
 `tests/listbridge-runner.test.mjs` (864) · `tests/split-join.test.mjs` (722) ·
 `tests/persistence-load-guards.test.mjs` (717) · `tests/storage-adapter.test.mjs` (675) ·
 `tests/scan-probe.mjs` (655) · `tests/listbridge-tunnel.test.mjs` (642) ·

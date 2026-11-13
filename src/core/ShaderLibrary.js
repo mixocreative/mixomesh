@@ -4,12 +4,20 @@ import { AssetLoader } from './AssetLoader.js';
 import { SceneManager } from './SceneManager.js';
 import { shaderSignature } from './shaders/ShaderSignature.js';
 import { srgbToLinear01, linearToSrgb01 } from './shaders/ColorSpace.js';
+import {
+  FALLBACK_DIFFUSE, LINEAR, buildEntryFromMaterial, createBabylonMaterial,
+  hexToColor3, importedMaterialName,
+} from './shaders/materials.js';
 import swatchData from '../config/swatches.json' with { type: 'json' };
 
 const BABYLON = window.BABYLON;
 if (!BABYLON) throw new Error('Babylon.js failed to load');
 
-const FALLBACK_DIFFUSE = '#cccccc';
+// Re-exported from here because that is where callers and tests import them from; the curve
+// itself is ./shaders/ColorSpace.js and the conversions are ./shaders/materials.js.
+export { srgbToLinear01, linearToSrgb01 };
+export { importedMaterialName as _importedMaterialName };
+
 const SILENT = { silent: true };
 
 /**
@@ -34,127 +42,6 @@ const _uvClones = new Map();
 let _idCounter = 0;
 function _nextShaderId() { return `sh_${Date.now().toString(36)}_${++_idCounter}`; }
 
-// ── Color helpers ────────────────────────────────────────
-//
-// Contract (Blueprint §10, 2026-09-17): a ShaderEntry's `diffuseColor` hex is
-// ALWAYS sRGB. PBR materials store `albedoColor`/`baseColor` in LINEAR space
-// (Babylon binds it raw; glTF's baseColorFactor lands there unchanged), so
-// every hex↔PBR mapping below converts exactly once. Standard/unlit
-// `diffuseColor` is gamma-space by Babylon convention and is copied raw.
-// Re-exported so callers/tests share the same pure curve as the writers.
-
-export { srgbToLinear01, linearToSrgb01 };
-
-/**
- * Color3 → '#rrggbb' (sRGB). Pass `{ linear: true }` when the source is a PBR
- * albedo so the channels are gamma-encoded first.
- */
-function _color3ToHex(c3, { linear = false } = {}) {
-  if (!c3) return FALLBACK_DIFFUSE;
-  const enc = (v) => Math.round(Math.max(0, Math.min(1, linear ? linearToSrgb01(v) : v)) * 255);
-  return '#' + [enc(c3.r), enc(c3.g), enc(c3.b)].map(v => v.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * '#rrggbb' (sRGB) → Color3. Pass `{ linear: true }` for a PBR albedo target so
- * the channels are decoded to linear space.
- */
-function _hexToColor3(hex, { linear = false } = {}) {
-  let c;
-  try { c = BABYLON.Color3.FromHexString(hex); }
-  catch { c = BABYLON.Color3.FromHexString(FALLBACK_DIFFUSE); }
-  if (!c || typeof c.r !== 'number') c = BABYLON.Color3.FromHexString(FALLBACK_DIFFUSE);
-  return linear
-    ? new BABYLON.Color3(srgbToLinear01(c.r), srgbToLinear01(c.g), srgbToLinear01(c.b))
-    : c;
-}
-
-const LINEAR = { linear: true };
-
-// ── Material introspection / construction ────────────────
-
-function _detectType(material) {
-  if (material instanceof BABYLON.PBRMaterial)                  return 'pbr';
-  if (material instanceof BABYLON.PBRMetallicRoughnessMaterial) return 'pbr';
-  if (material instanceof BABYLON.PBRSpecularGlossinessMaterial) return 'pbr';
-  if (material.disableLighting === true)                        return 'unlit';
-  return 'standard';
-}
-
-/**
- * User-facing shader name for an imported material. Babylon's glTF loader
- * names the material it synthesises for material-less primitives
- * "__GLTFLoader._default" — an internal token that surfaced verbatim in the
- * shader library (owner sweep 2026-09-18). Loader-internal names map to a
- * plain "Default"; everything else keeps the file's own material name.
- */
-export function _importedMaterialName(material) {
-  const raw = String(material?.name ?? '').trim();
-  if (!raw) return 'Material';
-  if (/^__GLTFLoader\._default$/i.test(raw) || /^__/.test(raw)) return 'Default';
-  return raw;
-}
-
-function _createBabylonMaterial(type, name, scene) {
-  if (type === 'pbr') {
-    const m = new BABYLON.PBRMaterial(name, scene);
-    m.metallic  = 0;
-    m.roughness = 0.5;
-    return m;
-  }
-  if (type === 'unlit') {
-    const m = new BABYLON.StandardMaterial(name, scene);
-    m.disableLighting = true;
-    m.emissiveColor   = new BABYLON.Color3(1, 1, 1);
-    return m;
-  }
-  return new BABYLON.StandardMaterial(name, scene);
-}
-
-function _buildEntryFromMaterial(material, importCtx = {}) {
-  const type = _detectType(material);
-  let diffuseColor = FALLBACK_DIFFUSE;
-  let opacity = 1, roughness = 0.5, metallic = 0;
-
-  if (type === 'pbr') {
-    // Imported PBR albedo is already linear (glTF baseColorFactor) — encode once.
-    diffuseColor = _color3ToHex(material.albedoColor ?? material.baseColor, LINEAR);
-    opacity      = material.alpha ?? 1;
-    roughness    = material.roughness ?? 0.5;
-    metallic     = material.metallic ?? 0;
-  } else {
-    diffuseColor = _color3ToHex(material.diffuseColor);
-    opacity      = material.alpha ?? 1;
-  }
-
-  // Whatever texture the material arrived with becomes a texture asset so the
-  // user can preview it, swap it onto another shader, or replace it. The
-  // import context scopes texture dedupe to the source file (§10b).
-  const importedTex = material.albedoTexture ?? material.baseTexture ?? material.diffuseTexture;
-  const diffuseTextureAssetId = importedTex
-    ? AssetLoader.registerImportedTexture(importedTex, importCtx)
-    : null;
-
-  return {
-    id: _nextShaderId(),
-    name: _importedMaterialName(material),
-    type,
-    diffuseColor,
-    diffuseTextureAssetId,
-    // Harvest the imported texture's UV transform (KHR_texture_transform-style)
-    // so a non-identity offset/scale/rotation survives import + .mixo round-trip
-    // instead of being reset to identity.
-    uvBase: importedTex ? {
-      offsetX:  Number.isFinite(importedTex.uOffset) ? importedTex.uOffset : 0,
-      offsetY:  Number.isFinite(importedTex.vOffset) ? importedTex.vOffset : 0,
-      scaleX:   Number.isFinite(importedTex.uScale)  ? importedTex.uScale  : 1,
-      scaleY:   Number.isFinite(importedTex.vScale)  ? importedTex.vScale  : 1,
-      rotation: Number.isFinite(importedTex.wAng)    ? importedTex.wAng    : 0,
-    } : { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 },
-    opacity, roughness, metallic,
-    linkedMeshIds: [],
-  };
-}
 
 // ── Field → material plumbing ────────────────────────────
 
@@ -165,15 +52,15 @@ function _buildEntryFromMaterial(material, importCtx = {}) {
 function _applyEntryToMaterial(mat, entry) {
   const t = entry.type;
   if (t === 'pbr') {
-    if ('albedoColor' in mat) mat.albedoColor = _hexToColor3(entry.diffuseColor, LINEAR);
-    if ('baseColor'   in mat) mat.baseColor   = _hexToColor3(entry.diffuseColor, LINEAR);
+    if ('albedoColor' in mat) mat.albedoColor = hexToColor3(entry.diffuseColor, LINEAR);
+    if ('baseColor'   in mat) mat.baseColor   = hexToColor3(entry.diffuseColor, LINEAR);
     if ('roughness'   in mat) mat.roughness   = entry.roughness;
     if ('metallic'    in mat) mat.metallic    = entry.metallic;
   } else {
-    mat.diffuseColor = _hexToColor3(entry.diffuseColor);
+    mat.diffuseColor = hexToColor3(entry.diffuseColor);
     // Unlit (disableLighting) shows emissiveColor, not diffuseColor — drive it
     // from the chosen colour so the viewport + exported Ke aren't stuck white.
-    if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = _hexToColor3(entry.diffuseColor);
+    if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = hexToColor3(entry.diffuseColor);
   }
   mat.alpha = entry.opacity;
   // hasAlpha is set when a texture wants alpha; for plain opacity we rely on alpha.
@@ -193,11 +80,11 @@ function _setMaterialField(mat, field, value, type) {
 
     case 'diffuseColor': {
       if (type === 'pbr') {
-        const c = _hexToColor3(value, LINEAR);
+        const c = hexToColor3(value, LINEAR);
         if ('albedoColor' in mat) mat.albedoColor = c;
         if ('baseColor'   in mat) mat.baseColor   = c;
       } else {
-        const c = _hexToColor3(value);
+        const c = hexToColor3(value);
         mat.diffuseColor = c;
         if (mat.disableLighting && 'emissiveColor' in mat) mat.emissiveColor = c;
       }
@@ -330,7 +217,7 @@ function _findNameConflicts(container, importCtx = {}) {
   for (const mat of container.materials) {
     if (seen.has(mat)) continue;
     seen.add(mat);
-    const name = _importedMaterialName(mat);
+    const name = importedMaterialName(mat);
     const existingId = existingByName.get(name);
     if (!existingId) continue;
     // Content match → auto-dedupe silently in _doRegister; no modal needed.
@@ -347,7 +234,7 @@ function _findNameConflicts(container, importCtx = {}) {
  * uvBase, and texture asset id.
  */
 function _findContentDuplicate(mat, importCtx = {}, sigIndex = null) {
-  const fresh = _buildEntryFromMaterial(mat, importCtx);
+  const fresh = buildEntryFromMaterial(mat, _nextShaderId(), importCtx);
   const sig = _shaderSignature(fresh, mat);
   if (!sig) return null;
   // O(1) lookup against a prebuilt signature→id index (the import paths pass
@@ -420,7 +307,7 @@ function _doRegister(container, choices, importCtx = {}) {
 
     // Build the entry + signature ONCE per material (reused on every branch);
     // the content-dedupe lookup is now O(1) against sigIndex.
-    const fresh = _buildEntryFromMaterial(mat, importCtx);
+    const fresh = buildEntryFromMaterial(mat, _nextShaderId(), importCtx);
     const sig = _shaderSignature(fresh, mat);
 
     // ── Auto-dedupe by content (any matching existing/earlier shader) ──
@@ -541,7 +428,7 @@ export function createShader(partial = {}) {
   const type = partial.type ?? 'standard';
 
   const scene = SceneManager.getScene();
-  const mat = _createBabylonMaterial(type, name, scene);
+  const mat = createBabylonMaterial(type, name, scene);
   _materials.set(id, mat);
 
   const entry = {
@@ -588,7 +475,7 @@ export function restoreShader(entry) {
   const name = entry.name ?? 'Material';
   const type = entry.type ?? 'standard';
   const scene = SceneManager.getScene();
-  const mat = _createBabylonMaterial(type, name, scene);
+  const mat = createBabylonMaterial(type, name, scene);
   _materials.set(id, mat);
 
   const restored = {
@@ -717,7 +604,7 @@ function _applyFieldToUvClones(shaderId, field, value, type) {
 function _rebuildMaterialForType(shaderId, entry) {
   const old = _materials.get(shaderId);
   const scene = SceneManager.getScene();
-  const next = _createBabylonMaterial(entry.type, entry.name, scene);
+  const next = createBabylonMaterial(entry.type, entry.name, scene);
   _applyEntryToMaterial(next, entry);
   if (entry.diffuseTextureAssetId) {
     _setMaterialField(next, 'diffuseTextureAssetId', entry.diffuseTextureAssetId, entry.type);

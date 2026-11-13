@@ -14,7 +14,36 @@ export const CDP_COMMAND_TIMEOUT_MS = 30000;
 
 export function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-export function assert(value, message) { if (!value) throw new Error(message); }
+/*
+ * A browser walk's assertions are counted, so a walk can prove it still RAN them.
+ *
+ * Every walk here reports by throwing: a failure propagates to a non-zero exit, which is correct,
+ * and a walk that silently stopped asserting exits 0 with nothing to show. That is the vacuous
+ * pass this project has already shipped under once. `assertionsRun()` lets a walk assert the
+ * number it is supposed to make — see `expectAssertions` below for the one-line form.
+ */
+let _assertions = 0;
+
+export function assert(value, message) {
+  _assertions++;
+  if (!value) throw new Error(message);
+}
+
+/** How many assertions this process has run so far. */
+export function assertionsRun() { return _assertions; }
+
+/**
+ * Fail unless exactly `expected` assertions ran. Call it at the very end of a walk, after the
+ * last check, and update the number in the same commit whenever you add or remove a check.
+ *
+ * Conditional and looped assertions mean the number is a MEASURED one, not a count of `assert(`
+ * in the source: run the walk and read what it reports.
+ */
+export function expectAssertions(expected, label = 'walk') {
+  if (_assertions === expected) return;
+  throw new Error(`${label}: ${_assertions} assertions ran, ${expected} expected.`
+    + ' If you added or removed a check on purpose, update the expected count in the same commit.');
+}
 
 export async function freePort() {
   const server = createNetServer();

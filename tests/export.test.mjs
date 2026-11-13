@@ -1976,6 +1976,27 @@ await test('MX-05: a name collision is refused by its cause — both formats and
 
 // ── Report ───────────────────────────────────────────────
 
+/*
+ * THE NUMBER OF CASES IS PART OF THE RESULT.
+ *
+ * This file has its own tiny runner, so `node --test` counts the whole file as ONE test: the 113
+ * cases below are invisible to the suite's own `ℹ tests N` line. That means a case that stops
+ * running — an early `return`, a bad merge, a split of this file that drops a block — changes
+ * nothing the suite reports. It prints a smaller number here and exits 0.
+ *
+ * So the count is asserted. WHEN YOU ADD OR REMOVE A CASE ON PURPOSE, change this number in the
+ * same commit and say why in the message.
+ *
+ * This is also the precondition for splitting this file (`docs/size-debt.md`): without it, a move
+ * that loses a block still exits 0, and the split would hide the one thing it must not.
+ */
+const EXPECTED_CASES = 113;
+if (passed + failed !== EXPECTED_CASES) {
+  out.push(`FAIL  case count\n      ${passed + failed} cases ran, ${EXPECTED_CASES} expected.`
+    + ' If you added or removed one on purpose, update EXPECTED_CASES in the same commit.');
+  failed++;
+}
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

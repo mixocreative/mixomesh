@@ -13,6 +13,7 @@ import { t } from '../i18n/index.js';
 export * from './commands/TransformCommands.js';
 export * from './commands/HierarchyCommands.js';
 export * from './commands/ParentCommands.js';
+export * from './commands/SplitJoinCommands.js';
 export * from './commands/ShaderCommands.js';
 export * from './commands/ScaleCommands.js';
 export * from './commands/PlacementCommands.js';
