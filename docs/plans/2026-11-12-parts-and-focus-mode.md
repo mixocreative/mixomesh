@@ -586,6 +586,23 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   and asserts the object is intact, the toast fired, the undo stack did not grow, AND that a
   single-mesh target in the same selection still moves -- the half a "nothing moved" test would miss.
 
+  **The class is now SWEPT, not sampled.** Every path that writes a per-mesh transform was checked
+  after this, so the next reader need not redo it:
+
+  | path | how it resolves targets | verdict |
+  |---|---|---|
+  | gizmo drag | `Selection.getTransformTargets()` | expands to every part |
+  | numeric transform sheet (`buildSheetCommand`) | `Selection.getTransformTargets()` | expands |
+  | Size field (`_commitSizeInput`) | `_logicalTargetIds` | expands |
+  | drop / center on bed (`BedPlacementCommand`) | `logicalObjectPartIds` + ONE delta from the combined bounds | expands, rigid |
+  | copy transform | raw `getSelectedIds()` | **was the lone outlier** |
+
+  **The rule that follows:** anything writing a transform PER MESH must resolve its targets through
+  `getTransformTargets()` or `logicalObjectPartIds`, and must apply ONE delta to all of them rather
+  than one absolute value to each. `Selection.getSelectedIds()` returns LEADS at root scope, which is
+  what makes the mistake easy to write and invisible to read -- it looks like a list of objects and
+  behaves like one everywhere except here.
+
   **Debt, with the reason:** if copy-transform is ever wanted for multi-part objects, the safe subset
   is position + rotation + UNIFORM scale composed about the lead pivot --
   `p = lead + R·k·(p - lead)`, `rot = R·rot`, `scale = k·scale` -- with a non-uniform ratio refused.
