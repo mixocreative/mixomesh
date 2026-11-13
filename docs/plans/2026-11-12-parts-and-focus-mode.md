@@ -525,7 +525,24 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   changed; one that reports an object came back at twice its size tells you what the operator would
   have thrown away.
 
-- **A readiness fix for the supports-walk right-click was tried and REVERTED, which is the finding.**
+- **The supports-walk right-click "flake" was never a flake: it clicked 27 px below the support.**
+  Reproduced ON DEMAND by running the walk with four other browser suites at once, then printing, on
+  every failed attempt, the click position against the app own:
+
+  ```
+  clicked 773.73,229.53 | app says tip at 774.27,202.42 | busy=false
+  ```
+
+  Identical on all six attempts, app IDLE, nothing moving. `feet()` returns where a support meets the
+  model; `contacts()` returns the TIP, which is what the removal pick wants -- and the step right
+  after it was already clicking `contacts()`. A deterministic miss wearing a race clothing, and the
+  retry loop could never have helped since all six attempts clicked the same wrong pixel. **Four
+  latency diagnoses in a row were wrong, including two of mine today.** Fixed by clicking the tip,
+  verified alone AND under the same contention that failed deterministically before. The lesson is
+  the method: a failure that only appears under load is still worth MAKING appear on demand, and one
+  print of "where did the click go vs where is the thing" beat four rounds of reasoning.
+
+- **Superseded: a readiness fix tried and REVERTED, whose debt note guessed the cause wrong.**
   Step e of `browser-supports-walk` ("right-click on a support removes it") passes alone every time
   and failed twice in loaded batch runs on 2026-11-13. Its own comment says "WAIT FOR THE REMOVAL, DO
   NOT SLEEP FOR IT", and the code only half does: it retries six times, each attempt still sleeping

@@ -206,22 +206,44 @@ try {
   const foot = feet[Math.floor(feet.length / 3)];
   const tip = contacts.find((c) => c.id === foot.id);
   /*
-   * WAIT FOR THE REMOVAL, DO NOT SLEEP FOR IT. This was `hover` + `sleep(300)` + one right-click,
-   * and the 300 ms was a guess at how long the app takes to work out which support is under the
-   * cursor (a pick on pointer move). Under load it is not enough: the click lands before anything is
-   * hovered, nothing is removed, and the check reports "removed 0 -> 0" with NO page error — which
-   * cost three separate diagnoses in one night, each time looking like a fresh defect.
+   * THIS STEP CLICKED THE WRONG POINT, and for a whole session it was read as a flake.
    *
-   * Retrying does not weaken the claim. The claim is that a right-click on a support removes it; if
-   * the handler were missing or the pick wrong, every attempt would fail and this still fails. What
-   * it stops asserting is a particular latency, which was never the point.
+   * It passed when run alone and failed inside a loaded batch, so it was diagnosed three times as a
+   * latency problem: first a `sleep(300)`, then a six-attempt retry loop, then (2026-11-13) a wait
+   * on `idle` and a re-read of the tip's screen position. None of them was the cause.
+   *
+   * What settled it was reproducing the failure ON DEMAND -- run this walk with three or four other
+   * browser suites at once -- and then printing, on every failed attempt, where the click went
+   * versus where the app says the support is:
+   *
+   *     clicked 773.73,229.53 | app says tip at 774.27,202.42 | busy=false
+   *
+   * identical on all six attempts. The app was IDLE, nothing was moving, and the click was landing
+   * 27 px below the tip: `feet()` returns where a support meets the model, `contacts()` returns the
+   * TIP, and the removal pick wants the support. A deterministic miss wearing a race's clothing --
+   * and the retry loop could never have helped, since all six attempts clicked the same wrong pixel.
+   * The step immediately after this one was already clicking `contacts()`, which is the tell.
+   *
+   * So: click the tip. The retry loop stays as cheap insurance against a real transient, but it is
+   * NOT a latency guard and must not be "fixed" by widening a wait -- if this fails again it will
+   * fail six identical times, and the thing to do is print the two positions again.
    */
   const base_removed = base.removed;
   let removed = base;
   for (let attempt = 0; attempt < 6 && removed.removed === base_removed; attempt++) {
-    await app.hover(foot.x, foot.y);
-    await sleep(150);
-    await app.click(foot.x, foot.y, 'right');
+    // RE-READ the tip's screen position each attempt. `feet()` was captured before the loop, and
+    // under load the camera can still be easing from an earlier step, so by click time the tip is no
+    // longer where it was measured -- the pick misses geometry that is on screen a few pixels away.
+    const now = (await w(`contacts(${J(id)})`)).find((c) => c.id === foot.id) ?? tip ?? foot;
+    await app.hover(now.x, now.y);
+    // Wait for the BUILD, not for a duration. The removal pick runs at click time
+    // (`supportInteraction.onUp` -> `hitAt`), so what the click needs is the support meshes for the
+    // current state to be in the scene -- which is what `idle` means and what every other step of
+    // this walk already waits on. The old `sleep(150)` was a guess at that, which is why this step
+    // failed in loaded batch runs while passing alone, and why RETRYING helped: each retry gave the
+    // build more time. Six guesses are still a guess.
+    await settle();
+    await app.click(now.x, now.y, 'right');
     await settle();
     removed = await counts();
   }
