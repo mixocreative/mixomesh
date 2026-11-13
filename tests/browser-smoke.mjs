@@ -1391,6 +1391,70 @@ async function main() {
     assert(near(ratioRT.restoredSize, ratioRT.scaledSize),
       `RESTORE LOST ratio bake or node scale: scaled=${ratioRT.scaledSize} restored=${ratioRT.restoredSize} (after=${ratioRT.afterSize})`);
 
+    // ── A SEPARATED object keeps its size through save → load (2026-11-13) ──
+    // The gap that let a real regression ship: nothing in the suite reloaded a separated object.
+    // `ProjectLoader` re-bakes each object's vertices by `bakedRatioOf`, so a split that moves an
+    // object's scale LABEL without recording where its vertices are brings it back the wrong size.
+    // Measured as a SIZE, like the ratio round-trip above, because the stored fields can look right
+    // while the restored geometry does not.
+    const sepRT = await evaluate(cdp, `(async () => {
+      const al = await import('/src/core/AssetLoader.js');
+      const sm = await import('/src/core/SceneManager.js');
+      const st = await import('/src/core/StateManager.js');
+      const hm = await import('/src/core/HistoryManager.js');
+      const pm = await import('/src/core/PersistenceManager.js');
+      const B = window.BABYLON;
+      const sizeOf = (mid) => {
+        const scene = sm.SceneManager.getScene();
+        const mesh = scene.meshes.find(m => m.metadata?.meshId === mid);
+        if (!mesh) return null;
+        const r = mesh.getHierarchyBoundingVectors(true);
+        return +(r.max.x - r.min.x).toFixed(6);
+      };
+      const stl = (w) => ['solid x','facet normal 0 0 1','outer loop',
+        'vertex 0 0 0','vertex ' + w + ' 0 0','vertex 0 ' + w + ' 0',
+        'endloop','endfacet','endsolid x',''].join('\\n');
+      const load = async (name, w) => (await al.AssetLoader.loadFromBlob(
+        new Blob([stl(w)], { type: 'model/stl' }), name, new B.Vector3(0,0,0), {}))[0];
+      const keep = await load('sep-a.stl', 20);
+      const part = await load('sep-b.stl', 20);
+      await new Promise(r => setTimeout(r, 60));
+      (await import('/src/core/scene/ImportBounce.js')).settleImportBounce();
+      // The part is printed at a DIFFERENT scale from the object that will swallow it: ratio 1 -> 2
+      // bakes x0.5 into its vertices, which is the anchor the reload must honour afterwards.
+      hm.push(new hm.RescaleObjectCommand([part], 2));
+      const partSizeAlone = sizeOf(part);
+      // Merge (warns that the lead's scale now applies, and leaves the part's ratio behind as a
+      // field nothing reads), then separate it straight back out.
+      hm.push(new hm.JoinCommand([keep, part], { leadId: keep }));
+      const sizeInside = sizeOf(part);
+      hm.push(new hm.SeparateSelectionCommand([part]));
+      const sizeSeparated = sizeOf(part);
+      const fields = { ...st.getState().scene.objects[part] };
+      const doc = JSON.parse(JSON.stringify(await pm.__test._buildDocument()));
+      await pm.__test._loadProject(doc);
+      await new Promise(r => setTimeout(r, 400));
+      return {
+        partSizeAlone, sizeInside, sizeSeparated,
+        restoredSize: sizeOf(part),
+        ratio: fields.ratio, bakedRatio: fields.bakedRatio,
+        restoredRatio: st.getState().scene.objects[part]?.ratio ?? null,
+      };
+    })()`);
+    assert(sepRT.sizeInside === sepRT.partSizeAlone,
+      `a merge must not resize the part it swallows: alone=${sepRT.partSizeAlone} inside=${sepRT.sizeInside}`);
+    assert(sepRT.sizeSeparated === sepRT.sizeInside,
+      `a separate must not resize anything: inside=${sepRT.sizeInside} separated=${sepRT.sizeSeparated}`);
+    assert(near(sepRT.restoredSize, sepRT.sizeSeparated),
+      `RELOAD RESIZED A SEPARATED OBJECT: separated=${sepRT.sizeSeparated} restored=${sepRT.restoredSize} ` +
+      `(ratio=${sepRT.ratio}, bakedRatio=${sepRT.bakedRatio}) -- the label moved without its anchor`);
+    // The label is the scale it was being PRINTED at inside the object it left...
+    assert(sepRT.ratio === 1, `separated part should carry the object's print scale, got ${sepRT.ratio}`);
+    // ...and the anchor says where its vertices actually are, or the reload rebuilds the wrong size.
+    assert(sepRT.bakedRatio === 2,
+      `separated part must record the anchor its vertices are baked at, got ${sepRT.bakedRatio}`);
+    assert(sepRT.restoredRatio === 1, `restored print scale lost: got ${sepRT.restoredRatio}`);
+
     // ── glTF RH→LH flip survives .mixo restore (audit follow-up) ─────────
     // Import a minimal asymmetric glTF triangle (Babylon applies the RH→LH
     // flip on load, baked into vertices). Round-trip and assert the restored
