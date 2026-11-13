@@ -236,6 +236,30 @@ export function set(ids, activeId) {
   _applyVisuals();
 }
 
+/**
+ * Re-canonicalise the stored selection after a structural change.
+ *
+ * `set` canonicalises, so the rest of the app may assume `selectedIds` holds DISPLAYABLE ids --
+ * the outliner compares them against its row ids directly (`Outliner.js:705`), and a row only
+ * exists for a lead. A command that makes a selected object an internal part of another (Join), or
+ * puts one back on undo (Separate), rewrites those link fields underneath the stored array; the
+ * commands are deliberately silent about selection, because one that drove it would make its own
+ * undo depend on a selection the user may have changed since.
+ *
+ * So the repair lives here instead, and it is the whole of it: `set` maps every id through `_canon`
+ * -- a part becomes the lead it now belongs to, a deleted id becomes null and is dropped -- and
+ * early-returns when nothing moved, so a reconcile that finds everything canonical is silent.
+ *
+ * The trap this prevents: the viewport looked RIGHT while the list looked empty. Reads resolve
+ * through `logicalObjectPartIds`, which canonicalises, so the gizmo and the outline covered the
+ * correct object and only the one reader that compares raw ids disagreed.
+ */
+export function reconcile() {
+  const { selectedIds, activeId } = getState().selection ?? {};
+  if (!selectedIds?.length) return;
+  set(selectedIds, activeId ?? null);
+}
+
 /** Add `id` to the selection (idempotent). The added id becomes active. */
 export function add(id) {
   const canonical = _canon(id);
@@ -493,4 +517,5 @@ export const Selection = {
   getSelectedIds, getActiveId, contains, getSelectedResolved, getSelectedNodes,
   getTransformTargets, isEffectivelyLocked,
   getScope, setScope, inPartScope, targetAtScope, resolveClick, enterScope, exitScope, scopeToParentOf,
+  reconcile,
 };

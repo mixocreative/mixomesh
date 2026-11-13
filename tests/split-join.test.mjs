@@ -15,6 +15,7 @@ const { SplitToPartsCommand, JoinCommand, SeparateSelectionCommand } = await imp
 const { AssetLoader } = await import('../src/core/AssetLoader.js');
 const { SceneManager } = await import('../src/core/SceneManager.js');
 const { Selection } = await import('../src/core/Selection.js');
+const History = await import('../src/core/HistoryManager.js');
 const { logicalObjectPartIds, canonicalObjectId, shouldDisplayObject } = await import('../src/core/LogicalObjects.js');
 const { MeshValidator } = await import('../src/core/MeshValidator.js');
 const R = await import('../src/core/repair/MeshRepair.js');
@@ -517,6 +518,56 @@ await test('validation of a joined object goes through the welded-union (group) 
   assert.equal(holes.scope, 'group', 'reported on the union, not the lead alone');
   assert.equal(holes.count, 3, 'three boundary edges of the missing face — seams between the joined parts are not holes');
   assert.equal(holes.autoFixAvailable, true, 'repairable as one solid');
+});
+
+await test('a structural edit never leaves a selected id the outliner cannot show', () => {
+  // The invariant: `Selection.set` canonicalises, so everything downstream may assume
+  // `selectedIds` holds DISPLAYABLE ids -- the outliner compares them against its row ids
+  // directly (`Outliner.js:705`), and only a lead has a row.
+  //
+  // Two edits used to break it, and both LOOKED fine: reads resolve through
+  // `logicalObjectPartIds`, which canonicalises, so the gizmo and the outline covered the right
+  // object while the list alone showed nothing selected.
+  const three = () => ({
+    body: base('body', 'body', { logicalObjectId: 'body', _tris: [[0, 2, 1]] }),
+    armA: base('armA', 'armA', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 1, 3]] }),
+    armB: base('armB', 'armB', { logicalObjectId: 'body', isInternalPart: true, _tris: [[0, 3, 2]] }),
+  });
+  const everySelectedIdHasARow = (where) => {
+    const objects = getState().scene.objects;
+    for (const id of Selection.getSelectedIds()) {
+      assert.ok(shouldDisplayObject(objects[id]), `${where}: ${id} is not a row the outliner draws`);
+    }
+  };
+  const freshSelection = () => setState(
+    st => ({ ...st, selection: { selectedIds: [], activeId: null, pivotMode: 'active' } }), { silent: true });
+
+  // 1. Separate, then undo. The new object is selected (what `PartScopeMode.separate` does), and
+  //    undo makes that id an internal part again.
+  seed(three());
+  freshSelection();
+  const sep = new SeparateSelectionCommand(['armA']);
+  History.push(sep);
+  Selection.set([sep.newObjectId], sep.newObjectId);
+  assert.deepEqual(Selection.getSelectedIds(), ['armA'], 'the new object is selected after the edit');
+  History.undo();
+  everySelectedIdHasARow('after undo of a separate');
+  assert.deepEqual(Selection.getSelectedIds(), ['body'], 'it follows the part back into the object it rejoined');
+
+  // 2. Join, on the DO. The swallowed object is selected and becomes an internal part -- the same
+  //    defect without an undo in sight, which is why the repair is on every structural change.
+  seed({ a: base('a', 'Body', { _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { _tris: [[0, 1, 3]] }) });
+  freshSelection();
+  Selection.set(['b'], 'b');
+  History.push(new JoinCommand(['a', 'b'], { leadId: 'a' }));
+  everySelectedIdHasARow('after a join');
+  assert.deepEqual(Selection.getSelectedIds(), ['a'], 'the selection follows the object into its new lead');
+
+  // 3. And redo, the third way through: it re-runs `execute`, so it needs the same repair.
+  History.undo();
+  Selection.set(['b'], 'b');
+  History.redo();
+  everySelectedIdHasARow('after redo of a join');
 });
 
 console.log('\n' + out.join('\n'));

@@ -7,6 +7,7 @@
 import { EVENTS } from './events.js';
 import { dispatch, withoutDirty } from './StateManager.js';
 import { caps } from './storage/capabilities.js';
+import { Selection } from './Selection.js';
 import { t } from '../i18n/index.js';
 
 export * from './commands/TransformCommands.js';
@@ -128,6 +129,9 @@ export function push(command) {
     _undoStack.push(command);
     _dropRedo();
     _trimUndo();
+    // After the command's own `Selection.set`, never before: the repair is for ids the edit left
+    // stale, not for the selection a command deliberately chose.
+    Selection.reconcile();
     dispatch(EVENTS.HISTORY_PUSHED, { label: command.label });
   } finally {
     _applying = false;
@@ -143,6 +147,7 @@ export function undo() {
     const cmd = _undoStack.pop();
     withoutDirty(() => cmd.undo());
     _redoStack.push(cmd);
+    Selection.reconcile();
     dispatch(EVENTS.HISTORY_UNDONE, { label: cmd.label });
   } finally {
     _applying = false;
@@ -158,6 +163,7 @@ export function redo() {
     const cmd = _redoStack.pop();
     withoutDirty(() => cmd.execute());
     _undoStack.push(cmd);
+    Selection.reconcile();
     _trimUndo();
     dispatch(EVENTS.HISTORY_REDONE, { label: cmd.label });
   } finally {
@@ -216,6 +222,9 @@ export function endBatch() {
   _undoStack.push(batch);
   _dropRedo();
   _trimUndo();
+  // A batch reaches history by its own path, not through `push`, so it needs the repair too:
+  // several structural edits in one entry leave exactly the same stale ids as one does.
+  Selection.reconcile();
   dispatch(EVENTS.HISTORY_PUSHED, { label: batch.label });
 }
 

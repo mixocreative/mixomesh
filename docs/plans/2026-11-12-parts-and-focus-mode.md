@@ -11,6 +11,11 @@
 > (gap 2, which was a live defect I first mis-filed as unreachable). Gaps 3 and 6 are fixed too, and
 > C2 is decided and built.
 >
+> **One defect was found AFTER all of that, on 2026-11-13, and fixed**: a structural edit (separate's
+> undo, and a merge's do) left a selected id the outliner could not draw -- the viewport looked
+> right and the list looked empty. `Selection.reconcile()`, on all four history paths. The finding is
+> in the U5 section; what found it was walking the workflow, not re-reading the gate.
+>
 > **NOTHING IN THIS PLAN IS WAITING ON ANYTHING.** Gaps 4 and 5 are not met and are not open items of
 > this plan: they are preconditions on a TOPOLOGICAL SPLIT — minting new geometry — which this plan
 > deliberately did not build ("extend the scope, do not add a third mode") and which nothing
@@ -398,6 +403,29 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   any other object with any other pivot. If a topological split ever mints geometry, that code picks
   an origin — the bounding-box centre of the picked set — because it will have geometry of its own to
   pick one for. Section 5.
+
+- **Found after delivery, 2026-11-13, by walking the shipped workflow rather than re-reading the
+  gate: a structural edit left a selected id the outliner could not show.** Separate, then undo: the
+  operator had the restored object outlined and under the gizmo in the viewport, and NOTHING selected
+  in the list.
+
+  `Selection.set` canonicalises, so the rest of the app may assume `selectedIds` holds displayable
+  ids -- only a lead has an outliner row (`Outliner.js:705` compares them raw). Undo rewrites the
+  link fields underneath that stored array, and a command is deliberately silent about selection
+  ("a command that also drove the selection would make its own undo depend on a selection the user
+  may have changed since" -- which is right, and is why the repair does not belong in the command).
+
+  **It was never only an undo bug, and not only separate's.** The same staleness happens on the DO
+  of a merge, where the swallowed object was selected and becomes an internal part. So the repair is
+  `Selection.reconcile()` -- re-run the stored ids through the same canonicalisation `set` already
+  uses -- called on all four paths a structural change reaches history by: `push`, `undo`, `redo`,
+  and `endBatch`, which has its own path and would otherwise have been a fourth silent site.
+
+  **Why a green gate never saw it:** every other reader resolves through `logicalObjectPartIds`,
+  which canonicalises on read, so the gizmo and the outline were correct and only the one reader
+  that compares raw ids disagreed. A defect that makes the app look right in the viewport and empty
+  in the list is exactly the shape no screenshot test catches. `tests/split-join.test.mjs` now
+  asserts the invariant on all three edits, and the test was confirmed by forging the fix away.
 
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and
