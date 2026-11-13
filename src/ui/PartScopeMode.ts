@@ -143,8 +143,21 @@ function render(): void {
 
 /** Watch the scope. Safe to call once at boot; it does nothing until an object is entered. */
 export function init(): void {
+  // The last three are the SCENE changing under the depth, and they are not optional -- Support
+  // Mode, which shares `createIsolation`, subscribes to exactly the same three and is the authority
+  // on why (`SupportMode.ts`):
+  //   OBJECT_REMOVED    the object being picked inside can be removed by something that is not a
+  //                     keypress (the automation API, a command pushed elsewhere). `getScope` then
+  //                     reads as root on its own, but nothing re-rendered, so the isolation stayed
+  //                     on and the panels stayed dimmed over a notice naming an object that is gone
+  //                     -- until the operator happened to click.
+  //   OBJECT_RESTORED   its undo, which puts the object back.
+  //   ASSET_INSTANTIATED  a NEW object appearing while inside leaks into the isolated viewport:
+  //                     `isolation.apply` re-reads the scene and hides everything but the scope,
+  //                     but only when something calls it.
   for (const event of [EVENTS.SCOPE_CHANGED, EVENTS.SELECTION_CHANGED, EVENTS.LOCALE_CHANGED,
-    EVENTS.PROJECT_LOADED, EVENTS.PROJECT_NEW, EVENTS.HISTORY_UNDONE, EVENTS.HISTORY_REDONE]) {
+    EVENTS.PROJECT_LOADED, EVENTS.PROJECT_NEW, EVENTS.HISTORY_UNDONE, EVENTS.HISTORY_REDONE,
+    EVENTS.OBJECT_REMOVED, EVENTS.OBJECT_RESTORED, EVENTS.ASSET_INSTANTIATED]) {
     subscribe(event, render);
   }
   render();

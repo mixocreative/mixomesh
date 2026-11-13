@@ -15,10 +15,13 @@
 > undo, and a merge's do) left a selected id the outliner could not draw -- the viewport looked
 > right and the list looked empty. `Selection.reconcile()`, on all four history paths.
 >
-> **And a second, worse one right after it**: inside an object, with ONE mesh picked, Delete removed
-> the WHOLE object -- the notice said "1 of 3 meshes picked". It is now refused with a reason, as the
-> gizmo already is. Both findings are in the U5 section. What found them was walking the workflow;
-> three green gates never would, because every other reader canonicalises on read.
+> **Then four more, the same way**: inside an object, with ONE mesh picked, **Delete removed the
+> WHOLE object** (the notice said "1 of 3 meshes picked") and H hid the object you were inside --
+> both now refused with a reason, as the gizmo already was, while L is deliberately still allowed;
+> the isolated viewport went stale when the scene changed under it, which its own sibling mode
+> already subscribed to; and **a merge-then-separate silently changed an object's declared print
+> scale**, in both split commands. Five findings, all in the U5 section below. Three green gates
+> never saw any of them.
 >
 > **NOTHING IN THIS PLAN IS WAITING ON ANYTHING.** Gaps 4 and 5 are not met and are not open items of
 > this plan: they are preconditions on a TOPOLOGICAL SPLIT — minting new geometry — which this plan
@@ -466,6 +469,37 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
 
   **If the owner wants deleting a mesh out of an object**, it is a command with the warnings a
   separate already has, not a widening of this key.
+
+- **The isolated viewport went stale in silence, and its sibling already knew.** `PartScopeMode`
+  subscribed to seven events, none of them the SCENE changing underneath it. `SupportMode`, which
+  shares `createIsolation`, subscribes to `OBJECT_REMOVED`, `OBJECT_RESTORED` and
+  `ASSET_INSTANTIATED` for a reason this depth had the same need of: the object being picked inside
+  can be removed by something that is not a keypress (the automation API, a command pushed
+  elsewhere), and `getScope` then reads as root on its own while NOTHING re-rendered -- isolation
+  still on, panels still dimmed, the notice still naming an object that no longer exists, until the
+  operator happened to click. A newly instantiated object leaked into the isolated viewport the same
+  way. Stale isolation is invisible by construction: an almost-empty viewport looks deliberate.
+
+  Pinned by `src/ui/isolationEvents.test.ts`, which asserts the two isolation modes AGREE on what
+  invalidates isolation, and names Support Mode as the authority so that if IT stops caring the
+  failure says to revisit the list rather than quietly dropping the check.
+
+- **A split changed the print scale an object was being printed at -- silently.** Two documented
+  operations: merge an object printed at 1:2 into one printed at 1:1 (gap 6 WARNS, and leaves the
+  swallowed `ratio` in place as a field nothing reads), then separate it out again. It becomes a
+  lead, which PROMOTES that stale field back into the reference -- `objectRatio` reads the lead's
+  `ratio`, the scale term for an object at import, display and export -- so its declared scale
+  returned to 1:2 with nothing said and the geometry untouched throughout.
+
+  **Both commands that promote a part to an object had it**, `SeparateSelectionCommand` and
+  `SplitToPartsCommand`, and the separate had it on BOTH sides: when the lead itself is taken, the
+  object left behind gets a new lead whose ratio becomes authoritative too -- the side a one-sided
+  fix would have missed, exactly as with the union repair in gap 2.
+
+  Inherited rather than warned about, because a separate has only ONE scale in play: the one the
+  operator has been looking at. A join warns because it must genuinely drop one of two. `ratio`
+  joined `LINK_FIELDS` so undo restores it, since a patch undo cannot reverse would be worse than
+  the defect it fixed -- asserted directly in `tests/split-join.test.mjs`.
 
 - **Gaps 4 and 5 do not apply to what was built**, and are re-filed at the end of this document
   under "If a topological split is ever proposed" — they are preconditions on minting geometry, and

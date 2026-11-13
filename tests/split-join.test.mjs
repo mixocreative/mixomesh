@@ -570,6 +570,56 @@ await test('a structural edit never leaves a selected id the outliner cannot sho
   everySelectedIdHasARow('after redo of a join');
 });
 
+await test('a split never changes the print scale an object was being printed at', async () => {
+  /*
+   * Found 2026-11-13 by walking merge-then-separate, which is two documented operations.
+   *
+   * `objectRatio` reads the LEAD's `ratio` -- the scale term for an object at import, display and
+   * export. A part that is not the lead keeps a `ratio` field nothing reads, and a merge
+   * deliberately leaves it there while WARNING that the lead's scale now applies (gap 6).
+   * Separating it out again made it a lead, promoting that stale field back into the reference: an
+   * object merged in at 1:2 and separated out came back declaring 1:2, silently, with the geometry
+   * untouched the whole time.
+   *
+   * Both commands that promote a part to an object are covered, because both had it.
+   */
+  const ratioOf = (id) => getState().scene.objects[id].ratio;
+
+  // 1. Separate, after a merge that crossed scales.
+  seed({ a: base('a', 'Body', { ratio: 1, _tris: [[0, 2, 1]] }), b: base('b', 'Arm', { ratio: 0.5, _tris: [[0, 1, 3]] }) });
+  new JoinCommand(['a', 'b'], { leadId: 'a' }).execute();
+  assert.equal(ratioOf('b'), 0.5, 'the merge leaves the swallowed scale in place (it only warns)');
+  const sep = new SeparateSelectionCommand(['b']);
+  sep.execute();
+  assert.equal(ratioOf('b'), 1, 'separated, it keeps the scale it was being PRINTED at, not the stale field');
+  assert.equal(ratioOf('a'), 1, 'and the object left behind is untouched');
+  sep.undo();
+  assert.equal(ratioOf('b'), 0.5, 'undo restores the field exactly -- a patch undo cannot reverse is worse than the defect');
+
+  // 2. The lead itself taken: the object LEFT BEHIND gets a new lead, whose ratio becomes the
+  //    reference too. This is the side a one-sided fix would have missed.
+  seed({
+    body: base('body', 'body', { logicalObjectId: 'body', ratio: 1, _tris: [[0, 2, 1]] }),
+    armA: base('armA', 'armA', { logicalObjectId: 'body', isInternalPart: true, ratio: 0.25, _tris: [[0, 1, 3]] }),
+    armB: base('armB', 'armB', { logicalObjectId: 'body', isInternalPart: true, ratio: 0.1, _tris: [[0, 3, 2]] }),
+  });
+  new SeparateSelectionCommand(['body']).execute();
+  assert.equal(ratioOf('body'), 1, 'the part that left keeps the object scale');
+  assert.equal(ratioOf('armA'), 1, 'and so does the new lead of what remains');
+
+  // 3. Split to parts: every id becomes its own object, so every one needs it.
+  seed({
+    lead: base('lead', 'Bowl', { logicalObjectId: 'lead', ratio: 2, _tris: [[0, 2, 1]] }),
+    p1: base('p1', 'Bowl_primitive1', { logicalObjectId: 'lead', isInternalPart: true, ratio: 0.5, _tris: [[0, 1, 3]] }),
+  });
+  const split = new SplitToPartsCommand('lead');
+  split.execute();
+  assert.equal(ratioOf('p1'), 2, 'a split part is printed at the scale its object was');
+  assert.equal(ratioOf('lead'), 2);
+  split.undo();
+  assert.equal(ratioOf('p1'), 0.5, 'and undo puts the field back');
+});
+
 console.log('\n' + out.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

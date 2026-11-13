@@ -9,6 +9,7 @@ import { SceneManager } from '../SceneManager.js';
 import { AssetLoader } from '../AssetLoader.js';
 import { Selection } from '../Selection.js';
 import { logicalObjectCommandIds, canonicalObjectId, logicalObjectPartIds } from '../LogicalObjects.js';
+import { objectRatio } from '../scale/ScaleMath.js';
 import { directSubgroupIds, validateParentChange } from '../hierarchy/HierarchyIntegrity.js';
 import {
   SILENT, withDetachedPivot, applyAbsoluteNodeTransform, findGroupNode,
@@ -544,7 +545,14 @@ function _uniqueNameIn(baseName, objects) {
   return `${baseName}.dup`;
 }
 
-const LINK_FIELDS = ['name', 'isInternalPart', 'logicalObjectId', 'sourceGroupId', 'isPrintPart'];
+/*
+ * `ratio` is here because both split commands now WRITE it (see `sourceRatio` below): it is the only
+ * field in this list that is not a link, and it is snapshotted for exactly the same reason the links
+ * are -- a patch that undo cannot reverse is worse than the defect it fixed. Widening the SNAPSHOT
+ * is safe for the commands that do not write it: `_applyLinkPatches` only applies the keys each
+ * patch actually carries, so for Join this restores a ratio to the value it already had.
+ */
+const LINK_FIELDS = ['name', 'isInternalPart', 'logicalObjectId', 'sourceGroupId', 'isPrintPart', 'ratio'];
 
 function _snapshotLink(obj) {
   const out = {};
@@ -717,7 +725,10 @@ export class SplitToPartsCommand {
       const name = i === 0 || !_isDerivedName(obj.name, lead.name)
         ? obj.name
         : _uniqueNameIn(`${lead.name}.${String(i).padStart(3, '0')}`, draft);
-      after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart };
+      // Every id here becomes its own object, so every one of them needs the lead's scale for the
+      // reason `sourceRatio` gives in the separate above: a part's own `ratio` was a field nothing
+      // read, and promoting it to a lead would make a stale one authoritative.
+      after[id] = { name, isInternalPart: false, logicalObjectId: null, sourceGroupId: null, isPrintPart: !!lead.isPrintPart, ratio: objectRatio(lead) };
       draft[id] = { ...obj, ...after[id] };
     });
     this._ids = ids;
@@ -792,6 +803,25 @@ export class SeparateSelectionCommand {
     if (taken.length === 0 || left.length === 0) return false;
 
     const source = objects[sourceLead];
+    /*
+     * The print scale the object was ACTUALLY being printed at, inherited by BOTH leads this edit
+     * produces. Found 2026-11-13 by walking merge-then-separate.
+     *
+     * `objectRatio` reads the LEAD's `ratio` -- the scale term for an object at import, display and
+     * export (`scale/ScaleMath.js`). A part that is not the lead keeps a `ratio` field nothing
+     * reads, and a merge deliberately leaves it there while warning that the lead's scale now
+     * applies (gap 6). Separating that part out again made it a lead, which PROMOTED the stale field
+     * back into the reference: merge an object printed at 1:2 into one printed at 1:1, separate it
+     * out, and its declared scale silently returned to 1:2 -- nothing said, geometry untouched.
+     *
+     * Inherited rather than warned about, because a separate has only ONE scale in play: the one the
+     * operator has been looking at. A join warns because it must genuinely drop one of two. This is
+     * the same inheritance `isPrintPart` already takes from `source`, one field over.
+     *
+     * BOTH sides, for the reason the union repair is dropped on both: when the lead itself is taken,
+     * the object left behind gets a new lead, and ITS ratio becomes authoritative too.
+     */
+    const sourceRatio = objectRatio(source);
     const before = {}, after = {};
     const draft = { ...objects };
     const newLead = taken[0];
@@ -803,7 +833,7 @@ export class SeparateSelectionCommand {
     for (const id of taken) {
       before[id] = _snapshotLink(objects[id]);
       after[id] = id === newLead
-        ? { name, isInternalPart: false, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart }
+        ? { name, isInternalPart: false, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ratio: sourceRatio }
         : { isInternalPart: true, logicalObjectId: newLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
       draft[id] = { ...objects[id], ...after[id] };
     }
@@ -813,7 +843,7 @@ export class SeparateSelectionCommand {
     for (const id of left) {
       before[id] ??= _snapshotLink(objects[id]);
       after[id] = id === keptLead
-        ? { name: objects[keptLead].name, isInternalPart: false, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart }
+        ? { name: objects[keptLead].name, isInternalPart: false, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart, ratio: sourceRatio }
         : { isInternalPart: true, logicalObjectId: keptLead, sourceGroupId: null, isPrintPart: !!source.isPrintPart };
     }
     this._newLeadId = newLead;
