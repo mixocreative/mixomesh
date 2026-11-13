@@ -455,6 +455,15 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   scope, one that it does NOT happen at root -- because a test proving only "Delete does nothing"
   would pass just as well if Delete had been broken everywhere. Confirmed by forging the guard away.
 
+  **H (hide) is refused for the same reason, and L (lock) deliberately is not.** The line, once the
+  other global keys were each driven through the real key path rather than reasoned about: a
+  whole-object command is refused inside the depth when it leaves the depth MEANINGLESS or
+  contradicts what the screen just said. Hide does the first -- isolation has already hidden
+  everything else, so hiding the object you are inside leaves a blank viewport with a notice over it
+  listing which of its meshes are picked. Lock does neither: it acts on the whole object, but you can
+  still see and pick the meshes, the outliner shows it, and it is a toggle. Refusing every
+  whole-object command would have been the easier rule and the wrong one.
+
   **If the owner wants deleting a mesh out of an object**, it is a command with the warnings a
   separate already has, not a widening of this key.
 

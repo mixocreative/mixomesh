@@ -1033,6 +1033,9 @@ function _frameSelection() {
 }
 
 function _hideSelected() {
+  // Hiding the object you are INSIDE leaves the depth meaningless: isolation has hidden everything
+  // else, so the viewport goes blank while the notice still says which meshes are picked.
+  if (_refuseInsideObject()) return;
   const objects = getState().scene.objects;
   const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
   if (!ids.length) return;

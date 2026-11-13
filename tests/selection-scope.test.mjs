@@ -379,3 +379,31 @@ test('the refusal is scoped to being inside an object, not a disabled key', () =
   assert.equal(Selection.inPartScope(), false);
   assert.deepEqual(toastsFrom(() => T.deleteSelected()), [], 'no refusal at root');
 });
+
+test('inside an object, H refuses too -- hiding it would leave the depth nothing to show', () => {
+  /*
+   * Same class as Delete, found the same way, and the line between refused and allowed is this:
+   * a whole-object command is refused inside the depth when it leaves the depth MEANINGLESS or
+   * contradicts what the screen just said. Hide does the first -- isolation has already hidden
+   * everything else, so hiding the object you are inside leaves a blank viewport with a notice
+   * over it saying which of its meshes are picked.
+   *
+   * Lock (L) is deliberately NOT refused: it acts on the whole object, but it is coherent at this
+   * depth (you can still see and pick the meshes), it is visible in the outliner, and it is a
+   * toggle. Refusing every whole-object command would have been the easier rule and the wrong one.
+   */
+  reset();
+  T.registerAll();
+  T.setCanvas({ contains: () => true });
+  Selection.enterScope('lead', 'lead.part');
+  Selection.set(['lead.part'], 'lead.part');
+  const visible = () => Object.values(getScene().objects).map(o => !!o.visible);
+  const before = visible();
+
+  const said = toastsFrom(() => T.keyDown({
+    key: 'h', preventDefault() {}, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, target: null,
+  }));
+
+  assert.deepEqual(visible(), before, 'the object you are inside is still visible');
+  assert.equal(said.length, 1, `and it says why: ${JSON.stringify(said)}`);
+});
