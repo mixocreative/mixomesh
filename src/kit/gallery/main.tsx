@@ -1,3 +1,9 @@
+// The component gallery: every control in ../ on one page, in each of its states.
+//
+// One job, and it is a real one rather than a demo: this is the fastest way to see what a token or
+// base-style change did to the whole library, and the only place the library is rendered without
+// an application around it. Check it after touching tokens.css or base.css. A control added to
+// ../index.ts and not added here is a control nobody will look at again.
 import '@fontsource/zen-kaku-gothic-new/400.css';
 import '@fontsource/zen-kaku-gothic-new/500.css';
 import '@fontsource/zen-kaku-gothic-new/700.css';

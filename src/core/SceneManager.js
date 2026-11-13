@@ -1,3 +1,12 @@
+// Owns the Babylon scene and everything in it that is not an imported object: the selection
+// silhouette, the bed and grid, the camera rig, the pivot session, the environment and tone
+// mapping. One job: there is exactly one scene, and this module is the only thing that creates,
+// configures or disposes it.
+//
+// The trap: a module that reaches in and mutates the scene directly works, right up to the point
+// where undo, save or a second viewport needs to know what changed. Scene changes that the user
+// can undo go through a command in ./commands/; scene changes that are presentation only
+// (highlight, grid, camera) are this module's own business and are deliberately NOT in history.
 import { EVENTS } from './events.js';
 import { subscribe, getState } from './StateManager.js';
 import {

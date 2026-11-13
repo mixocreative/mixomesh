@@ -1,3 +1,11 @@
+// The interactive placement session for a slice connector: the user draws a cut line over the
+// viewport, sees a preview, and confirms or escapes. start() / stop() are the whole surface.
+//
+// One job: own the transient interaction state -- the in-progress line, the preview meshes, the
+// armed tool -- and own ending it cleanly. The trap is the escape path: a session that leaves a
+// preview mesh, a pointer handler or an armed tool behind on cancel is a session the user has to
+// reload to get out of, so stop() is the part to read first and the part to keep correct.
+// The geometry is ../core/SliceConnectorService.js; the commit is a command.
 import { SceneManager } from '../core/SceneManager.js';
 import { Selection } from '../core/Selection.js';
 import { InputManager } from '../core/InputManager.js';

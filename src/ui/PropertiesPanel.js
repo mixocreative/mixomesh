@@ -1,3 +1,15 @@
+// The per-object inspector: object, source, transform, scale, material. The panel the operator
+// spends the most time in, and the largest file in this folder -- its cut is named in
+// ../../docs/size-debt.md, and new work belongs at one of those seams, not at the end.
+//
+// One job: render the selected object's state and send edits back as commands. It owns no state.
+//
+// Two traps it carries, both learned the hard way:
+//   - SOURCE_UNIT_FACTORS is imported from ../core/ImportNormalizer.js and never redefined here.
+//     Two tables of unit factors is two different answers to "how big is this".
+//   - the scale row distinguishes DECLARING a ratio from CONVERTING to it (`defaultScaleVerb`,
+//     `scaleConsequence`). Getting that wrong reloads an object at double size, which is a bug
+//     that only shows up after a save and a reopen.
 import { EVENTS } from '../core/events.js';
 import { subscribe, setState, getState } from '../core/StateManager.js';
 import { t, applyTranslations } from '../i18n/index.js';

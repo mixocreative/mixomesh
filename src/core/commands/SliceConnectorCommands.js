@@ -1,3 +1,9 @@
+// The undoable half of slice-connector: takes a plan from ../SliceConnectorService.js, performs
+// the boolean, and records ONE history entry for the whole operation.
+//
+// The trap this file exists to avoid: a cut produces several meshes, shaders and names, and doing
+// them as separate state writes gives the user an undo that half-undoes. One command, one entry,
+// one undo -- which is what tests/split-join.test.mjs and the commands contract check.
 import { EVENTS } from '../events.js';
 import { getState, setState, dispatch, markDirty } from '../StateManager.js';
 import { t } from '../../i18n/index.js';

@@ -1,3 +1,12 @@
+// The geometry of cutting a model in two and joining it back together with connectors, as pure
+// functions: the plane a cut line implies, the connector plan for a bounding box, the meshes that
+// plan becomes, and the eligibility and naming rules around them.
+//
+// One job, and the reason it is a separate file from the command and the session: nothing here
+// touches app state, history or the DOM, so every rule in it can be tested without a scene. The
+// interactive part is ../ui/SliceConnectorSession.js and the undoable part is
+// ./commands/SliceConnectorCommands.js. Keep it that way -- the moment this file reads getState()
+// the rules stop being testable, which is the only reason they are trustworthy.
 const VALID_SIDES = new Set(['front', 'back']);
 const VALID_SHAPES = new Set(['round', 'square']);
 const DEFAULTS = Object.freeze({

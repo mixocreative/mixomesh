@@ -1,3 +1,10 @@
+// Turns an imported container's node tree into this app's own object/group hierarchy, and finds
+// the bottom centre of a set of meshes so an import can be dropped onto the bed.
+//
+// One job: decide what an imported file's structure MEANS here. Loaders invent nodes -- Babylon's
+// synthetic `__root__`, transform nodes with no geometry -- and a hierarchy that mirrors the file
+// exactly gives the user empty rows they cannot select or delete. So nodes without geometry are
+// not objects, and the synthetic root is not a group.
 function _isGeometryMesh(mesh) {
   return !!mesh?.geometry && (mesh.getTotalVertices?.() ?? 0) > 0;
 }

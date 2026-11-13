@@ -1,3 +1,7 @@
+// Boot order, and nothing else. One job: bring the app up in an order where every failure is
+// catchable, so a browser or a device that cannot run MIXOMESH gets ONE blocking screen naming the
+// problem instead of a half-booted app with dead panels. Everything here is a call to someone
+// else's init; if logic appears in this file it belongs in the module being booted.
 import { Toast, safeAsync } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { JobActivityPanel } from '../ui/JobActivity.js';
