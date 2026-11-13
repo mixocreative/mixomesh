@@ -45,7 +45,7 @@ that needs nearly as much handed in as it hands back is a hub, not a job, and mo
 makes the codebase worse while looking like progress.* Rule 1 comes before rule 5. These two files
 are over the cut limit and stay that way until someone changes their shape, not their line count.
 
-### `core/InputManager.js` — 1,310 lines
+### `core/InputManager.js` — 1,310 → 1,203. One block taken; the rest NOT takeable.
 
 One state machine over pointer, key and touch input, sharing one set of mutable module variables.
 
@@ -54,7 +54,14 @@ One state machine over pointer, key and touch input, sharing one set of mutable 
 | keymap + dispatcher (`_buildKey`, `_isTypingTarget`, `_isViewportKeyTarget`, `_handleKeyDown/Up`) | **11 names**, including `_handlers`, `_modal`, `_mode`, `_readOnly`, `_currentContext`, `_canvas`, `_bodyDrag` |
 | touch (`_onTouchPointer`, `_onTouchGestures`, `_canvasLocal`, `_clearLongPress`) | **16 names**, including 13 references to `_touchBody` alone, plus `_gest`, `_longPressTimer`, `_lastTouchTap`, `_modal` |
 
-Either extraction is a module handed most of the file's state. **What IS worth taking, and is not
+**Every block was measured, not just the two above**, and exactly one passed rule 1: the shortcut
+handlers (frame, hide, unhide, lock, delete, duplicate, group, ungroup) touch NONE of this file's
+mutable module state, so they are now `core/input/selectionCommands.js`. Ten imports left with
+them. The modal G/R/S block was the other hope and failed clearly: it reads `_modal` 33 times while
+the dispatcher, the pointer observable and the touch path all read it too, so moving it would hand
+the module its own state back.
+
+Either remaining extraction is a module handed most of the file's state. **What IS worth taking, and is not
 a cut:** the pure predicates — `_isDoubleClick`, `_buildKey`, `_isTypingTarget`,
 `_isViewportKeyTarget`, `_canvasLocal` — about 60 lines, which would buy tests for rules nothing
 tests today. Do that for the tests, not for the number.

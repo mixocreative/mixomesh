@@ -1,10 +1,9 @@
-import { undo, redo, push, TransformCommand, VisibilityCommand, LockCommand, DeleteCommand, DuplicateCommand, GroupCommand, UngroupCommand } from './HistoryManager.js';
+import { undo, redo, push, TransformCommand } from './HistoryManager.js';
 import { SceneManager, setCameraPreset } from './SceneManager.js';
 import { Selection } from './Selection.js';
 import { BoxSelect } from './BoxSelect.js';
-import { getState, dispatch } from './StateManager.js';
-import { EVENTS } from './events.js';
-import { logicalObjectCommandIds, isGroupId, isPartScopeId } from './LogicalObjects.js';
+import { getState } from './StateManager.js';
+import { isGroupId, isPartScopeId } from './LogicalObjects.js';
 import { Toast } from '../ui/Toast.js';
 import { StatusBar } from '../ui/StatusBar.js';
 import { t } from '../i18n/index.js';
@@ -15,6 +14,11 @@ import { touchOrbit, touchPan, touchPinch } from './scene/CameraRig.js';
 import { createTouchGestures, TOUCH_LONG_PRESS_MS } from './TouchGestures.js';
 import { isReadOnlyShortcut } from './ViewerModel.js';
 import { translateSnapBU, rotateSnapRad, scaleSnapStep, snapToStep, nudgeStepMM, nudgeDirection } from './SnapUnits.js';
+
+import {
+  _deleteSelected, _duplicateSelected, _frameSelection, _groupSelected, _hideSelected,
+  _lockToggleSelected, _ungroupSelected, _unhideAll,
+} from './input/selectionCommands.js';
 
 const BABYLON = window.BABYLON;
 const PointerEventTypes = BABYLON.PointerEventTypes;
@@ -1024,116 +1028,6 @@ function _currentTranslateAmount() {
   return (dx + (-dy)) * worldPerPx;
 }
 
-// ── Shortcut handlers ────────────────────────────────────
-
-function _frameSelection() {
-  const meshes = Selection.getSelectedResolved().map(r => r.mesh);
-  if (!meshes.length) return;
-  SceneManager.frameSelected(meshes);
-}
-
-function _hideSelected() {
-  // Hiding the object you are INSIDE leaves the depth meaningless: isolation has hidden everything
-  // else, so the viewport goes blank while the notice still says which meshes are picked.
-  if (_refuseInsideObject()) return;
-  const objects = getState().scene.objects;
-  const ids = logicalObjectCommandIds(Selection.getSelectedIds(), objects);
-  if (!ids.length) return;
-  const prev = {};
-  for (const id of ids) prev[id] = !!objects[id]?.visible;
-  // Toggle: if all visible → hide; if any hidden → show all.
-  const anyVisible = ids.some(id => objects[id]?.visible);
-  push(new VisibilityCommand(ids, prev, !anyVisible));
-}
-
-function _unhideAll() {
-  const objects = getState().scene.objects;
-  const hidden = Object.values(objects).filter(o => o.visible === false).map(o => o.id);
-  if (!hidden.length) return;
-  const prev = {};
-  for (const id of hidden) prev[id] = false;
-  push(new VisibilityCommand(hidden, prev, true));
-}
-
-function _lockToggleSelected() {
-  const objects = getState().scene.objects;
-  const groups = getState().scene.groups;
-  const sel = Selection.getSelectedIds();
-  // Objects (expanded to all parts) AND selected groups toggle together.
-  const ids = [...logicalObjectCommandIds(sel, objects), ...sel.filter(id => !objects[id] && groups[id])];
-  if (!ids.length) return;
-  const isLocked = id => !!(objects[id] ?? groups[id])?.locked;
-  const prev = {};
-  for (const id of ids) prev[id] = isLocked(id);
-  const anyUnlocked = ids.some(id => !isLocked(id));
-  push(new LockCommand(ids, prev, anyUnlocked));
-}
-
-/**
- * Refuse a whole-object command while the operator is INSIDE an object (U5), and say so.
- *
- * Inside the part scope the selection is the object's PARTS, and these commands act on whole
- * objects: `_expandedCommandIds` turns one part id into every part of its logical object. So Delete
- * with one mesh picked removed ALL of them -- the notice read "1 of 3 meshes picked" and the object
- * vanished. Undoable, but nothing warned, and the screen had just said the opposite.
- *
- * Refused rather than reinterpreted: deleting one mesh OUT of a logical object is a real edit with
- * a separate's hazards (the union repair and the supports were built against the whole object), and
- * minting that from a keypress is worse than the surprise it replaces. If the owner wants it, it is
- * a command with its own warnings, not a key that quietly means something new.
- *
- * This follows the depth's own decision to turn the gizmo off rather than move one part
- * (`Selection.getTransformTargets`) -- and unlike the gizmo it SAYS so, because a key that silently
- * does nothing is its own defect. Duplicate is routed here too: it already did nothing at all.
- */
-function _refuseInsideObject() {
-  if (!Selection.inPartScope()) return false;
-  Toast.show(t('toast.insideObjectPickOnly'), 'warning', 6000);
-  return true;
-}
-
-function _deleteSelected() {
-  if (_refuseInsideObject()) return;
-  const ids = Selection.getSelectedIds();
-  if (!ids.length) return;
-  // Lock = transform-lock; Delete ASKS (Decision 9): a selection that holds a
-  // locked object/group (or anything inside a locked group) needs a confirm.
-  if (ids.some(id => Selection.isEffectivelyLocked(id))) {
-    dispatch(EVENTS.MODAL_OPEN, {
-      id: 'confirmAction',
-      title: t('context.deleteLockedTitle'),
-      body: t('context.deleteLockedBody'),
-      confirmLabel: t('context.deleteLockedConfirm'),
-      danger: true,
-      onClose: (r) => { if (r === 'confirm') push(new DeleteCommand(ids)); },
-    });
-    return;
-  }
-  push(new DeleteCommand(ids));
-}
-
-function _duplicateSelected() {
-  if (_refuseInsideObject()) return;
-  const ids = Selection.getSelectedIds();
-  if (!ids.length) return;
-  push(new DuplicateCommand(ids));
-}
-
-function _groupSelected() {
-  const ids = Selection.getSelectedIds();
-  if (ids.length < 1) return;
-  const cmd = new GroupCommand(ids);
-  push(cmd);
-  // Groups are selectable (2.1): select the new group so one click/drag moves everything.
-  if (getState().scene.groups[cmd.groupId]) Selection.set([cmd.groupId], cmd.groupId);
-}
-
-function _ungroupSelected() {
-  // Selected groups dissolve; selected objects ungroup their parent group.
-  const groupIds = UngroupCommand.targetsFor(Selection.getSelectedIds());
-  if (!groupIds.length) return;
-  push(new UngroupCommand(groupIds));
-}
 
 // ── Arrow-key nudge (overhaul 5.6, plan §4.7) ───────────
 // Arrows move the selection 1 mm (Shift 10 mm, Alt 0.1 mm) along the world
