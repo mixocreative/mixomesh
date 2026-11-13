@@ -70,7 +70,7 @@ tab an explicit view-model — one function from `S` to a plain object — and l
 that. Then they are pure, testable, and the boundary is one value wide. Until someone does that,
 this file is honestly 1,046 lines.
 
-### `tests/browser-smoke.mjs` — 2,845 lines. Guarded, and NOT takeable by moving text.
+### `tests/browser-smoke.mjs` — 2,845 → 2,649. One block taken; the rest NOT takeable.
 
 **The guard, which landed first and stands on its own merit.** `cdp-harness.mjs` now counts
 assertions (`assertionsRun()`, `expectAssertions()` — available to **all 34 browser walks**, not
@@ -91,9 +91,16 @@ bindings declared earlier in the same function:
 | live checks (1596–2000) | **42** of 295 |
 | the rest (2001–2835) | **76** of 372 |
 
-The dependency grows with the walk, because that is what a walk is. Only the first block is
-cleanly separable, and 165 lines out of 2,845 is not a cut. Handing a later block a context of
-seventy-six things is the hub rule 1 forbids.
+The dependency grows with the walk, because that is what a walk is. Handing a later block a
+context of seventy-six things is the hub rule 1 forbids.
+
+**The one block that passed rule 1 was taken** (`tests/smoke/rendering.mjs`, 198 lines). Measured
+again at the moment of cutting, its real Node-scope dependency turned out to be **two** things, not
+nine: most of the nine were identifiers inside the evaluated JS string, which runs in the browser,
+not in Node. It takes `(cdp, failures)` — `failures` rather than a fresh list, because surfacing
+page exceptions BEFORE the pixel asserts is the point of that check. **321 assertions before the
+cut, 321 after**, which is what the guard is for. The file is still over the limit and the entry
+stays.
 
 **This is a different answer from `export.test.mjs` on purpose**, and the difference is the shape,
 not the size: that file held 113 *independent* cases and split cleanly; this one is a single
