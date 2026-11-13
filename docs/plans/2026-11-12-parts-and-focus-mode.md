@@ -561,6 +561,36 @@ import case the 2-part test pins is unchanged, which is the point: that rename I
   **Left as known debt with its reason**, per the principle: the step is contention-sensitive in a
   batch run on a loaded machine and reliable alone. Do not "fix" it by widening the sleep.
 
+- **Copy transform tore a multi-part object apart, and the Properties panel disagreed with itself.**
+  `_commitSizeInput` expands to every part via `_logicalTargetIds`; `_copyTransformFromActive` (the
+  `[data-copy="transform"]` button, Blender Ctrl+L analogue) iterated `Selection.getSelectedIds()`,
+  which at root scope are LEADS. Running the real handler: source at x=10, target a two-part object
+  with its lead at x=0 and arm at x=1 -- afterwards the lead was at 10 and the arm still at 1, nine
+  units from its body, in one undoable step.
+
+  **Decided with Fable, not by me**, because the obvious repair is worse than it looks. Applying the
+  delta `M_src · M_lead⁻¹` to each part introduces SHEAR whenever the scale ratio is non-uniform and
+  a part is rotated relative to its lead, and a position/rotation/scale triple cannot hold shear --
+  Babylon `decompose` drops it without complaint, which is the deformation nobody sees until a print
+  fails. The lead pivot is also an import accident, so "make the lead transform equal the source"
+  is a rule we would be inventing; the gizmo per-part delta is not a precedent, since there the
+  operator is watching a live drag rather than deriving a delta from two unrelated absolutes.
+  Position-only was rejected as a middle: it drops the target on top of the source (a collision in
+  print prep), and a button that copies everything for some objects and one channel for others is a
+  new silent asymmetry.
+
+  So a multi-part TARGET is refused and named, with the alternative given
+  (`toast.copyTransformSkippedParts`, three locales). A multi-part SOURCE is still fine -- reading a
+  lead transform deforms nothing. Nothing is pushed when every target is refused, because an empty
+  undo step is its own small lie. `tests/properties-copy-transform.test.mjs` drives the real handler
+  and asserts the object is intact, the toast fired, the undo stack did not grow, AND that a
+  single-mesh target in the same selection still moves -- the half a "nothing moved" test would miss.
+
+  **Debt, with the reason:** if copy-transform is ever wanted for multi-part objects, the safe subset
+  is position + rotation + UNIFORM scale composed about the lead pivot --
+  `p = lead + R·k·(p - lead)`, `rot = R·rot`, `scale = k·scale` -- with a non-uniform ratio refused.
+  Not built: shear is the reason, and nothing has asked for it.
+
 - **And then the MERGE side, which was the worse half: a merge left a divergence that deformed the
   object on the next rescale.** Found by asking what a merge LEAVES BEHIND, having just fixed what a
   separate promotes. Gap 6 already tells the operator the lead scale applies from here -- but it only

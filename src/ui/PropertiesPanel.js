@@ -677,11 +677,40 @@ function _copyTransformFromActive() {
   const activeMesh = AssetLoader.getBabylonMesh(activeId);
   if (!activeMesh) return;
   const source = _readTransform(activeMesh);
+  const objects = getState().scene.objects;
 
   const prev = {};
   const next = {};
+  const skipped = [];
   for (const id of selIds) {
     if (id === activeId) continue;
+    /*
+     * A MULTI-PART target is refused, not approximated (decided 2026-11-13 with Fable, after the
+     * old code was found tearing one apart: source at x=10, target lead at x=0 with its arm at
+     * x=1, and after the click the lead was at 10 and the arm still at 1 — nine units from its
+     * body, in one undoable step).
+     *
+     * The parts of a logical object are not parented to the lead; each carries its own absolute
+     * transform. So copying ONE transform onto the lead alone tears the object, and the obvious
+     * repair — apply the delta `M_src · M_lead⁻¹` to every part — is worse than it looks: with a
+     * non-uniform scale ratio and a part rotated relative to the lead, `Δ · M_part` contains
+     * SHEAR, which a position/rotation/scale triple cannot hold. Babylon's `decompose` drops it
+     * without complaint, and that is the deformation nobody sees until the print fails.
+     *
+     * The lead's pivot is also an import accident, so "make the lead's transform equal the
+     * source's" is a rule we would be inventing. The gizmo's per-part delta is not a precedent for
+     * it: there the operator is watching a live drag, not deriving a delta from two unrelated
+     * absolute transforms.
+     *
+     * Position-only was rejected as the middle: copying position alone drops the target on top of
+     * the source, which in print prep is a collision, and a button that copies everything for some
+     * objects and one channel for others is a new silent asymmetry.
+     */
+
+    if (logicalObjectPartIds(id, objects).length > 1) {
+      skipped.push(objects[id]?.name ?? id);
+      continue;
+    }
     const m = AssetLoader.getBabylonMesh(id);
     if (!m) continue;
     prev[id] = _readTransform(m);
@@ -691,6 +720,9 @@ function _copyTransformFromActive() {
       scaling:  { ...source.scaling },
     };
   }
+  // Named, and told what to use instead, so the refusal is not a dead end.
+  if (skipped.length) Toast.show(t('toast.copyTransformSkippedParts', { names: skipped.join(', ') }), 'warning', 8000);
+  // No command when everything was refused: an empty undo step is its own small lie.
   if (!Object.keys(next).length) return;
   push(new TransformCommand(prev, next));
 }
@@ -1442,6 +1474,7 @@ export const PropertiesPanel = { init };
 
 export const __test = {
   ratioTargetIds: _ratioTargetIds,
+  copyTransformFromActive: _copyTransformFromActive,
   defaultScaleVerb,
   scaleConsequence,
   sourceStatusFor,

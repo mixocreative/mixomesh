@@ -695,6 +695,7 @@
   "toast.nothingSelected": "何も選択されていません",
   "toast.lockedNoTransform": "ロック中のアイテムは移動・回転・拡縮できません。先にロックを解除してください",
   "toast.insideObjectPickOnly": "オブジェクト内ではメッシュを選択します。先にEscを押して抜けてください",
+  "toast.copyTransformSkippedParts": "トランスフォームのコピーで {names} をスキップしました：複数のメッシュで構成されたオブジェクトには上書きできる単一のトランスフォームがありません。ギズモで移動するか、パネルでサイズを設定してください",
   "toast.csgUnavailable": "CSG2 が利用できません — 水密再ベイクをスキップ",
   "toast.exportCancelled": "書き出しをキャンセルしました — {filename} は保存されていません",
   "toast.importedAll": "{n} 個のファイルを読み込みました",

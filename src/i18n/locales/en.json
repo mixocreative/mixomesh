@@ -698,6 +698,7 @@
   "toast.nothingSelected": "Nothing selected",
   "toast.lockedNoTransform": "Locked items can't be moved, rotated or scaled — unlock first",
   "toast.insideObjectPickOnly": "Inside an object you pick meshes. Press Esc to leave it first.",
+  "toast.copyTransformSkippedParts": "Copy transform skipped {names}: an object made of several meshes has no single transform to overwrite. Move it with the gizmo, or set its size in the panel.",
   "toast.csgUnavailable": "CSG2 unavailable — watertight re-bake skipped",
   "toast.exportCancelled": "Export cancelled — {filename} was not written",
   "toast.importedAll": "Imported {n} files",
