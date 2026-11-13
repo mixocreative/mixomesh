@@ -3,9 +3,10 @@
 The rule (the owner's code principle, rule 5): **size is debt with a date.** Over ~600 lines a
 file is named here with its next cut written down; over ~1000 the cut is taken, not named.
 
-**Status: four of eight cuts taken on 2026-11-14. Two of the remaining four are measured as NOT
-takeable** — the extraction would make a hub, and rule 1 comes before rule 5. The other two are
-test harnesses whose **vacuous-pass guard has landed**; the splits are owed and now safe to make.
+**Status: five of eight cuts taken on 2026-11-14. The remaining three are measured as NOT
+takeable** — each extraction would make a hub, and rule 1 of the principle comes before rule 5.
+Every one of the three carries its measurement below, and the shape change that would make a cut
+possible. They are not "left for later": they are decided, with evidence.
 
 Measured by `cia`'s `tools/maintainability.py` (rule M2). Re-measure with:
 
@@ -21,6 +22,7 @@ python ~/.claude/skills/cia/tools/maintainability.py S:/ai/mixomesh --rule=M2
 | `ui/PropertiesPanel.js` 1,482 | **949** | `ui/properties/`: `ShaderSection.js` (279), `SourceRow.js`, `SourceUnitSection.js`, `UVOverrideSection.js`, `targets.js`, `format.js` |
 | `core/ShaderLibrary.js` 1,091 | **977** | `core/shaders/materials.js` (141): the colour conversions and material construction |
 | `core/print/PrintPipeline.js` 1,031 | **839** | `core/print/ExportRepair.js` (222): the CSG re-bake and watertight repair |
+| `tests/export.test.mjs` 2,003 | **gone** | `tests/export-kit.mjs` (the harness) + five `export-pipe-*.test.mjs` of 208–509 lines |
 
 **What made these four safe, and it was not the line count.** Each boundary was measured before it
 was cut: what the block needs from outside, and what outside needs from the block. `ParentCommands`
@@ -68,32 +70,64 @@ tab an explicit view-model — one function from `S` to a plain object — and l
 that. Then they are pure, testable, and the boundary is one value wide. Until someone does that,
 this file is honestly 1,046 lines.
 
-## Guards landed; splits owed
+### `tests/browser-smoke.mjs` — 2,845 lines. Guarded, and NOT takeable by moving text.
 
-Both are harnesses with their **own** runners, which means the suite's totals say nothing about
-whether they still run everything. That hole is now closed, and closing it was the precondition
-for ever splitting them — a move that drops a check would otherwise still exit 0.
+**The guard, which landed first and stands on its own merit.** `cdp-harness.mjs` now counts
+assertions (`assertionsRun()`, `expectAssertions()` — available to **all 34 browser walks**, not
+just this one), and this walk asserts `expectAssertions(321)`. Measured, not grepped: the source
+contains 310 `assert(` calls and runs 321, because of loops and conditional branches. Proven to
+bite — claiming 322 fails with exit 1.
 
-### `tests/browser-smoke.mjs` — 2,845 lines
+**Why the split was then refused.** `main()` is one 2,778-line sequential walk: it boots once and
+each area builds on the scene the previous areas left. Measured, block by block, against the
+bindings declared earlier in the same function:
 
-`cdp-harness.mjs` now counts assertions (`assertionsRun()`, `expectAssertions()` — available to
-**all 34 browser walks**, not just this one), and this walk asserts `expectAssertions(321)`.
-Measured, not grepped: the source contains 310 `assert(` calls and runs 321, because of loops and
-conditional branches. Proven to bite — claiming 322 fails the walk with exit 1.
+| Block | Earlier bindings it references |
+|---|---|
+| Scene ▸ Rendering (676–841) | **9** of 82 |
+| shadows / SSAO (876–1154) | **25** of 134 |
+| import + errors (1155–1335) | **24** of 201 |
+| scale round-trips (1336–1595) | **31** of 234 |
+| live checks (1596–2000) | **42** of 295 |
+| the rest (2001–2835) | **76** of 372 |
 
-**The next cut:** by subject into the folder's existing `browser-<subject>-smoke.mjs` convention,
-each added to `package.json`, with the total assertion count preserved across the split.
+The dependency grows with the walk, because that is what a walk is. Only the first block is
+cleanly separable, and 165 lines out of 2,845 is not a cut. Handing a later block a context of
+seventy-six things is the hub rule 1 forbids.
 
-### `tests/export.test.mjs` — 2,003 lines
+**This is a different answer from `export.test.mjs` on purpose**, and the difference is the shape,
+not the size: that file held 113 *independent* cases and split cleanly; this one is a single
+ordered session.
 
-This file has its own tiny runner, so `node --test` counts the whole file as **one** test: its 113
-cases were invisible to the suite's `ℹ tests 1136` line, and a dropped case changed nothing it
-reported. It now asserts `EXPECTED_CASES = 113`. Proven to bite.
+**The shape change that would make a cut possible** (a rewrite of the walk, not a move): make each
+area self-sufficient — import its own fixture, build its own scene, assert, tear down — so the
+areas can run in any order. That costs one browser boot per file and is a different review.
 
-**The next cut:** the 146-line preamble (env install, stubs, `mesh`/`setScene`/`obj` builders,
-validator fakes) becomes `tests/export-kit.mjs` — the same pattern as the existing
-`support-browser-kit.mjs` — and the 113 cases split by subject (`export-obj`, `export-stl`,
-`export-threemf`, `export-gate`, `export-preview`). The case count is what proves none was lost.
+### `tests/export.test.mjs` — split, 2026-11-14
+
+It had its own tiny runner, so `node --test` counted the whole file as **one** test: its 113 cases
+were invisible to the suite's `ℹ tests 1136` line, and a dropped case changed nothing it reported.
+The guard went in first (`EXPECTED_CASES`), and only then the split.
+
+The 146-line preamble became `tests/export-kit.mjs` — stubs, the `mesh`/`setScene`/`obj` builders,
+the validator fakes, the runner and a `report(n, label)` that asserts each caller's count. The 113
+cases went into five contiguous files, in order, unaltered:
+
+| File | Cases |
+|---|---|
+| `export-pipe-gating` | 29 — collection gating, auto-fix, the warning gate |
+| `export-pipe-repair` | 9 — watertight repair of the export clones |
+| `export-pipe-formats` | 27 — STL and 3MF |
+| `export-pipe-naming` | 26 — filenames, typed print sizes, texture synthesis |
+| `export-pipe-misc` | 22 — progress, dimensions, download, PLY/WRL, OBJ axis |
+
+**29 + 9 + 27 + 26 + 22 = 113**, and the node suite went 1,136 → 1,140 (one file became five).
+That arithmetic is the whole proof that no case was lost, and it is why the guard had to come
+first.
+
+**Counts are measured, never grepped.** The static count said 111: two cases live inside a `for`
+loop, so one source line produces several. The files were generated with a sentinel, run, and the
+real numbers patched in.
 
 ## In the debt band (~600–1000), named, no cut owed
 

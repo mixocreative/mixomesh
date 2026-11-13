@@ -512,7 +512,13 @@ tests/                     ← headless harness — Node-native, no build (§14b
   jszip-stub.mjs           ← minimal JSZip for export tests
   idb-stub.mjs             ← in-memory mirror of src/core/idb.js
   env.mjs                  ← installEnv(): Babylon shim, atob/btoa, DOMParser
-  export.test.mjs          ← PrintManager export pipeline
+  export-kit.mjs           ← shared harness for the five export-pipe-* files (stubs, fake
+                             meshes/scenes, the runner that asserts its own case count)
+  export-pipe-gating       ← PrintManager export pipeline: gating, auto-fix, warning gate
+  export-pipe-repair       ← ... watertight repair of the export clones
+  export-pipe-formats      ← ... STL and 3MF
+  export-pipe-naming       ← ... filenames, typed print sizes, texture synthesis
+  export-pipe-misc         ← ... progress, dimensions, download, PLY/WRL, OBJ axis
   export-context.test.mjs  ← ExportContext builder + freezing contracts
   export-planner.test.mjs  ← filename/profile/scale planner
   export-gate.test.mjs     ← exportGate button set/order/actions; Auto-fix absent when nothing is fixable
