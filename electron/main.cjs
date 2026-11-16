@@ -23,6 +23,7 @@ const { registerListbridgeIpc, loadListbridgeCore } = require('./listbridge/inde
 const { fakePlatformAdapters } = require('./listbridge/fakePlatform.cjs');
 const {
   SECURE_WEB_PREFERENCES, appEntryUrl, guardWebContents, denyAllPermissions, isTrustedSender,
+  allowPuckBluetooth,
 } = require('./WindowSecurity.cjs');
 
 const { applyHeapFlags } = require('./HeapFlags.cjs');
@@ -867,6 +868,10 @@ app.on('web-contents-created', (_event, contents) => {
   guardWebContents(contents, ENTRY_URL, {
     onBlocked: (kind, url) => console.error(`blocked ${kind}${url ? `: ${url}` : ''}`),
   });
+  // Web Bluetooth has no chooser dialog in Electron, so the main process picks the device - and
+  // picks only an orientation puck (ui/PuckPanel.js). Without this the renderer's
+  // `requestDevice()` never settles and Connect appears to do nothing at all.
+  allowPuckBluetooth(contents);
   // A streamed export save left open by a crashed renderer or a closed window
   // would keep its temp file (and an open handle) beside the user's file.
   const owner = contents.id;

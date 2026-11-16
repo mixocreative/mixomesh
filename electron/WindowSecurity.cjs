@@ -13,6 +13,9 @@
 //    notifications, clipboard-read, fullscreen, …) EXCEPT
 //    `clipboard-sanitized-write` — the cost card's "copy path" button uses
 //    navigator.clipboard.writeText (write-only, plain text).
+//  - Devices (HID / serial / USB): denied. BLUETOOTH is denied too, except a
+//    device whose advertised name is an orientation puck's — see
+//    `chooseBluetoothDevice`, which is the whole of that exception.
 //  - IPC: every handler checks the sender frame is the app's top frame.
 
 const { pathToFileURL } = require('node:url');
@@ -82,6 +85,78 @@ function guardWebContents(contents, entryUrl, opts = {}) {
 
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
 
+/**
+ * The orientation puck's advertised name prefix (mixospatial `PROTOCOL.md` §4: `mixo-NNN`, the
+ * number assigned at build time so two pucks on one desk can be told apart).
+ *
+ * This string is the whole of the Bluetooth exception below. Widening it widens what a compromised
+ * renderer can reach on the air, so it stays a prefix match on a name this project assigns.
+ */
+const PUCK_NAME_PREFIX = 'mixo-';
+
+/** How long to keep scanning before giving up and failing the request. */
+const BLUETOOTH_SCAN_TIMEOUT_MS = 15000;
+
+/**
+ * Which device, out of everything the scan has seen so far, the renderer may have.
+ *
+ * Pure, and the single place the answer is decided: Electron ships NO Bluetooth chooser UI, so
+ * unlike Chrome there is no dialog in which a person picks one device and rules out the rest. An
+ * app that answers `devices[0]` hands the page whatever happens to be advertising nearby — a
+ * colleague's headset, a phone — which is a wider grant than the browser would ever have made.
+ *
+ * @param {Array<{deviceId?: string, deviceName?: string}>} devices
+ * @param {string} [prefix]
+ * @returns {string} the chosen `deviceId`, or `''` for "none of these"
+ */
+function chooseBluetoothDevice(devices, prefix = PUCK_NAME_PREFIX) {
+  const list = Array.isArray(devices) ? devices : [];
+  const match = list.find(d => typeof d?.deviceName === 'string'
+    && d.deviceName.startsWith(prefix)
+    && typeof d.deviceId === 'string'
+    && d.deviceId.length > 0);
+
+  return match ? match.deviceId : '';
+}
+
+/**
+ * Let the renderer reach an orientation puck, and nothing else on the air.
+ *
+ * `select-bluetooth-device` fires AGAIN for every device the scan turns up, so answering `''` on
+ * the first miss would cancel a scan that had not yet found the puck. It therefore stays silent
+ * until a name matches — with a timeout, because `requestDevice()` returns a promise nobody else
+ * will ever settle, and a Connect button that hangs for ever is worse than one that reports a
+ * failure.
+ *
+ * @param {Electron.WebContents} contents
+ * @param {{namePrefix?: string, timeoutMs?: number}} [opts]
+ */
+function allowPuckBluetooth(contents, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? BLUETOOTH_SCAN_TIMEOUT_MS;
+  let timer = null;
+
+  contents.on('select-bluetooth-device', (event, devices, callback) => {
+    event.preventDefault();
+
+    const chosen = chooseBluetoothDevice(devices, opts.namePrefix);
+
+    if (chosen) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      callback(chosen);
+
+      return;
+    }
+
+    // Keep scanning, but not for ever. One timer per request: the first miss starts it.
+    if (!timer) {
+      timer = setTimeout(() => {
+        timer = null;
+        callback('');   // no puck within reach; `requestDevice()` rejects and the page says so
+      }, timeoutMs);
+    }
+  });
+}
+
 /** True only for the allowlisted permissions above. */
 function isPermissionAllowed(permission) {
   return ALLOWED_PERMISSIONS.has(permission);
@@ -94,7 +169,16 @@ function isPermissionAllowed(permission) {
 function denyAllPermissions(session) {
   session.setPermissionRequestHandler((_contents, permission, callback) => callback(isPermissionAllowed(permission)));
   session.setPermissionCheckHandler((_contents, permission) => isPermissionAllowed(permission));
-  session.setDevicePermissionHandler?.(() => false);
+  /*
+   * HID, serial and USB stay denied outright. Bluetooth is allowed for ONE device: a puck named by
+   * `PUCK_NAME_PREFIX`. Electron 43 routes Web Bluetooth's device grant through this handler as
+   * well as through `select-bluetooth-device`, so a handler that refused everything would let the
+   * picker above succeed and the connection fail immediately afterwards — the kind of
+   * half-denial that reads as a radio fault.
+   */
+  session.setDevicePermissionHandler?.((details) => details?.deviceType === 'bluetooth'
+    && typeof details?.device?.deviceName === 'string'
+    && details.device.deviceName.startsWith(PUCK_NAME_PREFIX));
 }
 
 /**
@@ -110,10 +194,13 @@ function isTrustedSender(event, entryUrl) {
 
 module.exports = {
   SECURE_WEB_PREFERENCES,
+  PUCK_NAME_PREFIX,
   appEntryUrl,
   isAppUrl,
   guardWebContents,
   denyAllPermissions,
   isPermissionAllowed,
   isTrustedSender,
+  chooseBluetoothDevice,
+  allowPuckBluetooth,
 };

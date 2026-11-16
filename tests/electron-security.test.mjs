@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const {
   SECURE_WEB_PREFERENCES, appEntryUrl, isAppUrl, guardWebContents, denyAllPermissions,
-  isPermissionAllowed, isTrustedSender,
+  isPermissionAllowed, isTrustedSender, chooseBluetoothDevice, allowPuckBluetooth,
 } = require('../electron/WindowSecurity.cjs');
 
 const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');   // line-ending agnostic (Windows checkouts)
@@ -135,6 +135,55 @@ await check('permissions: deny-all except clipboard write', () => {
   assert.equal(checkFn({}, 'clipboard-sanitized-write'), true);
   assert.equal(isPermissionAllowed('clipboard-sanitized-write'), true);
   assert.equal(device(), false);
+  // The one device exception: an orientation puck, by advertised name. Anything else advertising
+  // nearby - a headset, a phone, a watch - is refused the same as HID and serial are.
+  const bt = name => device({ deviceType: 'bluetooth', device: { deviceName: name } });
+  assert.equal(bt('mixo-001'), true);
+  assert.equal(bt('Pat’s Headphones'), false);
+  assert.equal(bt(undefined), false);
+  assert.equal(device({ deviceType: 'hid', device: { deviceName: 'mixo-001' } }), false, 'name is not a key to other buses');
+});
+
+await check('Bluetooth: only an orientation puck, and the scan is not left hanging', () => {
+  // Electron has NO Bluetooth chooser dialog, so this function is the whole of the choice a
+  // person would otherwise have made in the browser's own picker.
+  assert.equal(chooseBluetoothDevice([{ deviceId: 'a', deviceName: 'mixo-003' }]), 'a');
+  assert.equal(chooseBluetoothDevice([
+    { deviceId: 'headset', deviceName: 'WH-1000XM5' },
+    { deviceId: 'puck', deviceName: 'mixo-012' },
+  ]), 'puck', 'the puck is picked out of a crowded room');
+  assert.equal(chooseBluetoothDevice([{ deviceId: 'x', deviceName: 'WH-1000XM5' }]), '', 'nothing else will do');
+  assert.equal(chooseBluetoothDevice([{ deviceName: 'mixo-001' }]), '', 'a match with no id is not a device');
+  for (const junk of [[], null, undefined, [{}], [null]]) assert.equal(chooseBluetoothDevice(junk), '');
+
+  // The handler must stay SILENT on a miss (the scan fires again per device found) and must
+  // eventually give up, or `requestDevice()` is a promise nobody settles.
+  let fire = null;
+  allowPuckBluetooth({ on: (name, fn) => { if (name === 'select-bluetooth-device') fire = fn; } }, { timeoutMs: 20 });
+  assert.equal(typeof fire, 'function');
+
+  const answers = [];
+  let prevented = 0;
+  const scan = devices => fire({ preventDefault: () => { prevented++; } }, devices, v => answers.push(v));
+
+  scan([{ deviceId: 'headset', deviceName: 'WH-1000XM5' }]);
+  assert.deepEqual(answers, [], 'a miss keeps scanning rather than cancelling');
+  scan([{ deviceId: 'headset', deviceName: 'WH-1000XM5' }, { deviceId: 'puck', deviceName: 'mixo-007' }]);
+  assert.deepEqual(answers, ['puck']);
+  assert.equal(prevented, 2, 'the default picker is always prevented');
+
+  return new Promise(resolve => setTimeout(() => {
+    assert.deepEqual(answers, ['puck'], 'the timer was cancelled by the match');
+    // A fresh request that never finds one gives up on its own.
+    const late = [];
+    allowPuckBluetooth({ on: (name, fn) => { if (name === 'select-bluetooth-device') fire = fn; } }, { timeoutMs: 20 });
+    fire({ preventDefault: () => {} }, [{ deviceId: 'x', deviceName: 'nope' }], v => late.push(v));
+    setTimeout(() => { assert.deepEqual(late, [''], 'gave up instead of hanging'); resolve(); }, 60);
+  }, 60));
+});
+
+await check('main hands the Bluetooth choice to the main process', () => {
+  assert.match(mainSource, /app\.on\('web-contents-created'[\s\S]*?allowPuckBluetooth\(contents\)/);
 });
 
 await check('isTrustedSender: only the app top frame', () => {
@@ -306,4 +355,4 @@ await check('security smoke: runs a real Boolean in the bundled worker under fil
   assert.ok(smoke.includes('win.isDestroyed()'), 'probe callbacks bail out on a destroyed window');
 });
 
-assert.equal(cases, 14);
+assert.equal(cases, 16);
