@@ -64,38 +64,60 @@ export function relativeTo(qZero: Quaternion | null, q: Quaternion): Quaternion 
 /**
  * The puck's rotation expressed in MIXOMESH WORLD AXES instead of the puck's own.
  *
- * The puck's axes (`mixospatial/PROTOCOL.md` §2, after the firmware's mounting correction):
- * **+X is the connector**, **+Z is the top face**, +Y completes a right-handed set. mixomesh's
- * world is Y-up, and `CameraRig.setCameraPreset` fixes the rest: the FRONT view puts the camera on
- * +Z, so **+Z is toward the viewer**, and from there world +X is the viewer's LEFT.
+ * Three facts fix this map. The third is the one that is easy to get backwards, and this file
+ * once did.
  *
- * A puck lying top-up with its connector pointing AWAY from the person therefore wants
- * puck +Z → world +Y and puck +X → world −Z. That leaves one free choice, puck +Y → world ±X, and
- * only `−X` makes the map a proper rotation (its determinant is +1); `+X` would be a reflection,
- * which mirrors every rotation sense it is applied to. So the map is `(x, y, z) → (−y, z, −x)`.
+ * **1. The puck's axes** (`mixospatial/PROTOCOL.md` §2, after the firmware's mounting
+ * correction): **+X is the connector**, **+Z is the top face**, and +Y completes a RIGHT-handed
+ * set. So with the puck lying flat, top up, connector pointing away from the person,
+ * `+Y = +Z × +X` = up × away = **the person's LEFT**.
  *
- * For a basis change `B`, a quaternion's vector part becomes `det(B)·B·v` with `w` unchanged, and
- * `det(B) = +1` here, so it is just `B` applied to `(x, y, z)`.
+ * **2. mixomesh's world axes.** Y is up, and `CameraRig.setCameraPreset` fixes the rest: the
+ * FRONT view puts the camera on +Z, so **+Z is toward the viewer** and **world +X is the viewer's
+ * LEFT**. That second half is not a convention somebody chose — Babylon's left-handed look-at
+ * builds the camera's right as `up × forward`, which for a camera at +Z looking back is
+ * `(0,1,0) × (0,0,-1) = (-1,0,0)`. The comment in `setCameraPreset` says the same thing, and the
+ * NavCube agrees with it.
+ *
+ * **3. So the axes correspond as `+X -> -Z`, `+Y -> +X`, `+Z -> +Y`, and that map's determinant
+ * is -1.** It is not an error to be tidied away. Babylon's (viewer's-left, up, toward-viewer) is a
+ * LEFT-handed labelling of physical space while an IMU's frame is right-handed, and no proper
+ * rotation carries one onto the other. Under a basis change `B` a quaternion's vector part becomes
+ * `det(B)·B·v` with `w` unchanged, so the sign is carried rather than wished away:
+ * `B·v = (y, z, -x)`, and with `det(B) = -1` that is **`(-y, -z, x)`**.
+ *
+ * **The cross-check, against the one place this is proven in service.** `mixo-ar` drives the same
+ * puck through three.js, whose world is RIGHT-handed: same Y-up, same +Z toward the viewer, but
+ * +X is the viewer's RIGHT. Its map, verified by hand against the device, is
+ * `(x, y, z) -> (-y, z, -x)`. Going from three.js coordinates to Babylon's is the reflection
+ * `X_bab = -X_three`, and transporting a rotation through a reflection `M` uses that same
+ * `det(M)·M·v` rule, which here is `(x, y, z) -> (x, -y, -z)`. Apply it to mixo-ar's map and
+ * you get `(-y, -z, x)`: this function, exactly. Two derivations from different starting points,
+ * one answer.
  *
  * ---------------------------------------------------------------------------------------------
- * **NOT CHECKED AGAINST THE DEVICE.** This was derived, not measured, and the one thing the
- * derivation cannot settle is that **Babylon's world is LEFT-handed** while `mixo-ar`'s three.js
- * world — where the same basis change is in service and proven — is right-handed. The arithmetic
- * here is handedness-free, but the *appearance* need not be.
+ * **AN EARLIER VERSION OF THIS FILE HAD THE YAW BACKWARDS, and the comment that shipped with it
+ * said the question needed hardware to settle. It did not.** That version picked
+ * `+Y -> world -X` to force the determinant to +1 — the arithmetic looked tidier, and turning
+ * the puck anticlockwise on the desk swung the scene clockwise. Choosing the third axis to make
+ * the determinant come out is choosing which side of the puck the person's left hand is on; it is
+ * the one thing here that is not free. Fix the axes by what the hand does, then let the
+ * determinant say what it says.
  *
- * If the view turns the wrong way, read the fingerprint before touching anything:
+ * If it is ever wrong again, read the fingerprint before touching anything:
  *
- * | what you see | what it means | the fix |
+ * | what you see | what it means | where the fix is |
  * |---|---|---|
+ * | yaw mirrored, tilt correct | this map's third axis, i.e. fact 1 or 2 above | here |
+ * | every rotation mirrored | the `det(B)` sign | here |
  * | two axes reversed, the third correct | a HEADING error, 180° about the correct one | not here — ask how the puck is being HELD, then measure the device |
- * | every rotation mirrored | the left-handed world, i.e. this function | one line: `{ x: q.y, y: -q.z, z: -q.x, w: q.w }`, the same map conjugated by a flip of world Z |
- * | yaw right, view goes left; tilt correct | the inversion in `cameraOrbit`, not the basis | there, not here |
+ * | everything reversed together | the inversion in `cameraOrbit` | there, not here |
  *
- * Doing it in the other order — matrix first, question afterwards — cost `mixo-ar` a day and three
- * wrong answers. `?puck=fake` turns the view without hardware, which is enough to tell these apart.
+ * `?puck=fake` turns the view without hardware: it tilts once, cleanly, then yaws anticlockwise
+ * seen from above, so the scene should swing anticlockwise with it.
  */
 export function toWorldFrame(q: Quaternion): Quaternion {
-  return { x: -q.y, y: q.z, z: -q.x, w: q.w };
+  return { x: -q.y, y: -q.z, z: q.x, w: q.w };
 }
 
 /** Rotate a direction by a unit quaternion: `q v q⁻¹`. */

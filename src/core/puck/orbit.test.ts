@@ -81,14 +81,27 @@ describe('orbit — a reading becomes a view', () => {
     expect(Math.cos(alpha)).toBeCloseTo(Math.cos(HOME.alpha), 10);
   });
 
-  it('turns a puck yaw into the SAME angle of orbit, and no tilt', () => {
-    // Yaw is rotation about the puck's top face, which is its +Z (PROTOCOL.md section 2).
+  it('swings the view the way the hand swung the puck, by exactly as much', () => {
+    /*
+     * THE SIGN IS THE WHOLE TEST, and it is the thing that shipped wrong once. The chain, in one
+     * place, because every link of it is invisible until a hand is holding the puck:
+     *
+     *  - yaw is rotation about the puck's top face, its +Z (PROTOCOL.md section 2), and the
+     *    puck's frame is right-handed, so +theta is ANTICLOCKWISE seen from above.
+     *  - at the FRONT view Babylon's camera is on +Z and world +X is the viewer's LEFT, so
+     *    increasing `alpha` swings the camera from +X toward +Z and the scene APPEARS to turn
+     *    clockwise seen from above.
+     *  - matching the hand therefore means `alpha` must DECREASE by the same angle.
+     *
+     * `orbit.ts`'s `toWorldFrame` carries the derivation; this is its consequence, stated where
+     * a future sign flip cannot pass.
+     */
     for (const turn of [0.4, -0.9, 2.0]) {
       const { alpha, beta } = cameraOrbit(HOME, IDENTITY, about('z', turn));
 
       expect(beta).toBeCloseTo(HOME.beta, 10);
-      expect(Math.cos(alpha)).toBeCloseTo(Math.cos(HOME.alpha + turn), 10);
-      expect(Math.sin(alpha)).toBeCloseTo(Math.sin(HOME.alpha + turn), 10);
+      expect(Math.cos(alpha)).toBeCloseTo(Math.cos(HOME.alpha - turn), 10);
+      expect(Math.sin(alpha)).toBeCloseTo(Math.sin(HOME.alpha - turn), 10);
     }
   });
 
@@ -116,22 +129,49 @@ describe('orbit — a reading becomes a view', () => {
     const zero = about('z', 2.7);
     const after = cameraOrbit(HOME, zero, multiply(zero, about('z', 0.5)));
 
-    expect(after.alpha).toBeCloseTo(HOME.alpha + 0.5, 8);
+    expect(after.alpha).toBeCloseTo(HOME.alpha - 0.5, 8);
   });
 });
 
 describe('orbit — the basis change', () => {
-  it('is a proper rotation, so it cannot mirror a turn', () => {
-    // Each puck axis, mapped: +X (the connector) to world -Z, +Z (the top) to world +Y, and +Y to
-    // world -X, which is the ONLY third choice whose determinant is +1. A reflection here would
-    // reverse every rotation sense, and look exactly like a firmware bug.
-    // Summed rather than compared field by field: the map negates components, so an axis that
-    // lands on zero lands on NEGATIVE zero, which `toEqual` rightly refuses to call 0.
+  it('puts every puck axis where the hand says it goes', () => {
+    /*
+     * Each of these is a half-turn about one puck axis, and a half-turn about an axis is the same
+     * rotation about its opposite — so what is pinned here is the AXIS, with its sign free:
+     *
+     *   +X, the connector, pointing away from the person  ->  world -Z, away from the viewer
+     *   +Y, which a right-handed puck puts on the person's LEFT  ->  world +X, the viewer's left
+     *   +Z, the top face  ->  world +Y, up
+     *
+     * The second row is the one that was wrong. Sending +Y to world -X made the map a proper
+     * rotation, which is tidy and puts the person's left hand on the puck's right.
+     *
+     * Summed rather than compared field by field: the map negates components, so an axis that
+     * lands on zero lands on NEGATIVE zero, which `toEqual` rightly refuses to call 0.
+     */
     const axes = (q: Quaternion) => [q.x + 0, q.y + 0, q.z + 0, q.w + 0];
 
-    expect(axes(toWorldFrame({ x: 1, y: 0, z: 0, w: 0 }))).toEqual([0, 0, -1, 0]);
+    expect(axes(toWorldFrame({ x: 1, y: 0, z: 0, w: 0 }))).toEqual([0, 0, 1, 0]);
     expect(axes(toWorldFrame({ x: 0, y: 1, z: 0, w: 0 }))).toEqual([-1, 0, 0, 0]);
-    expect(axes(toWorldFrame({ x: 0, y: 0, z: 1, w: 0 }))).toEqual([0, 1, 0, 0]);
+    expect(axes(toWorldFrame({ x: 0, y: 0, z: 1, w: 0 }))).toEqual([0, -1, 0, 0]);
+  });
+
+  it('agrees with mixo-ar, carried across the two worlds handedness', () => {
+    /*
+     * mixo-ar drives the same puck through three.js, whose world is right-handed: same Y-up, same
+     * +Z toward the viewer, but +X is the viewer's RIGHT. Its map is verified against the device.
+     * Babylon's world is that one reflected in X, and a rotation carried through a reflection `M`
+     * transforms as `det(M)*M*v` — here `(x, y, z) -> (x, -y, -z)`.
+     *
+     * So this is the SECOND derivation of the same function, from a different starting point. If
+     * one of them is ever edited alone, this fails.
+     */
+    const mixoAr = (q: Quaternion) => ({ x: -q.y, y: q.z, z: -q.x, w: q.w });
+    const intoBabylon = (q: Quaternion) => ({ x: q.x, y: -q.y, z: -q.z, w: q.w });
+
+    for (const q of [about('x', 0.6), about('y', -1.1), about('z', 2.2), normalise({ x: 0.3, y: -0.5, z: 0.2, w: 0.8 })]) {
+      expect(toWorldFrame(q)).toEqual(intoBabylon(mixoAr(q)));
+    }
   });
 
   it('leaves w alone, so the angle of the turn survives it', () => {

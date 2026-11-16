@@ -22,11 +22,15 @@
 //                 axis, which the yaw has by then swung round, so they move BOTH angles - that is
 //                 the hand's own geometry and not a fault. The first tilt is the clean one.
 //
-// **What to look for.** The view should swing around the scene the same way the hand would have
-// swung the model: anticlockwise from above means the camera travels anticlockwise and the model's
-// left side comes into view. If it goes the other way, or if the tilt and the yaw are swapped, the
-// fingerprint table in `orbit.ts`'s `toWorldFrame` says which of three things is wrong and which
-// one line to change.
+// **What to look for.** The scene should appear to swing ANTICLOCKWISE with the puck - the same
+// way the model would have turned if the hand had been holding the model instead. The camera
+// itself travels the other way round the scene, which is exactly what makes the model look like it
+// is turning in the hand rather than the room turning around it.
+//
+// If it goes the other way, or if the tilt and the yaw are swapped, the fingerprint table in
+// `orbit.ts`'s `toWorldFrame` says which of four things is wrong and where the one line is. That
+// map is DERIVED, twice over and from different starting points, so a disagreement here is
+// evidence about the puck or the holding, not a free parameter to flip.
 
 /** Milliseconds between readings. The real puck reports at 50-100 Hz; this is the slow end. */
 const INTERVAL_MS = 50;

@@ -6981,14 +6981,34 @@ for ever. `setDevicePermissionHandler` grants `bluetooth` for the same name and 
 serial and USB. This is the only widening of Decision 19's deny-everything posture, and
 `tests/electron-security.test.mjs` pins both halves.
 
-### Not verified
+### Which way it turns, and why that is not a guess
 
-`orbit.toWorldFrame` maps the puck's axes to mixomesh's and was **derived, not measured**. The
-arithmetic is pinned by `orbit.test.ts` — a puck yaw of θ moves `alpha` by exactly θ and leaves
-`beta` alone — but no test can say whether the result LOOKS right on Babylon's left-handed stage,
-where `mixo-ar`'s proven right-handed three.js equivalent may not carry over. That function's
-comment holds the fingerprint table: which of three things is wrong, and the one line to change
-for each. `?puck=fake` turns the view without hardware, which is enough to tell them apart.
+`orbit.toWorldFrame` maps the puck's axes to mixomesh's. It is **derived, twice, from different
+starting points**, and both derivations give `(x, y, z) -> (-y, -z, x)`:
+
+1. **From the axes.** The puck's frame is right-handed with +X the connector and +Z the top, so
+   held flat with the connector pointing away, +Y is the person's LEFT. Babylon's world is Y-up
+   with +Z toward the viewer at the FRONT view, and **world +X is the viewer's left** - its
+   left-handed look-at builds the camera's right as `up x forward`, which for a camera on +Z is
+   `(-1,0,0)`. So `+X -> -Z`, `+Y -> +X`, `+Z -> +Y`, a map whose **determinant is -1**, because
+   Babylon's (left, up, toward-viewer) is a left-handed labelling of physical space and an IMU's
+   frame is right-handed. A quaternion's vector part under a basis change `B` becomes
+   `det(B)*B*v`, so the sign is carried, not wished away.
+2. **From mixo-ar.** The same puck drives three.js there, whose world is the same but with +X on
+   the viewer's RIGHT. Transporting its verified map `(-y, z, -x)` through that reflection with
+   the same rule gives `(-y, -z, x)`. `orbit.test.ts` asserts the two agree, so editing one alone
+   fails the suite.
+
+The consequence, asserted in the tests: **a puck yaw of θ DECREASES `alpha` by exactly θ**, which
+is what makes the scene appear to swing the way the hand swung the puck. Increasing `alpha` swings
+the camera from +X toward +Z, which reads as the scene turning clockwise seen from above; a puck
+yawed anticlockwise must therefore drive `alpha` down.
+
+**The first version of this shipped with the yaw backwards** - it chose `+Y -> world -X` to force
+the determinant to +1, which is tidier arithmetic and puts the person's left hand on the wrong
+side of the puck - and with a comment claiming only hardware could settle it. Nothing here needs
+hardware. `?puck=fake` tilts once cleanly and then yaws anticlockwise, which is a check by eye,
+not the proof.
 
 ---
 
