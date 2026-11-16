@@ -6918,6 +6918,78 @@ intercepts `BrowserWindow.close`, asks the renderer over the allowlisted
 successful `{action:'save',saved:true}` response; cancel and failed/cancelled
 save leave the window open. The renderer never exposes Node or an OS path.
 
+
+## §Puck — the orientation puck as a camera
+
+*The device, its wire format and its decisions live in `mixocreative/mixospatial`
+(`PROTOCOL.md`, `docs/decisions/`). This is mixomesh's half of the contract.*
+
+A rechargeable BLE puck reports its own orientation at 50-100 Hz; mixomesh turns that into an
+**orbit of the camera around the scene**. The product page `mixo-ar` drives the same device and
+the same workflow, but there the MODEL turns. The image is identical either way — rotating a
+model by `R` and orbiting the camera by `R⁻¹` produce the same picture — and the difference that
+matters is what the puck does NOT take here: it owns the camera's two ANGLES only, so target and
+radius stay the operator's and **pan and zoom keep working while it turns**.
+
+### Modules
+
+| File | Job |
+|---|---|
+| `vendor/mixospatial-puck/{codec,puck,transport-web-bluetooth}.js` | the wire format, the link state machine, the radio. Copied as built from mixospatial; `SOURCE.md` has the commit and the rule against editing them here |
+| `core/puck/orbit.ts` | pure: a reading and a reference pose become `{alpha, beta}`. Unit-tested (`orbit.test.ts`) |
+| `core/puck/PuckLink.js` | the link, Line up, and driving the camera. Owns the puck's state; the UI reads `snapshot()` |
+| `core/puck/fakePuck.js` | `?puck=fake` — the whole workflow with no hardware |
+| `ui/PuckPanel.js` | the chip, its menu and the Line up card. Rendered INTO the viewport toolbar (`buttonHtml()` / `wire()`), the same arrangement `TransformSheet` uses |
+
+**Event:** `EVENTS.PUCK_CHANGED` (`puck:changed`), no payload — every change redraws the same
+small control, and a per-reading event would fire a hundred times a second. Nothing about the puck
+goes into `StateManager` state: the link is a property of this session's hardware, not of the
+project, and a `.mixo` file that remembered a puck would be wrong on the next machine.
+
+### The camera contract (`core/scene/CameraRig.js`)
+
+- `HOME_ORBIT` (`SceneConstants.js`) is now the one definition of the neutral pose, shared by the
+  initial camera state, the `perspective` preset and Line up. Three copies of `π/3, π/4` used to
+  agree by accident.
+- `setPuckOrbit(on)` — while the puck drives, **mouse and touch orbit are refused** (`_orbit`
+  returns early). A drag would be overwritten by the next reading ~10 ms later; a control that is
+  dead is better than one that springs back. Pan and wheel zoom are untouched.
+- `orbitTo(alpha, beta)` — applied immediately, no easing (the firmware already filters), and it
+  **refuses while a preset transition is animating**. `PuckLink` reads a refusal as "the view was
+  taken somewhere else", re-homes on the pose the animation lands on and takes a fresh zero with
+  it — so Home, a NavCube face or any preset RE-BASES the puck instead of being undone by it.
+- `currentOrbit()` — the live pose, for that re-home.
+
+### Line up (PROTOCOL.md §3, decisions 0006 / 0009 / 0010)
+
+The puck has no magnetometer, so its yaw restarts at an arbitrary angle on every wake: **the zero
+lives in the host** and nothing is ever written to the device, which is why Line up cannot fail.
+Connecting walks straight into it. The card homes the view FIRST (the person cannot match a pose
+to a target that is itself wrong), then averages a run of readings that were genuinely still, and
+is confirmed by **double-tapping the puck** (§6 event `0x02`) — the only confirmation that does not
+move the thing being held still. A button in the card is the fallback for firmware without the
+gesture. A deliberate Disconnect sleeps the puck and returns the view home; an unintended link
+loss freezes the view where the hand left it and says why.
+
+### Electron (`electron/WindowSecurity.cjs`)
+
+Electron ships no Bluetooth chooser dialog, so the main process makes the choice the browser's
+picker would otherwise have offered: `chooseBluetoothDevice` picks the first device whose
+advertised name starts with `mixo-` and nothing else, and `allowPuckBluetooth` stays silent on a
+miss (the event re-fires per device found) with a 15 s give-up so `requestDevice()` cannot hang
+for ever. `setDevicePermissionHandler` grants `bluetooth` for the same name and still refuses HID,
+serial and USB. This is the only widening of Decision 19's deny-everything posture, and
+`tests/electron-security.test.mjs` pins both halves.
+
+### Not verified
+
+`orbit.toWorldFrame` maps the puck's axes to mixomesh's and was **derived, not measured**. The
+arithmetic is pinned by `orbit.test.ts` — a puck yaw of θ moves `alpha` by exactly θ and leaves
+`beta` alone — but no test can say whether the result LOOKS right on Babylon's left-handed stage,
+where `mixo-ar`'s proven right-handed three.js equivalent may not carry over. That function's
+comment holds the fingerprint table: which of three things is wrong, and the one line to change
+for each. `?puck=fake` turns the view without hardware, which is enough to tell them apart.
+
 ---
 
 *End of MIXOMESH Blueprint v4.0*

@@ -1563,5 +1563,23 @@
   "print.issueAction.supports-stale": "Open Support Mode to rebuild the supports, or export the model only.",
   "print.issue.supports-missing": "No supports to export",
   "print.issueAction.supports-missing": "Generate supports in Support Mode, or export the model.",
-  "progress.supports": "Building supports for export…"
+  "progress.supports": "Building supports for export…",
+
+  "puck.label": "Puck",
+  "puck.idle": "Not connected.",
+  "puck.connecting": "Connecting — pick the puck in the browser’s list.",
+  "puck.connected": "Connected.",
+  "puck.lost": "The link was lost. The view is where you left it.",
+  "puck.lostReason": "The puck went out of range, or its battery ran down.",
+  "puck.noSensor": "This puck’s motion sensor did not answer, so it cannot report a direction.",
+  "puck.batteryUnknown": "battery unknown",
+  "puck.noCell": "no cell fitted",
+  "puck.connect": "Connect",
+  "puck.disconnect": "Disconnect",
+  "puck.align": "Line up",
+  "puck.alignAsk": "Hold the puck the way you want it to face you, then double-tap it.",
+  "puck.alignReady": "Holding steady. Double-tap the puck when it is where you want it.",
+  "puck.alignHoldStill": "Keep it still — it moved while being read.",
+  "puck.alignNow": "Use the button instead",
+  "puck.cubeFront": "FRONT"
 }

@@ -113,6 +113,21 @@ const ICON_PATHS = {
   Disc3:          '<circle cx="12" cy="12" r="10"/><path d="M6 12c0-1.7.7-3.2 1.8-4.2"/><circle cx="12" cy="12" r="2"/><path d="M18 12c0 1.7-.7 3.2-1.8 4.2"/>',
   // Print scale ratio (distinct from the Scale3D gizmo + Ruler authored-scale).
   Percent:        '<line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+  // ── The orientation puck (ui/PuckPanel.js) ──
+  // Not from Lucide: these are mixo-ar's own glyphs, copied so the product page and this app
+  // ask for the same device with the same picture. `Box` would have done for the chip, and is
+  // deliberately NOT reused — it is already the Median-pivot button and the Build-volume toggle
+  // (see the uniqueness pass above), and a puck that borrows another control's symbol is the
+  // kind of collision that pass exists to stop.
+  //
+  // A cube drawn as an isometric box: the outline is ONE closed hexagon and the three inner
+  // edges meet at the centre, so the shape still reads at 14 px where a wireframe cube turns
+  // to mush.
+  Puck:           '<path d="M12 3.2 20.1 7.6v8.8L12 20.8 3.9 16.4V7.6Z"/><path d="M12 12 20.1 7.6M12 12 3.9 7.6M12 12v8.8"/>',
+  Bluetooth:      '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  // Charging, and drawn ONLY when the puck reports it — never inferred from USB presence.
+  Zap:            '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+
   // Exported still photo (distinct from the plain Image used for texture slots).
   ImageDown:      '<path d="M10.3 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6.5"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.814.014L6 21"/><circle cx="9" cy="9" r="2"/><path d="M19 16v6"/><path d="m22 19-3 3-3-3"/>',
 };

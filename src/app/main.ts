@@ -28,6 +28,7 @@ import { ViewportToggles } from '../ui/ViewportToggles.js';
 import { StatsHud } from '../panels/StatsHud/StatsHud.tsx';
 import { MeshStats } from '../ui/MeshStats.js';
 import { NavCube } from '../ui/NavCube.js';
+import { PuckPanel } from '../ui/PuckPanel.js';
 import { push, TransformCommand } from '../core/HistoryManager.js';
 import { MeshValidator } from '../core/MeshValidator.js';
 import { PersistenceManager } from '../core/PersistenceManager.js';
@@ -133,6 +134,7 @@ async function bootstrap() {
   PrintPanel.init();
   ContextMenu.init();
   AssetPanel.init();
+  PuckPanel.init();   // before the toolbar: it draws the puck chip, and only if there is one
   ViewportToolbar.init();
   ViewportToggles.init();
   StatsHud.init();   // viewport statistics, bottom-left

@@ -1,0 +1,108 @@
+/* The orientation puck's chip, menu and Line up card (ui/PuckPanel.js).
+   Tokens only — --hud-* for the viewport glass, --accent / --sp-* / --r-* from tokens.css.
+   Nothing here re-derives a colour or a spacing; mixo-app-style's rule. */
+
+/* ── The chip, inside the viewport toolbar ────────── */
+/* It sits in the toolbar with the other camera controls rather than in chrome of its own: the
+   viewport's top-right is where the Arrange drawer slides out, and a control that vanishes under
+   another panel is missing exactly when it is wanted. See ui/PuckPanel.js. */
+.puck-chip {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The link, visible WITH THE MENU SHUT (decision 0010). A control that only says whether it is
+   connected once you open it is a control you have to open to learn nothing. */
+.puck-dot {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hud-border);
+  pointer-events: none;
+}
+.puck-dot[data-link="connecting"] { background: var(--warning); }
+.puck-dot[data-link="connected"]  { background: var(--success); }
+.puck-dot[data-link="lost"]       { background: var(--danger); }
+
+/* ── The menu ───────────────────────────────────────────── */
+.puck-menu {
+  position: absolute;
+  /* Upward: the toolbar is anchored to the bottom of the viewport, so a menu dropping down would
+     open off-screen. */
+  bottom: calc(100% + var(--sp-3));
+  right: 0;
+  min-width: 212px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2);
+  background: var(--hud-bg);
+  backdrop-filter: var(--hud-blur);
+  -webkit-backdrop-filter: var(--hud-blur);
+  border: 1px solid var(--hud-border);
+  border-radius: 9px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+}
+.puck-menu[hidden] { display: none; }
+
+.puck-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  color: var(--hud-text);
+  border-bottom: 1px solid var(--hud-border);
+}
+.puck-charge { display: inline-flex; color: var(--success); }
+
+.puck-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--hud-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+}
+.puck-item:hover { background: var(--hud-hover-bg); color: var(--hud-text-hi); }
+
+/* ── The Line up card ───────────────────────────────────── */
+/* Centred over the viewport and NOT a <dialog>: the person is being asked to match the puck to
+   what is on screen, so the screen must stay visible and reachable behind it. */
+.puck-align-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 11;
+  width: min(320px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  text-align: center;
+  background: var(--hud-bg);
+  backdrop-filter: var(--hud-blur);
+  -webkit-backdrop-filter: var(--hud-blur);
+  border: 1px solid var(--hud-border);
+  border-radius: 11px;
+  box-shadow: var(--hud-highlight), var(--hud-shadow);
+  color: var(--hud-text);
+}
+.puck-align-card[hidden] { display: none; }
+.puck-align-card p { margin: 0; font-size: var(--fs-sm); line-height: 1.45; }
+.puck-align-figure { width: 120px; height: 70px; color: var(--hud-text-hi); }
+.puck-align-actions { display: flex; gap: var(--sp-2); }

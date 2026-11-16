@@ -1,6 +1,6 @@
 # src/core/ — the map
 
-39 files at this level plus seven subfolders: the application's state, its commands, and the
+39 files at this level plus eight subfolders: the application's state, its commands, and the
 services the UI calls. **Nothing here renders.** If a module reaches for the DOM it belongs in
 `../ui/`, and if it only computes it probably belongs in a plain module with a test and no engine.
 
@@ -75,6 +75,7 @@ persistent worker per concern, not one per call.
 | `commands/` | one class per undoable command. `ParentCommands.js` is the largest, named as debt |
 | `persist/` | save, load, project id, integrity, asset resolution |
 | `scene/` | camera rig, pivot session |
+| `puck/` | the orientation puck: the link, Line up, and the pure arithmetic that turns a reading into a camera orbit. The radio itself is vendored (`../../vendor/mixospatial-puck/`) |
 | `render/` | the Render-view output path |
 | `repair/` · `refinement/` · `placement/` · `shaders/` · `import/` | the narrower services the façades above cover |
 

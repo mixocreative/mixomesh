@@ -7,6 +7,7 @@ import { escapeHtml, escapeAttr } from './renderSafe.js';
 import { t } from '../i18n/index.js';
 import { tr } from './lib/tr.js';
 import { CursorPanel } from './CursorPanel.js';
+import { PuckPanel } from './PuckPanel.js';
 import { TransformSheet } from '../panels/TransformSheet/TransformSheet.tsx';
 
 /**
@@ -56,6 +57,7 @@ export function init() {
     EVENTS.PIVOT_MODE_CHANGED,
     EVENTS.GIZMO_CHANGED,
     EVENTS.CAMERA_PRESET_CHANGED,
+    EVENTS.PUCK_CHANGED,
     EVENTS.PROJECT_LOADED,
     EVENTS.LOCALE_CHANGED,
   ]) subscribe(ev, _render);
@@ -70,6 +72,9 @@ function _render() {
   const pivot      = s.selection?.pivotMode      ?? 'median';
   const follow     = s.scene?.camera?.followMode ?? 'free';
   const arrangeOpen  = CursorPanel.isOpen();
+  // Empty string on a machine with no Web Bluetooth, and the group is left out with it rather
+  // than drawn as a dead button (PuckPanel.buttonHtml).
+  const _puck        = PuckPanel.buttonHtml();
   const arrangeTitle = tr('arrange.panelTitleWithShortcut', 'Arrange (Shift+N)');
 
   _root.innerHTML = `
@@ -98,6 +103,7 @@ function _render() {
         <span class="vt-label">${escapeHtml(tr('arrange.panelTitle', 'Arrange'))}</span>
       </button>
     </div>
+    ${_puck ? `<div class="vt-sep"></div><div class="vt-group" data-group="puck">${_puck}</div>` : ''}
     <div class="vt-sep vt-touch-only"></div>
     <div class="vt-group vt-touch-only" data-group="numeric">${TransformSheet.buttonHtml()}</div>
   `;
@@ -129,6 +135,7 @@ function _select(kind, modes, current, titleKey, iconName) {
 }
 
 function _wire() {
+  PuckPanel.wire(_root);   // the puck chip's own menu, re-attached after every render
   _root.querySelectorAll('select[data-select]').forEach(sel => {
     sel.addEventListener('change', () => {
       const value = /** @type {HTMLSelectElement} */ (sel).value;

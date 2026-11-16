@@ -1,6 +1,6 @@
 # src/ui/ — the map
 
-43 files: everything the operator sees that is not the 3D viewport itself. The rule the folder
+44 files: everything the operator sees that is not the 3D viewport itself. The rule the folder
 works by: **a module here owns one surface and reads state, it never owns state.** State lives in
 `../core/StateManager.js`; a UI module subscribes to it and renders. A UI module that becomes the
 only place a value exists is a bug, because nothing else can then undo, save or test it.
@@ -47,6 +47,7 @@ own panels, built from it. New controls go in `kit`; new panels go here.
 | `ViewportDrop.js` | drag-and-drop import, routed through the "already in this project" check |
 | `ViewportEmptyState.js` | what an empty scene says, and the one action it offers |
 | `NavCube.js` | the orientation cube |
+| `PuckPanel.js` | the orientation puck's chip, menu and Line up card. The chip is rendered INTO `ViewportToolbar` rather than into chrome of its own — the viewport's top-right is where the Arrange drawer slides out over it. State lives in `../core/puck/PuckLink.js` |
 | `RenderFrame.js` | the framing overlay while Render view is active |
 | `ScopeBreadcrumb.js` | the chip at the viewport's top-left saying which scope you are inside |
 | `PartScopeMode.ts` · `isolation.ts` · `isolationEvents.test.ts` · `partScopeKeys.test.ts` | **inside-object scope.** While it is active, selection holds part ids, not displayable ids — which is why delete, duplicate and hide refuse here (`../core/InputManager.js`). Its event subscriptions must match its sibling `../supports/SupportMode.ts`; they drifted once |

@@ -1539,5 +1539,23 @@
   "print.issueAction.supports-stale": "請開啟支撐模式以重建支撐，或僅匯出模型。",
   "print.issue.supports-missing": "沒有可匯出的支撐",
   "print.issueAction.supports-missing": "請在支撐模式中產生支撐，或匯出模型。",
-  "progress.supports": "正在建立匯出用的支撐…"
+  "progress.supports": "正在建立匯出用的支撐…",
+
+  "puck.label": "控制器",
+  "puck.idle": "尚未連線。",
+  "puck.connecting": "連線中，請在瀏覽器的清單中選擇控制器。",
+  "puck.connected": "已連線。",
+  "puck.lost": "連線中斷，畫面維持在你離開時的角度。",
+  "puck.lostReason": "控制器超出範圍，或電量耗盡。",
+  "puck.noSensor": "這個控制器的動作感測器沒有回應，無法回報方向。",
+  "puck.batteryUnknown": "電量未知",
+  "puck.noCell": "未裝電池",
+  "puck.connect": "連線",
+  "puck.disconnect": "中斷連線",
+  "puck.align": "校正方向",
+  "puck.alignAsk": "把控制器擺成你想要面對你的方向，然後輕點兩下控制器。",
+  "puck.alignReady": "很穩定。擺到你要的位置後，輕點兩下控制器。",
+  "puck.alignHoldStill": "請保持不動，讀取時偵測到移動。",
+  "puck.alignNow": "改用按鈕",
+  "puck.cubeFront": "正面"
 }
