@@ -82,8 +82,10 @@
       <div id="nav-cube" class="nav-cube"></div>
       <nav id="scope-breadcrumb" class="scope-breadcrumb" hidden></nav>
       <div id="viewport-toggles" class="vp-toggles"></div>
-      <!-- The orientation puck's Line up card. The chip itself is drawn into the toolbar above
-           by ui/PuckPanel.js, which stays silent on a browser with no Web Bluetooth. -->
+      <!-- The orientation puck. The chip is drawn into the toolbar above by ui/PuckPanel.js,
+           which stays silent on a browser with no Web Bluetooth; its MENU has to live out here
+           because the toolbar scrolls (overflow: auto) and would clip it. -->
+      <div id="puck-menu-host" class="puck-menu-host" hidden></div>
       <aside id="puck-align-card" class="puck-align-card" hidden></aside>
       <div id="viewport-toolbar" class="viewport-toolbar"></div>
       <div id="boot-status" class="boot-status" role="status" aria-live="polite">

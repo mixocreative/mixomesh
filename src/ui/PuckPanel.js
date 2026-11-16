@@ -28,6 +28,7 @@ import { t } from '../i18n/index.js';
 import { safeAsync } from './Status.js';
 
 let _card = null;
+let _host = null;
 let _open = false;
 
 /**
@@ -38,16 +39,28 @@ let _open = false;
  */
 export function init() {
   _card = document.getElementById('puck-align-card');
-  if (!_card) return;
+  _host = document.getElementById('puck-menu-host');
+  if (!_card || !_host) return;
 
   PuckLink.init();
-  subscribe(EVENTS.PUCK_CHANGED, () => _renderCard(PuckLink.snapshot()));
-  subscribe(EVENTS.LOCALE_CHANGED, () => _renderCard(PuckLink.snapshot()));
+  subscribe(EVENTS.PUCK_CHANGED, _draw);
+  subscribe(EVENTS.LOCALE_CHANGED, _draw);
+
+  /*
+   * A resize SHUTS the menu rather than moving it. The menu is positioned once, from where the
+   * chip was when it opened, and a layout that moves under it would leave it pointing at nothing.
+   * Closing is the honest answer to a question nobody is mid-way through answering.
+   */
+  window.addEventListener('resize', () => {
+    if (!_open) return;
+    _open = false;
+    _draw();
+  });
 
   // A click anywhere else shuts the menu. Capture phase, so the test is made against the element
   // that was actually hit rather than against whatever a re-render has put there since.
   document.addEventListener('pointerdown', (e) => {
-    if (!_open || e.target?.closest?.('[data-ui="puck-chip"]')) return;
+    if (!_open || e.target?.closest?.('[data-ui="puck-chip"], [data-ui="puck-menu"]')) return;
     _open = false;
     _redraw();
   }, { capture: true });
@@ -64,10 +77,18 @@ export function init() {
     }
   });
 
-  _renderCard(PuckLink.snapshot());
+  _draw();
 }
 
-/** Ask the toolbar to draw the chip again. It owns the markup; this owns what goes in it. */
+/** Everything this module owns outright: the menu and the card. The chip is the toolbar's. */
+function _draw() {
+  const puck = PuckLink.snapshot();
+
+  _renderMenu(puck);
+  _renderCard(puck);
+}
+
+/** Ask the toolbar to draw the chip again, which also redraws the menu and the card. */
 function _redraw() {
   dispatch(EVENTS.PUCK_CHANGED, {});
 }
@@ -120,15 +141,6 @@ export function buttonHtml() {
   const connected = puck.link === 'connected';
   const label = t('puck.label');
 
-  /*
-   * CHARGING IS DRAWN ONLY WHEN THE PUCK SAYS SO, never inferred.
-   *
-   * `charging` is three-valued: true, false, and absent for "the puck did not say" — which is what
-   * firmware without the status characteristic reports. Drawing the bolt for absent would be
-   * inventing a fact; leaving it out is the honest rendering of not knowing.
-   */
-  const charging = connected && puck.batteryStatus?.charging === true;
-
   return `
     <span class="puck-chip" data-ui="puck-chip">
       <button class="vt-btn ${connected ? 'vt-on' : ''}" data-ui="puck-toggle"
@@ -137,31 +149,86 @@ export function buttonHtml() {
         ${icon('Puck', { width: 14, height: 14 })}
         <i class="puck-dot" data-link="${escapeAttr(puck.link)}" aria-hidden="true"></i>
       </button>
-      <div class="puck-menu" data-ui="puck-menu" role="menu"
-           aria-label="${escapeAttr(label)}" ${_open ? '' : 'hidden'}>
-        <p class="puck-state" data-ui="puck-state" role="status">
-          ${escapeHtml(_stateLine(puck))}
-          ${charging ? `<i class="puck-charge" aria-hidden="true">${icon('Zap', { width: 12, height: 12 })}</i>` : ''}
-        </p>
-        <button class="puck-item" role="menuitem" data-act="connect">
-          ${icon('Bluetooth', { width: 14, height: 14 })}
-          <span>${escapeHtml(t(connected ? 'puck.disconnect' : 'puck.connect'))}</span>
-        </button>
-        ${connected ? `
-          <button class="puck-item" role="menuitem" data-act="align">
-            ${icon('LocateFixed', { width: 14, height: 14 })}
-            <span>${escapeHtml(t('puck.align'))}</span>
-          </button>` : ''}
-      </div>
     </span>
   `;
 }
 
-/** Attach the chip's handlers. Called by the toolbar after every one of its renders. */
+/**
+ * The menu, drawn into its own host over the viewport and positioned under the chip.
+ *
+ * **It cannot be a child of the chip, and that is not a style choice.** `#viewport-toolbar` is
+ * `overflow: auto` below a certain width so it can scroll on a narrow window, and an overflow
+ * ancestor clips an absolutely positioned descendant that leaves its box — the menu rendered,
+ * reported a correct rectangle, and was invisible and unclickable, which is the worst shape a bug
+ * can take. `position: fixed` would not have saved it either: the toolbar carries a `transform`
+ * for its centring, which makes it the containing block for fixed descendants too.
+ *
+ * So the host sits in the viewport beside the Line up card, and the position is copied from the
+ * chip each time the menu opens. It is right-aligned to the chip and sits just above it.
+ */
+function _renderMenu(puck) {
+  if (!_host) return;
+
+  const chip = document.querySelector('[data-ui="puck-toggle"]');
+
+  _host.hidden = !(_open && puck.offered && chip);
+
+  if (_host.hidden) {
+    _host.innerHTML = '';
+
+    return;
+  }
+
+  const connected = puck.link === 'connected';
+
+  /*
+   * CHARGING IS DRAWN ONLY WHEN THE PUCK SAYS SO, never inferred.
+   *
+   * `charging` is three-valued: true, false, and absent for "the puck did not say" — which is
+   * what firmware without the status characteristic reports. Drawing the bolt for absent would be
+   * inventing a fact; leaving it out is the honest rendering of not knowing.
+   */
+  const charging = connected && puck.batteryStatus?.charging === true;
+  const label = t('puck.label');
+
+  _host.innerHTML = `
+    <div class="puck-menu" data-ui="puck-menu" role="menu" aria-label="${escapeAttr(label)}">
+      <p class="puck-state" data-ui="puck-state" role="status">
+        ${escapeHtml(_stateLine(puck))}
+        ${charging ? `<i class="puck-charge" aria-hidden="true">${icon('Zap', { width: 12, height: 12 })}</i>` : ''}
+      </p>
+      <button class="puck-item" role="menuitem" data-act="connect">
+        ${icon('Bluetooth', { width: 14, height: 14 })}
+        <span>${escapeHtml(t(connected ? 'puck.disconnect' : 'puck.connect'))}</span>
+      </button>
+      ${connected ? `
+        <button class="puck-item" role="menuitem" data-act="align">
+          ${icon('LocateFixed', { width: 14, height: 14 })}
+          <span>${escapeHtml(t('puck.align'))}</span>
+        </button>` : ''}
+    </div>
+  `;
+
+  const chipBox = chip.getBoundingClientRect();
+  const hostBox = _host.offsetParent?.getBoundingClientRect();
+
+  if (hostBox) {
+    _host.style.right = `${Math.round(hostBox.right - chipBox.right)}px`;
+    _host.style.bottom = `${Math.round(hostBox.bottom - chipBox.top + 6)}px`;
+  }
+
+  for (const btn of _host.querySelectorAll('[data-act]')) {
+    btn.addEventListener('click', () => _act(btn.dataset.act));
+  }
+}
+
+/** Attach the chip's handler, and redraw the menu under wherever the toolbar has just put it. */
 export function wire(root) {
   for (const btn of root.querySelectorAll('[data-ui="puck-chip"] [data-act]')) {
     btn.addEventListener('click', () => _act(btn.dataset.act));
   }
+
+  _draw();
 }
 
 /**

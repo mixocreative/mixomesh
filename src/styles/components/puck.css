@@ -28,14 +28,18 @@
 .puck-dot[data-link="lost"]       { background: var(--danger); }
 
 /* ── The menu ───────────────────────────────────────────── */
-.puck-menu {
+/* The host is a sibling of the Line up card inside #viewport, NOT a child of the chip, because
+   #viewport-toolbar is `overflow: auto` on a narrow window and would clip a popover that leaves
+   its box - it rendered, measured correctly, and was invisible and unclickable. ui/PuckPanel.js
+   copies the chip's position onto this host each time the menu opens. */
+.puck-menu-host {
   position: absolute;
-  /* Upward: the toolbar is anchored to the bottom of the viewport, so a menu dropping down would
-     open off-screen. */
-  bottom: calc(100% + var(--sp-3));
-  right: 0;
-  min-width: 212px;
   z-index: 12;
+}
+.puck-menu-host[hidden] { display: none; }
+
+.puck-menu {
+  min-width: 212px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -47,7 +51,6 @@
   border-radius: 9px;
   box-shadow: var(--hud-highlight), var(--hud-shadow);
 }
-.puck-menu[hidden] { display: none; }
 
 .puck-state {
   display: flex;
