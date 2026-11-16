@@ -47,6 +47,7 @@ import {
   initCameraRig, getCamera, applyCameraOptics,
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
   saveCameraState, restoreCameraState, setFollowMode, suspendFollow,
+  setPuckOrbit, currentOrbit, orbitTo,
 } from './scene/CameraRig.js';
 import {
   initPivotSession, setTransformCommitHandler,
@@ -65,6 +66,7 @@ export { setWireframeEdgeColor };
 export {
   setCameraPreset, toggleOrthographic, frameAll, frameSelected,
   saveCameraState, restoreCameraState, setFollowMode, suspendFollow,
+  setPuckOrbit, currentOrbit, orbitTo,
 };
 export {
   setTransformCommitHandler,
@@ -724,6 +726,7 @@ export const SceneManager = {
   getScene, getEngine, getShadowGenerator, getCamera,
   setCameraPreset, toggleOrthographic, frameSelected, frameAll, saveCameraState, restoreCameraState,
   setGizmoMode, setGizmoSpace, setScaleLock, setFollowMode, suspendFollow, attachToSelection, setViewOnly,
+  setPuckOrbit, currentOrbit, orbitTo,
   topmostTransformTargets, computePivotPosition,
   setActive, setSelected, suspendOutline, isOutlineEnabled, suspendGizmo,
   setOverlay, setWireframeEdgeColor, setGrid, rebuildBed, updateBedPreview, applyRenderSettings,

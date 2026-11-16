@@ -27,6 +27,18 @@ export const MM_PER_BU = 1000;
 export const AXES_SIZE = 0.05;
 export const CAM_RADIUS_MIN = 0.02;
 export const CAM_RADIUS_MAX = 5;
+/**
+ * The neutral home pose: front-right, elevated 45 degrees. Babylon puts the camera at
+ * `target + R.(sinB cosA, cosB, sinB sinA)`, so beta = pi/4 looks 45 degrees down and alpha = pi/3
+ * sits in the front-right quadrant.
+ *
+ * Named here because three places have to agree on it: the initial camera state
+ * (`StateManager.js`), the `perspective` preset the Home button applies
+ * (`CameraRig.setCameraPreset`), and the pose the puck's Line up homes to and then measures its
+ * turns FROM (`core/puck/PuckLink.js`). A puck lined up against one pose and homed to another is
+ * wrong by the difference between them, with nothing on screen to say so.
+ */
+export const HOME_ORBIT = Object.freeze({ alpha: Math.PI / 3, beta: Math.PI / 4 });
 export const CURSOR_DIAMETER = 0.003;
 // 3D-cursor ring/crosshair tint — the app accent amber (matches selection theme).
 export const CURSOR_HEX = '#f59e0b';

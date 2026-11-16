@@ -102,6 +102,11 @@ export const EVENTS = {
   // Support Mode entered / left (P3.2): { active, objectIds }
   SUPPORT_MODE_CHANGED:    'supports:modeChanged',
 
+  // The orientation puck's link, alignment or battery changed (core/puck/PuckLink.js): no payload,
+  // the panel reads `PuckLink.snapshot()`. ONE event for all of it on purpose - every change here
+  // redraws the same small control, and a reading-rate event would fire 100 times a second.
+  PUCK_CHANGED:            'puck:changed',
+
   // UI
   TOAST:                   'ui:toast',
   MODAL_OPEN:              'ui:modalOpen',

@@ -11,6 +11,7 @@ import { subscribe, dispatch, getState, setState } from '../StateManager.js';
 import {
   CAM_RADIUS_MIN,
   CAM_RADIUS_MAX,
+  HOME_ORBIT,
   REVERT_DELTA_SQ,
   REVERT_ANGLE_DELTA,
 } from './SceneConstants.js';
@@ -52,6 +53,7 @@ let _followSuspended = false;    // set by RenderOutput during offline render/ca
 // rather than left looking live. A real preference belongs in the Scene panel,
 // next to the other camera settings, and would reinstate a flag here.
 let _wheelZoomed  = false;       // a wheel step moved the target this frame (ortho auto-revert must ignore it)
+let _puckOrbit    = false;       // the puck owns alpha/beta (core/puck/PuckLink.js); see _orbit
 
 /** Suspend the per-frame follow-target hook (offline render drives target itself). */
 export function suspendFollow(on) { _followSuspended = !!on; }
@@ -204,6 +206,19 @@ const ORBIT_SENS = 0.006;
 let _camDrag = null;  // { x, y, btn } active camera drag, or null when idle
 
 function _orbit(dx, dy) {
+  /*
+   * REFUSED WHILE THE PUCK IS DRIVING, and a dead control is the point.
+   *
+   * The puck sets alpha/beta on every reading — 50 to 100 times a second — so a drag here would
+   * be overwritten before the next frame: the view would jerk and spring back, which reads as a
+   * broken mouse rather than as a camera somebody else is holding.
+   *
+   * Pan and wheel zoom are deliberately still live. The puck owns the two ANGLES and nothing else,
+   * so the target and the radius stay the operator's, and framing a detail while the puck turns it
+   * is the thing that combination is for.
+   */
+  if (_puckOrbit) return;
+
   _camera.alpha -= dx * ORBIT_SENS;
   _camera.beta  -= dy * ORBIT_SENS;
   const eps = 0.01;
@@ -349,10 +364,10 @@ export function setCameraPreset(preset) {
   let alpha, beta;
   let isOrtho = false;
   if (preset === 'perspective') {
-    // Front-right-elevated home pose — same shape as initial-load default so
-    // Home button returns the user to the same neutral view they started in.
-    alpha = Math.PI / 3;
-    beta  = Math.PI / 4;
+    // Front-right-elevated home pose — the one named constant, shared with the initial-load
+    // default and with the puck's Line up, so Home returns to the same neutral view in every case.
+    alpha = HOME_ORBIT.alpha;
+    beta  = HOME_ORBIT.beta;
     isOrtho = false;
   } else if (ORTHO[preset]) {
     alpha = ORTHO[preset].alpha;
@@ -392,6 +407,46 @@ export function setCameraPreset(preset) {
   _cachedPreset = preset;
   setState(s => ({ ...s, scene: { ...s.scene, camera: { ...s.scene.camera, preset } } }), { silent: true });
   dispatch(EVENTS.CAMERA_PRESET_CHANGED, { preset });
+}
+
+// ── Puck-driven orbit (core/puck/PuckLink.js) ────────────
+
+/**
+ * Hand the orbit to the puck, or take it back.
+ *
+ * While it is on, mouse and touch orbit are refused — see `_orbit` for why that is better than
+ * letting the two fight. Pan and zoom are untouched either way.
+ * @param {boolean} on
+ */
+export function setPuckOrbit(on) { _puckOrbit = !!on; }
+
+/** The camera's live orbit: the pose the puck measures its turns from. */
+export function currentOrbit() {
+  return _camera ? { alpha: _camera.alpha, beta: _camera.beta } : { ...HOME_ORBIT };
+}
+
+/**
+ * Point the camera along one orbit immediately — no animation, no inertia.
+ *
+ * The puck reports at 50-100 Hz, so easing here would be a filter on top of the one the firmware
+ * already runs, and the hand would feel it as lag.
+ *
+ * **It refuses while a preset transition is in flight**, which is how the two stop fighting: a Home
+ * or NavCube click animates for 320 ms, and a puck that kept writing alpha/beta through that would
+ * drag the view back mid-flight. The caller is expected to read a refusal as "the view has been
+ * taken somewhere else", re-home there, and carry on from the new pose.
+ *
+ * @param {number} alpha
+ * @param {number} beta
+ * @returns {boolean} false when the camera is animating and nothing was applied.
+ */
+export function orbitTo(alpha, beta) {
+  if (!_camera || _animating) return false;
+
+  _camera.alpha = alpha;
+  _camera.beta  = beta;
+
+  return true;
 }
 
 /**
