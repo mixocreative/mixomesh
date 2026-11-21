@@ -44,6 +44,15 @@ import {
 /** Readings arrive at 50-100 Hz, so half a second is tens of them. This is the floor, not a target. */
 const ALIGN_MIN_READINGS = 5;
 
+/*
+ * An alignment nobody answers cancels itself. The card is open and the puck holds its blue LED on while
+ * it waits (mixospatial decision 0017), so a person who walks away would otherwise leave both stuck.
+ * The puck has the same two minutes on its side (PUCK_ALIGN_HOLD_MAX_MS), so neither end depends on
+ * the other to let go.
+ */
+const ALIGN_TIMEOUT_MS = 120000;
+let _alignTimer = null;
+
 /** The camera preset Line up homes to. Its angles are `HOME_ORBIT`; the two must not drift apart. */
 const HOME_PRESET = 'perspective';
 
@@ -176,6 +185,7 @@ export function beginAlign() {
   _state.aligning = true;
   _state.hint = 'puck.alignAsk';
   _holdLight(true);
+  _armAlignTimeout();
   _changed();
 }
 
@@ -194,6 +204,7 @@ export function finishAlign() {
 
   _qZero = averageQuaternions(settled.slice(-ALIGN_MIN_READINGS));
   _home = { ...HOME_ORBIT };
+  _disarmAlignTimeout();
   _state.aligning = false;
   _holdLight(false);
   _changed();
@@ -203,6 +214,7 @@ export function finishAlign() {
 
 /** Walk away from the card. The link stays up and the floor in `_drive` takes over. */
 export function cancelAlign() {
+  _disarmAlignTimeout();
   _state.aligning = false;
   _holdLight(false);
   _changed();
@@ -216,6 +228,18 @@ export function cancelAlign() {
  * them, a dead link rejects the write, and none of that may stop an alignment. The puck lets go
  * by itself when the link drops, so the `idle` and `lost` branches below send nothing.
  */
+function _disarmAlignTimeout() {
+  clearTimeout(_alignTimer);
+  _alignTimer = null;
+}
+
+function _armAlignTimeout() {
+  _disarmAlignTimeout();
+  _alignTimer = setTimeout(() => {
+    if (_state.aligning) cancelAlign();
+  }, ALIGN_TIMEOUT_MS);
+}
+
 function _holdLight(on) {
   try {
     const sent = on ? _source?.alignHold?.() : _source?.alignRelease?.();
@@ -245,6 +269,7 @@ function _onState(next) {
     // Deliberate: the person said they were finished (0009).
     _qZero = null;
     _home = null;
+    _disarmAlignTimeout();
     _state.aligning = false;
     _state.noSensor = false;
     SceneManager.setPuckOrbit(false);
@@ -260,6 +285,7 @@ function _onState(next) {
      * The mouse DOES get the orbit back, though. Nothing is driving the camera any more, so a drag
      * can no longer be overwritten - and frozen-and-unturnable would just be a dead viewport.
      */
+    _disarmAlignTimeout();
     _state.aligning = false;
     SceneManager.setPuckOrbit(false);
   }
