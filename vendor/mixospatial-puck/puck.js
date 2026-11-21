@@ -5,7 +5,8 @@
 //
 //   1. the link's state machine, including bounded reconnection
 //   2. handing each notification to `codec.js` and **counting what it refuses** (PROTOCOL.md s8)
-//   3. the one command the device still has, `sleepNow()`
+//   3. the commands the device understands: `sleepNow()`, and the alignment courtesy pair
+//      `alignHold()` / `alignRelease()` (decision 0017)
 //
 // The zero is **not** here. Decision 0006 puts `q_zero` in the host, because without a
 // magnetometer the puck's yaw restarts at an arbitrary angle on every wake, so a stored zero would
@@ -19,6 +20,8 @@
 // the fixtures.
 
 import {
+  OPCODE_ALIGN_HOLD,
+  OPCODE_ALIGN_RELEASE,
   OPCODE_SLEEP_NOW,
   bytesToHex,
   commandRejection,
@@ -100,6 +103,32 @@ export function createPuck({
   const emit = (event, ...args) => {
     for (const handler of handlers.get(event) || []) {
       handler(...args);
+    }
+  };
+
+  /**
+   * Write one command that is allowed to fail quietly. Not `sleepNow`, which must be sure.
+   *
+   * Nothing is written unless the link is up: a write into a dead link only reports a DOMException
+   * after a timeout, and for a courtesy that is a delay with nothing to show for it.
+   */
+  const writeCourtesy = async (opcode) => {
+    if (link !== 'connected') {
+      return { ok: false, reason: 'not-connected' };
+    }
+
+    const bytes = encodeCommand(opcode);
+    const wouldRefuse = commandRejection(bytes);
+
+    if (wouldRefuse) {
+      return { ok: false, reason: wouldRefuse.reason, attError: wouldRefuse.attError };
+    }
+
+    try {
+      await transport.write(bytes);
+      return { ok: true };
+    } catch (failure) {
+      return { ok: false, reason: 'write-failed', error: failure };
     }
   };
 
@@ -395,6 +424,26 @@ export function createPuck({
         closingDeliberately = false;
         return { ok: false, reason: 'write-failed', error: failure };
       }
+    },
+
+    /**
+     * Ask the puck to keep its link LED lit while an alignment waits on the person (opcode `0x03`).
+     *
+     * Call it when the page starts asking, and `alignRelease()` when the alignment is accepted or
+     * cancelled. The puck lets go by itself when the link drops, so a page that forgets cannot leave
+     * the LED on across connections.
+     *
+     * **A courtesy, never a dependency.** Resolves `{ ok: false, reason }` and never throws, and the
+     * caller must align regardless: an older puck refuses these opcodes (ATT 0x80) and still aligns
+     * perfectly well, only without the light.
+     */
+    alignHold() {
+      return writeCourtesy(OPCODE_ALIGN_HOLD);
+    },
+
+    /** The alignment is over - accepted, or cancelled. Same contract as `alignHold()`. */
+    alignRelease() {
+      return writeCourtesy(OPCODE_ALIGN_RELEASE);
     },
 
     /** Read-only views, for a consumer that renders on its own clock rather than on our events. */

@@ -51,7 +51,7 @@ const TILT_RADIANS = 0.7;
 
 /**
  * Build the fake source. Same shape as `vendor/mixospatial-puck/puck.js`: `on`, `connect`,
- * `disconnect`, `sleepNow`.
+ * `disconnect`, `sleepNow`, `alignHold`, `alignRelease`.
  */
 export function fakePuck() {
   const handlers = new Map();
@@ -123,6 +123,19 @@ export function fakePuck() {
       timer = null;
       emit('state', 'idle');
     },
+
+    /** No LED to light; the answer is what the caller needs. `alignHeld` is for a hand check. */
+    alignHold() {
+      this.alignHeld = true;
+      return Promise.resolve({ ok: true });
+    },
+
+    alignRelease() {
+      this.alignHeld = false;
+      return Promise.resolve({ ok: true });
+    },
+
+    alignHeld: false,
 
     /** There is no device to put to sleep; answering is what the caller needs. */
     sleepNow() {

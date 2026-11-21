@@ -5,10 +5,10 @@ Three files copied verbatim from `mixocreative/mixospatial`, `web/src/`:
 | file | what it owns |
 |---|---|
 | `codec.js` | the wire format of `PROTOCOL.md` — bytes in, values out, and the refusals counted |
-| `puck.js` | the link's state machine, bounded reconnection, and the one command (`sleepNow`) |
+| `puck.js` | the link's state machine, bounded reconnection, and the commands (`sleepNow`, and the alignment courtesy pair `alignHold` / `alignRelease`) |
 | `transport-web-bluetooth.js` | `navigator.bluetooth` and nothing else; the transport is injected |
 
-**Source commit:** `7a496e28e1d28cb250b2eaee06b18e1bc4918251` (2026-11-17).
+**Source commit:** `0a75306` (2026-11-21), which adds `alignHold` / `alignRelease` (mixospatial decision 0017).
 
 Copied with:
 

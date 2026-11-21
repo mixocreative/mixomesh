@@ -47,6 +47,11 @@ export const EVENT_NAMES = Object.freeze({
 // stale client sending it would mean *re-zero* while a renumbered spec would read it as *sleep*.
 export const OPCODE_RETIRED_REZERO = 0x01;
 export const OPCODE_SLEEP_NOW = 0x02;
+// Decision 0017: ask for the link LED to stay lit while an alignment is waiting on the person.
+export const OPCODE_ALIGN_HOLD = 0x03;
+export const OPCODE_ALIGN_RELEASE = 0x04;
+
+const KNOWN_OPCODES = new Set([OPCODE_SLEEP_NOW, OPCODE_ALIGN_HOLD, OPCODE_ALIGN_RELEASE]);
 
 /** The two ATT errors section 7 distinguishes: malformed frame, versus understood and refused. */
 export const ATT_INVALID_LENGTH = 0x0d;
@@ -317,7 +322,7 @@ export function encodeEvent(event, seq = 0) {
   return new Uint8Array([PROTOCOL_VERSION, seq & 0xff, event]);
 }
 
-/** Build a command frame (section 7). Two bytes, and `sleepNow` is the only opcode left. */
+/** Build a command frame (section 7). Two bytes: the version and one opcode. */
 export function encodeCommand(opcode) {
   return new Uint8Array([PROTOCOL_VERSION, opcode]);
 }
@@ -347,7 +352,7 @@ export function commandRejection(input) {
     return { reason: REASONS.retiredOpcode, attError: ATT_APPLICATION };
   }
 
-  if (bytes[1] !== OPCODE_SLEEP_NOW) {
+  if (!KNOWN_OPCODES.has(bytes[1])) {
     return { reason: REASONS.unknownOpcode, attError: ATT_APPLICATION };
   }
 

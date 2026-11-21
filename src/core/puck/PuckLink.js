@@ -175,6 +175,7 @@ export function beginAlign() {
   _steady = [];
   _state.aligning = true;
   _state.hint = 'puck.alignAsk';
+  _holdLight(true);
   _changed();
 }
 
@@ -194,6 +195,7 @@ export function finishAlign() {
   _qZero = averageQuaternions(settled.slice(-ALIGN_MIN_READINGS));
   _home = { ...HOME_ORBIT };
   _state.aligning = false;
+  _holdLight(false);
   _changed();
 
   return true;
@@ -202,7 +204,26 @@ export function finishAlign() {
 /** Walk away from the card. The link stays up and the floor in `_drive` takes over. */
 export function cancelAlign() {
   _state.aligning = false;
+  _holdLight(false);
   _changed();
+}
+
+/**
+ * Keep the puck's blue LED lit while the align card is waiting on the person (mixospatial
+ * decision 0017), and let it go when the card closes.
+ *
+ * **A courtesy, never a dependency.** Fire and forget: a puck built before the opcodes refuses
+ * them, a dead link rejects the write, and none of that may stop an alignment. The puck lets go
+ * by itself when the link drops, so the `idle` and `lost` branches below send nothing.
+ */
+function _holdLight(on) {
+  try {
+    const sent = on ? _source?.alignHold?.() : _source?.alignRelease?.();
+
+    Promise.resolve(sent).catch(() => {});
+  } catch {
+    /* Nothing to light, nothing to tell. */
+  }
 }
 
 function _onState(next) {
